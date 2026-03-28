@@ -1,0 +1,96 @@
+campaign_slug: linden-pass
+character_slug: tobin-slate
+name: Tobin Slate
+status: active
+profile:
+  class_level_text: Fighter 5
+  classes:
+    - class_name: Fighter
+      subclass_name: Shield Marshal
+      level: 5
+  species: Human
+  background: Dock Guard
+  alignment: Lawful Neutral
+  size: Medium
+  experience_model: Milestone
+  biography_markdown: Tobin worked the gate crews before signing on with independent couriers.
+stats:
+  max_hp: 46
+  armor_class: 17
+  initiative_bonus: 1
+  speed: 30 ft.
+  proficiency_bonus: 3
+  passive_perception: 11
+  passive_insight: 10
+  passive_investigation: 10
+  ability_scores:
+    str:
+      score: 18
+      modifier: 4
+      save_bonus: 7
+    dex:
+      score: 12
+      modifier: 1
+      save_bonus: 1
+    con:
+      score: 16
+      modifier: 3
+      save_bonus: 6
+    int:
+      score: 10
+      modifier: 0
+      save_bonus: 0
+    wis:
+      score: 10
+      modifier: 0
+      save_bonus: 0
+    cha:
+      score: 11
+      modifier: 0
+      save_bonus: 0
+skills:
+  - name: Athletics
+    bonus: 7
+    proficiency_level: proficient
+  - name: Intimidation
+    bonus: 3
+    proficiency_level: proficient
+proficiencies:
+  armor:
+    - Heavy Armor
+    - Shields
+  weapons:
+    - Martial Weapons
+    - Simple Weapons
+  tools:
+    - Smith's Tools
+  languages:
+    - Common
+attacks:
+  - name: Longsword
+    category: melee weapon
+    attack_bonus: 7
+    damage: 1d8+4 slashing
+features:
+  - name: Guard Stance
+    category: class_feature
+    source: Sample Rules
+    description_markdown: Tobin can lock down a narrow route with shield and posture alone.
+spellcasting: {}
+equipment_catalog:
+  - id: longsword-1
+    name: Longsword
+    default_quantity: 1
+    weight: 3 lb.
+    is_equipped: true
+  - id: shield-2
+    name: Shield
+    default_quantity: 1
+    weight: 6 lb.
+    is_equipped: true
+reference_notes:
+  additional_notes_markdown: Tobin still knows which officers can be trusted on the late watch.
+resource_templates: []
+source:
+  sheet_name: Tobin Slate
+  imported_from: Tobin Slate - Character Sheet.md

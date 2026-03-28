@@ -1,0 +1,40 @@
+<article class="card combat-summary-card" id="combat-summary">
+  <div class="combat-summary-grid">
+    <div>
+      <p class="card-kicker">Round</p>
+      <h2>{{ combat_tracker.round_number }}</h2>
+    </div>
+    <div>
+      <p class="card-kicker">Current turn</p>
+      <h2>
+        {% if combat_tracker.has_current_turn %}
+          {{ combat_tracker.current_turn_label }}
+        {% else %}
+          No current turn set
+        {% endif %}
+      </h2>
+    </div>
+    <div>
+      <p class="card-kicker">Combatants</p>
+      <h2>{{ combat_tracker.combatant_count }}</h2>
+    </div>
+  </div>
+  {% if can_manage_combat %}
+    <div class="hero-actions">
+      <form
+        method="post"
+        action="{{ url_for('campaign_combat_advance_turn', campaign_slug=campaign.slug) }}"
+        data-combat-async
+      >
+        <button type="submit">Advance turn</button>
+      </form>
+      <form
+        method="post"
+        action="{{ url_for('campaign_combat_clear', campaign_slug=campaign.slug) }}"
+        data-combat-async
+      >
+        <button class="ghost-button" type="submit">Clear tracker</button>
+      </form>
+    </div>
+  {% endif %}
+</article>

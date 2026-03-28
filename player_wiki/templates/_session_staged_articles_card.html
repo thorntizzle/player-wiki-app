@@ -1,0 +1,79 @@
+<article class="card session-sidebar-card" id="session-staged-articles">
+  <div class="section-heading">
+    <h2>Staged articles</h2>
+    <p class="meta">{{ staged_articles|length }}</p>
+  </div>
+  {% if staged_articles %}
+    <div class="session-article-stack">
+      {% for article in staged_articles %}
+        <details class="feature-detail session-article-detail" data-session-article-id="{{ article.id }}">
+          <summary>
+            <span>{{ article.title }}</span>
+            <span class="meta">Saved {{ article.created_at_label }}</span>
+          </summary>
+          {% if article.image_url %}
+            <figure class="article-figure">
+              <img class="article-image" src="{{ article.image_url }}" alt="{{ article.image_alt or article.title }}">
+              {% if article.image_caption %}
+                <figcaption class="meta article-image__caption">{{ article.image_caption }}</figcaption>
+              {% endif %}
+            </figure>
+          {% endif %}
+          {% if article.source_title %}
+            <p class="meta">
+              Pulled from {{ article.source_label }}:
+              {% if article.source_url %}
+                <a href="{{ article.source_url }}">{{ article.source_title }}</a>
+              {% else %}
+                {{ article.source_title }}
+              {% endif %}
+            </p>
+          {% elif article.source_kind %}
+            <p class="meta">{{ article.source_missing_message }}</p>
+          {% endif %}
+          <div class="article-body article-body--compact">{{ article.body_html | safe }}</div>
+          <div class="session-article-detail__actions">
+            {% if chat_is_open %}
+              <form
+                method="post"
+                action="{{ url_for('campaign_session_reveal_article', campaign_slug=campaign.slug, article_id=article.id) }}"
+                data-session-async
+              >
+                <button type="submit">Reveal in chat</button>
+              </form>
+            {% else %}
+              <p class="meta">Begin a session before revealing this article.</p>
+            {% endif %}
+            {% if article.source_url %}
+              <a class="ghost-button" href="{{ article.source_url }}">{{ article.source_action_label }}</a>
+            {% elif article.source_kind %}
+              <p class="meta">{{ article.source_missing_message }}</p>
+            {% elif article.converted_page_url %}
+              <a class="ghost-button" href="{{ article.converted_page_url }}">View published page</a>
+            {% elif article.converted_page_title %}
+              <p class="meta">
+                Converted to {{ article.converted_page_title }}.
+                {% if article.converted_page_reveal_after_session is not none %}
+                  Visible after session {{ article.converted_page_reveal_after_session }}.
+                {% endif %}
+              </p>
+            {% else %}
+              <a class="ghost-button" href="{{ url_for('campaign_session_convert_article_view', campaign_slug=campaign.slug, article_id=article.id) }}">
+                Convert to wiki page
+              </a>
+            {% endif %}
+            <form
+              method="post"
+              action="{{ url_for('campaign_session_delete_article', campaign_slug=campaign.slug, article_id=article.id) }}"
+              data-session-async
+            >
+              <button type="submit" class="ghost-button">Delete article</button>
+            </form>
+          </div>
+        </details>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="meta">No unrevealed session articles are waiting right now.</p>
+  {% endif %}
+</article>

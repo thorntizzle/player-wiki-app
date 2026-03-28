@@ -1,0 +1,7 @@
+<div class="section-heading">
+  <h2>Chat window</h2>
+  <p class="meta">{% if chat_is_open %}Live feed{% else %}Waiting room{% endif %}</p>
+</div>
+{% set empty_feed_message = "No chat activity has been posted yet." if chat_is_open else "When the DM begins a session, chat messages and revealed articles will appear here." %}
+{% set session_feed_reverse = current_user_preferences.session_chat_order == "newest_first" %}
+{% include "_session_feed.html" %}

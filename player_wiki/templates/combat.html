@@ -1,0 +1,316 @@
+{% extends "base.html" %}
+
+{% block title %}Combat | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Combat tracker</p>
+    <h1>{{ campaign.title }} Combat</h1>
+    <p class="lede">
+      Track turn order, HP, action economy, and conditions for live DND-5E encounters without leaving the campaign space.
+    </p>
+  </section>
+
+  {% if not combat_system_supported %}
+    <section class="card auth-card">
+      <h2>Combat tracker not configured for this system yet</h2>
+      <p>This campaign uses {{ campaign.system or "an unknown system" }}, and the current combat tracker is only implemented for DND-5E right now.</p>
+    </section>
+  {% else %}
+    <datalist id="combat-condition-options">
+      {% for option in combat_condition_options %}
+        <option value="{{ option }}"></option>
+      {% endfor %}
+    </datalist>
+
+    <div
+      class="page-layout combat-layout"
+      data-combat-live-root
+      data-combat-live-url="{{ url_for('campaign_combat_live_state', campaign_slug=campaign.slug) }}"
+      data-combat-state-token="{{ combat_live_state_token }}"
+    >
+      <section class="section-list">
+        <div data-combat-summary-root>
+          {% include "_combat_summary_card.html" %}
+        </div>
+
+        <div data-combat-tracker-root>
+          {% include "_combat_tracker_section.html" %}
+        </div>
+      </section>
+
+      <div data-combat-sidebar-root>
+        {% include "_combat_sidebar.html" %}
+      </div>
+    </div>
+  {% endif %}
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    (() => {
+      const liveRoot = document.querySelector("[data-combat-live-root]");
+      if (!liveRoot) {
+        return;
+      }
+
+      const flashRoot = document.querySelector("[data-flash-stack-root]");
+      const summaryRoot = document.querySelector("[data-combat-summary-root]");
+      const trackerRoot = document.querySelector("[data-combat-tracker-root]");
+      const sidebarRoot = document.querySelector("[data-combat-sidebar-root]");
+      const pollUrl = liveRoot.dataset.combatLiveUrl;
+      let combatStateToken = liveRoot.dataset.combatStateToken || "";
+      let monsterSearchAbortController = null;
+      let monsterSearchTimerId = 0;
+      let pollInFlight = false;
+      let requestInFlight = false;
+
+      const hasFocusedFormControl = () => {
+        const activeElement = document.activeElement;
+        if (!activeElement || !liveRoot.contains(activeElement)) {
+          return false;
+        }
+        return activeElement.matches("input, textarea, select");
+      };
+
+      const scrollToAnchor = (anchor) => {
+        if (!anchor) {
+          return;
+        }
+        const target = document.getElementById(anchor);
+        if (target) {
+          target.scrollIntoView({ block: "start" });
+        }
+      };
+
+      const initializeSystemsMonsterSearch = () => {
+        if (!sidebarRoot) {
+          return;
+        }
+
+        const form = sidebarRoot.querySelector("[data-systems-monster-search-form]");
+        if (!(form instanceof HTMLFormElement)) {
+          return;
+        }
+
+        const searchInput = form.querySelector("[data-systems-monster-query]");
+        const resultsSelect = form.querySelector("[data-systems-monster-results]");
+        const status = form.querySelector("[data-systems-monster-status]");
+        const submitButton = form.querySelector("[data-systems-monster-submit]");
+        const searchUrl = form.dataset.systemsMonsterSearchUrl || "";
+
+        if (
+          !(searchInput instanceof HTMLInputElement)
+          || !(resultsSelect instanceof HTMLSelectElement)
+          || !searchUrl
+        ) {
+          return;
+        }
+
+        const setStatus = (message) => {
+          if (status instanceof HTMLElement) {
+            status.textContent = message;
+          }
+        };
+
+        const syncSubmitState = () => {
+          if (submitButton instanceof HTMLButtonElement) {
+            submitButton.disabled = resultsSelect.disabled || !resultsSelect.value;
+          }
+        };
+
+        const resetResults = (message) => {
+          resultsSelect.innerHTML = "";
+          const option = document.createElement("option");
+          option.value = "";
+          option.textContent = "Search to load matching monsters";
+          resultsSelect.append(option);
+          resultsSelect.disabled = true;
+          setStatus(message);
+          syncSubmitState();
+        };
+
+        const renderResults = (results, message) => {
+          if (!Array.isArray(results) || !results.length) {
+            resetResults(message || "No Systems monsters matched that search.");
+            return;
+          }
+
+          resultsSelect.innerHTML = "";
+          for (const result of results) {
+            const option = document.createElement("option");
+            option.value = String(result.entry_key || "");
+            option.textContent = [
+              String(result.title || ""),
+              String(result.source_id || ""),
+              String(result.subtitle || ""),
+              `Init ${String(result.initiative_bonus || "0")}`,
+            ].join(" - ");
+            resultsSelect.append(option);
+          }
+          resultsSelect.disabled = false;
+          resultsSelect.selectedIndex = 0;
+          setStatus(message || `Found ${results.length} matching monsters.`);
+          syncSubmitState();
+        };
+
+        const runSearch = async () => {
+          const query = searchInput.value.trim();
+          if (monsterSearchAbortController) {
+            monsterSearchAbortController.abort();
+          }
+          if (query.length < 2) {
+            resetResults("Type at least 2 letters to search the Systems monster list.");
+            return;
+          }
+
+          setStatus("Searching Systems monsters...");
+          monsterSearchAbortController = new AbortController();
+          try {
+            const response = await fetch(`${searchUrl}?q=${encodeURIComponent(query)}`, {
+              headers: {
+                "X-Requested-With": "XMLHttpRequest",
+                "Accept": "application/json",
+              },
+              cache: "no-store",
+              credentials: "same-origin",
+              signal: monsterSearchAbortController.signal,
+            });
+            if (!response.ok) {
+              resetResults("Could not search Systems monsters right now.");
+              return;
+            }
+
+            const payload = await response.json();
+            renderResults(payload.results, typeof payload.message === "string" ? payload.message : "");
+          } catch (error) {
+            if (error instanceof DOMException && error.name === "AbortError") {
+              return;
+            }
+            resetResults("Could not search Systems monsters right now.");
+          } finally {
+            monsterSearchAbortController = null;
+          }
+        };
+
+        resultsSelect.addEventListener("change", syncSubmitState);
+        searchInput.addEventListener("input", () => {
+          window.clearTimeout(monsterSearchTimerId);
+          monsterSearchTimerId = window.setTimeout(runSearch, 250);
+        });
+
+        resetResults("Type at least 2 letters to search the Systems monster list.");
+      };
+
+      const renderPayload = (payload, { force = false, forceFlash = false } = {}) => {
+        const nextToken = payload.combat_state_token ? String(payload.combat_state_token) : "";
+        if (!force && nextToken === combatStateToken) {
+          if (forceFlash && flashRoot && typeof payload.flash_html === "string") {
+            flashRoot.innerHTML = payload.flash_html;
+          }
+          scrollToAnchor(payload.anchor || "");
+          return;
+        }
+
+        if (summaryRoot && typeof payload.summary_html === "string") {
+          summaryRoot.innerHTML = payload.summary_html;
+        }
+        if (trackerRoot && typeof payload.tracker_html === "string") {
+          trackerRoot.innerHTML = payload.tracker_html;
+        }
+        if (sidebarRoot && typeof payload.sidebar_html === "string") {
+          if (monsterSearchAbortController) {
+            monsterSearchAbortController.abort();
+          }
+          window.clearTimeout(monsterSearchTimerId);
+          sidebarRoot.innerHTML = payload.sidebar_html;
+          initializeSystemsMonsterSearch();
+        }
+        if (forceFlash && flashRoot && typeof payload.flash_html === "string") {
+          flashRoot.innerHTML = payload.flash_html;
+        }
+
+        combatStateToken = nextToken;
+        liveRoot.dataset.combatStateToken = combatStateToken;
+        scrollToAnchor(payload.anchor || "");
+      };
+
+      const refreshLiveState = async () => {
+        if (pollInFlight || requestInFlight || document.hidden || hasFocusedFormControl()) {
+          return;
+        }
+
+        pollInFlight = true;
+        try {
+          const response = await fetch(pollUrl, {
+            headers: { "X-Requested-With": "XMLHttpRequest" },
+            cache: "no-store",
+            credentials: "same-origin",
+          });
+          if (!response.ok) {
+            return;
+          }
+
+          const payload = await response.json();
+          renderPayload(payload);
+        } catch (_) {
+          return;
+        } finally {
+          pollInFlight = false;
+        }
+      };
+
+      document.addEventListener("submit", async (event) => {
+        const form = event.target;
+        if (!(form instanceof HTMLFormElement) || !form.matches("[data-combat-async]")) {
+          return;
+        }
+
+        event.preventDefault();
+        if (requestInFlight) {
+          return;
+        }
+
+        requestInFlight = true;
+        const buttons = Array.from(form.querySelectorAll("button, input[type='submit']"));
+        for (const button of buttons) {
+          button.disabled = true;
+        }
+
+        try {
+          const response = await fetch(form.action, {
+            method: (form.method || "POST").toUpperCase(),
+            headers: {
+              "X-Requested-With": "XMLHttpRequest",
+              "Accept": "application/json",
+            },
+            body: new FormData(form),
+            credentials: "same-origin",
+          });
+          if (!response.ok) {
+            return;
+          }
+
+          const payload = await response.json();
+          renderPayload(payload, { force: true, forceFlash: true });
+        } catch (_) {
+          return;
+        } finally {
+          requestInFlight = false;
+          for (const button of buttons) {
+            button.disabled = false;
+          }
+        }
+      });
+
+      window.setInterval(refreshLiveState, 1000);
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) {
+          refreshLiveState();
+        }
+      });
+
+      initializeSystemsMonsterSearch();
+    })();
+  </script>
+{% endblock %}

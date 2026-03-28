@@ -1,0 +1,28 @@
+title: Echoes of the Alloy Coast
+slug: linden-pass
+summary: A public-safe sample campaign fixture used to verify wiki, session, combat, and character flows.
+system: DND-5E
+current_session: 2
+source_wiki_root: C:\sample-campaign\wiki
+player_content_dir: content
+asset_dir: assets
+character_dir: characters
+character_source_root: C:\sample-campaign\characters
+character_source_glob: "**/* - Character Sheet.md"
+systems_library: DND-5E
+systems_sources:
+  - source_id: PHB
+    enabled: true
+    default_visibility: players
+  - source_id: XGE
+    enabled: true
+    default_visibility: players
+  - source_id: TCE
+    enabled: true
+    default_visibility: players
+  - source_id: DMG
+    enabled: true
+    default_visibility: dm
+  - source_id: MM
+    enabled: true
+    default_visibility: dm

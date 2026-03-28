@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block title %}{{ campaign.title }} | Campaign Player Wiki{% endblock %}
+
+{% block header_secondary %}
+  {% if can_view_wiki %}
+    <form method="get" class="search-form site-search-form" action="{{ url_for('campaign_view', campaign_slug=campaign.slug) }}">
+      <input
+        type="search"
+        name="q"
+        value="{{ query }}"
+        placeholder="Search titles, alternate names, summaries, or body text"
+        aria-label="Search pages"
+      >
+      <button type="submit">Search</button>
+    </form>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Campaign</p>
+    <h1>{{ campaign.title }}</h1>
+    <p class="lede">{{ campaign.summary }}</p>
+  </section>
+
+  {% if can_view_wiki and grouped_pages %}
+    {% if query %}
+      <section class="section-list">
+        <div class="section-block">
+          <div class="section-heading">
+            <h2>Search Results</h2>
+            <p class="meta">{{ result_count }} match{% if result_count != 1 %}es{% endif %}</p>
+          </div>
+          <div class="grid">
+            {% for section_name, pages in grouped_pages.items() %}
+              {% for page in pages %}
+                <article class="card page-card">
+                  <p class="card-kicker">{{ page.section }} · {{ page.display_type }}</p>
+                  <h3>
+                    <a href="{{ url_for('page_view', campaign_slug=campaign.slug, page_slug=page.route_slug) }}">
+                      {{ page.title }}
+                    </a>
+                  </h3>
+                  {% if page.summary %}
+                    <p>{{ page.summary }}</p>
+                  {% endif %}
+                </article>
+              {% endfor %}
+            {% endfor %}
+          </div>
+        </div>
+      </section>
+    {% else %}
+      {% set overview_pages = grouped_pages.get('Overview', []) %}
+      {% if overview_pages %}
+        {% set overview_page = overview_pages|first %}
+        <section class="section-list">
+          <div class="section-block">
+            <article class="article card">
+              <p class="eyebrow">{{ overview_page.display_type }} in {{ overview_page.section }}</p>
+              <h2>
+                <a href="{{ url_for('page_view', campaign_slug=campaign.slug, page_slug=overview_page.route_slug) }}">
+                  {{ overview_page.title }}
+                </a>
+              </h2>
+              {% if overview_page.summary %}
+                <p class="lede">{{ overview_page.summary }}</p>
+              {% endif %}
+              <div class="article-body">
+                {{ overview_page.body_html | replace('/campaigns/{campaign_slug}/', '/campaigns/' ~ campaign.slug ~ '/') | safe }}
+              </div>
+            </article>
+          </div>
+        </section>
+      {% else %}
+        <section class="section-list">
+          <div class="section-block">
+            <div class="section-heading">
+              <h2>Browse By Section</h2>
+              <p class="meta">{{ grouped_pages|length }} section{% if grouped_pages|length != 1 %}s{% endif %}</p>
+            </div>
+            <div class="grid">
+              {% for section_name, pages in grouped_pages.items() %}
+                <article class="card page-card section-card">
+                  <p class="card-kicker">Section</p>
+                  <h3>
+                    <a href="{{ url_for('section_view', campaign_slug=campaign.slug, section_slug=slugify(section_name)) }}">
+                      {{ section_name }}
+                    </a>
+                  </h3>
+                  <p>{{ pages|length }} page{% if pages|length != 1 %}s{% endif %} available in this section.</p>
+                  <p><a href="{{ url_for('section_view', campaign_slug=campaign.slug, section_slug=slugify(section_name)) }}">Open {{ section_name }}</a></p>
+                </article>
+              {% endfor %}
+            </div>
+          </div>
+        </section>
+      {% endif %}
+    {% endif %}
+  {% elif can_view_wiki %}
+    <section class="card">
+      {% if query %}
+        <h2>No matching pages</h2>
+        <p>Try a broader search term or remove the query.</p>
+      {% else %}
+        <h2>No visible pages yet</h2>
+        <p>This campaign does not currently have any published pages available to players.</p>
+      {% endif %}
+    </section>
+  {% else %}
+    <section class="card">
+      <h2>Wiki visibility restricted</h2>
+      <p>
+        The player wiki for this campaign currently requires {{ wiki_visibility_label }} access.
+      </p>
+    </section>
+  {% endif %}
+{% endblock %}

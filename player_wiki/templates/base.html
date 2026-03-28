@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en" data-theme="{{ current_theme.key }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Campaign Player Wiki{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body>
+    {% set header_secondary_content %}{% block header_secondary %}{% endblock %}{% endset %}
+    <div class="page-shell">
+      <header class="site-header">
+        <div class="site-header__main">
+          <div class="site-header__primary">
+            <a class="brand" href="{{ url_for('campaign_picker') }}">Campaign Player Wiki</a>
+          </div>
+          <div class="site-header__actions">
+            {% if current_user %}
+              {% if current_user.is_admin %}
+                <a class="header-link" href="{{ url_for('admin_dashboard') }}">Admin</a>
+              {% endif %}
+              <a class="header-link" href="{{ url_for('account_settings_view') }}">Account</a>
+              <span class="user-badge">
+                {{ current_user.display_name }}
+                {% if current_user.is_admin %}
+                  <span class="meta">Admin</span>
+                {% endif %}
+              </span>
+              <form method="post" action="{{ url_for('sign_out') }}">
+                <button class="ghost-button" type="submit">Sign out</button>
+              </form>
+            {% else %}
+              <a class="ghost-button" href="{{ url_for('sign_in') }}">Sign in</a>
+            {% endif %}
+          </div>
+        </div>
+        {% if campaign is defined %}
+          <div class="site-header__secondary">
+            <nav class="campaign-nav">
+              <a class="{% if active_nav == 'wiki' %}is-active{% endif %}" href="{{ url_for('campaign_view', campaign_slug=campaign.slug) }}">
+                Campaign Home
+              </a>
+              {% if can_access_campaign_scope(campaign.slug, 'systems') %}
+                <a class="{% if active_nav == 'systems' %}is-active{% endif %}" href="{{ url_for('campaign_systems_index', campaign_slug=campaign.slug) }}">
+                  Systems
+                </a>
+              {% endif %}
+              {% if can_access_campaign_scope(campaign.slug, 'session') %}
+                <a class="{% if active_nav == 'session' %}is-active{% endif %}" href="{{ url_for('campaign_session_view', campaign_slug=campaign.slug) }}">
+                  Session
+                </a>
+              {% endif %}
+              {% if can_access_campaign_scope(campaign.slug, 'combat') %}
+                <a class="{% if active_nav == 'combat' %}is-active{% endif %}" href="{{ url_for('campaign_combat_view', campaign_slug=campaign.slug) }}">
+                  Combat
+                </a>
+              {% endif %}
+              {% if can_access_campaign_scope(campaign.slug, 'dm_content') %}
+                <a class="{% if active_nav == 'dm_content' %}is-active{% endif %}" href="{{ url_for('campaign_dm_content_view', campaign_slug=campaign.slug) }}">
+                  DM Content
+                </a>
+              {% endif %}
+              {% if can_access_campaign_scope(campaign.slug, 'characters') %}
+                <a class="{% if active_nav == 'characters' %}is-active{% endif %}" href="{{ url_for('character_roster_view', campaign_slug=campaign.slug) }}">
+                  Characters
+                </a>
+              {% endif %}
+              {% if can_manage_campaign_visibility(campaign.slug) %}
+                <a class="{% if active_nav == 'control' %}is-active{% endif %}" href="{{ url_for('campaign_control_panel_view', campaign_slug=campaign.slug) }}">
+                  Control
+                </a>
+              {% endif %}
+            </nav>
+            {% if header_secondary_content | trim %}
+              {{ header_secondary_content | safe }}
+            {% endif %}
+          </div>
+        {% elif header_secondary_content | trim %}
+          {{ header_secondary_content | safe }}
+        {% endif %}
+      </header>
+      <section class="flash-stack" data-flash-stack-root>
+        {% include "_flash_stack.html" %}
+      </section>
+      <main class="main-content">
+        {% block content %}{% endblock %}
+      </main>
+      <footer class="site-footer">
+        <span>v{{ app_metadata.version }}</span>
+        <span class="meta">Build {{ app_metadata.build_id }}</span>
+        <span class="meta">{{ app_metadata.runtime }}</span>
+        <span class="meta">{{ app_metadata.environment }}</span>
+        <span class="meta">{{ app_metadata.instance_name }}</span>
+      </footer>
+    </div>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+
+{% block title %}{{ managed_user.display_name }} | Admin{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Admin user detail</p>
+    <h1>{{ managed_user.display_name }}</h1>
+    <p class="lede">{{ managed_user.email }}</p>
+    <p class="meta">
+      Status: {{ managed_user.status | title }}
+      {% if managed_user.is_admin %} | App admin{% endif %}
+    </p>
+    <div class="hero-actions">
+      <a class="ghost-button" href="{{ url_for('admin_dashboard') }}">Back to admin dashboard</a>
+    </div>
+  </section>
+
+  <section class="page-layout admin-layout">
+    <article class="card admin-panel">
+      <h2>Campaign membership</h2>
+      <form method="post" action="{{ url_for('admin_set_membership', user_id=managed_user.id) }}" class="stack-form">
+        <label class="field">
+          <span>Campaign</span>
+          <select name="campaign_slug" required>
+            {% for campaign in campaign_choices %}
+              <option value="{{ campaign.slug }}" {% if membership_form_defaults.campaign_slug == campaign.slug %}selected{% endif %}>
+                {{ campaign.title }}
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span>Role</span>
+          <select name="role" required>
+            <option value="dm" {% if membership_form_defaults.role == "dm" %}selected{% endif %}>DM</option>
+            <option value="player" {% if membership_form_defaults.role == "player" %}selected{% endif %}>Player</option>
+            <option value="observer" {% if membership_form_defaults.role == "observer" %}selected{% endif %}>Observer</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Status</span>
+          <select name="status" required>
+            <option value="active" {% if membership_form_defaults.status == "active" %}selected{% endif %}>Active</option>
+            <option value="invited" {% if membership_form_defaults.status == "invited" %}selected{% endif %}>Invited</option>
+            <option value="removed" {% if membership_form_defaults.status == "removed" %}selected{% endif %}>Removed</option>
+          </select>
+        </label>
+        <button type="submit">Save membership</button>
+      </form>
+    </article>
+
+    <article class="card admin-panel">
+      <h2>Character assignment</h2>
+      <p class="meta">
+        Assignments require an active player membership in the same campaign.
+      </p>
+      <form method="post" action="{{ url_for('admin_assign_character', user_id=managed_user.id) }}" class="stack-form">
+        <label class="field">
+          <span>Character</span>
+          <select name="character_ref" required>
+            {% for character in character_choices %}
+              <option value="{{ character.value }}" {% if assignment_form_defaults.character_ref == character.value %}selected{% endif %}>
+                {{ character.label }}
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit">Assign character</button>
+      </form>
+    </article>
+  </section>
+
+  <section class="page-layout admin-layout">
+    <article class="card admin-panel">
+      <h2>Current memberships</h2>
+      {% if memberships %}
+        <ul class="plain-list">
+          {% for membership in memberships %}
+            <li class="admin-item-row">
+              <div>
+                <strong>{{ campaign_lookup.get(membership.campaign_slug, membership.campaign_slug) }}</strong>
+                <span class="meta">{{ membership.role }} | {{ membership.status }}</span>
+              </div>
+              <div class="admin-item-actions">
+                <a class="ghost-button" href="{{ url_for('admin_user_detail', user_id=managed_user.id, edit_membership_campaign_slug=membership.campaign_slug) }}">Edit</a>
+                {% if membership.status != "removed" %}
+                  <form method="post" action="{{ url_for('admin_remove_membership', user_id=managed_user.id) }}">
+                    <input type="hidden" name="campaign_slug" value="{{ membership.campaign_slug }}">
+                    <button type="submit">Remove</button>
+                  </form>
+                {% endif %}
+              </div>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="meta">No campaign memberships yet.</p>
+      {% endif %}
+    </article>
+
+    <article class="card admin-panel">
+      <h2>Current assignments</h2>
+      {% if assignments %}
+        <ul class="plain-list">
+          {% for assignment in assignments %}
+            <li class="admin-item-row">
+              <div>
+                <strong>{{ campaign_lookup.get(assignment.campaign_slug, assignment.campaign_slug) }}</strong>
+                <span class="meta">{{ assignment.character_slug }} | {{ assignment.assignment_type }}</span>
+              </div>
+              <div class="admin-item-actions">
+                <a class="ghost-button" href="{{ url_for('admin_user_detail', user_id=managed_user.id, edit_assignment_campaign_slug=assignment.campaign_slug, edit_assignment_character_slug=assignment.character_slug) }}">Edit</a>
+                <form method="post" action="{{ url_for('admin_remove_character_assignment', user_id=managed_user.id) }}">
+                  <input type="hidden" name="campaign_slug" value="{{ assignment.campaign_slug }}">
+                  <input type="hidden" name="character_slug" value="{{ assignment.character_slug }}">
+                  <button type="submit">Clear</button>
+                </form>
+              </div>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="meta">No character assignments yet.</p>
+      {% endif %}
+    </article>
+  </section>
+
+  <section class="page-layout admin-layout">
+    <article class="card admin-panel">
+      <h2>Account actions</h2>
+      <div class="admin-action-stack">
+        {% if managed_user.status == "invited" %}
+          <form method="post" action="{{ url_for('admin_issue_invite', user_id=managed_user.id) }}">
+            <button type="submit">Generate invite link</button>
+          </form>
+        {% endif %}
+
+        {% if managed_user.status == "active" %}
+          <form method="post" action="{{ url_for('admin_issue_password_reset', user_id=managed_user.id) }}">
+            <button type="submit">Generate password reset link</button>
+          </form>
+        {% endif %}
+
+        {% if can_manage_account and managed_user.status == "disabled" %}
+          <form method="post" action="{{ url_for('admin_enable_user', user_id=managed_user.id) }}">
+            <button type="submit">Re-enable user</button>
+          </form>
+        {% elif can_manage_account and managed_user.status != "disabled" %}
+          <form method="post" action="{{ url_for('admin_disable_user', user_id=managed_user.id) }}">
+            <button type="submit">Disable user</button>
+          </form>
+        {% endif %}
+
+        {% if can_manage_account %}
+          <form method="post" action="{{ url_for('admin_delete_user', user_id=managed_user.id) }}">
+            <button type="submit" class="ghost-button">Delete user</button>
+          </form>
+        {% else %}
+          <p class="meta">Use a different admin account or the CLI if you ever need to change the account you are currently using.</p>
+        {% endif %}
+      </div>
+    </article>
+
+    <article class="card admin-panel">
+      <h2>Recent activity for this user</h2>
+      <form method="get" action="{{ url_for('admin_user_detail', user_id=managed_user.id) }}" class="audit-filter-form">
+        <label class="field">
+          <span>Search</span>
+          <input type="text" name="audit_q" value="{{ activity_filters.query }}" placeholder="campaign, character, event">
+        </label>
+        <label class="field">
+          <span>Event</span>
+          <select name="audit_event_type">
+            <option value="">All events</option>
+            {% for option in audit_event_type_choices %}
+              <option value="{{ option.value }}" {% if activity_filters.event_type == option.value %}selected{% endif %}>
+                {{ option.label }}
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span>Campaign</span>
+          <select name="audit_campaign_slug">
+            <option value="">All campaigns</option>
+            {% for campaign in campaign_choices %}
+              <option value="{{ campaign.slug }}" {% if activity_filters.campaign_slug == campaign.slug %}selected{% endif %}>
+                {{ campaign.title }}
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+        <div class="audit-filter-form__actions">
+          <button type="submit">Filter activity</button>
+          <a class="ghost-button" href="{{ url_for('admin_user_detail', user_id=managed_user.id) }}">Clear</a>
+          <a class="ghost-button" href="{{ export_url }}">Export CSV</a>
+        </div>
+      </form>
+
+      {% if recent_audit_events %}
+        <ul class="plain-list audit-list">
+          {% for event in recent_audit_events %}
+            <li
+              class="audit-row"
+              data-event-type="{{ event.event_type }}"
+              data-campaign-slug="{{ event.campaign_slug }}"
+              data-character-slug="{{ event.character_slug }}"
+              data-actor-email="{{ event.actor_email }}"
+              data-target-email="{{ event.target_email }}"
+            >
+              <div class="audit-row__header">
+                <strong>{{ event.title }}</strong>
+                <span class="meta">{{ event.timestamp }}</span>
+              </div>
+              <p class="meta">
+                {% if event.actor %}
+                  <a href="{{ event.actor.href }}">{{ event.actor.label }}</a>
+                  {% if event.actor.meta %}<span class="meta">{{ event.actor.meta }}</span>{% endif %}
+                {% else %}
+                  System
+                {% endif %}
+                {% if event.target and (not event.actor or event.target.href != event.actor.href) %}
+                  &rarr;
+                  <a href="{{ event.target.href }}">{{ event.target.label }}</a>
+                  {% if event.target.meta %}<span class="meta">{{ event.target.meta }}</span>{% endif %}
+                {% endif %}
+              </p>
+              {% if event.scope %}
+                <p class="meta">{{ event.scope }}</p>
+              {% endif %}
+              {% if event.details %}
+                <p>{{ event.details }}</p>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+        <div class="pagination-bar">
+          <p class="meta">Page {{ pagination.current_page }} of {{ pagination.total_pages }}</p>
+          <div class="pagination-bar__actions">
+            {% if pagination.has_previous %}
+              <a class="ghost-button" href="{{ pagination.previous_url }}">Previous</a>
+            {% endif %}
+            {% if pagination.has_next %}
+              <a class="ghost-button" href="{{ pagination.next_url }}">Next</a>
+            {% endif %}
+          </div>
+        </div>
+      {% else %}
+        <p class="meta">No audit activity matched the current filters for this user.</p>
+      {% endif %}
+    </article>
+  </section>
+{% endblock %}

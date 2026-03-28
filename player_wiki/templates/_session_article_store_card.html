@@ -1,0 +1,176 @@
+<article class="card session-sidebar-card" id="session-article-store">
+  <h2>Session article store</h2>
+  <p class="meta">Type a new handout, upload markdown, or pull a published wiki or Systems article into the session reveal queue.</p>
+  <form
+    method="post"
+    action="{{ url_for('campaign_session_create_article', campaign_slug=campaign.slug) }}"
+    class="stack-form"
+    enctype="multipart/form-data"
+    data-session-article-mode-root
+    data-session-article-source-search-url="{{ url_for('campaign_session_search_article_sources', campaign_slug=campaign.slug) }}"
+    data-session-async
+    data-session-article-form
+  >
+    <input
+      class="session-form-mode-radio session-form-mode-radio--manual"
+      type="radio"
+      id="session-article-mode-manual"
+      name="article_mode"
+      value="manual"
+      {% if session_article_form_mode not in ['upload', 'wiki'] %}checked{% endif %}
+    >
+    <input
+      class="session-form-mode-radio session-form-mode-radio--upload"
+      type="radio"
+      id="session-article-mode-upload"
+      name="article_mode"
+      value="upload"
+      {% if session_article_form_mode == 'upload' %}checked{% endif %}
+    >
+    <input
+      class="session-form-mode-radio session-form-mode-radio--wiki"
+      type="radio"
+      id="session-article-mode-wiki"
+      name="article_mode"
+      value="wiki"
+      {% if session_article_form_mode == 'wiki' %}checked{% endif %}
+    >
+    <div class="session-form-mode-toggle" role="radiogroup" aria-label="Session article input mode">
+      <label class="ghost-button" for="session-article-mode-manual">Manual</label>
+      <label class="ghost-button" for="session-article-mode-upload">Upload</label>
+      <label class="ghost-button" for="session-article-mode-wiki">Lookup</label>
+    </div>
+    <div
+      class="session-article-mode-panel session-article-mode-panel--manual"
+      data-session-article-mode-panel="manual"
+    >
+      <label class="field">
+        <span>Title</span>
+        <input type="text" name="title" maxlength="200">
+      </label>
+      <label class="field">
+        <span>Body</span>
+        <textarea
+          name="body_markdown"
+          rows="10"
+          placeholder="Paste the handout or scene text you want ready for live play."
+        ></textarea>
+      </label>
+      <p class="meta">Optional image shown while the article is staged, revealed, or later converted.</p>
+      <div class="field session-file-field">
+        <span>Image</span>
+        <input
+          class="session-file-input"
+          type="file"
+          id="session-manual-image-file"
+          name="image_file"
+          accept="image/png,image/jpeg,image/gif,image/webp"
+          data-session-file-input
+        >
+        <label
+          class="session-file-dropzone"
+          for="session-manual-image-file"
+          tabindex="0"
+          data-session-file-dropzone
+        >
+          <strong>Drag and drop a file here</strong>
+          <span class="meta">or use Browse to choose one</span>
+          <span class="session-file-dropzone__browse">Browse</span>
+          <span class="meta session-file-dropzone__name" data-session-file-name>No file selected.</span>
+        </label>
+      </div>
+      <label class="field">
+        <span>Image alt text</span>
+        <input type="text" name="image_alt" maxlength="200" placeholder="Optional text for screen readers.">
+      </label>
+      <label class="field">
+        <span>Image caption</span>
+        <input type="text" name="image_caption" maxlength="300" placeholder="Optional caption shown under the image.">
+      </label>
+    </div>
+    <div
+      class="session-article-mode-panel session-article-mode-panel--upload"
+      data-session-article-mode-panel="upload"
+    >
+      <p class="meta">
+        Upload a UTF-8 Markdown file. The article title comes from frontmatter, then the first
+        <code># Heading</code>, then the filename.
+      </p>
+      <div class="field session-file-field">
+        <span>Markdown file</span>
+        <input
+          class="session-file-input"
+          type="file"
+          id="session-upload-markdown-file"
+          name="markdown_file"
+          accept=".md,.markdown,text/markdown,text/plain"
+          data-session-file-input
+        >
+        <label
+          class="session-file-dropzone"
+          for="session-upload-markdown-file"
+          tabindex="0"
+          data-session-file-dropzone
+        >
+          <strong>Drag and drop a file here</strong>
+          <span class="meta">or use Browse to choose one</span>
+          <span class="session-file-dropzone__browse">Browse</span>
+          <span class="meta session-file-dropzone__name" data-session-file-name>No file selected.</span>
+        </label>
+      </div>
+      <div class="field session-file-field">
+        <span>Referenced image</span>
+        <input
+          class="session-file-input"
+          type="file"
+          id="session-upload-referenced-image-file"
+          name="referenced_image_file"
+          accept="image/png,image/jpeg,image/gif,image/webp"
+          data-session-file-input
+        >
+        <label
+          class="session-file-dropzone"
+          for="session-upload-referenced-image-file"
+          tabindex="0"
+          data-session-file-dropzone
+        >
+          <strong>Drag and drop a file here</strong>
+          <span class="meta">or use Browse to choose one</span>
+          <span class="session-file-dropzone__browse">Browse</span>
+          <span class="meta session-file-dropzone__name" data-session-file-name>No file selected.</span>
+        </label>
+      </div>
+      <p class="meta">
+        If the markdown references an image in frontmatter or an embedded image tag, upload that image here too.
+      </p>
+    </div>
+    <div
+      class="session-article-mode-panel session-article-mode-panel--wiki"
+      data-session-article-mode-panel="wiki"
+    >
+      <p class="meta">
+        Search visible published wiki pages and accessible Systems entries, then pull one into the session store so
+        you can reveal it in chat without retyping it.
+      </p>
+      <label class="field">
+        <span>Search</span>
+        <input
+          type="search"
+          placeholder="title, section, type, or source"
+          autocomplete="off"
+          data-session-article-source-query
+        >
+      </label>
+      <label class="field">
+        <span>Matching articles</span>
+        <select name="source_ref" disabled data-session-article-source-results>
+          <option value="">Search to load matching articles</option>
+        </select>
+      </label>
+      <p class="meta" data-session-article-source-status>
+        Type at least 2 letters to search published wiki pages and Systems entries.
+      </p>
+    </div>
+    <button type="submit">Add to session store</button>
+  </form>
+</article>

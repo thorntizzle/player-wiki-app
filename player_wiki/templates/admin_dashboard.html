@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+
+{% block title %}Admin | Campaign Player Wiki{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Admin</p>
+    <h1>Admin dashboard</h1>
+    <p class="lede">
+      Use this screen for lighter operational work. The CLI remains the full-control path for bootstrap and recovery.
+    </p>
+  </section>
+
+  <section class="page-layout admin-layout">
+    <article class="card admin-panel">
+      <h2>Invite user</h2>
+      <form method="post" action="{{ url_for('admin_invite_user') }}" class="stack-form">
+        <label class="field">
+          <span>Email</span>
+          <input type="email" name="email" required>
+        </label>
+        <label class="field">
+          <span>Display name</span>
+          <input type="text" name="display_name" required>
+        </label>
+        <label class="field">
+          <span>User type</span>
+          <select name="user_type">
+            <option value="admin" {% if invite_form_defaults.user_type == "admin" %}selected{% endif %}>Admin</option>
+            <option value="dm" {% if invite_form_defaults.user_type == "dm" %}selected{% endif %}>DM</option>
+            <option value="player" {% if invite_form_defaults.user_type == "player" %}selected{% endif %}>Player</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Campaign for DM or Player</span>
+          <select name="campaign_slug">
+            {% if campaign_choices %}
+              {% for campaign in campaign_choices %}
+                <option value="{{ campaign.slug }}" {% if invite_form_defaults.campaign_slug == campaign.slug %}selected{% endif %}>
+                  {{ campaign.title }}
+                </option>
+              {% endfor %}
+            {% else %}
+              <option value="">No campaigns available</option>
+            {% endif %}
+          </select>
+        </label>
+        <p class="meta">Admin is app-wide. DM and Player invites also create an active membership in the selected campaign.</p>
+        <button type="submit">Create invite</button>
+      </form>
+    </article>
+
+    <aside class="card admin-panel">
+      <h2>Campaigns</h2>
+      <ul class="plain-list">
+        {% for campaign in campaign_choices %}
+          <li>{{ campaign.title }} <span class="meta">({{ campaign.slug }})</span></li>
+        {% endfor %}
+      </ul>
+    </aside>
+  </section>
+
+  <section class="section-list">
+    <div class="section-heading">
+      <h2>Users</h2>
+      <p class="meta">{{ user_cards|length }} total</p>
+    </div>
+    <div class="grid">
+      {% for user in user_cards %}
+        <article class="card admin-user-card">
+          <p class="card-kicker">
+            {{ user.status | title }}
+            {% if user.is_admin %} | Admin{% endif %}
+          </p>
+          <h3>
+            <a href="{{ url_for('admin_user_detail', user_id=user.id) }}">{{ user.display_name }}</a>
+          </h3>
+          <p>{{ user.email }}</p>
+          {% if user.membership_summary %}
+            <p class="meta">{{ user.membership_summary | join(" | ") }}</p>
+          {% endif %}
+          {% if user.assignment_summary %}
+            <p class="meta">Assignments: {{ user.assignment_summary | join(", ") }}</p>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="section-list">
+    <div class="section-heading">
+      <h2>Recent activity</h2>
+      <p class="meta">{{ pagination.total_events }} matching events</p>
+    </div>
+    <article class="card admin-panel">
+      <form method="get" action="{{ url_for('admin_dashboard') }}" class="audit-filter-form">
+        <label class="field">
+          <span>Search</span>
+          <input type="text" name="audit_q" value="{{ activity_filters.query }}" placeholder="user, campaign, character, event">
+        </label>
+        <label class="field">
+          <span>Event</span>
+          <select name="audit_event_type">
+            <option value="">All events</option>
+            {% for option in audit_event_type_choices %}
+              <option value="{{ option.value }}" {% if activity_filters.event_type == option.value %}selected{% endif %}>
+                {{ option.label }}
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span>Campaign</span>
+          <select name="audit_campaign_slug">
+            <option value="">All campaigns</option>
+            {% for campaign in campaign_choices %}
+              <option value="{{ campaign.slug }}" {% if activity_filters.campaign_slug == campaign.slug %}selected{% endif %}>
+                {{ campaign.title }}
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+        <div class="audit-filter-form__actions">
+          <button type="submit">Filter activity</button>
+          <a class="ghost-button" href="{{ url_for('admin_dashboard') }}">Clear</a>
+          <a class="ghost-button" href="{{ export_url }}">Export CSV</a>
+        </div>
+      </form>
+
+      {% if recent_audit_events %}
+        <ul class="plain-list audit-list">
+          {% for event in recent_audit_events %}
+            <li
+              class="audit-row"
+              data-event-type="{{ event.event_type }}"
+              data-campaign-slug="{{ event.campaign_slug }}"
+              data-character-slug="{{ event.character_slug }}"
+              data-actor-email="{{ event.actor_email }}"
+              data-target-email="{{ event.target_email }}"
+            >
+              <div class="audit-row__header">
+                <strong>{{ event.title }}</strong>
+                <span class="meta">{{ event.timestamp }}</span>
+              </div>
+              <p class="meta">
+                {% if event.actor %}
+                  <a href="{{ event.actor.href }}">{{ event.actor.label }}</a>
+                  {% if event.actor.meta %}<span class="meta">{{ event.actor.meta }}</span>{% endif %}
+                {% else %}
+                  System
+                {% endif %}
+                {% if event.target and (not event.actor or event.target.href != event.actor.href) %}
+                  &rarr;
+                  <a href="{{ event.target.href }}">{{ event.target.label }}</a>
+                  {% if event.target.meta %}<span class="meta">{{ event.target.meta }}</span>{% endif %}
+                {% endif %}
+              </p>
+              {% if event.scope %}
+                <p class="meta">{{ event.scope }}</p>
+              {% endif %}
+              {% if event.details %}
+                <p>{{ event.details }}</p>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+        <div class="pagination-bar">
+          <p class="meta">Page {{ pagination.current_page }} of {{ pagination.total_pages }}</p>
+          <div class="pagination-bar__actions">
+            {% if pagination.has_previous %}
+              <a class="ghost-button" href="{{ pagination.previous_url }}">Previous</a>
+            {% endif %}
+            {% if pagination.has_next %}
+              <a class="ghost-button" href="{{ pagination.next_url }}">Next</a>
+            {% endif %}
+          </div>
+        </div>
+      {% else %}
+        <p class="meta">No audit activity matched the current filters.</p>
+      {% endif %}
+    </article>
+  </section>
+{% endblock %}

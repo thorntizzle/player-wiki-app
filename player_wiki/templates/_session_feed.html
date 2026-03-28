@@ -1,0 +1,34 @@
+{% if session_messages %}
+  {% set feed_messages = session_messages|reverse if session_feed_reverse|default(false) else session_messages %}
+  <ul class="plain-list session-feed">
+    {% for message in feed_messages %}
+      <li class="session-feed__entry session-feed__entry--{{ message.message_type }}">
+        <div class="session-feed__meta">
+          <div>
+            <p class="card-kicker">{{ message.kind_label }}</p>
+            <strong>{{ message.author_label }}</strong>
+          </div>
+          <span class="meta">{{ message.timestamp_label }}</span>
+        </div>
+        {% if message.message_type == "article_reveal" %}
+          <div class="session-feed__article">
+            <h3>{{ message.article_title }}</h3>
+            {% if message.article_image_url %}
+              <figure class="article-figure">
+                <img class="article-image" src="{{ message.article_image_url }}" alt="{{ message.article_image_alt or message.article_title }}">
+                {% if message.article_image_caption %}
+                  <figcaption class="meta article-image__caption">{{ message.article_image_caption }}</figcaption>
+                {% endif %}
+              </figure>
+            {% endif %}
+            <div class="article-body article-body--compact">{{ message.article_html | safe }}</div>
+          </div>
+        {% else %}
+          <div class="session-feed__body">{{ message.body_text }}</div>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+{% else %}
+  <p class="meta">{{ empty_feed_message }}</p>
+{% endif %}

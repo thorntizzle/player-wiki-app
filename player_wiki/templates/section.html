@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+
+{% block title %}{{ section_name }} | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Section</p>
+    <h1>{{ section_name }}</h1>
+    <p class="lede">Published player-facing pages in this section of {{ campaign.title }}.</p>
+  </section>
+
+  {% if show_subsections %}
+    <div class="section-list__controls" hidden data-subsection-controls>
+      <button class="ghost-button section-list__control" type="button" data-collapse-all>
+        Collapse all
+      </button>
+      <button class="ghost-button section-list__control" type="button" data-expand-all>
+        Expand all
+      </button>
+    </div>
+    {% set top_level_pinned_pages = top_level_pages | selectattr("is_pinned") | list %}
+    {% set top_level_regular_pages = top_level_pages | rejectattr("is_pinned") | list %}
+    {% if top_level_pinned_pages %}
+      <section class="page-stack page-stack--featured">
+        {% for page in top_level_pinned_pages %}
+          <article class="card page-card page-card--featured">
+            <p class="card-kicker">{{ page.display_type }}</p>
+            <h2>
+              <a href="{{ url_for('page_view', campaign_slug=campaign.slug, page_slug=page.route_slug) }}">
+                {{ page.title }}
+              </a>
+            </h2>
+            {% if page.summary %}
+              <p class="page-card__summary">{{ page.summary }}</p>
+            {% endif %}
+          </article>
+        {% endfor %}
+      </section>
+    {% endif %}
+    {% if top_level_regular_pages %}
+      <section class="grid">
+        {% for page in top_level_regular_pages %}
+          <article class="card page-card">
+            <p class="card-kicker">{{ page.display_type }}</p>
+            <h2>
+              <a href="{{ url_for('page_view', campaign_slug=campaign.slug, page_slug=page.route_slug) }}">
+                {{ page.title }}
+              </a>
+            </h2>
+            {% if page.summary %}
+              <p>{{ page.summary }}</p>
+            {% endif %}
+          </article>
+        {% endfor %}
+      </section>
+    {% endif %}
+    <section class="section-list">
+      {% for subsection_name, subsection_pages in subsection_groups %}
+        {% set pinned_pages = subsection_pages | selectattr("is_pinned") | list %}
+        {% set regular_pages = subsection_pages | rejectattr("is_pinned") | list %}
+        <details class="section-block section-block--collapsible" data-collapsible-section open>
+          <summary class="section-toggle-summary">
+            <span class="section-toggle-summary__content">
+              <span class="section-title">{{ subsection_name }}</span>
+              <span class="meta">
+                {{ subsection_pages|length }} page{% if subsection_pages|length != 1 %}s{% endif %}
+              </span>
+            </span>
+            <span class="section-toggle-chevron" aria-hidden="true"></span>
+          </summary>
+          <div class="section-block__body">
+            {% if pinned_pages %}
+              <div class="page-stack page-stack--featured">
+                {% for page in pinned_pages %}
+                  <article class="card page-card page-card--featured">
+                    <p class="card-kicker">{{ page.display_type }}</p>
+                    <h3>
+                      <a href="{{ url_for('page_view', campaign_slug=campaign.slug, page_slug=page.route_slug) }}">
+                        {{ page.title }}
+                      </a>
+                    </h3>
+                    {% if page.summary %}
+                      <p class="page-card__summary">{{ page.summary }}</p>
+                    {% endif %}
+                  </article>
+                {% endfor %}
+              </div>
+            {% endif %}
+            {% if regular_pages %}
+              <div class="grid">
+                {% for page in regular_pages %}
+                  <article class="card page-card">
+                    <p class="card-kicker">{{ page.display_type }}</p>
+                    <h3>
+                      <a href="{{ url_for('page_view', campaign_slug=campaign.slug, page_slug=page.route_slug) }}">
+                        {{ page.title }}
+                      </a>
+                    </h3>
+                    {% if page.summary %}
+                      <p>{{ page.summary }}</p>
+                    {% endif %}
+                  </article>
+                {% endfor %}
+              </div>
+            {% endif %}
+          </div>
+        </details>
+      {% endfor %}
+    </section>
+  {% else %}
+    {% set pinned_pages = pages | selectattr("is_pinned") | list %}
+    {% set regular_pages = pages | rejectattr("is_pinned") | list %}
+    {% if pinned_pages %}
+      <section class="page-stack page-stack--featured">
+        {% for page in pinned_pages %}
+          <article class="card page-card page-card--featured">
+            <p class="card-kicker">{{ page.display_type }}</p>
+            <h2>
+              <a href="{{ url_for('page_view', campaign_slug=campaign.slug, page_slug=page.route_slug) }}">
+                {{ page.title }}
+              </a>
+            </h2>
+            {% if page.summary %}
+              <p class="page-card__summary">{{ page.summary }}</p>
+            {% endif %}
+          </article>
+        {% endfor %}
+      </section>
+    {% endif %}
+    {% if regular_pages %}
+      <section class="grid">
+        {% for page in regular_pages %}
+          <article class="card page-card">
+            <p class="card-kicker">{{ page.display_type }}</p>
+            <h2>
+              <a href="{{ url_for('page_view', campaign_slug=campaign.slug, page_slug=page.route_slug) }}">
+                {{ page.title }}
+              </a>
+            </h2>
+            {% if page.summary %}
+              <p>{{ page.summary }}</p>
+            {% endif %}
+          </article>
+        {% endfor %}
+      </section>
+    {% endif %}
+  {% endif %}
+{% endblock %}
+
+{% block scripts %}
+  {% if show_subsections %}
+    <script>
+      (() => {
+        const controls = document.querySelector("[data-subsection-controls]");
+        const collapsibleSections = Array.from(document.querySelectorAll("[data-collapsible-section]"));
+        if (!controls || collapsibleSections.length === 0) {
+          return;
+        }
+
+        controls.hidden = false;
+
+        const collapseAllButton = controls.querySelector("[data-collapse-all]");
+        const expandAllButton = controls.querySelector("[data-expand-all]");
+
+        collapseAllButton?.addEventListener("click", () => {
+          collapsibleSections.forEach((section) => {
+            section.open = false;
+          });
+        });
+
+        expandAllButton?.addEventListener("click", () => {
+          collapsibleSections.forEach((section) => {
+            section.open = true;
+          });
+        });
+      })();
+    </script>
+  {% endif %}
+{% endblock %}

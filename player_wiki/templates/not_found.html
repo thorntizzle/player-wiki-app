@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}Not Found | Campaign Player Wiki{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Unavailable</p>
+    <h1>That page is not available.</h1>
+    <p class="lede">
+      The content may not exist, may not be visible yet, or may not be available from your current campaign access.
+    </p>
+  </section>
+
+  <section class="card auth-card">
+    {% if current_user %}
+      <a class="button-link" href="{{ url_for('campaign_picker') }}">Back to campaigns</a>
+    {% else %}
+      <a class="button-link" href="{{ url_for('campaign_picker') }}">Back to campaigns</a>
+    {% endif %}
+  </section>
+{% endblock %}

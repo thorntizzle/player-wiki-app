@@ -1,0 +1,19 @@
+[Unit]
+Description=Campaign Player Wiki
+After=network.target
+
+[Service]
+User=wiki
+Group=www-data
+WorkingDirectory=/srv/campaign_player_wiki
+Environment=PLAYER_WIKI_ENV=production
+Environment=PLAYER_WIKI_SECRET_KEY=replace-with-a-real-secret
+Environment=PLAYER_WIKI_TRUST_PROXY=true
+Environment=PLAYER_WIKI_PROXY_FIX_HOPS=1
+Environment=PLAYER_WIKI_RELOAD_CONTENT=false
+ExecStart=/srv/campaign_player_wiki/.venv/bin/gunicorn -w 2 -b 127.0.0.1:8000 wsgi:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

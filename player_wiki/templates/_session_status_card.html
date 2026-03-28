@@ -1,0 +1,12 @@
+<div class="section-heading">
+  <h2>Live session</h2>
+  <p class="meta">{% if active_session %}Chat open{% else %}Chat closed{% endif %}</p>
+</div>
+{% if active_session %}
+  <p>The session is live for players and the DM.</p>
+  <p class="meta">Started {{ active_session.started_at_label }}</p>
+  <p class="meta">{{ active_session.message_count }} chat entr{% if active_session.message_count != 1 %}ies{% else %}y{% endif %}</p>
+{% else %}
+  <p>No active session is running right now.</p>
+  <p class="meta">The chat window activates when the DM begins a session.</p>
+{% endif %}

@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Characters | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Character roster</p>
+    <h1>{{ campaign.title }} Characters</h1>
+    <p class="lede">
+      Open a player sheet in read mode for reference during play. Session editing arrives in the next milestone.
+    </p>
+  </section>
+
+  <section class="card search-card">
+    <form method="get" class="search-form">
+      <input
+        type="search"
+        name="q"
+        value="{{ query }}"
+        placeholder="Search characters by name, class, species, or background"
+        aria-label="Search characters"
+      >
+      <button type="submit">Search</button>
+    </form>
+    <p class="meta">{{ result_count }} character{% if result_count != 1 %}s{% endif %} visible</p>
+  </section>
+
+  {% if character_cards %}
+    <section class="grid">
+      {% for character in character_cards %}
+        <article class="card character-card">
+          <p class="card-kicker">{{ character.class_level_text }}</p>
+          <h2>
+            <a href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
+              {{ character.name }}
+            </a>
+          </h2>
+          <p class="character-card__meta">
+            {% if character.species %}{{ character.species }}{% endif %}
+            {% if character.background %}{% if character.species %} · {% endif %}{{ character.background }}{% endif %}
+          </p>
+          <div class="character-card__stats">
+            <div>
+              <span class="meta">HP</span>
+              <strong>{{ character.current_hp }} / {{ character.max_hp }}</strong>
+            </div>
+            <div>
+              <span class="meta">Temp HP</span>
+              <strong>{{ character.temp_hp }}</strong>
+            </div>
+          </div>
+          {% if character.resource_preview %}
+            <ul class="plain-list resource-preview-list">
+              {% for resource in character.resource_preview %}
+                <li>
+                  <span>{{ resource.label }}</span>
+                  <strong>{{ resource.value }}</strong>
+                </li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+          <a class="button-link" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
+            Open sheet
+          </a>
+        </article>
+      {% endfor %}
+    </section>
+  {% else %}
+    <section class="card">
+      {% if query %}
+        <h2>No matching characters</h2>
+        <p>Try a broader search term or clear the current filter.</p>
+      {% else %}
+        <h2>No visible characters yet</h2>
+        <p>This campaign does not currently have any active player sheets available in the app.</p>
+      {% endif %}
+    </section>
+  {% endif %}
+{% endblock %}

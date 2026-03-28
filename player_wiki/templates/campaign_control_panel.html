@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}Control Panel | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Control panel</p>
+    <h1>{{ campaign.title }} Visibility</h1>
+    <p class="lede">
+      Control who can see the campaign, wiki, systems reference, session tools, combat tracker, DM content, and character section.
+    </p>
+  </section>
+
+  <div class="page-layout">
+    <section class="article card">
+      <h2>Visibility settings</h2>
+      <form method="post" action="{{ url_for('campaign_control_panel_update_visibility', campaign_slug=campaign.slug) }}" class="stack-form">
+        {% for row in visibility_rows %}
+          <label class="field">
+            <span>{{ row.label }}</span>
+            <select name="{{ row.scope }}_visibility">
+              {% for choice in row.choices %}
+                <option value="{{ choice.value }}" {% if row.selected_visibility == choice.value %}selected{% endif %}>
+                  {{ choice.label }}
+                </option>
+              {% endfor %}
+            </select>
+          </label>
+          <p class="meta">
+            Effective visibility: {{ row.effective_visibility_label }}
+            {% if row.configured_visibility_label %}
+              | configured: {{ row.configured_visibility_label }}
+            {% else %}
+              | using default visibility
+            {% endif %}
+          </p>
+          {% if row.is_overridden_by_campaign %}
+            <p class="meta">The campaign-level visibility is currently more private than this section setting.</p>
+          {% endif %}
+        {% endfor %}
+        <button type="submit">Save visibility</button>
+      </form>
+    </section>
+
+    <aside class="sidebar">
+      <section class="card sidebar-card">
+        <h2>Visibility rules</h2>
+        <p class="meta">Public: anyone can see it.</p>
+        <p class="meta">Players: only the DM and players in the campaign can see it.</p>
+        <p class="meta">DM: only the campaign DM can see it.</p>
+        <p class="meta">Private: only an app admin can see it.</p>
+      </section>
+
+      <section class="card sidebar-card">
+        <h2>Notes</h2>
+        <p class="meta">Campaign-level visibility acts as a floor for every campaign section.</p>
+        <p class="meta">Systems also apply source-level and article-level access rules on top of the systems scope.</p>
+        {% if not can_set_private_visibility %}
+          <p class="meta">Private visibility is reserved for admins even though admins can still access everything.</p>
+        {% endif %}
+      </section>
+    </aside>
+  </div>
+{% endblock %}

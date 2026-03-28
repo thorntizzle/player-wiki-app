@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Session | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Session</p>
+    <h1>{{ campaign.title }} Session</h1>
+    <p class="lede">
+      Follow the live session feed and chat with the table here. DM session controls and article tools live on a separate page.
+    </p>
+    <div class="hero-actions">
+      {% include "_session_view_switch.html" %}
+    </div>
+  </section>
+
+  <div
+    class="page-layout session-layout"
+    data-session-live-root
+    data-session-live-url="{{ url_for('campaign_session_live_state', campaign_slug=campaign.slug) }}"
+    data-active-session-id="{{ active_session_id or '' }}"
+    data-session-manager-state-token="{{ session_manager_state_token }}"
+  >
+    <section class="session-column">
+      <article class="card session-status-card" data-session-status-card>
+        {% include "_session_status_card.html" %}
+      </article>
+
+      <article class="card session-chat-card" id="session-chat" data-session-chat-card>
+        {% include "_session_chat_card.html" %}
+      </article>
+
+      <div data-session-composer-root>
+        {% include "_session_composer_card.html" %}
+      </div>
+    </section>
+
+    <aside class="session-sidebar">
+      {% include "_session_wiki_lookup_card.html" %}
+    </aside>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {% include "_session_live_scripts.html" %}
+{% endblock %}

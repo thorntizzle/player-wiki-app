@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Sign In | Campaign Player Wiki{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Private campaign access</p>
+    <h1>Sign in to your campaign workspace.</h1>
+    <p class="lede">
+      This local-first build keeps player-facing content private while you iterate on campaigns,
+      character sheets, and publishing workflows.
+    </p>
+  </section>
+
+  <section class="card auth-card">
+    <form method="post" class="stack-form">
+      <input type="hidden" name="next" value="{{ next_url or '' }}">
+
+      <label class="field">
+        <span>Email</span>
+        <input
+          type="email"
+          name="email"
+          value="{{ email or '' }}"
+          autocomplete="username"
+          required
+        >
+      </label>
+
+      <label class="field">
+        <span>Password</span>
+        <input
+          type="password"
+          name="password"
+          autocomplete="current-password"
+          required
+        >
+      </label>
+
+      <button type="submit">Sign in</button>
+    </form>
+  </section>
+{% endblock %}

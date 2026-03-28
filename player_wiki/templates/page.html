@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page.title }} | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <div class="page-layout">
+    <article class="article card">
+      <h1>{{ page.title }}</h1>
+      {% if page.summary and page.page_type not in ["item", "spell", "mechanic"] %}
+        <p class="lede">{{ page.summary }}</p>
+      {% endif %}
+      {% if page_image_url %}
+        <figure class="article-figure">
+          <img class="article-image" src="{{ page_image_url }}" alt="{{ page.image_alt or page.title }}">
+          {% if page.image_caption %}
+            <figcaption class="meta article-image__caption">{{ page.image_caption }}</figcaption>
+          {% endif %}
+        </figure>
+      {% endif %}
+      <div class="article-body">{{ body_html | safe }}</div>
+    </article>
+
+    <aside class="sidebar">
+      <section class="card sidebar-card">
+        <h2>Context</h2>
+        <p class="meta">
+          Campaign: <a href="{{ url_for('campaign_view', campaign_slug=campaign.slug) }}">{{ campaign.title }}</a>
+        </p>
+        <p class="meta">
+          Section: <a href="{{ url_for('section_view', campaign_slug=campaign.slug, section_slug=slugify(page.section)) }}">{{ page.section }}</a>
+        </p>
+      </section>
+
+      {% if backlinks %}
+        <section class="card sidebar-card">
+          <h2>Linked From</h2>
+          <ul class="plain-list">
+            {% for backlink in backlinks %}
+              <li>
+                <a href="{{ url_for('page_view', campaign_slug=campaign.slug, page_slug=backlink.route_slug) }}">
+                  {{ backlink.title }}
+                </a>
+              </li>
+            {% endfor %}
+          </ul>
+        </section>
+      {% endif %}
+    </aside>
+  </div>
+{% endblock %}

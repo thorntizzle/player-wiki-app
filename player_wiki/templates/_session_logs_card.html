@@ -1,0 +1,30 @@
+<article class="card session-sidebar-card" id="session-chat-logs">
+  <div class="section-heading">
+    <h2>Chat logs</h2>
+    <p class="meta">{{ session_logs|length }}</p>
+  </div>
+  {% if session_logs %}
+    <ul class="plain-list session-log-list">
+      {% for log in session_logs %}
+        <li>
+          <div class="session-log-list__row">
+            <div class="session-log-list__content">
+              <a href="{{ url_for('campaign_session_log_view', campaign_slug=campaign.slug, session_id=log.id) }}">
+                Session log from {{ log.started_at_label }}
+              </a>
+              <p class="meta">
+                {{ log.message_count }} entr{% if log.message_count != 1 %}ies{% else %}y{% endif %}
+                {% if log.ended_at_label %} | closed {{ log.ended_at_label }}{% endif %}
+              </p>
+            </div>
+            <form method="post" action="{{ url_for('campaign_session_log_delete', campaign_slug=campaign.slug, session_id=log.id) }}">
+              <button type="submit" class="ghost-button">Delete log</button>
+            </form>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="meta">Closed sessions will appear here after the first live run.</p>
+  {% endif %}
+</article>

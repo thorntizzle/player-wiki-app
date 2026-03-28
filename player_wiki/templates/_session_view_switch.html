@@ -1,0 +1,14 @@
+<a
+  class="{% if session_subpage == 'session' %}button-link{% else %}ghost-button{% endif %}"
+  href="{{ url_for('campaign_session_view', campaign_slug=campaign.slug) }}"
+>
+  Session
+</a>
+{% if can_manage_session %}
+  <a
+    class="{% if session_subpage == 'dm' %}button-link{% else %}ghost-button{% endif %}"
+    href="{{ url_for('campaign_session_dm_view', campaign_slug=campaign.slug) }}"
+  >
+    DM page
+  </a>
+{% endif %}

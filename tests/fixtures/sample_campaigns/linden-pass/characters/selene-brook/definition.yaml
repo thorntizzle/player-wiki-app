@@ -1,0 +1,113 @@
+campaign_slug: linden-pass
+character_slug: selene-brook
+name: Selene Brook
+status: active
+profile:
+  class_level_text: Ranger 4
+  classes:
+    - class_name: Ranger
+      subclass_name: Wayfinder
+      level: 4
+  species: Tidemarked
+  background: Scout
+  alignment: Chaotic Good
+  size: Medium
+  experience_model: Milestone
+  biography_markdown: Selene keeps the crew moving when the weather turns mean.
+stats:
+  max_hp: 44
+  armor_class: 15
+  initiative_bonus: 3
+  speed: 30 ft.
+  proficiency_bonus: 2
+  passive_perception: 14
+  passive_insight: 12
+  passive_investigation: 11
+  ability_scores:
+    str:
+      score: 10
+      modifier: 0
+      save_bonus: 0
+    dex:
+      score: 16
+      modifier: 3
+      save_bonus: 5
+    con:
+      score: 14
+      modifier: 2
+      save_bonus: 2
+    int:
+      score: 11
+      modifier: 0
+      save_bonus: 0
+    wis:
+      score: 15
+      modifier: 2
+      save_bonus: 4
+    cha:
+      score: 10
+      modifier: 0
+      save_bonus: 0
+skills:
+  - name: Acrobatics
+    bonus: 5
+    proficiency_level: proficient
+  - name: Nature
+    bonus: 4
+    proficiency_level: proficient
+  - name: Perception
+    bonus: 4
+    proficiency_level: proficient
+proficiencies:
+  armor:
+    - Light Armor
+    - Medium Armor
+    - Shields
+  weapons:
+    - Martial Weapons
+    - Simple Weapons
+  tools:
+    - Cartographer's Tools
+  languages:
+    - Common
+    - Tidemarked Cant
+attacks:
+  - name: Longbow
+    category: ranged weapon
+    attack_bonus: 5
+    damage: 1d8+3 piercing
+    notes: Range 150/600.
+features:
+  - name: Wayfinder's Eye
+    category: class_feature
+    source: Sample Rules
+    description_markdown: Selene can read wind direction and ship traffic at a glance.
+spellcasting:
+  spellcasting_class: Ranger
+  spellcasting_ability: Wisdom
+  slot_progression:
+    - level: 1
+      max_slots: 3
+  spells:
+    - name: Hunter's Mark
+      casting_time: 1 bonus action
+      range: 90 feet
+      duration: Concentration, 1 hour
+      components: V
+      save_or_hit: ""
+equipment_catalog:
+  - id: longbow-1
+    name: Longbow
+    default_quantity: 1
+    weight: 2 lb.
+    is_equipped: true
+  - id: arrows-2
+    name: Arrows
+    default_quantity: 20
+    weight: 1 lb.
+reference_notes:
+  additional_notes_markdown: Selene trusts tide charts more than people.
+resource_templates: []
+source:
+  sheet_name: Selene Brook
+  imported_from: Selene Brook - Character Sheet.md

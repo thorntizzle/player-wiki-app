@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Session DM | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Session DM</p>
+    <h1>{{ campaign.title }} Session DM</h1>
+    <p class="lede">
+      Manage the live session state, stage handouts, and review session logs without crowding the player chat view.
+    </p>
+    <div class="hero-actions">
+      {% include "_session_view_switch.html" %}
+    </div>
+  </section>
+
+  <div
+    class="page-layout session-layout"
+    data-session-live-root
+    data-session-live-url="{{ url_for('campaign_session_live_state', campaign_slug=campaign.slug) }}"
+    data-active-session-id="{{ active_session_id or '' }}"
+    data-session-manager-state-token="{{ session_manager_state_token }}"
+  >
+    <section class="session-column">
+      <article class="card session-status-card" data-session-status-card>
+        {% include "_session_status_card.html" %}
+      </article>
+
+      <div id="session-controls" data-session-controls-root>
+        {% include "_session_controls_card.html" %}
+      </div>
+
+      <div data-session-staged-root>
+        {% include "_session_staged_articles_card.html" %}
+      </div>
+
+      <div data-session-revealed-root>
+        {% include "_session_revealed_articles_card.html" %}
+      </div>
+    </section>
+
+    <aside class="session-sidebar">
+      {% include "_session_article_store_card.html" %}
+
+      <div data-session-logs-root>
+        {% include "_session_logs_card.html" %}
+      </div>
+    </aside>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {% include "_session_live_scripts.html" %}
+{% endblock %}

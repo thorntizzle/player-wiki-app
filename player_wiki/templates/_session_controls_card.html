@@ -1,0 +1,22 @@
+<article class="card session-sidebar-card">
+  <h2>Session controls</h2>
+  {% if can_manage_session %}
+    {% if active_session %}
+      <p>You can reveal staged articles or close the session when the table is done.</p>
+      <form method="post" action="{{ url_for('campaign_session_close', campaign_slug=campaign.slug) }}">
+        <button type="submit">Close session</button>
+      </form>
+    {% else %}
+      <p>Start a session to open the chat window and reveal staged handouts.</p>
+      <form
+        method="post"
+        action="{{ url_for('campaign_session_start', campaign_slug=campaign.slug) }}"
+        data-session-async
+      >
+        <button type="submit">Begin session</button>
+      </form>
+    {% endif %}
+  {% else %}
+    <p>The DM controls when the live session opens and closes.</p>
+  {% endif %}
+</article>

@@ -1,0 +1,26 @@
+<article class="card session-composer-card" id="session-chat-compose">
+  <h2>Send message</h2>
+  {% if can_post_messages and chat_is_open %}
+    <form
+      method="post"
+      action="{{ url_for('campaign_session_post_message', campaign_slug=campaign.slug) }}"
+      class="stack-form"
+      data-session-async
+    >
+      <label class="field">
+        <span>Message</span>
+        <textarea
+          name="body"
+          rows="5"
+          placeholder="Share a plan, question, or reaction with the table."
+          required
+        ></textarea>
+      </label>
+      <button type="submit">Post to chat</button>
+    </form>
+  {% elif chat_is_open %}
+    <p>Observers can watch the live session feed, but only players and the DM can post messages.</p>
+  {% else %}
+    <p>The chat composer unlocks as soon as the DM begins a session.</p>
+  {% endif %}
+</article>

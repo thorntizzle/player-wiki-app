@@ -1,0 +1,48 @@
+<section class="session-bar" id="session-vitals">
+  <div class="session-bar__summary">
+    <p class="eyebrow">Active session</p>
+    <h2>{{ character.name }}</h2>
+    <p class="meta">HP {{ character.current_hp }} / {{ character.max_hp }} | Temp HP {{ character.temp_hp }}</p>
+  </div>
+
+  <form
+    class="session-vitals-form"
+    method="post"
+    action="{{ url_for('character_session_vitals', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+  >
+    <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+    <label class="session-field">
+      <span>Current HP</span>
+      <input type="number" name="current_hp" value="{{ character.current_hp }}" min="0" max="{{ character.max_hp }}">
+    </label>
+    <div class="session-stepper">
+      <button type="submit" name="hp_delta" value="-5">-5</button>
+      <button type="submit" name="hp_delta" value="-1">-1</button>
+      <button type="submit" name="hp_delta" value="1">+1</button>
+      <button type="submit" name="hp_delta" value="5">+5</button>
+    </div>
+
+    <label class="session-field">
+      <span>Temp HP</span>
+      <input type="number" name="temp_hp" value="{{ character.temp_hp }}" min="0">
+    </label>
+    <div class="session-stepper">
+      <button type="submit" name="temp_hp_delta" value="-5">-5</button>
+      <button type="submit" name="temp_hp_delta" value="-1">-1</button>
+      <button type="submit" name="temp_hp_delta" value="1">+1</button>
+      <button type="submit" name="temp_hp_delta" value="5">+5</button>
+      <button type="submit" name="clear_temp_hp" value="1">Clear</button>
+    </div>
+
+    <button class="button-link" type="submit">Save vitals</button>
+  </form>
+
+  <div class="session-bar__actions" id="session-rest">
+    <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='session', confirm_rest='short') }}">
+      Short rest
+    </a>
+    <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='session', confirm_rest='long') }}">
+      Long rest
+    </a>
+  </div>
+</section>

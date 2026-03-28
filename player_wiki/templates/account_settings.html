@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block title %}Account Settings | Campaign Player Wiki{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Account settings</p>
+    <h1>{{ current_user.display_name }}</h1>
+    <p class="lede">
+      Save interface preferences to your account and use them everywhere you are signed in.
+    </p>
+    <p class="meta">
+      Current theme: {{ current_theme.label }}
+      {% if current_user.is_admin %} | App admin{% endif %}
+    </p>
+  </section>
+
+  <section class="page-layout account-layout">
+    <article class="card account-panel">
+      <section class="account-settings-group">
+        <h2>Color theme</h2>
+        <p class="meta">
+          These presets restyle the shared app chrome, cards, forms, and reading surfaces.
+        </p>
+        <form method="post" action="{{ url_for('account_theme_update') }}" class="stack-form">
+          <div class="theme-grid">
+            {% for theme in theme_presets %}
+              <label class="theme-option{% if selected_theme_key == theme.key %} is-selected{% endif %}">
+                <input
+                  class="theme-option__input"
+                  type="radio"
+                  name="theme_key"
+                  value="{{ theme.key }}"
+                  {% if selected_theme_key == theme.key %}checked{% endif %}
+                >
+                <span class="theme-option__header">
+                  <span>
+                    <strong>{{ theme.label }}</strong>
+                    {% if selected_theme_key == theme.key %}
+                      <span class="meta theme-option__status">Current</span>
+                    {% endif %}
+                  </span>
+                  <span class="theme-option__swatches" aria-hidden="true">
+                    {% for color in theme.preview_colors %}
+                      <span class="theme-option__swatch" style="background: {{ color }};"></span>
+                    {% endfor %}
+                  </span>
+                </span>
+                <span class="meta">{{ theme.description }}</span>
+              </label>
+            {% endfor %}
+          </div>
+          <button type="submit">Save theme</button>
+        </form>
+      </section>
+
+      <section class="account-settings-group">
+        <h2>Live session chat order</h2>
+        <p class="meta">
+          This changes the order of the live Session chat window for your account only. Stored session logs stay chronological.
+        </p>
+        <form method="post" action="{{ url_for('account_session_chat_order_update') }}" class="stack-form">
+          <div class="theme-grid">
+            {% for choice in session_chat_order_choices %}
+              <label class="theme-option{% if selected_session_chat_order == choice.value %} is-selected{% endif %}">
+                <input
+                  class="theme-option__input"
+                  type="radio"
+                  name="session_chat_order"
+                  value="{{ choice.value }}"
+                  {% if selected_session_chat_order == choice.value %}checked{% endif %}
+                >
+                <span class="theme-option__header">
+                  <span>
+                    <strong>{{ choice.label }}</strong>
+                    {% if selected_session_chat_order == choice.value %}
+                      <span class="meta theme-option__status">Current</span>
+                    {% endif %}
+                  </span>
+                </span>
+                <span class="meta">{{ choice.description }}</span>
+              </label>
+            {% endfor %}
+          </div>
+          <button type="submit">Save chat order</button>
+        </form>
+      </section>
+    </article>
+
+    <aside class="card account-sidebar">
+      <h2>Account</h2>
+      <p><strong>{{ current_user.display_name }}</strong></p>
+      <p class="meta">{{ current_user.email }}</p>
+      <p class="meta">
+        Theme and live-session chat preferences are stored in the auth database and applied on every signed-in request.
+      </p>
+      <a class="ghost-button" href="{{ url_for('campaign_picker') }}">Back to campaigns</a>
+    </aside>
+  </section>
+{% endblock %}

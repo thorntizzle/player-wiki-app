@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}{{ source_state.source.title }} | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Systems source</p>
+    <h1>{{ source_state.source.title }}</h1>
+    <p class="lede">
+      {{ source_state.source.source_id }} | {{ license_class_label }} | {{ campaign_visibility_label(source_state.default_visibility) }}
+    </p>
+    {% if can_manage_systems %}
+      <div class="hero-actions">
+        <a class="ghost-button" href="{{ url_for('campaign_systems_control_panel_view', campaign_slug=campaign.slug) }}">Systems settings</a>
+      </div>
+    {% endif %}
+  </section>
+
+  <div class="page-layout">
+    <section class="article card">
+      <h2>Browse This Source</h2>
+      <p class="meta">Choose a content category to load that entry list. This keeps large books like the Player's Handbook lighter to browse.</p>
+      {% if hidden_entry_count %}
+        <div class="meta">
+          {% if "classfeature" in hidden_entry_types %}
+            <p>Class Features are folded into their Class pages and remain searchable, even though they are not listed as a separate source category.</p>
+          {% endif %}
+          {% if "subclassfeature" in hidden_entry_types %}
+            <p>Subclass Features are folded into their Subclass pages and remain searchable, even though they are not listed as a separate source category.</p>
+          {% endif %}
+          {% if "optionalfeature" in hidden_entry_types %}
+            <p>Optional Features are surfaced under their related Class and Subclass pages and remain searchable, even though they are not listed as a separate source category.</p>
+          {% endif %}
+        </div>
+      {% endif %}
+
+      {% if entry_groups %}
+        <p class="meta">
+          This source currently has {{ browsable_entry_count }} browsable entries across {{ entry_groups|length }}
+          {{ "category" if entry_groups|length == 1 else "categories" }}.
+        </p>
+        <ul class="plain-list">
+          {% for group in entry_groups %}
+            <li>
+              <a href="{{ url_for('campaign_systems_source_type_detail', campaign_slug=campaign.slug, source_id=source_state.source.source_id, entry_type=group.entry_type) }}">{{ group.label }}</a>
+              <span class="meta">{{ group.count }} entries</span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="meta">No imported entries are available for this source yet.</p>
+      {% endif %}
+    </section>
+
+    <aside class="sidebar">
+      <section class="card sidebar-card">
+        <h2>Source Details</h2>
+        <p class="meta">Source ID: {{ source_state.source.source_id }}</p>
+        <p class="meta">Default visibility: {{ source_state.default_visibility }}</p>
+        <p class="meta">Imported entries: {{ entry_count }}</p>
+      </section>
+      {% if entry_groups %}
+        <section class="card sidebar-card">
+          <h2>Content Categories</h2>
+          <ul class="plain-list">
+            {% for group in entry_groups %}
+              <li>
+                <a href="{{ url_for('campaign_systems_source_type_detail', campaign_slug=campaign.slug, source_id=source_state.source.source_id, entry_type=group.entry_type) }}">{{ group.label }}</a>
+                <span class="meta">{{ group.count }}</span>
+              </li>
+            {% endfor %}
+          </ul>
+        </section>
+      {% endif %}
+    </aside>
+  </div>
+{% endblock %}

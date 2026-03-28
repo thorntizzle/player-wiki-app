@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}Campaigns | Campaign Player Wiki{% endblock %}
+
+{% block content %}
+  <section class="hero">
+    <p class="eyebrow">Player-safe campaign reference</p>
+    <h1>Publish each campaign as its own curated wiki.</h1>
+    <p class="lede">
+      This app separates player-facing lore from GM-side source notes. Each campaign defines its own
+      content set, reveal state, and wiki structure.
+    </p>
+  </section>
+
+  <section class="grid">
+    {% for campaign in campaigns %}
+      <article class="card campaign-card">
+        <p class="card-kicker">Campaign</p>
+        <h2>{{ campaign.title }}</h2>
+        <p>{{ campaign.summary }}</p>
+        <p class="meta">Current session: {{ campaign.current_session }}</p>
+        <a class="button-link" href="{{ url_for('campaign_view', campaign_slug=campaign.slug) }}">
+          Open wiki
+        </a>
+      </article>
+    {% endfor %}
+  </section>
+{% endblock %}

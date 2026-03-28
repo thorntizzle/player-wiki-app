@@ -1,0 +1,207 @@
+<section class="section-block" id="combat-tracker">
+  <div class="section-heading">
+    <h2>Turn order</h2>
+    <p class="meta">Highest turn value acts first. The current-turn badge marks the active combatant.</p>
+  </div>
+
+  {% if combat_tracker.combatants %}
+    <div class="combatant-stack">
+      {% for combatant in combat_tracker.combatants %}
+        <article class="card combatant-card{% if combatant.is_current_turn %} combatant-card--current{% endif %}" id="combatant-{{ combatant.id }}">
+          <div class="combatant-card__header">
+            <div>
+              <p class="card-kicker">{{ combatant.type_label }}</p>
+              <h3>{{ combatant.name }}</h3>
+              {% if combatant.subtitle %}
+                <p class="meta">{{ combatant.subtitle }}</p>
+              {% endif %}
+            </div>
+            <div class="combatant-badges">
+              <span class="combat-badge">Turn {{ combatant.turn_value }}</span>
+              {% if combatant.initiative_bonus_label != "0" %}
+                <span class="combat-badge combat-badge--muted">Init {{ combatant.initiative_bonus_label }}</span>
+              {% endif %}
+              {% if combatant.is_current_turn %}
+                <span class="combat-badge combat-badge--active">Current turn</span>
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="combat-stat-grid">
+            <div class="combat-stat">
+              <span class="meta">HP</span>
+              <strong>{{ combatant.current_hp }} / {{ combatant.max_hp }}</strong>
+            </div>
+            <div class="combat-stat">
+              <span class="meta">Temp HP</span>
+              <strong>{{ combatant.temp_hp }}</strong>
+            </div>
+            <div class="combat-stat">
+              <span class="meta">Movement</span>
+              <strong>{{ combatant.movement_remaining }} / {{ combatant.movement_total }}</strong>
+            </div>
+            <div class="combat-stat">
+              <span class="meta">Speed</span>
+              <strong>{{ combatant.speed_label }}</strong>
+            </div>
+          </div>
+
+          <div class="combat-resource-strip">
+            <span class="combat-resource{% if combatant.has_action %} combat-resource--ready{% endif %}">Action</span>
+            <span class="combat-resource{% if combatant.has_bonus_action %} combat-resource--ready{% endif %}">Bonus Action</span>
+            <span class="combat-resource{% if combatant.has_reaction %} combat-resource--ready{% endif %}">Reaction</span>
+            <span class="combat-resource combat-resource--movement">Movement {{ combatant.movement_remaining }}/{{ combatant.movement_total }}</span>
+          </div>
+
+          {% if combatant.can_edit_vitals %}
+            <form
+              method="post"
+              action="{{ url_for('campaign_combat_update_vitals', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
+              class="stack-form combat-form"
+              data-combat-async
+            >
+              {% if combatant.state_revision is not none %}
+                <input type="hidden" name="expected_revision" value="{{ combatant.state_revision }}">
+              {% endif %}
+              <div class="combat-form-grid">
+                <label class="field">
+                  <span>Current HP</span>
+                  <input type="number" name="current_hp" value="{{ combatant.current_hp }}">
+                </label>
+                <label class="field">
+                  <span>Temp HP</span>
+                  <input type="number" name="temp_hp" value="{{ combatant.temp_hp }}">
+                </label>
+                {% if combatant.can_manage_combat and not combatant.character_slug %}
+                  <label class="field">
+                    <span>Max HP</span>
+                    <input type="number" name="max_hp" value="{{ combatant.max_hp }}">
+                  </label>
+                  <label class="field">
+                    <span>Movement</span>
+                    <input type="number" name="movement_total" value="{{ combatant.movement_total }}">
+                  </label>
+                {% endif %}
+              </div>
+              <div class="combat-form-actions">
+                <button type="submit">Save vitals</button>
+              </div>
+            </form>
+          {% endif %}
+
+          {% if combatant.can_manage_combat %}
+            <div class="combat-manager-grid">
+              <form
+                method="post"
+                action="{{ url_for('campaign_combat_update_turn_value', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
+                class="stack-form combat-form combat-form--compact"
+                data-combat-async
+              >
+                <label class="field">
+                  <span>Turn value</span>
+                  <input type="number" name="turn_value" value="{{ combatant.turn_value }}">
+                </label>
+                <button type="submit">Save turn</button>
+              </form>
+
+              <form
+                method="post"
+                action="{{ url_for('campaign_combat_set_current_turn', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
+                class="stack-form combat-form combat-form--compact"
+                data-combat-async
+              >
+                <p class="meta">Refreshes action, bonus action, reaction, and movement at the start of this turn.</p>
+                <button type="submit">Set current turn</button>
+              </form>
+
+              <form
+                method="post"
+                action="{{ url_for('campaign_combat_update_resources', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
+                class="stack-form combat-form"
+                data-combat-async
+              >
+                <div class="combat-checkbox-row">
+                  <label><input type="checkbox" name="has_action" value="1" {% if combatant.has_action %}checked{% endif %}> Action ready</label>
+                  <label><input type="checkbox" name="has_bonus_action" value="1" {% if combatant.has_bonus_action %}checked{% endif %}> Bonus action ready</label>
+                  <label><input type="checkbox" name="has_reaction" value="1" {% if combatant.has_reaction %}checked{% endif %}> Reaction ready</label>
+                </div>
+                <label class="field">
+                  <span>Remaining movement</span>
+                  <input type="number" name="movement_remaining" value="{{ combatant.movement_remaining }}">
+                </label>
+                <button type="submit">Save resources</button>
+              </form>
+            </div>
+          {% endif %}
+
+          <section class="combat-conditions">
+            <div class="section-heading">
+              <h4>Conditions</h4>
+              <p class="meta">Track durations as freeform encounter notes.</p>
+            </div>
+            {% if combatant.conditions %}
+              <div class="combat-condition-list">
+                {% for condition in combatant.conditions %}
+                  <div class="combat-condition-item">
+                    <div>
+                      <strong>{{ condition.name }}</strong>
+                      {% if condition.duration_text %}
+                        <p class="meta">{{ condition.duration_text }}</p>
+                      {% endif %}
+                    </div>
+                    {% if combatant.can_manage_combat %}
+                      <form
+                        method="post"
+                        action="{{ url_for('campaign_combat_delete_condition', campaign_slug=campaign.slug, condition_id=condition.id) }}"
+                        data-combat-async
+                      >
+                        <button class="ghost-button" type="submit">Remove</button>
+                      </form>
+                    {% endif %}
+                  </div>
+                {% endfor %}
+              </div>
+            {% else %}
+              <p class="meta">No conditions are active on this combatant.</p>
+            {% endif %}
+
+            {% if combatant.can_manage_combat %}
+              <form
+                method="post"
+                action="{{ url_for('campaign_combat_add_condition', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
+                class="stack-form combat-form"
+                data-combat-async
+              >
+                <div class="combat-form-grid">
+                  <label class="field">
+                    <span>Condition</span>
+                    <input type="text" name="condition_name" list="combat-condition-options" placeholder="Condition name">
+                  </label>
+                  <label class="field">
+                    <span>Duration</span>
+                    <input type="text" name="duration_text" placeholder="Until end of next turn">
+                  </label>
+                </div>
+                <div class="combat-form-actions">
+                  <button type="submit">Add condition</button>
+                </div>
+              </form>
+              <form
+                method="post"
+                action="{{ url_for('campaign_combat_delete_combatant', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
+                data-combat-async
+              >
+                <button class="ghost-button" type="submit">Remove combatant</button>
+              </form>
+            {% endif %}
+          </section>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <article class="card">
+      <h3>No combatants in the tracker yet</h3>
+      <p>Once the DM adds player characters or NPCs, the turn order and encounter resources will appear here.</p>
+    </article>
+  {% endif %}
+</section>

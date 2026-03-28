@@ -1,0 +1,187 @@
+campaign_slug: linden-pass
+character_slug: arden-march
+name: Arden March
+status: active
+profile:
+  class_level_text: Sorcerer 5
+  classes:
+    - class_name: Sorcerer
+      subclass_name: Wild Surge
+      level: 5
+  species: Human
+  background: Courier
+  alignment: Neutral Good
+  size: Medium
+  experience_model: Milestone
+  biography_markdown: Arden serves as the crew's relay mage and keeps one eye on every exit.
+  personality_markdown: Arden plays careful in public and improvises recklessly once the plan starts moving.
+stats:
+  max_hp: 38
+  armor_class: 14
+  initiative_bonus: 2
+  speed: 30 ft.
+  proficiency_bonus: 3
+  passive_perception: 12
+  passive_insight: 11
+  passive_investigation: 12
+  ability_scores:
+    str:
+      score: 10
+      modifier: 0
+      save_bonus: 0
+    dex:
+      score: 14
+      modifier: 2
+      save_bonus: 2
+    con:
+      score: 14
+      modifier: 2
+      save_bonus: 5
+    int:
+      score: 12
+      modifier: 1
+      save_bonus: 1
+    wis:
+      score: 12
+      modifier: 1
+      save_bonus: 1
+    cha:
+      score: 18
+      modifier: 4
+      save_bonus: 7
+skills:
+  - name: Arcana
+    bonus: 7
+    proficiency_level: proficient
+  - name: Insight
+    bonus: 4
+    proficiency_level: proficient
+  - name: Perception
+    bonus: 4
+    proficiency_level: proficient
+  - name: Stealth
+    bonus: 2
+    proficiency_level: none
+proficiencies:
+  armor: []
+  weapons:
+    - Daggers
+    - Light Crossbows
+    - Quarterstaffs
+  tools:
+    - Navigator's Tools
+  languages:
+    - Common
+    - Elvish
+attacks:
+  - name: Crossbow, Light
+    category: ranged weapon
+    attack_bonus: 5
+    damage: 1d8+2 piercing
+    notes: Ammunition, loading, range 80/320.
+  - name: Quarterstaff
+    category: melee weapon
+    attack_bonus: 3
+    damage: 1d6 bludgeoning
+    notes: Versatile (1d8).
+features:
+  - name: Sorcerous Recovery
+    category: class_feature
+    tracker_ref: sorcery-points
+    source: Sample Rules
+    description_markdown: Spend sorcery points to shape prepared magic on the fly.
+  - name: Wild Surge
+    category: class_feature
+    tracker_ref: wild-die
+    source: Sample Rules
+    description_markdown: A volatile spark that can tilt a spell once each rest.
+  - name: Chaos Reserve
+    category: class_feature
+    tracker_ref: tides-of-chaos
+    source: Sample Rules
+    description_markdown: Cash in a reserve of luck to press the moment harder than expected.
+spellcasting:
+  spellcasting_class: Sorcerer
+  spellcasting_ability: Charisma
+  spell_save_dc: 15
+  spell_attack_bonus: 7
+  slot_progression:
+    - level: 1
+      max_slots: 4
+    - level: 2
+      max_slots: 3
+  spells:
+    - name: Message
+      casting_time: 1 action
+      range: 120 feet
+      duration: 1 round
+      components: V, S, M
+      save_or_hit: ""
+      source: Sample Rules
+      reference: page 14
+equipment_catalog:
+  - id: light-crossbow-1
+    name: Light Crossbow
+    default_quantity: 1
+    weight: 5 lb.
+    is_equipped: true
+  - id: quarterstaff-2
+    name: Quarterstaff
+    default_quantity: 1
+    weight: 4 lb.
+    is_equipped: true
+  - id: satchel-3
+    name: Courier Satchel
+    default_quantity: 1
+    weight: 2 lb.
+  - id: crossbow-bolts-4
+    name: Crossbow Bolts
+    default_quantity: 20
+    weight: 1.5 lb.
+    tags:
+      - ammunition
+  - id: backpack-5
+    name: Backpack
+    default_quantity: 1
+    weight: 5 lb.
+  - id: chalk-6
+    name: Chalk
+    default_quantity: 3
+    weight: light
+reference_notes:
+  additional_notes_markdown: Arden keeps coded route notes tucked inside the satchel.
+  allies_and_organizations_markdown: Arden reports directly to [[Captain Lyra Vale]] when harbor conditions turn rough.
+  custom_sections:
+    - title: Route Notes
+      body_markdown: The northern docks quiet down after second bell.
+resource_templates:
+  - id: sorcery-points
+    label: Sorcery Points
+    category: spellcasting
+    max: 5
+    initial_current: 5
+    reset_on: long_rest
+    reset_to: max
+    rest_behavior: restore_full
+    display_order: 10
+  - id: wild-die
+    label: Wild Die
+    category: custom_progress
+    max: 3
+    initial_current: 3
+    reset_on: long_rest
+    reset_to: max
+    rest_behavior: restore_full
+    display_order: 20
+  - id: tides-of-chaos
+    label: Tides of Chaos
+    category: custom_progress
+    max: 1
+    initial_current: 1
+    reset_on: long_rest
+    reset_to: max
+    rest_behavior: restore_full
+    display_order: 30
+source:
+  sheet_name: Arden March
+  imported_from: Arden March - Character Sheet.md

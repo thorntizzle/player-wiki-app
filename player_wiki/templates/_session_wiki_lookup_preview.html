@@ -1,0 +1,32 @@
+{% if lookup_page %}
+  <section class="session-wiki-lookup-result">
+    <header class="session-wiki-lookup-result__header">
+      <p class="eyebrow">Wiki article</p>
+      <h3>{{ lookup_page.title }}</h3>
+      <p class="meta">
+        {{ lookup_page.section }}
+        {% if lookup_page.subsection %} / {{ lookup_page.subsection }}{% endif %}
+        | {{ lookup_page.display_type | title }}
+      </p>
+      {% if lookup_page.summary and lookup_page.page_type not in ["item", "spell", "mechanic"] %}
+        <p class="lede">{{ lookup_page.summary }}</p>
+      {% endif %}
+      <p class="meta">
+        <a href="{{ lookup_page_url }}" target="_blank" rel="noopener noreferrer">Open full article in a new tab</a>
+      </p>
+    </header>
+    {% if lookup_page_image_url %}
+      <figure class="article-figure">
+        <img class="article-image" src="{{ lookup_page_image_url }}" alt="{{ lookup_page.image_alt or lookup_page.title }}">
+        {% if lookup_page.image_caption %}
+          <figcaption class="meta article-image__caption">{{ lookup_page.image_caption }}</figcaption>
+        {% endif %}
+      </figure>
+    {% endif %}
+    <div class="article-body article-body--compact">{{ lookup_body_html | safe }}</div>
+  </section>
+{% else %}
+  <div class="session-wiki-lookup-empty">
+    <p class="meta">{{ lookup_unavailable_message or "Search and choose a player-visible wiki article to read it here." }}</p>
+  </div>
+{% endif %}

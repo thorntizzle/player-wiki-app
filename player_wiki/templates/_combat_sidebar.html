@@ -1,0 +1,151 @@
+<aside class="sidebar">
+  {% if can_manage_combat %}
+    <section class="card sidebar-card">
+      <h2>Add player character</h2>
+      {% if available_character_choices %}
+        <form
+          method="post"
+          action="{{ url_for('campaign_combat_add_player', campaign_slug=campaign.slug) }}"
+          class="stack-form"
+          data-combat-async
+        >
+          <label class="field">
+            <span>Character</span>
+            <select name="character_slug">
+              {% for choice in available_character_choices %}
+                <option value="{{ choice.slug }}">{{ choice.name }} - {{ choice.subtitle }} - Init {{ choice.initiative_bonus }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="field">
+            <span>Turn value</span>
+            <input type="number" name="turn_value" placeholder="Defaults to initiative bonus">
+          </label>
+          <button type="submit">Add player character</button>
+        </form>
+      {% else %}
+        <p class="meta">All visible player characters are already in the tracker.</p>
+      {% endif %}
+    </section>
+
+    {% if can_access_systems %}
+      <section class="card sidebar-card">
+        <h2>Add NPC from Systems</h2>
+        <form
+          method="post"
+          action="{{ url_for('campaign_combat_add_systems_monster', campaign_slug=campaign.slug) }}"
+          class="stack-form"
+          data-combat-async
+          data-systems-monster-search-form
+          data-systems-monster-search-url="{{ url_for('campaign_combat_search_systems_monsters', campaign_slug=campaign.slug) }}"
+        >
+          <label class="field">
+            <span>Search monsters</span>
+            <input
+              type="search"
+              name="monster_query"
+              placeholder="Type at least 2 letters"
+              autocomplete="off"
+              data-systems-monster-query
+            >
+          </label>
+          <p class="meta" data-systems-monster-status>Type at least 2 letters to search the Systems monster list.</p>
+          <label class="field">
+            <span>Monster</span>
+            <select name="entry_key" data-systems-monster-results disabled>
+              <option value="">Search to load matching monsters</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Display name</span>
+            <input type="text" name="display_name" placeholder="Defaults to monster name">
+          </label>
+          <label class="field">
+            <span>Turn value</span>
+            <input type="number" name="turn_value" placeholder="Defaults to initiative bonus">
+          </label>
+          <button type="submit" data-systems-monster-submit disabled>Add from Systems</button>
+        </form>
+      </section>
+    {% endif %}
+
+    {% if can_access_dm_content %}
+      <section class="card sidebar-card">
+        <h2>Add NPC from DM Content</h2>
+        {% if available_statblock_choices %}
+          <form
+            method="post"
+            action="{{ url_for('campaign_combat_add_statblock_npc', campaign_slug=campaign.slug) }}"
+            class="stack-form"
+            data-combat-async
+          >
+            <label class="field">
+              <span>Statblock</span>
+              <select name="statblock_id">
+                {% for choice in available_statblock_choices %}
+                  <option value="{{ choice.id }}">{{ choice.title }} - {{ choice.subtitle }} - Init {{ choice.initiative_bonus }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label class="field">
+              <span>Display name</span>
+              <input type="text" name="display_name" placeholder="Defaults to statblock title">
+            </label>
+            <label class="field">
+              <span>Turn value</span>
+              <input type="number" name="turn_value" placeholder="Defaults to statblock initiative bonus">
+            </label>
+            <button type="submit">Add from DM Content</button>
+          </form>
+        {% else %}
+          <p class="meta">Upload statblocks on the DM Content page to use them here.</p>
+        {% endif %}
+      </section>
+    {% endif %}
+
+    <section class="card sidebar-card">
+      <h2>Add custom NPC combatant</h2>
+      <form
+        method="post"
+        action="{{ url_for('campaign_combat_add_npc', campaign_slug=campaign.slug) }}"
+        class="stack-form"
+        data-combat-async
+      >
+        <label class="field">
+          <span>Name</span>
+          <input type="text" name="display_name" placeholder="Clockwork Hound">
+        </label>
+        <label class="field">
+          <span>Turn value</span>
+          <input type="number" name="turn_value" value="0">
+        </label>
+        <label class="field">
+          <span>Current HP</span>
+          <input type="number" name="current_hp" value="0">
+        </label>
+        <label class="field">
+          <span>Max HP</span>
+          <input type="number" name="max_hp" value="0">
+        </label>
+        <label class="field">
+          <span>Temp HP</span>
+          <input type="number" name="temp_hp" value="0">
+        </label>
+        <label class="field">
+          <span>Movement</span>
+          <input type="number" name="movement_total" value="30">
+        </label>
+        <button type="submit">Add NPC combatant</button>
+      </form>
+    </section>
+  {% endif %}
+
+  <section class="card sidebar-card">
+    <h2>Current limits</h2>
+    <p class="meta">This first pass is tuned for DND-5E action economy and combat conditions.</p>
+    <p class="meta">Systems monster entries can now seed NPC combatants directly from the shared DND 5E library.</p>
+    <p class="meta">Uploaded DM Content statblocks can seed NPC combatants, and custom DM Content conditions appear in the combat condition picker.</p>
+    <p class="meta">Inline sheet/statblock viewing is still a TODO, as is a dedicated player-only combat resource interface.</p>
+    <p class="meta">Player-character HP and temp HP edits made here sync back into the existing character state.</p>
+  </section>
+</aside>

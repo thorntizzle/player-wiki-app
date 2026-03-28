@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}Systems | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Systems wiki</p>
+    <h1>{{ campaign.title }} Systems</h1>
+    <p class="lede">
+      Browse campaign-approved system sources and reference entries without leaving the campaign space.
+    </p>
+    {% if can_manage_systems %}
+      <div class="hero-actions">
+        <a class="ghost-button" href="{{ url_for('campaign_systems_control_panel_view', campaign_slug=campaign.slug) }}">Systems settings</a>
+      </div>
+    {% endif %}
+  </section>
+
+  <div class="page-layout">
+    <section class="article card">
+      <h2>Systems Search</h2>
+      <form method="get" action="{{ url_for('campaign_systems_search', campaign_slug=campaign.slug) }}" class="stack-form">
+        <label class="field">
+          <span>Search systems entries</span>
+          <input type="search" name="q" value="{{ query }}" placeholder="title, type, or source">
+        </label>
+        <button type="submit">Search</button>
+      </form>
+      <p class="meta">Search matches titles, entry types, and source IDs only.</p>
+
+      {% if query %}
+        <h3>Search Results</h3>
+        {% if search_results %}
+          <ul class="plain-list">
+            {% for result in search_results %}
+              <li>
+                <a href="{{ url_for('campaign_systems_entry_detail', campaign_slug=campaign.slug, entry_slug=result.slug) }}">{{ result.title }}</a>
+                <span class="meta">{{ result.source_id }} | {{ result.entry_type_label }}</span>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="meta">No imported systems entries matched that search yet.</p>
+        {% endif %}
+      {% endif %}
+    </section>
+
+    <aside class="sidebar">
+      <section class="card sidebar-card">
+        <h2>Available Sources</h2>
+        {% if source_cards %}
+          <ul class="plain-list">
+            {% for source in source_cards %}
+              <li>
+                <a href="{{ url_for('campaign_systems_source_detail', campaign_slug=campaign.slug, source_id=source.source_id) }}">{{ source.title }}</a>
+                <p class="meta">{{ source.source_id }} | {{ source.license_class_label }}</p>
+                <p class="meta">{{ source.default_visibility_label }} visibility | {{ source.entry_count }} imported entries</p>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="meta">No systems sources are currently available to this viewer.</p>
+        {% endif %}
+      </section>
+    </aside>
+  </div>
+{% endblock %}

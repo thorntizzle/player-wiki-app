@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+
+{% macro render_inline_options(options) -%}
+  <div class="systems-inline-option-stack">
+    {% for option in options %}
+      <details class="systems-inline-option-card">
+        <summary class="systems-inline-option-card__summary">
+          <span class="systems-inline-option-card__title">
+            {% if option.slug %}
+              <a href="{{ url_for('campaign_systems_entry_detail', campaign_slug=campaign.slug, entry_slug=option.slug) }}">{{ option.label }}</a>
+            {% else %}
+              {{ option.label }}
+            {% endif %}
+          </span>
+          {% if option.meta_badges %}
+            <span class="systems-inline-option-card__meta">
+              {% for badge in option.meta_badges %}
+                <span class="meta-badge">{{ badge }}</span>
+              {% endfor %}
+            </span>
+          {% endif %}
+        </summary>
+        {% if option.body_html %}
+          <div class="article-body--compact systems-inline-option-card__body">
+            {{ option.body_html | safe }}
+          </div>
+        {% endif %}
+      </details>
+    {% endfor %}
+  </div>
+{%- endmacro %}
+
+{% macro render_inline_option_groups(option_groups) -%}
+  <div class="systems-inline-option-groups">
+    {% for option_group in option_groups %}
+      <section class="systems-inline-option-group">
+        <p class="meta systems-inline-option-group__label">{{ option_group.summary_label }}:</p>
+        {{ render_inline_options(option_group.options) }}
+      </section>
+    {% endfor %}
+  </div>
+{%- endmacro %}
+
+{% macro render_optionalfeature_sections(option_sections, owner_title="") -%}
+  <div class="systems-inline-option-groups">
+    {% for option_section in option_sections %}
+      <section class="systems-inline-option-group">
+        {% if option_section.title != owner_title %}
+          <p class="meta systems-inline-option-group__label">{{ option_section.title }}:</p>
+        {% endif %}
+        {% if option_section.progression_text %}
+          <p class="meta">{{ option_section.progression_text }}</p>
+        {% endif %}
+        {{ render_inline_options(option_section.options) }}
+      </section>
+    {% endfor %}
+  </div>
+{%- endmacro %}
+
+{% macro render_feature_progression(groups) -%}
+  {% for group in groups %}
+    <section>
+      <h3>{{ group.level_label }}</h3>
+      {% for item in group.feature_rows %}
+        {% if item.entry %}
+          <article class="card systems-inline-feature-card">
+            <header class="systems-inline-card__header">
+              <h4 class="systems-inline-card__title">
+                <a href="{{ url_for('campaign_systems_entry_detail', campaign_slug=campaign.slug, entry_slug=item.entry.slug) }}">{{ item.entry.title }}</a>
+              </h4>
+              {% if item.embedded_card and item.embedded_card.meta_badges %}
+                <ul class="inline-meta-list systems-inline-card__meta">
+                  {% for badge in item.embedded_card.meta_badges %}
+                    <li><span class="meta-badge">{{ badge }}</span></li>
+                  {% endfor %}
+                </ul>
+              {% endif %}
+            </header>
+            {% if item.embedded_card and item.embedded_card.body_html %}
+              <div class="article-body--compact systems-inline-card__body">
+                {{ item.embedded_card.body_html | safe }}
+              </div>
+            {% endif %}
+            {% if item.embedded_card and item.embedded_card.option_groups %}
+              {{ render_inline_option_groups(item.embedded_card.option_groups) }}
+            {% endif %}
+            {% if item.optionalfeature_sections %}
+              {{ render_optionalfeature_sections(item.optionalfeature_sections, item.entry.title) }}
+            {% endif %}
+          </article>
+        {% else %}
+          <p class="meta">{{ item.label }}</p>
+        {% endif %}
+      {% endfor %}
+    </section>
+  {% endfor %}
+{%- endmacro %}
+
+{% block title %}{{ entry.title }} | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Systems entry</p>
+    <h1>{{ entry.title }}</h1>
+    <p class="lede">
+      {{ entry_type_label }} | {{ source_state.source.source_id }} | {{ license_class_label }}
+    </p>
+  </section>
+
+  <div class="page-layout">
+    <section class="article card">
+      {% if entry.entry_type == "class" and entry.body.rendered %}
+        {{ entry.body.rendered.summary_html | safe }}
+        {% if class_starting_proficiency_rows %}
+          <section>
+            <h2>Starting Proficiencies</h2>
+            {% for row in class_starting_proficiency_rows %}
+              <section>
+                <h3>{{ row.name }}</h3>
+                {% for block in row.blocks %}
+                  {% if block.kind == "choice" %}
+                    <p>
+                      Choose {{ block.count }} from:
+                      {% for option in block.options %}
+                        {% if option.slug %}
+                          <a href="{{ url_for('campaign_systems_entry_detail', campaign_slug=campaign.slug, entry_slug=option.slug) }}">{{ option.label }}</a>
+                        {% else %}
+                          {{ option.label }}
+                        {% endif %}
+                        {% if not loop.last %}, {% endif %}
+                      {% endfor %}
+                    </p>
+                  {% else %}
+                    <p>{{ block.text }}</p>
+                  {% endif %}
+                {% endfor %}
+              </section>
+            {% endfor %}
+          </section>
+        {% else %}
+          {{ entry.body.rendered.starting_proficiencies_html | safe }}
+        {% endif %}
+        {{ entry.body.rendered.starting_equipment_html | safe }}
+
+        {% if class_feature_progression_groups %}
+          <section>
+            <h2>Class Features By Level</h2>
+            <p class="meta">Class Feature pages remain searchable and directly linkable, but this class page is the primary place to browse them.</p>
+            {{ render_feature_progression(class_feature_progression_groups) }}
+          </section>
+        {% else %}
+          {{ entry.body.rendered.feature_progression_html | safe }}
+        {% endif %}
+
+        {% if class_optionalfeature_sections %}
+          <section>
+            <h2>Class Optional Features</h2>
+            {% for option_section in class_optionalfeature_sections %}
+              <section>
+                <h3>{{ option_section.title }}</h3>
+                {% if option_section.progression_text %}
+                  <p class="meta">{{ option_section.progression_text }}</p>
+                {% endif %}
+                {{ render_inline_options(option_section.options) }}
+              </section>
+            {% endfor %}
+          </section>
+        {% endif %}
+
+        {{ entry.body.rendered.multiclassing_html | safe }}
+      {% elif entry.entry_type == "subclass" %}
+        <section class="systems-entry-summary">
+          {% if entry.metadata.class_name %}
+            <p><strong>Class:</strong> <span>{{ entry.metadata.class_name }}</span></p>
+          {% endif %}
+          {% if entry.metadata.class_source %}
+            <p><strong>Class Source:</strong> <span>{{ entry.metadata.class_source }}</span></p>
+          {% endif %}
+        </section>
+
+        {% if subclass_feature_progression_groups %}
+          <section>
+            <h2>Subclass Features By Level</h2>
+            <p class="meta">Subclass Feature pages remain searchable and directly linkable, but this subclass page is the primary place to browse them.</p>
+            {{ render_feature_progression(subclass_feature_progression_groups) }}
+          </section>
+        {% else %}
+          {{ entry.rendered_html | safe }}
+        {% endif %}
+
+        {% if subclass_optionalfeature_sections %}
+          <section>
+            <h2>Subclass Optional Features</h2>
+            {% for option_section in subclass_optionalfeature_sections %}
+              <section>
+                <h3>{{ option_section.title }}</h3>
+                {% if option_section.progression_text %}
+                  <p class="meta">{{ option_section.progression_text }}</p>
+                {% endif %}
+                {{ render_inline_options(option_section.options) }}
+              </section>
+            {% endfor %}
+          </section>
+        {% endif %}
+      {% elif entry.entry_type == "subclassfeature" and feature_detail_card %}
+        <section class="systems-entry-summary">
+          {% if entry.metadata.class_name %}
+            <p><strong>Class:</strong> <span>{{ entry.metadata.class_name }}</span></p>
+          {% endif %}
+          {% if entry.metadata.subclass_name %}
+            <p><strong>Subclass:</strong> <span>{{ entry.metadata.subclass_name }}</span></p>
+          {% endif %}
+          {% if entry.metadata.level %}
+            <p><strong>Level:</strong> <span>{{ entry.metadata.level }}</span></p>
+          {% endif %}
+        </section>
+        {% if feature_detail_card.body_html %}
+          <div class="article-body--compact systems-inline-card__body">
+            {{ feature_detail_card.body_html | safe }}
+          </div>
+        {% endif %}
+        {% if feature_detail_card.option_groups %}
+          {{ render_inline_option_groups(feature_detail_card.option_groups) }}
+        {% endif %}
+      {% elif entry.rendered_html %}
+        {{ entry.rendered_html | safe }}
+      {% else %}
+        <p class="meta">This entry has been imported into the systems library, but it does not have rendered content yet.</p>
+        <p class="meta">Entry key: {{ entry.entry_key }}</p>
+        {% if entry.source_page %}
+          <p class="meta">Source page: {{ entry.source_page }}</p>
+        {% endif %}
+      {% endif %}
+    </section>
+
+    <aside class="sidebar">
+      <section class="card sidebar-card">
+        <h2>Entry Metadata</h2>
+        <p class="meta">Type: {{ entry_type_label }}</p>
+        <p class="meta">Source: {{ source_state.source.source_id }}</p>
+        <p class="meta">Entry key: {{ entry.entry_key }}</p>
+      </section>
+    </aside>
+  </div>
+{% endblock %}

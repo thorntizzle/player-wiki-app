@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Session Log | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Session log</p>
+    <h1>{{ campaign.title }} Chat Log</h1>
+    <p class="lede">
+      Review the stored chat history and revealed articles from a closed live session.
+    </p>
+  </section>
+
+  <div class="page-layout session-layout">
+    <section class="session-column">
+      <article class="card session-chat-card">
+        <div class="section-heading">
+          <h2>Stored chat log</h2>
+          <p class="meta">{{ session_log.message_count }} entr{% if session_log.message_count != 1 %}ies{% else %}y{% endif %}</p>
+        </div>
+        {% set empty_feed_message = "This session closed without any chat messages or revealed articles." %}
+        {% include "_session_feed.html" %}
+      </article>
+    </section>
+
+    <aside class="session-sidebar">
+      <article class="card session-sidebar-card">
+        <h2>Log details</h2>
+        <p class="meta">Started {{ session_log.started_at_label }}</p>
+        {% if session_log.ended_at_label %}
+          <p class="meta">Closed {{ session_log.ended_at_label }}</p>
+        {% endif %}
+        <p>{{ session_log.message_count }} entr{% if session_log.message_count != 1 %}ies{% else %}y{% endif %} captured in this log.</p>
+        <form method="post" action="{{ url_for('campaign_session_log_delete', campaign_slug=campaign.slug, session_id=session_log.id) }}">
+          <button type="submit" class="ghost-button">Delete log</button>
+        </form>
+      </article>
+    </aside>
+  </div>
+{% endblock %}

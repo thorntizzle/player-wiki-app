@@ -1,0 +1,30 @@
+<article
+  class="card session-sidebar-card"
+  data-session-wiki-lookup-root
+  data-session-wiki-lookup-search-url="{{ url_for('campaign_session_wiki_lookup_search', campaign_slug=campaign.slug) }}"
+  data-session-wiki-lookup-preview-url="{{ url_for('campaign_session_wiki_lookup_preview', campaign_slug=campaign.slug) }}"
+>
+  <h2>Wiki article lookup</h2>
+  <p class="meta">Search player-visible wiki articles and read them here without leaving the live session page.</p>
+  <label class="field">
+    <span>Search</span>
+    <input
+      type="search"
+      placeholder="title, section, or keyword"
+      autocomplete="off"
+      data-session-wiki-lookup-query
+    >
+  </label>
+  <label class="field">
+    <span>Matching articles</span>
+    <select disabled data-session-wiki-lookup-results>
+      <option value="">Search to load matching articles</option>
+    </select>
+  </label>
+  <p class="meta" data-session-wiki-lookup-status>
+    Type at least 2 letters to search player-visible wiki articles.
+  </p>
+  <div class="session-wiki-lookup-preview" data-session-wiki-lookup-preview data-loading="0" aria-busy="false">
+    {% include "_session_wiki_lookup_preview.html" %}
+  </div>
+</article>

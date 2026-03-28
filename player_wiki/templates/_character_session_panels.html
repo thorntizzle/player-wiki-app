@@ -1,0 +1,191 @@
+<section class="session-panels">
+  {% if rest_preview %}
+    <section class="card session-card">
+      <div class="section-heading">
+        <h2>{{ rest_preview.label }} confirmation</h2>
+      </div>
+      {% if rest_preview.changes %}
+        <ul class="plain-list rest-preview-list">
+          {% for change in rest_preview.changes %}
+            <li>
+              <strong>{{ change.label }}</strong>
+              <span>{{ change.from_value }} -> {{ change.to_value }}</span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p>No modeled state changes will be applied by this {{ rest_preview.label.lower() }}.</p>
+      {% endif %}
+      <div class="hero-actions">
+        <form
+          method="post"
+          action="{{ url_for('character_session_rest', campaign_slug=campaign.slug, character_slug=character.slug, rest_type=rest_preview.rest_type) }}"
+        >
+          <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+          <input type="hidden" name="confirm_rest" value="1">
+          <button type="submit">{{ rest_preview.label }}</button>
+        </form>
+        <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='session') }}">
+          Cancel
+        </a>
+      </div>
+    </section>
+  {% endif %}
+
+  {% if character.resources %}
+    <section class="read-section" id="session-resources">
+      <div class="section-heading">
+        <h2>Resources</h2>
+      </div>
+      <div class="resource-grid">
+        {% for resource in character.resources %}
+          <article class="resource-card session-resource-card {% if resource.is_manual %}session-resource-card--manual{% endif %}">
+            <form
+              class="session-inline-form"
+              method="post"
+              action="{{ url_for('character_session_resource', campaign_slug=campaign.slug, character_slug=character.slug, resource_id=resource.id) }}"
+            >
+              <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+              <div class="section-heading">
+                <h3>{{ resource.label }}</h3>
+                <span class="meta">{{ resource.reset_label }}</span>
+              </div>
+              <label class="session-field">
+                <span>Current</span>
+                <input
+                  type="number"
+                  name="current"
+                  value="{{ resource.current }}"
+                  min="0"
+                  {% if resource.max is not none %}max="{{ resource.max }}"{% endif %}
+                >
+              </label>
+              <p class="resource-card__value">{{ resource.value }}</p>
+              <div class="session-stepper">
+                <button type="submit" name="delta" value="-1">-1</button>
+                <button type="submit" name="delta" value="1">+1</button>
+                <button type="submit">Save</button>
+              </div>
+              {% if resource.notes %}
+                <p class="meta">{{ resource.notes }}</p>
+              {% endif %}
+            </form>
+          </article>
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+
+  {% if character.spellcasting and character.spellcasting.slots %}
+    <section class="read-section" id="session-spell-slots">
+      <div class="section-heading">
+        <h2>Spell slots</h2>
+      </div>
+      <div class="spell-slot-editor-list">
+        {% for slot in character.spellcasting.slots %}
+          <article class="detail-card">
+            <form
+              class="session-inline-form"
+              method="post"
+              action="{{ url_for('character_session_spell_slots', campaign_slug=campaign.slug, character_slug=character.slug, level=slot.level) }}"
+            >
+              <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+              <div class="section-heading">
+                <h3>{{ slot.label }}</h3>
+                <span class="meta">{{ slot.available }} available / {{ slot.max }}</span>
+              </div>
+              <label class="session-field">
+                <span>Used</span>
+                <input type="number" name="used" value="{{ slot.used }}" min="0" max="{{ slot.max }}">
+              </label>
+              <div class="session-stepper">
+                <button type="submit" name="delta_used" value="-1">Restore 1</button>
+                <button type="submit" name="delta_used" value="1">Use 1</button>
+                <button type="submit">Save</button>
+              </div>
+            </form>
+          </article>
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+
+  {% if character.inventory %}
+    <section class="read-section" id="session-inventory">
+      <div class="section-heading">
+        <h2>Inventory</h2>
+      </div>
+      <div class="inventory-list">
+        {% for item in character.inventory %}
+          <article class="inventory-row">
+            <form
+              class="session-inline-form"
+              method="post"
+              action="{{ url_for('character_session_inventory', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
+            >
+              <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+              <div class="inventory-row__header">
+                <h3>{{ item.name }}</h3>
+                <span class="meta">{% if item.weight %}{{ item.weight }}{% else %}Tracked item{% endif %}</span>
+              </div>
+              <label class="session-field">
+                <span>Quantity</span>
+                <input type="number" name="quantity" value="{{ item.quantity }}" min="0">
+              </label>
+              <div class="session-stepper">
+                <button type="submit" name="delta" value="-1">-1</button>
+                <button type="submit" name="delta" value="1">+1</button>
+                <button type="submit">Save</button>
+              </div>
+              {% if item.notes %}
+                <p class="meta">{{ item.notes }}</p>
+              {% endif %}
+            </form>
+          </article>
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+
+  <section class="read-section" id="session-currency">
+    <div class="section-heading">
+      <h2>Currency</h2>
+    </div>
+    <article class="detail-card session-card">
+      <form
+        class="currency-form"
+        method="post"
+        action="{{ url_for('character_session_currency', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+      >
+        <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+        {% for coin in ("cp", "sp", "ep", "gp", "pp") %}
+          <label class="session-field">
+            <span>{{ coin.upper() }}</span>
+            <input type="number" name="{{ coin }}" value="{{ character.currency_values[coin] }}" min="0">
+          </label>
+        {% endfor %}
+        <button type="submit">Save currency</button>
+      </form>
+    </article>
+  </section>
+
+  <section class="read-section" id="session-notes">
+    <div class="section-heading">
+      <h2>Player notes</h2>
+    </div>
+    <article class="detail-card session-card">
+      <form
+        class="stack-form"
+        method="post"
+        action="{{ url_for('character_session_notes', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+      >
+        <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+        <label class="field">
+          <span>Editable player notes</span>
+          <textarea name="player_notes_markdown">{{ character.player_notes_markdown }}</textarea>
+        </label>
+        <button type="submit">Save notes</button>
+      </form>
+    </article>
+  </section>
+</section>

@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title }} | Campaign Player Wiki{% endblock %}
+
+{% block content %}
+  {% if token_valid %}
+    <section class="hero compact">
+      <p class="eyebrow">
+        {% if mode == "invite" %}
+          Account setup
+        {% else %}
+          Password reset
+        {% endif %}
+      </p>
+      <h1>{{ page_title }}</h1>
+      <p class="lede">
+        {% if mode == "invite" %}
+          Finish setting up access for <strong>{{ user.email }}</strong>.
+        {% else %}
+          Set a new password for <strong>{{ user.email }}</strong>.
+        {% endif %}
+      </p>
+    </section>
+
+    <section class="card auth-card">
+      <form method="post" class="stack-form">
+        {% if mode == "invite" %}
+          <label class="field">
+            <span>Display name</span>
+            <input
+              type="text"
+              name="display_name"
+              value="{{ display_name or '' }}"
+              autocomplete="name"
+              required
+            >
+          </label>
+        {% endif %}
+
+        <label class="field">
+          <span>New password</span>
+          <input
+            type="password"
+            name="password"
+            autocomplete="new-password"
+            required
+          >
+        </label>
+
+        <label class="field">
+          <span>Confirm password</span>
+          <input
+            type="password"
+            name="password_confirmation"
+            autocomplete="new-password"
+            required
+          >
+        </label>
+
+        <button type="submit">
+          {% if mode == "invite" %}
+            Activate account
+          {% else %}
+            Update password
+          {% endif %}
+        </button>
+      </form>
+    </section>
+  {% else %}
+    <section class="hero compact">
+      <p class="eyebrow">Link unavailable</p>
+      <h1>This link is no longer valid.</h1>
+      <p class="lede">
+        The link may have expired, already been used, or the account may no longer be eligible for this action.
+      </p>
+    </section>
+
+    <section class="card auth-card">
+      <p>Ask an admin to issue a fresh invite or password reset link.</p>
+      <a class="button-link" href="{{ url_for('sign_in') }}">Back to sign in</a>
+    </section>
+  {% endif %}
+{% endblock %}

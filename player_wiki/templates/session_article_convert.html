@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}Convert Session Article | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Session article</p>
+    <h1>Convert "{{ article.title }}"</h1>
+    <p class="lede">
+      Turn this session-only handout into a published wiki page for the player-facing campaign reference.
+    </p>
+    {% if existing_page_url %}
+      <div class="hero-actions">
+        <a class="button-link" href="{{ existing_page_url }}">Open published page</a>
+      </div>
+    {% endif %}
+  </section>
+
+  <div class="page-layout">
+    <section class="article card">
+      {% if existing_page %}
+        <h2>Already converted</h2>
+        <p>
+          This session article is already published as
+          <a href="{{ existing_page_url }}">{{ existing_page.title }}</a>.
+        </p>
+      {% else %}
+        <h2>Publish settings</h2>
+        <form method="post" class="stack-form">
+          <label class="field">
+            <span>Title</span>
+            <input type="text" name="title" maxlength="200" value="{{ publish_form.title }}" required>
+          </label>
+          <label class="field">
+            <span>Slug</span>
+            <input type="text" name="slug_leaf" maxlength="120" value="{{ publish_form.slug_leaf }}" required>
+          </label>
+          <label class="field">
+            <span>Summary</span>
+            <textarea name="summary" rows="4" maxlength="400" placeholder="Short player-facing summary.">{{ publish_form.summary }}</textarea>
+          </label>
+          <label class="field">
+            <span>Section</span>
+            <select name="section">
+              {% for choice in section_choices %}
+                <option value="{{ choice.label }}" {% if publish_form.section == choice.label %}selected{% endif %}>
+                  {{ choice.label }}
+                </option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="field">
+            <span>Page type</span>
+            <input type="text" name="page_type" maxlength="80" value="{{ publish_form.page_type }}" required>
+          </label>
+          <label class="field">
+            <span>Subsection</span>
+            <input type="text" name="subsection" maxlength="120" value="{{ publish_form.subsection }}" placeholder="Optional subsection label.">
+          </label>
+          <label class="field">
+            <span>Reveal after session</span>
+            <input type="number" min="0" name="reveal_after_session" value="{{ publish_form.reveal_after_session }}" required>
+          </label>
+          <button type="submit">Publish to wiki</button>
+        </form>
+      {% endif %}
+    </section>
+
+    <aside class="sidebar">
+      <section class="card sidebar-card">
+        <h2>Article preview</h2>
+        {% if article.image_url %}
+          <figure class="article-figure">
+            <img class="article-image" src="{{ article.image_url }}" alt="{{ article.image_alt or article.title }}">
+            {% if article.image_caption %}
+              <figcaption class="meta article-image__caption">{{ article.image_caption }}</figcaption>
+            {% endif %}
+          </figure>
+        {% endif %}
+        <div class="article-body article-body--compact">{{ article.body_html | safe }}</div>
+      </section>
+
+      <section class="card sidebar-card">
+        <h2>Conversion notes</h2>
+        <p class="meta">The published page is written into the app's campaign content folder and becomes part of the player wiki.</p>
+        <p class="meta">If this session article has an image, it will be copied into campaign assets and attached to the new wiki page.</p>
+      </section>
+    </aside>
+  </div>
+{% endblock %}
