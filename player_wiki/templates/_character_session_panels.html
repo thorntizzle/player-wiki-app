@@ -22,10 +22,11 @@
           action="{{ url_for('character_session_rest', campaign_slug=campaign.slug, character_slug=character.slug, rest_type=rest_preview.rest_type) }}"
         >
           <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+          <input type="hidden" name="page" value="{{ character_subpage }}">
           <input type="hidden" name="confirm_rest" value="1">
           <button type="submit">{{ rest_preview.label }}</button>
         </form>
-        <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='session') }}">
+        <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='session', page=character_subpage) }}">
           Cancel
         </a>
       </div>
@@ -46,6 +47,7 @@
               action="{{ url_for('character_session_resource', campaign_slug=campaign.slug, character_slug=character.slug, resource_id=resource.id) }}"
             >
               <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+              <input type="hidden" name="page" value="{{ character_subpage }}">
               <div class="section-heading">
                 <h3>{{ resource.label }}</h3>
                 <span class="meta">{{ resource.reset_label }}</span>
@@ -90,6 +92,7 @@
               action="{{ url_for('character_session_spell_slots', campaign_slug=campaign.slug, character_slug=character.slug, level=slot.level) }}"
             >
               <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+              <input type="hidden" name="page" value="{{ character_subpage }}">
               <div class="section-heading">
                 <h3>{{ slot.label }}</h3>
                 <span class="meta">{{ slot.available }} available / {{ slot.max }}</span>
@@ -124,6 +127,7 @@
               action="{{ url_for('character_session_inventory', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
             >
               <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+              <input type="hidden" name="page" value="{{ character_subpage }}">
               <div class="inventory-row__header">
                 <h3>{{ item.name }}</h3>
                 <span class="meta">{% if item.weight %}{{ item.weight }}{% else %}Tracked item{% endif %}</span>
@@ -158,6 +162,7 @@
         action="{{ url_for('character_session_currency', campaign_slug=campaign.slug, character_slug=character.slug) }}"
       >
         <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+        <input type="hidden" name="page" value="{{ character_subpage }}">
         {% for coin in ("cp", "sp", "ep", "gp", "pp") %}
           <label class="session-field">
             <span>{{ coin.upper() }}</span>
@@ -180,6 +185,7 @@
         action="{{ url_for('character_session_notes', campaign_slug=campaign.slug, character_slug=character.slug) }}"
       >
         <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+        <input type="hidden" name="page" value="{{ character_subpage }}">
         <label class="field">
           <span>Editable player notes</span>
           <textarea name="player_notes_markdown">{{ character.player_notes_markdown }}</textarea>

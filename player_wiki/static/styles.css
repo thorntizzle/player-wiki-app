@@ -1259,6 +1259,12 @@ button {
   gap: 0.55rem;
 }
 
+.character-subpage-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
 .inline-meta-list {
   list-style: none;
   padding: 0;

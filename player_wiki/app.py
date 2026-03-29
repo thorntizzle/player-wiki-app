@@ -90,6 +90,12 @@ from .systems_store import SystemsStore
 from .version import build_app_metadata
 
 SESSION_ARTICLE_FORM_MODES = {"manual", "upload", "wiki"}
+CHARACTER_READ_SUBPAGE_LABELS = {
+    "quick": "Quick Reference",
+    "features": "Features",
+    "equipment": "Equipment",
+    "notes": "Notes",
+}
 SUPPORTED_COMBAT_SYSTEM = "DND-5E"
 SYSTEMS_ENTRY_TYPE_LABELS = {
     "action": "Actions",
@@ -146,6 +152,13 @@ def normalize_session_article_form_mode(value: str) -> str:
     if normalized in SESSION_ARTICLE_FORM_MODES:
         return normalized
     return "manual"
+
+
+def normalize_character_read_subpage(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in CHARACTER_READ_SUBPAGE_LABELS:
+        return normalized
+    return "quick"
 
 
 def create_app() -> Flask:
@@ -447,12 +460,14 @@ def create_app() -> Flask:
         return campaign
 
     def redirect_to_character_mode(campaign_slug: str, character_slug: str, *, anchor: str | None = None):
+        read_subpage = normalize_character_read_subpage(request.values.get("page", ""))
         return redirect(
             url_for(
                 "character_read_view",
                 campaign_slug=campaign_slug,
                 character_slug=character_slug,
                 mode="session",
+                page=read_subpage,
                 _anchor=anchor,
             )
         )
@@ -612,6 +627,7 @@ def create_app() -> Flask:
     ):
         campaign, record = load_character_context(campaign_slug, character_slug)
         can_use_session_mode = has_session_mode_access(campaign_slug, character_slug)
+        character_subpage = normalize_character_read_subpage(request.args.get("page", ""))
         is_session_mode = force_session_mode or (
             request.args.get("mode", "").strip().lower() == "session" and can_use_session_mode
         )
@@ -630,11 +646,28 @@ def create_app() -> Flask:
         if notes_draft is not None:
             character["player_notes_markdown"] = notes_draft
 
+        character_subpages = [
+            {
+                "slug": slug,
+                "label": label,
+                "href": url_for(
+                    "character_read_view",
+                    campaign_slug=campaign.slug,
+                    character_slug=character["slug"],
+                    page=slug,
+                ),
+                "is_active": slug == character_subpage,
+            }
+            for slug, label in CHARACTER_READ_SUBPAGE_LABELS.items()
+        ]
+
         return (
             render_template(
                 "character_read.html",
                 campaign=campaign,
                 character=character,
+                character_subpage=character_subpage,
+                character_subpages=character_subpages,
                 active_nav="characters",
                 can_use_session_mode=can_use_session_mode,
                 is_session_mode=is_session_mode,

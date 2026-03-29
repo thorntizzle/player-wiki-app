@@ -40,11 +40,11 @@
         {% if can_use_session_mode %}
           <div class="hero-actions">
             {% if is_session_mode %}
-              <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
+              <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, page=character_subpage) }}">
                 Back to read mode
               </a>
             {% else %}
-              <a class="button-link" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='session') }}">
+              <a class="button-link" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='session', page=character_subpage) }}">
                 Enter session mode
               </a>
             {% endif %}
@@ -52,24 +52,41 @@
         {% endif %}
       </header>
 
+      {% if not is_session_mode %}
+        <nav class="character-subpage-nav" aria-label="Character subpages">
+          {% for subpage in character_subpages %}
+            <a class="{% if subpage.is_active %}button-link{% else %}ghost-button{% endif %}" href="{{ subpage.href }}">
+              {{ subpage.label }}
+            </a>
+          {% endfor %}
+        </nav>
+      {% endif %}
+
+      {% set show_quick_sections = is_session_mode or character_subpage == 'quick' %}
+      {% set show_feature_sections = is_session_mode or character_subpage == 'features' %}
+      {% set show_equipment_sections = is_session_mode or character_subpage == 'equipment' %}
+      {% set show_note_sections = is_session_mode or character_subpage == 'notes' %}
+
       {% if is_session_mode %}
         {% include "_character_session_bar.html" %}
         {% include "_character_session_panels.html" %}
       {% endif %}
 
-      <section class="read-section">
-        <h2>At a glance</h2>
-        <div class="glance-grid">
-          {% for stat in character.overview_stats %}
-            <div class="glance-card">
-              <span class="meta">{{ stat.label }}</span>
-              <strong>{{ stat.value }}</strong>
-            </div>
-          {% endfor %}
-        </div>
-      </section>
+      {% if show_quick_sections %}
+        <section class="read-section">
+          <h2>At a glance</h2>
+          <div class="glance-grid">
+            {% for stat in character.overview_stats %}
+              <div class="glance-card">
+                <span class="meta">{{ stat.label }}</span>
+                <strong>{{ stat.value }}</strong>
+              </div>
+            {% endfor %}
+          </div>
+        </section>
+      {% endif %}
 
-      {% if character.resources and not is_session_mode %}
+      {% if show_quick_sections and character.resources and not is_session_mode %}
         <section class="read-section">
           <div class="section-heading">
             <h2>Resources</h2>
@@ -89,54 +106,56 @@
         </section>
       {% endif %}
 
-      <section class="read-section">
-        <div class="section-heading">
-          <h2>Abilities and skills</h2>
-        </div>
-        <div class="ability-grid">
-          {% for ability in character.abilities %}
-            <article class="ability-card">
-              <p class="card-kicker">{{ ability.abbr }}</p>
-              <h3>{{ ability.score }}</h3>
-              <p>{{ ability.name }}</p>
-              <p class="meta">Modifier {{ ability.modifier }} | Save {{ ability.save_bonus }}</p>
-            </article>
-          {% endfor %}
-        </div>
-
-        <div class="detail-cluster">
-          <div>
-            <h3>Skills</h3>
-            <div class="skill-grid">
-              {% for skill in character.skills %}
-                <div class="skill-pill {% if skill.is_proficient %}skill-pill--proficient{% endif %}">
-                  <span>{{ skill.name }}</span>
-                  <strong>{{ skill.bonus }}</strong>
-                  {% if skill.proficiency_label and skill.proficiency_label != 'None' %}
-                    <span class="meta">{{ skill.proficiency_label }}</span>
-                  {% endif %}
-                </div>
-              {% endfor %}
-            </div>
+      {% if show_quick_sections %}
+        <section class="read-section">
+          <div class="section-heading">
+            <h2>Abilities and skills</h2>
+          </div>
+          <div class="ability-grid">
+            {% for ability in character.abilities %}
+              <article class="ability-card">
+                <p class="card-kicker">{{ ability.abbr }}</p>
+                <h3>{{ ability.score }}</h3>
+                <p>{{ ability.name }}</p>
+                <p class="meta">Modifier {{ ability.modifier }} | Save {{ ability.save_bonus }}</p>
+              </article>
+            {% endfor %}
           </div>
 
-          {% if character.proficiency_groups %}
+          <div class="detail-cluster">
             <div>
-              <h3>Proficiencies</h3>
-              <div class="detail-grid">
-                {% for group in character.proficiency_groups %}
-                  <article class="detail-card">
-                    <h4>{{ group.title }}</h4>
-                    <p>{{ group.values_list | join(", ") }}</p>
-                  </article>
+              <h3>Skills</h3>
+              <div class="skill-grid">
+                {% for skill in character.skills %}
+                  <div class="skill-pill {% if skill.is_proficient %}skill-pill--proficient{% endif %}">
+                    <span>{{ skill.name }}</span>
+                    <strong>{{ skill.bonus }}</strong>
+                    {% if skill.proficiency_label and skill.proficiency_label != 'None' %}
+                      <span class="meta">{{ skill.proficiency_label }}</span>
+                    {% endif %}
+                  </div>
                 {% endfor %}
               </div>
             </div>
-          {% endif %}
-        </div>
-      </section>
 
-      {% if character.attacks %}
+            {% if character.proficiency_groups %}
+              <div>
+                <h3>Proficiencies</h3>
+                <div class="detail-grid">
+                  {% for group in character.proficiency_groups %}
+                    <article class="detail-card">
+                      <h4>{{ group.title }}</h4>
+                      <p>{{ group.values_list | join(", ") }}</p>
+                    </article>
+                  {% endfor %}
+                </div>
+              </div>
+            {% endif %}
+          </div>
+        </section>
+      {% endif %}
+
+      {% if show_quick_sections and character.attacks %}
         <section class="read-section">
           <div class="section-heading">
             <h2>Attacks</h2>
@@ -165,7 +184,7 @@
         </section>
       {% endif %}
 
-      {% if character.feature_groups %}
+      {% if show_feature_sections and character.feature_groups %}
         <section class="read-section">
           <div class="section-heading">
             <h2>Features and traits</h2>
@@ -201,7 +220,7 @@
         </section>
       {% endif %}
 
-      {% if character.spellcasting %}
+      {% if show_quick_sections and character.spellcasting %}
         <section class="read-section">
           <div class="section-heading">
             <h2>Spellcasting</h2>
@@ -274,7 +293,7 @@
         </section>
       {% endif %}
 
-      {% if (character.inventory or character.currency or character.other_currency) and not is_session_mode %}
+      {% if show_equipment_sections and (character.inventory or character.currency or character.other_currency) and not is_session_mode %}
         <section class="read-section">
           <div class="section-heading">
             <h2>Equipment and currency</h2>
@@ -331,7 +350,7 @@
         </section>
       {% endif %}
 
-      {% if character.reference_sections %}
+      {% if show_note_sections and character.reference_sections %}
         <section class="read-section">
           <div class="section-heading">
             <h2>Notes and reference</h2>

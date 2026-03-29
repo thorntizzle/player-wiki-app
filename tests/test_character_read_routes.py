@@ -88,6 +88,48 @@ def test_observer_cannot_read_character_when_characters_are_dm_only(client, sign
     assert response.status_code == 404
 
 
+def test_character_sheet_subpages_show_requested_sections(app, client, sign_in, users):
+    def _mutate(payload: dict) -> None:
+        reference_notes = dict(payload.get("reference_notes") or {})
+        reference_notes["additional_notes_markdown"] = "Keep an eye on the harbor."
+        payload["reference_notes"] = reference_notes
+
+    _write_character_definition(app, "arden-march", _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get("/campaigns/linden-pass/characters/arden-march?page=features")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Quick Reference" in html
+    assert "Features" in html
+    assert "Equipment" in html
+    assert "Notes" in html
+    assert "?page=quick" in html
+    assert "?page=features" in html
+    assert "?page=equipment" in html
+    assert "?page=notes" in html
+    assert "Features and traits" in html
+    assert "At a glance" not in html
+    assert "Equipment and currency" not in html
+    assert "Notes and reference" not in html
+    assert "mode=session&amp;page=features" in html
+
+
+def test_character_sheet_invalid_subpage_defaults_to_quick_reference(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get("/campaigns/linden-pass/characters/arden-march?page=not-a-real-page")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "At a glance" in html
+    assert "Abilities and skills" in html
+    assert "Features and traits" not in html
+    assert "Equipment and currency" not in html
+    assert "Notes and reference" not in html
+
+
 def test_character_sheet_renders_systems_links_when_present(app, client, sign_in, users):
     def _mutate(payload: dict) -> None:
         profile = dict(payload.get("profile") or {})
@@ -179,19 +221,29 @@ def test_character_sheet_renders_systems_links_when_present(app, client, sign_in
     _write_character_definition(app, "arden-march", _mutate)
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
-    response = client.get("/campaigns/linden-pass/characters/arden-march")
+    quick_response = client.get("/campaigns/linden-pass/characters/arden-march?page=quick")
+    features_response = client.get("/campaigns/linden-pass/characters/arden-march?page=features")
+    equipment_response = client.get("/campaigns/linden-pass/characters/arden-march?page=equipment")
 
-    assert response.status_code == 200
-    html = response.get_data(as_text=True)
-    assert '/campaigns/linden-pass/systems/entries/phb-class-sorcerer' in html
-    assert '/campaigns/linden-pass/systems/entries/phb-subclass-wild-magic' in html
-    assert '/campaigns/linden-pass/systems/entries/phb-race-human' in html
-    assert '/campaigns/linden-pass/systems/entries/phb-background-noble' in html
-    assert '/campaigns/linden-pass/systems/entries/phb-classfeature-spellcasting' in html
-    assert '/campaigns/linden-pass/systems/entries/phb-item-crossbow-light' in html
-    assert '/campaigns/linden-pass/systems/entries/phb-spell-message' in html
-    assert '/campaigns/linden-pass/systems/entries/phb-item-backpack' in html
-    assert 'View source entry' not in html
+    assert quick_response.status_code == 200
+    assert features_response.status_code == 200
+    assert equipment_response.status_code == 200
+
+    quick_html = quick_response.get_data(as_text=True)
+    features_html = features_response.get_data(as_text=True)
+    equipment_html = equipment_response.get_data(as_text=True)
+
+    assert '/campaigns/linden-pass/systems/entries/phb-class-sorcerer' in quick_html
+    assert '/campaigns/linden-pass/systems/entries/phb-subclass-wild-magic' in quick_html
+    assert '/campaigns/linden-pass/systems/entries/phb-race-human' in quick_html
+    assert '/campaigns/linden-pass/systems/entries/phb-background-noble' in quick_html
+    assert '/campaigns/linden-pass/systems/entries/phb-item-crossbow-light' in quick_html
+    assert '/campaigns/linden-pass/systems/entries/phb-spell-message' in quick_html
+    assert '/campaigns/linden-pass/systems/entries/phb-classfeature-spellcasting' in features_html
+    assert '/campaigns/linden-pass/systems/entries/phb-item-backpack' in equipment_html
+    assert 'View source entry' not in quick_html
+    assert 'View source entry' not in features_html
+    assert 'View source entry' not in equipment_html
 
 
 def test_character_sheet_shows_systems_feature_text_inline_and_hides_source_metadata(
@@ -249,7 +301,7 @@ def test_character_sheet_shows_systems_feature_text_inline_and_hides_source_meta
     monkeypatch.setattr(systems_service, "get_entry_by_slug_for_campaign", _fake_get_entry)
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
-    response = client.get("/campaigns/linden-pass/characters/arden-march")
+    response = client.get("/campaigns/linden-pass/characters/arden-march?page=features")
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
@@ -336,7 +388,7 @@ def test_character_sheet_hides_redundant_choice_placeholder_features(app, client
     _write_character_definition(app, "arden-march", _mutate)
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
-    response = client.get("/campaigns/linden-pass/characters/arden-march")
+    response = client.get("/campaigns/linden-pass/characters/arden-march?page=features")
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
