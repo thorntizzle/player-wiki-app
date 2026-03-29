@@ -236,6 +236,19 @@
       </section>
 
       <section class="card sidebar-card">
+        <h2>Attack Preview</h2>
+        {% if builder.preview.attacks %}
+          <ul class="plain-list builder-feature-list">
+            {% for attack_name in builder.preview.attacks %}
+              <li>{{ attack_name }}</li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="meta">Weapon-based attack rows will appear here when your starting gear includes a PHB weapon.</p>
+        {% endif %}
+      </section>
+
+      <section class="card sidebar-card">
         <h2>Spell Preview</h2>
         {% if builder.preview.spells %}
           <ul class="plain-list builder-feature-list">

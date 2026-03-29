@@ -171,7 +171,7 @@ def _minimal_import_metadata(character_slug: str = "new-hero") -> CharacterImpor
         character_slug=character_slug,
         source_path="builder://phb-level-1",
         imported_at_utc="2026-03-29T00:00:00Z",
-        parser_version="2026-03-29.2",
+        parser_version="2026-03-29.3",
         import_status="clean",
         warnings=[],
     )
@@ -205,7 +205,7 @@ def _builder_context_fixture() -> dict[str, object]:
         "subclass_progression": [],
         "limitations": [
             "Enter final level-1 ability scores after any species bonuses.",
-            "Attack rows still need a native builder pass; for now the sheet derives equipment and spell picks without generating attack actions automatically.",
+            "Basic weapon attack rows are now generated from chosen starting gear, but off-hand attacks and a few feature-based damage adjustments still need manual follow-up.",
             "Gold-alternative loadouts and a few class-specific spell extras still need manual follow-up.",
         ],
         "preview": {
@@ -218,6 +218,7 @@ def _builder_context_fixture() -> dict[str, object]:
             "languages": ["Common"],
             "features": ["Second Wind"],
             "equipment": [],
+            "attacks": [],
             "starting_currency": "",
             "spells": [],
             "background": "Acolyte",
@@ -395,6 +396,136 @@ def test_level_one_builder_creates_native_character_definition_from_phb_choices(
     assert any(feature["tracker_ref"] == "second-wind" for feature in definition.features if feature["name"] == "Second Wind")
     assert any(template["id"] == "second-wind" and template["max"] == 1 for template in definition.resource_templates)
     assert import_metadata.source_path == "builder://phb-level-1"
+
+
+def test_level_one_builder_generates_attack_rows_from_starting_weapons():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+            "starting_equipment": {
+                "defaultData": [
+                    {"a": ["longsword|phb", "shield|phb"], "b": ["battleaxe|phb", "shield|phb"]},
+                    {"_": ["light crossbow|phb", "crossbow bolts (20)|phb"]},
+                ]
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+        body={"entries": [{"name": "Feature: Adaptable", "entries": ["You fit in almost anywhere."]}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+        body={
+            "entries": [
+                {
+                    "name": "Feature: Shelter of the Faithful",
+                    "entries": ["You can find refuge among the faithful."],
+                    "data": {"isFeature": True},
+                }
+            ]
+        },
+    )
+    fighting_style = _systems_entry("classfeature", "phb-classfeature-fighting-style", "Fighting Style", metadata={"level": 1})
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    longsword = _systems_entry("item", "phb-item-longsword", "Longsword", metadata={"weight": 3})
+    battleaxe = _systems_entry("item", "phb-item-battleaxe", "Battleaxe", metadata={"weight": 4})
+    shield = _systems_entry("item", "phb-item-shield", "Shield", metadata={"weight": 6, "type": "S"})
+    light_crossbow = _systems_entry("item", "phb-item-light-crossbow", "Light Crossbow", metadata={"weight": 5})
+    crossbow_bolts = _systems_entry("item", "phb-item-crossbow-bolts-20", "Crossbow Bolts (20)", metadata={"weight": 1.5})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "item": [longsword, battleaxe, shield, light_crossbow, crossbow_bolts],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {
+                        "label": "Fighting Style",
+                        "entry": fighting_style,
+                        "embedded_card": {
+                            "option_groups": [
+                                {
+                                    "options": [
+                                        {"label": "Archery", "slug": "phb-optionalfeature-archery"},
+                                        {"label": "Defense", "slug": "phb-optionalfeature-defense"},
+                                    ]
+                                }
+                            ]
+                        },
+                    },
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    base_form_values = {
+        "name": "Hale Rowan",
+        "character_slug": "hale-rowan",
+        "alignment": "Lawful Good",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "class_option_1": "phb-optionalfeature-archery",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", base_form_values)
+    form_values = {
+        **base_form_values,
+        "class_equipment_1": _field_value_for_label(context, "class_equipment_1", "Longsword"),
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+
+    attacks_by_name = {attack["name"]: attack for attack in definition.attacks}
+
+    assert "Longsword (+5, 1d8+3 slashing)" in context["preview"]["attacks"]
+    assert "Light Crossbow (+5, 1d8+1 piercing)" in context["preview"]["attacks"]
+    assert set(attacks_by_name) == {"Longsword", "Light Crossbow"}
+    assert attacks_by_name["Longsword"]["category"] == "melee weapon"
+    assert attacks_by_name["Longsword"]["damage"] == "1d8+3 slashing"
+    assert attacks_by_name["Longsword"]["notes"] == "Versatile (1d10)."
+    assert attacks_by_name["Longsword"]["systems_ref"]["slug"] == "phb-item-longsword"
+    assert attacks_by_name["Light Crossbow"]["category"] == "ranged weapon"
+    assert attacks_by_name["Light Crossbow"]["attack_bonus"] == 5
+    assert attacks_by_name["Light Crossbow"]["damage"] == "1d8+1 piercing"
+    assert attacks_by_name["Light Crossbow"]["notes"] == "Ammunition, loading, range 80/320."
+    assert attacks_by_name["Light Crossbow"]["systems_ref"]["slug"] == "phb-item-light-crossbow"
 
 
 def test_level_one_builder_populates_starting_equipment_spells_and_currency():
@@ -726,7 +857,7 @@ def test_level_one_builder_populates_starting_equipment_spells_and_currency():
     assert spells_by_name["Find Familiar"]["mark"] == "Spellbook"
     assert spells_by_name["Detect Magic"]["reference"] == "p. 231"
     assert spells_by_name["Message"]["components"] == "V, S, M (a short piece of copper wire)"
-    assert import_metadata.parser_version == "2026-03-29.2"
+    assert import_metadata.parser_version == "2026-03-29.3"
 
 
 def test_dm_roster_shows_create_character_link(client, sign_in, users):

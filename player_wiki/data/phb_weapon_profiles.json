@@ -1,0 +1,443 @@
+{
+  "Battleaxe": {
+    "type": "M",
+    "weapon_category": "martial",
+    "properties": [
+      "V"
+    ],
+    "damage": "1d8",
+    "versatile_damage": "1d10",
+    "damage_type": "S",
+    "range": ""
+  },
+  "Blowgun": {
+    "type": "R",
+    "weapon_category": "martial",
+    "properties": [
+      "A",
+      "LD"
+    ],
+    "damage": "1",
+    "versatile_damage": "",
+    "damage_type": "P",
+    "range": "25/100"
+  },
+  "Club": {
+    "type": "M",
+    "weapon_category": "simple",
+    "properties": [
+      "L"
+    ],
+    "damage": "1d4",
+    "versatile_damage": "",
+    "damage_type": "B",
+    "range": ""
+  },
+  "Dagger": {
+    "type": "M",
+    "weapon_category": "simple",
+    "properties": [
+      "F",
+      "L",
+      "T"
+    ],
+    "damage": "1d4",
+    "versatile_damage": "",
+    "damage_type": "P",
+    "range": "20/60"
+  },
+  "Dart": {
+    "type": "R",
+    "weapon_category": "simple",
+    "properties": [
+      "F",
+      "T"
+    ],
+    "damage": "1d4",
+    "versatile_damage": "",
+    "damage_type": "P",
+    "range": "20/60"
+  },
+  "Flail": {
+    "type": "M",
+    "weapon_category": "martial",
+    "properties": [],
+    "damage": "1d8",
+    "versatile_damage": "",
+    "damage_type": "B",
+    "range": ""
+  },
+  "Glaive": {
+    "type": "M",
+    "weapon_category": "martial",
+    "properties": [
+      "H",
+      "R",
+      "2H"
+    ],
+    "damage": "1d10",
+    "versatile_damage": "",
+    "damage_type": "S",
+    "range": ""
+  },
+  "Greataxe": {
+    "type": "M",
+    "weapon_category": "martial",
+    "properties": [
+      "H",
+      "2H"
+    ],
+    "damage": "1d12",
+    "versatile_damage": "",
+    "damage_type": "S",
+    "range": ""
+  },
+  "Greatclub": {
+    "type": "M",
+    "weapon_category": "simple",
+    "properties": [
+      "2H"
+    ],
+    "damage": "1d8",
+    "versatile_damage": "",
+    "damage_type": "B",
+    "range": ""
+  },
+  "Greatsword": {
+    "type": "M",
+    "weapon_category": "martial",
+    "properties": [
+      "H",
+      "2H"
+    ],
+    "damage": "2d6",
+    "versatile_damage": "",
+    "damage_type": "S",
+    "range": ""
+  },
+  "Halberd": {
+    "type": "M",
+    "weapon_category": "martial",
+    "properties": [
+      "H",
+      "R",
+      "2H"
+    ],
+    "damage": "1d10",
+    "versatile_damage": "",
+    "damage_type": "S",
+    "range": ""
+  },
+  "Hand Crossbow": {
+    "type": "R",
+    "weapon_category": "martial",
+    "properties": [
+      "A",
+      "L",
+      "LD"
+    ],
+    "damage": "1d6",
+    "versatile_damage": "",
+    "damage_type": "P",
+    "range": "30/120"
+  },
+  "Handaxe": {
+    "type": "M",
+    "weapon_category": "simple",
+    "properties": [
+      "L",
+      "T"
+    ],
+    "damage": "1d6",
+    "versatile_damage": "",
+    "damage_type": "S",
+    "range": "20/60"
+  },
+  "Heavy Crossbow": {
+    "type": "R",
+    "weapon_category": "martial",
+    "properties": [
+      "A",
+      "H",
+      "LD",
+      "2H"
+    ],
+    "damage": "1d10",
+    "versatile_damage": "",
+    "damage_type": "P",
+    "range": "100/400"
+  },
+  "Javelin": {
+    "type": "M",
+    "weapon_category": "simple",
+    "properties": [
+      "T"
+    ],
+    "damage": "1d6",
+    "versatile_damage": "",
+    "damage_type": "P",
+    "range": "30/120"
+  },
+  "Lance": {
+    "type": "M",
+    "weapon_category": "martial",
+    "properties": [
+      "R",
+      "S"
+    ],
+    "damage": "1d12",
+    "versatile_damage": "",
+    "damage_type": "P",
+    "range": ""
+  },
+  "Light Crossbow": {
+    "type": "R",
+    "weapon_category": "simple",
+    "properties": [
+      "A",
+      "LD",
+      "2H"
+    ],
+    "damage": "1d8",
+    "versatile_damage": "",
+    "damage_type": "P",
+    "range": "80/320"
+  },
+  "Light Hammer": {
+    "type": "M",
+    "weapon_category": "simple",
+    "properties": [
+      "L",
+      "T"
+    ],
+    "damage": "1d4",
+    "versatile_damage": "",
+    "damage_type": "B",
+    "range": "20/60"
+  },
+  "Longbow": {
+    "type": "R",
+    "weapon_category": "martial",
+    "properties": [
+      "A",
+      "H",
+      "2H"
+    ],
+    "damage": "1d8",
+    "versatile_damage": "",
+    "damage_type": "P",
+    "range": "150/600"
+  },
+  "Longsword": {
+    "type": "M",
+    "weapon_category": "martial",
+    "properties": [
+      "V"
+    ],
+    "damage": "1d8",
+    "versatile_damage": "1d10",
+    "damage_type": "S",
+    "range": ""
+  },
+  "Mace": {
+    "type": "M",
+    "weapon_category": "simple",
+    "properties": [],
+    "damage": "1d6",
+    "versatile_damage": "",
+    "damage_type": "B",
+    "range": ""
+  },
+  "Maul": {
+    "type": "M",
+    "weapon_category": "martial",
+    "properties": [
+      "H",
+      "2H"
+    ],
+    "damage": "2d6",
+    "versatile_damage": "",
+    "damage_type": "B",
+    "range": ""
+  },
+  "Morningstar": {
+    "type": "M",
+    "weapon_category": "martial",
+    "properties": [],
+    "damage": "1d8",
+    "versatile_damage": "",
+    "damage_type": "P",
+    "range": ""
+  },
+  "Pike": {
+    "type": "M",
+    "weapon_category": "martial",
+    "properties": [
+      "H",
+      "R",
+      "2H"
+    ],
+    "damage": "1d10",
+    "versatile_damage": "",
+    "damage_type": "P",
+    "range": ""
+  },
+  "Quarterstaff": {
+    "type": "M",
+    "weapon_category": "simple",
+    "properties": [
+      "V"
+    ],
+    "damage": "1d6",
+    "versatile_damage": "1d8",
+    "damage_type": "B",
+    "range": ""
+  },
+  "Rapier": {
+    "type": "M",
+    "weapon_category": "martial",
+    "properties": [
+      "F"
+    ],
+    "damage": "1d8",
+    "versatile_damage": "",
+    "damage_type": "P",
+    "range": ""
+  },
+  "Scimitar": {
+    "type": "M",
+    "weapon_category": "martial",
+    "properties": [
+      "F",
+      "L"
+    ],
+    "damage": "1d6",
+    "versatile_damage": "",
+    "damage_type": "S",
+    "range": ""
+  },
+  "Shortbow": {
+    "type": "R",
+    "weapon_category": "simple",
+    "properties": [
+      "A",
+      "2H"
+    ],
+    "damage": "1d6",
+    "versatile_damage": "",
+    "damage_type": "P",
+    "range": "80/320"
+  },
+  "Shortsword": {
+    "type": "M",
+    "weapon_category": "martial",
+    "properties": [
+      "F",
+      "L"
+    ],
+    "damage": "1d6",
+    "versatile_damage": "",
+    "damage_type": "P",
+    "range": ""
+  },
+  "Sickle": {
+    "type": "M",
+    "weapon_category": "simple",
+    "properties": [
+      "L"
+    ],
+    "damage": "1d4",
+    "versatile_damage": "",
+    "damage_type": "S",
+    "range": ""
+  },
+  "Sling": {
+    "type": "R",
+    "weapon_category": "simple",
+    "properties": [
+      "A"
+    ],
+    "damage": "1d4",
+    "versatile_damage": "",
+    "damage_type": "B",
+    "range": "30/120"
+  },
+  "Spear": {
+    "type": "M",
+    "weapon_category": "simple",
+    "properties": [
+      "T",
+      "V"
+    ],
+    "damage": "1d6",
+    "versatile_damage": "1d8",
+    "damage_type": "P",
+    "range": "20/60"
+  },
+  "Staff": {
+    "type": "SCF",
+    "weapon_category": "simple",
+    "properties": [
+      "V"
+    ],
+    "damage": "1d6",
+    "versatile_damage": "1d8",
+    "damage_type": "B",
+    "range": ""
+  },
+  "Trident": {
+    "type": "M",
+    "weapon_category": "martial",
+    "properties": [
+      "T",
+      "V"
+    ],
+    "damage": "1d6",
+    "versatile_damage": "1d8",
+    "damage_type": "P",
+    "range": "20/60"
+  },
+  "War Pick": {
+    "type": "M",
+    "weapon_category": "martial",
+    "properties": [],
+    "damage": "1d8",
+    "versatile_damage": "",
+    "damage_type": "P",
+    "range": ""
+  },
+  "Warhammer": {
+    "type": "M",
+    "weapon_category": "martial",
+    "properties": [
+      "V"
+    ],
+    "damage": "1d8",
+    "versatile_damage": "1d10",
+    "damage_type": "B",
+    "range": ""
+  },
+  "Whip": {
+    "type": "M",
+    "weapon_category": "martial",
+    "properties": [
+      "F",
+      "R"
+    ],
+    "damage": "1d4",
+    "versatile_damage": "",
+    "damage_type": "S",
+    "range": ""
+  },
+  "Wooden Staff": {
+    "type": "SCF",
+    "weapon_category": "simple",
+    "properties": [
+      "V"
+    ],
+    "damage": "1d6",
+    "versatile_damage": "1d8",
+    "damage_type": "B",
+    "range": ""
+  }
+}

@@ -11,7 +11,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-03-29.2"
+CHARACTER_BUILDER_VERSION = "2026-03-29.3"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -215,6 +215,23 @@ ITEM_TYPE_CODES_BY_EQUIPMENT_TYPE = {
     "setGaming": {"GS"},
     "toolArtisan": {"AT"},
 }
+DAMAGE_TYPE_LABELS = {
+    "B": "bludgeoning",
+    "P": "piercing",
+    "S": "slashing",
+}
+WEAPON_PROPERTY_LABELS = {
+    "A": "Ammunition",
+    "F": "Finesse",
+    "H": "Heavy",
+    "L": "Light",
+    "LD": "Loading",
+    "R": "Reach",
+    "S": "Special",
+    "T": "Thrown",
+    "2H": "Two-Handed",
+    "V": "Versatile",
+}
 INLINE_TAG_PATTERN = re.compile(r"{@[^ }]+\s+([^}]+)}")
 
 
@@ -306,7 +323,7 @@ def build_level_one_builder_context(
         "spell_catalog": spell_catalog,
         "limitations": [
             "Enter final level-1 ability scores after any species bonuses.",
-            "Attack rows still need a native builder pass; for now the sheet derives equipment and spell picks without generating attack actions automatically.",
+            "Basic weapon attack rows are now generated from chosen starting gear, but off-hand attacks and a few feature-based damage adjustments still need manual follow-up.",
             "Gold-alternative loadouts and a few class-specific spell extras still need manual follow-up.",
         ],
         "preview": preview,
@@ -327,6 +344,7 @@ def build_level_one_character_definition(
     class_progression = list(builder_context.get("class_progression") or [])
     subclass_progression = list(builder_context.get("subclass_progression") or [])
     equipment_groups = list(builder_context.get("equipment_groups") or [])
+    item_catalog = dict(builder_context.get("item_catalog") or {})
     spell_catalog = dict(builder_context.get("spell_catalog") or {})
     limitations = list(builder_context.get("limitations") or [])
 
@@ -373,6 +391,14 @@ def build_level_one_character_definition(
         ability_scores=ability_scores,
     )
     equipment_catalog = _build_level_one_equipment_catalog(equipment_groups)
+    attacks = _build_level_one_attacks(
+        equipment_catalog=equipment_catalog,
+        item_catalog=item_catalog,
+        ability_scores=ability_scores,
+        proficiency_bonus=proficiency_bonus,
+        weapon_proficiencies=proficiencies["weapons"],
+        selected_choices=selected_choices,
+    )
 
     stats = _build_level_one_stats(
         selected_class=selected_class,
@@ -421,7 +447,7 @@ def build_level_one_character_definition(
             "tools": proficiencies["tools"],
             "languages": proficiencies["languages"],
         },
-        attacks=[],
+        attacks=attacks,
         features=features,
         spellcasting=spellcasting,
         equipment_catalog=equipment_catalog,
@@ -757,13 +783,42 @@ def _load_phb_level_one_spell_lists() -> dict[str, dict[str, list[str]]]:
     return normalized
 
 
+@lru_cache(maxsize=1)
+def _load_phb_weapon_profiles() -> dict[str, dict[str, Any]]:
+    reference_path = Path(__file__).resolve().parent / "data" / "phb_weapon_profiles.json"
+    if not reference_path.exists():
+        return {}
+    payload = json.loads(reference_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return {}
+    normalized: dict[str, dict[str, Any]] = {}
+    for title, profile in payload.items():
+        if not isinstance(profile, dict):
+            continue
+        normalized[normalize_lookup(title)] = {
+            "title": str(title).strip(),
+            "type": str(profile.get("type") or "").strip(),
+            "weapon_category": str(profile.get("weapon_category") or "").strip(),
+            "properties": [str(item).strip() for item in list(profile.get("properties") or []) if str(item).strip()],
+            "damage": str(profile.get("damage") or "").strip(),
+            "versatile_damage": str(profile.get("versatile_damage") or "").strip(),
+            "damage_type": str(profile.get("damage_type") or "").strip(),
+            "range": str(profile.get("range") or "").strip(),
+        }
+    return normalized
+
+
 def _build_item_catalog(item_entries: list[SystemsEntryRecord]) -> dict[str, Any]:
     by_title: dict[str, SystemsEntryRecord] = {}
     for entry in item_entries:
         normalized_title = normalize_lookup(entry.title)
         if normalized_title and normalized_title not in by_title:
             by_title[normalized_title] = entry
-    return {"entries": list(item_entries), "by_title": by_title}
+    return {
+        "entries": list(item_entries),
+        "by_title": by_title,
+        "phb_weapon_profiles": _load_phb_weapon_profiles(),
+    }
 
 
 def _build_spell_catalog(spell_entries: list[SystemsEntryRecord]) -> dict[str, Any]:
@@ -1104,6 +1159,140 @@ def _build_level_one_equipment_catalog(equipment_groups: list[dict[str, Any]]) -
     return merged_catalog
 
 
+def _build_level_one_attacks(
+    *,
+    equipment_catalog: list[dict[str, Any]],
+    item_catalog: dict[str, Any],
+    ability_scores: dict[str, int],
+    proficiency_bonus: int,
+    weapon_proficiencies: list[str],
+    selected_choices: dict[str, list[str]],
+) -> list[dict[str, Any]]:
+    attacks: list[dict[str, Any]] = []
+    for item in equipment_catalog:
+        profile = _resolve_weapon_profile(item, item_catalog)
+        if profile is None:
+            continue
+        attack_name = str(item.get("name") or profile.get("title") or "").strip()
+        if not attack_name:
+            continue
+        ability_key = _weapon_attack_ability_key(profile, ability_scores)
+        ability_modifier = _ability_modifier(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE))
+        attack_bonus = ability_modifier
+        if _is_proficient_with_weapon(profile, weapon_proficiencies, attack_name):
+            attack_bonus += proficiency_bonus
+        if _has_archery_style(selected_choices) and str(profile.get("type") or "").strip().upper() == "R":
+            attack_bonus += 2
+        damage_bonus = ability_modifier
+        attacks.append(
+            {
+                "id": f"{slugify(attack_name)}-{len(attacks) + 1}",
+                "name": attack_name,
+                "category": _weapon_attack_category(profile),
+                "attack_bonus": attack_bonus,
+                "damage": _format_weapon_damage(profile, damage_bonus),
+                "damage_type": DAMAGE_TYPE_LABELS.get(str(profile.get("damage_type") or "").strip().upper(), ""),
+                "notes": _build_weapon_attack_notes(profile),
+                "systems_ref": dict(item.get("systems_ref") or {}) or None,
+            }
+        )
+    return attacks
+
+
+def _resolve_weapon_profile(
+    item: dict[str, Any],
+    item_catalog: dict[str, Any],
+) -> dict[str, Any] | None:
+    systems_ref = dict(item.get("systems_ref") or {})
+    candidate_titles = [
+        str(systems_ref.get("title") or "").strip(),
+        str(item.get("name") or "").strip(),
+    ]
+    profiles = dict(item_catalog.get("phb_weapon_profiles") or {})
+    for title in candidate_titles:
+        profile = profiles.get(normalize_lookup(title))
+        if profile is not None:
+            return dict(profile)
+    return None
+
+
+def _weapon_attack_ability_key(
+    profile: dict[str, Any],
+    ability_scores: dict[str, int],
+) -> str:
+    if str(profile.get("type") or "").strip().upper() == "R":
+        return "dex"
+    if "F" in set(profile.get("properties") or []):
+        str_score = int(ability_scores.get("str", DEFAULT_ABILITY_SCORE) or DEFAULT_ABILITY_SCORE)
+        dex_score = int(ability_scores.get("dex", DEFAULT_ABILITY_SCORE) or DEFAULT_ABILITY_SCORE)
+        return "dex" if dex_score > str_score else "str"
+    return "str"
+
+
+def _is_proficient_with_weapon(
+    profile: dict[str, Any],
+    weapon_proficiencies: list[str],
+    attack_name: str,
+) -> bool:
+    normalized_proficiencies = {normalize_lookup(value) for value in weapon_proficiencies if str(value or "").strip()}
+    normalized_name = normalize_lookup(attack_name)
+    weapon_category = str(profile.get("weapon_category") or "").strip().lower()
+    if normalized_name in normalized_proficiencies:
+        return True
+    if weapon_category == "simple" and normalize_lookup("Simple Weapons") in normalized_proficiencies:
+        return True
+    if weapon_category == "martial" and normalize_lookup("Martial Weapons") in normalized_proficiencies:
+        return True
+    return False
+
+
+def _has_archery_style(selected_choices: dict[str, list[str]]) -> bool:
+    for values in selected_choices.values():
+        for value in values:
+            if normalize_lookup(value) in {
+                normalize_lookup("phb-optionalfeature-archery"),
+                normalize_lookup("archery"),
+            }:
+                return True
+    return False
+
+
+def _weapon_attack_category(profile: dict[str, Any]) -> str:
+    return "ranged weapon" if str(profile.get("type") or "").strip().upper() == "R" else "melee weapon"
+
+
+def _format_weapon_damage(profile: dict[str, Any], damage_bonus: int) -> str:
+    base_damage = str(profile.get("damage") or "").strip()
+    if not base_damage:
+        return "--"
+    bonus_text = ""
+    if damage_bonus > 0:
+        bonus_text = f"+{damage_bonus}"
+    elif damage_bonus < 0:
+        bonus_text = str(damage_bonus)
+    damage_type = DAMAGE_TYPE_LABELS.get(str(profile.get("damage_type") or "").strip().upper(), "").strip()
+    if damage_type:
+        return f"{base_damage}{bonus_text} {damage_type}"
+    return f"{base_damage}{bonus_text}"
+
+
+def _build_weapon_attack_notes(profile: dict[str, Any]) -> str:
+    properties = set(profile.get("properties") or [])
+    notes: list[str] = []
+    if "A" in properties:
+        notes.append("Ammunition")
+    if "LD" in properties:
+        notes.append("loading")
+    attack_range = str(profile.get("range") or "").strip()
+    if attack_range:
+        notes.append(f"range {attack_range}")
+    if "V" in properties and str(profile.get("versatile_damage") or "").strip():
+        notes.append(f"Versatile ({str(profile.get('versatile_damage') or '').strip()})")
+    if not notes:
+        return ""
+    return ", ".join(notes) + "."
+
+
 def _build_equipment_choice_fields(equipment_groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
     fields: list[dict[str, Any]] = []
     for group in equipment_groups:
@@ -1310,6 +1499,14 @@ def _build_level_one_preview(
         selected_choices=selected_choices,
     )
     equipment_catalog = _build_level_one_equipment_catalog(equipment_groups)
+    attacks = _build_level_one_attacks(
+        equipment_catalog=equipment_catalog,
+        item_catalog={"phb_weapon_profiles": _load_phb_weapon_profiles()},
+        ability_scores=ability_scores,
+        proficiency_bonus=proficiency_bonus,
+        weapon_proficiencies=proficiencies["weapons"],
+        selected_choices=selected_choices,
+    )
     spellcasting = (
         _build_level_one_spellcasting(
             selected_class=selected_class,
@@ -1341,6 +1538,11 @@ def _build_level_one_preview(
             _describe_equipment_spec(item)
             for item in equipment_catalog
             if not bool(item.get("is_currency_only")) and _describe_equipment_spec(item)
+        ],
+        "attacks": [
+            f"{attack['name']} ({int(attack.get('attack_bonus') or 0):+d}, {attack.get('damage')})"
+            for attack in attacks
+            if str(attack.get("name") or "").strip()
         ],
         "starting_currency": _format_currency_seed(_collect_currency_seed_from_equipment(equipment_catalog)),
         "spells": [_summarize_preview_spell(spell) for spell in list(spellcasting.get("spells") or [])],
