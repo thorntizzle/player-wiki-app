@@ -3239,7 +3239,7 @@ def create_app() -> Flask:
 
         if not builder_ready:
             flash(
-                "The PHB character builder needs PHB Systems entries for classes, species, and backgrounds first.",
+                "The native character builder needs a supported base class plus enabled Systems species and backgrounds first.",
                 "error",
             )
             return render_character_builder_page(campaign_slug, builder_context, status_code=400)

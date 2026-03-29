@@ -229,7 +229,7 @@ EXTRA_PHB_LEVEL_ONE_SPELL_LISTS = {
     },
 }
 NATIVE_LEVEL_UP_LIMITATIONS = [
-    "Native PHB level-up advances one level at a time for single-class native PHB characters.",
+    "Native level-up currently advances one level at a time for single-class native characters whose base class uses the PHB progression path.",
     "Hit point gain is entered manually so your table can choose rolled or fixed HP.",
     "Prepared-caster level-up currently preserves existing prepared spells and adds the new picks needed for the next level.",
     "Spell replacement, some granted spell choices, spell-granting feats, and some advanced feat side effects still need manual follow-up.",
@@ -356,13 +356,13 @@ def build_level_one_builder_context(
     form_values: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     values = dict(form_values or {})
-    class_options = _list_phb_entries(systems_service, campaign_slug, "class")
-    species_options = _list_phb_entries(systems_service, campaign_slug, "race")
-    background_options = _list_phb_entries(systems_service, campaign_slug, "background")
-    feat_options = _list_phb_entries(systems_service, campaign_slug, "feat")
+    class_options = _list_supported_class_entries(systems_service, campaign_slug)
+    species_options = _list_campaign_enabled_entries(systems_service, campaign_slug, "race")
+    background_options = _list_campaign_enabled_entries(systems_service, campaign_slug, "background")
+    feat_options = _list_campaign_enabled_entries(systems_service, campaign_slug, "feat")
     feat_catalog = _build_feat_catalog(feat_options)
-    item_catalog = _build_item_catalog(_list_phb_entries(systems_service, campaign_slug, "item"))
-    spell_catalog = _build_spell_catalog(_list_phb_entries(systems_service, campaign_slug, "spell"))
+    item_catalog = _build_item_catalog(_list_campaign_enabled_entries(systems_service, campaign_slug, "item"))
+    spell_catalog = _build_spell_catalog(_list_campaign_enabled_entries(systems_service, campaign_slug, "spell"))
 
     selected_class = _resolve_selected_entry(class_options, values.get("class_slug", ""))
     selected_species = _resolve_selected_entry(species_options, values.get("species_slug", ""))
@@ -439,6 +439,7 @@ def build_level_one_builder_context(
         "item_catalog": item_catalog,
         "spell_catalog": spell_catalog,
         "limitations": [
+            "Base classes currently follow the native PHB progression spine, but species, backgrounds, subclasses, feats, spells, and items can come from any enabled Systems source.",
             "Enter level-1 ability scores after species bonuses. Native feat-driven ability increases are applied automatically.",
             "Native attack rows now cover basic PHB weapons, off-hand attacks, and key level-1 fighting-style adjustments, but a few advanced damage riders still need manual follow-up.",
             "Gold-alternative loadouts, some granted spell choices, spell-granting feats, and a few class-specific spell extras still need manual follow-up.",
@@ -561,11 +562,11 @@ def build_level_one_character_definition(
         spell_catalog=spell_catalog,
     )
 
-    source_path = "builder://phb-level-1"
+    source_path = "builder://native-level-1"
     source = {
         "source_path": source_path,
         "source_type": "native_character_builder",
-        "imported_from": "In-app PHB Level 1 Builder",
+        "imported_from": "In-app Native Level 1 Builder",
         "imported_at": isoformat(utcnow()),
         "parse_warnings": list(limitations),
     }
@@ -624,13 +625,13 @@ def build_native_level_up_context(
     values = _normalize_level_up_values(definition, form_values or {})
     current_level = _resolve_native_character_level(definition)
     next_level = current_level + 1
-    class_options = _list_phb_entries(systems_service, campaign_slug, "class")
-    species_options = _list_phb_entries(systems_service, campaign_slug, "race")
-    background_options = _list_phb_entries(systems_service, campaign_slug, "background")
-    feat_options = _list_phb_entries(systems_service, campaign_slug, "feat")
+    class_options = _list_supported_class_entries(systems_service, campaign_slug)
+    species_options = _list_campaign_enabled_entries(systems_service, campaign_slug, "race")
+    background_options = _list_campaign_enabled_entries(systems_service, campaign_slug, "background")
+    feat_options = _list_campaign_enabled_entries(systems_service, campaign_slug, "feat")
     feat_catalog = _build_feat_catalog(feat_options)
-    item_catalog = _build_item_catalog(_list_phb_entries(systems_service, campaign_slug, "item"))
-    spell_catalog = _build_spell_catalog(_list_phb_entries(systems_service, campaign_slug, "spell"))
+    item_catalog = _build_item_catalog(_list_campaign_enabled_entries(systems_service, campaign_slug, "item"))
+    spell_catalog = _build_spell_catalog(_list_campaign_enabled_entries(systems_service, campaign_slug, "spell"))
 
     selected_class = _resolve_profile_entry(
         class_options,
@@ -648,7 +649,7 @@ def build_native_level_up_context(
         fallback_title=str(definition.profile.get("background") or "").strip(),
     )
     if selected_class is None or selected_species is None or selected_background is None:
-        raise CharacterBuildError("This native character is missing PHB Systems links needed for level-up.")
+        raise CharacterBuildError("This native character is missing enabled Systems links needed for level-up.")
 
     subclass_options = _list_subclass_options(systems_service, campaign_slug, selected_class)
     existing_subclass_slug = _systems_ref_slug(definition.profile.get("subclass_ref"))
@@ -890,7 +891,7 @@ def build_native_level_up_character_definition(
     import_metadata = CharacterImportMetadata(
         campaign_slug=campaign_slug,
         character_slug=current_definition.character_slug,
-        source_path=f"builder://phb-level-{target_level}",
+        source_path=f"builder://native-level-{target_level}",
         imported_at_utc=isoformat(utcnow()),
         parser_version=CHARACTER_BUILDER_VERSION,
         import_status="clean",
@@ -904,17 +905,59 @@ def _list_phb_entries(
     campaign_slug: str,
     entry_type: str,
 ) -> list[SystemsEntryRecord]:
+    return [
+        entry
+        for entry in _list_campaign_enabled_entries(systems_service, campaign_slug, entry_type)
+        if str(entry.source_id or "").strip().upper() == PHB_SOURCE_ID
+    ]
+
+
+def _list_supported_class_entries(
+    systems_service: Any,
+    campaign_slug: str,
+) -> list[SystemsEntryRecord]:
+    return _list_phb_entries(systems_service, campaign_slug, "class")
+
+
+def _list_campaign_enabled_entries(
+    systems_service: Any,
+    campaign_slug: str,
+    entry_type: str,
+) -> list[SystemsEntryRecord]:
     library = systems_service.get_campaign_library(campaign_slug)
     if library is None:
         return []
-    entries = systems_service.store.list_entries_for_campaign_source(
-        campaign_slug,
-        library.library_slug,
-        PHB_SOURCE_ID,
-        entry_type=entry_type,
-        limit=None,
+    enabled_source_ids = [
+        str(row.source.source_id or "").strip()
+        for row in list(systems_service.list_campaign_source_states(campaign_slug) or [])
+        if getattr(row, "is_enabled", False) and str(getattr(row.source, "source_id", "") or "").strip()
+    ]
+    if not enabled_source_ids:
+        return []
+
+    entries: list[SystemsEntryRecord] = []
+    seen_entry_keys: set[str] = set()
+    for source_id in enabled_source_ids:
+        for entry in systems_service.list_entries_for_campaign_source(
+            campaign_slug,
+            source_id,
+            entry_type=entry_type,
+            limit=None,
+        ):
+            if not systems_service.is_entry_enabled_for_campaign(campaign_slug, entry):
+                continue
+            if entry.entry_key in seen_entry_keys:
+                continue
+            seen_entry_keys.add(entry.entry_key)
+            entries.append(entry)
+    return sorted(
+        entries,
+        key=lambda entry: (
+            normalize_lookup(entry.title),
+            str(entry.source_id or "").strip().upper(),
+            str(entry.slug or "").strip(),
+        ),
     )
-    return [entry for entry in entries if systems_service.is_entry_enabled_for_campaign(campaign_slug, entry)]
 
 
 def _list_subclass_options(
@@ -924,7 +967,7 @@ def _list_subclass_options(
 ) -> list[SystemsEntryRecord]:
     if selected_class is None:
         return []
-    options = _list_phb_entries(systems_service, campaign_slug, "subclass")
+    options = _list_campaign_enabled_entries(systems_service, campaign_slug, "subclass")
     return [
         entry
         for entry in options
@@ -947,7 +990,12 @@ def _resolve_selected_entry(
 
 
 def _entry_option(entry: SystemsEntryRecord) -> dict[str, str]:
-    return {"slug": entry.slug, "title": entry.title, "source_id": entry.source_id}
+    return {
+        "slug": entry.slug,
+        "title": entry.title,
+        "source_id": entry.source_id,
+        "label": _entry_option_label(entry),
+    }
 
 
 def _entry_option_title(entry: Any) -> str:
@@ -958,11 +1006,27 @@ def _entry_option_title(entry: Any) -> str:
     return ""
 
 
+def _entry_option_label(entry: Any) -> str:
+    title = _entry_option_title(entry)
+    source_id = _entry_option_source_id(entry)
+    if title and source_id and str(source_id).strip().upper() != PHB_SOURCE_ID:
+        return f"{title} ({source_id})"
+    return title
+
+
 def _entry_option_slug(entry: Any) -> str:
     if isinstance(entry, SystemsEntryRecord):
         return str(entry.slug or "").strip()
     if isinstance(entry, dict):
         return str(entry.get("slug") or "").strip()
+    return ""
+
+
+def _entry_option_source_id(entry: Any) -> str:
+    if isinstance(entry, SystemsEntryRecord):
+        return str(entry.source_id or "").strip()
+    if isinstance(entry, dict):
+        return str(entry.get("source_id") or "").strip()
     return ""
 
 
@@ -1013,19 +1077,19 @@ def _native_character_class_name(definition: CharacterDefinition) -> str:
 def _native_level_up_support_error(definition: CharacterDefinition) -> str:
     source_type = str((definition.source or {}).get("source_type") or "").strip()
     if source_type != "native_character_builder":
-        return "Level-up currently supports native in-app PHB characters only."
+        return "Level-up currently supports native in-app characters only."
     classes = list((definition.profile or {}).get("classes") or [])
     if len(classes) != 1:
-        return "Level-up currently supports single-class native PHB characters only."
+        return "Level-up currently supports single-class native characters only."
     class_payload = dict(classes[0] or {})
     class_ref = dict(class_payload.get("systems_ref") or (definition.profile or {}).get("class_ref") or {})
     if str(class_ref.get("source_id") or "").strip().upper() != PHB_SOURCE_ID:
-        return "Level-up currently supports native PHB characters only."
+        return "Level-up currently supports native characters whose base class uses the PHB progression path."
     current_level = _resolve_native_character_level(definition)
     if current_level < 1:
-        return "This native PHB character is missing a valid current level."
+        return "This native character is missing a valid current level."
     if current_level >= 20:
-        return "This native PHB character is already at level 20."
+        return "This native character is already at level 20."
     return ""
 
 
@@ -1165,7 +1229,7 @@ def _build_level_up_choice_sections(
                 "name": "subclass_slug",
                 "label": str(selected_class.metadata.get("subclass_title") or "Subclass").strip(),
                 "help_text": f"Choose your {selected_class.title} subclass.",
-                "options": [_choice_option(entry.title, entry.slug) for entry in subclass_options],
+                "options": [_choice_option(_entry_option_label(entry), entry.slug) for entry in subclass_options],
                 "selected": str(values.get("subclass_slug") or "").strip(),
                 "group_key": "subclass_slug",
                 "kind": "subclass",
@@ -1353,7 +1417,7 @@ def _build_level_up_ability_score_fields(
 
     ability_options = [_choice_option(label, key) for key, label in ABILITY_LABELS.items()]
     feat_field_options = [
-        _choice_option(_entry_option_title(entry), _entry_option_slug(entry))
+        _choice_option(_entry_option_label(entry), _entry_option_slug(entry))
         for entry in feat_options
         if _entry_option_slug(entry)
     ]
@@ -1577,7 +1641,7 @@ def _build_species_choice_fields(
                     "name": field_name,
                     "label": "Species Feat",
                     "help_text": "Choose a feat granted by your species.",
-                    "options": [_choice_option(entry.title, entry.slug) for entry in feat_options],
+                    "options": [_choice_option(_entry_option_label(entry), entry.slug) for entry in feat_options],
                     "selected": str(values.get(field_name) or "").strip(),
                     "group_key": "species_feats",
                     "kind": "feat",
@@ -4375,9 +4439,9 @@ def _build_leveled_source(
     source = dict(source_payload or {})
     source.update(
         {
-            "source_path": f"builder://phb-level-{target_level}",
+            "source_path": f"builder://native-level-{target_level}",
             "source_type": "native_character_builder",
-            "imported_from": f"In-app PHB Level {target_level} Builder",
+            "imported_from": f"In-app Native Level {target_level} Builder",
             "imported_at": isoformat(utcnow()),
             "parse_warnings": [],
         }

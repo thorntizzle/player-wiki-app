@@ -3,15 +3,15 @@
     <section class="card">
       <div class="section-heading">
         <div>
-          <h2>PHB Level 1 Builder</h2>
-          <p class="meta">Choose class, species, background, and any level-1 options the Systems library exposes for those entries.</p>
+          <h2>Native Level 1 Builder</h2>
+          <p class="meta">Choose a supported base class, then fill in species, background, subclass, feat, and other level-1 options from the campaign's enabled Systems entries.</p>
         </div>
         <a class="ghost-button" href="{{ url_for('character_roster_view', campaign_slug=campaign.slug) }}">Back to roster</a>
       </div>
 
       {% if not builder_ready %}
         <p class="meta">
-          The builder needs PHB Systems entries for classes, species, and backgrounds before it can create characters in this campaign.
+          The builder needs a supported base class plus enabled Systems species and backgrounds before it can create characters in this campaign.
         </p>
       {% endif %}
 
@@ -52,7 +52,7 @@
                 <option value="" {% if not builder.selected_class %}selected{% endif %}>Choose a class</option>
                 {% for option in builder.class_options %}
                   <option value="{{ option.slug }}" {% if builder.selected_class and builder.selected_class.slug == option.slug %}selected{% endif %}>
-                    {{ option.title }}
+                    {{ option.label or option.title }}
                   </option>
                 {% endfor %}
               </select>
@@ -67,7 +67,7 @@
                   </option>
                   {% for option in builder.subclass_options %}
                     <option value="{{ option.slug }}" {% if builder.selected_subclass and builder.selected_subclass.slug == option.slug %}selected{% endif %}>
-                      {{ option.title }}
+                      {{ option.label or option.title }}
                     </option>
                   {% endfor %}
                 </select>
@@ -80,7 +80,7 @@
                 <option value="" {% if not builder.selected_species %}selected{% endif %}>Choose a species</option>
                 {% for option in builder.species_options %}
                   <option value="{{ option.slug }}" {% if builder.selected_species and builder.selected_species.slug == option.slug %}selected{% endif %}>
-                    {{ option.title }}
+                    {{ option.label or option.title }}
                   </option>
                 {% endfor %}
               </select>
@@ -92,7 +92,7 @@
                 <option value="" {% if not builder.selected_background %}selected{% endif %}>Choose a background</option>
                 {% for option in builder.background_options %}
                   <option value="{{ option.slug }}" {% if builder.selected_background and builder.selected_background.slug == option.slug %}selected{% endif %}>
-                    {{ option.title }}
+                    {{ option.label or option.title }}
                   </option>
                 {% endfor %}
               </select>
@@ -249,7 +249,7 @@
           {% endfor %}
         </ul>
       {% else %}
-        <p class="meta">Weapon-based attack rows will appear here when your starting gear includes a PHB weapon.</p>
+        <p class="meta">Weapon-based attack rows will appear here when your starting gear includes a supported weapon.</p>
       {% endif %}
     </section>
 

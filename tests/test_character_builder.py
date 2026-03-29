@@ -62,8 +62,12 @@ class _FakeSystemsStore:
         entry_type: str | None = None,
         limit=None,
     ) -> list[SystemsEntryRecord]:
-        del campaign_slug, library_slug, source_id, limit
-        return list(self._entries_by_type.get(str(entry_type or ""), []))
+        del campaign_slug, library_slug, limit
+        return [
+            entry
+            for entry in self._entries_by_type.get(str(entry_type or ""), [])
+            if str(entry.source_id or "").strip().upper() == str(source_id or "").strip().upper()
+        ]
 
 
 class _FakeSystemsService:
@@ -73,18 +77,61 @@ class _FakeSystemsService:
         *,
         class_progression: list[dict],
         subclass_progression: list[dict] | None = None,
+        enabled_source_ids: list[str] | None = None,
     ):
         self.store = _FakeSystemsStore(entries_by_type)
         self._class_progression = list(class_progression)
         self._subclass_progression = list(subclass_progression or [])
+        self._enabled_source_ids = {
+            str(source_id or "").strip().upper()
+            for source_id in (
+                enabled_source_ids
+                if enabled_source_ids is not None
+                else {
+                    str(entry.source_id or "").strip().upper()
+                    for entries in entries_by_type.values()
+                    for entry in entries
+                    if str(entry.source_id or "").strip()
+                }
+            )
+            if str(source_id or "").strip()
+        }
 
     def get_campaign_library(self, campaign_slug: str):
         del campaign_slug
         return SimpleNamespace(library_slug="DND-5E")
 
     def is_entry_enabled_for_campaign(self, campaign_slug: str, entry: SystemsEntryRecord) -> bool:
-        del campaign_slug, entry
-        return True
+        del campaign_slug
+        return str(entry.source_id or "").strip().upper() in self._enabled_source_ids
+
+    def list_campaign_source_states(self, campaign_slug: str):
+        del campaign_slug
+        return [
+            SimpleNamespace(
+                source=SimpleNamespace(source_id=source_id, library_slug="DND-5E"),
+                is_enabled=True,
+            )
+            for source_id in sorted(self._enabled_source_ids)
+        ]
+
+    def list_entries_for_campaign_source(
+        self,
+        campaign_slug: str,
+        source_id: str,
+        *,
+        entry_type: str | None = None,
+        query: str = "",
+        limit: int | None = None,
+    ) -> list[SystemsEntryRecord]:
+        del query
+        return self.store.list_entries_for_campaign_source(
+            campaign_slug,
+            "DND-5E",
+            source_id,
+            entry_type=entry_type,
+            limit=limit,
+        )
 
     def build_class_feature_progression_for_class_entry(
         self,
@@ -194,9 +241,9 @@ def _minimal_character_definition(character_slug: str = "new-hero", name: str = 
         },
         resource_templates=[],
         source={
-            "source_path": "builder://phb-level-1",
+            "source_path": "builder://native-level-1",
             "source_type": "native_character_builder",
-            "imported_from": "In-app PHB Level 1 Builder",
+            "imported_from": "In-app Native Level 1 Builder",
             "imported_at": "2026-03-29T00:00:00Z",
             "parse_warnings": [],
         },
@@ -207,7 +254,7 @@ def _minimal_import_metadata(character_slug: str = "new-hero") -> CharacterImpor
     return CharacterImportMetadata(
         campaign_slug="linden-pass",
         character_slug=character_slug,
-        source_path="builder://phb-level-1",
+        source_path="builder://native-level-1",
         imported_at_utc="2026-03-29T00:00:00Z",
         parser_version="2026-03-29.11",
         import_status="clean",
@@ -229,9 +276,9 @@ def _builder_context_fixture() -> dict[str, object]:
             "wis": "13",
             "cha": "8",
         },
-        "class_options": [{"slug": "phb-class-fighter", "title": "Fighter", "source_id": "PHB"}],
-        "species_options": [{"slug": "phb-race-human", "title": "Human", "source_id": "PHB"}],
-        "background_options": [{"slug": "phb-background-acolyte", "title": "Acolyte", "source_id": "PHB"}],
+        "class_options": [{"slug": "phb-class-fighter", "title": "Fighter", "source_id": "PHB", "label": "Fighter"}],
+        "species_options": [{"slug": "phb-race-human", "title": "Human", "source_id": "PHB", "label": "Human"}],
+        "background_options": [{"slug": "phb-background-acolyte", "title": "Acolyte", "source_id": "PHB", "label": "Acolyte"}],
         "subclass_options": [],
         "selected_class": None,
         "selected_species": None,
@@ -242,7 +289,8 @@ def _builder_context_fixture() -> dict[str, object]:
         "class_progression": [],
         "subclass_progression": [],
         "limitations": [
-            "Enter final level-1 ability scores after any species bonuses.",
+            "Base classes currently follow the native PHB progression spine, but species, backgrounds, subclasses, feats, spells, and items can come from any enabled Systems source.",
+            "Enter level-1 ability scores after any species bonuses. Native feat-driven ability increases are applied automatically.",
             "Native attack rows now cover basic PHB weapons, off-hand attacks, and key level-1 fighting-style adjustments, but a few advanced damage riders still need manual follow-up.",
             "Gold-alternative loadouts, some granted spell choices, spell-granting feats, and a few class-specific spell extras still need manual follow-up.",
         ],
@@ -433,7 +481,134 @@ def test_level_one_builder_creates_native_character_definition_from_phb_choices(
     assert "Alert" in feature_names
     assert any(feature["tracker_ref"] == "second-wind" for feature in definition.features if feature["name"] == "Second Wind")
     assert any(template["id"] == "second-wind" and template["max"] == 1 for template in definition.resource_templates)
-    assert import_metadata.source_path == "builder://phb-level-1"
+    assert import_metadata.source_path == "builder://native-level-1"
+
+
+def test_level_one_builder_supports_enabled_non_phb_species_background_feat_and_subclass_options():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+        source_id="PHB",
+    )
+    artificer = _systems_entry(
+        "class",
+        "tce-class-artificer",
+        "Artificer",
+        metadata={
+            "hit_die": {"faces": 8},
+            "proficiency": ["con", "int"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "shield"],
+                "weapons": ["simple"],
+                "skills": [{"choose": {"count": 2, "from": ["arcana", "history", "investigation"]}}],
+            },
+        },
+        source_id="TCE",
+    )
+    custom_lineage = _systems_entry(
+        "race",
+        "tce-race-custom-lineage",
+        "Custom Lineage",
+        metadata={
+            "size": ["M"],
+            "speed": 30,
+            "languages": [{"common": True}],
+            "feats": [{"any": 1}],
+        },
+        source_id="TCE",
+    )
+    urban_bounty_hunter = _systems_entry(
+        "background",
+        "xge-background-urban-bounty-hunter",
+        "Urban Bounty Hunter",
+        metadata={"skill_proficiencies": [{"insight": True, "persuasion": True}]},
+        source_id="XGE",
+    )
+    telekinetic = _systems_entry("feat", "tce-feat-telekinetic", "Telekinetic", source_id="TCE")
+    psi_warrior = _systems_entry(
+        "subclass",
+        "tce-subclass-psi-warrior",
+        "Psi Warrior",
+        metadata={"class_name": "Fighter", "class_source": "PHB"},
+        source_id="TCE",
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter, artificer],
+            "race": [custom_lineage],
+            "background": [urban_bounty_hunter],
+            "feat": [telekinetic],
+            "subclass": [psi_warrior],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+        enabled_source_ids=["PHB", "TCE", "XGE"],
+    )
+    form_values = {
+        "name": "Mixed Source Hero",
+        "character_slug": "mixed-source-hero",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": custom_lineage.slug,
+        "background_slug": urban_bounty_hunter.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "species_feat_1": telekinetic.slug,
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "13",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, import_metadata = build_level_one_character_definition("linden-pass", context, form_values)
+
+    species_feat_field = _find_builder_field(context, "species_feat_1")
+
+    assert [option["slug"] for option in context["class_options"]] == [fighter.slug]
+    assert any(
+        option["slug"] == custom_lineage.slug and option["label"] == "Custom Lineage (TCE)"
+        for option in context["species_options"]
+    )
+    assert any(
+        option["slug"] == urban_bounty_hunter.slug and option["label"] == "Urban Bounty Hunter (XGE)"
+        for option in context["background_options"]
+    )
+    assert any(
+        option["slug"] == psi_warrior.slug and option["label"] == "Psi Warrior (TCE)"
+        for option in context["subclass_options"]
+    )
+    assert any(
+        option["value"] == telekinetic.slug and option["label"] == "Telekinetic (TCE)"
+        for option in species_feat_field["options"]
+    )
+    assert definition.profile["species_ref"]["source_id"] == "TCE"
+    assert definition.profile["background_ref"]["source_id"] == "XGE"
+    assert any(feature["name"] == "Telekinetic" for feature in definition.features)
+    assert import_metadata.source_path == "builder://native-level-1"
 
 
 def test_level_one_builder_surfaces_and_applies_skilled_feat_choices():
@@ -1958,7 +2133,7 @@ def test_native_level_up_surfaces_expanded_subclass_spells_in_known_options():
             {"name": "Sleep", "mark": "Known", "systems_ref": {"slug": sleep.slug, "title": sleep.title, "entry_type": "spell", "source_id": "PHB"}},
         ],
     }
-    current_definition.source["source_path"] = "builder://phb-level-2"
+    current_definition.source["source_path"] = "builder://native-level-2"
 
     form_values = {"hp_gain": "5"}
     context = build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values)
@@ -2952,7 +3127,7 @@ def test_native_level_up_adds_structured_subclass_prepared_spells():
             {"name": "Shield of Faith", "mark": "Prepared", "systems_ref": {"slug": shield_of_faith.slug, "title": shield_of_faith.title, "entry_type": "spell", "source_id": "PHB"}},
         ],
     }
-    current_definition.source["source_path"] = "builder://phb-level-2"
+    current_definition.source["source_path"] = "builder://native-level-2"
 
     base_form = {"hp_gain": "6", "subclass_slug": devotion.slug}
     level_up_context = build_native_level_up_context(
@@ -3136,7 +3311,7 @@ def test_native_level_up_advances_wizard_to_level_four_with_cantrip_and_asi_grow
             {"name": "Scorching Ray", "mark": "Spellbook", "systems_ref": {"slug": scorching_ray.slug, "title": scorching_ray.title, "entry_type": "spell", "source_id": "PHB"}},
         ],
     }
-    current_definition.source["source_path"] = "builder://phb-level-3"
+    current_definition.source["source_path"] = "builder://native-level-3"
 
     level_up_form = {
         "hp_gain": "4",
@@ -3548,8 +3723,8 @@ def test_dm_can_open_character_builder_page_without_systems_data(client, sign_in
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "PHB Level 1 Builder" in html
-    assert "The builder needs PHB Systems entries for classes, species, and backgrounds" in html
+    assert "Native Level 1 Builder" in html
+    assert "The builder needs a supported base class plus enabled Systems species and backgrounds" in html
 
 
 def test_character_builder_live_preview_route_returns_fragment(app, client, sign_in, users, monkeypatch):
@@ -3701,7 +3876,7 @@ def test_dm_can_apply_native_level_up_route(app, client, sign_in, users, get_cha
         }
     ]
     leveled_import = _minimal_import_metadata("leveler")
-    leveled_import.source_path = "builder://phb-level-2"
+    leveled_import.source_path = "builder://native-level-2"
 
     monkeypatch.setattr(
         app_module,
@@ -3721,7 +3896,7 @@ def test_dm_can_apply_native_level_up_route(app, client, sign_in, users, get_cha
     definition_payload = yaml.safe_load((character_dir / "definition.yaml").read_text(encoding="utf-8"))
     import_payload = yaml.safe_load((character_dir / "import.yaml").read_text(encoding="utf-8"))
     assert definition_payload["profile"]["class_level_text"] == "Fighter 2"
-    assert import_payload["source_path"] == "builder://phb-level-2"
+    assert import_payload["source_path"] == "builder://native-level-2"
 
     record = get_character("leveler")
     assert record is not None
