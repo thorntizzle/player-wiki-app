@@ -17,7 +17,7 @@ from .character_store import CharacterStateStore
 from .db import init_database
 from .repository import slugify
 
-PARSER_VERSION = "2026-03-17.1"
+PARSER_VERSION = "2026-03-28.1"
 REST_TRACKER_PATTERN = re.compile(
     r"^(?P<label>.+?)\s*[-:]\s*(?P<value>\d+)\s*/\s*(?P<reset>Long Rest|Short Rest|Daily|Other|Manual|Never)\b",
     re.IGNORECASE,
@@ -29,6 +29,23 @@ PROGRESS_PATTERN = re.compile(
 SOURCE_REF_PATTERN = re.compile(
     r"^(?P<name>.+?)\s+-\s+(?P<source>(?:PHB|TCoE|BR|EE|XGtE|UA|DMG|MM)\b.*)$"
 )
+ANONYMOUS_ACTION_COST_PATTERN = re.compile(
+    r"^(?P<value>\d+)\s*/\s*(?P<reset>Long Rest|Short Rest|Daily|Other|Manual|Never)\s*-\s*"
+    r"(?:(?P<count>\d+)\s+)?(?P<activation>Bonus Action|Action|Reaction|Special)$",
+    re.IGNORECASE,
+)
+NAMED_ACTION_COST_PATTERN = re.compile(
+    r"^(?P<label>.+?)\s*[:\-]\s*(?:(?P<count>\d+)\s+)?(?P<activation>Bonus Action|Action|Reaction|Special)$",
+    re.IGNORECASE,
+)
+ACTION_SECTION_ACTIVATION_HINTS = {
+    "actions": "action",
+    "bonus actions": "bonus_action",
+    "reactions": "reaction",
+}
+GENERIC_ACTION_BLOCK_TITLES = {"standard actions"}
+GENERIC_FOLLOWUP_SUFFIXES = {"attack", "action", "bonus action", "reaction", "special"}
+STANDALONE_METADATA_TITLES = {"action", "bonus action", "reaction", "special"}
 
 
 class CharacterImportError(Exception):
@@ -145,6 +162,169 @@ def parse_bullet_items(section_text: str) -> list[str]:
     return items
 
 
+def split_text_blocks(section_text: str) -> list[str]:
+    blocks: list[str] = []
+    current: list[str] = []
+    for raw_line in section_text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            if current:
+                current.append("")
+            continue
+        current.append(stripped)
+    if current:
+        blocks.append("\n".join(current).strip())
+    return [block for block in blocks if block]
+
+
+def normalize_feature_text(value: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", str(value or "").lower()))
+
+
+def activation_type_from_section_title(section_title: str) -> str:
+    return ACTION_SECTION_ACTIVATION_HINTS.get(normalize_feature_text(section_title), "passive")
+
+
+def normalize_feature_header_name(header: str, tracker_matches: list[dict[str, Any]]) -> str:
+    if tracker_matches:
+        label = str(tracker_matches[0].get("label") or "").strip()
+        if label:
+            return label
+    named_action_match = NAMED_ACTION_COST_PATTERN.match(header.strip())
+    if named_action_match:
+        return named_action_match.group("label").strip()
+    return header.strip()
+
+
+def merge_feature_metadata(
+    feature: dict[str, Any],
+    *,
+    activation_type: str,
+    tracker_ref: str | None = None,
+) -> None:
+    existing_activation = str(feature.get("activation_type") or "").strip().lower()
+    if activation_type and activation_type != "passive" and existing_activation in {"", "passive"}:
+        feature["activation_type"] = activation_type
+    if tracker_ref and not str(feature.get("tracker_ref") or "").strip():
+        feature["tracker_ref"] = tracker_ref
+
+
+def is_generic_followup_feature(name: str, previous_name: str) -> bool:
+    normalized_name = normalize_feature_text(name)
+    normalized_previous = normalize_feature_text(previous_name)
+    if not normalized_name or not normalized_previous or not normalized_name.startswith(normalized_previous):
+        return False
+    suffix = normalized_name[len(normalized_previous) :].strip()
+    return suffix in GENERIC_FOLLOWUP_SUFFIXES
+
+
+def looks_like_action_feature_header(value: str) -> bool:
+    stripped = value.strip()
+    if not stripped:
+        return False
+    if normalize_feature_text(stripped) in GENERIC_ACTION_BLOCK_TITLES:
+        return True
+    if REST_TRACKER_PATTERN.match(stripped):
+        return True
+    if NAMED_ACTION_COST_PATTERN.match(stripped):
+        return True
+    if ":" in stripped:
+        return True
+    if stripped[-1:] in {".", "!", "?"}:
+        return False
+    return bool(re.match(r"^[A-Z][^.!?]{0,80}$", stripped)) and len(stripped.split()) <= 8
+
+
+def parse_action_feature_blocks(section_text: str) -> list[dict[str, str]]:
+    blocks: list[dict[str, str]] = []
+    current_header = ""
+    current_lines: list[str] = []
+    for raw_line in section_text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            if current_header:
+                current_lines.append("")
+            continue
+        if looks_like_action_feature_header(stripped):
+            if current_header:
+                blocks.append(
+                    {
+                        "header": current_header,
+                        "description": "\n".join(current_lines).strip(),
+                    }
+                )
+            current_header = stripped
+            current_lines = []
+            continue
+        if current_header:
+            current_lines.append(stripped)
+            continue
+        current_header = stripped
+        current_lines = []
+    if current_header:
+        blocks.append({"header": current_header, "description": "\n".join(current_lines).strip()})
+    return [block for block in blocks if str(block.get("header") or "").strip()]
+
+
+def merge_feature_record(destination: dict[str, Any], source: dict[str, Any]) -> None:
+    if not str(destination.get("description_markdown") or "").strip() and str(source.get("description_markdown") or "").strip():
+        destination["description_markdown"] = source["description_markdown"]
+    if not str(destination.get("source") or "").strip() and str(source.get("source") or "").strip():
+        destination["source"] = source["source"]
+    merge_feature_metadata(
+        destination,
+        activation_type=str(source.get("activation_type") or "passive"),
+        tracker_ref=str(source.get("tracker_ref") or "").strip() or None,
+    )
+
+
+def merge_action_features_into_features(
+    features: list[dict[str, Any]],
+    action_features: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged_features = [dict(feature) for feature in features]
+    name_lookup: dict[str, dict[str, Any]] = {}
+    for feature in merged_features:
+        normalized_name = normalize_feature_text(str(feature.get("name") or ""))
+        if normalized_name and normalized_name not in name_lookup:
+            name_lookup[normalized_name] = feature
+
+    action_feature_names = {
+        normalize_feature_text(str(feature.get("name") or ""))
+        for feature in action_features
+        if str(feature.get("name") or "").strip()
+    }
+    for feature in action_features:
+        normalized_name = normalize_feature_text(str(feature.get("name") or ""))
+        existing = name_lookup.get(normalized_name)
+        if existing is not None:
+            merge_feature_record(existing, feature)
+            continue
+        cloned = dict(feature)
+        merged_features.append(cloned)
+        if normalized_name:
+            name_lookup[normalized_name] = cloned
+
+    compacted_features: list[dict[str, Any]] = []
+    for feature in merged_features:
+        name = str(feature.get("name") or "").strip()
+        normalized_name = normalize_feature_text(name)
+        if (
+            ":" in name
+            and normalized_name not in action_feature_names
+            and str(feature.get("tracker_ref") or "").strip()
+            and not str(feature.get("description_markdown") or "").strip()
+            and not str(feature.get("source") or "").strip()
+        ):
+            parent_name = name.rsplit(":", 1)[0].strip()
+            parent = name_lookup.get(normalize_feature_text(parent_name))
+            if parent is not None and parent is not feature:
+                merge_feature_metadata(parent, activation_type="passive", tracker_ref=str(feature.get("tracker_ref") or ""))
+                continue
+        compacted_features.append(feature)
+    return compacted_features
+
+
 def clean_text_value(value: str) -> str:
     return value.strip().replace("`", "")
 
@@ -203,14 +383,14 @@ def build_feature_category(group_name: str) -> str:
 
 
 def build_activation_type(value: str) -> str:
-    normalized = value.lower()
+    normalized = normalize_feature_text(value)
     if "bonus action" in normalized:
         return "bonus_action"
     if "reaction" in normalized:
         return "reaction"
-    if "action" in normalized:
+    if re.search(r"\b\d+\s+action\b", normalized) or normalized.endswith(" action"):
         return "action"
-    if "special" in normalized or "hour" in normalized or "minute" in normalized:
+    if "special" in normalized or re.search(r"\b\d+\s+(hour|minute)s?\b", normalized):
         return "special"
     return "passive"
 
@@ -481,10 +661,32 @@ def parse_feature_groups(section_text: str, warnings: list[str]) -> tuple[list[d
                 merge_tracker(tracker_templates, tracker, warnings)
                 display_order += 1
 
+            anonymous_usage_match = ANONYMOUS_ACTION_COST_PATTERN.match(header_name)
+            if anonymous_usage_match:
+                if features:
+                    merge_feature_metadata(features[-1], activation_type=activation_type)
+                continue
+
+            normalized_header_name = normalize_feature_header_name(header_name, tracker_matches)
+            if (
+                not description
+                and not source_value
+                and normalize_feature_text(normalized_header_name) in STANDALONE_METADATA_TITLES
+            ):
+                continue
+            if (
+                not description
+                and not source_value
+                and features
+                and is_generic_followup_feature(normalized_header_name, str(features[-1].get("name") or ""))
+            ):
+                merge_feature_metadata(features[-1], activation_type=activation_type, tracker_ref=tracker_ref)
+                continue
+
             features.append(
                 {
-                    "id": f"{slugify(group_name)}-{slugify(header_name)}-{index}",
-                    "name": header_name,
+                    "id": f"{slugify(group_name)}-{slugify(normalized_header_name)}-{index}",
+                    "name": normalized_header_name,
                     "category": feature_category,
                     "source": source_value,
                     "description_markdown": description,
@@ -594,7 +796,10 @@ def parse_personality_and_story(section_text: str, warnings: list[str]) -> tuple
     )
 
 
-def parse_actions(section_text: str, warnings: list[str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def parse_actions(
+    section_text: str,
+    warnings: list[str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     subsections = split_sections(section_text, "###")
     custom_sections = [
         {"title": f"Actions: {title}", "body_markdown": body.strip()}
@@ -602,8 +807,10 @@ def parse_actions(section_text: str, warnings: list[str]) -> tuple[list[dict[str
         if body.strip()
     ]
     tracker_templates: dict[str, dict[str, Any]] = {}
+    action_features: list[dict[str, Any]] = []
     display_order = 0
-    for body in subsections.values():
+    action_feature_index = 0
+    for title, body in subsections.items():
         for tracker in extract_trackers_from_text(
             body,
             category="class_feature",
@@ -612,7 +819,44 @@ def parse_actions(section_text: str, warnings: list[str]) -> tuple[list[dict[str
         ):
             merge_tracker(tracker_templates, tracker, warnings)
             display_order += 1
-    return custom_sections, list(tracker_templates.values())
+        activation_hint = activation_type_from_section_title(title)
+        for block in parse_action_feature_blocks(body):
+            header = str(block.get("header") or "").strip()
+            description = str(block.get("description") or "").strip()
+            if normalize_feature_text(header) in GENERIC_ACTION_BLOCK_TITLES:
+                continue
+            tracker_matches = extract_trackers_from_text(
+                header,
+                category="class_feature",
+                display_start=display_order,
+                warnings=warnings,
+            )
+            tracker_ref = tracker_matches[0]["id"] if tracker_matches else None
+            for tracker in tracker_matches:
+                merge_tracker(tracker_templates, tracker, warnings)
+                display_order += 1
+            normalized_header = normalize_feature_header_name(header, tracker_matches)
+            if (
+                not description
+                and normalize_feature_text(normalized_header) in STANDALONE_METADATA_TITLES
+            ):
+                continue
+            activation_type = build_activation_type(header)
+            if activation_type == "passive":
+                activation_type = activation_hint
+            action_feature_index += 1
+            action_features.append(
+                {
+                    "id": f"actions-{slugify(normalized_header)}-{action_feature_index}",
+                    "name": normalized_header,
+                    "category": "class_feature",
+                    "source": "",
+                    "description_markdown": description,
+                    "activation_type": activation_type,
+                    "tracker_ref": tracker_ref,
+                }
+            )
+    return custom_sections, list(tracker_templates.values()), action_features
 
 
 def parse_character_sheet_text(
@@ -640,7 +884,8 @@ def parse_character_sheet_text(
     proficiencies = parse_proficiencies(sections.get("Proficiencies And Languages", ""))
     attacks = parse_attacks(sections.get("Attacks And Cantrips", ""))
     features, feature_trackers = parse_feature_groups(sections.get("Features And Traits", ""), warnings)
-    actions_sections, action_trackers = parse_actions(sections.get("Actions", ""), warnings)
+    actions_sections, action_trackers, action_features = parse_actions(sections.get("Actions", ""), warnings)
+    features = merge_action_features_into_features(features, action_features)
     reference_notes, note_trackers = parse_personality_and_story(
         sections.get("Personality And Story", ""),
         warnings,

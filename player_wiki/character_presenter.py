@@ -448,7 +448,12 @@ def summarize_resource_value(resource: dict[str, Any]) -> str:
 def summarize_linked_resource(resource: dict[str, Any] | None) -> str:
     if resource is None:
         return ""
-    return f"{str(resource.get('label') or 'Resource')}: {summarize_resource_value(resource)}"
+    label = str(resource.get("label") or "Resource")
+    summary = summarize_resource_value(resource)
+    reset_label = humanize_value(resource.get("reset_on"))
+    if reset_label and reset_label not in {"Manual", "Never", "Other"}:
+        return f"{label}: {summary} ({reset_label})"
+    return f"{label}: {summary}"
 
 
 def resolve_ability_score_payload(

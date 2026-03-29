@@ -17,7 +17,7 @@ from .repository import normalize_lookup
 from .systems_models import SystemsEntryRecord
 from .systems_service import SystemsService
 
-PDF_PARSER_VERSION = "2026-03-23.1"
+PDF_PARSER_VERSION = "2026-03-28.1"
 BULLET_CHAR = "\u2022"
 EN_DASH_CHAR = "\u2013"
 
@@ -599,6 +599,15 @@ def _resolve_named_entry(
     }
 
 
+def _feature_name_aliases(name: str) -> list[str]:
+    aliases: list[str] = []
+    if ":" in name:
+        suffix = name.rsplit(":", 1)[1].strip()
+        if suffix and suffix not in aliases:
+            aliases.append(suffix)
+    return aliases
+
+
 def _infer_subclass_name(
     systems_service: SystemsService,
     campaign_slug: str,
@@ -707,6 +716,7 @@ def resolve_definition_systems_links(
                     entry_types=entry_types,
                     class_name=class_name,
                     subclass_name=subclass_name,
+                    aliases=_feature_name_aliases(name),
                 )
         feature_links.append(
             {

@@ -186,6 +186,169 @@ def test_build_pdf_character_markdown_parses_into_character_definition():
     assert import_metadata.import_status == "clean"
 
 
+def test_parse_character_sheet_text_merges_split_action_cost_lines_into_features():
+    markdown = """
+## Sheet Summary
+| Field | Value |
+| --- | --- |
+| Sheet Name | Zigzag Blackscar |
+| Class & Level | Fighter 5 |
+| Species | Variant Human |
+| Background | Gladiator |
+| Alignment | Neutral |
+| Experience | (Milestone) |
+| Size | Medium |
+
+## Defenses And Core Stats
+| Metric | Value |
+| --- | --- |
+| Armor Class | 16 |
+| Initiative | +2 |
+| Speed | 30 ft. (Walking) |
+| Max HP | 54 |
+| Proficiency Bonus | +3 |
+| Passive Perception | 13 |
+| Passive Insight | 10 |
+| Passive Investigation | 9 |
+
+## Ability Scores
+| Ability | Score | Modifier | Save |
+| --- | --- | --- | --- |
+| Strength | 18 | +4 | +7 |
+| Dexterity | 14 | +2 | +2 |
+| Constitution | 15 | +2 | +5 |
+| Intelligence | 9 | -1 | -1 |
+| Wisdom | 11 | +0 | +0 |
+| Charisma | 14 | +2 | +2 |
+
+## Skills
+| Skill | Bonus | Proficiency |
+| --- | --- | --- |
+| Athletics | +7 | Proficient |
+
+## Proficiencies And Languages
+- Armor: Heavy Armor
+- Weapons: Martial Weapons
+- Tools: Disguise Kit
+- Languages: Common
+
+## Attacks And Cantrips
+| Attack | Hit | Damage | Notes |
+| --- | --- | --- | --- |
+| Huron Blade | +8 | 1d8+5 Slashing | Martial |
+
+## Features And Traits
+### Fighter Features
+
+- Second Wind - PHB 72
+Once per short rest, you can use a bonus action to regain 1d10 + 5 HP.
+
+- 1 / Short Rest - 1 Bonus Action
+
+- Action Surge - PHB 72
+You can take one additional action on your turn.
+
+- 1 / Short Rest - Special
+
+- Psionic Power - TCoE 43
+You have 6 Psionic Energy dice (1d8), and they fuel various psionic powers you have.
+
+- Psionic Power: Protective Field: 1 Reaction
+
+- Psionic Power: Psionic Energy: 6 / Long Rest - Special
+
+- Psionic Power: Psionic Strike: Special
+
+- Psionic Power: Telekinetic Movement: 1 / Short Rest - 1 Action
+
+- Psionic Power: Recovery: 1 / Short Rest - 1 Bonus Action
+
+### Feats
+
+- Sentinel - PHB 169
+When a creature within 5 ft. of you makes an attack against a target other than you, you can use your reaction to make a melee weapon attack against the attacking creature.
+
+- Sentinel Attack: 1 Reaction
+
+## Actions
+### Actions
+Standard Actions
+Attack, Dash
+
+Psionic Power: Telekinetic Movement - 1 / Short Rest
+You can move an object or a creature with your mind.
+
+Once you take this action, you can't do so again until you finish a short or long rest.
+
+### Bonus Actions
+Psionic Power: Recovery - 1 / Short Rest
+As a bonus action, you can regain one expended Psionic Energy die.
+
+Second Wind - 1 / Short Rest
+Once per short rest, you can use a bonus action to regain 1d10 + 5 HP.
+
+### Reactions
+Psionic Power: Protective Field
+
+## Personality And Story
+### Personality Traits
+
+## Spellcasting
+| Field | Value |
+| --- | --- |
+| Spellcasting Class |  |
+| Spellcasting Ability |  |
+| Spell Save DC |  |
+| Spell Attack Bonus |  |
+
+### Slots
+
+### Spells
+
+## Equipment
+| Item | Qty | Weight |
+| --- | --- | --- |
+| Backpack | 1 | 5 lb. |
+""".strip()
+    definition, _ = parse_character_sheet_text(
+        "linden-pass",
+        markdown,
+        source_path="Zigzag.pdf",
+        source_type="pdf_character_sheet_annotations",
+        imported_from="Zigzag.pdf",
+        parser_version="test",
+    )
+
+    features_by_name = {feature["name"]: feature for feature in definition.features}
+    feature_names = set(features_by_name)
+    resource_ids = {resource["id"] for resource in definition.resource_templates}
+
+    assert "1 / Short Rest - 1 Bonus Action" not in feature_names
+    assert "1 / Short Rest - Special" not in feature_names
+    assert "Psionic Power: Psionic Energy" not in feature_names
+    assert "Sentinel Attack" not in feature_names
+
+    assert features_by_name["Second Wind"]["activation_type"] == "bonus_action"
+    assert features_by_name["Second Wind"]["tracker_ref"] == "second-wind"
+    assert features_by_name["Action Surge"]["activation_type"] == "special"
+
+    assert features_by_name["Psionic Power"]["tracker_ref"] == "psionic-power-psionic-energy"
+    assert features_by_name["Psionic Power: Protective Field"]["activation_type"] == "reaction"
+    assert features_by_name["Psionic Power: Psionic Strike"]["activation_type"] == "special"
+    assert features_by_name["Psionic Power: Telekinetic Movement"]["activation_type"] == "action"
+    assert features_by_name["Psionic Power: Telekinetic Movement"]["tracker_ref"] == "psionic-power-telekinetic-movement"
+    assert "move an object or a creature with your mind" in features_by_name["Psionic Power: Telekinetic Movement"]["description_markdown"]
+    assert features_by_name["Psionic Power: Recovery"]["activation_type"] == "bonus_action"
+    assert features_by_name["Psionic Power: Recovery"]["tracker_ref"] == "psionic-power-recovery"
+    assert "regain one expended Psionic Energy die" in features_by_name["Psionic Power: Recovery"]["description_markdown"]
+
+    assert features_by_name["Sentinel"]["activation_type"] == "reaction"
+    assert "psionic-power-psionic-energy" in resource_ids
+    assert "psionic-power-telekinetic-movement" in resource_ids
+    assert "psionic-power-recovery" in resource_ids
+    assert "second-wind" in resource_ids
+
+
 def test_resolve_definition_systems_links_prefers_contextual_matches():
     markdown = build_pdf_character_markdown(_sample_pdf_fields())
     definition, _ = parse_character_sheet_text(
