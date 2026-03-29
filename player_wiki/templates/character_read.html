@@ -42,6 +42,11 @@
         {% endif %}
         {% if can_use_session_mode %}
           <div class="hero-actions">
+            {% if can_level_up %}
+              <a class="ghost-button" href="{{ url_for('character_level_up_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
+                Level up
+              </a>
+            {% endif %}
             {% if is_session_mode %}
               <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='read', page=character_subpage) }}">
                 Back to read mode
@@ -51,6 +56,12 @@
                 Enter session mode
               </a>
             {% endif %}
+          </div>
+        {% elif can_level_up %}
+          <div class="hero-actions">
+            <a class="ghost-button" href="{{ url_for('character_level_up_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
+              Level up
+            </a>
           </div>
         {% endif %}
       </header>

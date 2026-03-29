@@ -85,7 +85,12 @@ def build_initial_state(definition: CharacterDefinition) -> dict[str, Any]:
     }
 
 
-def merge_state_with_definition(definition: CharacterDefinition, state: dict[str, Any]) -> dict[str, Any]:
+def merge_state_with_definition(
+    definition: CharacterDefinition,
+    state: dict[str, Any],
+    *,
+    hp_delta: int = 0,
+) -> dict[str, Any]:
     payload = deepcopy(state)
     existing_resources = list(payload.get("resources") or [])
     template_resource_ids: set[str] = set()
@@ -124,6 +129,41 @@ def merge_state_with_definition(definition: CharacterDefinition, state: dict[str
         merged_resources.append(deepcopy(resource))
 
     payload["resources"] = merged_resources
+    existing_slots = list(payload.get("spell_slots") or [])
+    existing_slots_by_level = {
+        int(slot.get("level") or 0): dict(slot)
+        for slot in existing_slots
+        if int(slot.get("level") or 0) > 0
+    }
+    merged_slots: list[dict[str, Any]] = []
+    tracked_slot_levels: set[int] = set()
+    for slot in list((definition.spellcasting or {}).get("slot_progression") or []):
+        level = int(slot.get("level") or 0)
+        max_slots = int(slot.get("max_slots") or 0)
+        tracked_slot_levels.add(level)
+        existing_slot = existing_slots_by_level.get(level)
+        used_slots = int((existing_slot or {}).get("used") or 0)
+        merged_slots.append(
+            {
+                "level": level,
+                "max": max_slots,
+                "used": max(0, min(used_slots, max_slots)),
+            }
+        )
+    for slot in existing_slots:
+        level = int(slot.get("level") or 0)
+        if level in tracked_slot_levels:
+            continue
+        merged_slots.append(deepcopy(slot))
+    payload["spell_slots"] = merged_slots
+
+    vitals = dict(payload.get("vitals") or {})
+    current_hp = int(vitals.get("current_hp") or 0)
+    max_hp = int((definition.stats or {}).get("max_hp") or 0)
+    if hp_delta:
+        current_hp += int(hp_delta)
+    vitals["current_hp"] = max(0, min(current_hp, max_hp))
+    payload["vitals"] = vitals
     return payload
 
 

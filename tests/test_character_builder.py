@@ -4,11 +4,15 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import player_wiki.app as app_module
+import yaml
 from player_wiki.character_builder import (
+    build_native_level_up_character_definition,
+    build_native_level_up_context,
     build_level_one_builder_context,
     build_level_one_character_definition,
+    supports_native_level_up,
 )
-from player_wiki.character_service import build_initial_state
+from player_wiki.character_service import build_initial_state, merge_state_with_definition
 from player_wiki.character_models import CharacterDefinition, CharacterImportMetadata
 from player_wiki.systems_models import SystemsEntryRecord
 
@@ -109,9 +113,43 @@ def _minimal_character_definition(character_slug: str = "new-hero", name: str = 
             "sheet_name": name,
             "display_name": name,
             "class_level_text": "Fighter 1",
-            "classes": [],
+            "classes": [
+                {
+                    "class_name": "Fighter",
+                    "subclass_name": "",
+                    "level": 1,
+                    "systems_ref": {
+                        "entry_key": "dnd-5e|class|phb|fighter",
+                        "entry_type": "class",
+                        "title": "Fighter",
+                        "slug": "phb-class-fighter",
+                        "source_id": "PHB",
+                    },
+                }
+            ],
+            "class_ref": {
+                "entry_key": "dnd-5e|class|phb|fighter",
+                "entry_type": "class",
+                "title": "Fighter",
+                "slug": "phb-class-fighter",
+                "source_id": "PHB",
+            },
             "species": "Human",
+            "species_ref": {
+                "entry_key": "dnd-5e|race|phb|human",
+                "entry_type": "race",
+                "title": "Human",
+                "slug": "phb-race-human",
+                "source_id": "PHB",
+            },
             "background": "Acolyte",
+            "background_ref": {
+                "entry_key": "dnd-5e|background|phb|acolyte",
+                "entry_type": "background",
+                "title": "Acolyte",
+                "slug": "phb-background-acolyte",
+                "source_id": "PHB",
+            },
             "alignment": "Neutral",
             "experience_model": "Milestone",
             "size": "Medium",
@@ -171,7 +209,7 @@ def _minimal_import_metadata(character_slug: str = "new-hero") -> CharacterImpor
         character_slug=character_slug,
         source_path="builder://phb-level-1",
         imported_at_utc="2026-03-29T00:00:00Z",
-        parser_version="2026-03-29.5",
+        parser_version="2026-03-29.6",
         import_status="clean",
         warnings=[],
     )
@@ -1089,7 +1127,7 @@ def test_level_one_builder_populates_starting_equipment_spells_and_currency():
     assert spells_by_name["Find Familiar"]["mark"] == "Spellbook"
     assert spells_by_name["Detect Magic"]["reference"] == "p. 231"
     assert spells_by_name["Message"]["components"] == "V, S, M (a short piece of copper wire)"
-    assert import_metadata.parser_version == "2026-03-29.5"
+    assert import_metadata.parser_version == "2026-03-29.6"
 
 
 def test_level_one_builder_puts_great_weapon_fighting_note_on_versatile_two_handed_row():
@@ -1207,6 +1245,407 @@ def test_level_one_builder_puts_great_weapon_fighting_note_on_versatile_two_hand
     assert attacks_by_name["Quarterstaff (two-handed)"]["notes"] == "Great Weapon Fighting (reroll 1s and 2s)."
 
 
+def test_native_level_up_advances_fighter_to_level_two_and_merges_state():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "subclass_title": "Martial Archetype",
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+            "starting_equipment": {
+                "defaultData": [
+                    {"_": ["longsword|phb", "shield|phb"]},
+                ]
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+        body={"entries": [{"name": "Feature: Adaptable", "entries": ["You fit in almost anywhere."]}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+        body={
+            "entries": [
+                {
+                    "name": "Feature: Shelter of the Faithful",
+                    "entries": ["You can find refuge among the faithful."],
+                    "data": {"isFeature": True},
+                }
+            ]
+        },
+    )
+    fighting_style = _systems_entry("classfeature", "phb-classfeature-fighting-style", "Fighting Style", metadata={"level": 1})
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    action_surge = _systems_entry("classfeature", "phb-classfeature-action-surge", "Action Surge", metadata={"level": 2})
+    longsword = _systems_entry("item", "phb-item-longsword", "Longsword", metadata={"weight": 3})
+    shield = _systems_entry("item", "phb-item-shield", "Shield", metadata={"weight": 6, "type": "S"})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "item": [longsword, shield],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {
+                        "label": "Fighting Style",
+                        "entry": fighting_style,
+                        "embedded_card": {
+                            "option_groups": [
+                                {
+                                    "options": [
+                                        {"label": "Dueling", "slug": "phb-optionalfeature-dueling"},
+                                        {"label": "Defense", "slug": "phb-optionalfeature-defense"},
+                                    ]
+                                }
+                            ]
+                        },
+                    },
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            },
+            {
+                "level": 2,
+                "level_label": "Level 2",
+                "feature_rows": [
+                    {"label": "Action Surge", "entry": action_surge, "embedded_card": {"option_groups": []}},
+                ],
+            },
+        ],
+    )
+
+    form_values = {
+        "name": "Ser Rowan",
+        "character_slug": "ser-rowan",
+        "alignment": "Lawful Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "class_option_1": "phb-optionalfeature-dueling",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    level_one_context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    level_one_definition, _ = build_level_one_character_definition("linden-pass", level_one_context, form_values)
+    assert supports_native_level_up(level_one_definition) is True
+
+    level_up_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        level_one_definition,
+        {"hp_gain": "8"},
+    )
+    leveled_definition, _, hp_gain = build_native_level_up_character_definition(
+        "linden-pass",
+        level_one_definition,
+        level_up_context,
+        {"hp_gain": "8"},
+    )
+    merged_state = merge_state_with_definition(
+        leveled_definition,
+        build_initial_state(level_one_definition),
+        hp_delta=hp_gain,
+    )
+
+    feature_names = {feature["name"] for feature in leveled_definition.features}
+    attacks_by_name = {attack["name"]: attack for attack in leveled_definition.attacks}
+    resource_ids = {template["id"] for template in leveled_definition.resource_templates}
+
+    assert leveled_definition.profile["class_level_text"] == "Fighter 2"
+    assert leveled_definition.profile["classes"][0]["level"] == 2
+    assert leveled_definition.stats["max_hp"] == level_one_definition.stats["max_hp"] + 8
+    assert "Action Surge" in feature_names
+    assert "action-surge" in resource_ids
+    assert attacks_by_name["Longsword"]["damage"] == "1d8+5 slashing"
+    assert merged_state["vitals"]["current_hp"] == leveled_definition.stats["max_hp"]
+    assert {slot["level"]: slot["max"] for slot in merged_state["spell_slots"]} == {}
+
+
+def test_native_level_up_advances_wizard_to_level_two_with_subclass_and_spellbook_growth():
+    wizard = _systems_entry(
+        "class",
+        "phb-class-wizard",
+        "Wizard",
+        metadata={
+            "hit_die": {"faces": 6},
+            "proficiency": ["int", "wis"],
+            "subclass_title": "Arcane Tradition",
+            "starting_proficiencies": {
+                "armor": [],
+                "weapons": ["dagger", "dart", "sling", "quarterstaff", "light crossbow"],
+                "skills": [{"choose": {"count": 2, "from": ["arcana", "history", "investigation", "insight"]}}],
+            },
+            "starting_equipment": {
+                "defaultData": [
+                    {"a": ["quarterstaff|phb"], "b": ["dagger|phb"]},
+                    {"a": ["component pouch|phb"], "b": [{"equipmentType": "focusSpellcastingArcane"}]},
+                    {"a": ["scholar's pack|phb"], "b": ["explorer's pack|phb"]},
+                    {"_": ["spellbook|phb"]},
+                ]
+            },
+        },
+    )
+    evocation = _systems_entry(
+        "subclass",
+        "phb-subclass-wizard-school-of-evocation",
+        "School of Evocation",
+        metadata={"class_name": "Wizard", "class_source": "PHB"},
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+        body={"entries": [{"name": "Feature: Resourceful", "entries": ["You adapt quickly to new situations."]}]},
+    )
+    hermit = _systems_entry(
+        "background",
+        "phb-background-hermit",
+        "Hermit",
+        metadata={
+            "skill_proficiencies": [{"medicine": True, "religion": True}],
+            "tool_proficiencies": ["Herbalism Kit"],
+            "starting_equipment": [
+                {
+                    "_": [
+                        {
+                            "item": "map or scroll case|phb",
+                            "displayName": "scroll case stuffed full of notes from your studies or prayers",
+                        },
+                        {"item": "blanket|phb", "displayName": "winter blanket"},
+                        "common clothes|phb",
+                        "herbalism kit|phb",
+                        {"value": 500},
+                    ]
+                }
+            ],
+        },
+        body={
+            "entries": [
+                {
+                    "name": "Feature: Discovery",
+                    "entries": ["Your quiet seclusion has yielded a singular insight."],
+                    "data": {"isFeature": True},
+                }
+            ]
+        },
+    )
+    spellcasting_feature = _systems_entry(
+        "classfeature",
+        "phb-classfeature-spellcasting",
+        "Spellcasting",
+        metadata={"level": 1},
+    )
+    arcane_recovery = _systems_entry(
+        "classfeature",
+        "phb-classfeature-arcane-recovery",
+        "Arcane Recovery",
+        metadata={"level": 1},
+    )
+    arcane_tradition = _systems_entry(
+        "classfeature",
+        "phb-classfeature-arcane-tradition",
+        "Arcane Tradition",
+        metadata={"level": 2},
+    )
+    evocation_savant = _systems_entry(
+        "subclassfeature",
+        "phb-subclassfeature-evocation-savant",
+        "Evocation Savant",
+        metadata={"level": 2, "class_name": "Wizard", "class_source": "PHB", "subclass_name": "School of Evocation"},
+    )
+    sculpt_spells = _systems_entry(
+        "subclassfeature",
+        "phb-subclassfeature-sculpt-spells",
+        "Sculpt Spells",
+        metadata={"level": 2, "class_name": "Wizard", "class_source": "PHB", "subclass_name": "School of Evocation"},
+    )
+    quarterstaff = _systems_entry("item", "phb-item-quarterstaff", "Quarterstaff", metadata={"weight": 4, "type": "M"})
+    component_pouch = _systems_entry("item", "phb-item-component-pouch", "Component Pouch", metadata={"weight": 2})
+    crystal = _systems_entry("item", "phb-item-crystal", "Crystal", metadata={"weight": 1, "type": "SCF"})
+    scholars_pack = _systems_entry("item", "phb-item-scholars-pack", "Scholar's Pack", metadata={"weight": 10})
+    spellbook = _systems_entry("item", "phb-item-spellbook", "Spellbook", metadata={"weight": 3})
+    scroll_case = _systems_entry("item", "phb-item-map-or-scroll-case", "Map or Scroll Case", metadata={"weight": 1})
+    blanket = _systems_entry("item", "phb-item-blanket", "Blanket", metadata={"weight": 3})
+    common_clothes = _systems_entry("item", "phb-item-common-clothes", "Common Clothes", metadata={"weight": 3})
+    herbalism_kit = _systems_entry("item", "phb-item-herbalism-kit", "Herbalism Kit", metadata={"weight": 3, "type": "AT"})
+
+    light = _systems_entry("spell", "phb-spell-light", "Light", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    mage_hand = _systems_entry("spell", "phb-spell-mage-hand", "Mage Hand", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    message = _systems_entry("spell", "phb-spell-message", "Message", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    detect_magic = _systems_entry("spell", "phb-spell-detect-magic", "Detect Magic", metadata={"casting_time": [{"number": 1, "unit": "action"}]}, source_page="231")
+    find_familiar = _systems_entry("spell", "phb-spell-find-familiar", "Find Familiar", metadata={"casting_time": [{"number": 1, "unit": "hour"}]}, source_page="240")
+    mage_armor = _systems_entry("spell", "phb-spell-mage-armor", "Mage Armor", metadata={"casting_time": [{"number": 1, "unit": "action"}]}, source_page="256")
+    magic_missile = _systems_entry("spell", "phb-spell-magic-missile", "Magic Missile", metadata={"casting_time": [{"number": 1, "unit": "action"}]}, source_page="257")
+    shield = _systems_entry("spell", "phb-spell-shield", "Shield", metadata={"casting_time": [{"number": 1, "unit": "reaction"}]}, source_page="275")
+    sleep = _systems_entry("spell", "phb-spell-sleep", "Sleep", metadata={"casting_time": [{"number": 1, "unit": "action"}]}, source_page="276")
+    thunderwave = _systems_entry("spell", "phb-spell-thunderwave", "Thunderwave", metadata={"casting_time": [{"number": 1, "unit": "action"}]}, source_page="282")
+    burning_hands = _systems_entry("spell", "phb-spell-burning-hands", "Burning Hands", metadata={"casting_time": [{"number": 1, "unit": "action"}]}, source_page="220")
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [wizard],
+            "race": [human],
+            "background": [hermit],
+            "feat": [],
+            "subclass": [evocation],
+            "item": [
+                quarterstaff,
+                component_pouch,
+                crystal,
+                scholars_pack,
+                spellbook,
+                scroll_case,
+                blanket,
+                common_clothes,
+                herbalism_kit,
+            ],
+            "spell": [
+                light,
+                mage_hand,
+                message,
+                detect_magic,
+                find_familiar,
+                mage_armor,
+                magic_missile,
+                shield,
+                sleep,
+                thunderwave,
+                burning_hands,
+            ],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Spellcasting", "entry": spellcasting_feature, "embedded_card": {"option_groups": []}},
+                    {"label": "Arcane Recovery", "entry": arcane_recovery, "embedded_card": {"option_groups": []}},
+                ],
+            },
+            {
+                "level": 2,
+                "level_label": "Level 2",
+                "feature_rows": [
+                    {"label": "Arcane Tradition", "entry": arcane_tradition, "embedded_card": {"option_groups": []}},
+                ],
+            },
+        ],
+        subclass_progression=[
+            {
+                "level": 2,
+                "level_label": "Level 2",
+                "feature_rows": [
+                    {"label": "Evocation Savant", "entry": evocation_savant, "embedded_card": {"option_groups": []}},
+                    {"label": "Sculpt Spells", "entry": sculpt_spells, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    base_form_values = {
+        "name": "Mira Vale",
+        "character_slug": "mira-vale",
+        "alignment": "Neutral Good",
+        "experience_model": "Milestone",
+        "class_slug": wizard.slug,
+        "species_slug": human.slug,
+        "background_slug": hermit.slug,
+        "class_skill_1": "arcana",
+        "class_skill_2": "history",
+        "str": "8",
+        "dex": "14",
+        "con": "13",
+        "int": "16",
+        "wis": "12",
+        "cha": "10",
+    }
+
+    level_one_context = build_level_one_builder_context(systems_service, "linden-pass", base_form_values)
+    level_one_form = {
+        **base_form_values,
+        "class_equipment_1": _field_value_for_label(level_one_context, "class_equipment_1", "Quarterstaff"),
+        "class_equipment_2": _field_value_for_label(level_one_context, "class_equipment_2", "Crystal"),
+        "class_equipment_3": _field_value_for_label(level_one_context, "class_equipment_3", "Scholar's Pack"),
+        "spell_cantrip_1": _field_value_for_label(level_one_context, "spell_cantrip_1", "Light"),
+        "spell_cantrip_2": _field_value_for_label(level_one_context, "spell_cantrip_2", "Mage Hand"),
+        "spell_cantrip_3": _field_value_for_label(level_one_context, "spell_cantrip_3", "Message"),
+        "wizard_spellbook_1": _field_value_for_label(level_one_context, "wizard_spellbook_1", "Detect Magic"),
+        "wizard_spellbook_2": _field_value_for_label(level_one_context, "wizard_spellbook_2", "Find Familiar"),
+        "wizard_spellbook_3": _field_value_for_label(level_one_context, "wizard_spellbook_3", "Mage Armor"),
+        "wizard_spellbook_4": _field_value_for_label(level_one_context, "wizard_spellbook_4", "Magic Missile"),
+        "wizard_spellbook_5": _field_value_for_label(level_one_context, "wizard_spellbook_5", "Shield"),
+        "wizard_spellbook_6": _field_value_for_label(level_one_context, "wizard_spellbook_6", "Sleep"),
+        "wizard_prepared_1": _field_value_for_label(level_one_context, "wizard_prepared_1", "Detect Magic"),
+        "wizard_prepared_2": _field_value_for_label(level_one_context, "wizard_prepared_2", "Mage Armor"),
+        "wizard_prepared_3": _field_value_for_label(level_one_context, "wizard_prepared_3", "Magic Missile"),
+        "wizard_prepared_4": _field_value_for_label(level_one_context, "wizard_prepared_4", "Shield"),
+    }
+    level_one_context = build_level_one_builder_context(systems_service, "linden-pass", level_one_form)
+    level_one_definition, _ = build_level_one_character_definition("linden-pass", level_one_context, level_one_form)
+
+    level_up_form = {
+        "hp_gain": "4",
+        "subclass_slug": evocation.slug,
+        "levelup_wizard_spellbook_1": thunderwave.slug,
+        "levelup_wizard_spellbook_2": burning_hands.slug,
+        "levelup_wizard_prepared_1": thunderwave.slug,
+    }
+    level_up_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        level_one_definition,
+        level_up_form,
+    )
+    leveled_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        level_one_definition,
+        level_up_context,
+        level_up_form,
+    )
+
+    spells_by_name = {spell["name"]: spell for spell in leveled_definition.spellcasting["spells"]}
+    feature_names = {feature["name"] for feature in leveled_definition.features}
+
+    assert leveled_definition.profile["class_level_text"] == "Wizard 2"
+    assert leveled_definition.profile["subclass_ref"]["slug"] == evocation.slug
+    assert leveled_definition.stats["max_hp"] == level_one_definition.stats["max_hp"] + 4
+    assert leveled_definition.spellcasting["slot_progression"] == [{"level": 1, "max_slots": 3}]
+    assert spells_by_name["Thunderwave"]["mark"] == "Prepared + Spellbook"
+    assert spells_by_name["Burning Hands"]["mark"] == "Spellbook"
+    assert feature_names >= {"Evocation Savant", "Sculpt Spells"}
+
+
 def test_dm_roster_shows_create_character_link(client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
@@ -1270,3 +1709,123 @@ def test_dm_can_create_character_from_builder_route(app, client, sign_in, users,
     assert record is not None
     assert record.definition.name == "New Hero"
     assert record.state_record.state["vitals"]["current_hp"] == 12
+
+
+def test_dm_can_see_level_up_entry_for_supported_native_character(app, client, sign_in, users, monkeypatch):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    character_dir = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "characters" / "leveler"
+    character_dir.mkdir(parents=True, exist_ok=True)
+    definition = _minimal_character_definition("leveler", "Leveler")
+    import_metadata = _minimal_import_metadata("leveler")
+    (character_dir / "definition.yaml").write_text(yaml.safe_dump(definition.to_dict(), sort_keys=False), encoding="utf-8")
+    (character_dir / "import.yaml").write_text(yaml.safe_dump(import_metadata.to_dict(), sort_keys=False), encoding="utf-8")
+
+    monkeypatch.setattr(app_module, "supports_native_level_up", lambda definition: True)
+
+    response = client.get("/campaigns/linden-pass/characters/leveler")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "/campaigns/linden-pass/characters/leveler/level-up" in html
+    assert "Level up" in html
+
+
+def test_dm_can_apply_native_level_up_route(app, client, sign_in, users, get_character, monkeypatch):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    character_dir = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "characters" / "leveler"
+    character_dir.mkdir(parents=True, exist_ok=True)
+    definition = _minimal_character_definition("leveler", "Leveler")
+    import_metadata = _minimal_import_metadata("leveler")
+    (character_dir / "definition.yaml").write_text(yaml.safe_dump(definition.to_dict(), sort_keys=False), encoding="utf-8")
+    (character_dir / "import.yaml").write_text(yaml.safe_dump(import_metadata.to_dict(), sort_keys=False), encoding="utf-8")
+
+    monkeypatch.setattr(app_module, "supports_native_level_up", lambda definition: True)
+    monkeypatch.setattr(
+        app_module,
+        "build_native_level_up_context",
+        lambda *args, **kwargs: {
+            "values": {"hp_gain": "8"},
+            "character_name": "Leveler",
+            "current_level": 1,
+            "next_level": 2,
+            "selected_class": SimpleNamespace(title="Fighter"),
+            "selected_species": SimpleNamespace(title="Human"),
+            "selected_background": SimpleNamespace(title="Acolyte"),
+            "selected_subclass": None,
+            "subclass_options": [],
+            "requires_subclass": False,
+            "choice_sections": [],
+            "class_progression": [],
+            "subclass_progression": [],
+            "spell_catalog": {},
+            "limitations": [],
+            "preview": {
+                "class_level_text": "Fighter 2",
+                "max_hp": 20,
+                "gained_features": ["Action Surge"],
+                "spell_slots": [],
+                "new_spells": [],
+            },
+        },
+    )
+
+    leveled_definition = _minimal_character_definition("leveler", "Leveler")
+    leveled_definition.profile["class_level_text"] = "Fighter 2"
+    leveled_definition.profile["classes"][0]["level"] = 2
+    leveled_definition.stats["max_hp"] = 20
+    leveled_definition.features = [
+        {
+            "id": "action-surge-1",
+            "name": "Action Surge",
+            "category": "class_feature",
+            "source": "PHB",
+            "description_markdown": "",
+            "activation_type": "special",
+            "tracker_ref": "action-surge",
+            "systems_ref": {"entry_type": "classfeature", "slug": "phb-classfeature-action-surge", "title": "Action Surge", "source_id": "PHB"},
+        }
+    ]
+    leveled_definition.resource_templates = [
+        {
+            "id": "action-surge",
+            "label": "Action Surge",
+            "category": "class_feature",
+            "initial_current": 1,
+            "max": 1,
+            "reset_on": "short_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Action Surge",
+            "display_order": 0,
+        }
+    ]
+    leveled_import = _minimal_import_metadata("leveler")
+    leveled_import.source_path = "builder://phb-level-2"
+
+    monkeypatch.setattr(
+        app_module,
+        "build_native_level_up_character_definition",
+        lambda *args, **kwargs: (leveled_definition, leveled_import, 8),
+    )
+
+    response = client.post(
+        "/campaigns/linden-pass/characters/leveler/level-up",
+        data={"expected_revision": "1", "hp_gain": "8"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/campaigns/linden-pass/characters/leveler")
+
+    definition_payload = yaml.safe_load((character_dir / "definition.yaml").read_text(encoding="utf-8"))
+    import_payload = yaml.safe_load((character_dir / "import.yaml").read_text(encoding="utf-8"))
+    assert definition_payload["profile"]["class_level_text"] == "Fighter 2"
+    assert import_payload["source_path"] == "builder://phb-level-2"
+
+    record = get_character("leveler")
+    assert record is not None
+    assert record.definition.stats["max_hp"] == 20
+    assert record.state_record.state["vitals"]["current_hp"] == 20
+    assert any(resource["id"] == "action-surge" for resource in record.state_record.state["resources"])

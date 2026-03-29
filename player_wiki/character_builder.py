@@ -11,7 +11,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-03-29.5"
+CHARACTER_BUILDER_VERSION = "2026-03-29.6"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -98,6 +98,8 @@ SPELLCASTING_ABILITY_BY_CLASS = {
     "Bard": "Charisma",
     "Cleric": "Wisdom",
     "Druid": "Wisdom",
+    "Paladin": "Charisma",
+    "Ranger": "Wisdom",
     "Sorcerer": "Charisma",
     "Warlock": "Charisma",
     "Wizard": "Intelligence",
@@ -123,6 +125,69 @@ LEVEL_ONE_SPELL_RULES_BY_CLASS = {
         "ability_key": "int",
     },
 }
+LEVEL_TWO_SPELL_SLOTS_BY_CLASS = {
+    "Bard": [{"level": 1, "max_slots": 3}],
+    "Cleric": [{"level": 1, "max_slots": 3}],
+    "Druid": [{"level": 1, "max_slots": 3}],
+    "Paladin": [{"level": 1, "max_slots": 2}],
+    "Ranger": [{"level": 1, "max_slots": 2}],
+    "Sorcerer": [{"level": 1, "max_slots": 3}],
+    "Warlock": [{"level": 1, "max_slots": 2}],
+    "Wizard": [{"level": 1, "max_slots": 3}],
+}
+LEVEL_TWO_SPELL_RULES_BY_CLASS = {
+    "Bard": {"spell_mode": "known", "new_level_one_spells": 1},
+    "Cleric": {"spell_mode": "prepared", "ability_key": "wis"},
+    "Druid": {"spell_mode": "prepared", "ability_key": "wis"},
+    "Paladin": {"spell_mode": "prepared", "ability_key": "cha", "starts_spellcasting": True},
+    "Ranger": {"spell_mode": "known", "new_level_one_spells": 2, "starts_spellcasting": True},
+    "Sorcerer": {"spell_mode": "known", "new_level_one_spells": 1},
+    "Warlock": {"spell_mode": "known", "new_level_one_spells": 1},
+    "Wizard": {"spell_mode": "wizard", "ability_key": "int", "new_spellbook_spells": 2},
+}
+EXTRA_PHB_LEVEL_ONE_SPELL_LISTS = {
+    "Paladin": {
+        "1": [
+            "Bless",
+            "Command",
+            "Compelled Duel",
+            "Cure Wounds",
+            "Detect Evil and Good",
+            "Detect Magic",
+            "Detect Poison and Disease",
+            "Divine Favor",
+            "Heroism",
+            "Protection from Evil and Good",
+            "Purify Food and Drink",
+            "Searing Smite",
+            "Shield of Faith",
+            "Thunderous Smite",
+            "Wrathful Smite",
+        ]
+    },
+    "Ranger": {
+        "1": [
+            "Alarm",
+            "Animal Friendship",
+            "Cure Wounds",
+            "Detect Magic",
+            "Detect Poison and Disease",
+            "Ensnaring Strike",
+            "Fog Cloud",
+            "Goodberry",
+            "Hail of Thorns",
+            "Hunter's Mark",
+            "Jump",
+            "Longstrider",
+            "Speak with Animals",
+        ]
+    },
+}
+NATIVE_LEVEL_UP_LIMITATIONS = [
+    "This first progression slice advances native PHB characters from level 1 to level 2.",
+    "Hit point gain is entered manually so your table can choose rolled or fixed HP.",
+    "Prepared-caster level-up currently preserves existing prepared spells and adds the new picks needed for the next level.",
+]
 LEVEL_ONE_ALWAYS_PREPARED_SPELLS_BY_SUBCLASS = {
     normalize_lookup("Knowledge Domain"): ["Command", "Identify"],
     normalize_lookup("Life Domain"): ["Bless", "Cure Wounds"],
@@ -471,6 +536,228 @@ def build_level_one_character_definition(
     return definition, import_metadata
 
 
+def supports_native_level_up(definition: CharacterDefinition) -> bool:
+    return _native_level_up_support_error(definition) == ""
+
+
+def build_native_level_up_context(
+    systems_service: Any,
+    campaign_slug: str,
+    definition: CharacterDefinition,
+    form_values: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    support_error = _native_level_up_support_error(definition)
+    if support_error:
+        raise CharacterBuildError(support_error)
+
+    values = _normalize_level_up_values(definition, form_values or {})
+    current_level = _resolve_native_character_level(definition)
+    next_level = current_level + 1
+    class_options = _list_phb_entries(systems_service, campaign_slug, "class")
+    species_options = _list_phb_entries(systems_service, campaign_slug, "race")
+    background_options = _list_phb_entries(systems_service, campaign_slug, "background")
+    spell_catalog = _build_spell_catalog(_list_phb_entries(systems_service, campaign_slug, "spell"))
+
+    selected_class = _resolve_profile_entry(
+        class_options,
+        definition.profile.get("class_ref"),
+        fallback_title=_native_character_class_name(definition),
+    )
+    selected_species = _resolve_profile_entry(
+        species_options,
+        definition.profile.get("species_ref"),
+        fallback_title=str(definition.profile.get("species") or "").strip(),
+    )
+    selected_background = _resolve_profile_entry(
+        background_options,
+        definition.profile.get("background_ref"),
+        fallback_title=str(definition.profile.get("background") or "").strip(),
+    )
+    if selected_class is None or selected_species is None or selected_background is None:
+        raise CharacterBuildError("This native character is missing PHB Systems links needed for level-up.")
+
+    subclass_options = _list_subclass_options(systems_service, campaign_slug, selected_class)
+    existing_subclass_slug = _systems_ref_slug(definition.profile.get("subclass_ref"))
+    if existing_subclass_slug and not str(values.get("subclass_slug") or "").strip():
+        values["subclass_slug"] = existing_subclass_slug
+    selected_subclass = _resolve_selected_entry(subclass_options, values.get("subclass_slug", ""))
+
+    class_progression = systems_service.build_class_feature_progression_for_class_entry(campaign_slug, selected_class)
+    requires_subclass = (
+        _class_requires_subclass_at_level(selected_class, class_progression, next_level)
+        and selected_subclass is None
+    )
+    subclass_progression = (
+        systems_service.build_subclass_feature_progression_for_subclass_entry(campaign_slug, selected_subclass)
+        if selected_subclass is not None
+        else []
+    )
+    choice_sections = _build_level_up_choice_sections(
+        definition=definition,
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        subclass_options=subclass_options,
+        requires_subclass=requires_subclass,
+        class_progression=class_progression,
+        subclass_progression=subclass_progression,
+        spell_catalog=spell_catalog,
+        target_level=next_level,
+        values=values,
+    )
+    preview = _build_native_level_up_preview(
+        definition=definition,
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        class_progression=class_progression,
+        subclass_progression=subclass_progression,
+        choice_sections=choice_sections,
+        spell_catalog=spell_catalog,
+        target_level=next_level,
+        values=values,
+    )
+    return {
+        "values": values,
+        "character_name": definition.name,
+        "current_level": current_level,
+        "next_level": next_level,
+        "selected_class": selected_class,
+        "selected_species": selected_species,
+        "selected_background": selected_background,
+        "selected_subclass": selected_subclass,
+        "subclass_options": [_entry_option(entry) for entry in subclass_options],
+        "requires_subclass": requires_subclass,
+        "choice_sections": choice_sections,
+        "class_progression": class_progression,
+        "subclass_progression": subclass_progression,
+        "spell_catalog": spell_catalog,
+        "limitations": list(NATIVE_LEVEL_UP_LIMITATIONS),
+        "preview": preview,
+    }
+
+
+def build_native_level_up_character_definition(
+    campaign_slug: str,
+    current_definition: CharacterDefinition,
+    level_up_context: dict[str, Any],
+    form_values: dict[str, str] | None = None,
+) -> tuple[CharacterDefinition, CharacterImportMetadata, int]:
+    support_error = _native_level_up_support_error(current_definition)
+    if support_error:
+        raise CharacterBuildError(support_error)
+
+    values = _normalize_level_up_values(current_definition, form_values or {})
+    selected_class = level_up_context.get("selected_class")
+    selected_species = level_up_context.get("selected_species")
+    selected_background = level_up_context.get("selected_background")
+    selected_subclass = level_up_context.get("selected_subclass")
+    choice_sections = list(level_up_context.get("choice_sections") or [])
+    class_progression = list(level_up_context.get("class_progression") or [])
+    subclass_progression = list(level_up_context.get("subclass_progression") or [])
+    spell_catalog = dict(level_up_context.get("spell_catalog") or {})
+    if selected_class is None or selected_species is None or selected_background is None:
+        raise CharacterBuildError("This native character is missing the class, species, or background needed for level-up.")
+    if level_up_context.get("requires_subclass") and selected_subclass is None:
+        raise CharacterBuildError("Choose a subclass before leveling up this character.")
+
+    current_level = int(level_up_context.get("current_level") or _resolve_native_character_level(current_definition))
+    target_level = int(level_up_context.get("next_level") or (current_level + 1))
+    if target_level != current_level + 1:
+        raise CharacterBuildError("Level-up currently advances one level at a time.")
+
+    hp_gain = _parse_level_up_hit_point_gain(values)
+    _, selected_choices = _resolve_builder_choices(choice_sections, values)
+    ability_scores = _ability_scores_from_definition(current_definition)
+    proficiency_bonus = _proficiency_bonus_for_level(target_level)
+    proficient_skills = [
+        str(skill.get("name") or "").strip()
+        for skill in list(current_definition.skills or [])
+        if str(skill.get("proficiency_level") or "").strip() == "proficient"
+    ]
+    skills = _build_skills_payload(ability_scores, proficient_skills, proficiency_bonus)
+
+    new_feature_entries = _collect_progression_feature_entries_for_level(
+        class_progression=class_progression,
+        subclass_progression=subclass_progression,
+        target_level=target_level,
+        selected_choices=selected_choices,
+    )
+    new_features, new_resource_templates = _build_feature_payloads(
+        new_feature_entries,
+        ability_scores=ability_scores,
+    )
+
+    combined_selected_choices = _merge_selected_choice_maps(
+        _extract_existing_feature_choice_map(current_definition),
+        selected_choices,
+    )
+    item_catalog = _build_item_catalog([])
+    attacks = _build_level_one_attacks(
+        equipment_catalog=list(current_definition.equipment_catalog or []),
+        item_catalog=item_catalog,
+        ability_scores=ability_scores,
+        proficiency_bonus=proficiency_bonus,
+        weapon_proficiencies=list((current_definition.proficiencies or {}).get("weapons") or []),
+        selected_choices=combined_selected_choices,
+    )
+    definition = CharacterDefinition(
+        campaign_slug=campaign_slug,
+        character_slug=current_definition.character_slug,
+        name=current_definition.name,
+        status=current_definition.status,
+        profile=_build_leveled_profile(
+            current_definition=current_definition,
+            selected_class=selected_class,
+            selected_subclass=selected_subclass,
+            target_level=target_level,
+        ),
+        stats=_build_leveled_stats(
+            current_definition=current_definition,
+            selected_class=selected_class,
+            ability_scores=ability_scores,
+            skills=skills,
+            proficiency_bonus=proficiency_bonus,
+            hp_gain=hp_gain,
+        ),
+        skills=skills,
+        proficiencies={
+            "armor": list((current_definition.proficiencies or {}).get("armor") or []),
+            "weapons": list((current_definition.proficiencies or {}).get("weapons") or []),
+            "tools": list((current_definition.proficiencies or {}).get("tools") or []),
+            "languages": list((current_definition.proficiencies or {}).get("languages") or []),
+        },
+        attacks=attacks,
+        features=_merge_feature_payloads(list(current_definition.features or []), new_features),
+        spellcasting=_build_level_up_spellcasting(
+            current_definition=current_definition,
+            selected_class=selected_class,
+            selected_subclass=selected_subclass,
+            ability_scores=ability_scores,
+            proficiency_bonus=proficiency_bonus,
+            choice_sections=choice_sections,
+            selected_choices=selected_choices,
+            spell_catalog=spell_catalog,
+            target_level=target_level,
+        ),
+        equipment_catalog=list(current_definition.equipment_catalog or []),
+        reference_notes=dict(current_definition.reference_notes or {}),
+        resource_templates=_merge_resource_templates(
+            list(current_definition.resource_templates or []),
+            new_resource_templates,
+        ),
+        source=_build_leveled_source(current_definition.source, target_level),
+    )
+    import_metadata = CharacterImportMetadata(
+        campaign_slug=campaign_slug,
+        character_slug=current_definition.character_slug,
+        source_path=f"builder://phb-level-{target_level}",
+        imported_at_utc=isoformat(utcnow()),
+        parser_version=CHARACTER_BUILDER_VERSION,
+        import_status="clean",
+        warnings=[],
+    )
+    return definition, import_metadata, hp_gain
+
+
 def _list_phb_entries(
     systems_service: Any,
     campaign_slug: str,
@@ -522,9 +809,83 @@ def _entry_option(entry: SystemsEntryRecord) -> dict[str, str]:
     return {"slug": entry.slug, "title": entry.title, "source_id": entry.source_id}
 
 
-def _class_requires_subclass_at_level_one(
+def _systems_ref_slug(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("slug") or "").strip()
+
+
+def _resolve_profile_entry(
+    options: list[SystemsEntryRecord],
+    systems_ref: Any,
+    *,
+    fallback_title: str = "",
+) -> SystemsEntryRecord | None:
+    selected_slug = _systems_ref_slug(systems_ref)
+    if selected_slug:
+        resolved = _resolve_selected_entry(options, selected_slug)
+        if resolved is not None:
+            return resolved
+    normalized_title = normalize_lookup(fallback_title)
+    if not normalized_title:
+        return None
+    return next((entry for entry in options if normalize_lookup(entry.title) == normalized_title), None)
+
+
+def _resolve_native_character_level(definition: CharacterDefinition) -> int:
+    classes = list((definition.profile or {}).get("classes") or [])
+    if classes:
+        return max(int((classes[0] or {}).get("level") or 0), 0)
+    class_level_text = str((definition.profile or {}).get("class_level_text") or "").strip()
+    match = re.search(r"(\d+)\s*$", class_level_text)
+    if match:
+        return int(match.group(1))
+    return 0
+
+
+def _native_character_class_name(definition: CharacterDefinition) -> str:
+    classes = list((definition.profile or {}).get("classes") or [])
+    if classes:
+        class_payload = dict(classes[0] or {})
+        class_ref = dict(class_payload.get("systems_ref") or {})
+        return str(class_ref.get("title") or class_payload.get("class_name") or "").strip()
+    class_ref = dict((definition.profile or {}).get("class_ref") or {})
+    return str(class_ref.get("title") or "").strip()
+
+
+def _native_level_up_support_error(definition: CharacterDefinition) -> str:
+    source_type = str((definition.source or {}).get("source_type") or "").strip()
+    if source_type != "native_character_builder":
+        return "Level-up currently supports native in-app PHB characters only."
+    classes = list((definition.profile or {}).get("classes") or [])
+    if len(classes) != 1:
+        return "Level-up currently supports single-class native PHB characters only."
+    class_payload = dict(classes[0] or {})
+    class_ref = dict(class_payload.get("systems_ref") or (definition.profile or {}).get("class_ref") or {})
+    if str(class_ref.get("source_id") or "").strip().upper() != PHB_SOURCE_ID:
+        return "Level-up currently supports native PHB characters only."
+    current_level = _resolve_native_character_level(definition)
+    if current_level != 1:
+        return "This first leveling slice advances native PHB characters from level 1 to level 2."
+    return ""
+
+
+def _normalize_level_up_values(
+    definition: CharacterDefinition,
+    values: dict[str, str],
+) -> dict[str, str]:
+    normalized = {key: str(value) for key, value in dict(values or {}).items()}
+    normalized.setdefault("hp_gain", "")
+    existing_subclass_slug = _systems_ref_slug((definition.profile or {}).get("subclass_ref"))
+    if existing_subclass_slug and not str(normalized.get("subclass_slug") or "").strip():
+        normalized["subclass_slug"] = existing_subclass_slug
+    return normalized
+
+
+def _class_requires_subclass_at_level(
     selected_class: SystemsEntryRecord | None,
     class_progression: list[dict[str, Any]],
+    target_level: int,
 ) -> bool:
     if selected_class is None:
         return False
@@ -533,7 +894,7 @@ def _class_requires_subclass_at_level_one(
         return False
     normalized_subclass_title = normalize_lookup(subclass_title)
     for group in class_progression:
-        if int(group.get("level") or 0) != 1:
+        if int(group.get("level") or 0) != target_level:
             continue
         for feature_row in list(group.get("feature_rows") or []):
             label = normalize_lookup(feature_row.get("label"))
@@ -542,6 +903,13 @@ def _class_requires_subclass_at_level_one(
             if "choose subclass feature" in label:
                 return True
     return False
+
+
+def _class_requires_subclass_at_level_one(
+    selected_class: SystemsEntryRecord | None,
+    class_progression: list[dict[str, Any]],
+) -> bool:
+    return _class_requires_subclass_at_level(selected_class, class_progression, 1)
 
 
 def _build_choice_sections(
@@ -587,6 +955,67 @@ def _build_choice_sections(
     return sections
 
 
+def _build_level_up_choice_sections(
+    *,
+    definition: CharacterDefinition,
+    selected_class: SystemsEntryRecord,
+    selected_subclass: SystemsEntryRecord | None,
+    subclass_options: list[SystemsEntryRecord],
+    requires_subclass: bool,
+    class_progression: list[dict[str, Any]],
+    subclass_progression: list[dict[str, Any]],
+    spell_catalog: dict[str, Any],
+    target_level: int,
+    values: dict[str, str],
+) -> list[dict[str, Any]]:
+    sections: list[dict[str, Any]] = []
+    class_fields: list[dict[str, Any]] = []
+    if requires_subclass:
+        class_fields.append(
+            {
+                "name": "subclass_slug",
+                "label": str(selected_class.metadata.get("subclass_title") or "Subclass").strip(),
+                "help_text": f"Choose your {selected_class.title} subclass.",
+                "options": [_choice_option(entry.title, entry.slug) for entry in subclass_options],
+                "selected": str(values.get("subclass_slug") or "").strip(),
+                "group_key": "subclass_slug",
+                "kind": "subclass",
+            }
+        )
+    class_fields.extend(
+        _build_progression_option_fields(
+            class_progression,
+            target_level=target_level,
+            values=values,
+            field_prefix="levelup_class_option",
+            group_key_prefix="levelup_class_options",
+        )
+    )
+    class_fields.extend(
+        _build_progression_option_fields(
+            subclass_progression,
+            target_level=target_level,
+            values=values,
+            field_prefix="levelup_subclass_option",
+            group_key_prefix="levelup_subclass_options",
+        )
+    )
+    if class_fields:
+        sections.append({"title": "Class Choices", "fields": class_fields})
+
+    spell_fields = _build_level_up_spell_choice_fields(
+        definition=definition,
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        spell_catalog=spell_catalog,
+        target_level=target_level,
+        values=values,
+    )
+    if spell_fields:
+        sections.append({"title": "Spell Choices", "fields": spell_fields})
+    return sections
+
+
 def _build_class_skill_fields(
     selected_class: SystemsEntryRecord | None,
     values: dict[str, str],
@@ -622,10 +1051,26 @@ def _build_class_option_fields(
     class_progression: list[dict[str, Any]],
     values: dict[str, str],
 ) -> list[dict[str, Any]]:
+    return _build_progression_option_fields(
+        class_progression,
+        target_level=1,
+        values=values,
+        field_prefix="class_option",
+    )
+
+
+def _build_progression_option_fields(
+    progression: list[dict[str, Any]],
+    *,
+    target_level: int,
+    values: dict[str, str],
+    field_prefix: str,
+    group_key_prefix: str | None = None,
+) -> list[dict[str, Any]]:
     fields: list[dict[str, Any]] = []
     index = 0
-    for group in class_progression:
-        if int(group.get("level") or 0) != 1:
+    for group in progression:
+        if int(group.get("level") or 0) != target_level:
             continue
         for feature_row in list(group.get("feature_rows") or []):
             embedded_card = dict(feature_row.get("embedded_card") or {})
@@ -635,7 +1080,7 @@ def _build_class_option_fields(
             feature_label = str(feature_row.get("label") or "Feature").strip()
             for option_group in option_groups:
                 index += 1
-                field_name = f"class_option_{index}"
+                field_name = f"{field_prefix}_{index}"
                 options = [
                     _choice_option(str(option.get("label") or ""), str(option.get("slug") or ""))
                     for option in list(option_group.get("options") or [])
@@ -650,7 +1095,7 @@ def _build_class_option_fields(
                         "help_text": f"Choose an option for {feature_label}.",
                         "options": options,
                         "selected": str(values.get(field_name) or "").strip(),
-                        "group_key": field_name,
+                        "group_key": str(group_key_prefix or field_name),
                         "kind": "optionalfeature",
                     }
                 )
@@ -780,6 +1225,12 @@ def _load_phb_level_one_spell_lists() -> dict[str, dict[str, list[str]]]:
             str(level_key): [str(item).strip() for item in list(level_values or []) if str(item).strip()]
             for level_key, level_values in levels.items()
         }
+    for class_name, levels in EXTRA_PHB_LEVEL_ONE_SPELL_LISTS.items():
+        class_payload = normalized.setdefault(str(class_name), {})
+        for level_key, titles in levels.items():
+            existing_titles = list(class_payload.get(str(level_key)) or [])
+            merged_titles = existing_titles + [title for title in titles if title not in existing_titles]
+            class_payload[str(level_key)] = merged_titles
     return normalized
 
 
@@ -1647,6 +2098,114 @@ def _build_spell_choice_fields(
     return fields
 
 
+def _build_level_up_spell_choice_fields(
+    *,
+    definition: CharacterDefinition,
+    selected_class: SystemsEntryRecord,
+    selected_subclass: SystemsEntryRecord | None,
+    spell_catalog: dict[str, Any],
+    target_level: int,
+    values: dict[str, str],
+) -> list[dict[str, Any]]:
+    del selected_subclass
+    if target_level != 2:
+        return []
+    spell_rules = dict(LEVEL_TWO_SPELL_RULES_BY_CLASS.get(selected_class.title) or {})
+    spell_mode = str(spell_rules.get("spell_mode") or "").strip()
+    if not spell_mode:
+        return []
+    level_one_options = _build_spell_options_for_class_level(selected_class.title, "1", spell_catalog)
+    if not level_one_options:
+        return []
+
+    fields: list[dict[str, Any]] = []
+    existing_spells = list((definition.spellcasting or {}).get("spells") or [])
+    existing_known_values = _spell_selection_values_by_mark(existing_spells, "Known")
+    existing_prepared_values = _spell_selection_values_by_mark(existing_spells, "Prepared")
+    existing_spellbook_values = _spell_selection_values_by_mark(existing_spells, "Spellbook")
+
+    if spell_mode == "known":
+        options = [option for option in level_one_options if option["value"] not in existing_known_values]
+        for index in range(int(spell_rules.get("new_level_one_spells") or 0)):
+            field_name = f"levelup_spell_{index + 1}"
+            fields.append(
+                {
+                    "name": field_name,
+                    "label": f"New Spell {index + 1}",
+                    "help_text": f"Choose a new {selected_class.title} spell for level {target_level}.",
+                    "options": options,
+                    "selected": str(values.get(field_name) or "").strip(),
+                    "group_key": "levelup_spells",
+                    "kind": "spell",
+                }
+            )
+        return fields
+
+    if spell_mode == "prepared":
+        options = [option for option in level_one_options if option["value"] not in existing_prepared_values]
+        prepared_count = _level_two_prepared_spell_additions(
+            spell_rules,
+            definition=definition,
+        )
+        for index in range(prepared_count):
+            field_name = f"levelup_prepared_spell_{index + 1}"
+            fields.append(
+                {
+                    "name": field_name,
+                    "label": f"New Prepared Spell {index + 1}",
+                    "help_text": f"Choose a new prepared {selected_class.title} spell for level {target_level}.",
+                    "options": options,
+                    "selected": str(values.get(field_name) or "").strip(),
+                    "group_key": "levelup_spells",
+                    "kind": "spell",
+                }
+            )
+        return fields
+
+    if spell_mode == "wizard":
+        spellbook_options = [option for option in level_one_options if option["value"] not in existing_spellbook_values]
+        for index in range(int(spell_rules.get("new_spellbook_spells") or 0)):
+            field_name = f"levelup_wizard_spellbook_{index + 1}"
+            fields.append(
+                {
+                    "name": field_name,
+                    "label": f"New Spellbook Spell {index + 1}",
+                    "help_text": "Choose a 1st-level wizard spell to add to your spellbook.",
+                    "options": spellbook_options,
+                    "selected": str(values.get(field_name) or "").strip(),
+                    "group_key": "levelup_wizard_spellbook",
+                    "kind": "spell",
+                }
+            )
+        new_spellbook_values = [
+            str(values.get(f"levelup_wizard_spellbook_{index + 1}") or "").strip()
+            for index in range(int(spell_rules.get("new_spellbook_spells") or 0))
+            if str(values.get(f"levelup_wizard_spellbook_{index + 1}") or "").strip()
+        ]
+        prepared_options = [
+            option
+            for option in level_one_options
+            if option["value"] in (existing_spellbook_values | set(new_spellbook_values))
+            and option["value"] not in existing_prepared_values
+        ]
+        for index in range(_level_two_prepared_spell_additions(spell_rules, definition=definition)):
+            field_name = f"levelup_wizard_prepared_{index + 1}"
+            fields.append(
+                {
+                    "name": field_name,
+                    "label": f"New Prepared Spell {index + 1}",
+                    "help_text": "Choose an additional prepared wizard spell from your spellbook.",
+                    "options": prepared_options,
+                    "selected": str(values.get(field_name) or "").strip(),
+                    "group_key": "levelup_wizard_prepared",
+                    "kind": "spell",
+                }
+            )
+        return fields
+
+    return fields
+
+
 def _build_spell_options_for_class_level(
     class_name: str,
     level_key: str,
@@ -1678,6 +2237,20 @@ def _level_one_spell_selection_count(spell_rules: dict[str, Any], values: dict[s
         modifier = _ability_modifier(_coerce_ability_scores(values).get(ability_key, DEFAULT_ABILITY_SCORE))
         return max(1 + modifier, 1)
     return 0
+
+
+def _level_two_prepared_spell_additions(
+    spell_rules: dict[str, Any],
+    *,
+    definition: CharacterDefinition,
+) -> int:
+    ability_key = str(spell_rules.get("ability_key") or "").strip()
+    if ability_key not in ABILITY_KEYS:
+        return 0
+    modifier = _ability_modifier(_ability_scores_from_definition(definition).get(ability_key, DEFAULT_ABILITY_SCORE))
+    total_prepared = max(2 + modifier, 1)
+    existing_prepared = len(_spell_selection_values_by_mark(list((definition.spellcasting or {}).get("spells") or []), "Prepared"))
+    return max(total_prepared - existing_prepared, 0)
 
 
 def _normalize_preview_values(values: dict[str, str]) -> dict[str, str]:
@@ -1996,6 +2569,89 @@ def _collect_level_one_feature_entries(
     return feature_entries
 
 
+def _collect_progression_feature_entries_for_level(
+    *,
+    class_progression: list[dict[str, Any]],
+    subclass_progression: list[dict[str, Any]],
+    target_level: int,
+    selected_choices: dict[str, list[str]],
+) -> list[dict[str, Any]]:
+    feature_entries: list[dict[str, Any]] = []
+    feature_entries.extend(
+        _collect_progression_feature_entries(
+            progression=class_progression,
+            target_level=target_level,
+            selected_choices=selected_choices,
+            group_key="levelup_class_options",
+        )
+    )
+    feature_entries.extend(
+        _collect_progression_feature_entries(
+            progression=subclass_progression,
+            target_level=target_level,
+            selected_choices=selected_choices,
+            group_key="levelup_subclass_options",
+        )
+    )
+    return feature_entries
+
+
+def _collect_progression_feature_entries(
+    *,
+    progression: list[dict[str, Any]],
+    target_level: int,
+    selected_choices: dict[str, list[str]],
+    group_key: str,
+) -> list[dict[str, Any]]:
+    feature_entries: list[dict[str, Any]] = []
+    selected_values = list(selected_choices.get(group_key) or [])
+    selected_index = 0
+    for group in progression:
+        if int(group.get("level") or 0) != target_level:
+            continue
+        for feature_row in list(group.get("feature_rows") or []):
+            label = str(feature_row.get("label") or "").strip()
+            if "choose subclass feature" in normalize_lookup(label):
+                continue
+            embedded_card = dict(feature_row.get("embedded_card") or {})
+            option_groups = list(embedded_card.get("option_groups") or [])
+            if option_groups:
+                for option_group in option_groups:
+                    selected_slug = selected_values[selected_index] if selected_index < len(selected_values) else ""
+                    selected_index += 1
+                    selected_option = next(
+                        (
+                            option
+                            for option in list(option_group.get("options") or [])
+                            if str(option.get("slug") or "").strip() == selected_slug
+                        ),
+                        None,
+                    )
+                    if selected_option is None:
+                        continue
+                    feature_entries.append(
+                        {
+                            "kind": "optionalfeature",
+                            "entry": None,
+                            "name": str(selected_option.get("label") or "").strip(),
+                            "label": str(selected_option.get("label") or "").strip(),
+                            "slug": str(selected_option.get("slug") or "").strip(),
+                        }
+                    )
+                continue
+            entry = feature_row.get("entry")
+            if isinstance(entry, SystemsEntryRecord):
+                feature_entries.append(
+                    {
+                        "kind": "systems",
+                        "entry": entry,
+                        "name": entry.title,
+                        "label": entry.title,
+                    }
+                )
+    return feature_entries
+
+
 def _build_feature_payloads(
     feature_entries: list[dict[str, Any]],
     *,
@@ -2242,6 +2898,222 @@ def _build_level_one_profile(
     }
 
 
+def _proficiency_bonus_for_level(level: int) -> int:
+    clean_level = max(int(level or 1), 1)
+    return 2 + ((clean_level - 1) // 4)
+
+
+def _ability_scores_from_definition(definition: CharacterDefinition) -> dict[str, int]:
+    ability_scores = dict((definition.stats or {}).get("ability_scores") or {})
+    return {
+        ability_key: int(dict(ability_scores.get(ability_key) or {}).get("score") or DEFAULT_ABILITY_SCORE)
+        for ability_key in ABILITY_KEYS
+    }
+
+
+def _parse_level_up_hit_point_gain(values: dict[str, str]) -> int:
+    raw_value = str(values.get("hp_gain") or "").strip()
+    if not raw_value:
+        raise CharacterBuildError("Hit point gain is required to level up this character.")
+    try:
+        hp_gain = int(raw_value)
+    except ValueError as exc:
+        raise CharacterBuildError("Hit point gain must be a whole number.") from exc
+    if hp_gain < 1:
+        raise CharacterBuildError("Hit point gain must be at least 1.")
+    return hp_gain
+
+
+def _build_leveled_stats(
+    *,
+    current_definition: CharacterDefinition,
+    selected_class: SystemsEntryRecord,
+    ability_scores: dict[str, int],
+    skills: list[dict[str, Any]],
+    proficiency_bonus: int,
+    hp_gain: int,
+) -> dict[str, Any]:
+    stats = dict(current_definition.stats or {})
+    skill_lookup = {normalize_lookup(skill["name"]): skill for skill in skills}
+    save_proficiencies = set(_class_save_proficiencies(selected_class))
+    stats["max_hp"] = max(int(stats.get("max_hp") or 0) + hp_gain, 1)
+    stats["proficiency_bonus"] = proficiency_bonus
+    stats["passive_perception"] = 10 + int(
+        (skill_lookup.get("perception") or {}).get("bonus") or _ability_modifier(ability_scores["wis"])
+    )
+    stats["passive_insight"] = 10 + int(
+        (skill_lookup.get("insight") or {}).get("bonus") or _ability_modifier(ability_scores["wis"])
+    )
+    stats["passive_investigation"] = 10 + int(
+        (skill_lookup.get("investigation") or {}).get("bonus") or _ability_modifier(ability_scores["int"])
+    )
+    stats["ability_scores"] = {
+        ability_key: {
+            "score": score,
+            "modifier": _ability_modifier(score),
+            "save_bonus": _ability_modifier(score) + (proficiency_bonus if ability_key in save_proficiencies else 0),
+        }
+        for ability_key, score in ability_scores.items()
+    }
+    return stats
+
+
+def _build_leveled_profile(
+    *,
+    current_definition: CharacterDefinition,
+    selected_class: SystemsEntryRecord,
+    selected_subclass: SystemsEntryRecord | None,
+    target_level: int,
+) -> dict[str, Any]:
+    profile = dict(current_definition.profile or {})
+    classes = list(profile.get("classes") or [])
+    class_payload = dict(classes[0] or {}) if classes else {}
+    class_payload["class_name"] = selected_class.title
+    class_payload["level"] = target_level
+    class_payload["systems_ref"] = _systems_ref_from_entry(selected_class)
+    class_payload["subclass_name"] = selected_subclass.title if selected_subclass is not None else ""
+    if selected_subclass is not None:
+        class_payload["subclass_ref"] = _systems_ref_from_entry(selected_subclass)
+    else:
+        class_payload.pop("subclass_ref", None)
+    profile["classes"] = [class_payload]
+    profile["class_level_text"] = f"{selected_class.title} {target_level}"
+    profile["class_ref"] = _systems_ref_from_entry(selected_class)
+    profile["subclass_ref"] = _systems_ref_from_entry(selected_subclass) if selected_subclass is not None else None
+    return profile
+
+
+def _build_leveled_source(
+    source_payload: dict[str, Any],
+    target_level: int,
+) -> dict[str, Any]:
+    source = dict(source_payload or {})
+    source.update(
+        {
+            "source_path": f"builder://phb-level-{target_level}",
+            "source_type": "native_character_builder",
+            "imported_from": f"In-app PHB Level {target_level} Builder",
+            "imported_at": isoformat(utcnow()),
+            "parse_warnings": [],
+        }
+    )
+    return source
+
+
+def _merge_feature_payloads(
+    existing_features: list[dict[str, Any]],
+    new_features: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged = [dict(feature) for feature in existing_features]
+    seen_names = {
+        normalize_lookup(str(feature.get("name") or "").strip())
+        for feature in merged
+        if str(feature.get("name") or "").strip()
+    }
+    for feature in new_features:
+        feature_name = str(feature.get("name") or "").strip()
+        normalized_name = normalize_lookup(feature_name)
+        if not feature_name or normalized_name in seen_names:
+            continue
+        seen_names.add(normalized_name)
+        merged.append(dict(feature))
+    return merged
+
+
+def _merge_resource_templates(
+    existing_templates: list[dict[str, Any]],
+    new_templates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged = [dict(template) for template in existing_templates]
+    seen_ids = {
+        str(template.get("id") or "").strip()
+        for template in merged
+        if str(template.get("id") or "").strip()
+    }
+    for template in new_templates:
+        template_id = str(template.get("id") or "").strip()
+        if template_id and template_id in seen_ids:
+            continue
+        if template_id:
+            seen_ids.add(template_id)
+        merged.append(dict(template))
+    return merged
+
+
+def _extract_existing_feature_choice_map(definition: CharacterDefinition) -> dict[str, list[str]]:
+    values: list[str] = []
+    for feature in list(definition.features or []):
+        feature_name = str(feature.get("name") or "").strip()
+        if feature_name:
+            values.append(feature_name)
+        systems_ref = dict(feature.get("systems_ref") or {})
+        feature_slug = str(systems_ref.get("slug") or "").strip()
+        if feature_slug:
+            values.append(feature_slug)
+    return {"existing_features": _dedupe_preserve_order(values)}
+
+
+def _merge_selected_choice_maps(*choice_maps: dict[str, list[str]]) -> dict[str, list[str]]:
+    merged: dict[str, list[str]] = {}
+    for choice_map in choice_maps:
+        for key, values in choice_map.items():
+            merged.setdefault(str(key), [])
+            merged[key] = _dedupe_preserve_order(merged[key] + [str(value).strip() for value in values if str(value).strip()])
+    return merged
+
+
+def _build_native_level_up_preview(
+    *,
+    definition: CharacterDefinition,
+    selected_class: SystemsEntryRecord,
+    selected_subclass: SystemsEntryRecord | None,
+    class_progression: list[dict[str, Any]],
+    subclass_progression: list[dict[str, Any]],
+    choice_sections: list[dict[str, Any]],
+    spell_catalog: dict[str, Any],
+    target_level: int,
+    values: dict[str, str],
+) -> dict[str, Any]:
+    _, selected_choices = _resolve_builder_choices(choice_sections, values)
+    hp_gain = 0
+    try:
+        hp_gain = _parse_level_up_hit_point_gain(values)
+    except CharacterBuildError:
+        hp_gain = 0
+    gained_feature_entries = _collect_progression_feature_entries_for_level(
+        class_progression=class_progression,
+        subclass_progression=subclass_progression,
+        target_level=target_level,
+        selected_choices=selected_choices,
+    )
+    gained_features = [
+        str(entry.get("label") or entry.get("name") or "").strip()
+        for entry in gained_feature_entries
+        if str(entry.get("label") or entry.get("name") or "").strip()
+    ]
+    new_spell_names = _summarize_level_up_spell_choices(
+        definition=definition,
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        selected_choices=selected_choices,
+        spell_catalog=spell_catalog,
+        target_level=target_level,
+    )
+    slot_progression = _level_up_slot_progression_for_class(selected_class.title, target_level)
+    slot_summary = [
+        f"Level {int(slot.get('level') or 0)}: {int(slot.get('max_slots') or 0)} slots"
+        for slot in slot_progression
+        if int(slot.get("max_slots") or 0) > 0
+    ]
+    return {
+        "class_level_text": f"{selected_class.title} {target_level}",
+        "max_hp": max(int((definition.stats or {}).get("max_hp") or 0) + hp_gain, 1),
+        "gained_features": gained_features,
+        "spell_slots": slot_summary,
+        "new_spells": new_spell_names,
+    }
+
+
 def _build_level_one_spellcasting(
     *,
     selected_class: SystemsEntryRecord,
@@ -2279,6 +3151,91 @@ def _build_level_one_spellcasting(
         "slot_progression": list(LEVEL_ONE_SPELL_SLOTS_BY_CLASS.get(selected_class.title, [])),
         "spells": spell_payloads,
     }
+
+
+def _build_level_up_spellcasting(
+    *,
+    current_definition: CharacterDefinition,
+    selected_class: SystemsEntryRecord,
+    selected_subclass: SystemsEntryRecord | None,
+    ability_scores: dict[str, int],
+    proficiency_bonus: int,
+    choice_sections: list[dict[str, Any]],
+    selected_choices: dict[str, list[str]],
+    spell_catalog: dict[str, Any],
+    target_level: int,
+) -> dict[str, Any]:
+    del choice_sections, selected_subclass
+    ability_name = SPELLCASTING_ABILITY_BY_CLASS.get(selected_class.title, "")
+    spell_rules = dict(LEVEL_TWO_SPELL_RULES_BY_CLASS.get(selected_class.title) or {})
+    if target_level != 2 or (not ability_name and not spell_rules):
+        return dict(current_definition.spellcasting or {})
+    if not ability_name:
+        return dict(current_definition.spellcasting or {})
+
+    ability_key = next(key for key, label in ABILITY_LABELS.items() if label == ability_name)
+    modifier = _ability_modifier(ability_scores[ability_key])
+    existing_spells = list((current_definition.spellcasting or {}).get("spells") or [])
+    spells_by_key: dict[str, dict[str, Any]] = {}
+    for spell in existing_spells:
+        payload_key = _spell_payload_key(spell)
+        if payload_key:
+            spells_by_key[payload_key] = dict(spell)
+
+    spell_mode = str(spell_rules.get("spell_mode") or "").strip()
+    if spell_mode in {"known", "prepared"}:
+        mark = "Known" if spell_mode == "known" else "Prepared"
+        for selected_value in selected_choices.get("levelup_spells", []):
+            _add_spell_to_payloads(
+                spells_by_key,
+                selected_value=selected_value,
+                spell_catalog=spell_catalog,
+                mark=mark,
+            )
+    elif spell_mode == "wizard":
+        existing_prepared = _spell_selection_values_by_mark(existing_spells, "Prepared")
+        new_spellbook_values = list(selected_choices.get("levelup_wizard_spellbook", []))
+        new_prepared_values = set(selected_choices.get("levelup_wizard_prepared", []))
+        for selected_value in new_spellbook_values:
+            _add_spell_to_payloads(
+                spells_by_key,
+                selected_value=selected_value,
+                spell_catalog=spell_catalog,
+                mark="Prepared + Spellbook" if selected_value in new_prepared_values else "Spellbook",
+            )
+        for selected_value in new_prepared_values:
+            payload_key = _spell_lookup_key(selected_value, spell_catalog)
+            existing_payload = spells_by_key.get(payload_key)
+            if existing_payload is None:
+                _add_spell_to_payloads(
+                    spells_by_key,
+                    selected_value=selected_value,
+                    spell_catalog=spell_catalog,
+                    mark="Prepared + Spellbook",
+                )
+                continue
+            if "Prepared" not in str(existing_payload.get("mark") or ""):
+                existing_payload["mark"] = _merge_spell_mark(str(existing_payload.get("mark") or "").strip(), "Prepared")
+        for selected_value in existing_prepared:
+            payload_key = _spell_lookup_key(selected_value, spell_catalog)
+            existing_payload = spells_by_key.get(payload_key)
+            if existing_payload is not None and "Prepared" not in str(existing_payload.get("mark") or ""):
+                existing_payload["mark"] = _merge_spell_mark(str(existing_payload.get("mark") or "").strip(), "Prepared")
+
+    return {
+        "spellcasting_class": selected_class.title,
+        "spellcasting_ability": ability_name,
+        "spell_save_dc": 8 + proficiency_bonus + modifier,
+        "spell_attack_bonus": proficiency_bonus + modifier,
+        "slot_progression": _level_up_slot_progression_for_class(selected_class.title, target_level),
+        "spells": list(spells_by_key.values()),
+    }
+
+
+def _level_up_slot_progression_for_class(class_name: str, target_level: int) -> list[dict[str, Any]]:
+    if target_level == 2:
+        return list(LEVEL_TWO_SPELL_SLOTS_BY_CLASS.get(class_name, []))
+    return []
 
 
 def _build_level_one_spell_payloads(
@@ -2339,6 +3296,67 @@ def _build_level_one_spell_payloads(
         )
 
     return list(spells_by_key.values())
+
+
+def _spell_payload_key(spell_payload: dict[str, Any]) -> str:
+    systems_ref = dict(spell_payload.get("systems_ref") or {})
+    return str(systems_ref.get("slug") or spell_payload.get("name") or "").strip()
+
+
+def _spell_lookup_key(selected_value: str, spell_catalog: dict[str, Any]) -> str:
+    spell_entry = _resolve_spell_entry(selected_value, spell_catalog)
+    if spell_entry is not None:
+        return spell_entry.slug
+    return str(selected_value or "").strip()
+
+
+def _spell_selection_values_by_mark(
+    spell_payloads: list[dict[str, Any]],
+    mark_fragment: str,
+) -> set[str]:
+    values: set[str] = set()
+    normalized_mark = normalize_lookup(mark_fragment)
+    for spell_payload in spell_payloads:
+        if normalized_mark not in normalize_lookup(str(spell_payload.get("mark") or "")):
+            continue
+        payload_key = _spell_payload_key(spell_payload)
+        if payload_key:
+            values.add(payload_key)
+    return values
+
+
+def _summarize_level_up_spell_choices(
+    *,
+    definition: CharacterDefinition,
+    selected_class: SystemsEntryRecord,
+    selected_subclass: SystemsEntryRecord | None,
+    selected_choices: dict[str, list[str]],
+    spell_catalog: dict[str, Any],
+    target_level: int,
+) -> list[str]:
+    del selected_subclass
+    if target_level != 2:
+        return []
+    spell_rules = dict(LEVEL_TWO_SPELL_RULES_BY_CLASS.get(selected_class.title) or {})
+    spell_mode = str(spell_rules.get("spell_mode") or "").strip()
+    selected_values: list[str] = []
+    if spell_mode in {"known", "prepared"}:
+        selected_values.extend(selected_choices.get("levelup_spells", []))
+    elif spell_mode == "wizard":
+        selected_values.extend(selected_choices.get("levelup_wizard_spellbook", []))
+        selected_values.extend(selected_choices.get("levelup_wizard_prepared", []))
+
+    summaries: list[str] = []
+    seen: set[str] = set()
+    for selected_value in selected_values:
+        spell_entry = _resolve_spell_entry(selected_value, spell_catalog)
+        label = spell_entry.title if spell_entry is not None else str(selected_value or "").strip()
+        normalized_label = normalize_lookup(label)
+        if not label or normalized_label in seen:
+            continue
+        seen.add(normalized_label)
+        summaries.append(label)
+    return summaries
 
 
 def _add_spell_to_payloads(
@@ -2809,6 +3827,76 @@ def _build_feature_tracker_template(
             "notes": "Bardic Inspiration",
             "display_order": display_order,
             "activation_type": "bonus_action",
+        }
+    if normalized == normalize_lookup("Action Surge"):
+        return {
+            "id": "action-surge",
+            "label": "Action Surge",
+            "category": "class_feature",
+            "initial_current": 1,
+            "max": 1,
+            "reset_on": "short_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Action Surge",
+            "display_order": display_order,
+            "activation_type": "special",
+        }
+    if normalized == normalize_lookup("Channel Divinity"):
+        return {
+            "id": "channel-divinity",
+            "label": "Channel Divinity",
+            "category": "class_feature",
+            "initial_current": 1,
+            "max": 1,
+            "reset_on": "short_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Channel Divinity",
+            "display_order": display_order,
+            "activation_type": "passive",
+        }
+    if normalized == normalize_lookup("Wild Shape"):
+        return {
+            "id": "wild-shape",
+            "label": "Wild Shape",
+            "category": "class_feature",
+            "initial_current": 2,
+            "max": 2,
+            "reset_on": "short_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Wild Shape",
+            "display_order": display_order,
+            "activation_type": "action",
+        }
+    if normalized == normalize_lookup("Ki"):
+        return {
+            "id": "ki",
+            "label": "Ki",
+            "category": "class_feature",
+            "initial_current": 2,
+            "max": 2,
+            "reset_on": "short_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Ki",
+            "display_order": display_order,
+            "activation_type": "passive",
+        }
+    if normalized == normalize_lookup("Font of Magic"):
+        return {
+            "id": "sorcery-points",
+            "label": "Sorcery Points",
+            "category": "class_feature",
+            "initial_current": 2,
+            "max": 2,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Sorcery Points",
+            "display_order": display_order,
+            "activation_type": "passive",
         }
     return None
 
