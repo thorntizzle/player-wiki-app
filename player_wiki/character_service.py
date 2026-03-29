@@ -10,6 +10,23 @@ class CharacterStateValidationError(ValueError):
     pass
 
 
+def build_resource_state(template: dict[str, Any]) -> dict[str, Any]:
+    max_value = template.get("max")
+    current = template.get("initial_current", max_value if max_value is not None else 0)
+    return {
+        "id": template.get("id"),
+        "label": template.get("label"),
+        "category": template.get("category", "custom_progress"),
+        "current": int(current or 0),
+        "max": int(max_value) if max_value is not None else None,
+        "reset_on": template.get("reset_on", "manual"),
+        "reset_to": template.get("reset_to", "unchanged"),
+        "rest_behavior": template.get("rest_behavior", "manual_only"),
+        "notes": template.get("notes", ""),
+        "display_order": int(template.get("display_order") or 0),
+    }
+
+
 def build_initial_state(definition: CharacterDefinition) -> dict[str, Any]:
     max_hp = int(definition.stats.get("max_hp") or 0)
     spell_slots = [
@@ -21,24 +38,7 @@ def build_initial_state(definition: CharacterDefinition) -> dict[str, Any]:
         for slot in definition.spellcasting.get("slot_progression", [])
     ]
 
-    resources = []
-    for template in definition.resource_templates:
-        max_value = template.get("max")
-        current = template.get("initial_current", max_value if max_value is not None else 0)
-        resources.append(
-            {
-                "id": template.get("id"),
-                "label": template.get("label"),
-                "category": template.get("category", "custom_progress"),
-                "current": int(current or 0),
-                "max": int(max_value) if max_value is not None else None,
-                "reset_on": template.get("reset_on", "manual"),
-                "reset_to": template.get("reset_to", "unchanged"),
-                "rest_behavior": template.get("rest_behavior", "manual_only"),
-                "notes": template.get("notes", ""),
-                "display_order": int(template.get("display_order") or 0),
-            }
-        )
+    resources = [build_resource_state(template) for template in definition.resource_templates]
 
     inventory = []
     for item in definition.equipment_catalog:
@@ -77,6 +77,48 @@ def build_initial_state(definition: CharacterDefinition) -> dict[str, Any]:
             "session_notes": [],
         },
     }
+
+
+def merge_state_with_definition(definition: CharacterDefinition, state: dict[str, Any]) -> dict[str, Any]:
+    payload = deepcopy(state)
+    existing_resources = list(payload.get("resources") or [])
+    template_resource_ids: set[str] = set()
+    existing_by_id = {
+        str(resource.get("id") or "").strip(): resource
+        for resource in existing_resources
+        if str(resource.get("id") or "").strip()
+    }
+    merged_resources: list[dict[str, Any]] = []
+
+    for template in definition.resource_templates:
+        template_resource = build_resource_state(template)
+        resource_id = str(template_resource.get("id") or "").strip()
+        if not resource_id:
+            merged_resources.append(template_resource)
+            continue
+        template_resource_ids.add(resource_id)
+        existing_resource = existing_by_id.get(resource_id)
+        if existing_resource is None:
+            merged_resources.append(template_resource)
+            continue
+
+        preserved_current = int(existing_resource.get("current") or 0)
+        max_value = template_resource.get("max")
+        template_resource["current"] = (
+            max(0, min(preserved_current, int(max_value)))
+            if max_value is not None
+            else max(0, preserved_current)
+        )
+        merged_resources.append(template_resource)
+
+    for resource in existing_resources:
+        resource_id = str(resource.get("id") or "").strip()
+        if resource_id and resource_id in template_resource_ids:
+            continue
+        merged_resources.append(deepcopy(resource))
+
+    payload["resources"] = merged_resources
+    return payload
 
 
 def validate_state(definition: CharacterDefinition, state: dict[str, Any]) -> dict[str, Any]:

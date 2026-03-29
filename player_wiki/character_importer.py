@@ -12,12 +12,12 @@ import yaml
 from .auth_store import isoformat, utcnow
 from .character_models import CharacterDefinition, CharacterImportMetadata
 from .character_repository import CampaignCharacterConfig, load_campaign_character_config
-from .character_service import build_initial_state
-from .character_store import CharacterStateStore
+from .character_service import build_initial_state, merge_state_with_definition
+from .character_store import CharacterStateStore, CharacterStateWriteResult
 from .db import init_database
 from .repository import slugify
 
-PARSER_VERSION = "2026-03-28.1"
+PARSER_VERSION = "2026-03-29.1"
 REST_TRACKER_PATTERN = re.compile(
     r"^(?P<label>.+?)\s*[-:]\s*(?P<value>\d+)\s*/\s*(?P<reset>Long Rest|Short Rest|Daily|Other|Manual|Never)\b",
     re.IGNORECASE,
@@ -664,7 +664,22 @@ def parse_feature_groups(section_text: str, warnings: list[str]) -> tuple[list[d
             anonymous_usage_match = ANONYMOUS_ACTION_COST_PATTERN.match(header_name)
             if anonymous_usage_match:
                 if features:
-                    merge_feature_metadata(features[-1], activation_type=activation_type)
+                    tracker = build_tracker_template(
+                        str(features[-1].get("name") or "Feature"),
+                        current=int(anonymous_usage_match.group("value")),
+                        max_value=int(anonymous_usage_match.group("value")),
+                        reset_token=anonymous_usage_match.group("reset"),
+                        category=feature_category,
+                        display_order=display_order,
+                        source_hint=header_name,
+                    )
+                    merge_tracker(tracker_templates, tracker, warnings)
+                    display_order += 1
+                    merge_feature_metadata(
+                        features[-1],
+                        activation_type=activation_type,
+                        tracker_ref=tracker["id"],
+                    )
                 continue
 
             normalized_header_name = normalize_feature_header_name(header_name, tracker_matches)
@@ -969,6 +984,27 @@ def write_yaml(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(rendered, encoding="utf-8")
 
 
+def initialize_or_reconcile_imported_state(
+    state_store: CharacterStateStore,
+    definition: CharacterDefinition,
+) -> CharacterStateWriteResult:
+    existing = state_store.get_state(definition.campaign_slug, definition.character_slug)
+    if existing is None:
+        initial_state = build_initial_state(definition)
+        return state_store.initialize_state_if_missing(definition, initial_state)
+
+    reconciled_state = merge_state_with_definition(definition, existing.state)
+    if reconciled_state == existing.state:
+        return CharacterStateWriteResult(record=existing, created=False)
+
+    updated = state_store.replace_state(
+        definition,
+        reconciled_state,
+        expected_revision=existing.revision,
+    )
+    return CharacterStateWriteResult(record=updated, created=False)
+
+
 def import_character(
     project_root: Path,
     campaign_slug: str,
@@ -993,8 +1029,7 @@ def import_character(
         character_dir = config.characters_dir / definition.character_slug
         write_yaml(character_dir / "definition.yaml", definition.to_dict())
         write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
-        initial_state = build_initial_state(definition)
-        state_result = state_store.initialize_state_if_missing(definition, initial_state)
+        state_result = initialize_or_reconcile_imported_state(state_store, definition)
         return CharacterImportResult(
             definition=definition,
             import_metadata=import_metadata,

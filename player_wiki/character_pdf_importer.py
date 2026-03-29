@@ -8,16 +8,19 @@ from typing import Any
 
 from pypdf import PdfReader
 
-from .character_importer import parse_character_sheet_text, write_yaml
+from .character_importer import (
+    initialize_or_reconcile_imported_state,
+    parse_character_sheet_text,
+    write_yaml,
+)
 from .character_models import CharacterDefinition, CharacterImportMetadata
 from .character_repository import load_campaign_character_config
-from .character_service import build_initial_state
 from .character_store import CharacterStateStore
 from .repository import normalize_lookup
 from .systems_models import SystemsEntryRecord
 from .systems_service import SystemsService
 
-PDF_PARSER_VERSION = "2026-03-28.1"
+PDF_PARSER_VERSION = "2026-03-29.1"
 BULLET_CHAR = "\u2022"
 EN_DASH_CHAR = "\u2013"
 
@@ -1028,8 +1031,7 @@ def import_pdf_character(
         character_dir = config.characters_dir / artifacts.definition.character_slug
         write_yaml(character_dir / "definition.yaml", artifacts.definition.to_dict())
         write_yaml(character_dir / "import.yaml", artifacts.import_metadata.to_dict())
-        initial_state = build_initial_state(artifacts.definition)
-        state_result = state_store.initialize_state_if_missing(artifacts.definition, initial_state)
+        state_result = initialize_or_reconcile_imported_state(state_store, artifacts.definition)
         return CharacterPdfImportResult(
             definition=artifacts.definition,
             import_metadata=artifacts.import_metadata,

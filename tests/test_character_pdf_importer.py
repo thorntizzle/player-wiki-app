@@ -1,10 +1,16 @@
 ﻿from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timezone
+from pathlib import Path
 
-from player_wiki.character_importer import parse_character_sheet_text
+from player_wiki.app import create_app
+from player_wiki.character_importer import import_character, parse_character_sheet_text
 from player_wiki.character_pdf_importer import build_pdf_character_markdown, resolve_definition_systems_links
+from player_wiki.config import Config
+from player_wiki.db import init_database
 from player_wiki.systems_models import SystemsEntryRecord
+from tests.sample_data import build_test_campaigns_dir
 
 
 def _sample_pdf_fields() -> dict[str, str]:
@@ -341,6 +347,7 @@ def test_parse_character_sheet_text_merges_split_action_cost_lines_into_features
     assert features_by_name["Second Wind"]["activation_type"] == "bonus_action"
     assert features_by_name["Second Wind"]["tracker_ref"] == "second-wind"
     assert features_by_name["Action Surge"]["activation_type"] == "special"
+    assert features_by_name["Action Surge"]["tracker_ref"] == "action-surge"
 
     assert features_by_name["Psionic Power"]["tracker_ref"] == "psionic-power-psionic-energy"
     assert features_by_name["Psionic Power: Protective Field"]["activation_type"] == "reaction"
@@ -356,7 +363,69 @@ def test_parse_character_sheet_text_merges_split_action_cost_lines_into_features
     assert "psionic-power-psionic-energy" in resource_ids
     assert "psionic-power-telekinetic-movement" in resource_ids
     assert "psionic-power-recovery" in resource_ids
+    assert "action-surge" in resource_ids
     assert "second-wind" in resource_ids
+
+
+def test_import_character_reconciles_missing_resource_trackers_into_existing_state(tmp_path, monkeypatch):
+    campaigns_dir = build_test_campaigns_dir(tmp_path)
+    db_path = tmp_path / "player_wiki.sqlite3"
+    source_path = tmp_path / "Zigzag - Character Sheet.md"
+    source_path.write_text(_sample_split_action_markdown(), encoding="utf-8")
+
+    monkeypatch.setattr(Config, "CAMPAIGNS_DIR", campaigns_dir)
+    monkeypatch.setattr(Config, "DB_PATH", db_path)
+
+    project_root = Path(__file__).resolve().parents[1]
+    first_import = import_character(
+        project_root,
+        "linden-pass",
+        str(source_path),
+        character_slug="zigzag-blackscar",
+    )
+    assert first_import.state_created is True
+
+    app = create_app()
+    with app.app_context():
+        init_database()
+        repository = app.extensions["character_repository"]
+        state_store = app.extensions["character_state_store"]
+        record = repository.get_character("linden-pass", "zigzag-blackscar")
+        assert record is not None
+        payload = deepcopy(record.state_record.state)
+        payload["resources"] = [
+            resource
+            for resource in payload["resources"]
+            if resource.get("id") != "action-surge"
+        ]
+        second_wind = next(resource for resource in payload["resources"] if resource["id"] == "second-wind")
+        second_wind["current"] = 0
+        state_store.replace_state(
+            record.definition,
+            payload,
+            expected_revision=record.state_record.revision,
+        )
+
+    second_import = import_character(
+        project_root,
+        "linden-pass",
+        str(source_path),
+        character_slug="zigzag-blackscar",
+    )
+    assert second_import.state_created is False
+
+    app = create_app()
+    with app.app_context():
+        init_database()
+        repository = app.extensions["character_repository"]
+        record = repository.get_character("linden-pass", "zigzag-blackscar")
+        assert record is not None
+        resources = {resource["id"]: resource for resource in record.state_record.state["resources"]}
+
+    assert resources["action-surge"]["current"] == 1
+    assert resources["action-surge"]["max"] == 1
+    assert resources["action-surge"]["reset_on"] == "short_rest"
+    assert resources["second-wind"]["current"] == 0
 
 
 def test_resolve_definition_systems_links_falls_back_to_parent_feature_for_nested_rows():
