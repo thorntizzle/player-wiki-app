@@ -2074,6 +2074,21 @@ def test_dm_can_open_character_builder_page_without_systems_data(client, sign_in
     assert "The builder needs PHB Systems entries for classes, species, and backgrounds" in html
 
 
+def test_character_builder_live_preview_route_returns_fragment(app, client, sign_in, users, monkeypatch):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    monkeypatch.setattr(app_module, "build_level_one_builder_context", lambda *args, **kwargs: _builder_context_fixture())
+
+    response = client.get("/campaigns/linden-pass/characters/new?_live_preview=1&class_slug=phb-class-fighter")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "<!doctype html>" not in html.lower()
+    assert "data-live-builder-root" in html
+    assert "data-live-builder-form" in html
+    assert "data-live-refresh-fallback" in html
+
+
 def test_non_manager_cannot_open_character_builder_page(client, sign_in, users, set_campaign_visibility):
     set_campaign_visibility("linden-pass", characters="players")
     sign_in(users["owner"]["email"], users["owner"]["password"])
@@ -2235,3 +2250,54 @@ def test_dm_can_apply_native_level_up_route(app, client, sign_in, users, get_cha
     assert record.definition.stats["max_hp"] == 20
     assert record.state_record.state["vitals"]["current_hp"] == 20
     assert any(resource["id"] == "action-surge" for resource in record.state_record.state["resources"])
+
+
+def test_level_up_live_preview_route_returns_fragment(app, client, sign_in, users, monkeypatch):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    character_dir = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "characters" / "leveler"
+    character_dir.mkdir(parents=True, exist_ok=True)
+    definition = _minimal_character_definition("leveler", "Leveler")
+    import_metadata = _minimal_import_metadata("leveler")
+    (character_dir / "definition.yaml").write_text(yaml.safe_dump(definition.to_dict(), sort_keys=False), encoding="utf-8")
+    (character_dir / "import.yaml").write_text(yaml.safe_dump(import_metadata.to_dict(), sort_keys=False), encoding="utf-8")
+
+    monkeypatch.setattr(app_module, "supports_native_level_up", lambda definition: True)
+    monkeypatch.setattr(
+        app_module,
+        "build_native_level_up_context",
+        lambda *args, **kwargs: {
+            "values": {"hp_gain": "8"},
+            "character_name": "Leveler",
+            "current_level": 1,
+            "next_level": 2,
+            "selected_class": SimpleNamespace(title="Fighter"),
+            "selected_species": SimpleNamespace(title="Human"),
+            "selected_background": SimpleNamespace(title="Acolyte"),
+            "selected_subclass": None,
+            "subclass_options": [],
+            "requires_subclass": False,
+            "choice_sections": [],
+            "class_progression": [],
+            "subclass_progression": [],
+            "spell_catalog": {},
+            "limitations": [],
+            "preview": {
+                "class_level_text": "Fighter 2",
+                "max_hp": 20,
+                "gained_features": ["Action Surge"],
+                "spell_slots": [],
+                "new_spells": [],
+            },
+            "state_revision": 1,
+        },
+    )
+
+    response = client.get("/campaigns/linden-pass/characters/leveler/level-up?_live_preview=1&hp_gain=8")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "<!doctype html>" not in html.lower()
+    assert "data-live-builder-root" in html
+    assert "data-live-builder-form" in html
+    assert "data-live-refresh-fallback" in html

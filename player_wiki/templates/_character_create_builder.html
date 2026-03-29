@@ -1,0 +1,265 @@
+<div class="page-layout character-builder-layout" data-live-builder-root>
+  <section class="section-list">
+    <section class="card">
+      <div class="section-heading">
+        <div>
+          <h2>PHB Level 1 Builder</h2>
+          <p class="meta">Choose class, species, background, and any level-1 options the Systems library exposes for those entries.</p>
+        </div>
+        <a class="ghost-button" href="{{ url_for('character_roster_view', campaign_slug=campaign.slug) }}">Back to roster</a>
+      </div>
+
+      {% if not builder_ready %}
+        <p class="meta">
+          The builder needs PHB Systems entries for classes, species, and backgrounds before it can create characters in this campaign.
+        </p>
+      {% endif %}
+
+      <form
+        method="get"
+        action="{{ url_for('character_create_view', campaign_slug=campaign.slug) }}"
+        class="stack-form character-builder-form"
+        data-live-builder-form
+      >
+        <section class="builder-section">
+          <h3>Identity</h3>
+          <div class="builder-field-grid">
+            <label class="field">
+              <span>Character Name</span>
+              <input type="text" name="name" value="{{ builder.values.name }}" placeholder="Zigzag Blackscar">
+            </label>
+            <label class="field">
+              <span>Character Slug</span>
+              <input type="text" name="character_slug" value="{{ builder.values.character_slug }}" placeholder="Auto-generated from the name if left blank">
+            </label>
+            <label class="field">
+              <span>Alignment</span>
+              <input type="text" name="alignment" value="{{ builder.values.alignment }}" placeholder="Neutral Good">
+            </label>
+            <label class="field">
+              <span>Experience Model</span>
+              <input type="text" name="experience_model" value="{{ builder.values.experience_model }}">
+            </label>
+          </div>
+        </section>
+
+        <section class="builder-section">
+          <h3>Core Build</h3>
+          <div class="builder-field-grid">
+            <label class="field">
+              <span>Class</span>
+              <select name="class_slug">
+                <option value="" {% if not builder.selected_class %}selected{% endif %}>Choose a class</option>
+                {% for option in builder.class_options %}
+                  <option value="{{ option.slug }}" {% if builder.selected_class and builder.selected_class.slug == option.slug %}selected{% endif %}>
+                    {{ option.title }}
+                  </option>
+                {% endfor %}
+              </select>
+            </label>
+
+            {% if builder.subclass_options or builder.requires_subclass %}
+              <label class="field">
+                <span>Subclass</span>
+                <select name="subclass_slug">
+                  <option value="" {% if not builder.selected_subclass %}selected{% endif %}>
+                    {% if builder.requires_subclass %}Choose a subclass{% else %}No subclass{% endif %}
+                  </option>
+                  {% for option in builder.subclass_options %}
+                    <option value="{{ option.slug }}" {% if builder.selected_subclass and builder.selected_subclass.slug == option.slug %}selected{% endif %}>
+                      {{ option.title }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </label>
+            {% endif %}
+
+            <label class="field">
+              <span>Species</span>
+              <select name="species_slug">
+                <option value="" {% if not builder.selected_species %}selected{% endif %}>Choose a species</option>
+                {% for option in builder.species_options %}
+                  <option value="{{ option.slug }}" {% if builder.selected_species and builder.selected_species.slug == option.slug %}selected{% endif %}>
+                    {{ option.title }}
+                  </option>
+                {% endfor %}
+              </select>
+            </label>
+
+            <label class="field">
+              <span>Background</span>
+              <select name="background_slug">
+                <option value="" {% if not builder.selected_background %}selected{% endif %}>Choose a background</option>
+                {% for option in builder.background_options %}
+                  <option value="{{ option.slug }}" {% if builder.selected_background and builder.selected_background.slug == option.slug %}selected{% endif %}>
+                    {{ option.title }}
+                  </option>
+                {% endfor %}
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section class="builder-section">
+          <h3>Ability Scores</h3>
+          <p class="meta">Enter final level-1 scores after any species bonuses.</p>
+          <div class="builder-ability-grid">
+            {% for ability_key, label in {
+              "str": "Strength",
+              "dex": "Dexterity",
+              "con": "Constitution",
+              "int": "Intelligence",
+              "wis": "Wisdom",
+              "cha": "Charisma",
+            }.items() %}
+              <label class="field">
+                <span>{{ label }}</span>
+                <input type="number" name="{{ ability_key }}" min="1" max="30" value="{{ builder.values[ability_key] }}">
+              </label>
+            {% endfor %}
+          </div>
+        </section>
+
+        {% for section in builder.choice_sections %}
+          <section class="builder-section">
+            <h3>{{ section.title }}</h3>
+            <div class="builder-field-grid">
+              {% for field in section.fields %}
+                <label class="field">
+                  <span>{{ field.label }}</span>
+                  <select name="{{ field.name }}">
+                    <option value="" {% if not field.selected %}selected{% endif %}>Choose an option</option>
+                    {% for option in field.options %}
+                      <option value="{{ option.value }}" {% if field.selected == option.value %}selected{% endif %}>
+                        {{ option.label }}
+                      </option>
+                    {% endfor %}
+                  </select>
+                  {% if field.help_text %}
+                    <small>{{ field.help_text }}</small>
+                  {% endif %}
+                </label>
+              {% endfor %}
+            </div>
+          </section>
+        {% endfor %}
+
+        <div class="builder-actions">
+          <button class="ghost-button" type="submit" data-live-refresh-fallback>Refresh options</button>
+          <button type="submit" formmethod="post" {% if not builder_ready %}disabled{% endif %}>Create character</button>
+        </div>
+      </form>
+    </section>
+  </section>
+
+  <aside class="sidebar">
+    <section class="card sidebar-card">
+      <h2>Preview</h2>
+      <div class="builder-preview-list">
+        <div>
+          <span class="meta">Class</span>
+          <strong>{{ builder.preview.class_level_text }}</strong>
+        </div>
+        <div>
+          <span class="meta">Max HP</span>
+          <strong>{{ builder.preview.max_hp }}</strong>
+        </div>
+        <div>
+          <span class="meta">Speed</span>
+          <strong>{{ builder.preview.speed or "Not set" }}</strong>
+        </div>
+        <div>
+          <span class="meta">Size</span>
+          <strong>{{ builder.preview.size or "Not set" }}</strong>
+        </div>
+        <div>
+          <span class="meta">Saving Throws</span>
+          <strong>
+            {% if builder.preview.saving_throws %}
+              {{ builder.preview.saving_throws | join(", ") }}
+            {% else %}
+              Not set
+            {% endif %}
+          </strong>
+        </div>
+        <div>
+          <span class="meta">Languages</span>
+          <strong>
+            {% if builder.preview.languages %}
+              {{ builder.preview.languages | join(", ") }}
+            {% else %}
+              Not set
+            {% endif %}
+          </strong>
+        </div>
+        {% if builder.preview.starting_currency %}
+          <div>
+            <span class="meta">Starting Currency</span>
+            <strong>{{ builder.preview.starting_currency }}</strong>
+          </div>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="card sidebar-card">
+      <h2>Expected Features</h2>
+      {% if builder.preview.features %}
+        <ul class="plain-list builder-feature-list">
+          {% for feature_name in builder.preview.features %}
+            <li>{{ feature_name }}</li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="meta">Choose a class, species, and background to preview the resulting sheet content.</p>
+      {% endif %}
+    </section>
+
+    <section class="card sidebar-card">
+      <h2>Starting Equipment</h2>
+      {% if builder.preview.equipment %}
+        <ul class="plain-list builder-feature-list">
+          {% for item in builder.preview.equipment %}
+            <li>{{ item }}</li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="meta">Equipment choices will appear here as the build comes together.</p>
+      {% endif %}
+    </section>
+
+    <section class="card sidebar-card">
+      <h2>Attack Preview</h2>
+      {% if builder.preview.attacks %}
+        <ul class="plain-list builder-feature-list">
+          {% for attack_name in builder.preview.attacks %}
+            <li>{{ attack_name }}</li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="meta">Weapon-based attack rows will appear here when your starting gear includes a PHB weapon.</p>
+      {% endif %}
+    </section>
+
+    <section class="card sidebar-card">
+      <h2>Spell Preview</h2>
+      {% if builder.preview.spells %}
+        <ul class="plain-list builder-feature-list">
+          {% for spell_name in builder.preview.spells %}
+            <li>{{ spell_name }}</li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="meta">Spell picks will appear here for spellcasting classes.</p>
+      {% endif %}
+    </section>
+
+    <section class="card sidebar-card">
+      <h2>Current Scope</h2>
+      <ul class="plain-list builder-feature-list">
+        {% for limitation in builder.limitations %}
+          <li>{{ limitation }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+  </aside>
+</div>

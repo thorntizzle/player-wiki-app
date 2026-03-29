@@ -708,9 +708,14 @@ def create_app() -> Flask:
             and builder_context.get("species_options")
             and builder_context.get("background_options")
         )
+        template_name = (
+            "_character_create_builder.html"
+            if request.method == "GET" and request.args.get("_live_preview") == "1"
+            else "character_create.html"
+        )
         return (
             render_template(
-                "character_create.html",
+                template_name,
                 campaign=campaign,
                 builder=builder_context,
                 builder_ready=builder_ready,
@@ -727,9 +732,14 @@ def create_app() -> Flask:
         status_code: int = 200,
     ):
         campaign = load_campaign_context(campaign_slug)
+        template_name = (
+            "_character_level_up_builder.html"
+            if request.method == "GET" and request.args.get("_live_preview") == "1"
+            else "character_level_up.html"
+        )
         return (
             render_template(
-                "character_level_up.html",
+                template_name,
                 campaign=campaign,
                 character_slug=character_slug,
                 level_up=level_up_context,

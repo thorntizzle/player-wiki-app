@@ -1,0 +1,137 @@
+<script>
+  (() => {
+    const rootSelector = "[data-live-builder-root]";
+    const formSelector = "[data-live-builder-form]";
+    const textInputSelector = "input[type='text'], input[type='number'], textarea";
+    const fieldSelector = "input:not([type='hidden']):not([type='submit']):not([type='button']):not([disabled]), select:not([disabled]), textarea:not([disabled])";
+
+    function captureFocus(root) {
+      const active = document.activeElement;
+      if (!active || !root.contains(active) || !active.name) {
+        return null;
+      }
+      const focusState = {name: active.name};
+      if (typeof active.selectionStart === "number" && typeof active.selectionEnd === "number") {
+        focusState.selectionStart = active.selectionStart;
+        focusState.selectionEnd = active.selectionEnd;
+      }
+      return focusState;
+    }
+
+    function restoreFocus(root, focusState) {
+      if (!focusState || !focusState.name) {
+        return;
+      }
+      const field = root.querySelector(`[name="${CSS.escape(focusState.name)}"]`);
+      if (!field) {
+        return;
+      }
+      field.focus({preventScroll: true});
+      if (typeof focusState.selectionStart === "number" && typeof field.setSelectionRange === "function") {
+        field.setSelectionRange(focusState.selectionStart, focusState.selectionEnd ?? focusState.selectionStart);
+      }
+    }
+
+    function buildPreviewUrl(form) {
+      const action = form.getAttribute("action") || window.location.pathname;
+      const url = new URL(action, window.location.origin);
+      const params = new URLSearchParams();
+      const formData = new FormData(form);
+      for (const [name, rawValue] of formData.entries()) {
+        if (typeof rawValue !== "string") {
+          continue;
+        }
+        if (!rawValue) {
+          continue;
+        }
+        params.append(name, rawValue);
+      }
+      params.set("_live_preview", "1");
+      url.search = params.toString();
+      return url.toString();
+    }
+
+    function hideFallbackButtons(root) {
+      root.querySelectorAll("[data-live-refresh-fallback]").forEach((button) => {
+        button.hidden = true;
+      });
+    }
+
+    function initLiveBuilder(root) {
+      if (!root || root.dataset.liveBuilderReady === "true") {
+        return;
+      }
+      const form = root.querySelector(formSelector);
+      if (!form) {
+        return;
+      }
+      root.dataset.liveBuilderReady = "true";
+      hideFallbackButtons(root);
+
+      let refreshTimer = null;
+      let activeRequestId = 0;
+      let activeController = null;
+      let liveRoot = root;
+
+      async function refreshPreview() {
+        const focusState = captureFocus(liveRoot);
+        activeRequestId += 1;
+        const requestId = activeRequestId;
+        if (activeController) {
+          activeController.abort();
+        }
+        activeController = new AbortController();
+        liveRoot.setAttribute("aria-busy", "true");
+        try {
+          const response = await fetch(buildPreviewUrl(form), {
+            credentials: "same-origin",
+            headers: {"X-Requested-With": "XMLHttpRequest"},
+            signal: activeController.signal,
+          });
+          if (!response.ok || requestId !== activeRequestId) {
+            return;
+          }
+          const wrapper = document.createElement("div");
+          wrapper.innerHTML = await response.text();
+          const nextRoot = wrapper.querySelector(rootSelector);
+          if (!nextRoot) {
+            return;
+          }
+          liveRoot.replaceWith(nextRoot);
+          liveRoot = nextRoot;
+          restoreFocus(liveRoot, focusState);
+          initLiveBuilder(liveRoot);
+        } catch (error) {
+          if (error?.name !== "AbortError") {
+            console.error("Character builder live preview failed.", error);
+          }
+        } finally {
+          if (liveRoot.isConnected) {
+            liveRoot.removeAttribute("aria-busy");
+          }
+        }
+      }
+
+      function scheduleRefresh(delayMs) {
+        window.clearTimeout(refreshTimer);
+        refreshTimer = window.setTimeout(refreshPreview, delayMs);
+      }
+
+      form.addEventListener("change", (event) => {
+        if (event.target instanceof HTMLElement && event.target.matches(fieldSelector)) {
+          scheduleRefresh(120);
+        }
+      });
+
+      form.addEventListener("input", (event) => {
+        if (event.target instanceof HTMLElement && event.target.matches(textInputSelector)) {
+          scheduleRefresh(250);
+        }
+      });
+    }
+
+    window.addEventListener("DOMContentLoaded", () => {
+      document.querySelectorAll(rootSelector).forEach(initLiveBuilder);
+    });
+  })();
+</script>
