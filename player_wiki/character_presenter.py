@@ -30,6 +30,10 @@ FEATURE_GROUP_TITLES = {
     "background_feature": "Background Features",
     "custom_feature": "Custom Features",
 }
+REDUNDANT_FEATURE_CHOICE_NAMES = {
+    "ability score increase",
+    "ability score improvement",
+}
 
 
 def present_character_roster(records: list[CharacterRecord]) -> list[dict[str, Any]]:
@@ -226,7 +230,21 @@ def present_character_detail(
         }
 
     feature_groups_ordered: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
+    has_language_details = any(group["title"] == "Languages" and group["values_list"] for group in proficiency_groups)
+    has_skill_details = bool(skills)
+    has_named_feats = any(
+        normalize_feature_name(feature.get("name")) != "feat"
+        for feature in list(definition.features or [])
+        if str(feature.get("category") or "").strip() == "feat"
+    )
     for feature in list(definition.features or []):
+        if should_hide_redundant_choice_feature(
+            feature,
+            has_language_details=has_language_details,
+            has_skill_details=has_skill_details,
+            has_named_feats=has_named_feats,
+        ):
+            continue
         group_title = FEATURE_GROUP_TITLES.get(
             str(feature.get("category") or ""),
             humanize_value(feature.get("category")) or "Features",
@@ -445,6 +463,35 @@ def resolve_feature_description_html(
     if entry is None:
         return ""
     return str(systems_service.build_character_sheet_entry_body_html(campaign.slug, entry) or "").strip()
+
+
+def should_hide_redundant_choice_feature(
+    feature: dict[str, Any],
+    *,
+    has_language_details: bool,
+    has_skill_details: bool,
+    has_named_feats: bool,
+) -> bool:
+    if str(feature.get("tracker_ref") or "").strip():
+        return False
+    activation_type = str(feature.get("activation_type") or "").strip().lower()
+    if activation_type and activation_type != "passive":
+        return False
+
+    feature_name = normalize_feature_name(feature.get("name"))
+    if feature_name in REDUNDANT_FEATURE_CHOICE_NAMES:
+        return True
+    if feature_name == "languages":
+        return has_language_details
+    if feature_name == "skills":
+        return has_skill_details
+    if feature_name == "feat":
+        return has_named_feats
+    return False
+
+
+def normalize_feature_name(value: Any) -> str:
+    return str(value or "").strip().lower()
 
 
 def render_campaign_markdown(campaign: Campaign, markdown_text: str) -> str:

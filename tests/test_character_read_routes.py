@@ -260,6 +260,78 @@ def test_character_sheet_shows_systems_feature_text_inline_and_hides_source_meta
     assert 'View source entry' not in html
 
 
+def test_character_sheet_hides_redundant_choice_placeholder_features(app, client, sign_in, users):
+    def _mutate(payload: dict) -> None:
+        features = list(payload.get("features") or [])
+        features.extend(
+            [
+                {
+                    "name": "Languages",
+                    "category": "species_trait",
+                    "source": "BR 31",
+                    "description_markdown": "You can speak, read, and write Common and one extra language.",
+                    "activation_type": "passive",
+                    "tracker_ref": None,
+                },
+                {
+                    "name": "Ability Score Increase",
+                    "category": "species_trait",
+                    "source": "BR 31",
+                    "description_markdown": "Two different ability scores of your choice increase by 1.",
+                    "activation_type": "passive",
+                    "tracker_ref": None,
+                },
+                {
+                    "name": "Skills",
+                    "category": "species_trait",
+                    "source": "BR 31",
+                    "description_markdown": "You gain proficiency in one skill of your choice.",
+                    "activation_type": "passive",
+                    "tracker_ref": None,
+                },
+                {
+                    "name": "Feat",
+                    "category": "species_trait",
+                    "source": "BR 31",
+                    "description_markdown": "You gain one feat of your choice.",
+                    "activation_type": "passive",
+                    "tracker_ref": None,
+                },
+                {
+                    "name": "Ability Score Improvement",
+                    "category": "class_feature",
+                    "source": "PHB 72",
+                    "description_markdown": "Increase one ability score by 2 or two ability scores by 1.",
+                    "activation_type": "passive",
+                    "tracker_ref": None,
+                },
+                {
+                    "name": "Sentinel",
+                    "category": "feat",
+                    "source": "PHB 169",
+                    "description_markdown": "Creatures provoke opportunity attacks from you even if they take the Disengage action.",
+                    "activation_type": "reaction",
+                    "tracker_ref": None,
+                },
+            ]
+        )
+        payload["features"] = features
+
+    _write_character_definition(app, "arden-march", _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get("/campaigns/linden-pass/characters/arden-march")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "You can speak, read, and write Common and one extra language." not in html
+    assert "Two different ability scores of your choice increase by 1." not in html
+    assert "You gain proficiency in one skill of your choice." not in html
+    assert "You gain one feat of your choice." not in html
+    assert "Increase one ability score by 2 or two ability scores by 1." not in html
+    assert "Creatures provoke opportunity attacks from you even if they take the Disengage action." in html
+
+
 def test_character_sheet_renders_long_form_imported_ability_keys(app, client, sign_in, users):
     def _mutate(payload: dict) -> None:
         stats = dict(payload.get("stats") or {})
