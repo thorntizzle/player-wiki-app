@@ -10,12 +10,12 @@ from .models import Campaign
 from .repository import build_alias_index, render_obsidian_links
 
 ABILITY_ORDER = (
-    ("str", "Strength"),
-    ("dex", "Dexterity"),
-    ("con", "Constitution"),
-    ("int", "Intelligence"),
-    ("wis", "Wisdom"),
-    ("cha", "Charisma"),
+    ("str", "strength", "Strength"),
+    ("dex", "dexterity", "Dexterity"),
+    ("con", "constitution", "Constitution"),
+    ("int", "intelligence", "Intelligence"),
+    ("wis", "wisdom", "Wisdom"),
+    ("cha", "charisma", "Charisma"),
 )
 PROFICIENCY_TITLES = (
     ("armor", "Armor"),
@@ -120,8 +120,8 @@ def present_character_detail(
 
     abilities = []
     ability_scores = dict(stats.get("ability_scores") or {})
-    for ability_key, ability_name in ABILITY_ORDER:
-        ability = dict(ability_scores.get(ability_key) or {})
+    for ability_key, legacy_key, ability_name in ABILITY_ORDER:
+        ability = resolve_ability_score_payload(ability_scores, ability_key, legacy_key)
         abilities.append(
             {
                 "abbr": ability_key.upper(),
@@ -449,6 +449,20 @@ def summarize_linked_resource(resource: dict[str, Any] | None) -> str:
     if resource is None:
         return ""
     return f"{str(resource.get('label') or 'Resource')}: {summarize_resource_value(resource)}"
+
+
+def resolve_ability_score_payload(
+    ability_scores: dict[str, Any],
+    ability_key: str,
+    legacy_key: str,
+) -> dict[str, Any]:
+    payload = ability_scores.get(ability_key)
+    if isinstance(payload, dict):
+        return dict(payload)
+    legacy_payload = ability_scores.get(legacy_key)
+    if isinstance(legacy_payload, dict):
+        return dict(legacy_payload)
+    return {}
 
 
 def format_signed(value: Any) -> str:

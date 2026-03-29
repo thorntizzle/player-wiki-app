@@ -190,3 +190,31 @@ def test_character_sheet_renders_systems_links_when_present(app, client, sign_in
     assert '/campaigns/linden-pass/systems/entries/phb-item-backpack' in html
     assert 'View source entry' in html
 
+
+def test_character_sheet_renders_long_form_imported_ability_keys(app, client, sign_in, users):
+    def _mutate(payload: dict) -> None:
+        stats = dict(payload.get("stats") or {})
+        stats["ability_scores"] = {
+            "strength": {"score": 17, "modifier": 3, "save_bonus": 6},
+            "dexterity": {"score": 13, "modifier": 1, "save_bonus": 1},
+            "constitution": {"score": 16, "modifier": 3, "save_bonus": 3},
+            "intelligence": {"score": 8, "modifier": -1, "save_bonus": -1},
+            "wisdom": {"score": 12, "modifier": 1, "save_bonus": 1},
+            "charisma": {"score": 19, "modifier": 4, "save_bonus": 7},
+        }
+        payload["stats"] = stats
+
+    _write_character_definition(app, "arden-march", _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get("/campaigns/linden-pass/characters/arden-march")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "<h3>17</h3>" in html
+    assert "<p>Strength</p>" in html
+    assert "Modifier +3 | Save +6" in html
+    assert "<h3>19</h3>" in html
+    assert "<p>Charisma</p>" in html
+    assert "Modifier +4 | Save +7" in html
+
