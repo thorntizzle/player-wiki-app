@@ -85,6 +85,22 @@ def test_owner_player_can_update_mutable_state(
     record = get_character("arden-march")
     assert record.state_record.state["notes"]["player_notes_markdown"] == "Session note test"
 
+    response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/session/personal",
+        data={
+            "expected_revision": record.state_record.revision,
+            "physical_description_markdown": "Lean and weathered.",
+            "background_markdown": "Raised around the salt docks.",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+
+    record = get_character("arden-march")
+    notes_state = record.state_record.state["notes"]
+    assert notes_state["physical_description_markdown"] == "Lean and weathered."
+    assert notes_state["background_markdown"] == "Raised around the salt docks."
+
 
 def test_long_rest_preview_and_apply_reset_modeled_state(
     client, sign_in, users, get_character, set_campaign_visibility

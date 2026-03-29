@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+from copy import deepcopy
 import yaml
 from datetime import datetime, timezone
 
@@ -17,6 +18,21 @@ def _write_character_definition(app, character_slug: str, mutator) -> None:
     payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
     mutator(payload)
     definition_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+
+def _write_character_state(app, character_slug: str, mutator) -> None:
+    with app.app_context():
+        repository = app.extensions["character_repository"]
+        store = app.extensions["character_state_store"]
+        record = repository.get_character("linden-pass", character_slug)
+        assert record is not None
+        payload = deepcopy(record.state_record.state)
+        mutator(payload)
+        store.replace_state(
+            record.definition,
+            payload,
+            expected_revision=record.state_record.revision,
+        )
 
 
 def test_dm_can_open_character_roster_and_read_sheet(client, sign_in, users):
@@ -62,6 +78,7 @@ def test_owner_player_can_open_session_mode_when_character_visibility_allows_pla
     html = response.get_data(as_text=True)
     assert "Active session" in html
     assert "Save vitals" in html
+    assert "Save personal details" in html
     assert "Back to read mode" in html
 
 
@@ -104,15 +121,17 @@ def test_character_sheet_subpages_show_requested_sections(app, client, sign_in, 
     assert "Quick Reference" in html
     assert "Features" in html
     assert "Equipment" in html
+    assert "Personal" in html
     assert "Notes" in html
     assert "?page=quick" in html
     assert "?page=features" in html
     assert "?page=equipment" in html
+    assert "?page=personal" in html
     assert "?page=notes" in html
     assert "Features and traits" in html
     assert "At a glance" not in html
     assert "Equipment and currency" not in html
-    assert "Notes and reference" not in html
+    assert "Keep an eye on the harbor." not in html
     assert "mode=session&amp;page=features" in html
 
 
@@ -127,7 +146,52 @@ def test_character_sheet_invalid_subpage_defaults_to_quick_reference(client, sig
     assert "Abilities and skills" in html
     assert "Features and traits" not in html
     assert "Equipment and currency" not in html
-    assert "Notes and reference" not in html
+    assert "No notes yet." not in html
+
+
+def test_character_sheet_personal_and_notes_subpages_render_markdown_fields_and_hide_legacy_action_sections(
+    app, client, sign_in, users
+):
+    def _mutate_definition(payload: dict) -> None:
+        reference_notes = dict(payload.get("reference_notes") or {})
+        reference_notes["additional_notes_markdown"] = "Keep an eye on the harbor."
+        reference_notes["custom_sections"] = [
+            {"title": "Actions: Bonus Actions", "body_markdown": "Second Wind"}
+        ]
+        payload["reference_notes"] = reference_notes
+
+    def _mutate_state(payload: dict) -> None:
+        notes = dict(payload.get("notes") or {})
+        notes["player_notes_markdown"] = "Remember the **dock code**."
+        notes["physical_description_markdown"] = "Tall, scarred, and always in dark leathers."
+        notes["background_markdown"] = "Raised along the harbor and quick to vanish into crowds."
+        payload["notes"] = notes
+
+    _write_character_definition(app, "arden-march", _mutate_definition)
+    _write_character_state(app, "arden-march", _mutate_state)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    personal_response = client.get("/campaigns/linden-pass/characters/arden-march?page=personal")
+    notes_response = client.get("/campaigns/linden-pass/characters/arden-march?page=notes")
+
+    assert personal_response.status_code == 200
+    personal_html = personal_response.get_data(as_text=True)
+    assert "Personal" in personal_html
+    assert "Physical Description" in personal_html
+    assert "Tall, scarred, and always in dark leathers." in personal_html
+    assert "Background" in personal_html
+    assert "Raised along the harbor and quick to vanish into crowds." in personal_html
+    assert "No personal details yet." not in personal_html
+
+    assert notes_response.status_code == 200
+    notes_html = notes_response.get_data(as_text=True)
+    assert "Notes" in notes_html
+    assert "Remember the" in notes_html
+    assert "dock code" in notes_html
+    assert "Keep an eye on the harbor." in notes_html
+    assert "Actions: Bonus Actions" not in notes_html
+    assert "Second Wind" not in notes_html
+    assert "No notes yet." not in notes_html
 
 
 def test_character_sheet_renders_systems_links_when_present(app, client, sign_in, users):

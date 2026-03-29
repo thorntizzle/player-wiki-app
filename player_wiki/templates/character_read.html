@@ -65,6 +65,7 @@
       {% set show_quick_sections = is_session_mode or character_subpage == 'quick' %}
       {% set show_feature_sections = is_session_mode or character_subpage == 'features' %}
       {% set show_equipment_sections = is_session_mode or character_subpage == 'equipment' %}
+      {% set show_personal_sections = is_session_mode or character_subpage == 'personal' %}
       {% set show_note_sections = is_session_mode or character_subpage == 'notes' %}
 
       {% if is_session_mode %}
@@ -350,18 +351,56 @@
         </section>
       {% endif %}
 
-      {% if show_note_sections and character.reference_sections %}
+      {% if show_personal_sections %}
         <section class="read-section">
           <div class="section-heading">
-            <h2>Notes and reference</h2>
+            <h2>Personal</h2>
           </div>
           <div class="reference-stack">
+            {% if character.physical_description_html %}
+              <article class="detail-card">
+                <h3>Physical Description</h3>
+                <div class="article-body article-body--compact">{{ character.physical_description_html | safe }}</div>
+              </article>
+            {% endif %}
+            {% if character.personal_background_html %}
+              <article class="detail-card">
+                <h3>Background</h3>
+                <div class="article-body article-body--compact">{{ character.personal_background_html | safe }}</div>
+              </article>
+            {% endif %}
+            {% if not character.physical_description_html and not character.personal_background_html and not is_session_mode %}
+              <article class="detail-card">
+                <p class="meta">No personal details yet.</p>
+              </article>
+            {% endif %}
+          </div>
+        </section>
+      {% endif %}
+
+      {% if show_note_sections and (character.player_notes_html or character.reference_sections or not is_session_mode) %}
+        <section class="read-section">
+          <div class="section-heading">
+            <h2>Notes</h2>
+          </div>
+          <div class="reference-stack">
+            {% if character.player_notes_html %}
+              <article class="detail-card">
+                <h3>Note</h3>
+                <div class="article-body article-body--compact">{{ character.player_notes_html | safe }}</div>
+              </article>
+            {% endif %}
             {% for section in character.reference_sections %}
               <article class="detail-card">
                 <h3>{{ section.title }}</h3>
                 <div class="article-body article-body--compact">{{ section.html | safe }}</div>
               </article>
             {% endfor %}
+            {% if not character.player_notes_html and not character.reference_sections and not is_session_mode %}
+              <article class="detail-card">
+                <p class="meta">No notes yet.</p>
+              </article>
+            {% endif %}
           </div>
         </section>
       {% endif %}

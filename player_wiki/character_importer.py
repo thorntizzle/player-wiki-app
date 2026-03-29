@@ -884,7 +884,7 @@ def parse_character_sheet_text(
     proficiencies = parse_proficiencies(sections.get("Proficiencies And Languages", ""))
     attacks = parse_attacks(sections.get("Attacks And Cantrips", ""))
     features, feature_trackers = parse_feature_groups(sections.get("Features And Traits", ""), warnings)
-    actions_sections, action_trackers, action_features = parse_actions(sections.get("Actions", ""), warnings)
+    _, action_trackers, action_features = parse_actions(sections.get("Actions", ""), warnings)
     features = merge_action_features_into_features(features, action_features)
     reference_notes, note_trackers = parse_personality_and_story(
         sections.get("Personality And Story", ""),
@@ -898,7 +898,6 @@ def parse_character_sheet_text(
         merge_tracker(tracker_templates, tracker, warnings)
 
     custom_sections = list(reference_notes.get("custom_sections") or [])
-    custom_sections.extend(actions_sections)
     if reference_notes.get("personality_markdown"):
         profile["personality_markdown"] = reference_notes["personality_markdown"]
 

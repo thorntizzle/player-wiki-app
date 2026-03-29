@@ -2850,6 +2850,22 @@ def register_api(app) -> None:
             ),
         )
 
+    @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/personal")
+    @api_campaign_scope_access_required("characters")
+    @api_login_required
+    def character_personal_update(campaign_slug: str, character_slug: str):
+        return run_character_mutation(
+            campaign_slug,
+            character_slug,
+            lambda record, payload, user_id: get_character_state_service().update_personal_details(
+                record,
+                expected_revision=int(payload.get("expected_revision")),
+                physical_description_markdown=str(payload.get("physical_description_markdown") or ""),
+                background_markdown=str(payload.get("background_markdown") or ""),
+                updated_by_user_id=user_id,
+            ),
+        )
+
     @api.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>")
     @api_campaign_scope_access_required("characters")
     @api_login_required

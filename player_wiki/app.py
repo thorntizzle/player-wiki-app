@@ -94,6 +94,7 @@ CHARACTER_READ_SUBPAGE_LABELS = {
     "quick": "Quick Reference",
     "features": "Features",
     "equipment": "Equipment",
+    "personal": "Personal",
     "notes": "Notes",
 }
 SUPPORTED_COMBAT_SYSTEM = "DND-5E"
@@ -622,6 +623,8 @@ def create_app() -> Flask:
         character_slug: str,
         *,
         notes_draft: str | None = None,
+        physical_description_draft: str | None = None,
+        background_draft: str | None = None,
         force_session_mode: bool = False,
         status_code: int = 200,
     ):
@@ -645,6 +648,10 @@ def create_app() -> Flask:
         )
         if notes_draft is not None:
             character["player_notes_markdown"] = notes_draft
+        if physical_description_draft is not None:
+            character["physical_description_markdown"] = physical_description_draft
+        if background_draft is not None:
+            character["personal_background_markdown"] = background_draft
 
         character_subpages = [
             {
@@ -3261,8 +3268,54 @@ def create_app() -> Flask:
                 status_code=400,
             )
 
-        flash("Player notes saved.", "success")
+        flash("Note saved.", "success")
         return redirect_to_character_mode(campaign_slug, character_slug, anchor="session-notes")
+
+    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/personal")
+    @campaign_scope_access_required("characters")
+    def character_session_personal(campaign_slug: str, character_slug: str):
+        _, record = load_character_context(campaign_slug, character_slug)
+        if not has_session_mode_access(campaign_slug, character_slug):
+            abort(403)
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        physical_description_markdown = request.form.get("physical_description_markdown", "")
+        background_markdown = request.form.get("background_markdown", "")
+        try:
+            expected_revision = parse_expected_revision()
+            get_character_state_service().update_personal_details(
+                record,
+                expected_revision=expected_revision,
+                physical_description_markdown=physical_description_markdown,
+                background_markdown=background_markdown,
+                updated_by_user_id=user.id,
+            )
+        except CharacterStateConflictError:
+            flash("This sheet changed in another session. Refresh the page and try again.", "error")
+            return render_character_page(
+                campaign_slug,
+                character_slug,
+                physical_description_draft=physical_description_markdown,
+                background_draft=background_markdown,
+                force_session_mode=True,
+                status_code=409,
+            )
+        except (CharacterStateValidationError, ValueError) as exc:
+            flash(str(exc), "error")
+            return render_character_page(
+                campaign_slug,
+                character_slug,
+                physical_description_draft=physical_description_markdown,
+                background_draft=background_markdown,
+                force_session_mode=True,
+                status_code=400,
+            )
+
+        flash("Personal details saved.", "success")
+        return redirect_to_character_mode(campaign_slug, character_slug, anchor="session-personal")
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>")
     @campaign_scope_access_required("characters")

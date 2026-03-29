@@ -393,6 +393,25 @@ def test_api_character_endpoints_allow_assigned_owner_updates(client, app, users
         == "Remember to bring the ash-yard contract to the council."
     )
 
+    personal_response = client.patch(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/session/personal",
+        headers=api_headers(owner_token),
+        json={
+            "expected_revision": updated_character["state_record"]["revision"],
+            "physical_description_markdown": "Broad-shouldered and steady-eyed.",
+            "background_markdown": "Spent years running messages along the harbor roads.",
+        },
+    )
+
+    assert personal_response.status_code == 200
+    personal_character = personal_response.get_json()["character"]
+    assert personal_character["state_record"]["state"]["notes"]["physical_description_markdown"] == (
+        "Broad-shouldered and steady-eyed."
+    )
+    assert personal_character["state_record"]["state"]["notes"]["background_markdown"] == (
+        "Spent years running messages along the harbor roads."
+    )
+
     stale_response = client.patch(
         "/api/v1/campaigns/linden-pass/characters/arden-march/session/notes",
         headers=api_headers(owner_token),

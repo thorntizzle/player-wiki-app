@@ -185,6 +185,27 @@ class CharacterStateService:
             updated_by_user_id=updated_by_user_id,
         )
 
+    def update_personal_details(
+        self,
+        record: CharacterRecord,
+        *,
+        expected_revision: int,
+        physical_description_markdown: str,
+        background_markdown: str,
+        updated_by_user_id: int | None = None,
+    ) -> CharacterStateRecord:
+        state = deepcopy(record.state_record.state)
+        notes = dict(state.get("notes") or {})
+        notes["physical_description_markdown"] = physical_description_markdown
+        notes["background_markdown"] = background_markdown
+        state["notes"] = notes
+        return self._replace_state(
+            record,
+            state,
+            expected_revision=expected_revision,
+            updated_by_user_id=updated_by_user_id,
+        )
+
     def preview_rest(self, record: CharacterRecord, rest_type: str) -> CharacterRestPreview:
         normalized_rest = self._normalize_rest_type(rest_type)
         state = deepcopy(record.state_record.state)

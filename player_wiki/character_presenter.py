@@ -92,6 +92,7 @@ def present_character_detail(
     profile = dict(definition.profile or {})
     classes = list(profile.get("classes") or [])
     first_class = dict(classes[0] or {}) if classes else {}
+    notes_payload = dict(state.get("notes") or {})
     resource_lookup = {
         str(resource.get("id") or ""): resource for resource in list(state.get("resources") or [])
     }
@@ -316,6 +317,9 @@ def present_character_detail(
         state,
         include_player_notes=include_player_notes_section,
     )
+    player_notes_markdown = str(notes_payload.get("player_notes_markdown") or "")
+    physical_description_markdown = str(notes_payload.get("physical_description_markdown") or "")
+    personal_background_markdown = str(notes_payload.get("background_markdown") or "")
 
     feature_groups = [
         {"title": title, "entries": entries} for title, entries in feature_groups_ordered.items() if entries
@@ -362,7 +366,18 @@ def present_character_detail(
         "current_hp": int(vitals.get("current_hp") or 0),
         "max_hp": int(stats.get("max_hp") or 0),
         "temp_hp": int(vitals.get("temp_hp") or 0),
-        "player_notes_markdown": str((state.get("notes") or {}).get("player_notes_markdown") or ""),
+        "player_notes_markdown": player_notes_markdown,
+        "player_notes_html": render_campaign_markdown(campaign, player_notes_markdown)
+        if player_notes_markdown.strip()
+        else "",
+        "physical_description_markdown": physical_description_markdown,
+        "physical_description_html": render_campaign_markdown(campaign, physical_description_markdown)
+        if physical_description_markdown.strip()
+        else "",
+        "personal_background_markdown": personal_background_markdown,
+        "personal_background_html": render_campaign_markdown(campaign, personal_background_markdown)
+        if personal_background_markdown.strip()
+        else "",
         "class_level_text": str(profile.get("class_level_text") or "Character"),
         "header_segments": [segment for segment in header_segments if str(segment.get("text") or "").strip()],
         "species": str(profile.get("species") or ""),
@@ -432,10 +447,10 @@ def build_reference_sections(
     )
 
     for section in custom_sections:
-        add_section(str(section.get("title") or ""), str(section.get("body_markdown") or ""))
-
-    if include_player_notes:
-        add_section("Player Notes", str((state.get("notes") or {}).get("player_notes_markdown") or ""))
+        title = str(section.get("title") or "")
+        if title.strip().lower().startswith("actions:"):
+            continue
+        add_section(title, str(section.get("body_markdown") or ""))
 
     return sections
 

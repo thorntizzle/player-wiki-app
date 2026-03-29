@@ -72,6 +72,8 @@ def build_initial_state(definition: CharacterDefinition) -> dict[str, Any]:
         "attunement": {"max_attuned_items": 3, "attuned_item_refs": []},
         "notes": {
             "player_notes_markdown": "",
+            "physical_description_markdown": "",
+            "background_markdown": "",
             "session_notes": [],
         },
     }
@@ -187,6 +189,10 @@ def validate_state(definition: CharacterDefinition, state: dict[str, Any]) -> di
     }
     payload["notes"] = {
         "player_notes_markdown": str((payload.get("notes") or {}).get("player_notes_markdown") or ""),
+        "physical_description_markdown": str(
+            (payload.get("notes") or {}).get("physical_description_markdown") or ""
+        ),
+        "background_markdown": str((payload.get("notes") or {}).get("background_markdown") or ""),
         "session_notes": list((payload.get("notes") or {}).get("session_notes") or []),
     }
     payload["status"] = str(payload.get("status") or definition.status)
