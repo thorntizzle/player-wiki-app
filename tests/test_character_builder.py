@@ -171,7 +171,7 @@ def _minimal_import_metadata(character_slug: str = "new-hero") -> CharacterImpor
         character_slug=character_slug,
         source_path="builder://phb-level-1",
         imported_at_utc="2026-03-29T00:00:00Z",
-        parser_version="2026-03-29.3",
+        parser_version="2026-03-29.4",
         import_status="clean",
         warnings=[],
     )
@@ -205,7 +205,7 @@ def _builder_context_fixture() -> dict[str, object]:
         "subclass_progression": [],
         "limitations": [
             "Enter final level-1 ability scores after any species bonuses.",
-            "Basic weapon attack rows are now generated from chosen starting gear, but off-hand attacks and a few feature-based damage adjustments still need manual follow-up.",
+            "Native attack rows now cover basic PHB weapons, off-hand attacks, and key level-1 fighting-style adjustments, but a few advanced damage riders still need manual follow-up.",
             "Gold-alternative loadouts and a few class-specific spell extras still need manual follow-up.",
         ],
         "preview": {
@@ -526,6 +526,230 @@ def test_level_one_builder_generates_attack_rows_from_starting_weapons():
     assert attacks_by_name["Light Crossbow"]["damage"] == "1d8+1 piercing"
     assert attacks_by_name["Light Crossbow"]["notes"] == "Ammunition, loading, range 80/320."
     assert attacks_by_name["Light Crossbow"]["systems_ref"]["slug"] == "phb-item-light-crossbow"
+
+
+def test_level_one_builder_applies_dueling_damage_bonus_to_one_handed_melee_weapon():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+            "starting_equipment": {
+                "defaultData": [
+                    {"_": ["longsword|phb", "shield|phb"]},
+                ]
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+        body={"entries": [{"name": "Feature: Adaptable", "entries": ["You fit in almost anywhere."]}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+        body={
+            "entries": [
+                {
+                    "name": "Feature: Shelter of the Faithful",
+                    "entries": ["You can find refuge among the faithful."],
+                    "data": {"isFeature": True},
+                }
+            ]
+        },
+    )
+    fighting_style = _systems_entry("classfeature", "phb-classfeature-fighting-style", "Fighting Style", metadata={"level": 1})
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    longsword = _systems_entry("item", "phb-item-longsword", "Longsword", metadata={"weight": 3})
+    shield = _systems_entry("item", "phb-item-shield", "Shield", metadata={"weight": 6, "type": "S"})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "item": [longsword, shield],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {
+                        "label": "Fighting Style",
+                        "entry": fighting_style,
+                        "embedded_card": {
+                            "option_groups": [
+                                {
+                                    "options": [
+                                        {"label": "Dueling", "slug": "phb-optionalfeature-dueling"},
+                                        {"label": "Defense", "slug": "phb-optionalfeature-defense"},
+                                    ]
+                                }
+                            ]
+                        },
+                    },
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    form_values = {
+        "name": "Ser Rowan",
+        "character_slug": "ser-rowan",
+        "alignment": "Lawful Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "class_option_1": "phb-optionalfeature-dueling",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+
+    assert context["preview"]["attacks"] == ["Longsword (+5, 1d8+5 slashing)"]
+    assert definition.attacks[0]["name"] == "Longsword"
+    assert definition.attacks[0]["damage"] == "1d8+5 slashing"
+    assert definition.attacks[0]["notes"] == "Versatile (1d10)."
+
+
+def test_level_one_builder_generates_off_hand_attack_and_two_weapon_fighting_damage():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+            "starting_equipment": {
+                "defaultData": [
+                    {"_": [{"item": "handaxe|phb", "quantity": 2}]},
+                ]
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+        body={"entries": [{"name": "Feature: Adaptable", "entries": ["You fit in almost anywhere."]}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+        body={
+            "entries": [
+                {
+                    "name": "Feature: Shelter of the Faithful",
+                    "entries": ["You can find refuge among the faithful."],
+                    "data": {"isFeature": True},
+                }
+            ]
+        },
+    )
+    fighting_style = _systems_entry("classfeature", "phb-classfeature-fighting-style", "Fighting Style", metadata={"level": 1})
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    handaxe = _systems_entry("item", "phb-item-handaxe", "Handaxe", metadata={"weight": 2})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "item": [handaxe],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {
+                        "label": "Fighting Style",
+                        "entry": fighting_style,
+                        "embedded_card": {
+                            "option_groups": [
+                                {
+                                    "options": [
+                                        {
+                                            "label": "Two-Weapon Fighting",
+                                            "slug": "phb-optionalfeature-two-weapon-fighting",
+                                        },
+                                        {"label": "Defense", "slug": "phb-optionalfeature-defense"},
+                                    ]
+                                }
+                            ]
+                        },
+                    },
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    form_values = {
+        "name": "Tamsin Vale",
+        "character_slug": "tamsin-vale",
+        "alignment": "Chaotic Good",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "acrobatics",
+        "class_option_1": "phb-optionalfeature-two-weapon-fighting",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+    attacks_by_name = {attack["name"]: attack for attack in definition.attacks}
+
+    assert "Handaxe (+5, 1d6+3 slashing)" in context["preview"]["attacks"]
+    assert "Handaxe (off-hand) (+5, 1d6+3 slashing)" in context["preview"]["attacks"]
+    assert attacks_by_name["Handaxe"]["notes"] == "range 20/60."
+    assert attacks_by_name["Handaxe (off-hand)"]["damage"] == "1d6+3 slashing"
+    assert attacks_by_name["Handaxe (off-hand)"]["notes"] == "range 20/60, Bonus action."
 
 
 def test_level_one_builder_populates_starting_equipment_spells_and_currency():
@@ -857,7 +1081,7 @@ def test_level_one_builder_populates_starting_equipment_spells_and_currency():
     assert spells_by_name["Find Familiar"]["mark"] == "Spellbook"
     assert spells_by_name["Detect Magic"]["reference"] == "p. 231"
     assert spells_by_name["Message"]["components"] == "V, S, M (a short piece of copper wire)"
-    assert import_metadata.parser_version == "2026-03-29.3"
+    assert import_metadata.parser_version == "2026-03-29.4"
 
 
 def test_dm_roster_shows_create_character_link(client, sign_in, users):

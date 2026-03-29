@@ -11,7 +11,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-03-29.3"
+CHARACTER_BUILDER_VERSION = "2026-03-29.4"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -323,7 +323,7 @@ def build_level_one_builder_context(
         "spell_catalog": spell_catalog,
         "limitations": [
             "Enter final level-1 ability scores after any species bonuses.",
-            "Basic weapon attack rows are now generated from chosen starting gear, but off-hand attacks and a few feature-based damage adjustments still need manual follow-up.",
+            "Native attack rows now cover basic PHB weapons, off-hand attacks, and key level-1 fighting-style adjustments, but a few advanced damage riders still need manual follow-up.",
             "Gold-alternative loadouts and a few class-specific spell extras still need manual follow-up.",
         ],
         "preview": preview,
@@ -1169,6 +1169,88 @@ def _build_level_one_attacks(
     selected_choices: dict[str, list[str]],
 ) -> list[dict[str, Any]]:
     attacks: list[dict[str, Any]] = []
+    attack_contexts = _build_weapon_attack_contexts(
+        equipment_catalog=equipment_catalog,
+        item_catalog=item_catalog,
+        ability_scores=ability_scores,
+        weapon_proficiencies=weapon_proficiencies,
+    )
+    has_archery = _has_fighting_style(selected_choices, "phb-optionalfeature-archery", "Archery")
+    has_dueling = _has_fighting_style(selected_choices, "phb-optionalfeature-dueling", "Dueling")
+    has_great_weapon_fighting = _has_fighting_style(
+        selected_choices,
+        "phb-optionalfeature-great-weapon-fighting",
+        "Great Weapon Fighting",
+    )
+    has_two_weapon_fighting = _has_fighting_style(
+        selected_choices,
+        "phb-optionalfeature-two-weapon-fighting",
+        "Two-Weapon Fighting",
+    )
+    off_hand_context = _resolve_off_hand_attack_context(attack_contexts)
+    has_shield = any(_is_shield_item(context["item"]) for context in attack_contexts)
+
+    for context in attack_contexts:
+        profile = dict(context["profile"] or {})
+        attack_bonus = int(context["ability_modifier"] or 0)
+        if bool(context["is_proficient"]):
+            attack_bonus += proficiency_bonus
+        if has_archery and str(profile.get("type") or "").strip().upper() == "R":
+            attack_bonus += 2
+        damage_bonus = int(context["ability_modifier"] or 0)
+        if has_dueling and _qualifies_for_dueling(context, off_hand_context=off_hand_context):
+            damage_bonus += 2
+        attacks.append(
+            _build_weapon_attack_payload(
+                context,
+                attack_bonus=attack_bonus,
+                damage_bonus=damage_bonus,
+                notes=_build_weapon_attack_notes(
+                    profile,
+                    great_weapon_fighting=has_great_weapon_fighting,
+                    has_shield=has_shield,
+                    off_hand_context=off_hand_context,
+                ),
+                index=len(attacks) + 1,
+            )
+        )
+
+    if off_hand_context is not None:
+        off_hand_damage_bonus = (
+            int(off_hand_context["ability_modifier"] or 0)
+            if has_two_weapon_fighting
+            else min(int(off_hand_context["ability_modifier"] or 0), 0)
+        )
+        off_hand_attack_bonus = int(off_hand_context["ability_modifier"] or 0)
+        if bool(off_hand_context["is_proficient"]):
+            off_hand_attack_bonus += proficiency_bonus
+        attacks.append(
+            _build_weapon_attack_payload(
+                off_hand_context,
+                attack_bonus=off_hand_attack_bonus,
+                damage_bonus=off_hand_damage_bonus,
+                notes=_build_weapon_attack_notes(
+                    dict(off_hand_context["profile"] or {}),
+                    bonus_action=True,
+                    great_weapon_fighting=False,
+                    has_shield=False,
+                    off_hand_context=off_hand_context,
+                ),
+                index=len(attacks) + 1,
+                name_suffix=" (off-hand)",
+            )
+        )
+    return attacks
+
+
+def _build_weapon_attack_contexts(
+    *,
+    equipment_catalog: list[dict[str, Any]],
+    item_catalog: dict[str, Any],
+    ability_scores: dict[str, int],
+    weapon_proficiencies: list[str],
+) -> list[dict[str, Any]]:
+    contexts: list[dict[str, Any]] = []
     for item in equipment_catalog:
         profile = _resolve_weapon_profile(item, item_catalog)
         if profile is None:
@@ -1177,26 +1259,57 @@ def _build_level_one_attacks(
         if not attack_name:
             continue
         ability_key = _weapon_attack_ability_key(profile, ability_scores)
-        ability_modifier = _ability_modifier(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE))
-        attack_bonus = ability_modifier
-        if _is_proficient_with_weapon(profile, weapon_proficiencies, attack_name):
-            attack_bonus += proficiency_bonus
-        if _has_archery_style(selected_choices) and str(profile.get("type") or "").strip().upper() == "R":
-            attack_bonus += 2
-        damage_bonus = ability_modifier
-        attacks.append(
+        contexts.append(
             {
-                "id": f"{slugify(attack_name)}-{len(attacks) + 1}",
-                "name": attack_name,
-                "category": _weapon_attack_category(profile),
-                "attack_bonus": attack_bonus,
-                "damage": _format_weapon_damage(profile, damage_bonus),
-                "damage_type": DAMAGE_TYPE_LABELS.get(str(profile.get("damage_type") or "").strip().upper(), ""),
-                "notes": _build_weapon_attack_notes(profile),
-                "systems_ref": dict(item.get("systems_ref") or {}) or None,
+                "item": dict(item),
+                "profile": dict(profile),
+                "attack_name": attack_name,
+                "ability_key": ability_key,
+                "ability_modifier": _ability_modifier(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE)),
+                "is_proficient": _is_proficient_with_weapon(profile, weapon_proficiencies, attack_name),
+                "quantity": max(int(item.get("default_quantity") or 1), 1),
             }
         )
-    return attacks
+    return contexts
+
+
+def _build_weapon_attack_payload(
+    context: dict[str, Any],
+    *,
+    attack_bonus: int,
+    damage_bonus: int,
+    notes: str,
+    index: int,
+    name_suffix: str = "",
+) -> dict[str, Any]:
+    profile = dict(context["profile"] or {})
+    attack_name = f"{str(context.get('attack_name') or '').strip()}{name_suffix}"
+    return {
+        "id": f"{slugify(attack_name)}-{index}",
+        "name": attack_name,
+        "category": _weapon_attack_category(profile),
+        "attack_bonus": attack_bonus,
+        "damage": _format_weapon_damage(profile, damage_bonus),
+        "damage_type": DAMAGE_TYPE_LABELS.get(str(profile.get("damage_type") or "").strip().upper(), ""),
+        "notes": notes,
+        "systems_ref": dict(dict(context.get("item") or {}).get("systems_ref") or {}) or None,
+    }
+
+
+def _resolve_off_hand_attack_context(attack_contexts: list[dict[str, Any]]) -> dict[str, Any] | None:
+    eligible_contexts: list[dict[str, Any]] = []
+    for context in attack_contexts:
+        profile = dict(context.get("profile") or {})
+        if str(profile.get("type") or "").strip().upper() != "M":
+            continue
+        if "L" not in set(profile.get("properties") or []):
+            continue
+        quantity = max(int(context.get("quantity") or 1), 1)
+        for _ in range(quantity):
+            eligible_contexts.append(context)
+            if len(eligible_contexts) >= 2:
+                return eligible_contexts[1]
+    return None
 
 
 def _resolve_weapon_profile(
@@ -1246,15 +1359,39 @@ def _is_proficient_with_weapon(
     return False
 
 
-def _has_archery_style(selected_choices: dict[str, list[str]]) -> bool:
+def _has_fighting_style(selected_choices: dict[str, list[str]], *style_values: str) -> bool:
+    normalized_targets = {normalize_lookup(value) for value in style_values if str(value or "").strip()}
     for values in selected_choices.values():
         for value in values:
-            if normalize_lookup(value) in {
-                normalize_lookup("phb-optionalfeature-archery"),
-                normalize_lookup("archery"),
-            }:
+            if normalize_lookup(value) in normalized_targets:
                 return True
     return False
+
+
+def _qualifies_for_dueling(
+    context: dict[str, Any],
+    *,
+    off_hand_context: dict[str, Any] | None,
+) -> bool:
+    profile = dict(context.get("profile") or {})
+    properties = set(profile.get("properties") or [])
+    if str(profile.get("type") or "").strip().upper() != "M":
+        return False
+    if "2H" in properties:
+        return False
+    if off_hand_context is not None:
+        return False
+    return True
+
+
+def _is_shield_item(item: dict[str, Any]) -> bool:
+    systems_ref = dict(item.get("systems_ref") or {})
+    candidate_values = [
+        str(item.get("name") or "").strip(),
+        str(systems_ref.get("title") or "").strip(),
+        str(systems_ref.get("slug") or "").strip(),
+    ]
+    return any(normalize_lookup(value) in {"shield", "phb item shield"} for value in candidate_values if value)
 
 
 def _weapon_attack_category(profile: dict[str, Any]) -> str:
@@ -1276,7 +1413,14 @@ def _format_weapon_damage(profile: dict[str, Any], damage_bonus: int) -> str:
     return f"{base_damage}{bonus_text}"
 
 
-def _build_weapon_attack_notes(profile: dict[str, Any]) -> str:
+def _build_weapon_attack_notes(
+    profile: dict[str, Any],
+    *,
+    bonus_action: bool = False,
+    great_weapon_fighting: bool = False,
+    has_shield: bool = False,
+    off_hand_context: dict[str, Any] | None = None,
+) -> str:
     properties = set(profile.get("properties") or [])
     notes: list[str] = []
     if "A" in properties:
@@ -1288,6 +1432,10 @@ def _build_weapon_attack_notes(profile: dict[str, Any]) -> str:
         notes.append(f"range {attack_range}")
     if "V" in properties and str(profile.get("versatile_damage") or "").strip():
         notes.append(f"Versatile ({str(profile.get('versatile_damage') or '').strip()})")
+    if great_weapon_fighting and ("2H" in properties or ("V" in properties and not has_shield and off_hand_context is None)):
+        notes.append("Great Weapon Fighting (reroll 1s and 2s)")
+    if bonus_action:
+        notes.append("Bonus action")
     if not notes:
         return ""
     return ", ".join(notes) + "."
