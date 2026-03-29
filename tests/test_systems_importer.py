@@ -542,6 +542,90 @@ def build_test_data_root(root: Path) -> Path:
     return root
 
 
+def build_additional_spell_metadata_data_root(root: Path) -> Path:
+    write_json(root / "data/class/index.json", {"cleric": "class-cleric.json"})
+    write_json(
+        root / "data/class/class-cleric.json",
+        {
+            "class": [
+                {
+                    "name": "Cleric",
+                    "source": "PHB",
+                    "page": 56,
+                    "hd": {"number": 1, "faces": 8},
+                    "proficiency": ["wis", "cha"],
+                    "subclassTitle": "Divine Domain",
+                    "classFeatures": ["Spellcasting|Cleric||1"],
+                    "additionalSpells": [
+                        {
+                            "prepared": {
+                                "1": ["ceremony"],
+                            }
+                        }
+                    ],
+                }
+            ],
+            "subclass": [
+                {
+                    "name": "Life Domain",
+                    "source": "PHB",
+                    "className": "Cleric",
+                    "classSource": "PHB",
+                    "page": 60,
+                    "subclassFeatures": ["Disciple of Life|Cleric||Life||1"],
+                    "additionalSpells": [
+                        {
+                            "prepared": {
+                                "1": ["bless", "cure wounds"],
+                                "3": ["lesser restoration", "spiritual weapon"],
+                            }
+                        }
+                    ],
+                }
+            ],
+            "classFeature": [
+                {
+                    "name": "Spellcasting",
+                    "source": "PHB",
+                    "className": "Cleric",
+                    "classSource": "PHB",
+                    "level": 1,
+                    "page": 58,
+                    "entries": ["You can cast prepared cleric spells."],
+                    "additionalSpells": [
+                        {
+                            "prepared": {
+                                "1": ["guidance"],
+                            }
+                        }
+                    ],
+                }
+            ],
+            "subclassFeature": [
+                {
+                    "name": "Disciple of Life",
+                    "source": "PHB",
+                    "className": "Cleric",
+                    "classSource": "PHB",
+                    "subclassShortName": "Life",
+                    "subclassSource": "PHB",
+                    "level": 1,
+                    "page": 60,
+                    "entries": ["Your healing spells are more effective."],
+                    "additionalSpells": [
+                        {
+                            "prepared": {
+                                "1": ["bless"],
+                            }
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    return root
+
+
 def build_large_feat_data_root(root: Path, *, count: int) -> Path:
     write_json(
         root / "data/feats.json",
@@ -1184,6 +1268,27 @@ def test_importer_imports_mechanics_only_and_strips_media_fields(app, tmp_path):
         assert "altArt" not in raw_monster_text
         assert "Melee Weapon Attack:" in monster.rendered_html
         assert "+4" in monster.rendered_html
+
+
+def test_importer_preserves_additional_spell_metadata_on_class_entries(app, tmp_path):
+    data_root = build_additional_spell_metadata_data_root(tmp_path / "dnd5e-source-additional-spells")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("PHB", entry_types=["class", "subclass", "classfeature", "subclassfeature"])
+        store = app.extensions["systems_store"]
+        entries = {entry.title: entry for entry in store.list_entries_for_source("DND-5E", "PHB", limit=20)}
+
+    assert entries["Cleric"].metadata["additional_spells"] == [{"prepared": {"1": ["ceremony"]}}]
+    assert entries["Life Domain"].metadata["additional_spells"] == [
+        {"prepared": {"1": ["bless", "cure wounds"], "3": ["lesser restoration", "spiritual weapon"]}}
+    ]
+    assert entries["Spellcasting"].metadata["additional_spells"] == [{"prepared": {"1": ["guidance"]}}]
+    assert entries["Disciple of Life"].metadata["additional_spells"] == [{"prepared": {"1": ["bless"]}}]
 
 
 def test_importer_preserves_structured_feat_metadata_for_native_builder(app, tmp_path):

@@ -654,6 +654,7 @@ class Dnd5eSystemsImporter:
             "multiclassing": self._clean_data(raw_entry.get("multiclassing")),
             "subclass_title": self._clean_data(raw_entry.get("subclassTitle")),
             "optionalfeature_progression": self._clean_data(raw_entry.get("optionalfeatureProgression")),
+            "additional_spells": self._clean_data(raw_entry.get("additionalSpells")),
         }
         feature_progression = self._build_feature_progression_sections(raw_entry.get("classFeatures"))
         body = {
@@ -712,6 +713,7 @@ class Dnd5eSystemsImporter:
             "class_name": self._clean_data(raw_entry.get("className")),
             "class_source": self._clean_data(raw_entry.get("classSource")),
             "optionalfeature_progression": self._clean_data(raw_entry.get("optionalfeatureProgression")),
+            "additional_spells": self._clean_data(raw_entry.get("additionalSpells")),
         }
         body = {
             "feature_progression": self._build_feature_progression_sections(raw_entry.get("subclassFeatures")),
@@ -861,6 +863,7 @@ class Dnd5eSystemsImporter:
                 "class_name": self._clean_data(raw_entry.get("className")),
                 "class_source": self._clean_data(raw_entry.get("classSource")),
                 "level": raw_entry.get("level"),
+                "additional_spells": self._clean_data(raw_entry.get("additionalSpells")),
             }
             metadata_pairs = [
                 ("Class", self._format_compact_value(raw_entry.get("className"))),
@@ -935,6 +938,7 @@ class Dnd5eSystemsImporter:
                 "subclass_name": self._clean_data(raw_entry.get("subclassShortName")),
                 "subclass_source": self._clean_data(raw_entry.get("subclassSource")),
                 "level": raw_entry.get("level"),
+                "additional_spells": self._clean_data(raw_entry.get("additionalSpells")),
             }
             metadata_pairs = [
                 ("Class", self._format_compact_value(raw_entry.get("className"))),
