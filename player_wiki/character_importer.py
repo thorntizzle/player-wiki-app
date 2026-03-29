@@ -17,7 +17,7 @@ from .character_store import CharacterStateStore, CharacterStateWriteResult
 from .db import init_database
 from .repository import slugify
 
-PARSER_VERSION = "2026-03-29.1"
+PARSER_VERSION = "2026-03-29.2"
 REST_TRACKER_PATTERN = re.compile(
     r"^(?P<label>.+?)\s*[-:]\s*(?P<value>\d+)\s*/\s*(?P<reset>Long Rest|Short Rest|Daily|Other|Manual|Never)\b",
     re.IGNORECASE,
@@ -984,6 +984,64 @@ def write_yaml(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(rendered, encoding="utf-8")
 
 
+def _preserve_existing_page_overrides(
+    imported_entries: list[dict[str, Any]],
+    existing_entries: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    existing_by_id = {
+        str(entry.get("id") or "").strip(): dict(entry or {})
+        for entry in existing_entries
+        if str(entry.get("id") or "").strip()
+    }
+    merged: list[dict[str, Any]] = []
+    for entry in imported_entries:
+        payload = dict(entry or {})
+        entry_id = str(payload.get("id") or "").strip()
+        existing = existing_by_id.get(entry_id)
+        if existing is not None and existing.get("page_ref"):
+            existing_page_ref = existing.get("page_ref")
+            payload["page_ref"] = (
+                dict(existing_page_ref)
+                if isinstance(existing_page_ref, dict)
+                else existing_page_ref
+            )
+            payload.pop("systems_ref", None)
+            existing_name = str(existing.get("name") or "").strip()
+            if existing_name:
+                payload["name"] = existing_name
+        merged.append(payload)
+    return merged
+
+
+def preserve_existing_character_overrides(
+    definition: CharacterDefinition,
+    character_dir: Path,
+) -> CharacterDefinition:
+    definition_path = character_dir / "definition.yaml"
+    if not definition_path.exists():
+        return definition
+
+    existing_payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(existing_payload, dict) or not existing_payload.get("character_slug"):
+        return definition
+
+    try:
+        existing_definition = CharacterDefinition.from_dict(existing_payload)
+    except ValueError:
+        return definition
+
+    merged_definition = CharacterDefinition.from_dict(definition.to_dict())
+    merged_definition.attacks = _preserve_existing_page_overrides(
+        list(merged_definition.attacks or []),
+        list(existing_definition.attacks or []),
+    )
+    merged_definition.equipment_catalog = _preserve_existing_page_overrides(
+        list(merged_definition.equipment_catalog or []),
+        list(existing_definition.equipment_catalog or []),
+    )
+    return merged_definition
+
+
 def initialize_or_reconcile_imported_state(
     state_store: CharacterStateStore,
     definition: CharacterDefinition,
@@ -1027,6 +1085,7 @@ def import_character(
             character_slug=character_slug,
         )
         character_dir = config.characters_dir / definition.character_slug
+        definition = preserve_existing_character_overrides(definition, character_dir)
         write_yaml(character_dir / "definition.yaml", definition.to_dict())
         write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
         state_result = initialize_or_reconcile_imported_state(state_store, definition)

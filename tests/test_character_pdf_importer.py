@@ -4,6 +4,8 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 
+import yaml
+
 from player_wiki.app import create_app
 from player_wiki.character_importer import import_character, parse_character_sheet_text
 from player_wiki.character_pdf_importer import build_pdf_character_markdown, resolve_definition_systems_links
@@ -426,6 +428,63 @@ def test_import_character_reconciles_missing_resource_trackers_into_existing_sta
     assert resources["action-surge"]["max"] == 1
     assert resources["action-surge"]["reset_on"] == "short_rest"
     assert resources["second-wind"]["current"] == 0
+
+
+def test_import_character_preserves_existing_campaign_page_overrides(tmp_path, monkeypatch):
+    campaigns_dir = build_test_campaigns_dir(tmp_path)
+    db_path = tmp_path / "player_wiki.sqlite3"
+    source_path = tmp_path / "Zigzag - Character Sheet.md"
+    source_markdown = _sample_split_action_markdown().replace(
+        "| Backpack | 1 | 5 lb. |",
+        "| Huron Blade | 1 | 3 lb. |",
+    )
+    source_path.write_text(source_markdown, encoding="utf-8")
+
+    monkeypatch.setattr(Config, "CAMPAIGNS_DIR", campaigns_dir)
+    monkeypatch.setattr(Config, "DB_PATH", db_path)
+
+    project_root = Path(__file__).resolve().parents[1]
+    character_dir = campaigns_dir / "linden-pass" / "characters" / "zigzag-blackscar"
+
+    import_character(
+        project_root,
+        "linden-pass",
+        str(source_path),
+        character_slug="zigzag-blackscar",
+    )
+
+    definition_path = character_dir / "definition.yaml"
+    payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
+    attack = next(entry for entry in payload["attacks"] if entry["name"] == "Huron Blade")
+    attack["name"] = "Consecrated Huran Blade"
+    attack["page_ref"] = {
+        "slug": "items/consecrated-huran-blade",
+        "title": "Consecrated Huran Blade",
+    }
+    item = next(entry for entry in payload["equipment_catalog"] if entry["name"] == "Huron Blade")
+    item["name"] = "Consecrated Huran Blade"
+    item["page_ref"] = {
+        "slug": "items/consecrated-huran-blade",
+        "title": "Consecrated Huran Blade",
+    }
+    definition_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    result = import_character(
+        project_root,
+        "linden-pass",
+        str(source_path),
+        character_slug="zigzag-blackscar",
+    )
+
+    attack = next(entry for entry in result.definition.attacks if entry["name"] == "Consecrated Huran Blade")
+    item = next(entry for entry in result.definition.equipment_catalog if entry["name"] == "Consecrated Huran Blade")
+
+    assert attack["name"] == "Consecrated Huran Blade"
+    assert attack["page_ref"]["slug"] == "items/consecrated-huran-blade"
+    assert "systems_ref" not in attack
+    assert item["name"] == "Consecrated Huran Blade"
+    assert item["page_ref"]["slug"] == "items/consecrated-huran-blade"
+    assert "systems_ref" not in item
 
 
 def test_resolve_definition_systems_links_falls_back_to_parent_feature_for_nested_rows():

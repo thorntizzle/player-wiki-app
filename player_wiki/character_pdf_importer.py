@@ -11,6 +11,7 @@ from pypdf import PdfReader
 from .character_importer import (
     initialize_or_reconcile_imported_state,
     parse_character_sheet_text,
+    preserve_existing_character_overrides,
     write_yaml,
 )
 from .character_models import CharacterDefinition, CharacterImportMetadata
@@ -20,7 +21,7 @@ from .repository import normalize_lookup
 from .systems_models import SystemsEntryRecord
 from .systems_service import SystemsService
 
-PDF_PARSER_VERSION = "2026-03-29.1"
+PDF_PARSER_VERSION = "2026-03-29.2"
 BULLET_CHAR = "\u2022"
 EN_DASH_CHAR = "\u2013"
 
@@ -1029,11 +1030,12 @@ def import_pdf_character(
         campaigns_dir: Path = app.config["CAMPAIGNS_DIR"]
         config = load_campaign_character_config(campaigns_dir, campaign_slug)
         character_dir = config.characters_dir / artifacts.definition.character_slug
-        write_yaml(character_dir / "definition.yaml", artifacts.definition.to_dict())
+        definition = preserve_existing_character_overrides(artifacts.definition, character_dir)
+        write_yaml(character_dir / "definition.yaml", definition.to_dict())
         write_yaml(character_dir / "import.yaml", artifacts.import_metadata.to_dict())
-        state_result = initialize_or_reconcile_imported_state(state_store, artifacts.definition)
+        state_result = initialize_or_reconcile_imported_state(state_store, definition)
         return CharacterPdfImportResult(
-            definition=artifacts.definition,
+            definition=definition,
             import_metadata=artifacts.import_metadata,
             character_dir=character_dir,
             state_created=state_result.created,
