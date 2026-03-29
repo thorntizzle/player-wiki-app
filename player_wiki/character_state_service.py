@@ -149,15 +149,31 @@ class CharacterStateService:
         *,
         expected_revision: int,
         values: dict[str, Any],
+        delta: Any | None = None,
         updated_by_user_id: int | None = None,
     ) -> CharacterStateRecord:
         state = deepcopy(record.state_record.state)
         currency = dict(state.get("currency") or {})
+        delta_key = ""
+        delta_amount = 0
+        raw_delta = str(delta or "").strip()
+        if raw_delta:
+            try:
+                delta_key, raw_delta_amount = raw_delta.split(":", 1)
+            except ValueError as exc:
+                raise ValueError("Invalid currency adjustment.") from exc
+            delta_key = delta_key.strip().lower()
+            if delta_key not in {"cp", "sp", "ep", "gp", "pp"}:
+                raise ValueError("Invalid currency adjustment.")
+            delta_amount = int(raw_delta_amount)
         for key in ("cp", "sp", "ep", "gp", "pp"):
+            next_value = int(currency.get(key) or 0)
             raw_value = values.get(key)
-            if raw_value is None or str(raw_value).strip() == "":
-                continue
-            currency[key] = int(raw_value)
+            if raw_value is not None and str(raw_value).strip() != "":
+                next_value = int(raw_value)
+            if delta_key == key:
+                next_value = max(0, next_value + delta_amount)
+            currency[key] = next_value
         state["currency"] = currency
         return self._replace_state(
             record,

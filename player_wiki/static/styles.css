@@ -957,12 +957,29 @@ button {
 }
 
 .currency-form {
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   align-items: end;
+}
+
+.currency-form__coin {
+  display: grid;
+  gap: 0.5rem;
+  align-content: start;
 }
 
 .currency-form button {
   grid-column: 1 / -1;
+}
+
+.currency-form input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.currency-form input[type="number"]::-webkit-outer-spin-button,
+.currency-form input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 .session-field {
@@ -994,6 +1011,10 @@ button {
 .session-stepper button {
   min-height: 2.35rem;
   padding: 0.55rem 0.85rem;
+}
+
+.session-stepper--compact button {
+  flex: 1 1 0;
 }
 
 .session-card {

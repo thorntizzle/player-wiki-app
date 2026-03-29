@@ -170,10 +170,16 @@
         <input type="hidden" name="mode" value="session">
         <input type="hidden" name="page" value="{{ character_subpage }}">
         {% for coin in ("cp", "sp", "ep", "gp", "pp") %}
-          <label class="session-field">
-            <span>{{ coin.upper() }}</span>
-            <input type="number" name="{{ coin }}" value="{{ character.currency_values[coin] }}" min="0">
-          </label>
+          <article class="currency-form__coin">
+            <label class="session-field">
+              <span>{{ coin.upper() }}</span>
+              <input type="number" name="{{ coin }}" value="{{ character.currency_values[coin] }}" min="0">
+            </label>
+            <div class="session-stepper session-stepper--compact">
+              <button type="submit" name="delta" value="{{ coin }}:-1" aria-label="{{ coin.upper() }} minus 1">-1</button>
+              <button type="submit" name="delta" value="{{ coin }}:1" aria-label="{{ coin.upper() }} plus 1">+1</button>
+            </div>
+          </article>
         {% endfor %}
         <button type="submit">Save currency</button>
       </form>

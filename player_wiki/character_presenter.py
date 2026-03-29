@@ -34,6 +34,11 @@ REDUNDANT_FEATURE_CHOICE_NAMES = {
     "ability score increase",
     "ability score improvement",
 }
+REDUNDANT_PASSIVE_FEATURE_NAMES = {
+    "fighting style",
+    "martial archetype",
+    "psi warrior",
+}
 
 
 def present_character_roster(records: list[CharacterRecord]) -> list[dict[str, Any]]:
@@ -501,6 +506,8 @@ def should_hide_redundant_choice_feature(
 
     feature_name = normalize_feature_name(feature.get("name"))
     if feature_name in REDUNDANT_FEATURE_CHOICE_NAMES:
+        return True
+    if feature_name in REDUNDANT_PASSIVE_FEATURE_NAMES:
         return True
     if feature_name == "hit points":
         return has_hit_point_details

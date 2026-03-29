@@ -51,8 +51,8 @@ def test_dm_can_open_character_roster_and_read_sheet(client, sign_in, users):
     assert sheet.status_code == 200
     sheet_html = sheet.get_data(as_text=True)
     assert "At a glance" in sheet_html
-    assert "Active session" in sheet_html
-    assert "Back to read mode" in sheet_html
+    assert "Active session" not in sheet_html
+    assert "Enter session mode" in sheet_html
     assert "Back to character roster" not in sheet_html
     assert "Open campaign wiki" not in sheet_html
 
@@ -73,7 +73,7 @@ def test_owner_player_can_open_session_mode_when_character_visibility_allows_pla
     set_campaign_visibility("linden-pass", characters="players")
     sign_in(users["owner"]["email"], users["owner"]["password"])
 
-    response = client.get("/campaigns/linden-pass/characters/arden-march?page=quick")
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=quick")
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
@@ -126,11 +126,11 @@ def test_character_sheet_subpages_show_requested_sections(app, client, sign_in, 
     assert "Equipment" in html
     assert "Personal" in html
     assert "Notes" in html
-    assert "?mode=read&amp;page=quick" in html
-    assert "?mode=read&amp;page=features" in html
-    assert "?mode=read&amp;page=equipment" in html
-    assert "?mode=read&amp;page=personal" in html
-    assert "?mode=read&amp;page=notes" in html
+    assert "?page=quick" in html
+    assert "?page=features" in html
+    assert "?page=equipment" in html
+    assert "?page=personal" in html
+    assert "?page=notes" in html
     assert "Features and traits" in html
     assert "At a glance" not in html
     assert "Equipment and currency" not in html
@@ -221,9 +221,7 @@ def test_read_mode_note_save_stays_in_read_mode(client, sign_in, users, get_char
     )
 
     assert response.status_code == 302
-    assert response.headers["Location"].endswith(
-        "/campaigns/linden-pass/characters/arden-march?page=notes&mode=read#session-notes"
-    )
+    assert response.headers["Location"].endswith("/campaigns/linden-pass/characters/arden-march?page=notes#session-notes")
     assert "mode=session" not in response.headers["Location"]
 
 
@@ -244,7 +242,7 @@ def test_session_mode_uses_same_subpage_ui_as_read_mode(client, sign_in, users, 
     assert "At a glance" not in html
 
 
-def test_editable_users_default_to_session_mode(client, sign_in, users, set_campaign_visibility):
+def test_editable_users_default_to_read_mode(client, sign_in, users, set_campaign_visibility):
     set_campaign_visibility("linden-pass", characters="players")
     sign_in(users["owner"]["email"], users["owner"]["password"])
 
@@ -252,17 +250,17 @@ def test_editable_users_default_to_session_mode(client, sign_in, users, set_camp
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Active session" in html
-    assert "Back to read mode" in html
-    assert "Enter session mode" not in html
+    assert "Active session" not in html
+    assert "Enter session mode" in html
+    assert "Back to read mode" not in html
 
 
 def test_session_active_widget_stays_on_quick_reference_only(client, sign_in, users, set_campaign_visibility):
     set_campaign_visibility("linden-pass", characters="players")
     sign_in(users["owner"]["email"], users["owner"]["password"])
 
-    quick_response = client.get("/campaigns/linden-pass/characters/arden-march?page=quick")
-    features_response = client.get("/campaigns/linden-pass/characters/arden-march?page=features")
+    quick_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=quick")
+    features_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=features")
 
     assert quick_response.status_code == 200
     quick_html = quick_response.get_data(as_text=True)
@@ -519,6 +517,22 @@ def test_character_sheet_hides_redundant_choice_placeholder_features(app, client
                     "tracker_ref": None,
                 },
                 {
+                    "name": "Fighting Style",
+                    "category": "class_feature",
+                    "source": "PHB 72",
+                    "description_markdown": "You adopt a fighting style specialty.",
+                    "activation_type": "passive",
+                    "tracker_ref": None,
+                },
+                {
+                    "name": "Psi Warrior",
+                    "category": "class_feature",
+                    "source": "TCE 42",
+                    "description_markdown": "Feature progression: Level 3 through Level 18 subclass features.",
+                    "activation_type": "passive",
+                    "tracker_ref": None,
+                },
+                {
                     "name": "Sentinel",
                     "category": "feat",
                     "source": "PHB 169",
@@ -544,7 +558,23 @@ def test_character_sheet_hides_redundant_choice_placeholder_features(app, client
     assert "You gain proficiency in one skill of your choice." not in html
     assert "You gain one feat of your choice." not in html
     assert "Increase one ability score by 2 or two ability scores by 1." not in html
+    assert "You adopt a fighting style specialty." not in html
+    assert "Feature progression: Level 3 through Level 18 subclass features." not in html
     assert "Creatures provoke opportunity attacks from you even if they take the Disengage action." in html
+
+
+def test_session_currency_editor_shows_explicit_coin_adjusters(client, sign_in, users, set_campaign_visibility):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=equipment")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'value="cp:-1"' in html
+    assert 'value="cp:1"' in html
+    assert 'value="gp:-1"' in html
+    assert 'value="gp:1"' in html
 
 
 def test_character_sheet_renders_long_form_imported_ability_keys(app, client, sign_in, users):

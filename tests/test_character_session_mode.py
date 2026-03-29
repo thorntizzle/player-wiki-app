@@ -73,6 +73,24 @@ def test_owner_player_can_update_mutable_state(
     assert record.state_record.state["currency"]["sp"] == 7
 
     response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/session/currency",
+        data={
+            "expected_revision": record.state_record.revision,
+            "cp": 0,
+            "sp": 7,
+            "ep": 0,
+            "gp": 125,
+            "pp": 0,
+            "delta": "gp:1",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record.state_record.state["currency"]["gp"] == 126
+
+    response = client.post(
         "/campaigns/linden-pass/characters/arden-march/session/notes",
         data={
             "expected_revision": record.state_record.revision,

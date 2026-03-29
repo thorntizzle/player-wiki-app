@@ -469,7 +469,7 @@ def create_app() -> Flask:
             "page": read_subpage,
             "_anchor": anchor,
         }
-        if mode in {"session", "read"}:
+        if mode == "session":
             route_values["mode"] = mode
         return redirect(
             url_for("character_read_view", **route_values)
@@ -634,7 +634,7 @@ def create_app() -> Flask:
         can_use_session_mode = has_session_mode_access(campaign_slug, character_slug)
         character_subpage = normalize_character_read_subpage(request.args.get("page", ""))
         requested_mode = request.args.get("mode", "").strip().lower()
-        is_session_mode = force_session_mode or (can_use_session_mode and requested_mode != "read")
+        is_session_mode = force_session_mode or (requested_mode == "session" and can_use_session_mode)
 
         confirm_rest = request.args.get("confirm_rest", "").strip().lower() if is_session_mode else ""
         rest_preview = None
@@ -662,7 +662,7 @@ def create_app() -> Flask:
                     "character_read_view",
                     campaign_slug=campaign.slug,
                     character_slug=character["slug"],
-                    mode="session" if is_session_mode else ("read" if can_use_session_mode else None),
+                    mode="session" if is_session_mode else None,
                     page=slug,
                 ),
                 "is_active": slug == character_subpage,
@@ -3227,6 +3227,7 @@ def create_app() -> Flask:
                 record,
                 expected_revision=expected_revision,
                 values={key: request.form.get(key) for key in ("cp", "sp", "ep", "gp", "pp")},
+                delta=request.form.get("delta"),
                 updated_by_user_id=user_id,
             ),
         )
