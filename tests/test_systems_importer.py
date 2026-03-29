@@ -560,6 +560,41 @@ def build_large_feat_data_root(root: Path, *, count: int) -> Path:
     return root
 
 
+def build_feat_metadata_data_root(root: Path) -> Path:
+    write_json(
+        root / "data/feats.json",
+        {
+            "feat": [
+                {
+                    "name": "Resilient",
+                    "source": "PHB",
+                    "page": 168,
+                    "ability": [{"choose": {"from": ["str", "dex", "con", "int", "wis", "cha"], "amount": 1}}],
+                    "savingThrowProficiencies": [{"choose": {"from": ["str", "dex", "con", "int", "wis", "cha"]}}],
+                    "entries": ["Choose one ability score. Increase it by 1 and gain saving throw proficiency with it."],
+                },
+                {
+                    "name": "Skilled",
+                    "source": "PHB",
+                    "page": 170,
+                    "skillToolLanguageProficiencies": [
+                        {
+                            "choose": [
+                                {
+                                    "from": ["anySkill", "anyTool"],
+                                    "count": 3,
+                                }
+                            ]
+                        }
+                    ],
+                    "entries": ["Gain three skill or tool proficiencies."],
+                },
+            ]
+        },
+    )
+    return root
+
+
 def build_xphb_variant_subclass_data_root(root: Path) -> Path:
     write_json(root / "data/class/index.json", {"wizard": "class-wizard.json"})
     write_json(
@@ -1149,6 +1184,31 @@ def test_importer_imports_mechanics_only_and_strips_media_fields(app, tmp_path):
         assert "altArt" not in raw_monster_text
         assert "Melee Weapon Attack:" in monster.rendered_html
         assert "+4" in monster.rendered_html
+
+
+def test_importer_preserves_structured_feat_metadata_for_native_builder(app, tmp_path):
+    data_root = build_feat_metadata_data_root(tmp_path / "dnd5e-source-feat-metadata")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        result = importer.import_source("PHB", entry_types=["feat"])
+
+        assert result.imported_count == 2
+        store = app.extensions["systems_store"]
+        feat_entries = {entry.title: entry for entry in store.list_entries_for_source("DND-5E", "PHB", entry_type="feat", limit=10)}
+
+    resilient = feat_entries["Resilient"]
+    skilled = feat_entries["Skilled"]
+
+    assert resilient.metadata["ability"] == [{"choose": {"from": ["str", "dex", "con", "int", "wis", "cha"], "amount": 1}}]
+    assert resilient.metadata["saving_throw_proficiencies"] == [{"choose": {"from": ["str", "dex", "con", "int", "wis", "cha"]}}]
+    assert skilled.metadata["skill_tool_language_proficiencies"] == [
+        {"choose": [{"from": ["anySkill", "anyTool"], "count": 3}]}
+    ]
 
 
 def test_importer_replaces_existing_entries_for_a_source(app, tmp_path):

@@ -872,6 +872,18 @@ class Dnd5eSystemsImporter:
                 "prerequisite": self._clean_data(raw_entry.get("prerequisite")),
                 "category": self._clean_data(raw_entry.get("category")),
                 "ability": self._clean_data(raw_entry.get("ability")),
+                "skill_proficiencies": self._clean_data(raw_entry.get("skillProficiencies")),
+                "tool_proficiencies": self._clean_data(raw_entry.get("toolProficiencies")),
+                "language_proficiencies": self._clean_data(raw_entry.get("languageProficiencies")),
+                "skill_tool_language_proficiencies": self._clean_data(raw_entry.get("skillToolLanguageProficiencies")),
+                "armor_proficiencies": self._clean_data(raw_entry.get("armorProficiencies")),
+                "weapon_proficiencies": self._clean_data(raw_entry.get("weaponProficiencies")),
+                "saving_throw_proficiencies": self._clean_data(raw_entry.get("savingThrowProficiencies")),
+                "expertise": self._clean_data(raw_entry.get("expertise")),
+                "senses": self._clean_data(raw_entry.get("senses")),
+                "resist": self._clean_data(raw_entry.get("resist")),
+                "condition_immune": self._clean_data(raw_entry.get("conditionImmune")),
+                "additional_spells": self._clean_data(raw_entry.get("additionalSpells")),
             }
             metadata_pairs = [
                 ("Prerequisite", self._format_compact_value(raw_entry.get("prerequisite"))),

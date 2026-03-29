@@ -209,7 +209,7 @@ def _minimal_import_metadata(character_slug: str = "new-hero") -> CharacterImpor
         character_slug=character_slug,
         source_path="builder://phb-level-1",
         imported_at_utc="2026-03-29T00:00:00Z",
-        parser_version="2026-03-29.7",
+        parser_version="2026-03-29.8",
         import_status="clean",
         warnings=[],
     )
@@ -434,6 +434,220 @@ def test_level_one_builder_creates_native_character_definition_from_phb_choices(
     assert any(feature["tracker_ref"] == "second-wind" for feature in definition.features if feature["name"] == "Second Wind")
     assert any(template["id"] == "second-wind" and template["max"] == 1 for template in definition.resource_templates)
     assert import_metadata.source_path == "builder://phb-level-1"
+
+
+def test_level_one_builder_surfaces_and_applies_skilled_feat_choices():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    variant_human = _systems_entry(
+        "race",
+        "phb-race-variant-human",
+        "Variant Human",
+        metadata={
+            "size": ["M"],
+            "speed": 30,
+            "languages": [{"common": True}],
+            "feats": [{"any": 1}],
+        },
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    skilled = _systems_entry(
+        "feat",
+        "phb-feat-skilled",
+        "Skilled",
+        metadata={
+            "skill_tool_language_proficiencies": [
+                {
+                    "choose": [
+                        {
+                            "from": ["anySkill", "anyTool"],
+                            "count": 3,
+                        }
+                    ]
+                }
+            ]
+        },
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [variant_human],
+            "background": [acolyte],
+            "feat": [skilled],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    form_values = {
+        "name": "Skill Hero",
+        "character_slug": "skill-hero",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": variant_human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "species_feat_1": skilled.slug,
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "13",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    assert _find_builder_field(context, "feat_species_feat_1_skill_tool_language_1")["label"] == "Skilled Choice 1"
+
+    form_values.update(
+        {
+            "feat_species_feat_1_skill_tool_language_1": _field_value_for_label(
+                context,
+                "feat_species_feat_1_skill_tool_language_1",
+                "Skill: Acrobatics",
+            ),
+            "feat_species_feat_1_skill_tool_language_2": _field_value_for_label(
+                context,
+                "feat_species_feat_1_skill_tool_language_2",
+                "Skill: Perception",
+            ),
+            "feat_species_feat_1_skill_tool_language_3": _field_value_for_label(
+                context,
+                "feat_species_feat_1_skill_tool_language_3",
+                "Tool: Thieves' Tools",
+            ),
+        }
+    )
+
+    definition, _ = build_level_one_character_definition(
+        "linden-pass",
+        build_level_one_builder_context(systems_service, "linden-pass", form_values),
+        form_values,
+    )
+
+    proficient_skill_names = {
+        skill["name"] for skill in definition.skills if skill.get("proficiency_level") == "proficient"
+    }
+    feature_names = {feature["name"] for feature in definition.features}
+
+    assert {"Acrobatics", "Perception"} <= proficient_skill_names
+    assert "Thieves' Tools" in definition.proficiencies["tools"]
+    assert "Skilled" in feature_names
+
+
+def test_level_one_builder_applies_alert_feat_to_initiative():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    variant_human = _systems_entry(
+        "race",
+        "phb-race-variant-human",
+        "Variant Human",
+        metadata={
+            "size": ["M"],
+            "speed": 30,
+            "languages": [{"common": True}],
+            "feats": [{"any": 1}],
+        },
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    alert = _systems_entry("feat", "phb-feat-alert", "Alert")
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [variant_human],
+            "background": [acolyte],
+            "feat": [alert],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    form_values = {
+        "name": "Alert Hero",
+        "character_slug": "alert-hero",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": variant_human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "species_feat_1": alert.slug,
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "13",
+        "cha": "8",
+    }
+
+    definition, _ = build_level_one_character_definition(
+        "linden-pass",
+        build_level_one_builder_context(systems_service, "linden-pass", form_values),
+        form_values,
+    )
+
+    assert definition.stats["initiative_bonus"] == 6
 
 
 def test_level_one_builder_generates_attack_rows_from_starting_weapons():
@@ -1127,7 +1341,7 @@ def test_level_one_builder_populates_starting_equipment_spells_and_currency():
     assert spells_by_name["Find Familiar"]["mark"] == "Spellbook"
     assert spells_by_name["Detect Magic"]["reference"] == "p. 231"
     assert spells_by_name["Message"]["components"] == "V, S, M (a short piece of copper wire)"
-    assert import_metadata.parser_version == "2026-03-29.7"
+    assert import_metadata.parser_version == "2026-03-29.8"
 
 
 def test_level_one_builder_puts_great_weapon_fighting_note_on_versatile_two_handed_row():
@@ -1606,6 +1820,115 @@ def test_native_level_up_advances_fighter_to_level_four_with_ability_score_impro
     assert "Ability Score Improvement" not in feature_names
 
 
+def test_native_level_up_applies_resilient_feat_side_effects():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    ability_score_improvement = _systems_entry(
+        "classfeature",
+        "phb-classfeature-ability-score-improvement",
+        "Ability Score Improvement",
+        metadata={"level": 4},
+    )
+    resilient = _systems_entry(
+        "feat",
+        "phb-feat-resilient",
+        "Resilient",
+        metadata={
+            "ability": [
+                {
+                    "choose": {
+                        "from": ["str", "dex", "con", "int", "wis", "cha"],
+                        "amount": 1,
+                    }
+                }
+            ],
+            "saving_throw_proficiencies": [
+                {
+                    "choose": {
+                        "from": ["str", "dex", "con", "int", "wis", "cha"],
+                    }
+                }
+            ],
+        },
+    )
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [resilient],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 4,
+                "level_label": "Level 4",
+                "feature_rows": [
+                    {"label": "Ability Score Improvement", "entry": ability_score_improvement, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    current_definition = _minimal_character_definition("resilient-hero", "Resilient Hero")
+    current_definition.profile["class_level_text"] = "Fighter 3"
+    current_definition.profile["classes"][0]["level"] = 3
+
+    form_values = {
+        "hp_gain": "8",
+        "levelup_asi_mode_1": "feat",
+        "levelup_feat_1": resilient.slug,
+    }
+    context = build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values)
+    assert _find_builder_field(context, "feat_levelup_feat_1_ability_1")["label"] == "Resilient Ability"
+    form_values["feat_levelup_feat_1_ability_1"] = _field_value_for_label(
+        context,
+        "feat_levelup_feat_1_ability_1",
+        "Dexterity",
+    )
+
+    leveled_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values),
+        form_values,
+    )
+
+    dexterity = leveled_definition.stats["ability_scores"]["dex"]
+    feature_names = {feature["name"] for feature in leveled_definition.features}
+
+    assert dexterity["score"] == 13
+    assert dexterity["save_bonus"] == 3
+    assert "Resilient" in feature_names
+
+
 def test_native_level_up_advances_wizard_to_level_two_with_subclass_and_spellbook_growth():
     wizard = _systems_entry(
         "class",
@@ -2050,6 +2373,90 @@ def test_native_level_up_advances_wizard_to_level_four_with_cantrip_and_asi_grow
     assert spells_by_name["Mirror Image"]["mark"] == "Spellbook"
     assert spells_by_name["Web"]["mark"] == "Prepared + Spellbook"
     assert spells_by_name["Burning Hands"]["mark"] == "Spellbook + Prepared"
+
+
+def test_native_level_up_applies_tough_feat_hit_points_to_definition_and_state():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    ability_score_improvement = _systems_entry(
+        "classfeature",
+        "phb-classfeature-ability-score-improvement",
+        "Ability Score Improvement",
+        metadata={"level": 4},
+    )
+    tough = _systems_entry("feat", "phb-feat-tough", "Tough")
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [tough],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 4,
+                "level_label": "Level 4",
+                "feature_rows": [
+                    {"label": "Ability Score Improvement", "entry": ability_score_improvement, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    current_definition = _minimal_character_definition("tough-hero", "Tough Hero")
+    current_definition.profile["class_level_text"] = "Fighter 3"
+    current_definition.profile["classes"][0]["level"] = 3
+    current_definition.stats["max_hp"] = 28
+
+    form_values = {
+        "hp_gain": "8",
+        "levelup_asi_mode_1": "feat",
+        "levelup_feat_1": tough.slug,
+    }
+
+    leveled_definition, _, hp_delta = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values),
+        form_values,
+    )
+    merged_state = merge_state_with_definition(
+        leveled_definition,
+        build_initial_state(current_definition),
+        hp_delta=hp_delta,
+    )
+
+    assert leveled_definition.stats["max_hp"] == 44
+    assert hp_delta == 16
+    assert merged_state["vitals"]["current_hp"] == 44
 
 
 def test_dm_roster_shows_create_character_link(client, sign_in, users):

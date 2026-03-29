@@ -11,7 +11,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-03-29.7"
+CHARACTER_BUILDER_VERSION = "2026-03-29.8"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -74,6 +74,47 @@ STANDARD_LANGUAGE_OPTIONS = [
     "Goblin",
     "Halfling",
     "Orc",
+]
+COMMON_TOOL_PROFICIENCY_OPTIONS = [
+    "Alchemist's Supplies",
+    "Bagpipes",
+    "Brewer's Supplies",
+    "Calligrapher's Supplies",
+    "Carpenter's Tools",
+    "Cartographer's Tools",
+    "Cobbler's Tools",
+    "Cook's Utensils",
+    "Dice Set",
+    "Disguise Kit",
+    "Dragonchess Set",
+    "Drum",
+    "Dulcimer",
+    "Flute",
+    "Forgery Kit",
+    "Glassblower's Tools",
+    "Herbalism Kit",
+    "Horn",
+    "Jeweler's Tools",
+    "Leatherworker's Tools",
+    "Lute",
+    "Lyre",
+    "Mason's Tools",
+    "Navigator's Tools",
+    "Painter's Supplies",
+    "Pan Flute",
+    "Playing Card Set",
+    "Poisoner's Kit",
+    "Potter's Tools",
+    "Shawm",
+    "Smith's Tools",
+    "Thieves' Tools",
+    "Tinker's Tools",
+    "Three-Dragon Ante Set",
+    "Vehicles (Land)",
+    "Vehicles (Water)",
+    "Viol",
+    "Weaver's Tools",
+    "Woodcarver's Tools",
 ]
 SIZE_LABELS = {
     "T": "Tiny",
@@ -191,7 +232,7 @@ NATIVE_LEVEL_UP_LIMITATIONS = [
     "Native PHB level-up advances one level at a time for single-class native PHB characters.",
     "Hit point gain is entered manually so your table can choose rolled or fixed HP.",
     "Prepared-caster level-up currently preserves existing prepared spells and adds the new picks needed for the next level.",
-    "Spell replacement, special spell-granting features like Magical Secrets, and feat side effects beyond adding the feat still need manual follow-up.",
+    "Spell replacement, spell-granting feats, and some advanced feat side effects still need manual follow-up.",
 ]
 LEVEL_ONE_ALWAYS_PREPARED_SPELLS_BY_SUBCLASS = {
     normalize_lookup("Knowledge Domain"): ["Command", "Identify"],
@@ -319,6 +360,7 @@ def build_level_one_builder_context(
     species_options = _list_phb_entries(systems_service, campaign_slug, "race")
     background_options = _list_phb_entries(systems_service, campaign_slug, "background")
     feat_options = _list_phb_entries(systems_service, campaign_slug, "feat")
+    feat_catalog = _build_feat_catalog(feat_options)
     item_catalog = _build_item_catalog(_list_phb_entries(systems_service, campaign_slug, "item"))
     spell_catalog = _build_spell_catalog(_list_phb_entries(systems_service, campaign_slug, "spell"))
 
@@ -355,8 +397,10 @@ def build_level_one_builder_context(
         selected_species=selected_species,
         selected_background=selected_background,
         feat_options=feat_options,
+        feat_catalog=feat_catalog,
         class_progression=class_progression,
         equipment_groups=equipment_groups,
+        item_catalog=item_catalog,
         spell_catalog=spell_catalog,
         values=preview_values,
     )
@@ -370,6 +414,8 @@ def build_level_one_builder_context(
         subclass_progression=subclass_progression,
         equipment_groups=equipment_groups,
         choice_sections=choice_sections,
+        feat_catalog=feat_catalog,
+        item_catalog=item_catalog,
         spell_catalog=spell_catalog,
         values=preview_values,
     )
@@ -389,12 +435,13 @@ def build_level_one_builder_context(
         "class_progression": class_progression,
         "subclass_progression": subclass_progression,
         "equipment_groups": equipment_groups,
+        "feat_catalog": feat_catalog,
         "item_catalog": item_catalog,
         "spell_catalog": spell_catalog,
         "limitations": [
-            "Enter final level-1 ability scores after any species bonuses.",
+            "Enter level-1 ability scores after species bonuses. Native feat-driven ability increases are applied automatically.",
             "Native attack rows now cover basic PHB weapons, off-hand attacks, and key level-1 fighting-style adjustments, but a few advanced damage riders still need manual follow-up.",
-            "Gold-alternative loadouts and a few class-specific spell extras still need manual follow-up.",
+            "Gold-alternative loadouts, spell-granting feats, and a few class-specific spell extras still need manual follow-up.",
         ],
         "preview": preview,
     }
@@ -414,6 +461,7 @@ def build_level_one_character_definition(
     class_progression = list(builder_context.get("class_progression") or [])
     subclass_progression = list(builder_context.get("subclass_progression") or [])
     equipment_groups = list(builder_context.get("equipment_groups") or [])
+    feat_catalog = dict(builder_context.get("feat_catalog") or {})
     item_catalog = dict(builder_context.get("item_catalog") or {})
     spell_catalog = dict(builder_context.get("spell_catalog") or {})
     limitations = list(builder_context.get("limitations") or [])
@@ -434,15 +482,28 @@ def build_level_one_character_definition(
     if not character_slug:
         raise CharacterBuildError("Character slug is required.")
 
-    ability_scores = _parse_ability_scores(values)
+    feat_selections = _resolve_builder_feat_selections(values, feat_catalog)
+    ability_scores = _apply_feat_ability_score_bonuses(
+        _parse_ability_scores(values),
+        feat_selections=feat_selections,
+        selected_choices={},
+        strict=False,
+    )
     proficiency_bonus = 2
     fixed_proficiencies, selected_choices = _resolve_builder_choices(choice_sections, values)
+    ability_scores = _apply_feat_ability_score_bonuses(
+        _parse_ability_scores(values),
+        feat_selections=feat_selections,
+        selected_choices=selected_choices,
+        strict=True,
+    )
     proficiencies = _build_level_one_proficiencies(
         selected_class=selected_class,
         selected_species=selected_species,
         selected_background=selected_background,
         fixed_proficiencies=fixed_proficiencies,
         selected_choices=selected_choices,
+        feat_selections=feat_selections,
     )
     skills = _build_skills_payload(ability_scores, proficiencies["skills"], proficiency_bonus)
 
@@ -455,6 +516,7 @@ def build_level_one_character_definition(
         selected_background=selected_background,
         choice_sections=choice_sections,
         selected_choices=selected_choices,
+        feat_selections=feat_selections,
     )
     features, resource_templates = _build_feature_payloads(
         selected_feature_entries,
@@ -476,6 +538,9 @@ def build_level_one_character_definition(
         ability_scores=ability_scores,
         skills=skills,
         proficiency_bonus=proficiency_bonus,
+        feat_selections=feat_selections,
+        selected_choices=selected_choices,
+        current_level=1,
     )
     profile = _build_level_one_profile(
         name=name,
@@ -562,6 +627,8 @@ def build_native_level_up_context(
     species_options = _list_phb_entries(systems_service, campaign_slug, "race")
     background_options = _list_phb_entries(systems_service, campaign_slug, "background")
     feat_options = _list_phb_entries(systems_service, campaign_slug, "feat")
+    feat_catalog = _build_feat_catalog(feat_options)
+    item_catalog = _build_item_catalog(_list_phb_entries(systems_service, campaign_slug, "item"))
     spell_catalog = _build_spell_catalog(_list_phb_entries(systems_service, campaign_slug, "spell"))
 
     selected_class = _resolve_profile_entry(
@@ -604,10 +671,12 @@ def build_native_level_up_context(
         selected_class=selected_class,
         selected_subclass=selected_subclass,
         feat_options=feat_options,
+        feat_catalog=feat_catalog,
         subclass_options=subclass_options,
         requires_subclass=requires_subclass,
         class_progression=class_progression,
         subclass_progression=subclass_progression,
+        item_catalog=item_catalog,
         spell_catalog=spell_catalog,
         target_level=next_level,
         current_ability_scores=ability_scores,
@@ -620,6 +689,7 @@ def build_native_level_up_context(
         class_progression=class_progression,
         subclass_progression=subclass_progression,
         feat_options=feat_options,
+        feat_catalog=feat_catalog,
         choice_sections=choice_sections,
         spell_catalog=spell_catalog,
         target_level=next_level,
@@ -637,10 +707,12 @@ def build_native_level_up_context(
         "selected_subclass": selected_subclass,
         "subclass_options": [_entry_option(entry) for entry in subclass_options],
         "feat_options": [_entry_option(entry) for entry in feat_options],
+        "feat_catalog": feat_catalog,
         "requires_subclass": requires_subclass,
         "choice_sections": choice_sections,
         "class_progression": class_progression,
         "subclass_progression": subclass_progression,
+        "item_catalog": item_catalog,
         "spell_catalog": spell_catalog,
         "limitations": list(NATIVE_LEVEL_UP_LIMITATIONS),
         "preview": preview,
@@ -666,6 +738,7 @@ def build_native_level_up_character_definition(
     class_progression = list(level_up_context.get("class_progression") or [])
     subclass_progression = list(level_up_context.get("subclass_progression") or [])
     feat_options = list(level_up_context.get("feat_options") or [])
+    feat_catalog = dict(level_up_context.get("feat_catalog") or {})
     spell_catalog = dict(level_up_context.get("spell_catalog") or {})
     if selected_class is None or selected_species is None or selected_background is None:
         raise CharacterBuildError("This native character is missing the class, species, or background needed for level-up.")
@@ -679,7 +752,7 @@ def build_native_level_up_character_definition(
 
     hp_gain = _parse_level_up_hit_point_gain(values)
     _, selected_choices = _resolve_builder_choices(choice_sections, values)
-    ability_scores, level_up_feat_entries, _ = _resolve_level_up_ability_score_choices(
+    base_ability_scores, level_up_feat_entries, _ = _resolve_level_up_ability_score_choices(
         current_ability_scores=_ability_scores_from_definition(current_definition),
         class_progression=class_progression,
         subclass_progression=subclass_progression,
@@ -688,12 +761,28 @@ def build_native_level_up_character_definition(
         values=values,
         strict=True,
     )
+    feat_selections = _resolve_level_up_feat_selections(
+        values,
+        feat_catalog,
+        class_progression=class_progression,
+        subclass_progression=subclass_progression,
+        target_level=target_level,
+    )
+    ability_scores = _apply_feat_ability_score_bonuses(
+        base_ability_scores,
+        feat_selections=feat_selections,
+        selected_choices=selected_choices,
+        strict=True,
+    )
     proficiency_bonus = _proficiency_bonus_for_level(target_level)
     proficient_skills = [
         str(skill.get("name") or "").strip()
         for skill in list(current_definition.skills or [])
         if str(skill.get("proficiency_level") or "").strip() == "proficient"
     ]
+    proficient_skills = _dedupe_preserve_order(
+        proficient_skills + _extract_feat_skill_proficiencies(feat_selections, selected_choices)
+    )
     skills = _build_skills_payload(ability_scores, proficient_skills, proficiency_bonus)
 
     new_feature_entries = _collect_progression_feature_entries_for_level(
@@ -718,8 +807,15 @@ def build_native_level_up_character_definition(
         item_catalog=item_catalog,
         ability_scores=ability_scores,
         proficiency_bonus=proficiency_bonus,
-        weapon_proficiencies=list((current_definition.proficiencies or {}).get("weapons") or []),
+        weapon_proficiencies=_dedupe_preserve_order(
+            list((current_definition.proficiencies or {}).get("weapons") or [])
+            + _extract_feat_weapon_proficiencies(feat_selections, selected_choices)
+        ),
         selected_choices=combined_selected_choices,
+    )
+    total_hp_delta = hp_gain + _feat_hit_point_bonus(
+        feat_selections,
+        current_level=target_level,
     )
     definition = CharacterDefinition(
         campaign_slug=campaign_slug,
@@ -739,13 +835,28 @@ def build_native_level_up_character_definition(
             skills=skills,
             proficiency_bonus=proficiency_bonus,
             hp_gain=hp_gain,
+            feat_selections=feat_selections,
+            selected_choices=selected_choices,
+            current_level=target_level,
         ),
         skills=skills,
         proficiencies={
-            "armor": list((current_definition.proficiencies or {}).get("armor") or []),
-            "weapons": list((current_definition.proficiencies or {}).get("weapons") or []),
-            "tools": list((current_definition.proficiencies or {}).get("tools") or []),
-            "languages": list((current_definition.proficiencies or {}).get("languages") or []),
+            "armor": _dedupe_preserve_order(
+                list((current_definition.proficiencies or {}).get("armor") or [])
+                + _extract_feat_armor_proficiencies(feat_selections, selected_choices)
+            ),
+            "weapons": _dedupe_preserve_order(
+                list((current_definition.proficiencies or {}).get("weapons") or [])
+                + _extract_feat_weapon_proficiencies(feat_selections, selected_choices)
+            ),
+            "tools": _dedupe_preserve_order(
+                list((current_definition.proficiencies or {}).get("tools") or [])
+                + _extract_feat_tool_proficiencies(feat_selections, selected_choices)
+            ),
+            "languages": _dedupe_preserve_order(
+                list((current_definition.proficiencies or {}).get("languages") or [])
+                + _extract_feat_language_proficiencies(feat_selections, selected_choices)
+            ),
         },
         attacks=attacks,
         features=_merge_feature_payloads(list(current_definition.features or []), new_features),
@@ -777,7 +888,7 @@ def build_native_level_up_character_definition(
         import_status="clean",
         warnings=[],
     )
-    return definition, import_metadata, hp_gain
+    return definition, import_metadata, total_hp_delta
 
 
 def _list_phb_entries(
@@ -959,8 +1070,10 @@ def _build_choice_sections(
     selected_species: SystemsEntryRecord | None,
     selected_background: SystemsEntryRecord | None,
     feat_options: list[SystemsEntryRecord],
+    feat_catalog: dict[str, Any],
     class_progression: list[dict[str, Any]],
     equipment_groups: list[dict[str, Any]],
+    item_catalog: dict[str, Any],
     spell_catalog: dict[str, Any],
     values: dict[str, str],
 ) -> list[dict[str, Any]]:
@@ -978,6 +1091,14 @@ def _build_choice_sections(
     background_fields = _build_background_choice_fields(selected_background, values)
     if background_fields:
         sections.append({"title": "Background Choices", "fields": background_fields})
+
+    feat_fields = _build_feat_choice_fields(
+        feat_selections=_resolve_builder_feat_selections(values, feat_catalog),
+        values=values,
+        item_catalog=item_catalog,
+    )
+    if feat_fields:
+        sections.append({"title": "Feat Choices", "fields": feat_fields})
 
     equipment_fields = _build_equipment_choice_fields(equipment_groups)
     if equipment_fields:
@@ -1001,10 +1122,12 @@ def _build_level_up_choice_sections(
     selected_class: SystemsEntryRecord,
     selected_subclass: SystemsEntryRecord | None,
     feat_options: list[SystemsEntryRecord],
+    feat_catalog: dict[str, Any],
     subclass_options: list[SystemsEntryRecord],
     requires_subclass: bool,
     class_progression: list[dict[str, Any]],
     subclass_progression: list[dict[str, Any]],
+    item_catalog: dict[str, Any],
     spell_catalog: dict[str, Any],
     target_level: int,
     current_ability_scores: dict[str, int],
@@ -1063,6 +1186,29 @@ def _build_level_up_choice_sections(
     if ability_fields:
         sections.append({"title": "Ability Score Improvement", "fields": ability_fields})
 
+    feat_selections = _resolve_level_up_feat_selections(
+        values,
+        feat_catalog,
+        class_progression=class_progression,
+        subclass_progression=subclass_progression,
+        target_level=target_level,
+    )
+    feat_fields = _build_feat_choice_fields(
+        feat_selections=feat_selections,
+        values=values,
+        item_catalog=item_catalog,
+    )
+    if feat_fields:
+        sections.append({"title": "Feat Choices", "fields": feat_fields})
+
+    preview_choice_sections = list(sections)
+    _, preview_selected_choices = _resolve_builder_choices(preview_choice_sections, values, strict=False)
+    preview_ability_scores = _apply_feat_ability_score_bonuses(
+        preview_ability_scores,
+        feat_selections=feat_selections,
+        selected_choices=preview_selected_choices,
+        strict=False,
+    )
     spell_fields = _build_level_up_spell_choice_fields(
         definition=definition,
         selected_class=selected_class,
@@ -1464,6 +1610,261 @@ def _build_background_choice_fields(
     return fields
 
 
+def _build_feat_choice_fields(
+    *,
+    feat_selections: list[dict[str, Any]],
+    values: dict[str, str],
+    item_catalog: dict[str, Any],
+) -> list[dict[str, Any]]:
+    fields: list[dict[str, Any]] = []
+    for selection in feat_selections:
+        fields.extend(
+            _build_feat_choice_fields_for_selection(
+                selection=selection,
+                values=values,
+                item_catalog=item_catalog,
+            )
+        )
+    return fields
+
+
+def _build_feat_choice_fields_for_selection(
+    *,
+    selection: dict[str, Any],
+    values: dict[str, str],
+    item_catalog: dict[str, Any],
+) -> list[dict[str, Any]]:
+    feat_entry = selection.get("entry")
+    instance_key = str(selection.get("instance_key") or "").strip()
+    if not isinstance(feat_entry, SystemsEntryRecord) or not instance_key:
+        return []
+
+    metadata = dict(feat_entry.metadata or {})
+    feat_title = feat_entry.title
+    fields: list[dict[str, Any]] = []
+    ability_options = [_choice_option(label, key) for key, label in ABILITY_LABELS.items()]
+    skill_options = [_choice_option(label, token) for token, label in _all_skill_options()]
+    language_options = [_choice_option(label, label) for label in STANDARD_LANGUAGE_OPTIONS]
+    tool_options = _tool_proficiency_options(item_catalog)
+    weapon_options = _weapon_proficiency_options(item_catalog)
+
+    ability_choice_index = 0
+    for block in list(metadata.get("ability") or []):
+        if not isinstance(block, dict):
+            continue
+        choose = dict(block.get("choose") or {})
+        options = [
+            _choice_option(ABILITY_LABELS.get(str(option), _humanize_words(str(option))), str(option))
+            for option in list(choose.get("from") or [])
+            if str(option) in ABILITY_KEYS
+        ]
+        count = max(int(choose.get("count") or 1), 0)
+        if not options or count <= 0:
+            continue
+        for _ in range(count):
+            ability_choice_index += 1
+            field_name = _feat_field_name(instance_key, "ability", ability_choice_index)
+            fields.append(
+                {
+                    "name": field_name,
+                    "label": f"{feat_title} Ability",
+                    "help_text": f"Choose the ability increased by {feat_title}.",
+                    "options": options,
+                    "selected": str(values.get(field_name) or "").strip(),
+                    "group_key": _feat_group_key(instance_key, "ability"),
+                    "kind": "feat_ability",
+                }
+            )
+
+    skill_choice_index = 0
+    for block in list(metadata.get("skill_proficiencies") or []):
+        if not isinstance(block, dict):
+            continue
+        choose = dict(block.get("choose") or {})
+        options = [
+            _choice_option(_skill_label(option), str(option))
+            for option in list(choose.get("from") or [])
+            if normalize_lookup(str(option)) in SKILL_LABELS
+        ]
+        count = int(choose.get("count") or 0)
+        if not options and int(block.get("any") or 0) > 0:
+            options = skill_options
+            count = int(block.get("any") or 0)
+        if not options or count <= 0:
+            continue
+        for _ in range(count):
+            skill_choice_index += 1
+            field_name = _feat_field_name(instance_key, "skills", skill_choice_index)
+            fields.append(
+                {
+                    "name": field_name,
+                    "label": f"{feat_title} Skill {skill_choice_index}",
+                    "help_text": f"Choose a skill granted by {feat_title}.",
+                    "options": options,
+                    "selected": str(values.get(field_name) or "").strip(),
+                    "group_key": _feat_group_key(instance_key, "skills"),
+                    "kind": "feat_skill",
+                }
+            )
+
+    language_choice_index = 0
+    for block in list(metadata.get("language_proficiencies") or []):
+        if not isinstance(block, dict):
+            continue
+        count = int(block.get("anyStandard") or block.get("any") or 0)
+        if count <= 0:
+            continue
+        for _ in range(count):
+            language_choice_index += 1
+            field_name = _feat_field_name(instance_key, "languages", language_choice_index)
+            fields.append(
+                {
+                    "name": field_name,
+                    "label": f"{feat_title} Language {language_choice_index}",
+                    "help_text": f"Choose a language granted by {feat_title}.",
+                    "options": language_options,
+                    "selected": str(values.get(field_name) or "").strip(),
+                    "group_key": _feat_group_key(instance_key, "languages"),
+                    "kind": "feat_language",
+                }
+            )
+
+    tool_choice_index = 0
+    for block in list(metadata.get("tool_proficiencies") or []):
+        if not isinstance(block, dict):
+            continue
+        any_artisan_count = int(block.get("anyArtisansTool") or 0)
+        any_tool_count = int(block.get("any") or block.get("anyTool") or 0)
+        if any_artisan_count > 0:
+            for _ in range(any_artisan_count):
+                tool_choice_index += 1
+                field_name = _feat_field_name(instance_key, "tools", tool_choice_index)
+                fields.append(
+                    {
+                        "name": field_name,
+                        "label": f"{feat_title} Tool {tool_choice_index}",
+                        "help_text": f"Choose an artisan's tool granted by {feat_title}.",
+                        "options": _tool_proficiency_options(item_catalog, artisan_only=True),
+                        "selected": str(values.get(field_name) or "").strip(),
+                        "group_key": _feat_group_key(instance_key, "tools"),
+                        "kind": "feat_tool",
+                    }
+                )
+        if any_tool_count > 0:
+            for _ in range(any_tool_count):
+                tool_choice_index += 1
+                field_name = _feat_field_name(instance_key, "tools", tool_choice_index)
+                fields.append(
+                    {
+                        "name": field_name,
+                        "label": f"{feat_title} Tool {tool_choice_index}",
+                        "help_text": f"Choose a tool granted by {feat_title}.",
+                        "options": tool_options,
+                        "selected": str(values.get(field_name) or "").strip(),
+                        "group_key": _feat_group_key(instance_key, "tools"),
+                        "kind": "feat_tool",
+                    }
+                )
+
+    weapon_choice_index = 0
+    for block in list(metadata.get("weapon_proficiencies") or []):
+        if not isinstance(block, dict):
+            continue
+        choose = dict(block.get("choose") or {})
+        count = int(choose.get("count") or 0)
+        if count <= 0:
+            continue
+        for _ in range(count):
+            weapon_choice_index += 1
+            field_name = _feat_field_name(instance_key, "weapons", weapon_choice_index)
+            fields.append(
+                {
+                    "name": field_name,
+                    "label": f"{feat_title} Weapon {weapon_choice_index}",
+                    "help_text": f"Choose a weapon granted by {feat_title}.",
+                    "options": weapon_options,
+                    "selected": str(values.get(field_name) or "").strip(),
+                    "group_key": _feat_group_key(instance_key, "weapons"),
+                    "kind": "feat_weapon",
+                }
+            )
+
+    mixed_choice_index = 0
+    for block in list(metadata.get("skill_tool_language_proficiencies") or []):
+        if not isinstance(block, dict):
+            continue
+        for choose_block in list(block.get("choose") or []):
+            if not isinstance(choose_block, dict):
+                continue
+            count = int(choose_block.get("count") or 0)
+            if count <= 0:
+                continue
+            options: list[dict[str, str]] = []
+            from_values = [str(value or "").strip() for value in list(choose_block.get("from") or [])]
+            if "anySkill" in from_values:
+                options.extend(
+                    _choice_option(f"Skill: {label}", f"skill:{token}")
+                    for token, label in _all_skill_options()
+                )
+            if "anyTool" in from_values:
+                options.extend(
+                    _choice_option(f"Tool: {option['label']}", f"tool:{option['value']}")
+                    for option in tool_options
+                )
+            if "anyLanguage" in from_values:
+                options.extend(
+                    _choice_option(f"Language: {option['label']}", f"language:{option['value']}")
+                    for option in language_options
+                )
+            if not options:
+                continue
+            for _ in range(count):
+                mixed_choice_index += 1
+                field_name = _feat_field_name(instance_key, "skill_tool_language", mixed_choice_index)
+                fields.append(
+                    {
+                        "name": field_name,
+                        "label": f"{feat_title} Choice {mixed_choice_index}",
+                        "help_text": f"Choose a skill, tool, or language granted by {feat_title}.",
+                        "options": options,
+                        "selected": str(values.get(field_name) or "").strip(),
+                        "group_key": _feat_group_key(instance_key, "skill_tool_language"),
+                        "kind": "feat_mixed_proficiency",
+                    }
+                )
+
+    if normalize_lookup(feat_title) != normalize_lookup("Resilient"):
+        save_choice_index = 0
+        for block in list(metadata.get("saving_throw_proficiencies") or []):
+            if not isinstance(block, dict):
+                continue
+            choose = dict(block.get("choose") or {})
+            options = [
+                _choice_option(ABILITY_LABELS.get(str(option), _humanize_words(str(option))), str(option))
+                for option in list(choose.get("from") or [])
+                if str(option) in ABILITY_KEYS
+            ]
+            count = max(int(choose.get("count") or 1), 0)
+            if not options or count <= 0:
+                continue
+            for _ in range(count):
+                save_choice_index += 1
+                field_name = _feat_field_name(instance_key, "saving_throws", save_choice_index)
+                fields.append(
+                    {
+                        "name": field_name,
+                        "label": f"{feat_title} Saving Throw",
+                        "help_text": f"Choose the saving throw proficiency granted by {feat_title}.",
+                        "options": ability_options,
+                        "selected": str(values.get(field_name) or "").strip(),
+                        "group_key": _feat_group_key(instance_key, "saving_throws"),
+                        "kind": "feat_save",
+                    }
+                )
+
+    return fields
+
+
 @lru_cache(maxsize=1)
 def _load_phb_level_one_spell_lists() -> dict[str, dict[str, list[str]]]:
     reference_path = Path(__file__).resolve().parent / "data" / "phb_level_one_spell_lists.json"
@@ -1584,6 +1985,126 @@ def _build_spell_catalog(spell_entries: list[SystemsEntryRecord]) -> dict[str, A
         "by_slug": by_slug,
         "phb_level_one_lists": _load_phb_level_one_spell_lists(),
     }
+
+
+def _build_feat_catalog(feat_entries: list[SystemsEntryRecord]) -> dict[str, Any]:
+    by_slug: dict[str, SystemsEntryRecord] = {}
+    for entry in feat_entries:
+        slug = str(entry.slug or "").strip()
+        if slug and slug not in by_slug:
+            by_slug[slug] = entry
+    return {
+        "entries": list(feat_entries),
+        "by_slug": by_slug,
+    }
+
+
+def _item_type_code(entry: SystemsEntryRecord) -> str:
+    raw_value = str((entry.metadata or {}).get("type") or "").strip()
+    return raw_value.split("|", 1)[0].strip().upper()
+
+
+def _tool_proficiency_options(
+    item_catalog: dict[str, Any],
+    *,
+    artisan_only: bool = False,
+) -> list[dict[str, str]]:
+    allowed_type_codes = {"AT"} if artisan_only else {"AT", "GS", "INS"}
+    dynamic_titles = [
+        entry.title
+        for entry in list(item_catalog.get("entries") or [])
+        if _item_type_code(entry) in allowed_type_codes and str(entry.title or "").strip()
+    ]
+    fallback_titles = [
+        title
+        for title in COMMON_TOOL_PROFICIENCY_OPTIONS
+        if not artisan_only
+        or title.endswith("Supplies")
+        or title.endswith("Tools")
+        or title.endswith("Utensils")
+    ]
+    merged_titles = _dedupe_preserve_order(dynamic_titles + fallback_titles)
+    return [_choice_option(title, title) for title in merged_titles]
+
+
+def _weapon_proficiency_options(item_catalog: dict[str, Any]) -> list[dict[str, str]]:
+    profile_titles = [
+        str(dict(profile or {}).get("title") or "").strip()
+        for profile in list(dict(item_catalog.get("phb_weapon_profiles") or {}).values())
+    ]
+    return [_choice_option(title, title) for title in _dedupe_preserve_order(profile_titles)]
+
+
+def _resolve_builder_feat_selections(
+    values: dict[str, str],
+    feat_catalog: dict[str, Any],
+) -> list[dict[str, Any]]:
+    by_slug = dict(feat_catalog.get("by_slug") or {})
+    selections: list[dict[str, Any]] = []
+    for field_name in sorted(values.keys()):
+        if not str(field_name).startswith("species_feat_"):
+            continue
+        feat_slug = str(values.get(field_name) or "").strip()
+        feat_entry = by_slug.get(feat_slug)
+        if feat_entry is None:
+            continue
+        selections.append(
+            {
+                "instance_key": str(field_name),
+                "slug": feat_slug,
+                "entry": feat_entry,
+            }
+        )
+    return selections
+
+
+def _resolve_level_up_feat_selections(
+    values: dict[str, str],
+    feat_catalog: dict[str, Any],
+    *,
+    class_progression: list[dict[str, Any]],
+    subclass_progression: list[dict[str, Any]],
+    target_level: int,
+) -> list[dict[str, Any]]:
+    by_slug = dict(feat_catalog.get("by_slug") or {})
+    improvement_count = _count_ability_score_improvements_for_level(
+        class_progression=class_progression,
+        subclass_progression=subclass_progression,
+        target_level=target_level,
+    )
+    selections: list[dict[str, Any]] = []
+    for index in range(1, improvement_count + 1):
+        if str(values.get(f"levelup_asi_mode_{index}") or "ability_scores").strip() != "feat":
+            continue
+        field_name = f"levelup_feat_{index}"
+        feat_slug = str(values.get(field_name) or "").strip()
+        feat_entry = by_slug.get(feat_slug)
+        if feat_entry is None:
+            continue
+        selections.append(
+            {
+                "instance_key": field_name,
+                "slug": feat_slug,
+                "entry": feat_entry,
+            }
+        )
+    return selections
+
+
+def _feat_field_name(instance_key: str, category: str, index: int) -> str:
+    return f"feat_{instance_key}_{category}_{index}"
+
+
+def _feat_group_key(instance_key: str, category: str) -> str:
+    return f"feat:{instance_key}:{category}"
+
+
+def _feat_selected_values(
+    selected_choices: dict[str, list[str]],
+    instance_key: str,
+    category: str,
+) -> list[str]:
+    return list(selected_choices.get(_feat_group_key(instance_key, category)) or [])
 
 
 def _build_equipment_groups(
@@ -2695,22 +3216,31 @@ def _build_level_one_preview(
     subclass_progression: list[dict[str, Any]],
     equipment_groups: list[dict[str, Any]],
     choice_sections: list[dict[str, Any]],
+    feat_catalog: dict[str, Any],
+    item_catalog: dict[str, Any],
     spell_catalog: dict[str, Any],
     values: dict[str, str],
 ) -> dict[str, Any]:
+    feat_selections = _resolve_builder_feat_selections(values, feat_catalog)
     ability_scores = _coerce_ability_scores(values)
     proficiency_bonus = 2
     class_name = selected_class.title if selected_class is not None else ""
-    con_modifier = _ability_modifier(ability_scores.get("con", DEFAULT_ABILITY_SCORE))
-    hit_die = int(((selected_class.metadata if selected_class is not None else {}) or {}).get("hit_die", {}).get("faces") or 0)
     fixed_proficiencies, selected_choices = _resolve_builder_choices(choice_sections, values, strict=False)
+    ability_scores = _apply_feat_ability_score_bonuses(
+        ability_scores,
+        feat_selections=feat_selections,
+        selected_choices=selected_choices,
+        strict=False,
+    )
     proficiencies = _build_level_one_proficiencies(
         selected_class=selected_class,
         selected_species=selected_species,
         selected_background=selected_background,
         fixed_proficiencies=fixed_proficiencies,
         selected_choices=selected_choices,
+        feat_selections=feat_selections,
     )
+    skills = _build_skills_payload(ability_scores, proficiencies["skills"], proficiency_bonus)
     feature_entries = _collect_level_one_feature_entries(
         class_progression=class_progression,
         subclass_progression=subclass_progression,
@@ -2720,11 +3250,12 @@ def _build_level_one_preview(
         selected_background=selected_background,
         choice_sections=choice_sections,
         selected_choices=selected_choices,
+        feat_selections=feat_selections,
     )
     equipment_catalog = _build_level_one_equipment_catalog(equipment_groups)
     attacks = _build_level_one_attacks(
         equipment_catalog=equipment_catalog,
-        item_catalog={"phb_weapon_profiles": _load_phb_weapon_profiles()},
+        item_catalog=item_catalog,
         ability_scores=ability_scores,
         proficiency_bonus=proficiency_bonus,
         weapon_proficiencies=proficiencies["weapons"],
@@ -2743,18 +3274,36 @@ def _build_level_one_preview(
         if selected_class is not None
         else {"spells": []}
     )
+    stats = (
+        _build_level_one_stats(
+            selected_class=selected_class,
+            selected_species=selected_species,
+            ability_scores=ability_scores,
+            skills=skills,
+            proficiency_bonus=proficiency_bonus,
+            feat_selections=feat_selections,
+            selected_choices=selected_choices,
+            current_level=1,
+        )
+        if selected_class is not None and selected_species is not None
+        else {}
+    )
     feature_names = [
         str(feature.get("name") or feature.get("label") or "").strip()
         for feature in feature_entries
         if str(feature.get("name") or feature.get("label") or "").strip()
     ]
+    save_proficiencies = _dedupe_preserve_order(
+        _class_save_proficiencies(selected_class)
+        + _extract_feat_saving_throw_proficiencies(feat_selections, selected_choices)
+    )
     return {
         "class_level_text": f"{class_name} 1" if class_name else "Level 1",
-        "max_hp": max(hit_die + con_modifier, 1) if hit_die else 0,
-        "speed": _extract_speed_label(selected_species),
+        "max_hp": int(stats.get("max_hp") or 0),
+        "speed": str(stats.get("speed") or _extract_speed_label(selected_species)),
         "size": _extract_size_label(selected_species),
         "proficiency_bonus": proficiency_bonus,
-        "saving_throws": [_humanize_saving_throw(code) for code in _class_save_proficiencies(selected_class)],
+        "saving_throws": [_humanize_saving_throw(code) for code in save_proficiencies],
         "languages": list(proficiencies["languages"]),
         "features": feature_names,
         "equipment": [
@@ -2837,6 +3386,275 @@ def _resolve_builder_choices(
     return fixed_proficiencies, selected_choices
 
 
+def _apply_feat_ability_score_bonuses(
+    base_scores: dict[str, int],
+    *,
+    feat_selections: list[dict[str, Any]],
+    selected_choices: dict[str, list[str]],
+    strict: bool,
+) -> dict[str, int]:
+    updated_scores = dict(base_scores)
+    for selection in feat_selections:
+        feat_entry = selection.get("entry")
+        instance_key = str(selection.get("instance_key") or "").strip()
+        if not isinstance(feat_entry, SystemsEntryRecord) or not instance_key:
+            continue
+        metadata = dict(feat_entry.metadata or {})
+        chosen_values = _feat_selected_values(selected_choices, instance_key, "ability")
+        chosen_index = 0
+        for block in list(metadata.get("ability") or []):
+            if not isinstance(block, dict):
+                continue
+            for ability_key in ABILITY_KEYS:
+                raw_bonus = block.get(ability_key)
+                if isinstance(raw_bonus, (int, float)) and int(raw_bonus):
+                    updated_scores[ability_key] = min(
+                        int(updated_scores.get(ability_key, DEFAULT_ABILITY_SCORE)) + int(raw_bonus),
+                        20,
+                    )
+            choose = dict(block.get("choose") or {})
+            options = [str(option) for option in list(choose.get("from") or []) if str(option) in ABILITY_KEYS]
+            count = max(int(choose.get("count") or 1), 0)
+            amount = max(int(choose.get("amount") or 1), 1)
+            if not options or count <= 0:
+                continue
+            selected_values = chosen_values[chosen_index : chosen_index + count]
+            chosen_index += count
+            if len(selected_values) < count:
+                if strict:
+                    raise CharacterBuildError(f"Choose the ability increase for {feat_entry.title}.")
+                continue
+            for ability_key in selected_values:
+                if ability_key not in options:
+                    if strict:
+                        raise CharacterBuildError(f"Choose a valid ability increase for {feat_entry.title}.")
+                    continue
+                updated_scores[ability_key] = min(
+                    int(updated_scores.get(ability_key, DEFAULT_ABILITY_SCORE)) + amount,
+                    20,
+                )
+    return updated_scores
+
+
+def _extract_feat_skill_proficiencies(
+    feat_selections: list[dict[str, Any]],
+    selected_choices: dict[str, list[str]],
+) -> list[str]:
+    results: list[str] = []
+    for selection in feat_selections:
+        feat_entry = selection.get("entry")
+        instance_key = str(selection.get("instance_key") or "").strip()
+        if not isinstance(feat_entry, SystemsEntryRecord) or not instance_key:
+            continue
+        metadata = dict(feat_entry.metadata or {})
+        for block in list(metadata.get("skill_proficiencies") or []):
+            if not isinstance(block, dict):
+                continue
+            if "choose" in block or int(block.get("any") or 0) > 0:
+                results.extend(_skill_label(value) for value in _feat_selected_values(selected_choices, instance_key, "skills"))
+                continue
+            for key, value in block.items():
+                if value is True:
+                    results.append(_skill_label(key))
+        for value in _feat_selected_values(selected_choices, instance_key, "skill_tool_language"):
+            if str(value).startswith("skill:"):
+                results.append(_skill_label(str(value).split(":", 1)[1]))
+    return _dedupe_preserve_order(results)
+
+
+def _extract_feat_language_proficiencies(
+    feat_selections: list[dict[str, Any]],
+    selected_choices: dict[str, list[str]],
+) -> list[str]:
+    results: list[str] = []
+    for selection in feat_selections:
+        feat_entry = selection.get("entry")
+        instance_key = str(selection.get("instance_key") or "").strip()
+        if not isinstance(feat_entry, SystemsEntryRecord) or not instance_key:
+            continue
+        metadata = dict(feat_entry.metadata or {})
+        for block in list(metadata.get("language_proficiencies") or []):
+            if not isinstance(block, dict):
+                continue
+            if int(block.get("anyStandard") or block.get("any") or 0) > 0:
+                results.extend(_feat_selected_values(selected_choices, instance_key, "languages"))
+                continue
+            for key, value in block.items():
+                if value is True:
+                    results.append(_humanize_proficiency_value(key, category="languages"))
+        for value in _feat_selected_values(selected_choices, instance_key, "skill_tool_language"):
+            if str(value).startswith("language:"):
+                results.append(str(value).split(":", 1)[1])
+    return _dedupe_preserve_order(results)
+
+
+def _extract_feat_tool_proficiencies(
+    feat_selections: list[dict[str, Any]],
+    selected_choices: dict[str, list[str]],
+) -> list[str]:
+    results: list[str] = []
+    for selection in feat_selections:
+        feat_entry = selection.get("entry")
+        instance_key = str(selection.get("instance_key") or "").strip()
+        if not isinstance(feat_entry, SystemsEntryRecord) or not instance_key:
+            continue
+        metadata = dict(feat_entry.metadata or {})
+        for block in list(metadata.get("tool_proficiencies") or []):
+            if isinstance(block, str):
+                cleaned = _clean_embedded_text(block)
+                if cleaned:
+                    results.append(cleaned)
+                continue
+            if not isinstance(block, dict):
+                continue
+            if int(block.get("any") or block.get("anyTool") or block.get("anyArtisansTool") or 0) > 0:
+                results.extend(_feat_selected_values(selected_choices, instance_key, "tools"))
+                continue
+            for key, value in block.items():
+                if value is True:
+                    cleaned = _clean_embedded_text(key)
+                    if cleaned:
+                        results.append(cleaned)
+        for value in _feat_selected_values(selected_choices, instance_key, "skill_tool_language"):
+            if str(value).startswith("tool:"):
+                results.append(str(value).split(":", 1)[1])
+    return _dedupe_preserve_order(results)
+
+
+def _extract_feat_armor_proficiencies(
+    feat_selections: list[dict[str, Any]],
+    selected_choices: dict[str, list[str]],
+) -> list[str]:
+    del selected_choices
+    results: list[str] = []
+    for selection in feat_selections:
+        feat_entry = selection.get("entry")
+        if not isinstance(feat_entry, SystemsEntryRecord):
+            continue
+        metadata = dict(feat_entry.metadata or {})
+        for block in list(metadata.get("armor_proficiencies") or []):
+            if not isinstance(block, dict):
+                continue
+            for key, value in block.items():
+                if value is True:
+                    results.append(_humanize_proficiency_value(key, category="armor"))
+    return _dedupe_preserve_order(results)
+
+
+def _extract_feat_weapon_proficiencies(
+    feat_selections: list[dict[str, Any]],
+    selected_choices: dict[str, list[str]],
+) -> list[str]:
+    results: list[str] = []
+    for selection in feat_selections:
+        feat_entry = selection.get("entry")
+        instance_key = str(selection.get("instance_key") or "").strip()
+        if not isinstance(feat_entry, SystemsEntryRecord) or not instance_key:
+            continue
+        metadata = dict(feat_entry.metadata or {})
+        for block in list(metadata.get("weapon_proficiencies") or []):
+            if not isinstance(block, dict):
+                continue
+            if "choose" in block:
+                results.extend(_feat_selected_values(selected_choices, instance_key, "weapons"))
+                continue
+            for key, value in block.items():
+                if value is True:
+                    results.append(_humanize_proficiency_value(key, category="weapons"))
+    return _dedupe_preserve_order(results)
+
+
+def _extract_feat_saving_throw_proficiencies(
+    feat_selections: list[dict[str, Any]],
+    selected_choices: dict[str, list[str]],
+) -> list[str]:
+    results: list[str] = []
+    for selection in feat_selections:
+        feat_entry = selection.get("entry")
+        instance_key = str(selection.get("instance_key") or "").strip()
+        if not isinstance(feat_entry, SystemsEntryRecord) or not instance_key:
+            continue
+        if normalize_lookup(feat_entry.title) == normalize_lookup("Resilient"):
+            results.extend(
+                ability_key
+                for ability_key in _feat_selected_values(selected_choices, instance_key, "ability")
+                if ability_key in ABILITY_KEYS
+            )
+            continue
+        metadata = dict(feat_entry.metadata or {})
+        for block in list(metadata.get("saving_throw_proficiencies") or []):
+            if not isinstance(block, dict):
+                continue
+            if "choose" in block:
+                results.extend(
+                    ability_key
+                    for ability_key in _feat_selected_values(selected_choices, instance_key, "saving_throws")
+                    if ability_key in ABILITY_KEYS
+                )
+                continue
+            for key, value in block.items():
+                if value is True and key in ABILITY_KEYS:
+                    results.append(key)
+    return _dedupe_preserve_order(results)
+
+
+def _feat_initiative_bonus(feat_selections: list[dict[str, Any]]) -> int:
+    for selection in feat_selections:
+        feat_entry = selection.get("entry")
+        if isinstance(feat_entry, SystemsEntryRecord) and normalize_lookup(feat_entry.title) == normalize_lookup("Alert"):
+            return 5
+    return 0
+
+
+def _feat_speed_bonus(feat_selections: list[dict[str, Any]]) -> int:
+    bonus = 0
+    for selection in feat_selections:
+        feat_entry = selection.get("entry")
+        if isinstance(feat_entry, SystemsEntryRecord) and normalize_lookup(feat_entry.title) == normalize_lookup("Mobile"):
+            bonus += 10
+    return bonus
+
+
+def _apply_speed_bonus_to_label(speed_label: str, bonus: int) -> str:
+    clean_label = str(speed_label or "").strip()
+    if not clean_label or not bonus:
+        return clean_label
+    match = re.search(r"(\d+)", clean_label)
+    if not match:
+        return clean_label
+    return clean_label[: match.start(1)] + str(int(match.group(1)) + int(bonus)) + clean_label[match.end(1) :]
+
+
+def _feat_passive_bonus(
+    feat_selections: list[dict[str, Any]],
+    *,
+    skill_name: str,
+) -> int:
+    normalized_skill = normalize_lookup(skill_name)
+    bonus = 0
+    for selection in feat_selections:
+        feat_entry = selection.get("entry")
+        if not isinstance(feat_entry, SystemsEntryRecord):
+            continue
+        normalized_title = normalize_lookup(feat_entry.title)
+        if normalized_title == normalize_lookup("Observant") and normalized_skill in {"perception", "investigation"}:
+            bonus += 5
+    return bonus
+
+
+def _feat_hit_point_bonus(
+    feat_selections: list[dict[str, Any]],
+    *,
+    current_level: int,
+) -> int:
+    bonus = 0
+    for selection in feat_selections:
+        feat_entry = selection.get("entry")
+        if isinstance(feat_entry, SystemsEntryRecord) and normalize_lookup(feat_entry.title) == normalize_lookup("Tough"):
+            bonus += max(int(current_level or 0), 0) * 2
+    return bonus
+
+
 def _build_level_one_proficiencies(
     *,
     selected_class: SystemsEntryRecord | None,
@@ -2844,26 +3662,36 @@ def _build_level_one_proficiencies(
     selected_background: SystemsEntryRecord | None,
     fixed_proficiencies: dict[str, list[str]],
     selected_choices: dict[str, list[str]],
+    feat_selections: list[dict[str, Any]],
 ) -> dict[str, list[str]]:
     del fixed_proficiencies
-    armor = _dedupe_preserve_order(_extract_class_armor_proficiencies(selected_class))
-    weapons = _dedupe_preserve_order(_extract_class_weapon_proficiencies(selected_class))
+    armor = _dedupe_preserve_order(
+        _extract_class_armor_proficiencies(selected_class)
+        + _extract_feat_armor_proficiencies(feat_selections, selected_choices)
+    )
+    weapons = _dedupe_preserve_order(
+        _extract_class_weapon_proficiencies(selected_class)
+        + _extract_feat_weapon_proficiencies(feat_selections, selected_choices)
+    )
     tools = _dedupe_preserve_order(
         _extract_class_tool_proficiencies(selected_class)
         + _extract_fixed_tool_proficiencies(selected_species)
         + _extract_fixed_tool_proficiencies(selected_background)
+        + _extract_feat_tool_proficiencies(feat_selections, selected_choices)
     )
     languages = _dedupe_preserve_order(
         _extract_fixed_languages(selected_species)
         + _extract_fixed_languages(selected_background)
         + selected_choices.get("species_languages", [])
         + selected_choices.get("background_languages", [])
+        + _extract_feat_language_proficiencies(feat_selections, selected_choices)
     )
     skills = _dedupe_preserve_order(
         _extract_fixed_skills(selected_species)
         + _extract_fixed_skills(selected_background)
         + selected_choices.get("class_skills", [])
         + selected_choices.get("species_skills", [])
+        + _extract_feat_skill_proficiencies(feat_selections, selected_choices)
     )
     return {
         "armor": armor,
@@ -2905,6 +3733,7 @@ def _collect_level_one_feature_entries(
     selected_background: SystemsEntryRecord | None,
     choice_sections: list[dict[str, Any]],
     selected_choices: dict[str, list[str]],
+    feat_selections: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     del selected_class
     feature_entries: list[dict[str, Any]] = []
@@ -2978,8 +3807,14 @@ def _collect_level_one_feature_entries(
     if selected_background is not None:
         feature_entries.extend(_extract_background_feature_entries(selected_background))
 
-    for feat_slug in selected_choices.get("species_feats", []):
-        feat_title = _resolve_choice_label(choice_sections, "species_feats", feat_slug) or feat_slug
+    for selection in feat_selections:
+        feat_entry = selection.get("entry")
+        feat_slug = str(selection.get("slug") or "").strip()
+        feat_title = (
+            feat_entry.title
+            if isinstance(feat_entry, SystemsEntryRecord)
+            else _resolve_choice_label(choice_sections, "species_feats", feat_slug) or feat_slug
+        )
         feature_entries.append(
             {
                 "kind": "feat",
@@ -2987,6 +3822,7 @@ def _collect_level_one_feature_entries(
                 "name": feat_title,
                 "label": feat_title,
                 "slug": feat_slug,
+                "systems_entry": feat_entry if isinstance(feat_entry, SystemsEntryRecord) else None,
             }
         )
 
@@ -3227,27 +4063,39 @@ def _build_feature_payload(
     if kind == "feat":
         slug = str(feature_entry.get("slug") or "").strip()
         feature_name = str(feature_entry.get("title") or feature_entry.get("label") or "").strip()
+        systems_entry = feature_entry.get("systems_entry")
         if not slug or not feature_name:
             return None, None
-        return (
-            {
-                "id": f"{slugify(feature_name)}-{index}",
-                "name": feature_name,
-                "category": "feat",
-                "source": PHB_SOURCE_ID,
-                "description_markdown": "",
-                "activation_type": "passive",
-                "tracker_ref": None,
-                "systems_ref": {
+        feature_payload = {
+            "id": f"{slugify(feature_name)}-{index}",
+            "name": feature_name,
+            "category": "feat",
+            "source": systems_entry.source_id if isinstance(systems_entry, SystemsEntryRecord) else PHB_SOURCE_ID,
+            "description_markdown": "",
+            "activation_type": "passive",
+            "tracker_ref": None,
+            "systems_ref": (
+                _systems_ref_from_entry(systems_entry)
+                if isinstance(systems_entry, SystemsEntryRecord)
+                else {
                     "entry_key": "",
                     "entry_type": "feat",
                     "title": feature_name,
                     "slug": slug,
                     "source_id": PHB_SOURCE_ID,
-                },
-            },
-            None,
+                }
+            ),
+        }
+        tracker_template = _build_feature_tracker_template(
+            feature_name,
+            ability_scores=ability_scores,
+            display_order=display_order,
         )
+        if tracker_template is not None:
+            feature_payload["tracker_ref"] = tracker_template["id"]
+            feature_payload["activation_type"] = str(tracker_template.get("activation_type") or "passive")
+            tracker_template.pop("activation_type", None)
+        return feature_payload, tracker_template
 
     return None, None
 
@@ -3259,6 +4107,9 @@ def _build_level_one_stats(
     ability_scores: dict[str, int],
     skills: list[dict[str, Any]],
     proficiency_bonus: int,
+    feat_selections: list[dict[str, Any]],
+    selected_choices: dict[str, list[str]],
+    current_level: int,
 ) -> dict[str, Any]:
     class_metadata = dict(selected_class.metadata or {})
     hit_die_faces = int((class_metadata.get("hit_die") or {}).get("faces") or 0)
@@ -3267,17 +4118,23 @@ def _build_level_one_stats(
     passive_perception = 10 + int((skill_lookup.get("perception") or {}).get("bonus") or _ability_modifier(ability_scores["wis"]))
     passive_insight = 10 + int((skill_lookup.get("insight") or {}).get("bonus") or _ability_modifier(ability_scores["wis"]))
     passive_investigation = 10 + int((skill_lookup.get("investigation") or {}).get("bonus") or _ability_modifier(ability_scores["int"]))
-    save_proficiencies = set(_class_save_proficiencies(selected_class))
+    save_proficiencies = set(
+        _class_save_proficiencies(selected_class)
+        + _extract_feat_saving_throw_proficiencies(feat_selections, selected_choices)
+    )
+    base_speed = _extract_speed_label(selected_species)
 
     return {
-        "max_hp": max(hit_die_faces + con_modifier, 1),
+        "max_hp": max(hit_die_faces + con_modifier, 1)
+        + _feat_hit_point_bonus(feat_selections, current_level=current_level),
         "armor_class": 10 + _ability_modifier(ability_scores["dex"]),
-        "initiative_bonus": _ability_modifier(ability_scores["dex"]),
-        "speed": _extract_speed_label(selected_species),
+        "initiative_bonus": _ability_modifier(ability_scores["dex"])
+        + _feat_initiative_bonus(feat_selections),
+        "speed": _apply_speed_bonus_to_label(base_speed, _feat_speed_bonus(feat_selections)),
         "proficiency_bonus": proficiency_bonus,
-        "passive_perception": passive_perception,
+        "passive_perception": passive_perception + _feat_passive_bonus(feat_selections, skill_name="Perception"),
         "passive_insight": passive_insight,
-        "passive_investigation": passive_investigation,
+        "passive_investigation": passive_investigation + _feat_passive_bonus(feat_selections, skill_name="Investigation"),
         "ability_scores": {
             ability_key: {
                 "score": score,
@@ -3359,21 +4216,30 @@ def _build_leveled_stats(
     skills: list[dict[str, Any]],
     proficiency_bonus: int,
     hp_gain: int,
+    feat_selections: list[dict[str, Any]],
+    selected_choices: dict[str, list[str]],
+    current_level: int,
 ) -> dict[str, Any]:
     stats = dict(current_definition.stats or {})
     skill_lookup = {normalize_lookup(skill["name"]): skill for skill in skills}
-    save_proficiencies = set(_class_save_proficiencies(selected_class))
-    stats["max_hp"] = max(int(stats.get("max_hp") or 0) + hp_gain, 1)
+    save_proficiencies = set(
+        _class_save_proficiencies(selected_class)
+        + _extract_feat_saving_throw_proficiencies(feat_selections, selected_choices)
+    )
+    feat_hp_bonus = _feat_hit_point_bonus(feat_selections, current_level=current_level)
+    stats["max_hp"] = max(int(stats.get("max_hp") or 0) + hp_gain + feat_hp_bonus, 1)
     stats["proficiency_bonus"] = proficiency_bonus
     stats["passive_perception"] = 10 + int(
         (skill_lookup.get("perception") or {}).get("bonus") or _ability_modifier(ability_scores["wis"])
-    )
+    ) + _feat_passive_bonus(feat_selections, skill_name="Perception")
     stats["passive_insight"] = 10 + int(
         (skill_lookup.get("insight") or {}).get("bonus") or _ability_modifier(ability_scores["wis"])
     )
     stats["passive_investigation"] = 10 + int(
         (skill_lookup.get("investigation") or {}).get("bonus") or _ability_modifier(ability_scores["int"])
-    )
+    ) + _feat_passive_bonus(feat_selections, skill_name="Investigation")
+    stats["initiative_bonus"] = _ability_modifier(ability_scores["dex"]) + _feat_initiative_bonus(feat_selections)
+    stats["speed"] = _apply_speed_bonus_to_label(str(stats.get("speed") or ""), _feat_speed_bonus(feat_selections))
     stats["ability_scores"] = {
         ability_key: {
             "score": score,
@@ -3497,6 +4363,7 @@ def _build_native_level_up_preview(
     class_progression: list[dict[str, Any]],
     subclass_progression: list[dict[str, Any]],
     feat_options: list[dict[str, str]],
+    feat_catalog: dict[str, Any],
     choice_sections: list[dict[str, Any]],
     spell_catalog: dict[str, Any],
     target_level: int,
@@ -3504,13 +4371,26 @@ def _build_native_level_up_preview(
     values: dict[str, str],
 ) -> dict[str, Any]:
     _, selected_choices = _resolve_builder_choices(choice_sections, values, strict=False)
-    _, _, asi_summaries = _resolve_level_up_ability_score_choices(
+    base_ability_scores, _, asi_summaries = _resolve_level_up_ability_score_choices(
         current_ability_scores=current_ability_scores,
         class_progression=class_progression,
         subclass_progression=subclass_progression,
         feat_options=feat_options,
         target_level=target_level,
         values=values,
+        strict=False,
+    )
+    feat_selections = _resolve_level_up_feat_selections(
+        values,
+        feat_catalog,
+        class_progression=class_progression,
+        subclass_progression=subclass_progression,
+        target_level=target_level,
+    )
+    ability_scores = _apply_feat_ability_score_bonuses(
+        base_ability_scores,
+        feat_selections=feat_selections,
+        selected_choices=selected_choices,
         strict=False,
     )
     hp_gain = 0
@@ -3547,7 +4427,12 @@ def _build_native_level_up_preview(
     ]
     return {
         "class_level_text": f"{selected_class.title} {target_level}",
-        "max_hp": max(int((definition.stats or {}).get("max_hp") or 0) + hp_gain, 1),
+        "max_hp": max(
+            int((definition.stats or {}).get("max_hp") or 0)
+            + hp_gain
+            + _feat_hit_point_bonus(feat_selections, current_level=target_level),
+            1,
+        ),
         "gained_features": gained_features,
         "spell_slots": slot_summary,
         "new_spells": new_spell_names,
@@ -4346,6 +5231,20 @@ def _build_feature_tracker_template(
             "notes": "Sorcery Points",
             "display_order": display_order,
             "activation_type": "passive",
+        }
+    if normalized == normalize_lookup("Lucky"):
+        return {
+            "id": "lucky",
+            "label": "Lucky",
+            "category": "feat",
+            "initial_current": 3,
+            "max": 3,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Lucky",
+            "display_order": display_order,
+            "activation_type": "special",
         }
     return None
 
