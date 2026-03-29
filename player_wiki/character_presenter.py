@@ -230,7 +230,9 @@ def present_character_detail(
         }
 
     feature_groups_ordered: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
+    has_hit_point_details = int(stats.get("max_hp") or 0) > 0
     has_language_details = any(group["title"] == "Languages" and group["values_list"] for group in proficiency_groups)
+    has_proficiency_details = bool(proficiency_groups)
     has_skill_details = bool(skills)
     has_named_feats = any(
         normalize_feature_name(feature.get("name")) != "feat"
@@ -240,7 +242,9 @@ def present_character_detail(
     for feature in list(definition.features or []):
         if should_hide_redundant_choice_feature(
             feature,
+            has_hit_point_details=has_hit_point_details,
             has_language_details=has_language_details,
+            has_proficiency_details=has_proficiency_details,
             has_skill_details=has_skill_details,
             has_named_feats=has_named_feats,
         ):
@@ -468,7 +472,9 @@ def resolve_feature_description_html(
 def should_hide_redundant_choice_feature(
     feature: dict[str, Any],
     *,
+    has_hit_point_details: bool,
     has_language_details: bool,
+    has_proficiency_details: bool,
     has_skill_details: bool,
     has_named_feats: bool,
 ) -> bool:
@@ -481,6 +487,10 @@ def should_hide_redundant_choice_feature(
     feature_name = normalize_feature_name(feature.get("name"))
     if feature_name in REDUNDANT_FEATURE_CHOICE_NAMES:
         return True
+    if feature_name == "hit points":
+        return has_hit_point_details
+    if feature_name == "proficiencies":
+        return has_proficiency_details
     if feature_name == "languages":
         return has_language_details
     if feature_name == "skills":

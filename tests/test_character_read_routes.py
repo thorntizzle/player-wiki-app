@@ -266,6 +266,22 @@ def test_character_sheet_hides_redundant_choice_placeholder_features(app, client
         features.extend(
             [
                 {
+                    "name": "Hit Points",
+                    "category": "class_feature",
+                    "source": "PHB 71",
+                    "description_markdown": "Your hit points increase by 1d10 plus your Constitution modifier at fighter level 1.",
+                    "activation_type": "passive",
+                    "tracker_ref": None,
+                },
+                {
+                    "name": "Proficiencies",
+                    "category": "class_feature",
+                    "source": "PHB 71",
+                    "description_markdown": "You gain proficiency with all armor, shields, simple weapons, and martial weapons.",
+                    "activation_type": "passive",
+                    "tracker_ref": None,
+                },
+                {
                     "name": "Languages",
                     "category": "species_trait",
                     "source": "BR 31",
@@ -324,6 +340,8 @@ def test_character_sheet_hides_redundant_choice_placeholder_features(app, client
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
+    assert "Your hit points increase by 1d10 plus your Constitution modifier at fighter level 1." not in html
+    assert "You gain proficiency with all armor, shields, simple weapons, and martial weapons." not in html
     assert "You can speak, read, and write Common and one extra language." not in html
     assert "Two different ability scores of your choice increase by 1." not in html
     assert "You gain proficiency in one skill of your choice." not in html
