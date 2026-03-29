@@ -1013,10 +1013,6 @@ button {
   padding: 0.55rem 0.85rem;
 }
 
-.session-stepper--compact button {
-  flex: 1 1 0;
-}
-
 .session-card {
   background: var(--surface);
 }

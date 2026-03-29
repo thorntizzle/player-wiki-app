@@ -175,10 +175,6 @@
               <span>{{ coin.upper() }}</span>
               <input type="number" name="{{ coin }}" value="{{ character.currency_values[coin] }}" min="0">
             </label>
-            <div class="session-stepper session-stepper--compact">
-              <button type="submit" name="delta" value="{{ coin }}:-1" aria-label="{{ coin.upper() }} minus 1">-1</button>
-              <button type="submit" name="delta" value="{{ coin }}:1" aria-label="{{ coin.upper() }} plus 1">+1</button>
-            </div>
           </article>
         {% endfor %}
         <button type="submit">Save currency</button>

@@ -617,7 +617,9 @@ def test_character_sheet_hides_redundant_choice_placeholder_features(app, client
     assert "Creatures provoke opportunity attacks from you even if they take the Disengage action." in html
 
 
-def test_session_currency_editor_shows_explicit_coin_adjusters(client, sign_in, users, set_campaign_visibility):
+def test_session_currency_editor_renders_plain_fields_without_adjuster_buttons(
+    client, sign_in, users, set_campaign_visibility
+):
     set_campaign_visibility("linden-pass", characters="players")
     sign_in(users["owner"]["email"], users["owner"]["password"])
 
@@ -625,10 +627,13 @@ def test_session_currency_editor_shows_explicit_coin_adjusters(client, sign_in, 
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert 'value="cp:-1"' in html
-    assert 'value="cp:1"' in html
-    assert 'value="gp:-1"' in html
-    assert 'value="gp:1"' in html
+    assert 'name="cp"' in html
+    assert 'name="sp"' in html
+    assert 'name="ep"' in html
+    assert 'name="gp"' in html
+    assert 'name="pp"' in html
+    assert 'value="cp:-1"' not in html
+    assert 'value="gp:1"' not in html
 
 
 def test_character_sheet_renders_long_form_imported_ability_keys(app, client, sign_in, users):
