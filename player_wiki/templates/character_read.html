@@ -176,21 +176,8 @@
                 <h3>{{ group.title }}</h3>
                 <div class="feature-stack">
                   {% for feature in group.entries %}
-                    {% if feature.description_html %}
-                      <details class="feature-detail">
-                        <summary>
-                          <span>{{ feature.name }}</span>
-                          {% if feature.metadata %}
-                            <span class="meta">{{ feature.metadata | join(" | ") }}</span>
-                          {% endif %}
-                        </summary>
-                        {% if feature.href %}
-                          <p class="meta"><a href="{{ feature.href }}">View source entry</a></p>
-                        {% endif %}
-                        <div class="article-body article-body--compact">{{ feature.description_html | safe }}</div>
-                      </details>
-                    {% else %}
-                      <article class="feature-row">
+                    <article class="feature-row">
+                      <div class="feature-row__header">
                         <h4>
                           {% if feature.href %}
                             <a href="{{ feature.href }}">{{ feature.name }}</a>
@@ -201,8 +188,11 @@
                         {% if feature.metadata %}
                           <p class="meta">{{ feature.metadata | join(" | ") }}</p>
                         {% endif %}
-                      </article>
-                    {% endif %}
+                      </div>
+                      {% if feature.description_html %}
+                        <div class="article-body article-body--compact">{{ feature.description_html | safe }}</div>
+                      {% endif %}
+                    </article>
                   {% endfor %}
                 </div>
               </section>

@@ -516,6 +516,39 @@ class SystemsService:
             optionalfeature_lookup=self._build_optionalfeature_entry_lookup(campaign_slug),
         )
 
+    def build_character_sheet_entry_body_html(
+        self,
+        campaign_slug: str,
+        entry: SystemsEntryRecord,
+    ) -> str:
+        body_entries = entry.body.get("entries")
+        if body_entries is not None:
+            body_html, _ = self._render_embedded_content(
+                campaign_slug,
+                body_entries,
+                heading_level=5,
+                extract_option_groups=False,
+                optionalfeature_lookup=self._build_optionalfeature_entry_lookup(campaign_slug),
+                preferred_source_id=entry.source_id,
+            )
+            if body_html.strip():
+                return body_html
+
+        if entry.entry_type == "class":
+            progression_html = self._render_character_sheet_progression_groups(
+                self.build_class_feature_progression_for_class_entry(campaign_slug, entry),
+            )
+            if progression_html:
+                return progression_html
+        if entry.entry_type == "subclass":
+            progression_html = self._render_character_sheet_progression_groups(
+                self.build_subclass_feature_progression_for_subclass_entry(campaign_slug, entry),
+            )
+            if progression_html:
+                return progression_html
+
+        return self._strip_systems_entry_summary_section(entry.rendered_html)
+
     def get_entry_by_slug_for_campaign(self, campaign_slug: str, entry_slug: str) -> SystemsEntryRecord | None:
         library = self.get_campaign_library(campaign_slug)
         if library is None:
@@ -979,6 +1012,43 @@ class SystemsService:
         if level > 0:
             badges.append(f"Level {level}")
         return badges
+
+    def _render_character_sheet_progression_groups(self, groups: list[dict[str, object]]) -> str:
+        list_items: list[str] = []
+        for group in groups:
+            level_label = str(group.get("level_label") or "").strip()
+            feature_rows = group.get("feature_rows")
+            if not isinstance(feature_rows, list):
+                continue
+            labels = [
+                str(row.get("label") or "").strip()
+                for row in feature_rows
+                if isinstance(row, dict) and str(row.get("label") or "").strip()
+            ]
+            if not labels:
+                continue
+            joined_labels = ", ".join(labels)
+            if level_label:
+                list_items.append(
+                    f"<li><strong>{escape(level_label)}:</strong> {escape(joined_labels)}</li>"
+                )
+            else:
+                list_items.append(f"<li>{escape(joined_labels)}</li>")
+        if not list_items:
+            return ""
+        return "<p>Feature progression:</p><ul>" + "".join(list_items) + "</ul>"
+
+    def _strip_systems_entry_summary_section(self, rendered_html: str) -> str:
+        html = str(rendered_html or "").strip()
+        if not html:
+            return ""
+        return re.sub(
+            r"^\s*<section class=\"systems-entry-summary\">.*?</section>\s*",
+            "",
+            html,
+            count=1,
+            flags=re.IGNORECASE | re.DOTALL,
+        ).strip()
 
     def _build_embedded_optionalfeature_option(
         self,

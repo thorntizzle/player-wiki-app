@@ -79,6 +79,7 @@ def present_character_detail(
     record: CharacterRecord,
     *,
     include_player_notes_section: bool = True,
+    systems_service: Any | None = None,
 ) -> dict[str, Any]:
     definition = record.definition
     state = dict(record.state_record.state or {})
@@ -234,7 +235,6 @@ def present_character_detail(
         tracker_ref = str(feature.get("tracker_ref") or "").strip()
         linked_resource = resource_lookup.get(tracker_ref) if tracker_ref else None
         metadata = [
-            str(feature.get("source") or "").strip(),
             humanize_value(feature.get("activation_type")),
             summarize_linked_resource(linked_resource),
         ]
@@ -243,8 +243,10 @@ def present_character_detail(
                 "name": str(feature.get("name") or "Feature"),
                 "href": build_systems_entry_href(campaign.slug, feature.get("systems_ref")),
                 "metadata": [part for part in metadata if part],
-                "description_html": render_campaign_markdown(
-                    campaign, str(feature.get("description_markdown") or "")
+                "description_html": resolve_feature_description_html(
+                    campaign,
+                    feature,
+                    systems_service=systems_service,
                 ),
             }
         )
@@ -422,6 +424,27 @@ def build_systems_entry_href(campaign_slug: str, systems_ref: Any) -> str:
     if not slug or not campaign_slug.strip():
         return ""
     return f"/campaigns/{campaign_slug}/systems/entries/{slug}"
+
+
+def resolve_feature_description_html(
+    campaign: Campaign,
+    feature: dict[str, Any],
+    *,
+    systems_service: Any | None = None,
+) -> str:
+    description_markdown = str(feature.get("description_markdown") or "").strip()
+    if description_markdown:
+        return render_campaign_markdown(campaign, description_markdown)
+    if systems_service is None:
+        return ""
+    systems_ref = dict(feature.get("systems_ref") or {})
+    slug = str(systems_ref.get("slug") or "").strip()
+    if not slug:
+        return ""
+    entry = systems_service.get_entry_by_slug_for_campaign(campaign.slug, slug)
+    if entry is None:
+        return ""
+    return str(systems_service.build_character_sheet_entry_body_html(campaign.slug, entry) or "").strip()
 
 
 def render_campaign_markdown(campaign: Campaign, markdown_text: str) -> str:

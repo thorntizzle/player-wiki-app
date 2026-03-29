@@ -1396,7 +1396,8 @@ button {
 }
 
 .spell-row__header,
-.inventory-row__header {
+.inventory-row__header,
+.feature-row__header {
   display: flex;
   justify-content: space-between;
   gap: 1rem;
@@ -1869,6 +1870,7 @@ button {
 
   .feature-detail summary,
   .spell-row__header,
+  .feature-row__header,
   .inventory-row__header,
   .dm-content-item__header,
   .combatant-card__header,

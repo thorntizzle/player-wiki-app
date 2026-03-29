@@ -625,6 +625,7 @@ def create_app() -> Flask:
             campaign,
             record,
             include_player_notes_section=not is_session_mode,
+            systems_service=get_systems_service(),
         )
         if notes_draft is not None:
             character["player_notes_markdown"] = notes_draft

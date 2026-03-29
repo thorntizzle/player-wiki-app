@@ -1,6 +1,9 @@
 ﻿from __future__ import annotations
 
 import yaml
+from datetime import datetime, timezone
+
+from player_wiki.systems_models import SystemsEntryRecord
 
 
 def _write_character_definition(app, character_slug: str, mutator) -> None:
@@ -188,7 +191,73 @@ def test_character_sheet_renders_systems_links_when_present(app, client, sign_in
     assert '/campaigns/linden-pass/systems/entries/phb-item-crossbow-light' in html
     assert '/campaigns/linden-pass/systems/entries/phb-spell-message' in html
     assert '/campaigns/linden-pass/systems/entries/phb-item-backpack' in html
-    assert 'View source entry' in html
+    assert 'View source entry' not in html
+
+
+def test_character_sheet_shows_systems_feature_text_inline_and_hides_source_metadata(
+    app, client, sign_in, users, monkeypatch
+):
+    def _mutate(payload: dict) -> None:
+        features = list(payload.get("features") or [])
+        if not features:
+            return
+        features[0] = {
+            "name": "Spellcasting",
+            "category": "class_feature",
+            "source": "Unique Source 77",
+            "description_markdown": "",
+            "activation_type": "bonus_action",
+            "tracker_ref": None,
+            "systems_ref": {
+                "entry_type": "classfeature",
+                "slug": "phb-classfeature-spellcasting",
+                "title": "Spellcasting",
+                "source_id": "PHB",
+            },
+        }
+        payload["features"] = features
+
+    _write_character_definition(app, "arden-march", _mutate)
+
+    fake_entry = SystemsEntryRecord(
+        id=999,
+        library_slug="DND-5E",
+        source_id="PHB",
+        entry_key="dnd-5e|classfeature|phb|spellcasting",
+        entry_type="classfeature",
+        slug="phb-classfeature-spellcasting",
+        title="Spellcasting",
+        source_page="",
+        source_path="",
+        search_text="spellcasting",
+        player_safe_default=True,
+        dm_heavy=False,
+        metadata={},
+        body={"entries": ["You can cast spells using your force of personality as your spellcasting focus."]},
+        rendered_html="",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    systems_service = app.extensions["systems_service"]
+    original_get_entry = systems_service.get_entry_by_slug_for_campaign
+
+    def _fake_get_entry(campaign_slug: str, entry_slug: str):
+        if campaign_slug == "linden-pass" and entry_slug == "phb-classfeature-spellcasting":
+            return fake_entry
+        return original_get_entry(campaign_slug, entry_slug)
+
+    monkeypatch.setattr(systems_service, "get_entry_by_slug_for_campaign", _fake_get_entry)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get("/campaigns/linden-pass/characters/arden-march")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert '>Spellcasting</a>' in html
+    assert '/campaigns/linden-pass/systems/entries/phb-classfeature-spellcasting' in html
+    assert 'You can cast spells using your force of personality as your spellcasting focus.' in html
+    assert 'Unique Source 77' not in html
+    assert 'View source entry' not in html
 
 
 def test_character_sheet_renders_long_form_imported_ability_keys(app, client, sign_in, users):
