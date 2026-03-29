@@ -34,6 +34,12 @@ from .auth import (
     register_auth,
     role_satisfies_visibility,
 )
+from .character_builder import (
+    CharacterBuildError,
+    build_level_one_builder_context,
+    build_level_one_character_definition,
+)
+from .character_importer import write_yaml
 from .character_service import CharacterStateValidationError
 from .combat_presenter import DND_5E_CONDITION_OPTIONS, present_combat_tracker
 from .character_presenter import present_character_detail, present_character_roster
@@ -45,9 +51,10 @@ from .campaign_dm_content_store import CampaignDMContentStore
 from .campaign_page_store import CampaignPageStore
 from .campaign_session_service import CampaignSessionService, CampaignSessionValidationError
 from .campaign_session_store import CampaignSessionStore
-from .character_repository import CharacterRepository
+from .character_repository import CharacterRepository, load_campaign_character_config
 from .character_state_service import CharacterStateService
 from .character_store import CharacterStateConflictError, CharacterStateStore
+from .character_service import build_initial_state
 from .campaign_visibility import (
     CAMPAIGN_VISIBILITY_SCOPE_LABELS,
     CAMPAIGN_VISIBILITY_SCOPES,
@@ -681,6 +688,29 @@ def create_app() -> Flask:
                 can_use_session_mode=can_use_session_mode,
                 is_session_mode=is_session_mode,
                 rest_preview=rest_preview,
+            ),
+            status_code,
+        )
+
+    def render_character_builder_page(
+        campaign_slug: str,
+        builder_context: dict[str, object],
+        *,
+        status_code: int = 200,
+    ):
+        campaign = load_campaign_context(campaign_slug)
+        builder_ready = bool(
+            builder_context.get("class_options")
+            and builder_context.get("species_options")
+            and builder_context.get("background_options")
+        )
+        return (
+            render_template(
+                "character_create.html",
+                campaign=campaign,
+                builder=builder_context,
+                builder_ready=builder_ready,
+                active_nav="characters",
             ),
             status_code,
         )
@@ -3121,7 +3151,68 @@ def create_app() -> Flask:
             character_cards=character_cards,
             query=query,
             result_count=len(character_cards),
+            can_create_characters=can_manage_campaign_session(campaign_slug),
             active_nav="characters",
+        )
+
+    @app.route("/campaigns/<campaign_slug>/characters/new", methods=["GET", "POST"])
+    @campaign_scope_access_required("characters")
+    def character_create_view(campaign_slug: str):
+        if not can_manage_campaign_session(campaign_slug):
+            abort(403)
+
+        form_values = dict(request.form if request.method == "POST" else request.args)
+        builder_context = build_level_one_builder_context(
+            get_systems_service(),
+            campaign_slug,
+            form_values,
+        )
+        builder_ready = bool(
+            builder_context.get("class_options")
+            and builder_context.get("species_options")
+            and builder_context.get("background_options")
+        )
+        if request.method != "POST":
+            return render_character_builder_page(campaign_slug, builder_context)
+
+        if not builder_ready:
+            flash(
+                "The PHB character builder needs PHB Systems entries for classes, species, and backgrounds first.",
+                "error",
+            )
+            return render_character_builder_page(campaign_slug, builder_context, status_code=400)
+
+        try:
+            definition, import_metadata = build_level_one_character_definition(
+                campaign_slug,
+                builder_context,
+                form_values,
+            )
+        except CharacterBuildError as exc:
+            flash(str(exc), "error")
+            return render_character_builder_page(campaign_slug, builder_context, status_code=400)
+
+        config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
+        character_dir = config.characters_dir / definition.character_slug
+        definition_path = character_dir / "definition.yaml"
+        import_path = character_dir / "import.yaml"
+        if definition_path.exists() or import_path.exists():
+            flash(
+                f"A character with slug '{definition.character_slug}' already exists in this campaign.",
+                "error",
+            )
+            return render_character_builder_page(campaign_slug, builder_context, status_code=409)
+
+        write_yaml(definition_path, definition.to_dict())
+        write_yaml(import_path, import_metadata.to_dict())
+        character_state_store.initialize_state_if_missing(definition, build_initial_state(definition))
+        flash(f"{definition.name} created.", "success")
+        return redirect(
+            url_for(
+                "character_read_view",
+                campaign_slug=campaign_slug,
+                character_slug=definition.character_slug,
+            )
         )
 
     @app.get("/campaigns/<campaign_slug>/characters/<character_slug>")

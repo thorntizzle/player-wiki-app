@@ -1291,6 +1291,46 @@ button {
   gap: 0.75rem;
 }
 
+.character-builder-layout {
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.8fr);
+}
+
+.character-builder-form,
+.builder-section,
+.builder-preview-list,
+.builder-feature-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.builder-field-grid,
+.builder-ability-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.85rem;
+}
+
+.builder-preview-list div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.builder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.builder-feature-list li {
+  padding-bottom: 0.7rem;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.builder-feature-list li:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
 .inline-meta-list {
   list-style: none;
   padding: 0;

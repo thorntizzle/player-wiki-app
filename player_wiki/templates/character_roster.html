@@ -7,11 +7,20 @@
     <p class="eyebrow">Character roster</p>
     <h1>{{ campaign.title }} Characters</h1>
     <p class="lede">
-      Open a player sheet in read mode for reference during play. Session editing arrives in the next milestone.
+      Open a player sheet in read mode for play, or start a new in-app PHB level 1 character when you need native sheet data instead of an imported PDF.
     </p>
   </section>
 
   <section class="card search-card">
+    {% if can_create_characters %}
+      <div class="section-heading">
+        <div>
+          <h2>Roster tools</h2>
+          <p class="meta">Use the current PHB level 1 builder to create new characters directly in the app.</p>
+        </div>
+        <a class="button-link" href="{{ url_for('character_create_view', campaign_slug=campaign.slug) }}">Create character</a>
+      </div>
+    {% endif %}
     <form method="get" class="search-form">
       <input
         type="search"
