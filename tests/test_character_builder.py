@@ -171,7 +171,7 @@ def _minimal_import_metadata(character_slug: str = "new-hero") -> CharacterImpor
         character_slug=character_slug,
         source_path="builder://phb-level-1",
         imported_at_utc="2026-03-29T00:00:00Z",
-        parser_version="2026-03-29.4",
+        parser_version="2026-03-29.5",
         import_status="clean",
         warnings=[],
     )
@@ -746,8 +746,11 @@ def test_level_one_builder_generates_off_hand_attack_and_two_weapon_fighting_dam
     attacks_by_name = {attack["name"]: attack for attack in definition.attacks}
 
     assert "Handaxe (+5, 1d6+3 slashing)" in context["preview"]["attacks"]
+    assert "Handaxe (thrown) (+5, 1d6+3 slashing)" in context["preview"]["attacks"]
     assert "Handaxe (off-hand) (+5, 1d6+3 slashing)" in context["preview"]["attacks"]
-    assert attacks_by_name["Handaxe"]["notes"] == "range 20/60."
+    assert attacks_by_name["Handaxe"]["notes"] == ""
+    assert attacks_by_name["Handaxe (thrown)"]["category"] == "ranged weapon"
+    assert attacks_by_name["Handaxe (thrown)"]["notes"] == "range 20/60."
     assert attacks_by_name["Handaxe (off-hand)"]["damage"] == "1d6+3 slashing"
     assert attacks_by_name["Handaxe (off-hand)"]["notes"] == "range 20/60, Bonus action."
 
@@ -1054,9 +1057,12 @@ def test_level_one_builder_populates_starting_equipment_spells_and_currency():
     equipment_names = {item["name"] for item in definition.equipment_catalog}
     inventory_names = {item["name"] for item in initial_state["inventory"]}
     spells_by_name = {spell["name"]: spell for spell in definition.spellcasting["spells"]}
+    attacks_by_name = {attack["name"]: attack for attack in definition.attacks}
 
     assert context["preview"]["starting_currency"] == "5 gp"
     assert "Quarterstaff" in context["preview"]["equipment"]
+    assert "Quarterstaff (+1, 1d6-1 bludgeoning)" in context["preview"]["attacks"]
+    assert "Quarterstaff (two-handed) (+1, 1d8-1 bludgeoning)" in context["preview"]["attacks"]
     assert any("Magic Missile" in spell_name for spell_name in context["preview"]["spells"])
     assert definition.profile["class_level_text"] == "Wizard 1"
     assert definition.spellcasting["spellcasting_class"] == "Wizard"
@@ -1076,12 +1082,129 @@ def test_level_one_builder_populates_starting_equipment_spells_and_currency():
     }
     assert "5 gp" not in inventory_names
     assert initial_state["currency"]["gp"] == 5
+    assert attacks_by_name["Quarterstaff"]["notes"] == ""
+    assert attacks_by_name["Quarterstaff (two-handed)"]["damage"] == "1d8-1 bludgeoning"
     assert spells_by_name["Light"]["mark"] == "Cantrip"
     assert spells_by_name["Magic Missile"]["mark"] == "Prepared + Spellbook"
     assert spells_by_name["Find Familiar"]["mark"] == "Spellbook"
     assert spells_by_name["Detect Magic"]["reference"] == "p. 231"
     assert spells_by_name["Message"]["components"] == "V, S, M (a short piece of copper wire)"
-    assert import_metadata.parser_version == "2026-03-29.4"
+    assert import_metadata.parser_version == "2026-03-29.5"
+
+
+def test_level_one_builder_puts_great_weapon_fighting_note_on_versatile_two_handed_row():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+            "starting_equipment": {
+                "defaultData": [
+                    {"_": ["quarterstaff|phb"]},
+                ]
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+        body={"entries": [{"name": "Feature: Adaptable", "entries": ["You fit in almost anywhere."]}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+        body={
+            "entries": [
+                {
+                    "name": "Feature: Shelter of the Faithful",
+                    "entries": ["You can find refuge among the faithful."],
+                    "data": {"isFeature": True},
+                }
+            ]
+        },
+    )
+    fighting_style = _systems_entry("classfeature", "phb-classfeature-fighting-style", "Fighting Style", metadata={"level": 1})
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    quarterstaff = _systems_entry("item", "phb-item-quarterstaff", "Quarterstaff", metadata={"weight": 4})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "item": [quarterstaff],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {
+                        "label": "Fighting Style",
+                        "entry": fighting_style,
+                        "embedded_card": {
+                            "option_groups": [
+                                {
+                                    "options": [
+                                        {
+                                            "label": "Great Weapon Fighting",
+                                            "slug": "phb-optionalfeature-great-weapon-fighting",
+                                        },
+                                        {"label": "Defense", "slug": "phb-optionalfeature-defense"},
+                                    ]
+                                }
+                            ]
+                        },
+                    },
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    form_values = {
+        "name": "Brom Hale",
+        "character_slug": "brom-hale",
+        "alignment": "Neutral Good",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "class_option_1": "phb-optionalfeature-great-weapon-fighting",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+    attacks_by_name = {attack["name"]: attack for attack in definition.attacks}
+
+    assert context["preview"]["attacks"] == [
+        "Quarterstaff (+5, 1d6+3 bludgeoning)",
+        "Quarterstaff (two-handed) (+5, 1d8+3 bludgeoning)",
+    ]
+    assert attacks_by_name["Quarterstaff"]["notes"] == ""
+    assert attacks_by_name["Quarterstaff (two-handed)"]["notes"] == "Great Weapon Fighting (reroll 1s and 2s)."
 
 
 def test_dm_roster_shows_create_character_link(client, sign_in, users):

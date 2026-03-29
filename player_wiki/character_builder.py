@@ -11,7 +11,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-03-29.4"
+CHARACTER_BUILDER_VERSION = "2026-03-29.5"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -1188,10 +1188,16 @@ def _build_level_one_attacks(
         "Two-Weapon Fighting",
     )
     off_hand_context = _resolve_off_hand_attack_context(attack_contexts)
-    has_shield = any(_is_shield_item(context["item"]) for context in attack_contexts)
+    has_shield = any(_is_shield_item(item) for item in equipment_catalog)
 
     for context in attack_contexts:
         profile = dict(context["profile"] or {})
+        has_thrown_variant = _supports_thrown_attack_variant(profile)
+        has_two_handed_variant = _supports_versatile_two_handed_attack(
+            profile,
+            has_shield=has_shield,
+            off_hand_context=off_hand_context,
+        )
         attack_bonus = int(context["ability_modifier"] or 0)
         if bool(context["is_proficient"]):
             attack_bonus += proficiency_bonus
@@ -1210,10 +1216,55 @@ def _build_level_one_attacks(
                     great_weapon_fighting=has_great_weapon_fighting,
                     has_shield=has_shield,
                     off_hand_context=off_hand_context,
+                    show_range=not has_thrown_variant,
+                    show_versatile=not has_two_handed_variant,
                 ),
                 index=len(attacks) + 1,
             )
         )
+        if has_thrown_variant:
+            attacks.append(
+                _build_weapon_attack_payload(
+                    context,
+                    attack_bonus=attack_bonus,
+                    damage_bonus=damage_bonus,
+                    notes=_build_weapon_attack_notes(
+                        profile,
+                        great_weapon_fighting=False,
+                        has_shield=has_shield,
+                        off_hand_context=off_hand_context,
+                        show_versatile=False,
+                    ),
+                    index=len(attacks) + 1,
+                    name_suffix=" (thrown)",
+                    category_override="ranged weapon",
+                )
+            )
+        if has_two_handed_variant:
+            two_handed_profile = dict(profile)
+            two_handed_profile["damage"] = str(profile.get("versatile_damage") or "").strip()
+            two_handed_attack_bonus = int(context["ability_modifier"] or 0)
+            if bool(context["is_proficient"]):
+                two_handed_attack_bonus += proficiency_bonus
+            two_handed_damage_bonus = int(context["ability_modifier"] or 0)
+            attacks.append(
+                _build_weapon_attack_payload(
+                    context,
+                    attack_bonus=two_handed_attack_bonus,
+                    damage_bonus=two_handed_damage_bonus,
+                    notes=_build_weapon_attack_notes(
+                        two_handed_profile,
+                        great_weapon_fighting=has_great_weapon_fighting,
+                        has_shield=False,
+                        off_hand_context=None,
+                        show_versatile=False,
+                        wielded_two_handed=True,
+                    ),
+                    index=len(attacks) + 1,
+                    name_suffix=" (two-handed)",
+                    profile_override=two_handed_profile,
+                )
+            )
 
     if off_hand_context is not None:
         off_hand_damage_bonus = (
@@ -1281,13 +1332,15 @@ def _build_weapon_attack_payload(
     notes: str,
     index: int,
     name_suffix: str = "",
+    category_override: str | None = None,
+    profile_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    profile = dict(context["profile"] or {})
+    profile = dict(profile_override or context["profile"] or {})
     attack_name = f"{str(context.get('attack_name') or '').strip()}{name_suffix}"
     return {
         "id": f"{slugify(attack_name)}-{index}",
         "name": attack_name,
-        "category": _weapon_attack_category(profile),
+        "category": str(category_override or _weapon_attack_category(profile)),
         "attack_bonus": attack_bonus,
         "damage": _format_weapon_damage(profile, damage_bonus),
         "damage_type": DAMAGE_TYPE_LABELS.get(str(profile.get("damage_type") or "").strip().upper(), ""),
@@ -1384,6 +1437,31 @@ def _qualifies_for_dueling(
     return True
 
 
+def _supports_thrown_attack_variant(profile: dict[str, Any]) -> bool:
+    properties = set(profile.get("properties") or [])
+    return (
+        str(profile.get("type") or "").strip().upper() == "M"
+        and "T" in properties
+        and bool(str(profile.get("range") or "").strip())
+    )
+
+
+def _supports_versatile_two_handed_attack(
+    profile: dict[str, Any],
+    *,
+    has_shield: bool,
+    off_hand_context: dict[str, Any] | None,
+) -> bool:
+    properties = set(profile.get("properties") or [])
+    return (
+        str(profile.get("type") or "").strip().upper() == "M"
+        and "V" in properties
+        and bool(str(profile.get("versatile_damage") or "").strip())
+        and not has_shield
+        and off_hand_context is None
+    )
+
+
 def _is_shield_item(item: dict[str, Any]) -> bool:
     systems_ref = dict(item.get("systems_ref") or {})
     candidate_values = [
@@ -1420,6 +1498,9 @@ def _build_weapon_attack_notes(
     great_weapon_fighting: bool = False,
     has_shield: bool = False,
     off_hand_context: dict[str, Any] | None = None,
+    show_range: bool = True,
+    show_versatile: bool = True,
+    wielded_two_handed: bool = False,
 ) -> str:
     properties = set(profile.get("properties") or [])
     notes: list[str] = []
@@ -1428,11 +1509,11 @@ def _build_weapon_attack_notes(
     if "LD" in properties:
         notes.append("loading")
     attack_range = str(profile.get("range") or "").strip()
-    if attack_range:
+    if show_range and attack_range:
         notes.append(f"range {attack_range}")
-    if "V" in properties and str(profile.get("versatile_damage") or "").strip():
+    if show_versatile and "V" in properties and str(profile.get("versatile_damage") or "").strip():
         notes.append(f"Versatile ({str(profile.get('versatile_damage') or '').strip()})")
-    if great_weapon_fighting and ("2H" in properties or ("V" in properties and not has_shield and off_hand_context is None)):
+    if great_weapon_fighting and ("2H" in properties or wielded_two_handed):
         notes.append("Great Weapon Fighting (reroll 1s and 2s)")
     if bonus_action:
         notes.append("Bonus action")
