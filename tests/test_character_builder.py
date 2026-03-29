@@ -209,7 +209,7 @@ def _minimal_import_metadata(character_slug: str = "new-hero") -> CharacterImpor
         character_slug=character_slug,
         source_path="builder://phb-level-1",
         imported_at_utc="2026-03-29T00:00:00Z",
-        parser_version="2026-03-29.8",
+        parser_version="2026-03-29.9",
         import_status="clean",
         warnings=[],
     )
@@ -1310,11 +1310,14 @@ def test_level_one_builder_populates_starting_equipment_spells_and_currency():
     inventory_names = {item["name"] for item in initial_state["inventory"]}
     spells_by_name = {spell["name"]: spell for spell in definition.spellcasting["spells"]}
     attacks_by_name = {attack["name"]: attack for attack in definition.attacks}
+    resource_templates_by_id = {resource["id"]: resource for resource in definition.resource_templates}
+    state_resources_by_id = {resource["id"]: resource for resource in initial_state["resources"]}
 
     assert context["preview"]["starting_currency"] == "5 gp"
     assert "Quarterstaff" in context["preview"]["equipment"]
     assert "Quarterstaff (+1, 1d6-1 bludgeoning)" in context["preview"]["attacks"]
     assert "Quarterstaff (two-handed) (+1, 1d8-1 bludgeoning)" in context["preview"]["attacks"]
+    assert "Arcane Recovery: 1 / 1 (Long Rest)" in context["preview"]["resources"]
     assert any("Magic Missile" in spell_name for spell_name in context["preview"]["spells"])
     assert definition.profile["class_level_text"] == "Wizard 1"
     assert definition.spellcasting["spellcasting_class"] == "Wizard"
@@ -1341,7 +1344,9 @@ def test_level_one_builder_populates_starting_equipment_spells_and_currency():
     assert spells_by_name["Find Familiar"]["mark"] == "Spellbook"
     assert spells_by_name["Detect Magic"]["reference"] == "p. 231"
     assert spells_by_name["Message"]["components"] == "V, S, M (a short piece of copper wire)"
-    assert import_metadata.parser_version == "2026-03-29.8"
+    assert resource_templates_by_id["arcane-recovery"]["max"] == 1
+    assert state_resources_by_id["arcane-recovery"]["current"] == 1
+    assert import_metadata.parser_version == "2026-03-29.9"
 
 
 def test_level_one_builder_puts_great_weapon_fighting_note_on_versatile_two_handed_row():
@@ -2457,6 +2462,268 @@ def test_native_level_up_applies_tough_feat_hit_points_to_definition_and_state()
     assert leveled_definition.stats["max_hp"] == 44
     assert hp_delta == 16
     assert merged_state["vitals"]["current_hp"] == 44
+
+
+def test_native_level_up_refreshes_scaling_fighter_resource_templates():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[],
+    )
+
+    current_definition = _minimal_character_definition("fighter-ace", "Fighter Ace")
+    current_definition.profile["class_level_text"] = "Fighter 16"
+    current_definition.profile["classes"][0]["level"] = 16
+    current_definition.stats["max_hp"] = 132
+    current_definition.features = [
+        {
+            "id": "action-surge-1",
+            "name": "Action Surge",
+            "category": "class_feature",
+            "source": "PHB",
+            "description_markdown": "",
+            "activation_type": "special",
+            "tracker_ref": "action-surge",
+            "systems_ref": {"entry_type": "classfeature", "slug": "phb-classfeature-action-surge", "title": "Action Surge", "source_id": "PHB"},
+        },
+        {
+            "id": "indomitable-1",
+            "name": "Indomitable",
+            "category": "class_feature",
+            "source": "PHB",
+            "description_markdown": "",
+            "activation_type": "special",
+            "tracker_ref": "indomitable",
+            "systems_ref": {"entry_type": "classfeature", "slug": "phb-classfeature-indomitable", "title": "Indomitable", "source_id": "PHB"},
+        },
+    ]
+    current_definition.resource_templates = [
+        {
+            "id": "action-surge",
+            "label": "Action Surge",
+            "category": "class_feature",
+            "initial_current": 1,
+            "max": 1,
+            "reset_on": "short_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Action Surge",
+            "display_order": 0,
+        },
+        {
+            "id": "indomitable",
+            "label": "Indomitable",
+            "category": "class_feature",
+            "initial_current": 2,
+            "max": 2,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Indomitable",
+            "display_order": 1,
+        },
+    ]
+
+    form_values = {"hp_gain": "9"}
+    level_up_context = build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values)
+    leveled_definition, _, hp_delta = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        level_up_context,
+        form_values,
+    )
+
+    state = build_initial_state(current_definition)
+    state["resources"] = [
+        {
+            "id": "action-surge",
+            "label": "Action Surge",
+            "category": "class_feature",
+            "current": 0,
+            "max": 1,
+            "reset_on": "short_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Action Surge",
+            "display_order": 0,
+        },
+        {
+            "id": "indomitable",
+            "label": "Indomitable",
+            "category": "class_feature",
+            "current": 1,
+            "max": 2,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Indomitable",
+            "display_order": 1,
+        },
+    ]
+    merged_state = merge_state_with_definition(leveled_definition, state, hp_delta=hp_delta)
+    resources_by_id = {resource["id"]: resource for resource in leveled_definition.resource_templates}
+    merged_resources = {resource["id"]: resource for resource in merged_state["resources"]}
+
+    assert resources_by_id["action-surge"]["max"] == 2
+    assert resources_by_id["indomitable"]["max"] == 3
+    assert merged_resources["action-surge"]["current"] == 0
+    assert merged_resources["action-surge"]["max"] == 2
+    assert merged_resources["indomitable"]["current"] == 1
+    assert merged_resources["indomitable"]["max"] == 3
+
+
+def test_native_level_up_refreshes_scaling_rage_resource():
+    barbarian = _systems_entry(
+        "class",
+        "phb-class-barbarian",
+        "Barbarian",
+        metadata={
+            "hit_die": {"faces": 12},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "nature", "survival"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [barbarian],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[],
+    )
+
+    current_definition = _minimal_character_definition("rage-heart", "Rage Heart")
+    current_definition.profile["class_level_text"] = "Barbarian 2"
+    current_definition.profile["classes"][0]["class_name"] = "Barbarian"
+    current_definition.profile["classes"][0]["level"] = 2
+    current_definition.profile["classes"][0]["systems_ref"] = {
+        "entry_key": barbarian.entry_key,
+        "entry_type": "class",
+        "title": barbarian.title,
+        "slug": barbarian.slug,
+        "source_id": barbarian.source_id,
+    }
+    current_definition.profile["class_ref"] = {
+        "entry_key": barbarian.entry_key,
+        "entry_type": "class",
+        "title": barbarian.title,
+        "slug": barbarian.slug,
+        "source_id": barbarian.source_id,
+    }
+    current_definition.stats["max_hp"] = 27
+    current_definition.features = [
+        {
+            "id": "rage-1",
+            "name": "Rage",
+            "category": "class_feature",
+            "source": "PHB",
+            "description_markdown": "",
+            "activation_type": "bonus_action",
+            "tracker_ref": "rage",
+            "systems_ref": {"entry_type": "classfeature", "slug": "phb-classfeature-rage", "title": "Rage", "source_id": "PHB"},
+        }
+    ]
+    current_definition.resource_templates = [
+        {
+            "id": "rage",
+            "label": "Rage",
+            "category": "class_feature",
+            "initial_current": 2,
+            "max": 2,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Rage",
+            "display_order": 0,
+        }
+    ]
+
+    form_values = {"hp_gain": "8"}
+    level_up_context = build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values)
+    leveled_definition, _, hp_delta = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        level_up_context,
+        form_values,
+    )
+
+    state = build_initial_state(current_definition)
+    state["resources"] = [
+        {
+            "id": "rage",
+            "label": "Rage",
+            "category": "class_feature",
+            "current": 1,
+            "max": 2,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Rage",
+            "display_order": 0,
+        }
+    ]
+    merged_state = merge_state_with_definition(leveled_definition, state, hp_delta=hp_delta)
+    resources_by_id = {resource["id"]: resource for resource in leveled_definition.resource_templates}
+    merged_resources = {resource["id"]: resource for resource in merged_state["resources"]}
+
+    assert resources_by_id["rage"]["max"] == 3
+    assert merged_resources["rage"]["current"] == 1
+    assert merged_resources["rage"]["max"] == 3
 
 
 def test_dm_roster_shows_create_character_link(client, sign_in, users):

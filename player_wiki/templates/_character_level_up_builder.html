@@ -103,6 +103,19 @@
     </section>
 
     <section class="card sidebar-card">
+      <h2>Resources After Level Up</h2>
+      {% if level_up.preview.resources %}
+        <ul class="plain-list builder-feature-list">
+          {% for resource_line in level_up.preview.resources %}
+            <li>{{ resource_line }}</li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="meta">No modeled limited-use resources are on the resulting sheet yet.</p>
+      {% endif %}
+    </section>
+
+    <section class="card sidebar-card">
       <h2>Spell Slots</h2>
       {% if level_up.preview.spell_slots %}
         <ul class="plain-list builder-feature-list">

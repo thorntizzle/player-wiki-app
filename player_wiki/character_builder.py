@@ -11,7 +11,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-03-29.8"
+CHARACTER_BUILDER_VERSION = "2026-03-29.9"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -521,6 +521,7 @@ def build_level_one_character_definition(
     features, resource_templates = _build_feature_payloads(
         selected_feature_entries,
         ability_scores=ability_scores,
+        current_level=1,
     )
     equipment_catalog = _build_level_one_equipment_catalog(equipment_groups)
     attacks = _build_level_one_attacks(
@@ -792,9 +793,16 @@ def build_native_level_up_character_definition(
         selected_choices=selected_choices,
     )
     new_feature_entries.extend(level_up_feat_entries)
-    new_features, new_resource_templates = _build_feature_payloads(
+    new_features, _ = _build_feature_payloads(
         new_feature_entries,
         ability_scores=ability_scores,
+        current_level=target_level,
+    )
+    merged_features = _merge_feature_payloads(list(current_definition.features or []), new_features)
+    merged_features, derived_resource_templates = _apply_tracker_templates_to_feature_payloads(
+        merged_features,
+        ability_scores=ability_scores,
+        current_level=target_level,
     )
 
     combined_selected_choices = _merge_selected_choice_maps(
@@ -859,7 +867,7 @@ def build_native_level_up_character_definition(
             ),
         },
         attacks=attacks,
-        features=_merge_feature_payloads(list(current_definition.features or []), new_features),
+        features=merged_features,
         spellcasting=_build_level_up_spellcasting(
             current_definition=current_definition,
             selected_class=selected_class,
@@ -875,7 +883,7 @@ def build_native_level_up_character_definition(
         reference_notes=dict(current_definition.reference_notes or {}),
         resource_templates=_merge_resource_templates(
             list(current_definition.resource_templates or []),
-            new_resource_templates,
+            derived_resource_templates,
         ),
         source=_build_leveled_source(current_definition.source, target_level),
     )
@@ -3288,9 +3296,14 @@ def _build_level_one_preview(
         if selected_class is not None and selected_species is not None
         else {}
     )
+    feature_payloads, resource_templates = _build_feature_payloads(
+        feature_entries,
+        ability_scores=ability_scores,
+        current_level=1,
+    )
     feature_names = [
         str(feature.get("name") or feature.get("label") or "").strip()
-        for feature in feature_entries
+        for feature in feature_payloads
         if str(feature.get("name") or feature.get("label") or "").strip()
     ]
     save_proficiencies = _dedupe_preserve_order(
@@ -3306,6 +3319,11 @@ def _build_level_one_preview(
         "saving_throws": [_humanize_saving_throw(code) for code in save_proficiencies],
         "languages": list(proficiencies["languages"]),
         "features": feature_names,
+        "resources": [
+            _summarize_preview_resource(template)
+            for template in resource_templates
+            if _summarize_preview_resource(template)
+        ],
         "equipment": [
             _describe_equipment_spec(item)
             for item in equipment_catalog
@@ -3919,18 +3937,15 @@ def _build_feature_payloads(
     feature_entries: list[dict[str, Any]],
     *,
     ability_scores: dict[str, int],
+    current_level: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     features: list[dict[str, Any]] = []
-    resource_templates: list[dict[str, Any]] = []
-    display_order = 0
     seen_feature_names: set[str] = set()
 
     for index, feature_entry in enumerate(feature_entries, start=1):
-        feature_payload, tracker_template = _build_feature_payload(
+        feature_payload = _build_feature_payload(
             feature_entry,
             index=index,
-            display_order=display_order,
-            ability_scores=ability_scores,
         )
         if feature_payload is None:
             continue
@@ -3940,10 +3955,11 @@ def _build_feature_payloads(
             continue
         seen_feature_names.add(normalized_name)
         features.append(feature_payload)
-        if tracker_template is not None:
-            resource_templates.append(tracker_template)
-            display_order += 1
-    return features, resource_templates
+    return _apply_tracker_templates_to_feature_payloads(
+        features,
+        ability_scores=ability_scores,
+        current_level=current_level,
+    )
 
 
 def _resolve_choice_label(
@@ -3968,9 +3984,7 @@ def _build_feature_payload(
     feature_entry: dict[str, Any],
     *,
     index: int,
-    display_order: int,
-    ability_scores: dict[str, int],
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+) -> dict[str, Any] | None:
     entry = feature_entry.get("entry")
     kind = str(feature_entry.get("kind") or "")
 
@@ -3986,79 +4000,61 @@ def _build_feature_payload(
             "tracker_ref": None,
             "systems_ref": _systems_ref_from_entry(entry),
         }
-        tracker_template = _build_feature_tracker_template(
-            feature_name,
-            ability_scores=ability_scores,
-            display_order=display_order,
-        )
-        if tracker_template is not None:
-            feature_payload["tracker_ref"] = tracker_template["id"]
-            feature_payload["activation_type"] = str(tracker_template.get("activation_type") or "passive")
-            tracker_template.pop("activation_type", None)
-        return feature_payload, tracker_template
+        return feature_payload
 
     if kind == "optionalfeature":
         slug = str(feature_entry.get("slug") or "").strip()
         feature_name = str(feature_entry.get("label") or "").strip()
         if not slug or not feature_name:
             return None, None
-        return (
-            {
-                "id": f"{slugify(feature_name)}-{index}",
-                "name": feature_name,
-                "category": "class_feature",
-                "source": PHB_SOURCE_ID,
-                "description_markdown": "",
-                "activation_type": "passive",
-                "tracker_ref": None,
-                "systems_ref": {
-                    "entry_key": "",
-                    "entry_type": "optionalfeature",
-                    "title": feature_name,
-                    "slug": slug,
-                    "source_id": PHB_SOURCE_ID,
-                },
+        return {
+            "id": f"{slugify(feature_name)}-{index}",
+            "name": feature_name,
+            "category": "class_feature",
+            "source": PHB_SOURCE_ID,
+            "description_markdown": "",
+            "activation_type": "passive",
+            "tracker_ref": None,
+            "systems_ref": {
+                "entry_key": "",
+                "entry_type": "optionalfeature",
+                "title": feature_name,
+                "slug": slug,
+                "source_id": PHB_SOURCE_ID,
             },
-            None,
-        )
+        }
 
     if kind == "species_trait":
         feature_name = str(feature_entry.get("label") or "").strip()
         systems_entry = feature_entry.get("systems_entry")
         if not feature_name or not isinstance(systems_entry, SystemsEntryRecord):
             return None, None
-        return (
-            {
-                "id": f"{slugify(feature_name)}-{index}",
-                "name": feature_name,
-                "category": "species_trait",
-                "source": systems_entry.source_id,
-                "description_markdown": str(feature_entry.get("description_markdown") or "").strip(),
-                "activation_type": "passive",
-                "tracker_ref": None,
-                "systems_ref": _systems_ref_from_entry(systems_entry),
-            },
-            None,
-        )
+        return {
+            "id": f"{slugify(feature_name)}-{index}",
+            "name": feature_name,
+            "category": "species_trait",
+            "source": systems_entry.source_id,
+            "description_markdown": str(feature_entry.get("description_markdown") or "").strip(),
+            "activation_type": "passive",
+            "tracker_ref": None,
+            "systems_ref": _systems_ref_from_entry(systems_entry),
+        }
 
     if kind == "background_feature":
         feature_name = str(feature_entry.get("label") or "").strip()
         systems_entry = feature_entry.get("systems_entry")
         if not feature_name or not isinstance(systems_entry, SystemsEntryRecord):
             return None, None
-        return (
-            {
-                "id": f"{slugify(feature_name)}-{index}",
-                "name": feature_name,
-                "category": "background_feature",
-                "source": systems_entry.source_id,
-                "description_markdown": str(feature_entry.get("description_markdown") or "").strip(),
-                "activation_type": "passive",
-                "tracker_ref": None,
-                "systems_ref": _systems_ref_from_entry(systems_entry),
-            },
-            None,
-        )
+        return {
+            "id": f"{slugify(feature_name)}-{index}",
+            "name": feature_name,
+            "category": "background_feature",
+            "source": systems_entry.source_id,
+            "description_markdown": str(feature_entry.get("description_markdown") or "").strip(),
+            "activation_type": "passive",
+            "tracker_ref": None,
+            "systems_ref": _systems_ref_from_entry(systems_entry),
+        }
 
     if kind == "feat":
         slug = str(feature_entry.get("slug") or "").strip()
@@ -4086,18 +4082,9 @@ def _build_feature_payload(
                 }
             ),
         }
-        tracker_template = _build_feature_tracker_template(
-            feature_name,
-            ability_scores=ability_scores,
-            display_order=display_order,
-        )
-        if tracker_template is not None:
-            feature_payload["tracker_ref"] = tracker_template["id"]
-            feature_payload["activation_type"] = str(tracker_template.get("activation_type") or "passive")
-            tracker_template.pop("activation_type", None)
-        return feature_payload, tracker_template
+        return feature_payload
 
-    return None, None
+    return None
 
 
 def _build_level_one_stats(
@@ -4313,23 +4300,74 @@ def _merge_feature_payloads(
     return merged
 
 
+def _apply_tracker_templates_to_feature_payloads(
+    features: list[dict[str, Any]],
+    *,
+    ability_scores: dict[str, int],
+    current_level: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    updated_features: list[dict[str, Any]] = []
+    resource_templates: list[dict[str, Any]] = []
+    seen_template_ids: set[str] = set()
+    display_order = 0
+
+    for feature in features:
+        feature_payload = dict(feature)
+        tracker_template = _build_feature_tracker_template(
+            str(feature_payload.get("name") or "").strip(),
+            ability_scores=ability_scores,
+            current_level=current_level,
+            display_order=display_order,
+        )
+        if tracker_template is not None:
+            tracker_id = str(tracker_template.get("id") or "").strip()
+            if tracker_id:
+                feature_payload["tracker_ref"] = tracker_id
+            feature_payload["activation_type"] = str(
+                tracker_template.get("activation_type") or feature_payload.get("activation_type") or "passive"
+            )
+            normalized_tracker = dict(tracker_template)
+            normalized_tracker.pop("activation_type", None)
+            if not tracker_id or tracker_id not in seen_template_ids:
+                resource_templates.append(normalized_tracker)
+                if tracker_id:
+                    seen_template_ids.add(tracker_id)
+                display_order += 1
+        updated_features.append(feature_payload)
+
+    return updated_features, resource_templates
+
+
 def _merge_resource_templates(
     existing_templates: list[dict[str, Any]],
     new_templates: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    merged = [dict(template) for template in existing_templates]
-    seen_ids = {
-        str(template.get("id") or "").strip()
-        for template in merged
+    merged: list[dict[str, Any]] = []
+    new_by_id = {
+        str(template.get("id") or "").strip(): dict(template)
+        for template in new_templates
         if str(template.get("id") or "").strip()
     }
+    seen_ids: set[str] = set()
     for template in new_templates:
         template_id = str(template.get("id") or "").strip()
-        if template_id and template_id in seen_ids:
+        if not template_id:
+            merged.append(dict(template))
+    for template in existing_templates:
+        template_id = str(template.get("id") or "").strip()
+        if template_id and template_id in new_by_id:
+            merged.append(dict(new_by_id[template_id]))
+            seen_ids.add(template_id)
             continue
+        merged.append(dict(template))
         if template_id:
             seen_ids.add(template_id)
+    for template in new_templates:
+        template_id = str(template.get("id") or "").strip()
+        if not template_id or template_id in seen_ids:
+            continue
         merged.append(dict(template))
+        seen_ids.add(template_id)
     return merged
 
 
@@ -4371,7 +4409,7 @@ def _build_native_level_up_preview(
     values: dict[str, str],
 ) -> dict[str, Any]:
     _, selected_choices = _resolve_builder_choices(choice_sections, values, strict=False)
-    base_ability_scores, _, asi_summaries = _resolve_level_up_ability_score_choices(
+    base_ability_scores, level_up_feat_entries, asi_summaries = _resolve_level_up_ability_score_choices(
         current_ability_scores=current_ability_scores,
         class_progression=class_progression,
         subclass_progression=subclass_progression,
@@ -4404,6 +4442,7 @@ def _build_native_level_up_preview(
         target_level=target_level,
         selected_choices=selected_choices,
     )
+    gained_feature_entries.extend(level_up_feat_entries)
     gained_features = [
         str(entry.get("label") or entry.get("name") or "").strip()
         for entry in gained_feature_entries
@@ -4425,6 +4464,20 @@ def _build_native_level_up_preview(
         for slot in slot_progression
         if int(slot.get("max_slots") or 0) > 0
     ]
+    preview_feature_payloads, _ = _build_feature_payloads(
+        gained_feature_entries,
+        ability_scores=ability_scores,
+        current_level=target_level,
+    )
+    _, preview_resource_templates = _apply_tracker_templates_to_feature_payloads(
+        _merge_feature_payloads(list(definition.features or []), preview_feature_payloads),
+        ability_scores=ability_scores,
+        current_level=target_level,
+    )
+    merged_resource_templates = _merge_resource_templates(
+        list(definition.resource_templates or []),
+        preview_resource_templates,
+    )
     return {
         "class_level_text": f"{selected_class.title} {target_level}",
         "max_hp": max(
@@ -4434,6 +4487,11 @@ def _build_native_level_up_preview(
             1,
         ),
         "gained_features": gained_features,
+        "resources": [
+            _summarize_preview_resource(template)
+            for template in merged_resource_templates
+            if _summarize_preview_resource(template)
+        ],
         "spell_slots": slot_summary,
         "new_spells": new_spell_names,
     }
@@ -5112,10 +5170,19 @@ def _character_feature_category(entry_type: str) -> str:
     return "class_feature"
 
 
+def _resource_value_by_level(current_level: int, thresholds: list[tuple[int, int]]) -> int:
+    value = 0
+    for minimum_level, scaled_value in thresholds:
+        if current_level >= minimum_level:
+            value = scaled_value
+    return value
+
+
 def _build_feature_tracker_template(
     feature_name: str,
     *,
     ability_scores: dict[str, int],
+    current_level: int,
     display_order: int,
 ) -> dict[str, Any] | None:
     normalized = normalize_lookup(feature_name)
@@ -5134,12 +5201,13 @@ def _build_feature_tracker_template(
             "activation_type": "bonus_action",
         }
     if normalized == normalize_lookup("Rage"):
+        uses = _resource_value_by_level(current_level, [(1, 2), (3, 3), (6, 4), (12, 5), (17, 6)]) or 2
         return {
             "id": "rage",
             "label": "Rage",
             "category": "class_feature",
-            "initial_current": 2,
-            "max": 2,
+            "initial_current": uses,
+            "max": uses,
             "reset_on": "long_rest",
             "reset_to": "max",
             "rest_behavior": "confirm_before_reset",
@@ -5163,12 +5231,13 @@ def _build_feature_tracker_template(
             "activation_type": "bonus_action",
         }
     if normalized == normalize_lookup("Action Surge"):
+        uses = _resource_value_by_level(current_level, [(2, 1), (17, 2)]) or 1
         return {
             "id": "action-surge",
             "label": "Action Surge",
             "category": "class_feature",
-            "initial_current": 1,
-            "max": 1,
+            "initial_current": uses,
+            "max": uses,
             "reset_on": "short_rest",
             "reset_to": "max",
             "rest_behavior": "confirm_before_reset",
@@ -5176,13 +5245,58 @@ def _build_feature_tracker_template(
             "display_order": display_order,
             "activation_type": "special",
         }
+    if normalized == normalize_lookup("Arcane Recovery"):
+        return {
+            "id": "arcane-recovery",
+            "label": "Arcane Recovery",
+            "category": "class_feature",
+            "initial_current": 1,
+            "max": 1,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Arcane Recovery",
+            "display_order": display_order,
+            "activation_type": "special",
+        }
+    if normalized == normalize_lookup("Divine Sense"):
+        uses = max(1 + _ability_modifier(ability_scores.get("cha", DEFAULT_ABILITY_SCORE)), 1)
+        return {
+            "id": "divine-sense",
+            "label": "Divine Sense",
+            "category": "class_feature",
+            "initial_current": uses,
+            "max": uses,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Divine Sense",
+            "display_order": display_order,
+            "activation_type": "action",
+        }
+    if normalized == normalize_lookup("Lay on Hands"):
+        pool = max(current_level * 5, 5)
+        return {
+            "id": "lay-on-hands",
+            "label": "Lay on Hands",
+            "category": "class_feature",
+            "initial_current": pool,
+            "max": pool,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Lay on Hands pool",
+            "display_order": display_order,
+            "activation_type": "action",
+        }
     if normalized == normalize_lookup("Channel Divinity"):
+        uses = _resource_value_by_level(current_level, [(2, 1), (6, 2), (18, 3)]) or 1
         return {
             "id": "channel-divinity",
             "label": "Channel Divinity",
             "category": "class_feature",
-            "initial_current": 1,
-            "max": 1,
+            "initial_current": uses,
+            "max": uses,
             "reset_on": "short_rest",
             "reset_to": "max",
             "rest_behavior": "confirm_before_reset",
@@ -5205,12 +5319,13 @@ def _build_feature_tracker_template(
             "activation_type": "action",
         }
     if normalized == normalize_lookup("Ki"):
+        points = max(current_level, 2)
         return {
             "id": "ki",
             "label": "Ki",
             "category": "class_feature",
-            "initial_current": 2,
-            "max": 2,
+            "initial_current": points,
+            "max": points,
             "reset_on": "short_rest",
             "reset_to": "max",
             "rest_behavior": "confirm_before_reset",
@@ -5219,18 +5334,49 @@ def _build_feature_tracker_template(
             "activation_type": "passive",
         }
     if normalized == normalize_lookup("Font of Magic"):
+        points = max(current_level, 2)
         return {
             "id": "sorcery-points",
             "label": "Sorcery Points",
             "category": "class_feature",
-            "initial_current": 2,
-            "max": 2,
+            "initial_current": points,
+            "max": points,
             "reset_on": "long_rest",
             "reset_to": "max",
             "rest_behavior": "confirm_before_reset",
             "notes": "Sorcery Points",
             "display_order": display_order,
             "activation_type": "passive",
+        }
+    if normalized == normalize_lookup("Combat Superiority"):
+        dice = _resource_value_by_level(current_level, [(3, 4), (7, 5), (15, 6)]) or 4
+        return {
+            "id": "superiority-dice",
+            "label": "Superiority Dice",
+            "category": "class_feature",
+            "initial_current": dice,
+            "max": dice,
+            "reset_on": "short_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Combat Superiority",
+            "display_order": display_order,
+            "activation_type": "special",
+        }
+    if normalized == normalize_lookup("Indomitable"):
+        uses = _resource_value_by_level(current_level, [(9, 1), (13, 2), (17, 3)]) or 1
+        return {
+            "id": "indomitable",
+            "label": "Indomitable",
+            "category": "class_feature",
+            "initial_current": uses,
+            "max": uses,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Indomitable",
+            "display_order": display_order,
+            "activation_type": "special",
         }
     if normalized == normalize_lookup("Lucky"):
         return {
@@ -5247,6 +5393,23 @@ def _build_feature_tracker_template(
             "activation_type": "special",
         }
     return None
+
+
+def _summarize_preview_resource(template: dict[str, Any]) -> str:
+    label = str(template.get("label") or "").strip()
+    if not label:
+        return ""
+    max_value = template.get("max")
+    current_value = template.get("initial_current", max_value if max_value is not None else 0)
+    summary = f"{label}: {int(current_value or 0)}"
+    if max_value is not None:
+        summary = f"{label}: {int(current_value or 0)} / {int(max_value or 0)}"
+    reset_on = str(template.get("reset_on") or "").strip()
+    if reset_on == "short_rest":
+        return f"{summary} (Short Rest)"
+    if reset_on == "long_rest":
+        return f"{summary} (Long Rest)"
+    return summary
 
 
 def _class_save_proficiencies(selected_class: SystemsEntryRecord | None) -> list[str]:
