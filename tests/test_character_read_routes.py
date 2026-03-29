@@ -51,7 +51,8 @@ def test_dm_can_open_character_roster_and_read_sheet(client, sign_in, users):
     assert sheet.status_code == 200
     sheet_html = sheet.get_data(as_text=True)
     assert "At a glance" in sheet_html
-    assert "Enter session mode" in sheet_html
+    assert "Active session" in sheet_html
+    assert "Back to read mode" in sheet_html
     assert "Back to character roster" not in sheet_html
     assert "Open campaign wiki" not in sheet_html
 
@@ -72,7 +73,7 @@ def test_owner_player_can_open_session_mode_when_character_visibility_allows_pla
     set_campaign_visibility("linden-pass", characters="players")
     sign_in(users["owner"]["email"], users["owner"]["password"])
 
-    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=quick")
+    response = client.get("/campaigns/linden-pass/characters/arden-march?page=quick")
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
@@ -116,7 +117,7 @@ def test_character_sheet_subpages_show_requested_sections(app, client, sign_in, 
     _write_character_definition(app, "arden-march", _mutate)
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
-    response = client.get("/campaigns/linden-pass/characters/arden-march?page=features")
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=features")
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
@@ -125,11 +126,11 @@ def test_character_sheet_subpages_show_requested_sections(app, client, sign_in, 
     assert "Equipment" in html
     assert "Personal" in html
     assert "Notes" in html
-    assert "?page=quick" in html
-    assert "?page=features" in html
-    assert "?page=equipment" in html
-    assert "?page=personal" in html
-    assert "?page=notes" in html
+    assert "?mode=read&amp;page=quick" in html
+    assert "?mode=read&amp;page=features" in html
+    assert "?mode=read&amp;page=equipment" in html
+    assert "?mode=read&amp;page=personal" in html
+    assert "?mode=read&amp;page=notes" in html
     assert "Features and traits" in html
     assert "At a glance" not in html
     assert "Equipment and currency" not in html
@@ -140,7 +141,7 @@ def test_character_sheet_subpages_show_requested_sections(app, client, sign_in, 
 def test_character_sheet_invalid_subpage_defaults_to_quick_reference(client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
-    response = client.get("/campaigns/linden-pass/characters/arden-march?page=not-a-real-page")
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=not-a-real-page")
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
@@ -173,8 +174,8 @@ def test_character_sheet_personal_and_notes_subpages_render_markdown_fields_and_
     _write_character_state(app, "arden-march", _mutate_state)
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
-    personal_response = client.get("/campaigns/linden-pass/characters/arden-march?page=personal")
-    notes_response = client.get("/campaigns/linden-pass/characters/arden-march?page=notes")
+    personal_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=personal")
+    notes_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=notes")
 
     assert personal_response.status_code == 200
     personal_html = personal_response.get_data(as_text=True)
@@ -212,6 +213,7 @@ def test_read_mode_note_save_stays_in_read_mode(client, sign_in, users, get_char
         "/campaigns/linden-pass/characters/arden-march/session/notes",
         data={
             "expected_revision": record.state_record.revision,
+            "mode": "read",
             "page": "notes",
             "player_notes_markdown": "Read mode note save.",
         },
@@ -219,7 +221,9 @@ def test_read_mode_note_save_stays_in_read_mode(client, sign_in, users, get_char
     )
 
     assert response.status_code == 302
-    assert response.headers["Location"].endswith("/campaigns/linden-pass/characters/arden-march?page=notes#session-notes")
+    assert response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/arden-march?page=notes&mode=read#session-notes"
+    )
     assert "mode=session" not in response.headers["Location"]
 
 
@@ -240,12 +244,25 @@ def test_session_mode_uses_same_subpage_ui_as_read_mode(client, sign_in, users, 
     assert "At a glance" not in html
 
 
+def test_editable_users_default_to_session_mode(client, sign_in, users, set_campaign_visibility):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get("/campaigns/linden-pass/characters/arden-march")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Active session" in html
+    assert "Back to read mode" in html
+    assert "Enter session mode" not in html
+
+
 def test_session_active_widget_stays_on_quick_reference_only(client, sign_in, users, set_campaign_visibility):
     set_campaign_visibility("linden-pass", characters="players")
     sign_in(users["owner"]["email"], users["owner"]["password"])
 
-    quick_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=quick")
-    features_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=features")
+    quick_response = client.get("/campaigns/linden-pass/characters/arden-march?page=quick")
+    features_response = client.get("/campaigns/linden-pass/characters/arden-march?page=features")
 
     assert quick_response.status_code == 200
     quick_html = quick_response.get_data(as_text=True)
@@ -349,9 +366,9 @@ def test_character_sheet_renders_systems_links_when_present(app, client, sign_in
     _write_character_definition(app, "arden-march", _mutate)
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
-    quick_response = client.get("/campaigns/linden-pass/characters/arden-march?page=quick")
-    features_response = client.get("/campaigns/linden-pass/characters/arden-march?page=features")
-    equipment_response = client.get("/campaigns/linden-pass/characters/arden-march?page=equipment")
+    quick_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=quick")
+    features_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=features")
+    equipment_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=equipment")
 
     assert quick_response.status_code == 200
     assert features_response.status_code == 200
@@ -429,7 +446,7 @@ def test_character_sheet_shows_systems_feature_text_inline_and_hides_source_meta
     monkeypatch.setattr(systems_service, "get_entry_by_slug_for_campaign", _fake_get_entry)
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
-    response = client.get("/campaigns/linden-pass/characters/arden-march?page=features")
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=features")
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
@@ -516,7 +533,7 @@ def test_character_sheet_hides_redundant_choice_placeholder_features(app, client
     _write_character_definition(app, "arden-march", _mutate)
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
-    response = client.get("/campaigns/linden-pass/characters/arden-march?page=features")
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=features")
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)

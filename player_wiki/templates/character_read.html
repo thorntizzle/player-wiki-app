@@ -40,12 +40,12 @@
         {% if can_use_session_mode %}
           <div class="hero-actions">
             {% if is_session_mode %}
-              <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, page=character_subpage) }}">
+              <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='read', page=character_subpage) }}">
                 Back to read mode
               </a>
             {% else %}
               <a class="button-link" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='session', page=character_subpage) }}">
-                Enter session mode
+                Back to edit mode
               </a>
             {% endif %}
           </div>
@@ -383,6 +383,7 @@
                 action="{{ url_for('character_session_personal', campaign_slug=campaign.slug, character_slug=character.slug) }}"
               >
                 <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                <input type="hidden" name="mode" value="read">
                 <input type="hidden" name="page" value="{{ character_subpage }}">
                 <label class="field">
                   <span>Physical Description</span>
@@ -431,6 +432,7 @@
                 action="{{ url_for('character_session_notes', campaign_slug=campaign.slug, character_slug=character.slug) }}"
               >
                 <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                <input type="hidden" name="mode" value="read">
                 <input type="hidden" name="page" value="{{ character_subpage }}">
                 <label class="field">
                   <span>Markdown note</span>
