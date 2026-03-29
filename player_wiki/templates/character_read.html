@@ -24,15 +24,18 @@
             {% if character.background %} | {{ character.background }}{% endif %}
           {% endif %}
         </p>
-        {% if character.alignment %}
-          <p class="meta">Alignment: {{ character.alignment }}</p>
-        {% endif %}
-        {% if character.identity_details %}
-          <ul class="inline-meta-list">
+        {% if character.alignment or character.identity_details or campaign.title %}
+          <div class="character-meta-line">
+            {% if character.alignment %}
+              <span class="character-meta-item"><span class="meta">Alignment:</span> {{ character.alignment }}</span>
+            {% endif %}
             {% for detail in character.identity_details if detail.value %}
-              <li><span class="meta">{{ detail.label }}</span> {{ detail.value }}</li>
+              <span class="character-meta-item"><span class="meta">{{ detail.label }}:</span> {{ detail.value }}</span>
             {% endfor %}
-          </ul>
+            {% if campaign.title %}
+              <span class="character-meta-item"><span class="meta">Campaign:</span> {{ campaign.title }}</span>
+            {% endif %}
+          </div>
         {% endif %}
         {% if character.death_save_summary %}
           <p class="meta">Death saves: {{ character.death_save_summary }}</p>
@@ -445,12 +448,5 @@
         </section>
       {% endif %}
     </article>
-
-    <aside class="sidebar">
-      <section class="card sidebar-card">
-        <h2>Context</h2>
-        <p class="meta">Campaign: {{ campaign.title }}</p>
-      </section>
-    </aside>
   </div>
 {% endblock %}

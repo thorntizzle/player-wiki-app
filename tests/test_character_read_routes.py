@@ -53,6 +53,10 @@ def test_dm_can_open_character_roster_and_read_sheet(client, sign_in, users):
     assert "At a glance" in sheet_html
     assert "Active session" not in sheet_html
     assert "Enter session mode" in sheet_html
+    assert "Alignment:" in sheet_html
+    assert "Chaotic Good" in sheet_html
+    assert "Campaign:" in sheet_html
+    assert "Context" not in sheet_html
     assert "Back to character roster" not in sheet_html
     assert "Open campaign wiki" not in sheet_html
 

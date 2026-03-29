@@ -922,7 +922,7 @@ button {
 }
 
 .character-layout {
-  grid-template-columns: minmax(0, 1.85fr) minmax(240px, 0.55fr);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .character-sheet {
@@ -1276,6 +1276,17 @@ button {
 .character-header {
   display: grid;
   gap: 0.55rem;
+}
+
+.character-meta-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.1rem;
+  align-items: baseline;
+}
+
+.character-meta-item {
+  white-space: nowrap;
 }
 
 .character-subpage-nav {
