@@ -930,6 +930,31 @@ button {
   gap: 1.5rem;
 }
 
+.character-edit-sheet,
+.character-edit-stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.character-edit-grid {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.character-edit-row {
+  display: grid;
+  gap: 1rem;
+}
+
+.character-edit-row__grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+}
+
+.character-edit-row__grid--equipment {
+  grid-template-columns: minmax(0, 2fr) minmax(120px, 0.8fr) minmax(140px, 1fr);
+}
+
 .session-bar,
 .session-panels {
   display: grid;
@@ -1962,6 +1987,11 @@ button {
 
   .session-bar {
     position: static;
+  }
+
+  .character-edit-row__grid,
+  .character-edit-row__grid--equipment {
+    grid-template-columns: 1fr;
   }
 
   .rest-preview-list li {

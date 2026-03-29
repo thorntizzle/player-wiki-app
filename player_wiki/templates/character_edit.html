@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block title %}Edit {{ character.name }} | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Character editor</p>
+    <h1>Edit {{ character.name }}</h1>
+    <p class="lede">
+      Manage campaign-time adjustments that are outside the native level-up flow. This first slice covers languages, proficiencies, custom features, and manual equipment additions.
+    </p>
+    <div class="hero-actions">
+      <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">Back to sheet</a>
+      {% if character.class_level_text %}
+        <span class="meta">{{ character.class_level_text }}</span>
+      {% endif %}
+    </div>
+  </section>
+
+  <article class="card character-edit-sheet">
+    <form class="stack-form" method="post">
+      <input type="hidden" name="expected_revision" value="{{ edit_context.state_revision }}">
+
+      <section class="read-section">
+        <div class="section-heading">
+          <h2>Proficiencies</h2>
+        </div>
+        <div class="detail-grid character-edit-grid">
+          {% for field in edit_context.proficiency_fields %}
+            <article class="detail-card">
+              <label class="field">
+                <span>{{ field.label }}</span>
+                <textarea name="{{ field.name }}" rows="6">{{ field.value }}</textarea>
+              </label>
+              <p class="meta">{{ field.help_text }}</p>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="read-section">
+        <div class="section-heading">
+          <h2>Custom Features</h2>
+        </div>
+        <p class="meta">Use this for campaign boons, curses, training rewards, or other custom rules text. Leave a row blank to omit it.</p>
+        <div class="character-edit-stack">
+          {% for row in edit_context.feature_rows %}
+            <article class="detail-card character-edit-row">
+              <input type="hidden" name="custom_feature_id_{{ row.index }}" value="{{ row.id }}">
+              <div class="character-edit-row__grid">
+                <label class="field">
+                  <span>Name</span>
+                  <input type="text" name="custom_feature_name_{{ row.index }}" value="{{ row.name }}">
+                </label>
+                <label class="field">
+                  <span>Activation</span>
+                  <select name="custom_feature_activation_type_{{ row.index }}">
+                    {% for option in edit_context.activation_options %}
+                      <option value="{{ option.value }}"{% if option.value == row.activation_type %} selected{% endif %}>{{ option.label }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+              </div>
+              <label class="field">
+                <span>Description (Markdown)</span>
+                <textarea name="custom_feature_description_{{ row.index }}" rows="6">{{ row.description_markdown }}</textarea>
+              </label>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="read-section">
+        <div class="section-heading">
+          <h2>Manual Equipment</h2>
+        </div>
+        <p class="meta">Add gear that was granted in play or needs to exist on the sheet outside the builder and import flows.</p>
+        {% if edit_context.existing_managed_equipment %}
+          <article class="detail-card">
+            <h3>Existing built-in equipment</h3>
+            <ul class="plain-list">
+              {% for item in edit_context.existing_managed_equipment %}
+                <li>
+                  <strong>{{ item.name }}</strong>
+                  {% if item.quantity %} x{{ item.quantity }}{% endif %}
+                  {% if item.weight %}<span class="meta"> | {{ item.weight }}</span>{% endif %}
+                </li>
+              {% endfor %}
+            </ul>
+          </article>
+        {% endif %}
+        <div class="character-edit-stack">
+          {% for row in edit_context.equipment_rows %}
+            <article class="detail-card character-edit-row">
+              <input type="hidden" name="manual_item_id_{{ row.index }}" value="{{ row.id }}">
+              <div class="character-edit-row__grid character-edit-row__grid--equipment">
+                <label class="field">
+                  <span>Name</span>
+                  <input type="text" name="manual_item_name_{{ row.index }}" value="{{ row.name }}">
+                </label>
+                <label class="field">
+                  <span>Quantity</span>
+                  <input type="number" name="manual_item_quantity_{{ row.index }}" value="{{ row.quantity }}" min="0">
+                </label>
+                <label class="field">
+                  <span>Weight</span>
+                  <input type="text" name="manual_item_weight_{{ row.index }}" value="{{ row.weight }}">
+                </label>
+              </div>
+              <label class="field">
+                <span>Notes</span>
+                <textarea name="manual_item_notes_{{ row.index }}" rows="4">{{ row.notes }}</textarea>
+              </label>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <div class="hero-actions">
+        <button type="submit">Save character edits</button>
+        <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">Back to sheet</a>
+      </div>
+    </form>
+  </article>
+{% endblock %}

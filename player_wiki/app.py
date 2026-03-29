@@ -42,6 +42,11 @@ from .character_builder import (
     build_level_one_character_definition,
     supports_native_level_up,
 )
+from .character_editor import (
+    CharacterEditValidationError,
+    apply_native_character_edits,
+    build_native_character_edit_context,
+)
 from .character_importer import write_yaml
 from .character_service import CharacterStateValidationError, build_initial_state, merge_state_with_definition
 from .combat_presenter import DND_5E_CONDITION_OPTIONS, present_combat_tracker
@@ -719,6 +724,30 @@ def create_app() -> Flask:
                 campaign=campaign,
                 builder=builder_context,
                 builder_ready=builder_ready,
+                active_nav="characters",
+            ),
+            status_code,
+        )
+
+    def render_character_edit_page(
+        campaign_slug: str,
+        character_slug: str,
+        edit_context: dict[str, object],
+        *,
+        status_code: int = 200,
+    ):
+        campaign, record = load_character_context(campaign_slug, character_slug)
+        return (
+            render_template(
+                "character_edit.html",
+                campaign=campaign,
+                character=present_character_detail(
+                    campaign,
+                    record,
+                    include_player_notes_section=True,
+                    systems_service=get_systems_service(),
+                ),
+                edit_context=edit_context,
                 active_nav="characters",
             ),
             status_code,
@@ -3326,6 +3355,66 @@ def create_app() -> Flask:
         return redirect(
             url_for(
                 "character_read_view",
+                campaign_slug=campaign_slug,
+                character_slug=character_slug,
+            )
+        )
+
+    @app.route("/campaigns/<campaign_slug>/characters/<character_slug>/edit", methods=["GET", "POST"])
+    @campaign_scope_access_required("characters")
+    def character_edit_view(campaign_slug: str, character_slug: str):
+        if not has_session_mode_access(campaign_slug, character_slug):
+            abort(403)
+
+        _, record = load_character_context(campaign_slug, character_slug)
+        form_values = dict(request.form if request.method == "POST" else request.args)
+        edit_context = build_native_character_edit_context(
+            record.definition,
+            form_values=form_values if request.method == "POST" else None,
+        )
+        edit_context["state_revision"] = record.state_record.revision
+
+        if request.method != "POST":
+            return render_character_edit_page(campaign_slug, character_slug, edit_context)
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        try:
+            expected_revision = parse_expected_revision()
+            definition, import_metadata, inventory_quantity_overrides = apply_native_character_edits(
+                campaign_slug,
+                record.definition,
+                record.import_metadata,
+                form_values,
+            )
+            merged_state = merge_state_with_definition(
+                definition,
+                record.state_record.state,
+                inventory_quantity_overrides=inventory_quantity_overrides,
+            )
+            character_state_store.replace_state(
+                definition,
+                merged_state,
+                expected_revision=expected_revision,
+                updated_by_user_id=user.id,
+            )
+        except CharacterStateConflictError:
+            flash("This sheet changed in another session. Refresh the page and try again.", "error")
+            return render_character_edit_page(campaign_slug, character_slug, edit_context, status_code=409)
+        except (CharacterEditValidationError, CharacterStateValidationError, ValueError) as exc:
+            flash(str(exc), "error")
+            return render_character_edit_page(campaign_slug, character_slug, edit_context, status_code=400)
+
+        config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
+        character_dir = config.characters_dir / character_slug
+        write_yaml(character_dir / "definition.yaml", definition.to_dict())
+        write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
+        flash("Character details updated.", "success")
+        return redirect(
+            url_for(
+                "character_edit_view",
                 campaign_slug=campaign_slug,
                 character_slug=character_slug,
             )

@@ -27,6 +27,23 @@ def build_resource_state(template: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_inventory_state(item: dict[str, Any], *, quantity: int | None = None) -> dict[str, Any]:
+    resolved_quantity = item.get("default_quantity") if quantity is None else quantity
+    return {
+        "id": item.get("id"),
+        "catalog_ref": item.get("id"),
+        "name": item.get("name"),
+        "quantity": int(resolved_quantity or 0),
+        "weight": item.get("weight"),
+        "is_equipped": bool(item.get("is_equipped", False)),
+        "is_attuned": bool(item.get("is_attuned", False)),
+        "charges_current": item.get("charges_current"),
+        "charges_max": item.get("charges_max"),
+        "notes": item.get("notes", ""),
+        "tags": list(item.get("tags") or []),
+    }
+
+
 def build_initial_state(definition: CharacterDefinition) -> dict[str, Any]:
     max_hp = int(definition.stats.get("max_hp") or 0)
     spell_slots = [
@@ -48,21 +65,7 @@ def build_initial_state(definition: CharacterDefinition) -> dict[str, Any]:
             currency[denomination] = int(currency.get(denomination) or 0) + int(item_currency.get(denomination) or 0)
         if bool(item.get("is_currency_only")):
             continue
-        inventory.append(
-            {
-                "id": item.get("id"),
-                "catalog_ref": item.get("id"),
-                "name": item.get("name"),
-                "quantity": int(item.get("default_quantity") or 0),
-                "weight": item.get("weight"),
-                "is_equipped": bool(item.get("is_equipped", False)),
-                "is_attuned": bool(item.get("is_attuned", False)),
-                "charges_current": item.get("charges_current"),
-                "charges_max": item.get("charges_max"),
-                "notes": item.get("notes", ""),
-                "tags": list(item.get("tags") or []),
-            }
-        )
+        inventory.append(build_inventory_state(item))
 
     return {
         "status": definition.status,
@@ -90,6 +93,7 @@ def merge_state_with_definition(
     state: dict[str, Any],
     *,
     hp_delta: int = 0,
+    inventory_quantity_overrides: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     payload = deepcopy(state)
     existing_resources = list(payload.get("resources") or [])
@@ -156,6 +160,45 @@ def merge_state_with_definition(
             continue
         merged_slots.append(deepcopy(slot))
     payload["spell_slots"] = merged_slots
+
+    quantity_overrides = {
+        str(key).strip(): int(value)
+        for key, value in dict(inventory_quantity_overrides or {}).items()
+        if str(key).strip()
+    }
+    existing_inventory = list(payload.get("inventory") or [])
+    existing_inventory_by_ref = {
+        str(item.get("catalog_ref") or item.get("id") or "").strip(): dict(item)
+        for item in existing_inventory
+        if str(item.get("catalog_ref") or item.get("id") or "").strip()
+    }
+    tracked_inventory_refs: set[str] = set()
+    merged_inventory: list[dict[str, Any]] = []
+    for catalog_item in list(definition.equipment_catalog or []):
+        if bool(catalog_item.get("is_currency_only")):
+            continue
+        catalog_ref = str(catalog_item.get("id") or "").strip()
+        if not catalog_ref:
+            continue
+        tracked_inventory_refs.add(catalog_ref)
+        existing_item = existing_inventory_by_ref.get(catalog_ref)
+        quantity = int(quantity_overrides.get(catalog_ref, (existing_item or {}).get("quantity") or catalog_item.get("default_quantity") or 0))
+        merged_item = build_inventory_state(catalog_item, quantity=quantity)
+        if existing_item is not None:
+            merged_item["is_equipped"] = bool(existing_item.get("is_equipped", merged_item.get("is_equipped", False)))
+            merged_item["is_attuned"] = bool(existing_item.get("is_attuned", merged_item.get("is_attuned", False)))
+            merged_item["charges_current"] = existing_item.get("charges_current", merged_item.get("charges_current"))
+            merged_item["charges_max"] = existing_item.get("charges_max", merged_item.get("charges_max"))
+        merged_inventory.append(merged_item)
+
+    for item in existing_inventory:
+        catalog_ref = str(item.get("catalog_ref") or item.get("id") or "").strip()
+        if catalog_ref and catalog_ref in tracked_inventory_refs:
+            continue
+        if catalog_ref:
+            continue
+        merged_inventory.append(deepcopy(item))
+    payload["inventory"] = merged_inventory
 
     vitals = dict(payload.get("vitals") or {})
     current_hp = int(vitals.get("current_hp") or 0)
