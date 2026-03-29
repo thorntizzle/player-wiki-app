@@ -411,6 +411,7 @@ def _preferred_item_aliases(name: str) -> list[str]:
     alias_map = {
         "Chain Mail": "Chain Mail Armor",
         "Crossbow, Light": "Light Crossbow",
+        "Crossbow Bolts": "Crossbow Bolts (20)",
         "Rope, Hempen (50 feet)": "Hempen Rope (50 feet)",
     }
     mapped = alias_map.get(name, "")
@@ -602,9 +603,11 @@ def _resolve_named_entry(
 def _feature_name_aliases(name: str) -> list[str]:
     aliases: list[str] = []
     if ":" in name:
+        prefix = name.split(":", 1)[0].strip()
         suffix = name.rsplit(":", 1)[1].strip()
-        if suffix and suffix not in aliases:
-            aliases.append(suffix)
+        for alias in (suffix, prefix):
+            if alias and alias not in aliases:
+                aliases.append(alias)
     return aliases
 
 

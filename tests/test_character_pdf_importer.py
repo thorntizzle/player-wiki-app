@@ -113,6 +113,12 @@ def _sample_pdf_fields() -> dict[str, str]:
         "Eq Name8": "Waterskin",
         "Eq Qty8": "1",
         "Eq Weight8": "5 lb.",
+        "Eq Name9": "Chain Mail",
+        "Eq Qty9": "1",
+        "Eq Weight9": "55 lb.",
+        "Eq Name10": "Crossbow Bolts",
+        "Eq Qty10": "1",
+        "Eq Weight10": "1.5 lb.",
     }
 
 
@@ -186,8 +192,8 @@ def test_build_pdf_character_markdown_parses_into_character_definition():
     assert import_metadata.import_status == "clean"
 
 
-def test_parse_character_sheet_text_merges_split_action_cost_lines_into_features():
-    markdown = """
+def _sample_split_action_markdown() -> str:
+    return """
 ## Sheet Summary
 | Field | Value |
 | --- | --- |
@@ -310,6 +316,10 @@ Psionic Power: Protective Field
 | --- | --- | --- |
 | Backpack | 1 | 5 lb. |
 """.strip()
+
+
+def test_parse_character_sheet_text_merges_split_action_cost_lines_into_features():
+    markdown = _sample_split_action_markdown()
     definition, _ = parse_character_sheet_text(
         "linden-pass",
         markdown,
@@ -347,6 +357,36 @@ Psionic Power: Protective Field
     assert "psionic-power-telekinetic-movement" in resource_ids
     assert "psionic-power-recovery" in resource_ids
     assert "second-wind" in resource_ids
+
+
+def test_resolve_definition_systems_links_falls_back_to_parent_feature_for_nested_rows():
+    definition, _ = parse_character_sheet_text(
+        "linden-pass",
+        _sample_split_action_markdown(),
+        source_path="Zigzag.pdf",
+        source_type="pdf_character_sheet_annotations",
+        imported_from="Zigzag.pdf",
+        parser_version="test",
+    )
+    systems_service = _FakeSystemsService(
+        [
+            _sample_system_entry(
+                entry_key="scf-psionic-power",
+                entry_type="subclassfeature",
+                title="Psionic Power",
+                source_id="TCE",
+                metadata={"class_name": "Fighter", "subclass_name": "Psi Warrior"},
+            ),
+        ]
+    )
+
+    links = resolve_definition_systems_links(systems_service, "linden-pass", definition)
+    recovery = next(entry for entry in links["features"] if entry["name"] == "Psionic Power: Recovery")
+
+    assert recovery["match"]["status"] == "matched"
+    assert recovery["match"]["title"] == "Psionic Power"
+    assert recovery["match"]["strategy"] == "alias"
+    assert recovery["match"]["query"] == "Psionic Power"
 
 
 def test_resolve_definition_systems_links_prefers_contextual_matches():
@@ -465,6 +505,30 @@ def test_resolve_definition_systems_links_prefers_contextual_matches():
                 source_id="PHB",
             ),
             _sample_system_entry(
+                entry_key="item-longsword",
+                entry_type="item",
+                title="Longsword",
+                source_id="PHB",
+            ),
+            _sample_system_entry(
+                entry_key="item-chain-mail",
+                entry_type="item",
+                title="Chain Mail",
+                source_id="PHB",
+            ),
+            _sample_system_entry(
+                entry_key="item-light-crossbow",
+                entry_type="item",
+                title="Light Crossbow",
+                source_id="PHB",
+            ),
+            _sample_system_entry(
+                entry_key="item-crossbow-bolts",
+                entry_type="item",
+                title="Crossbow Bolts (20)",
+                source_id="PHB",
+            ),
+            _sample_system_entry(
                 entry_key="item-longsword-fancy",
                 entry_type="item",
                 title="Silver-plated steel longsword with jet set in hilt",
@@ -482,6 +546,7 @@ def test_resolve_definition_systems_links_prefers_contextual_matches():
     def _feature_starting_with(prefix: str):
         return next(entry for entry in links["features"] if entry["name"].startswith(prefix))
 
+    attacks_by_name = {entry["name"]: entry for entry in links["attacks"]}
     equipment_by_name = {entry["name"]: entry for entry in links["equipment"]}
 
     fighting_style = _feature_starting_with("Fighting Style")
@@ -498,7 +563,10 @@ def test_resolve_definition_systems_links_prefers_contextual_matches():
     assert ability_score_improvement["match"]["status"] == "unresolved"
     assert ability_score_improvement["match"]["candidates"][0]["entry_key"] == "cf-ability-score-improvement-fighter"
     assert proficiencies["match"]["status"] == "unresolved"
+    assert attacks_by_name["Crossbow, Light"]["match"]["title"] == "Light Crossbow"
     assert equipment_by_name["Backpack"]["match"]["title"] == "Backpack"
-    assert equipment_by_name["Longsword"]["match"]["status"] == "unresolved"
+    assert equipment_by_name["Longsword"]["match"]["title"] == "Longsword"
+    assert equipment_by_name["Chain Mail"]["match"]["title"] == "Chain Mail"
+    assert equipment_by_name["Crossbow Bolts"]["match"]["title"] == "Crossbow Bolts (20)"
 
 

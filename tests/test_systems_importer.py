@@ -198,6 +198,37 @@ def build_test_data_root(root: Path) -> Path:
         },
     )
     write_json(
+        root / "data/items-base.json",
+        {
+            "baseitem": [
+                {
+                    "name": "Chain Mail",
+                    "source": "PHB",
+                    "page": 145,
+                    "type": "HA",
+                    "weight": 55,
+                    "entries": ["Heavy armor made of interlocking metal rings."]
+                },
+                {
+                    "name": "Light Crossbow",
+                    "source": "PHB",
+                    "page": 149,
+                    "type": "R",
+                    "weight": 5,
+                    "entries": ["A martial ranged weapon with loading and two-handed properties."]
+                },
+                {
+                    "name": "Crossbow Bolts (20)",
+                    "source": "PHB",
+                    "page": 150,
+                    "type": "A",
+                    "weight": 1.5,
+                    "entries": ["A case of twenty crossbow bolts."]
+                },
+            ]
+        },
+    )
+    write_json(
         root / "data/optionalfeatures.json",
         {
             "optionalfeature": [
@@ -1039,7 +1070,7 @@ def test_importer_imports_mechanics_only_and_strips_media_fields(app, tmp_path):
         egw_result = importer.import_source("EGW", entry_types=["race"])
         mm_result = importer.import_source("MM")
 
-        assert phb_result.imported_count == 26
+        assert phb_result.imported_count == 29
         assert phb_result.imported_by_type == {
             "action": 1,
             "background": 1,
@@ -1047,7 +1078,7 @@ def test_importer_imports_mechanics_only_and_strips_media_fields(app, tmp_path):
             "classfeature": 1,
             "condition": 1,
             "feat": 1,
-            "item": 1,
+            "item": 4,
             "optionalfeature": 3,
             "race": 9,
             "sense": 1,
@@ -1074,6 +1105,9 @@ def test_importer_imports_mechanics_only_and_strips_media_fields(app, tmp_path):
         spell = phb_entries["Mage Hand"]
         assert "Cantrip (Conjuration)" in spell.rendered_html
         assert "30 feet" in spell.rendered_html
+        assert "Heavy armor made of interlocking metal rings." in phb_entries["Chain Mail"].rendered_html
+        assert "martial ranged weapon" in phb_entries["Light Crossbow"].rendered_html
+        assert "twenty crossbow bolts" in phb_entries["Crossbow Bolts (20)"].rendered_html
         fighter = phb_entries["Fighter"]
         assert "Summary" not in fighter.rendered_html
         assert "<strong>Hit Die:</strong> <span>1d10</span>" in fighter.rendered_html
@@ -1158,7 +1192,7 @@ def test_importer_replaces_existing_entries_for_a_source(app, tmp_path):
         assert "Mage Hand" not in titles
         assert "Alert" in titles
         assert "Fighter" in titles
-        assert len(entries) == 26
+        assert len(entries) == 29
 
 
 def test_systems_search_uses_imported_entries(client, sign_in, users, app, tmp_path):

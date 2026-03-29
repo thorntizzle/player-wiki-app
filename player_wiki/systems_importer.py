@@ -185,6 +185,7 @@ DATASETS = (
     DatasetDefinition("status", "data/conditionsdiseases.json", "status"),
     DatasetDefinition("background", "data/backgrounds.json", "background"),
     DatasetDefinition("feat", "data/feats.json", "feat"),
+    DatasetDefinition("item", "data/items-base.json", "baseitem"),
     DatasetDefinition("item", "data/items.json", "item"),
     DatasetDefinition("optionalfeature", "data/optionalfeatures.json", "optionalfeature"),
     DatasetDefinition("race", "data/races.json", "race"),
