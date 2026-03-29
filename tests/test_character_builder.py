@@ -209,7 +209,7 @@ def _minimal_import_metadata(character_slug: str = "new-hero") -> CharacterImpor
         character_slug=character_slug,
         source_path="builder://phb-level-1",
         imported_at_utc="2026-03-29T00:00:00Z",
-        parser_version="2026-03-29.6",
+        parser_version="2026-03-29.7",
         import_status="clean",
         warnings=[],
     )
@@ -1127,7 +1127,7 @@ def test_level_one_builder_populates_starting_equipment_spells_and_currency():
     assert spells_by_name["Find Familiar"]["mark"] == "Spellbook"
     assert spells_by_name["Detect Magic"]["reference"] == "p. 231"
     assert spells_by_name["Message"]["components"] == "V, S, M (a short piece of copper wire)"
-    assert import_metadata.parser_version == "2026-03-29.6"
+    assert import_metadata.parser_version == "2026-03-29.7"
 
 
 def test_level_one_builder_puts_great_weapon_fighting_note_on_versatile_two_handed_row():
@@ -1391,6 +1391,221 @@ def test_native_level_up_advances_fighter_to_level_two_and_merges_state():
     assert {slot["level"]: slot["max"] for slot in merged_state["spell_slots"]} == {}
 
 
+def test_native_level_up_advances_fighter_to_level_four_with_ability_score_improvement():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "subclass_title": "Martial Archetype",
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+            "starting_equipment": {
+                "defaultData": [
+                    {"_": ["longsword|phb", "shield|phb"]},
+                ]
+            },
+        },
+    )
+    champion = _systems_entry(
+        "subclass",
+        "phb-subclass-fighter-champion",
+        "Champion",
+        metadata={"class_name": "Fighter", "class_source": "PHB"},
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+        body={"entries": [{"name": "Feature: Adaptable", "entries": ["You fit in almost anywhere."]}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+        body={
+            "entries": [
+                {
+                    "name": "Feature: Shelter of the Faithful",
+                    "entries": ["You can find refuge among the faithful."],
+                    "data": {"isFeature": True},
+                }
+            ]
+        },
+    )
+    fighting_style = _systems_entry("classfeature", "phb-classfeature-fighting-style", "Fighting Style", metadata={"level": 1})
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    action_surge = _systems_entry("classfeature", "phb-classfeature-action-surge", "Action Surge", metadata={"level": 2})
+    martial_archetype = _systems_entry("classfeature", "phb-classfeature-martial-archetype", "Martial Archetype", metadata={"level": 3})
+    improved_critical = _systems_entry(
+        "subclassfeature",
+        "phb-subclassfeature-improved-critical",
+        "Improved Critical",
+        metadata={"level": 3, "class_name": "Fighter", "class_source": "PHB", "subclass_name": "Champion"},
+    )
+    ability_score_improvement = _systems_entry(
+        "classfeature",
+        "phb-classfeature-ability-score-improvement",
+        "Ability Score Improvement",
+        metadata={"level": 4},
+    )
+    longsword = _systems_entry("item", "phb-item-longsword", "Longsword", metadata={"weight": 3})
+    shield = _systems_entry("item", "phb-item-shield", "Shield", metadata={"weight": 6, "type": "S"})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [champion],
+            "item": [longsword, shield],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {
+                        "label": "Fighting Style",
+                        "entry": fighting_style,
+                        "embedded_card": {
+                            "option_groups": [
+                                {
+                                    "options": [
+                                        {"label": "Dueling", "slug": "phb-optionalfeature-dueling"},
+                                        {"label": "Defense", "slug": "phb-optionalfeature-defense"},
+                                    ]
+                                }
+                            ]
+                        },
+                    },
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            },
+            {
+                "level": 2,
+                "level_label": "Level 2",
+                "feature_rows": [
+                    {"label": "Action Surge", "entry": action_surge, "embedded_card": {"option_groups": []}},
+                ],
+            },
+            {
+                "level": 3,
+                "level_label": "Level 3",
+                "feature_rows": [
+                    {"label": "Martial Archetype", "entry": martial_archetype, "embedded_card": {"option_groups": []}},
+                ],
+            },
+            {
+                "level": 4,
+                "level_label": "Level 4",
+                "feature_rows": [
+                    {"label": "Ability Score Improvement", "entry": ability_score_improvement, "embedded_card": {"option_groups": []}},
+                ],
+            },
+        ],
+        subclass_progression=[
+            {
+                "level": 3,
+                "level_label": "Level 3",
+                "feature_rows": [
+                    {"label": "Improved Critical", "entry": improved_critical, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    base_form_values = {
+        "name": "Ser Rowan",
+        "character_slug": "ser-rowan",
+        "alignment": "Lawful Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "class_option_1": "phb-optionalfeature-dueling",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    level_one_context = build_level_one_builder_context(systems_service, "linden-pass", base_form_values)
+    level_one_definition, _ = build_level_one_character_definition("linden-pass", level_one_context, base_form_values)
+
+    level_two_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        level_one_definition,
+        {"hp_gain": "8"},
+    )
+    level_two_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        level_one_definition,
+        level_two_context,
+        {"hp_gain": "8"},
+    )
+
+    level_three_form = {"hp_gain": "7", "subclass_slug": champion.slug}
+    level_three_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        level_two_definition,
+        level_three_form,
+    )
+    level_three_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        level_two_definition,
+        level_three_context,
+        level_three_form,
+    )
+
+    level_four_form = {
+        "hp_gain": "8",
+        "levelup_asi_mode_1": "ability_scores",
+        "levelup_asi_ability_1_1": "str",
+        "levelup_asi_ability_1_2": "str",
+    }
+    level_four_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        level_three_definition,
+        level_four_form,
+    )
+    level_four_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        level_three_definition,
+        level_four_context,
+        level_four_form,
+    )
+
+    attacks_by_name = {attack["name"]: attack for attack in level_four_definition.attacks}
+    feature_names = {feature["name"] for feature in level_four_definition.features}
+
+    assert level_four_context["preview"]["gained_features"] == ["Strength +2"]
+    assert level_four_definition.profile["class_level_text"] == "Fighter 4"
+    assert level_four_definition.profile["subclass_ref"]["slug"] == champion.slug
+    assert level_four_definition.stats["ability_scores"]["str"]["score"] == 18
+    assert level_four_definition.stats["ability_scores"]["str"]["modifier"] == 4
+    assert attacks_by_name["Longsword"]["attack_bonus"] == 6
+    assert attacks_by_name["Longsword"]["damage"] == "1d8+6 slashing"
+    assert "Improved Critical" in feature_names
+    assert "Ability Score Improvement" not in feature_names
+
+
 def test_native_level_up_advances_wizard_to_level_two_with_subclass_and_spellbook_growth():
     wizard = _systems_entry(
         "class",
@@ -1644,6 +1859,197 @@ def test_native_level_up_advances_wizard_to_level_two_with_subclass_and_spellboo
     assert spells_by_name["Thunderwave"]["mark"] == "Prepared + Spellbook"
     assert spells_by_name["Burning Hands"]["mark"] == "Spellbook"
     assert feature_names >= {"Evocation Savant", "Sculpt Spells"}
+
+
+def test_native_level_up_advances_wizard_to_level_four_with_cantrip_and_asi_growth():
+    wizard = _systems_entry(
+        "class",
+        "phb-class-wizard",
+        "Wizard",
+        metadata={
+            "hit_die": {"faces": 6},
+            "proficiency": ["int", "wis"],
+            "subclass_title": "Arcane Tradition",
+            "starting_proficiencies": {
+                "armor": [],
+                "weapons": ["dagger", "dart", "sling", "quarterstaff", "light crossbow"],
+                "skills": [{"choose": {"count": 2, "from": ["arcana", "history", "investigation", "insight"]}}],
+            },
+        },
+    )
+    evocation = _systems_entry(
+        "subclass",
+        "phb-subclass-wizard-school-of-evocation",
+        "School of Evocation",
+        metadata={"class_name": "Wizard", "class_source": "PHB"},
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    ability_score_improvement = _systems_entry(
+        "classfeature",
+        "phb-classfeature-ability-score-improvement",
+        "Ability Score Improvement",
+        metadata={"level": 4},
+    )
+    light = _systems_entry("spell", "phb-spell-light", "Light", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    mage_hand = _systems_entry("spell", "phb-spell-mage-hand", "Mage Hand", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    message = _systems_entry("spell", "phb-spell-message", "Message", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    prestidigitation = _systems_entry("spell", "phb-spell-prestidigitation", "Prestidigitation", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    detect_magic = _systems_entry("spell", "phb-spell-detect-magic", "Detect Magic", metadata={"casting_time": [{"number": 1, "unit": "action"}]}, source_page="231")
+    mage_armor = _systems_entry("spell", "phb-spell-mage-armor", "Mage Armor", metadata={"casting_time": [{"number": 1, "unit": "action"}]}, source_page="256")
+    magic_missile = _systems_entry("spell", "phb-spell-magic-missile", "Magic Missile", metadata={"casting_time": [{"number": 1, "unit": "action"}]}, source_page="257")
+    shield = _systems_entry("spell", "phb-spell-shield", "Shield", metadata={"casting_time": [{"number": 1, "unit": "reaction"}]}, source_page="275")
+    thunderwave = _systems_entry("spell", "phb-spell-thunderwave", "Thunderwave", metadata={"casting_time": [{"number": 1, "unit": "action"}]}, source_page="282")
+    burning_hands = _systems_entry("spell", "phb-spell-burning-hands", "Burning Hands", metadata={"casting_time": [{"number": 1, "unit": "action"}]}, source_page="220")
+    misty_step = _systems_entry("spell", "phb-spell-misty-step", "Misty Step", metadata={"casting_time": [{"number": 1, "unit": "bonus"}]}, source_page="260")
+    scorching_ray = _systems_entry("spell", "phb-spell-scorching-ray", "Scorching Ray", metadata={"casting_time": [{"number": 1, "unit": "action"}]}, source_page="273")
+    mirror_image = _systems_entry("spell", "phb-spell-mirror-image", "Mirror Image", metadata={"casting_time": [{"number": 1, "unit": "action"}]}, source_page="260")
+    web = _systems_entry("spell", "phb-spell-web", "Web", metadata={"casting_time": [{"number": 1, "unit": "action"}]}, source_page="287")
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [wizard],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [evocation],
+            "item": [],
+            "spell": [
+                light,
+                mage_hand,
+                message,
+                prestidigitation,
+                detect_magic,
+                mage_armor,
+                magic_missile,
+                shield,
+                thunderwave,
+                burning_hands,
+                misty_step,
+                scorching_ray,
+                mirror_image,
+                web,
+            ],
+        },
+        class_progression=[
+            {
+                "level": 4,
+                "level_label": "Level 4",
+                "feature_rows": [
+                    {"label": "Ability Score Improvement", "entry": ability_score_improvement, "embedded_card": {"option_groups": []}},
+                ],
+            },
+        ],
+        subclass_progression=[],
+    )
+
+    current_definition = _minimal_character_definition("mira-vale", "Mira Vale")
+    current_definition.profile["class_level_text"] = "Wizard 3"
+    current_definition.profile["classes"][0]["class_name"] = "Wizard"
+    current_definition.profile["classes"][0]["level"] = 3
+    current_definition.profile["classes"][0]["systems_ref"] = {
+        "entry_key": "dnd-5e|class|phb|wizard",
+        "entry_type": "class",
+        "title": "Wizard",
+        "slug": "phb-class-wizard",
+        "source_id": "PHB",
+    }
+    current_definition.profile["class_ref"] = dict(current_definition.profile["classes"][0]["systems_ref"])
+    current_definition.profile["subclass_ref"] = {
+        "entry_key": "dnd-5e|subclass|phb|school-of-evocation",
+        "entry_type": "subclass",
+        "title": "School of Evocation",
+        "slug": evocation.slug,
+        "source_id": "PHB",
+    }
+    current_definition.profile["classes"][0]["subclass_name"] = "School of Evocation"
+    current_definition.profile["classes"][0]["subclass_ref"] = dict(current_definition.profile["subclass_ref"])
+    current_definition.stats["max_hp"] = 18
+    current_definition.stats["proficiency_bonus"] = 2
+    current_definition.stats["ability_scores"] = {
+        "str": {"score": 8, "modifier": -1, "save_bonus": -1},
+        "dex": {"score": 14, "modifier": 2, "save_bonus": 2},
+        "con": {"score": 13, "modifier": 1, "save_bonus": 1},
+        "int": {"score": 16, "modifier": 3, "save_bonus": 5},
+        "wis": {"score": 12, "modifier": 1, "save_bonus": 3},
+        "cha": {"score": 10, "modifier": 0, "save_bonus": 0},
+    }
+    current_definition.spellcasting = {
+        "spellcasting_class": "Wizard",
+        "spellcasting_ability": "Intelligence",
+        "spell_save_dc": 13,
+        "spell_attack_bonus": 5,
+        "slot_progression": [{"level": 1, "max_slots": 4}, {"level": 2, "max_slots": 2}],
+        "spells": [
+            {"name": "Light", "mark": "Cantrip", "systems_ref": {"slug": light.slug, "title": light.title, "entry_type": "spell", "source_id": "PHB"}},
+            {"name": "Mage Hand", "mark": "Cantrip", "systems_ref": {"slug": mage_hand.slug, "title": mage_hand.title, "entry_type": "spell", "source_id": "PHB"}},
+            {"name": "Message", "mark": "Cantrip", "systems_ref": {"slug": message.slug, "title": message.title, "entry_type": "spell", "source_id": "PHB"}},
+            {"name": "Detect Magic", "mark": "Prepared + Spellbook", "systems_ref": {"slug": detect_magic.slug, "title": detect_magic.title, "entry_type": "spell", "source_id": "PHB"}},
+            {"name": "Mage Armor", "mark": "Prepared + Spellbook", "systems_ref": {"slug": mage_armor.slug, "title": mage_armor.title, "entry_type": "spell", "source_id": "PHB"}},
+            {"name": "Magic Missile", "mark": "Prepared + Spellbook", "systems_ref": {"slug": magic_missile.slug, "title": magic_missile.title, "entry_type": "spell", "source_id": "PHB"}},
+            {"name": "Shield", "mark": "Prepared + Spellbook", "systems_ref": {"slug": shield.slug, "title": shield.title, "entry_type": "spell", "source_id": "PHB"}},
+            {"name": "Thunderwave", "mark": "Prepared + Spellbook", "systems_ref": {"slug": thunderwave.slug, "title": thunderwave.title, "entry_type": "spell", "source_id": "PHB"}},
+            {"name": "Burning Hands", "mark": "Spellbook", "systems_ref": {"slug": burning_hands.slug, "title": burning_hands.title, "entry_type": "spell", "source_id": "PHB"}},
+            {"name": "Misty Step", "mark": "Prepared + Spellbook", "systems_ref": {"slug": misty_step.slug, "title": misty_step.title, "entry_type": "spell", "source_id": "PHB"}},
+            {"name": "Scorching Ray", "mark": "Spellbook", "systems_ref": {"slug": scorching_ray.slug, "title": scorching_ray.title, "entry_type": "spell", "source_id": "PHB"}},
+        ],
+    }
+    current_definition.source["source_path"] = "builder://phb-level-3"
+
+    level_up_form = {
+        "hp_gain": "4",
+        "levelup_asi_mode_1": "ability_scores",
+        "levelup_asi_ability_1_1": "int",
+        "levelup_asi_ability_1_2": "int",
+        "levelup_spell_cantrip_1": prestidigitation.slug,
+        "levelup_wizard_spellbook_1": mirror_image.slug,
+        "levelup_wizard_spellbook_2": web.slug,
+        "levelup_wizard_prepared_1": burning_hands.slug,
+        "levelup_wizard_prepared_2": web.slug,
+    }
+
+    level_up_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        current_definition,
+        level_up_form,
+    )
+    field_names = {
+        field["name"]
+        for section in level_up_context["choice_sections"]
+        for field in section["fields"]
+    }
+    leveled_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        level_up_context,
+        level_up_form,
+    )
+
+    spells_by_name = {spell["name"]: spell for spell in leveled_definition.spellcasting["spells"]}
+
+    assert level_up_context["preview"]["gained_features"] == ["Intelligence +2"]
+    assert {"levelup_spell_cantrip_1", "levelup_wizard_spellbook_1", "levelup_wizard_spellbook_2"} <= field_names
+    assert {"levelup_wizard_prepared_1", "levelup_wizard_prepared_2"} <= field_names
+    assert leveled_definition.profile["class_level_text"] == "Wizard 4"
+    assert leveled_definition.stats["ability_scores"]["int"]["score"] == 18
+    assert leveled_definition.spellcasting["spell_save_dc"] == 14
+    assert leveled_definition.spellcasting["spell_attack_bonus"] == 6
+    assert leveled_definition.spellcasting["slot_progression"] == [{"level": 1, "max_slots": 4}, {"level": 2, "max_slots": 3}]
+    assert spells_by_name["Prestidigitation"]["mark"] == "Cantrip"
+    assert spells_by_name["Mirror Image"]["mark"] == "Spellbook"
+    assert spells_by_name["Web"]["mark"] == "Prepared + Spellbook"
+    assert spells_by_name["Burning Hands"]["mark"] == "Spellbook + Prepared"
 
 
 def test_dm_roster_shows_create_character_link(client, sign_in, users):

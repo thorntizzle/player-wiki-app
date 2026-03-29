@@ -1,0 +1,3391 @@
+{
+  "Bard": {
+    "spellcasting_ability": "cha",
+    "caster_progression": "full",
+    "cantrip_progression": [
+      2,
+      2,
+      2,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4
+    ],
+    "spells_known_progression": [
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      14,
+      15,
+      15,
+      16,
+      18,
+      19,
+      19,
+      20,
+      22,
+      22,
+      22
+    ],
+    "spells_known_progression_fixed": [],
+    "prepared_spells": "",
+    "prepared_spells_progression": [],
+    "slot_progression": [
+      [
+        {
+          "level": 1,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        },
+        {
+          "level": 9,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 3
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        },
+        {
+          "level": 9,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 3
+        },
+        {
+          "level": 6,
+          "max_slots": 2
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        },
+        {
+          "level": 9,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 3
+        },
+        {
+          "level": 6,
+          "max_slots": 2
+        },
+        {
+          "level": 7,
+          "max_slots": 2
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        },
+        {
+          "level": 9,
+          "max_slots": 1
+        }
+      ]
+    ]
+  },
+  "Cleric": {
+    "spellcasting_ability": "wis",
+    "caster_progression": "full",
+    "cantrip_progression": [
+      3,
+      3,
+      3,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5
+    ],
+    "spells_known_progression": [],
+    "spells_known_progression_fixed": [],
+    "prepared_spells": "<$level$> + <$wis_mod$>",
+    "prepared_spells_progression": [],
+    "slot_progression": [
+      [
+        {
+          "level": 1,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        },
+        {
+          "level": 9,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 3
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        },
+        {
+          "level": 9,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 3
+        },
+        {
+          "level": 6,
+          "max_slots": 2
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        },
+        {
+          "level": 9,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 3
+        },
+        {
+          "level": 6,
+          "max_slots": 2
+        },
+        {
+          "level": 7,
+          "max_slots": 2
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        },
+        {
+          "level": 9,
+          "max_slots": 1
+        }
+      ]
+    ]
+  },
+  "Druid": {
+    "spellcasting_ability": "wis",
+    "caster_progression": "full",
+    "cantrip_progression": [
+      2,
+      2,
+      2,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4
+    ],
+    "spells_known_progression": [],
+    "spells_known_progression_fixed": [],
+    "prepared_spells": "<$level$> + <$wis_mod$>",
+    "prepared_spells_progression": [],
+    "slot_progression": [
+      [
+        {
+          "level": 1,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        },
+        {
+          "level": 9,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 3
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        },
+        {
+          "level": 9,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 3
+        },
+        {
+          "level": 6,
+          "max_slots": 2
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        },
+        {
+          "level": 9,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 3
+        },
+        {
+          "level": 6,
+          "max_slots": 2
+        },
+        {
+          "level": 7,
+          "max_slots": 2
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        },
+        {
+          "level": 9,
+          "max_slots": 1
+        }
+      ]
+    ]
+  },
+  "Paladin": {
+    "spellcasting_ability": "cha",
+    "caster_progression": "1/2",
+    "cantrip_progression": [],
+    "spells_known_progression": [],
+    "spells_known_progression_fixed": [],
+    "prepared_spells": "<$level$> / 2 + <$cha_mod$>",
+    "prepared_spells_progression": [],
+    "slot_progression": [
+      [],
+      [
+        {
+          "level": 1,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        }
+      ]
+    ]
+  },
+  "Ranger": {
+    "spellcasting_ability": "wis",
+    "caster_progression": "1/2",
+    "cantrip_progression": [],
+    "spells_known_progression": [
+      0,
+      2,
+      3,
+      3,
+      4,
+      4,
+      5,
+      5,
+      6,
+      6,
+      7,
+      7,
+      8,
+      8,
+      9,
+      9,
+      10,
+      10,
+      11,
+      11
+    ],
+    "spells_known_progression_fixed": [],
+    "prepared_spells": "",
+    "prepared_spells_progression": [],
+    "slot_progression": [
+      [],
+      [
+        {
+          "level": 1,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        }
+      ]
+    ]
+  },
+  "Sorcerer": {
+    "spellcasting_ability": "cha",
+    "caster_progression": "full",
+    "cantrip_progression": [
+      4,
+      4,
+      4,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6
+    ],
+    "spells_known_progression": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      12,
+      13,
+      13,
+      14,
+      14,
+      15,
+      15,
+      15,
+      15
+    ],
+    "spells_known_progression_fixed": [],
+    "prepared_spells": "",
+    "prepared_spells_progression": [],
+    "slot_progression": [
+      [
+        {
+          "level": 1,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        },
+        {
+          "level": 9,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 3
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        },
+        {
+          "level": 9,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 3
+        },
+        {
+          "level": 6,
+          "max_slots": 2
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        },
+        {
+          "level": 9,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 3
+        },
+        {
+          "level": 6,
+          "max_slots": 2
+        },
+        {
+          "level": 7,
+          "max_slots": 2
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        },
+        {
+          "level": 9,
+          "max_slots": 1
+        }
+      ]
+    ]
+  },
+  "Warlock": {
+    "spellcasting_ability": "cha",
+    "caster_progression": "pact",
+    "cantrip_progression": [
+      2,
+      2,
+      2,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4
+    ],
+    "spells_known_progression": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      10,
+      11,
+      11,
+      12,
+      12,
+      13,
+      13,
+      14,
+      14,
+      15,
+      15
+    ],
+    "spells_known_progression_fixed": [],
+    "prepared_spells": "",
+    "prepared_spells_progression": [],
+    "slot_progression": [
+      [
+        {
+          "level": 1,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 2,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 2,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 3,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 3,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 4,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 4,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 5,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 5,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 5,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 5,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 5,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 5,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 5,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 5,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 5,
+          "max_slots": 4
+        }
+      ],
+      [
+        {
+          "level": 5,
+          "max_slots": 4
+        }
+      ],
+      [
+        {
+          "level": 5,
+          "max_slots": 4
+        }
+      ],
+      [
+        {
+          "level": 5,
+          "max_slots": 4
+        }
+      ]
+    ]
+  },
+  "Wizard": {
+    "spellcasting_ability": "int",
+    "caster_progression": "full",
+    "cantrip_progression": [
+      3,
+      3,
+      3,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5
+    ],
+    "spells_known_progression": [],
+    "spells_known_progression_fixed": [
+      6,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2
+    ],
+    "prepared_spells": "<$level$> + <$int_mod$>",
+    "prepared_spells_progression": [],
+    "slot_progression": [
+      [
+        {
+          "level": 1,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 2
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        },
+        {
+          "level": 9,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 3
+        },
+        {
+          "level": 6,
+          "max_slots": 1
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        },
+        {
+          "level": 9,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 3
+        },
+        {
+          "level": 6,
+          "max_slots": 2
+        },
+        {
+          "level": 7,
+          "max_slots": 1
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        },
+        {
+          "level": 9,
+          "max_slots": 1
+        }
+      ],
+      [
+        {
+          "level": 1,
+          "max_slots": 4
+        },
+        {
+          "level": 2,
+          "max_slots": 3
+        },
+        {
+          "level": 3,
+          "max_slots": 3
+        },
+        {
+          "level": 4,
+          "max_slots": 3
+        },
+        {
+          "level": 5,
+          "max_slots": 3
+        },
+        {
+          "level": 6,
+          "max_slots": 2
+        },
+        {
+          "level": 7,
+          "max_slots": 2
+        },
+        {
+          "level": 8,
+          "max_slots": 1
+        },
+        {
+          "level": 9,
+          "max_slots": 1
+        }
+      ]
+    ]
+  },
+  "Barbarian": {
+    "spellcasting_ability": "",
+    "caster_progression": "",
+    "cantrip_progression": [],
+    "spells_known_progression": [],
+    "spells_known_progression_fixed": [],
+    "prepared_spells": "",
+    "prepared_spells_progression": [],
+    "slot_progression": []
+  },
+  "Fighter": {
+    "spellcasting_ability": "",
+    "caster_progression": "",
+    "cantrip_progression": [],
+    "spells_known_progression": [],
+    "spells_known_progression_fixed": [],
+    "prepared_spells": "",
+    "prepared_spells_progression": [],
+    "slot_progression": []
+  },
+  "Monk": {
+    "spellcasting_ability": "",
+    "caster_progression": "",
+    "cantrip_progression": [],
+    "spells_known_progression": [],
+    "spells_known_progression_fixed": [],
+    "prepared_spells": "",
+    "prepared_spells_progression": [],
+    "slot_progression": []
+  },
+  "Rogue": {
+    "spellcasting_ability": "",
+    "caster_progression": "",
+    "cantrip_progression": [],
+    "spells_known_progression": [],
+    "spells_known_progression_fixed": [],
+    "prepared_spells": "",
+    "prepared_spells_progression": [],
+    "slot_progression": []
+  }
+}
