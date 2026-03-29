@@ -181,6 +181,9 @@ def test_character_sheet_personal_and_notes_subpages_render_markdown_fields_and_
     assert "Tall, scarred, and always in dark leathers." in personal_html
     assert "Background" in personal_html
     assert "Raised along the harbor and quick to vanish into crowds." in personal_html
+    assert "Save personal details" in personal_html
+    assert 'name="physical_description_markdown"' in personal_html
+    assert 'name="background_markdown"' in personal_html
     assert "No personal details yet." not in personal_html
 
     assert notes_response.status_code == 200
@@ -189,6 +192,8 @@ def test_character_sheet_personal_and_notes_subpages_render_markdown_fields_and_
     assert "Remember the" in notes_html
     assert "dock code" in notes_html
     assert "Keep an eye on the harbor." in notes_html
+    assert "Save note" in notes_html
+    assert 'name="player_notes_markdown"' in notes_html
     assert "Actions: Bonus Actions" not in notes_html
     assert "Second Wind" not in notes_html
     assert "No notes yet." not in notes_html

@@ -375,6 +375,27 @@
               </article>
             {% endif %}
           </div>
+          {% if can_use_session_mode and not is_session_mode %}
+            <article class="detail-card session-card">
+              <form
+                class="stack-form"
+                method="post"
+                action="{{ url_for('character_session_personal', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+              >
+                <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                <input type="hidden" name="page" value="{{ character_subpage }}">
+                <label class="field">
+                  <span>Physical Description</span>
+                  <textarea name="physical_description_markdown">{{ character.physical_description_markdown }}</textarea>
+                </label>
+                <label class="field">
+                  <span>Background</span>
+                  <textarea name="background_markdown">{{ character.personal_background_markdown }}</textarea>
+                </label>
+                <button type="submit">Save personal details</button>
+              </form>
+            </article>
+          {% endif %}
         </section>
       {% endif %}
 
@@ -402,6 +423,23 @@
               </article>
             {% endif %}
           </div>
+          {% if can_use_session_mode and not is_session_mode %}
+            <article class="detail-card session-card">
+              <form
+                class="stack-form"
+                method="post"
+                action="{{ url_for('character_session_notes', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+              >
+                <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                <input type="hidden" name="page" value="{{ character_subpage }}">
+                <label class="field">
+                  <span>Markdown note</span>
+                  <textarea name="player_notes_markdown">{{ character.player_notes_markdown }}</textarea>
+                </label>
+                <button type="submit">Save note</button>
+              </form>
+            </article>
+          {% endif %}
         </section>
       {% endif %}
     </article>
