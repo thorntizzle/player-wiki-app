@@ -937,9 +937,7 @@ button {
 }
 
 .session-bar {
-  position: sticky;
-  top: 0.75rem;
-  z-index: 10;
+  position: static;
   padding: 1rem;
   border-radius: 20px;
   border: 1px solid var(--border-accent);

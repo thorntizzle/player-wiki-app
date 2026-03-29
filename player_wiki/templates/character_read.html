@@ -66,12 +66,10 @@
       {% set show_personal_sections = character_subpage == 'personal' %}
       {% set show_note_sections = character_subpage == 'notes' %}
 
-      {% if is_session_mode %}
-        {% include "_character_session_bar.html" %}
-        {% include "_character_session_panels.html" %}
-      {% endif %}
-
       {% if show_quick_sections %}
+        {% if is_session_mode %}
+          {% include "_character_session_bar.html" %}
+        {% endif %}
         <section class="read-section">
           <h2>At a glance</h2>
           <div class="glance-grid">
@@ -83,6 +81,10 @@
             {% endfor %}
           </div>
         </section>
+      {% endif %}
+
+      {% if is_session_mode %}
+        {% include "_character_session_panels.html" %}
       {% endif %}
 
       {% if show_quick_sections and character.resources and not is_session_mode %}

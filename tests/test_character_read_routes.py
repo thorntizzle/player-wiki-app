@@ -231,13 +231,31 @@ def test_session_mode_uses_same_subpage_ui_as_read_mode(client, sign_in, users, 
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Active session" in html
+    assert "Active session" not in html
     assert "?mode=session&amp;page=quick" in html
     assert "?mode=session&amp;page=personal" in html
     assert "?mode=session&amp;page=notes" in html
     assert "Save personal details" in html
     assert "Save note" not in html
     assert "At a glance" not in html
+
+
+def test_session_active_widget_stays_on_quick_reference_only(client, sign_in, users, set_campaign_visibility):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    quick_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=quick")
+    features_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=features")
+
+    assert quick_response.status_code == 200
+    quick_html = quick_response.get_data(as_text=True)
+    assert "Active session" in quick_html
+    assert "Save vitals" in quick_html
+
+    assert features_response.status_code == 200
+    features_html = features_response.get_data(as_text=True)
+    assert "Active session" not in features_html
+    assert "Save vitals" not in features_html
 
 
 def test_character_sheet_renders_systems_links_when_present(app, client, sign_in, users):
