@@ -41,7 +41,13 @@ def build_initial_state(definition: CharacterDefinition) -> dict[str, Any]:
     resources = [build_resource_state(template) for template in definition.resource_templates]
 
     inventory = []
+    currency = {"cp": 0, "sp": 0, "ep": 0, "gp": 0, "pp": 0, "other": []}
     for item in definition.equipment_catalog:
+        item_currency = dict(item.get("currency") or {})
+        for denomination in ("cp", "sp", "ep", "gp", "pp"):
+            currency[denomination] = int(currency.get(denomination) or 0) + int(item_currency.get(denomination) or 0)
+        if bool(item.get("is_currency_only")):
+            continue
         inventory.append(
             {
                 "id": item.get("id"),
@@ -67,7 +73,7 @@ def build_initial_state(definition: CharacterDefinition) -> dict[str, Any]:
         },
         "resources": resources,
         "inventory": inventory,
-        "currency": {"cp": 0, "sp": 0, "ep": 0, "gp": 0, "pp": 0, "other": []},
+        "currency": currency,
         "spell_slots": spell_slots,
         "attunement": {"max_attuned_items": 3, "attuned_item_refs": []},
         "notes": {

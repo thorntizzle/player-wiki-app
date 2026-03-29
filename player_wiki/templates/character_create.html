@@ -163,11 +163,11 @@
     <aside class="sidebar">
       <section class="card sidebar-card">
         <h2>Preview</h2>
-        <div class="builder-preview-list">
-          <div>
-            <span class="meta">Class</span>
-            <strong>{{ builder.preview.class_level_text }}</strong>
-          </div>
+          <div class="builder-preview-list">
+            <div>
+              <span class="meta">Class</span>
+              <strong>{{ builder.preview.class_level_text }}</strong>
+            </div>
           <div>
             <span class="meta">Max HP</span>
             <strong>{{ builder.preview.max_hp }}</strong>
@@ -190,17 +190,23 @@
               {% endif %}
             </strong>
           </div>
-          <div>
-            <span class="meta">Languages</span>
-            <strong>
-              {% if builder.preview.languages %}
-                {{ builder.preview.languages | join(", ") }}
-              {% else %}
-                Not set
-              {% endif %}
-            </strong>
+            <div>
+              <span class="meta">Languages</span>
+              <strong>
+                {% if builder.preview.languages %}
+                  {{ builder.preview.languages | join(", ") }}
+                {% else %}
+                  Not set
+                {% endif %}
+              </strong>
+            </div>
+            {% if builder.preview.starting_currency %}
+              <div>
+                <span class="meta">Starting Currency</span>
+                <strong>{{ builder.preview.starting_currency }}</strong>
+              </div>
+            {% endif %}
           </div>
-        </div>
       </section>
 
       <section class="card sidebar-card">
@@ -213,6 +219,32 @@
           </ul>
         {% else %}
           <p class="meta">Choose a class, species, and background to preview the resulting sheet content.</p>
+        {% endif %}
+      </section>
+
+      <section class="card sidebar-card">
+        <h2>Starting Equipment</h2>
+        {% if builder.preview.equipment %}
+          <ul class="plain-list builder-feature-list">
+            {% for item in builder.preview.equipment %}
+              <li>{{ item }}</li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="meta">Equipment choices will appear here as the build comes together.</p>
+        {% endif %}
+      </section>
+
+      <section class="card sidebar-card">
+        <h2>Spell Preview</h2>
+        {% if builder.preview.spells %}
+          <ul class="plain-list builder-feature-list">
+            {% for spell_name in builder.preview.spells %}
+              <li>{{ spell_name }}</li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="meta">Spell picks will appear here for spellcasting classes.</p>
         {% endif %}
       </section>
 

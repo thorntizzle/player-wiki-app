@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import re
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from .auth_store import isoformat, utcnow
@@ -8,7 +11,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-03-29.1"
+CHARACTER_BUILDER_VERSION = "2026-03-29.2"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -107,6 +110,111 @@ LEVEL_ONE_SPELL_SLOTS_BY_CLASS = {
     "Warlock": [{"level": 1, "max_slots": 1}],
     "Wizard": [{"level": 1, "max_slots": 2}],
 }
+LEVEL_ONE_SPELL_RULES_BY_CLASS = {
+    "Bard": {"cantrip_count": 2, "level_one_mode": "known", "level_one_count": 4},
+    "Cleric": {"cantrip_count": 3, "level_one_mode": "prepared", "ability_key": "wis"},
+    "Druid": {"cantrip_count": 2, "level_one_mode": "prepared", "ability_key": "wis"},
+    "Sorcerer": {"cantrip_count": 4, "level_one_mode": "known", "level_one_count": 2},
+    "Warlock": {"cantrip_count": 2, "level_one_mode": "known", "level_one_count": 2},
+    "Wizard": {
+        "cantrip_count": 3,
+        "level_one_mode": "wizard",
+        "spellbook_count": 6,
+        "ability_key": "int",
+    },
+}
+LEVEL_ONE_ALWAYS_PREPARED_SPELLS_BY_SUBCLASS = {
+    normalize_lookup("Knowledge Domain"): ["Command", "Identify"],
+    normalize_lookup("Life Domain"): ["Bless", "Cure Wounds"],
+    normalize_lookup("Light Domain"): ["Burning Hands", "Faerie Fire"],
+    normalize_lookup("Nature Domain"): ["Animal Friendship", "Speak with Animals"],
+    normalize_lookup("Tempest Domain"): ["Fog Cloud", "Thunderwave"],
+    normalize_lookup("Trickery Domain"): ["Charm Person", "Disguise Self"],
+    normalize_lookup("War Domain"): ["Divine Favor", "Shield of Faith"],
+}
+ITEM_TITLES_BY_EQUIPMENT_TYPE = {
+    "weaponSimple": [
+        "Club",
+        "Dagger",
+        "Greatclub",
+        "Handaxe",
+        "Javelin",
+        "Light Hammer",
+        "Mace",
+        "Quarterstaff",
+        "Sickle",
+        "Spear",
+        "Light Crossbow",
+        "Dart",
+        "Shortbow",
+        "Sling",
+    ],
+    "weaponSimpleMelee": [
+        "Club",
+        "Dagger",
+        "Greatclub",
+        "Handaxe",
+        "Javelin",
+        "Light Hammer",
+        "Mace",
+        "Quarterstaff",
+        "Sickle",
+        "Spear",
+    ],
+    "weaponMartial": [
+        "Battleaxe",
+        "Flail",
+        "Glaive",
+        "Greataxe",
+        "Greatsword",
+        "Halberd",
+        "Lance",
+        "Longsword",
+        "Maul",
+        "Morningstar",
+        "Pike",
+        "Rapier",
+        "Scimitar",
+        "Shortsword",
+        "Trident",
+        "War Pick",
+        "Warhammer",
+        "Whip",
+        "Blowgun",
+        "Hand Crossbow",
+        "Heavy Crossbow",
+        "Longbow",
+        "Net",
+    ],
+    "weaponMartialMelee": [
+        "Battleaxe",
+        "Flail",
+        "Glaive",
+        "Greataxe",
+        "Greatsword",
+        "Halberd",
+        "Lance",
+        "Longsword",
+        "Maul",
+        "Morningstar",
+        "Pike",
+        "Rapier",
+        "Scimitar",
+        "Shortsword",
+        "Trident",
+        "War Pick",
+        "Warhammer",
+        "Whip",
+    ],
+    "focusSpellcastingArcane": ["Crystal", "Orb", "Rod", "Staff", "Wand"],
+    "focusSpellcastingHoly": ["Amulet", "Emblem", "Reliquary"],
+    "focusSpellcastingDruidic": ["Sprig of Mistletoe", "Totem", "Wooden Staff", "Yew Wand"],
+}
+ITEM_TYPE_CODES_BY_EQUIPMENT_TYPE = {
+    "instrumentMusical": {"INS"},
+    "setGaming": {"GS"},
+    "toolArtisan": {"AT"},
+}
 INLINE_TAG_PATTERN = re.compile(r"{@[^ }]+\s+([^}]+)}")
 
 
@@ -124,6 +232,8 @@ def build_level_one_builder_context(
     species_options = _list_phb_entries(systems_service, campaign_slug, "race")
     background_options = _list_phb_entries(systems_service, campaign_slug, "background")
     feat_options = _list_phb_entries(systems_service, campaign_slug, "feat")
+    item_catalog = _build_item_catalog(_list_phb_entries(systems_service, campaign_slug, "item"))
+    spell_catalog = _build_spell_catalog(_list_phb_entries(systems_service, campaign_slug, "spell"))
 
     selected_class = _resolve_selected_entry(class_options, values.get("class_slug", ""))
     selected_species = _resolve_selected_entry(species_options, values.get("species_slug", ""))
@@ -144,16 +254,26 @@ def build_level_one_builder_context(
     )
     requires_subclass = _class_requires_subclass_at_level_one(selected_class, class_progression)
 
+    preview_values = _normalize_preview_values(values)
+    equipment_groups = _build_equipment_groups(
+        selected_class=selected_class,
+        selected_background=selected_background,
+        item_catalog=item_catalog,
+        values=preview_values,
+    )
+
     choice_sections = _build_choice_sections(
         selected_class=selected_class,
+        selected_subclass=selected_subclass,
         selected_species=selected_species,
         selected_background=selected_background,
         feat_options=feat_options,
         class_progression=class_progression,
-        values=values,
+        equipment_groups=equipment_groups,
+        spell_catalog=spell_catalog,
+        values=preview_values,
     )
 
-    preview_values = _normalize_preview_values(values)
     preview = _build_level_one_preview(
         selected_class=selected_class,
         selected_subclass=selected_subclass,
@@ -161,7 +281,9 @@ def build_level_one_builder_context(
         selected_background=selected_background,
         class_progression=class_progression,
         subclass_progression=subclass_progression,
+        equipment_groups=equipment_groups,
         choice_sections=choice_sections,
+        spell_catalog=spell_catalog,
         values=preview_values,
     )
 
@@ -179,9 +301,13 @@ def build_level_one_builder_context(
         "choice_sections": choice_sections,
         "class_progression": class_progression,
         "subclass_progression": subclass_progression,
+        "equipment_groups": equipment_groups,
+        "item_catalog": item_catalog,
+        "spell_catalog": spell_catalog,
         "limitations": [
             "Enter final level-1 ability scores after any species bonuses.",
-            "This first creator slice does not yet auto-populate starting equipment, attacks, or spell selections.",
+            "Attack rows still need a native builder pass; for now the sheet derives equipment and spell picks without generating attack actions automatically.",
+            "Gold-alternative loadouts and a few class-specific spell extras still need manual follow-up.",
         ],
         "preview": preview,
     }
@@ -200,6 +326,8 @@ def build_level_one_character_definition(
     choice_sections = list(builder_context.get("choice_sections") or [])
     class_progression = list(builder_context.get("class_progression") or [])
     subclass_progression = list(builder_context.get("subclass_progression") or [])
+    equipment_groups = list(builder_context.get("equipment_groups") or [])
+    spell_catalog = dict(builder_context.get("spell_catalog") or {})
     limitations = list(builder_context.get("limitations") or [])
 
     if selected_class is None:
@@ -244,6 +372,7 @@ def build_level_one_character_definition(
         selected_feature_entries,
         ability_scores=ability_scores,
     )
+    equipment_catalog = _build_level_one_equipment_catalog(equipment_groups)
 
     stats = _build_level_one_stats(
         selected_class=selected_class,
@@ -262,8 +391,12 @@ def build_level_one_character_definition(
     )
     spellcasting = _build_level_one_spellcasting(
         selected_class=selected_class,
+        selected_subclass=selected_subclass,
         ability_scores=ability_scores,
         proficiency_bonus=proficiency_bonus,
+        choice_sections=choice_sections,
+        selected_choices=selected_choices,
+        spell_catalog=spell_catalog,
     )
 
     source_path = "builder://phb-level-1"
@@ -291,7 +424,7 @@ def build_level_one_character_definition(
         attacks=[],
         features=features,
         spellcasting=spellcasting,
-        equipment_catalog=[],
+        equipment_catalog=equipment_catalog,
         reference_notes={
             "additional_notes_markdown": "",
             "allies_and_organizations_markdown": "",
@@ -388,10 +521,13 @@ def _class_requires_subclass_at_level_one(
 def _build_choice_sections(
     *,
     selected_class: SystemsEntryRecord | None,
+    selected_subclass: SystemsEntryRecord | None,
     selected_species: SystemsEntryRecord | None,
     selected_background: SystemsEntryRecord | None,
     feat_options: list[SystemsEntryRecord],
     class_progression: list[dict[str, Any]],
+    equipment_groups: list[dict[str, Any]],
+    spell_catalog: dict[str, Any],
     values: dict[str, str],
 ) -> list[dict[str, Any]]:
     sections: list[dict[str, Any]] = []
@@ -408,6 +544,19 @@ def _build_choice_sections(
     background_fields = _build_background_choice_fields(selected_background, values)
     if background_fields:
         sections.append({"title": "Background Choices", "fields": background_fields})
+
+    equipment_fields = _build_equipment_choice_fields(equipment_groups)
+    if equipment_fields:
+        sections.append({"title": "Equipment Choices", "fields": equipment_fields})
+
+    spell_fields = _build_spell_choice_fields(
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        spell_catalog=spell_catalog,
+        values=values,
+    )
+    if spell_fields:
+        sections.append({"title": "Spell Choices", "fields": spell_fields})
 
     return sections
 
@@ -589,6 +738,530 @@ def _build_background_choice_fields(
     return fields
 
 
+@lru_cache(maxsize=1)
+def _load_phb_level_one_spell_lists() -> dict[str, dict[str, list[str]]]:
+    reference_path = Path(__file__).resolve().parent / "data" / "phb_level_one_spell_lists.json"
+    if not reference_path.exists():
+        return {}
+    payload = json.loads(reference_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return {}
+    normalized: dict[str, dict[str, list[str]]] = {}
+    for class_name, levels in payload.items():
+        if not isinstance(levels, dict):
+            continue
+        normalized[str(class_name)] = {
+            str(level_key): [str(item).strip() for item in list(level_values or []) if str(item).strip()]
+            for level_key, level_values in levels.items()
+        }
+    return normalized
+
+
+def _build_item_catalog(item_entries: list[SystemsEntryRecord]) -> dict[str, Any]:
+    by_title: dict[str, SystemsEntryRecord] = {}
+    for entry in item_entries:
+        normalized_title = normalize_lookup(entry.title)
+        if normalized_title and normalized_title not in by_title:
+            by_title[normalized_title] = entry
+    return {"entries": list(item_entries), "by_title": by_title}
+
+
+def _build_spell_catalog(spell_entries: list[SystemsEntryRecord]) -> dict[str, Any]:
+    by_title: dict[str, SystemsEntryRecord] = {}
+    by_slug: dict[str, SystemsEntryRecord] = {}
+    for entry in spell_entries:
+        normalized_title = normalize_lookup(entry.title)
+        if normalized_title and normalized_title not in by_title:
+            by_title[normalized_title] = entry
+        if entry.slug:
+            by_slug[entry.slug] = entry
+    return {
+        "entries": list(spell_entries),
+        "by_title": by_title,
+        "by_slug": by_slug,
+        "phb_level_one_lists": _load_phb_level_one_spell_lists(),
+    }
+
+
+def _build_equipment_groups(
+    *,
+    selected_class: SystemsEntryRecord | None,
+    selected_background: SystemsEntryRecord | None,
+    item_catalog: dict[str, Any],
+    values: dict[str, str],
+) -> list[dict[str, Any]]:
+    groups: list[dict[str, Any]] = []
+    class_starting_equipment = dict((selected_class.metadata if selected_class is not None else {}) or {}).get(
+        "starting_equipment"
+    )
+    if isinstance(class_starting_equipment, dict):
+        groups.extend(
+            _build_starting_equipment_groups(
+                prefix="class",
+                label_prefix="Class Equipment",
+                raw_groups=list(class_starting_equipment.get("defaultData") or []),
+                item_catalog=item_catalog,
+                values=values,
+            )
+        )
+
+    background_starting_equipment = dict((selected_background.metadata if selected_background is not None else {}) or {}).get(
+        "starting_equipment"
+    )
+    if isinstance(background_starting_equipment, list):
+        groups.extend(
+            _build_starting_equipment_groups(
+                prefix="background",
+                label_prefix="Background Equipment",
+                raw_groups=background_starting_equipment,
+                item_catalog=item_catalog,
+                values=values,
+            )
+        )
+    return groups
+
+
+def _build_starting_equipment_groups(
+    *,
+    prefix: str,
+    label_prefix: str,
+    raw_groups: list[Any],
+    item_catalog: dict[str, Any],
+    values: dict[str, str],
+) -> list[dict[str, Any]]:
+    groups: list[dict[str, Any]] = []
+    choice_index = 0
+    for raw_group in raw_groups:
+        option_bundles = _build_equipment_group_option_bundles(raw_group, item_catalog)
+        if not option_bundles:
+            continue
+        field_name = None
+        selected = ""
+        if len(option_bundles) > 1:
+            choice_index += 1
+            field_name = f"{prefix}_equipment_{choice_index}"
+            for option_index, option in enumerate(option_bundles, start=1):
+                option["value"] = f"{field_name}:{option_index}"
+            selected = str(values.get(field_name) or "").strip()
+        else:
+            option_bundles[0]["value"] = f"{prefix}_equipment_fixed_{len(groups) + 1}"
+        groups.append(
+            {
+                "field_name": field_name,
+                "field_label": f"{label_prefix} {choice_index}" if field_name else "",
+                "help_text": f"Choose {label_prefix.lower()}." if field_name else "",
+                "selected": selected,
+                "options": option_bundles,
+            }
+        )
+    return groups
+
+
+def _build_equipment_group_option_bundles(
+    raw_group: Any,
+    item_catalog: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if not isinstance(raw_group, dict):
+        return []
+    alternatives: list[Any]
+    option_keys = [key for key in raw_group.keys() if key != "_"]
+    if option_keys:
+        alternatives = [raw_group.get(key) for key in option_keys]
+    else:
+        alternatives = [raw_group.get("_")]
+
+    option_bundles: list[dict[str, Any]] = []
+    for alternative in alternatives:
+        bundles = _expand_equipment_bundle_specs(alternative, item_catalog)
+        for bundle in bundles:
+            option_bundles.append(
+                {
+                    "label": _describe_equipment_bundle(bundle),
+                    "value": "",
+                    "equipment_bundle": bundle,
+                }
+            )
+    return option_bundles
+
+
+def _expand_equipment_bundle_specs(
+    raw_specs: Any,
+    item_catalog: dict[str, Any],
+) -> list[list[dict[str, Any]]]:
+    specs_list = raw_specs if isinstance(raw_specs, list) else [raw_specs]
+    bundles: list[list[dict[str, Any]]] = [[]]
+    for raw_spec in specs_list:
+        candidate_specs = _expand_equipment_spec(raw_spec, item_catalog)
+        if not candidate_specs:
+            continue
+        next_bundles: list[list[dict[str, Any]]] = []
+        for bundle in bundles:
+            for candidate in candidate_specs:
+                next_bundles.append(bundle + [candidate])
+        bundles = next_bundles or bundles
+    return bundles
+
+
+def _expand_equipment_spec(
+    raw_spec: Any,
+    item_catalog: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if isinstance(raw_spec, str):
+        return [_build_equipment_item_spec(raw_spec, item_catalog=item_catalog)]
+    if not isinstance(raw_spec, dict):
+        return []
+
+    equipment_type = str(raw_spec.get("equipmentType") or "").strip()
+    if equipment_type:
+        candidates = []
+        for entry in _list_item_entries_for_equipment_type(equipment_type, item_catalog):
+            candidates.append(
+                _build_equipment_item_spec(
+                    entry.title,
+                    item_catalog=item_catalog,
+                    quantity=int(raw_spec.get("quantity") or 1),
+                    forced_entry=entry,
+                )
+            )
+        return candidates
+
+    if raw_spec.get("item"):
+        return [
+            _build_equipment_item_spec(
+                str(raw_spec.get("item") or ""),
+                item_catalog=item_catalog,
+                quantity=int(raw_spec.get("quantity") or 1),
+                display_name=str(raw_spec.get("displayName") or "").strip() or None,
+                special_text=str(raw_spec.get("special") or "").strip() or None,
+                contained_value=raw_spec.get("containsValue"),
+            )
+        ]
+
+    if raw_spec.get("value") is not None:
+        currency = _currency_seed_from_cp(raw_spec.get("value"))
+        label = _format_currency_seed(currency)
+        if not label:
+            return []
+        return [
+            {
+                "name": label,
+                "quantity": 1,
+                "weight": "",
+                "notes": "",
+                "systems_ref": None,
+                "currency": currency,
+                "is_currency_only": True,
+            }
+        ]
+
+    special_name = str(raw_spec.get("displayName") or raw_spec.get("special") or "").strip()
+    if special_name:
+        currency = _currency_seed_from_cp(raw_spec.get("containsValue"))
+        return [
+            {
+                "name": special_name,
+                "quantity": int(raw_spec.get("quantity") or 1),
+                "weight": "",
+                "notes": "",
+                "systems_ref": None,
+                "currency": currency,
+                "is_currency_only": False,
+            }
+        ]
+    return []
+
+
+def _build_equipment_item_spec(
+    item_reference: str,
+    *,
+    item_catalog: dict[str, Any],
+    quantity: int = 1,
+    display_name: str | None = None,
+    special_text: str | None = None,
+    contained_value: Any = None,
+    forced_entry: SystemsEntryRecord | None = None,
+) -> dict[str, Any]:
+    entry = forced_entry or _resolve_item_entry(item_reference, item_catalog)
+    name = display_name or (entry.title if entry is not None else _humanize_item_reference(item_reference))
+    currency = _currency_seed_from_cp(contained_value)
+    notes_parts = [part for part in (special_text,) if part]
+    return {
+        "name": name,
+        "quantity": max(int(quantity or 1), 1),
+        "weight": _format_weight_value((entry.metadata or {}).get("weight")) if entry is not None else "",
+        "notes": " ".join(notes_parts).strip(),
+        "systems_ref": _systems_ref_from_entry(entry),
+        "currency": currency,
+        "is_currency_only": False,
+    }
+
+
+def _resolve_item_entry(
+    item_reference: str,
+    item_catalog: dict[str, Any],
+) -> SystemsEntryRecord | None:
+    normalized_reference = normalize_lookup(_humanize_item_reference(item_reference))
+    return dict(item_catalog.get("by_title") or {}).get(normalized_reference)
+
+
+def _list_item_entries_for_equipment_type(
+    equipment_type: str,
+    item_catalog: dict[str, Any],
+) -> list[SystemsEntryRecord]:
+    by_title = dict(item_catalog.get("by_title") or {})
+    exact_titles = list(ITEM_TITLES_BY_EQUIPMENT_TYPE.get(equipment_type) or [])
+    if exact_titles:
+        return [
+            entry
+            for title in exact_titles
+            for entry in [by_title.get(normalize_lookup(title))]
+            if entry is not None
+        ]
+    type_codes = set(ITEM_TYPE_CODES_BY_EQUIPMENT_TYPE.get(equipment_type) or set())
+    if type_codes:
+        return sorted(
+            [
+                entry
+                for entry in list(item_catalog.get("entries") or [])
+                if str(entry.metadata.get("type") or "").strip() in type_codes
+            ],
+            key=lambda entry: entry.title.lower(),
+        )
+    return []
+
+
+def _describe_equipment_bundle(bundle: list[dict[str, Any]]) -> str:
+    return ", ".join(_describe_equipment_spec(spec) for spec in bundle if _describe_equipment_spec(spec))
+
+
+def _describe_equipment_spec(spec: dict[str, Any]) -> str:
+    name = str(spec.get("name") or "").strip()
+    quantity = int(spec.get("quantity") or 1)
+    if not name:
+        return ""
+    if quantity > 1:
+        return f"{quantity} x {name}"
+    return name
+
+
+def _build_level_one_equipment_catalog(equipment_groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    selected_specs: list[dict[str, Any]] = []
+    for group in equipment_groups:
+        options = list(group.get("options") or [])
+        if not options:
+            continue
+        selected_value = str(group.get("selected") or "").strip()
+        selected_option = next(
+            (option for option in options if str(option.get("value") or "").strip() == selected_value),
+            None,
+        )
+        if selected_option is None:
+            selected_option = options[0]
+        selected_specs.extend(list(selected_option.get("equipment_bundle") or []))
+
+    merged_catalog: list[dict[str, Any]] = []
+    merged_index_by_key: dict[tuple[str, str, str, str, bool], int] = {}
+    for spec in selected_specs:
+        name = str(spec.get("name") or "").strip()
+        if not name:
+            continue
+        systems_ref = dict(spec.get("systems_ref") or {})
+        notes = str(spec.get("notes") or "").strip()
+        weight = str(spec.get("weight") or "").strip()
+        is_currency_only = bool(spec.get("is_currency_only"))
+        merge_key = (
+            normalize_lookup(name),
+            str(systems_ref.get("slug") or ""),
+            notes,
+            weight,
+            is_currency_only,
+        )
+        existing_index = merged_index_by_key.get(merge_key)
+        if existing_index is None:
+            row = {
+                "id": f"{slugify(name)}-{len(merged_catalog) + 1}",
+                "name": name,
+                "default_quantity": max(int(spec.get("quantity") or 1), 1),
+                "weight": weight,
+                "notes": notes,
+                "systems_ref": systems_ref or None,
+                "currency": dict(spec.get("currency") or {}),
+                "is_currency_only": is_currency_only,
+            }
+            merged_index_by_key[merge_key] = len(merged_catalog)
+            merged_catalog.append(row)
+            continue
+
+        merged_row = merged_catalog[existing_index]
+        merged_row["default_quantity"] = int(merged_row.get("default_quantity") or 0) + max(
+            int(spec.get("quantity") or 1),
+            1,
+        )
+        merged_row["currency"] = _merge_currency_seed(
+            dict(merged_row.get("currency") or {}),
+            dict(spec.get("currency") or {}),
+        )
+    return merged_catalog
+
+
+def _build_equipment_choice_fields(equipment_groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    fields: list[dict[str, Any]] = []
+    for group in equipment_groups:
+        field_name = str(group.get("field_name") or "").strip()
+        if not field_name:
+            continue
+        fields.append(
+            {
+                "name": field_name,
+                "label": str(group.get("field_label") or "Equipment Choice"),
+                "help_text": str(group.get("help_text") or "Choose your starting equipment."),
+                "options": [
+                    _choice_option(str(option.get("label") or ""), str(option.get("value") or ""))
+                    for option in list(group.get("options") or [])
+                    if str(option.get("value") or "").strip()
+                ],
+                "selected": str(group.get("selected") or "").strip(),
+                "group_key": field_name,
+                "kind": "equipment",
+            }
+        )
+    return fields
+
+
+def _build_spell_choice_fields(
+    *,
+    selected_class: SystemsEntryRecord | None,
+    selected_subclass: SystemsEntryRecord | None,
+    spell_catalog: dict[str, Any],
+    values: dict[str, str],
+) -> list[dict[str, Any]]:
+    del selected_subclass
+    if selected_class is None:
+        return []
+    class_name = selected_class.title
+    spell_rules = LEVEL_ONE_SPELL_RULES_BY_CLASS.get(class_name)
+    if not spell_rules:
+        return []
+    fields: list[dict[str, Any]] = []
+
+    cantrip_options = _build_spell_options_for_class_level(class_name, "0", spell_catalog)
+    if cantrip_options:
+        for index in range(int(spell_rules.get("cantrip_count") or 0)):
+            field_name = f"spell_cantrip_{index + 1}"
+            fields.append(
+                {
+                    "name": field_name,
+                    "label": f"Cantrip {index + 1}",
+                    "help_text": f"Choose a {class_name} cantrip.",
+                    "options": cantrip_options,
+                    "selected": str(values.get(field_name) or "").strip(),
+                    "group_key": "spell_cantrips",
+                    "kind": "spell",
+                }
+            )
+
+    spell_mode = str(spell_rules.get("level_one_mode") or "")
+    level_one_options = _build_spell_options_for_class_level(class_name, "1", spell_catalog)
+    if not level_one_options:
+        return fields
+    if spell_mode == "wizard":
+        spellbook_count = int(spell_rules.get("spellbook_count") or 0)
+        for index in range(spellbook_count):
+            field_name = f"wizard_spellbook_{index + 1}"
+            fields.append(
+                {
+                    "name": field_name,
+                    "label": f"Spellbook Spell {index + 1}",
+                    "help_text": "Choose a 1st-level wizard spell for your spellbook.",
+                    "options": level_one_options,
+                    "selected": str(values.get(field_name) or "").strip(),
+                    "group_key": "wizard_spellbook",
+                    "kind": "spell",
+                }
+            )
+
+        prepared_count = _level_one_spell_selection_count(spell_rules, values)
+        selected_spellbook_values = [
+            str(values.get(f"wizard_spellbook_{index + 1}") or "").strip()
+            for index in range(spellbook_count)
+            if str(values.get(f"wizard_spellbook_{index + 1}") or "").strip()
+        ]
+        prepared_options = (
+            [option for option in level_one_options if option["value"] in selected_spellbook_values]
+            if selected_spellbook_values
+            else level_one_options
+        )
+        for index in range(prepared_count):
+            field_name = f"wizard_prepared_{index + 1}"
+            fields.append(
+                {
+                    "name": field_name,
+                    "label": f"Prepared Spell {index + 1}",
+                    "help_text": "Choose a prepared wizard spell from your selected spellbook spells.",
+                    "options": prepared_options,
+                    "selected": str(values.get(field_name) or "").strip(),
+                    "group_key": "wizard_prepared",
+                    "kind": "spell",
+                }
+            )
+        return fields
+
+    level_one_count = _level_one_spell_selection_count(spell_rules, values)
+    label_prefix = "Known Spell" if spell_mode == "known" else "Prepared Spell"
+    help_text = (
+        f"Choose a {class_name} spell you know."
+        if spell_mode == "known"
+        else f"Choose a {class_name} spell you have prepared."
+    )
+    for index in range(level_one_count):
+        field_name = f"spell_level_one_{index + 1}"
+        fields.append(
+            {
+                "name": field_name,
+                "label": f"{label_prefix} {index + 1}",
+                "help_text": help_text,
+                "options": level_one_options,
+                "selected": str(values.get(field_name) or "").strip(),
+                "group_key": "spell_level_one",
+                "kind": "spell",
+            }
+        )
+    return fields
+
+
+def _build_spell_options_for_class_level(
+    class_name: str,
+    level_key: str,
+    spell_catalog: dict[str, Any],
+) -> list[dict[str, str]]:
+    titles = list(
+        dict(dict(spell_catalog.get("phb_level_one_lists") or {}).get(class_name) or {}).get(str(level_key)) or []
+    )
+    by_title = dict(spell_catalog.get("by_title") or {})
+    options: list[dict[str, str]] = []
+    seen_values: set[str] = set()
+    for title in titles:
+        entry = by_title.get(normalize_lookup(title))
+        value = entry.slug if entry is not None else title
+        label = entry.title if entry is not None else title
+        if value in seen_values:
+            continue
+        seen_values.add(value)
+        options.append(_choice_option(label, value))
+    return options
+
+
+def _level_one_spell_selection_count(spell_rules: dict[str, Any], values: dict[str, str]) -> int:
+    explicit_count = spell_rules.get("level_one_count")
+    if explicit_count is not None:
+        return max(int(explicit_count or 0), 0)
+    ability_key = str(spell_rules.get("ability_key") or "").strip()
+    if ability_key and ability_key in ABILITY_KEYS:
+        modifier = _ability_modifier(_coerce_ability_scores(values).get(ability_key, DEFAULT_ABILITY_SCORE))
+        return max(1 + modifier, 1)
+    return 0
+
+
 def _normalize_preview_values(values: dict[str, str]) -> dict[str, str]:
     normalized = {key: str(value) for key, value in dict(values or {}).items()}
     normalized.setdefault("name", "")
@@ -608,7 +1281,9 @@ def _build_level_one_preview(
     selected_background: SystemsEntryRecord | None,
     class_progression: list[dict[str, Any]],
     subclass_progression: list[dict[str, Any]],
+    equipment_groups: list[dict[str, Any]],
     choice_sections: list[dict[str, Any]],
+    spell_catalog: dict[str, Any],
     values: dict[str, str],
 ) -> dict[str, Any]:
     ability_scores = _coerce_ability_scores(values)
@@ -634,6 +1309,20 @@ def _build_level_one_preview(
         choice_sections=choice_sections,
         selected_choices=selected_choices,
     )
+    equipment_catalog = _build_level_one_equipment_catalog(equipment_groups)
+    spellcasting = (
+        _build_level_one_spellcasting(
+            selected_class=selected_class,
+            selected_subclass=selected_subclass,
+            ability_scores=ability_scores,
+            proficiency_bonus=proficiency_bonus,
+            choice_sections=choice_sections,
+            selected_choices=selected_choices,
+            spell_catalog=spell_catalog,
+        )
+        if selected_class is not None
+        else {"spells": []}
+    )
     feature_names = [
         str(feature.get("name") or feature.get("label") or "").strip()
         for feature in feature_entries
@@ -648,6 +1337,13 @@ def _build_level_one_preview(
         "saving_throws": [_humanize_saving_throw(code) for code in _class_save_proficiencies(selected_class)],
         "languages": list(proficiencies["languages"]),
         "features": feature_names,
+        "equipment": [
+            _describe_equipment_spec(item)
+            for item in equipment_catalog
+            if not bool(item.get("is_currency_only")) and _describe_equipment_spec(item)
+        ],
+        "starting_currency": _format_currency_seed(_collect_currency_seed_from_equipment(equipment_catalog)),
+        "spells": [_summarize_preview_spell(spell) for spell in list(spellcasting.get("spells") or [])],
         "background": selected_background.title if selected_background is not None else "",
         "subclass": selected_subclass.title if selected_subclass is not None else "",
     }
@@ -693,14 +1389,18 @@ def _resolve_builder_choices(
             group_key = str(field.get("group_key") or field_name)
             raw_value = str(values.get(field_name) or "").strip()
             allowed_values = {str(option.get("value") or "").strip() for option in list(field.get("options") or [])}
-            if strict and not raw_value:
-                raise CharacterBuildError(f"{field.get('label') or 'A required choice'} is required.")
-            if raw_value and raw_value not in allowed_values:
-                raise CharacterBuildError(f"{field.get('label') or 'A choice'} is not valid for the current selection.")
+            if not raw_value:
+                if strict:
+                    raise CharacterBuildError(f"{field.get('label') or 'A required choice'} is required.")
+                continue
+            if raw_value not in allowed_values:
+                if strict:
+                    raise CharacterBuildError(f"{field.get('label') or 'A choice'} is not valid for the current selection.")
+                continue
             if raw_value:
                 grouped_values.setdefault(group_key, []).append(raw_value)
         for group_key, group_values in grouped_values.items():
-            if len(group_values) != len(set(group_values)):
+            if strict and len(group_values) != len(set(group_values)):
                 raise CharacterBuildError("Choose distinct options when a choice group grants more than one selection.")
             selected_choices[group_key] = group_values
 
@@ -1114,8 +1814,12 @@ def _build_level_one_profile(
 def _build_level_one_spellcasting(
     *,
     selected_class: SystemsEntryRecord,
+    selected_subclass: SystemsEntryRecord | None,
     ability_scores: dict[str, int],
     proficiency_bonus: int,
+    choice_sections: list[dict[str, Any]],
+    selected_choices: dict[str, list[str]],
+    spell_catalog: dict[str, Any],
 ) -> dict[str, Any]:
     ability_name = SPELLCASTING_ABILITY_BY_CLASS.get(selected_class.title)
     if not ability_name:
@@ -1129,14 +1833,338 @@ def _build_level_one_spellcasting(
         }
     ability_key = next(key for key, label in ABILITY_LABELS.items() if label == ability_name)
     modifier = _ability_modifier(ability_scores[ability_key])
+    spell_payloads = _build_level_one_spell_payloads(
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        choice_sections=choice_sections,
+        selected_choices=selected_choices,
+        spell_catalog=spell_catalog,
+    )
     return {
         "spellcasting_class": selected_class.title,
         "spellcasting_ability": ability_name,
         "spell_save_dc": 8 + proficiency_bonus + modifier,
         "spell_attack_bonus": proficiency_bonus + modifier,
         "slot_progression": list(LEVEL_ONE_SPELL_SLOTS_BY_CLASS.get(selected_class.title, [])),
-        "spells": [],
+        "spells": spell_payloads,
     }
+
+
+def _build_level_one_spell_payloads(
+    *,
+    selected_class: SystemsEntryRecord,
+    selected_subclass: SystemsEntryRecord | None,
+    choice_sections: list[dict[str, Any]],
+    selected_choices: dict[str, list[str]],
+    spell_catalog: dict[str, Any],
+) -> list[dict[str, Any]]:
+    spell_rules = LEVEL_ONE_SPELL_RULES_BY_CLASS.get(selected_class.title)
+    if not spell_rules:
+        return []
+
+    spells_by_key: dict[str, dict[str, Any]] = {}
+    for selected_value in selected_choices.get("spell_cantrips", []):
+        _add_spell_to_payloads(
+            spells_by_key,
+            selected_value=selected_value,
+            spell_catalog=spell_catalog,
+            mark="Cantrip",
+        )
+
+    spell_mode = str(spell_rules.get("level_one_mode") or "")
+    if spell_mode == "known":
+        for selected_value in selected_choices.get("spell_level_one", []):
+            _add_spell_to_payloads(
+                spells_by_key,
+                selected_value=selected_value,
+                spell_catalog=spell_catalog,
+                mark="Known",
+            )
+    elif spell_mode == "prepared":
+        for selected_value in selected_choices.get("spell_level_one", []):
+            _add_spell_to_payloads(
+                spells_by_key,
+                selected_value=selected_value,
+                spell_catalog=spell_catalog,
+                mark="Prepared",
+            )
+    elif spell_mode == "wizard":
+        prepared_values = set(selected_choices.get("wizard_prepared", []))
+        for selected_value in selected_choices.get("wizard_spellbook", []):
+            _add_spell_to_payloads(
+                spells_by_key,
+                selected_value=selected_value,
+                spell_catalog=spell_catalog,
+                mark="Prepared + Spellbook" if selected_value in prepared_values else "Spellbook",
+            )
+
+    subclass_key = normalize_lookup(selected_subclass.title) if selected_subclass is not None else ""
+    for spell_title in LEVEL_ONE_ALWAYS_PREPARED_SPELLS_BY_SUBCLASS.get(subclass_key, []):
+        _add_spell_to_payloads(
+            spells_by_key,
+            selected_value=spell_title,
+            spell_catalog=spell_catalog,
+            is_always_prepared=True,
+        )
+
+    return list(spells_by_key.values())
+
+
+def _add_spell_to_payloads(
+    spells_by_key: dict[str, dict[str, Any]],
+    *,
+    selected_value: str,
+    spell_catalog: dict[str, Any],
+    mark: str = "",
+    is_always_prepared: bool = False,
+) -> None:
+    spell_entry = _resolve_spell_entry(selected_value, spell_catalog)
+    spell_payload = _build_spell_payload(selected_value, spell_entry)
+    payload_key = str((spell_entry.slug if spell_entry is not None else selected_value) or "").strip()
+    if not payload_key:
+        return
+
+    existing_payload = spells_by_key.get(payload_key)
+    if existing_payload is None:
+        if mark:
+            spell_payload["mark"] = mark
+        if is_always_prepared:
+            spell_payload["is_always_prepared"] = True
+        spells_by_key[payload_key] = spell_payload
+        return
+
+    existing_payload["mark"] = _merge_spell_mark(
+        str(existing_payload.get("mark") or "").strip(),
+        mark,
+    )
+    if is_always_prepared:
+        existing_payload["is_always_prepared"] = True
+
+
+def _resolve_spell_entry(
+    selected_value: str,
+    spell_catalog: dict[str, Any],
+) -> SystemsEntryRecord | None:
+    clean_value = str(selected_value or "").strip()
+    if not clean_value:
+        return None
+    by_slug = dict(spell_catalog.get("by_slug") or {})
+    if clean_value in by_slug:
+        return by_slug[clean_value]
+    return dict(spell_catalog.get("by_title") or {}).get(normalize_lookup(clean_value))
+
+
+def _build_spell_payload(
+    selected_value: str,
+    spell_entry: SystemsEntryRecord | None,
+) -> dict[str, Any]:
+    metadata = dict((spell_entry.metadata if spell_entry is not None else {}) or {})
+    title = spell_entry.title if spell_entry is not None else str(selected_value or "").strip()
+    source = spell_entry.source_id if spell_entry is not None else PHB_SOURCE_ID
+    reference = (
+        f"p. {spell_entry.source_page}"
+        if spell_entry is not None and str(spell_entry.source_page or "").strip()
+        else ""
+    )
+    return {
+        "name": title,
+        "casting_time": _format_spell_casting_time(metadata.get("casting_time")),
+        "range": _format_spell_range(metadata.get("range")),
+        "duration": _format_spell_duration(metadata.get("duration")),
+        "components": _format_spell_components(metadata.get("components")),
+        "save_or_hit": "",
+        "source": source,
+        "reference": reference,
+        "mark": "",
+        "is_always_prepared": False,
+        "is_ritual": False,
+        "systems_ref": _systems_ref_from_entry(spell_entry),
+    }
+
+
+def _merge_spell_mark(existing_mark: str, new_mark: str) -> str:
+    marks: list[str] = []
+    for candidate in (existing_mark, new_mark):
+        clean_candidate = str(candidate or "").strip()
+        if not clean_candidate:
+            continue
+        for part in [part.strip() for part in clean_candidate.split("+")]:
+            if part and part not in marks:
+                marks.append(part)
+    return " + ".join(marks)
+
+
+def _summarize_preview_spell(spell: dict[str, Any]) -> str:
+    name = str(spell.get("name") or "").strip()
+    badges = []
+    if bool(spell.get("is_always_prepared")):
+        badges.append("Always prepared")
+    mark = str(spell.get("mark") or "").strip()
+    if mark:
+        badges.append(mark)
+    if not name:
+        return ""
+    if badges:
+        return f"{name} ({', '.join(badges)})"
+    return name
+
+
+def _format_spell_casting_time(value: Any) -> str:
+    blocks = value if isinstance(value, list) else [value]
+    parts: list[str] = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            cleaned = _clean_embedded_text(str(block or ""))
+            if cleaned:
+                parts.append(cleaned)
+            continue
+        amount = int(block.get("number") or 1)
+        unit = str(block.get("unit") or "").replace("_", " ").strip()
+        if not unit:
+            continue
+        label = unit if amount == 1 else f"{unit}s"
+        parts.append(f"{amount} {label}")
+    return ", ".join(parts) or "--"
+
+
+def _format_spell_range(value: Any) -> str:
+    if isinstance(value, str):
+        return _clean_embedded_text(value) or "--"
+    if not isinstance(value, dict):
+        return "--"
+    range_type = str(value.get("type") or "").strip().lower()
+    if range_type == "point":
+        distance = dict(value.get("distance") or {})
+        distance_type = str(distance.get("type") or "").strip().lower()
+        amount = distance.get("amount")
+        if distance_type == "self":
+            return "Self"
+        if distance_type == "touch":
+            return "Touch"
+        if amount is not None:
+            if distance_type == "feet":
+                return f"{int(amount)} feet"
+            if distance_type:
+                return f"{amount} {distance_type}"
+            return str(amount)
+    if range_type == "special":
+        return "Special"
+    if range_type == "self":
+        return "Self"
+    return "--"
+
+
+def _format_spell_duration(value: Any) -> str:
+    blocks = value if isinstance(value, list) else [value]
+    parts: list[str] = []
+    for block in blocks:
+        if isinstance(block, str):
+            cleaned = _clean_embedded_text(block)
+            if cleaned:
+                parts.append(cleaned)
+            continue
+        if not isinstance(block, dict):
+            continue
+        duration_type = str(block.get("type") or "").strip().lower()
+        if duration_type == "instant":
+            parts.append("Instantaneous")
+            continue
+        if duration_type == "permanent":
+            parts.append("Permanent")
+            continue
+        if duration_type == "special":
+            parts.append("Special")
+            continue
+        if duration_type == "timed":
+            duration = dict(block.get("duration") or {})
+            amount = int(duration.get("amount") or 1)
+            unit = str(duration.get("type") or "").replace("_", " ").strip()
+            if unit:
+                label = unit if amount == 1 else f"{unit}s"
+                prefix = "Concentration, up to " if bool(block.get("concentration")) else ""
+                parts.append(f"{prefix}{amount} {label}")
+    return ", ".join(parts) or "--"
+
+
+def _format_spell_components(value: Any) -> str:
+    if isinstance(value, str):
+        return _clean_embedded_text(value) or "--"
+    if not isinstance(value, dict):
+        return "--"
+    parts: list[str] = []
+    if value.get("v"):
+        parts.append("V")
+    if value.get("s"):
+        parts.append("S")
+    material = value.get("m")
+    if material:
+        if isinstance(material, str):
+            parts.append(f"M ({_clean_embedded_text(material)})")
+        else:
+            parts.append("M")
+    return ", ".join(parts) or "--"
+
+
+def _humanize_item_reference(value: str) -> str:
+    base_value = str(value or "").split("|", 1)[0].strip()
+    if not base_value:
+        return ""
+    if any(character.isupper() for character in base_value):
+        return base_value
+    return _humanize_words(base_value)
+
+
+def _format_weight_value(value: Any) -> str:
+    if value is None or value == "":
+        return ""
+    if isinstance(value, int):
+        return f"{value} lb."
+    if isinstance(value, float):
+        return f"{int(value) if value.is_integer() else value} lb."
+    cleaned = _clean_embedded_text(str(value))
+    return cleaned
+
+
+def _currency_seed_from_cp(value: Any) -> dict[str, int]:
+    try:
+        total_cp = int(value or 0)
+    except (TypeError, ValueError):
+        return {}
+    if total_cp <= 0:
+        return {}
+    gp, remainder = divmod(total_cp, 100)
+    sp, cp = divmod(remainder, 10)
+    return {"cp": cp, "sp": sp, "ep": 0, "gp": gp, "pp": 0}
+
+
+def _merge_currency_seed(existing: dict[str, int], new: dict[str, int]) -> dict[str, int]:
+    return {
+        denomination: int(existing.get(denomination) or 0) + int(new.get(denomination) or 0)
+        for denomination in ("cp", "sp", "ep", "gp", "pp")
+    }
+
+
+def _collect_currency_seed_from_equipment(equipment_catalog: list[dict[str, Any]]) -> dict[str, int]:
+    totals = {"cp": 0, "sp": 0, "ep": 0, "gp": 0, "pp": 0}
+    for item in equipment_catalog:
+        totals = _merge_currency_seed(totals, dict(item.get("currency") or {}))
+    return totals
+
+
+def _format_currency_seed(currency: dict[str, int]) -> str:
+    parts = [
+        f"{int(currency.get(denomination) or 0)} {denomination}"
+        for denomination in ("pp", "gp", "ep", "sp", "cp")
+        if int(currency.get(denomination) or 0) > 0
+    ]
+    return ", ".join(parts)
+
+
+def _format_contained_value(value: Any) -> str:
+    label = _format_currency_seed(_currency_seed_from_cp(value))
+    if not label:
+        return ""
+    return f"Contains {label}."
 
 
 def _extract_class_armor_proficiencies(selected_class: SystemsEntryRecord | None) -> list[str]:
