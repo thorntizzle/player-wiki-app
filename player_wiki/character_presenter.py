@@ -214,7 +214,11 @@ def present_character_detail(
             spells.append(
                 {
                     "name": str(spell.get("name") or "Spell"),
-                    "href": build_systems_entry_href(campaign.slug, spell.get("systems_ref")),
+                    "href": build_character_entry_href(
+                        campaign.slug,
+                        systems_ref=spell.get("systems_ref"),
+                        page_ref=spell.get("page_ref"),
+                    ),
                     "casting_time": str(spell.get("casting_time") or "--"),
                     "range": str(spell.get("range") or "--"),
                     "duration": str(spell.get("duration") or "--"),
@@ -269,7 +273,11 @@ def present_character_detail(
         feature_groups_ordered[group_title].append(
             {
                 "name": str(feature.get("name") or "Feature"),
-                "href": build_systems_entry_href(campaign.slug, feature.get("systems_ref")),
+                "href": build_character_entry_href(
+                    campaign.slug,
+                    systems_ref=feature.get("systems_ref"),
+                    page_ref=feature.get("page_ref"),
+                ),
                 "metadata": [part for part in metadata if part],
                 "description_html": resolve_feature_description_html(
                     campaign,
@@ -282,7 +290,11 @@ def present_character_detail(
     attacks = [
         {
             "name": str(attack.get("name") or "Attack"),
-            "href": build_systems_entry_href(campaign.slug, attack.get("systems_ref")),
+            "href": build_character_entry_href(
+                campaign.slug,
+                systems_ref=attack.get("systems_ref"),
+                page_ref=attack.get("page_ref"),
+            ),
             "attack_bonus": format_signed(attack.get("attack_bonus")),
             "damage": str(attack.get("damage") or "--"),
             "category": humanize_value(attack.get("category")),
@@ -295,9 +307,14 @@ def present_character_detail(
         {
             "id": str(item.get("id") or ""),
             "name": str(item.get("name") or "Item"),
-            "href": build_systems_entry_href(
+            "href": build_character_entry_href(
                 campaign.slug,
-                equipment_catalog_lookup.get(str(item.get("catalog_ref") or item.get("id") or ""), {}).get("systems_ref"),
+                systems_ref=equipment_catalog_lookup.get(str(item.get("catalog_ref") or item.get("id") or ""), {}).get(
+                    "systems_ref"
+                ),
+                page_ref=equipment_catalog_lookup.get(str(item.get("catalog_ref") or item.get("id") or ""), {}).get(
+                    "page_ref"
+                ),
             ),
             "quantity": int(item.get("quantity") or 0),
             "weight": str(item.get("weight") or "").strip(),
@@ -466,6 +483,28 @@ def build_systems_entry_href(campaign_slug: str, systems_ref: Any) -> str:
     if not slug or not campaign_slug.strip():
         return ""
     return f"/campaigns/{campaign_slug}/systems/entries/{slug}"
+
+
+def build_campaign_page_href(campaign_slug: str, page_ref: Any) -> str:
+    payload = dict(page_ref or {})
+    slug = str(payload.get("slug") or payload.get("page_slug") or "").strip()
+    if not slug:
+        slug = str(page_ref or "").strip()
+    if not slug or not campaign_slug.strip():
+        return ""
+    return f"/campaigns/{campaign_slug}/pages/{slug}"
+
+
+def build_character_entry_href(
+    campaign_slug: str,
+    *,
+    systems_ref: Any = None,
+    page_ref: Any = None,
+) -> str:
+    systems_href = build_systems_entry_href(campaign_slug, systems_ref)
+    if systems_href:
+        return systems_href
+    return build_campaign_page_href(campaign_slug, page_ref)
 
 
 def resolve_feature_description_html(

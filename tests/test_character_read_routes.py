@@ -393,6 +393,56 @@ def test_character_sheet_renders_systems_links_when_present(app, client, sign_in
     assert 'View source entry' not in equipment_html
 
 
+def test_character_sheet_renders_campaign_page_links_when_present(app, client, sign_in, users):
+    def _mutate(payload: dict) -> None:
+        attacks = list(payload.get("attacks") or [])
+        if attacks:
+            attacks[0]["name"] = "Consecrated Huran Blade"
+            attacks[0]["systems_ref"] = None
+            attacks[0]["page_ref"] = {
+                "slug": "items/consecrated-huran-blade",
+                "title": "Consecrated Huran Blade",
+            }
+        payload["attacks"] = attacks
+
+        equipment_catalog = list(payload.get("equipment_catalog") or [])
+        if equipment_catalog:
+            equipment_catalog[0]["name"] = "Consecrated Huran Blade"
+            equipment_catalog[0]["systems_ref"] = None
+            equipment_catalog[0]["page_ref"] = {
+                "slug": "items/consecrated-huran-blade",
+                "title": "Consecrated Huran Blade",
+            }
+        payload["equipment_catalog"] = equipment_catalog
+
+    def _mutate_state(payload: dict) -> None:
+        inventory = list(payload.get("inventory") or [])
+        if inventory:
+            inventory[0] = {
+                **dict(inventory[0]),
+                "name": "Consecrated Huran Blade",
+            }
+        payload["inventory"] = inventory
+
+    _write_character_definition(app, "arden-march", _mutate)
+    _write_character_state(app, "arden-march", _mutate_state)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    quick_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=quick")
+    equipment_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=equipment")
+
+    assert quick_response.status_code == 200
+    assert equipment_response.status_code == 200
+
+    quick_html = quick_response.get_data(as_text=True)
+    equipment_html = equipment_response.get_data(as_text=True)
+
+    assert '/campaigns/linden-pass/pages/items/consecrated-huran-blade' in quick_html
+    assert '/campaigns/linden-pass/pages/items/consecrated-huran-blade' in equipment_html
+    assert '>Consecrated Huran Blade</a>' in quick_html
+    assert '>Consecrated Huran Blade</a>' in equipment_html
+
+
 def test_character_sheet_shows_systems_feature_text_inline_and_hides_source_metadata(
     app, client, sign_in, users, monkeypatch
 ):
