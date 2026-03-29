@@ -462,15 +462,17 @@ def create_app() -> Flask:
 
     def redirect_to_character_mode(campaign_slug: str, character_slug: str, *, anchor: str | None = None):
         read_subpage = normalize_character_read_subpage(request.values.get("page", ""))
+        mode = request.values.get("mode", "").strip().lower()
+        route_values = {
+            "campaign_slug": campaign_slug,
+            "character_slug": character_slug,
+            "page": read_subpage,
+            "_anchor": anchor,
+        }
+        if mode == "session":
+            route_values["mode"] = "session"
         return redirect(
-            url_for(
-                "character_read_view",
-                campaign_slug=campaign_slug,
-                character_slug=character_slug,
-                mode="session",
-                page=read_subpage,
-                _anchor=anchor,
-            )
+            url_for("character_read_view", **route_values)
         )
 
     def redirect_to_campaign_session(
@@ -661,6 +663,7 @@ def create_app() -> Flask:
                     "character_read_view",
                     campaign_slug=campaign.slug,
                     character_slug=character["slug"],
+                    mode="session" if is_session_mode else None,
                     page=slug,
                 ),
                 "is_active": slug == character_subpage,
@@ -3241,6 +3244,7 @@ def create_app() -> Flask:
             abort(403)
 
         notes_markdown = request.form.get("player_notes_markdown", "")
+        return_to_session_mode = request.form.get("mode", "").strip().lower() == "session"
         try:
             expected_revision = parse_expected_revision()
             get_character_state_service().update_player_notes(
@@ -3255,7 +3259,7 @@ def create_app() -> Flask:
                 campaign_slug,
                 character_slug,
                 notes_draft=notes_markdown,
-                force_session_mode=True,
+                force_session_mode=return_to_session_mode,
                 status_code=409,
             )
         except (CharacterStateValidationError, ValueError) as exc:
@@ -3264,7 +3268,7 @@ def create_app() -> Flask:
                 campaign_slug,
                 character_slug,
                 notes_draft=notes_markdown,
-                force_session_mode=True,
+                force_session_mode=return_to_session_mode,
                 status_code=400,
             )
 
@@ -3284,6 +3288,7 @@ def create_app() -> Flask:
 
         physical_description_markdown = request.form.get("physical_description_markdown", "")
         background_markdown = request.form.get("background_markdown", "")
+        return_to_session_mode = request.form.get("mode", "").strip().lower() == "session"
         try:
             expected_revision = parse_expected_revision()
             get_character_state_service().update_personal_details(
@@ -3300,7 +3305,7 @@ def create_app() -> Flask:
                 character_slug,
                 physical_description_draft=physical_description_markdown,
                 background_draft=background_markdown,
-                force_session_mode=True,
+                force_session_mode=return_to_session_mode,
                 status_code=409,
             )
         except (CharacterStateValidationError, ValueError) as exc:
@@ -3310,7 +3315,7 @@ def create_app() -> Flask:
                 character_slug,
                 physical_description_draft=physical_description_markdown,
                 background_draft=background_markdown,
-                force_session_mode=True,
+                force_session_mode=return_to_session_mode,
                 status_code=400,
             )
 

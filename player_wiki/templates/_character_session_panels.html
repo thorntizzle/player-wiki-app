@@ -22,6 +22,7 @@
           action="{{ url_for('character_session_rest', campaign_slug=campaign.slug, character_slug=character.slug, rest_type=rest_preview.rest_type) }}"
         >
           <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+          <input type="hidden" name="mode" value="session">
           <input type="hidden" name="page" value="{{ character_subpage }}">
           <input type="hidden" name="confirm_rest" value="1">
           <button type="submit">{{ rest_preview.label }}</button>
@@ -33,7 +34,7 @@
     </section>
   {% endif %}
 
-  {% if character.resources %}
+  {% if show_quick_sections and character.resources %}
     <section class="read-section" id="session-resources">
       <div class="section-heading">
         <h2>Resources</h2>
@@ -47,6 +48,7 @@
               action="{{ url_for('character_session_resource', campaign_slug=campaign.slug, character_slug=character.slug, resource_id=resource.id) }}"
             >
               <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+              <input type="hidden" name="mode" value="session">
               <input type="hidden" name="page" value="{{ character_subpage }}">
               <div class="section-heading">
                 <h3>{{ resource.label }}</h3>
@@ -78,7 +80,7 @@
     </section>
   {% endif %}
 
-  {% if character.spellcasting and character.spellcasting.slots %}
+  {% if show_quick_sections and character.spellcasting and character.spellcasting.slots %}
     <section class="read-section" id="session-spell-slots">
       <div class="section-heading">
         <h2>Spell slots</h2>
@@ -92,6 +94,7 @@
               action="{{ url_for('character_session_spell_slots', campaign_slug=campaign.slug, character_slug=character.slug, level=slot.level) }}"
             >
               <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+              <input type="hidden" name="mode" value="session">
               <input type="hidden" name="page" value="{{ character_subpage }}">
               <div class="section-heading">
                 <h3>{{ slot.label }}</h3>
@@ -113,7 +116,7 @@
     </section>
   {% endif %}
 
-  {% if character.inventory %}
+  {% if show_equipment_sections and character.inventory %}
     <section class="read-section" id="session-inventory">
       <div class="section-heading">
         <h2>Inventory</h2>
@@ -127,6 +130,7 @@
               action="{{ url_for('character_session_inventory', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
             >
               <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+              <input type="hidden" name="mode" value="session">
               <input type="hidden" name="page" value="{{ character_subpage }}">
               <div class="inventory-row__header">
                 <h3>{{ item.name }}</h3>
@@ -151,6 +155,7 @@
     </section>
   {% endif %}
 
+  {% if show_equipment_sections %}
   <section class="read-section" id="session-currency">
     <div class="section-heading">
       <h2>Currency</h2>
@@ -162,6 +167,7 @@
         action="{{ url_for('character_session_currency', campaign_slug=campaign.slug, character_slug=character.slug) }}"
       >
         <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+        <input type="hidden" name="mode" value="session">
         <input type="hidden" name="page" value="{{ character_subpage }}">
         {% for coin in ("cp", "sp", "ep", "gp", "pp") %}
           <label class="session-field">
@@ -173,7 +179,9 @@
       </form>
     </article>
   </section>
+  {% endif %}
 
+  {% if show_personal_sections %}
   <section class="read-section" id="session-personal">
     <div class="section-heading">
       <h2>Personal</h2>
@@ -185,6 +193,7 @@
         action="{{ url_for('character_session_personal', campaign_slug=campaign.slug, character_slug=character.slug) }}"
       >
         <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+        <input type="hidden" name="mode" value="session">
         <input type="hidden" name="page" value="{{ character_subpage }}">
         <label class="field">
           <span>Physical Description</span>
@@ -198,7 +207,9 @@
       </form>
     </article>
   </section>
+  {% endif %}
 
+  {% if show_note_sections %}
   <section class="read-section" id="session-notes">
     <div class="section-heading">
       <h2>Note</h2>
@@ -210,6 +221,7 @@
         action="{{ url_for('character_session_notes', campaign_slug=campaign.slug, character_slug=character.slug) }}"
       >
         <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+        <input type="hidden" name="mode" value="session">
         <input type="hidden" name="page" value="{{ character_subpage }}">
         <label class="field">
           <span>Markdown note</span>
@@ -219,4 +231,5 @@
       </form>
     </article>
   </section>
+  {% endif %}
 </section>

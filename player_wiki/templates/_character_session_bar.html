@@ -11,6 +11,7 @@
     action="{{ url_for('character_session_vitals', campaign_slug=campaign.slug, character_slug=character.slug) }}"
   >
     <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+    <input type="hidden" name="mode" value="session">
     <input type="hidden" name="page" value="{{ character_subpage }}">
     <label class="session-field">
       <span>Current HP</span>

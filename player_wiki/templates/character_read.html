@@ -52,21 +52,19 @@
         {% endif %}
       </header>
 
-      {% if not is_session_mode %}
-        <nav class="character-subpage-nav" aria-label="Character subpages">
-          {% for subpage in character_subpages %}
-            <a class="{% if subpage.is_active %}button-link{% else %}ghost-button{% endif %}" href="{{ subpage.href }}">
-              {{ subpage.label }}
-            </a>
-          {% endfor %}
-        </nav>
-      {% endif %}
+      <nav class="character-subpage-nav" aria-label="Character subpages">
+        {% for subpage in character_subpages %}
+          <a class="{% if subpage.is_active %}button-link{% else %}ghost-button{% endif %}" href="{{ subpage.href }}">
+            {{ subpage.label }}
+          </a>
+        {% endfor %}
+      </nav>
 
-      {% set show_quick_sections = is_session_mode or character_subpage == 'quick' %}
-      {% set show_feature_sections = is_session_mode or character_subpage == 'features' %}
-      {% set show_equipment_sections = is_session_mode or character_subpage == 'equipment' %}
-      {% set show_personal_sections = is_session_mode or character_subpage == 'personal' %}
-      {% set show_note_sections = is_session_mode or character_subpage == 'notes' %}
+      {% set show_quick_sections = character_subpage == 'quick' %}
+      {% set show_feature_sections = character_subpage == 'features' %}
+      {% set show_equipment_sections = character_subpage == 'equipment' %}
+      {% set show_personal_sections = character_subpage == 'personal' %}
+      {% set show_note_sections = character_subpage == 'notes' %}
 
       {% if is_session_mode %}
         {% include "_character_session_bar.html" %}

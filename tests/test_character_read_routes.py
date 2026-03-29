@@ -72,14 +72,16 @@ def test_owner_player_can_open_session_mode_when_character_visibility_allows_pla
     set_campaign_visibility("linden-pass", characters="players")
     sign_in(users["owner"]["email"], users["owner"]["password"])
 
-    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session")
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=quick")
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert "Active session" in html
     assert "Save vitals" in html
-    assert "Save personal details" in html
     assert "Back to read mode" in html
+    assert "?mode=session&amp;page=quick" in html
+    assert "?mode=session&amp;page=personal" in html
+    assert "Save personal details" not in html
 
 
 def test_unassigned_player_falls_back_to_read_mode_when_character_visibility_allows_players(
@@ -197,6 +199,45 @@ def test_character_sheet_personal_and_notes_subpages_render_markdown_fields_and_
     assert "Actions: Bonus Actions" not in notes_html
     assert "Second Wind" not in notes_html
     assert "No notes yet." not in notes_html
+
+
+def test_read_mode_note_save_stays_in_read_mode(client, sign_in, users, get_character, set_campaign_visibility):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    record = get_character("arden-march")
+    assert record is not None
+
+    response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/session/notes",
+        data={
+            "expected_revision": record.state_record.revision,
+            "page": "notes",
+            "player_notes_markdown": "Read mode note save.",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/campaigns/linden-pass/characters/arden-march?page=notes#session-notes")
+    assert "mode=session" not in response.headers["Location"]
+
+
+def test_session_mode_uses_same_subpage_ui_as_read_mode(client, sign_in, users, set_campaign_visibility):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=personal")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Active session" in html
+    assert "?mode=session&amp;page=quick" in html
+    assert "?mode=session&amp;page=personal" in html
+    assert "?mode=session&amp;page=notes" in html
+    assert "Save personal details" in html
+    assert "Save note" not in html
+    assert "At a glance" not in html
 
 
 def test_character_sheet_renders_systems_links_when_present(app, client, sign_in, users):
