@@ -5,6 +5,8 @@ from typing import Any
 
 from .character_models import CharacterDefinition
 
+MANAGED_CUSTOM_TRACKER_PREFIX = "manual-feature-tracker:"
+
 
 class CharacterStateValidationError(ValueError):
     pass
@@ -129,6 +131,8 @@ def merge_state_with_definition(
     for resource in existing_resources:
         resource_id = str(resource.get("id") or "").strip()
         if resource_id and resource_id in template_resource_ids:
+            continue
+        if resource_id.startswith(MANAGED_CUSTOM_TRACKER_PREFIX):
             continue
         merged_resources.append(deepcopy(resource))
 

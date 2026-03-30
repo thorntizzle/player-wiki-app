@@ -7,7 +7,7 @@
     <p class="eyebrow">Character editor</p>
     <h1>Edit {{ character.name }}</h1>
     <p class="lede">
-      Manage campaign-time adjustments that are outside the native level-up flow. This slice covers languages, proficiencies, custom features, manual equipment additions, and campaign-page links for custom sheet content.
+      Manage campaign-time adjustments that are outside the native level-up flow. This slice covers proficiencies, persistent reference text, custom features with optional trackers, manual equipment additions, and campaign-page links for custom sheet content.
     </p>
     <div class="hero-actions">
       <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">Back to sheet</a>
@@ -40,9 +40,26 @@
 
       <section class="read-section">
         <div class="section-heading">
+          <h2>Reference Text</h2>
+        </div>
+        <div class="detail-grid character-edit-grid">
+          {% for field in edit_context.reference_fields %}
+            <article class="detail-card">
+              <label class="field">
+                <span>{{ field.label }}</span>
+                <textarea name="{{ field.name }}" rows="6">{{ field.value }}</textarea>
+              </label>
+              <p class="meta">{{ field.help_text }}</p>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="read-section">
+        <div class="section-heading">
           <h2>Custom Features</h2>
         </div>
-        <p class="meta">Use this for campaign boons, curses, training rewards, or other custom rules text. Leave a row blank to omit it.</p>
+        <p class="meta">Use this for campaign boons, curses, training rewards, or other custom rules text. Optional tracker fields let the sheet and combat-facing state treat the feature as a limited-use resource.</p>
         <div class="character-edit-stack">
           {% for row in edit_context.feature_rows %}
             <article class="detail-card character-edit-row">
@@ -74,6 +91,21 @@
                 <span>Description (Markdown)</span>
                 <textarea name="custom_feature_description_{{ row.index }}" rows="6">{{ row.description_markdown }}</textarea>
               </label>
+              <div class="character-edit-row__grid">
+                <label class="field">
+                  <span>Uses / Max</span>
+                  <input type="number" name="custom_feature_resource_max_{{ row.index }}" value="{{ row.resource_max }}" min="0" placeholder="Optional">
+                </label>
+                <label class="field">
+                  <span>Reset On</span>
+                  <select name="custom_feature_resource_reset_on_{{ row.index }}">
+                    {% for option in edit_context.resource_reset_options %}
+                      <option value="{{ option.value }}"{% if option.value == row.resource_reset_on %} selected{% endif %}>{{ option.label }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+              </div>
+              <p class="meta">Leave Uses / Max blank for a non-tracked feature. Existing spent values are preserved when you change the limit.</p>
             </article>
           {% endfor %}
         </div>

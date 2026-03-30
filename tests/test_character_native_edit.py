@@ -14,7 +14,9 @@ def test_owner_player_can_open_native_character_edit_page(
     assert "Edit Arden March" in html
     assert "Save character edits" in html
     assert "Languages" in html
+    assert "Reference Text" in html
     assert "Custom Features" in html
+    assert "Uses / Max" in html
     assert "Manual Equipment" in html
     assert "Linked Page" in html
     assert "Stormglass Compass | Items" in html
@@ -186,3 +188,110 @@ def test_stale_revision_is_rejected_for_native_character_edits(
     ]
     assert any(item["name"] == "Storm Token" for item in manual_items)
     assert "Dwarvish" not in record.definition.proficiencies["languages"]
+
+
+def test_native_character_edits_can_manage_reference_text_and_feature_trackers(
+    client, sign_in, users, get_character, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    record = get_character("arden-march")
+    assert record is not None
+
+    first_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "Light Armor",
+            "weapon_proficiencies_text": "Simple Weapons",
+            "tool_proficiencies_text": "Thieves' Tools",
+            "biography_markdown": "Raised on the storm coast.",
+            "personality_markdown": "- Calm under pressure",
+            "additional_notes_markdown": "Keeps a weather eye on the harbor.",
+            "allies_and_organizations_markdown": "Harbor Wardens",
+            "custom_feature_name_1": "Blessing of the Tide",
+            "custom_feature_activation_type_1": "bonus_action",
+            "custom_feature_description_1": "Call on the tide to steady your footing.",
+            "custom_feature_resource_max_1": "3",
+            "custom_feature_resource_reset_on_1": "long_rest",
+        },
+        follow_redirects=False,
+    )
+
+    assert first_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    assert record.definition.profile["biography_markdown"] == "Raised on the storm coast."
+    assert record.definition.profile["personality_markdown"] == "- Calm under pressure"
+    assert record.definition.reference_notes["additional_notes_markdown"] == "Keeps a weather eye on the harbor."
+    assert record.definition.reference_notes["allies_and_organizations_markdown"] == "Harbor Wardens"
+
+    custom_feature = next(
+        feature
+        for feature in record.definition.features
+        if feature.get("category") == "custom_feature" and feature.get("name") == "Blessing of the Tide"
+    )
+    tracker_ref = str(custom_feature.get("tracker_ref") or "")
+    assert tracker_ref.startswith("manual-feature-tracker:")
+
+    tracker_template = next(
+        template for template in record.definition.resource_templates if template.get("id") == tracker_ref
+    )
+    assert tracker_template["label"] == "Blessing of the Tide"
+    assert tracker_template["max"] == 3
+    assert tracker_template["reset_on"] == "long_rest"
+
+    resource_state = next(
+        resource for resource in record.state_record.state["resources"] if resource.get("id") == tracker_ref
+    )
+    assert resource_state["label"] == "Blessing of the Tide"
+    assert resource_state["current"] == 3
+    assert resource_state["max"] == 3
+    assert resource_state["reset_on"] == "long_rest"
+
+    notes_response = client.get("/campaigns/linden-pass/characters/arden-march?page=notes")
+    assert notes_response.status_code == 200
+    notes_html = notes_response.get_data(as_text=True)
+    assert "Raised on the storm coast." in notes_html
+    assert "Harbor Wardens" in notes_html
+
+    features_response = client.get("/campaigns/linden-pass/characters/arden-march?page=features")
+    assert features_response.status_code == 200
+    features_html = features_response.get_data(as_text=True)
+    assert "Blessing of the Tide: 3 / 3 (Long Rest)" in features_html
+
+    second_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "Light Armor",
+            "weapon_proficiencies_text": "Simple Weapons",
+            "tool_proficiencies_text": "Thieves' Tools",
+            "biography_markdown": "Raised on the storm coast.",
+            "personality_markdown": "- Calm under pressure",
+            "additional_notes_markdown": "Keeps a weather eye on the harbor.",
+            "allies_and_organizations_markdown": "Harbor Wardens",
+            "custom_feature_id_1": custom_feature["id"],
+            "custom_feature_name_1": "",
+            "custom_feature_activation_type_1": "bonus_action",
+            "custom_feature_description_1": "",
+            "custom_feature_resource_max_1": "",
+            "custom_feature_resource_reset_on_1": "manual",
+        },
+        follow_redirects=False,
+    )
+
+    assert second_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    assert all(
+        feature.get("name") != "Blessing of the Tide"
+        for feature in record.definition.features
+    )
+    assert all(template.get("id") != tracker_ref for template in record.definition.resource_templates)
+    assert all(resource.get("id") != tracker_ref for resource in record.state_record.state["resources"])

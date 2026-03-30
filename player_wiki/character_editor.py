@@ -8,9 +8,10 @@ from .auth_store import isoformat, utcnow
 from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import slugify
 
-CHARACTER_EDITOR_VERSION = "2026-03-29.01"
+CHARACTER_EDITOR_VERSION = "2026-03-30.01"
 CUSTOM_FEATURE_CATEGORY = "custom_feature"
 CUSTOM_EQUIPMENT_SOURCE_KIND = "manual_edit"
+CUSTOM_FEATURE_TRACKER_PREFIX = "manual-feature-tracker"
 MIN_CUSTOM_FEATURE_ROWS = 3
 MIN_CUSTOM_EQUIPMENT_ROWS = 3
 FEATURE_ACTIVATION_OPTIONS = (
@@ -21,6 +22,12 @@ FEATURE_ACTIVATION_OPTIONS = (
     ("special", "Special"),
 )
 VALID_FEATURE_ACTIVATION_TYPES = {value for value, _ in FEATURE_ACTIVATION_OPTIONS}
+FEATURE_RESOURCE_RESET_OPTIONS = (
+    ("manual", "Manual"),
+    ("short_rest", "Short Rest"),
+    ("long_rest", "Long Rest"),
+)
+VALID_FEATURE_RESOURCE_RESET_TYPES = {value for value, _ in FEATURE_RESOURCE_RESET_OPTIONS}
 
 
 class CharacterEditValidationError(ValueError):
@@ -37,6 +44,11 @@ def build_native_character_edit_context(
     proficiency_lists = dict(definition.proficiencies or {})
     manual_features = _manual_custom_features(definition)
     manual_items = _manual_equipment_entries(definition)
+    resource_template_lookup = {
+        str(template.get("id") or "").strip(): dict(template)
+        for template in list(definition.resource_templates or [])
+        if str(template.get("id") or "").strip()
+    }
     campaign_page_options = _build_campaign_page_options(campaign_page_records or [])
 
     proficiency_fields = [
@@ -77,6 +89,40 @@ def build_native_character_edit_context(
             ),
         },
     ]
+    reference_fields = [
+        {
+            "name": "biography_markdown",
+            "label": "Biography",
+            "help_text": "Markdown shown on the Notes page for reference-level character history.",
+            "value": str(values.get("biography_markdown") or (definition.profile or {}).get("biography_markdown") or ""),
+        },
+        {
+            "name": "personality_markdown",
+            "label": "Personality",
+            "help_text": "Markdown shown on the Notes page for personality traits, ideals, bonds, flaws, or similar notes.",
+            "value": str(values.get("personality_markdown") or (definition.profile or {}).get("personality_markdown") or ""),
+        },
+        {
+            "name": "additional_notes_markdown",
+            "label": "Additional Notes",
+            "help_text": "Markdown shown on the Notes page for other persistent reference material.",
+            "value": str(
+                values.get("additional_notes_markdown")
+                or (definition.reference_notes or {}).get("additional_notes_markdown")
+                or ""
+            ),
+        },
+        {
+            "name": "allies_and_organizations_markdown",
+            "label": "Allies and Organizations",
+            "help_text": "Markdown shown on the Notes page for friendly factions, patrons, allies, or affiliations.",
+            "value": str(
+                values.get("allies_and_organizations_markdown")
+                or (definition.reference_notes or {}).get("allies_and_organizations_markdown")
+                or ""
+            ),
+        },
+    ]
 
     feature_row_count = max(
         len(manual_features) + 1,
@@ -86,6 +132,7 @@ def build_native_character_edit_context(
     feature_rows = []
     for index in range(1, feature_row_count + 1):
         existing = manual_features[index - 1] if index - 1 < len(manual_features) else {}
+        tracker = resource_template_lookup.get(str(existing.get("tracker_ref") or "").strip(), {})
         feature_rows.append(
             {
                 "index": index,
@@ -105,6 +152,16 @@ def build_native_character_edit_context(
                     values.get(f"custom_feature_description_{index}")
                     or existing.get("description_markdown")
                     or ""
+                ),
+                "resource_max": str(
+                    values.get(f"custom_feature_resource_max_{index}")
+                    or tracker.get("max")
+                    or ""
+                ).strip(),
+                "resource_reset_on": _normalize_resource_reset_on(
+                    values.get(f"custom_feature_resource_reset_on_{index}")
+                    or tracker.get("reset_on")
+                    or "manual"
                 ),
             }
         )
@@ -140,11 +197,16 @@ def build_native_character_edit_context(
     return {
         "values": values,
         "proficiency_fields": proficiency_fields,
+        "reference_fields": reference_fields,
         "feature_rows": feature_rows,
         "equipment_rows": equipment_rows,
         "activation_options": [
             {"value": value, "label": label}
             for value, label in FEATURE_ACTIVATION_OPTIONS
+        ],
+        "resource_reset_options": [
+            {"value": value, "label": label}
+            for value, label in FEATURE_RESOURCE_RESET_OPTIONS
         ],
         "campaign_page_options": campaign_page_options,
         "existing_managed_equipment": [
@@ -174,6 +236,16 @@ def apply_native_character_edits(
         for feature in _manual_custom_features(current_definition)
         if str(feature.get("id") or "").strip()
     }
+    existing_manual_tracker_ids = {
+        _manual_feature_tracker_id(str(feature.get("id") or "").strip())
+        for feature in _manual_custom_features(current_definition)
+        if str(feature.get("id") or "").strip()
+    }
+    resource_template_lookup = {
+        str(template.get("id") or "").strip(): dict(template)
+        for template in list(current_definition.resource_templates or [])
+        if str(template.get("id") or "").strip()
+    }
     manual_item_lookup = {
         str(item.get("id") or "").strip(): dict(item)
         for item in _manual_equipment_entries(current_definition)
@@ -186,9 +258,16 @@ def apply_native_character_edits(
         "weapons": _parse_multiline_values(values.get("weapon_proficiencies_text", "")),
         "tools": _parse_multiline_values(values.get("tool_proficiencies_text", "")),
     }
+    reference_notes = dict(current_definition.reference_notes or {})
+    reference_notes["additional_notes_markdown"] = str(values.get("additional_notes_markdown") or "")
+    reference_notes["allies_and_organizations_markdown"] = str(values.get("allies_and_organizations_markdown") or "")
+    profile = dict(current_definition.profile or {})
+    profile["biography_markdown"] = str(values.get("biography_markdown") or "")
+    profile["personality_markdown"] = str(values.get("personality_markdown") or "")
 
     used_feature_ids = set(manual_feature_lookup.keys())
     manual_features: list[dict[str, Any]] = []
+    manual_resource_templates: list[dict[str, Any]] = []
     seen_feature_names: set[str] = set()
     for index in range(1, max(_max_row_index(values, "custom_feature"), MIN_CUSTOM_FEATURE_ROWS) + 1):
         raw_id = str(values.get(f"custom_feature_id_{index}") or "").strip()
@@ -201,7 +280,11 @@ def apply_native_character_edits(
             name = str((campaign_page_lookup.get(page_ref) or {}).get("title") or "").strip()
         description_markdown = str(values.get(f"custom_feature_description_{index}") or "")
         activation_type = _normalize_activation_type(values.get(f"custom_feature_activation_type_{index}") or "passive")
-        has_content = bool(raw_id or name or page_ref or description_markdown.strip())
+        resource_max = _parse_optional_nonnegative_integer(
+            values.get(f"custom_feature_resource_max_{index}") or "",
+            field_label=f"resource max for '{name or f'custom feature {index}'}'",
+        )
+        has_content = bool(name or page_ref or description_markdown.strip() or resource_max)
         if not has_content:
             continue
         if not name:
@@ -226,11 +309,27 @@ def apply_native_character_edits(
                 "source": str(existing.get("source") or "Campaign").strip() or "Campaign",
                 "description_markdown": description_markdown.strip(),
                 "activation_type": activation_type,
-                "tracker_ref": existing.get("tracker_ref"),
+                "tracker_ref": None,
             }
+        )
+        resource_reset_on = _normalize_resource_reset_on(
+            values.get(f"custom_feature_resource_reset_on_{index}") or "manual"
         )
         if page_ref:
             existing["page_ref"] = page_ref
+        if resource_max:
+            tracker_id = _manual_feature_tracker_id(feature_id)
+            existing["tracker_ref"] = tracker_id
+            manual_resource_templates.append(
+                _build_manual_feature_resource_template(
+                    tracker_id=tracker_id,
+                    feature_name=name,
+                    max_value=resource_max,
+                    reset_on=resource_reset_on,
+                    existing_template=resource_template_lookup.get(tracker_id),
+                    display_order=len(manual_resource_templates),
+                )
+            )
         manual_features.append(existing)
 
     used_item_ids = set(manual_item_lookup.keys())
@@ -248,7 +347,7 @@ def apply_native_character_edits(
         quantity_text = str(values.get(f"manual_item_quantity_{index}") or "").strip()
         weight = str(values.get(f"manual_item_weight_{index}") or "").strip()
         notes = str(values.get(f"manual_item_notes_{index}") or "")
-        has_content = bool(raw_id or name or page_ref or quantity_text or weight or notes.strip())
+        has_content = bool(name or page_ref or quantity_text or weight or notes.strip())
         if not has_content:
             continue
         if not name:
@@ -278,7 +377,9 @@ def apply_native_character_edits(
     payload = deepcopy(current_definition.to_dict())
     payload["campaign_slug"] = campaign_slug
     payload["character_slug"] = current_definition.character_slug
+    payload["profile"] = profile
     payload["proficiencies"] = proficiencies
+    payload["reference_notes"] = reference_notes
     payload["features"] = [
         dict(feature)
         for feature in list(current_definition.features or [])
@@ -289,6 +390,11 @@ def apply_native_character_edits(
         for item in list(current_definition.equipment_catalog or [])
         if str(item.get("source_kind") or "") != CUSTOM_EQUIPMENT_SOURCE_KIND
     ] + manual_items
+    payload["resource_templates"] = [
+        dict(template)
+        for template in list(current_definition.resource_templates or [])
+        if str(template.get("id") or "").strip() not in existing_manual_tracker_ids
+    ] + manual_resource_templates
 
     definition = CharacterDefinition.from_dict(payload)
     import_metadata = CharacterImportMetadata(
@@ -317,6 +423,38 @@ def _manual_equipment_entries(definition: CharacterDefinition) -> list[dict[str,
         for item in list(definition.equipment_catalog or [])
         if str(item.get("source_kind") or "") == CUSTOM_EQUIPMENT_SOURCE_KIND
     ]
+
+
+def _manual_feature_tracker_id(feature_id: str) -> str:
+    return f"{CUSTOM_FEATURE_TRACKER_PREFIX}:{feature_id}"
+
+
+def _build_manual_feature_resource_template(
+    *,
+    tracker_id: str,
+    feature_name: str,
+    max_value: int,
+    reset_on: str,
+    existing_template: dict[str, Any] | None,
+    display_order: int,
+) -> dict[str, Any]:
+    current_template = dict(existing_template or {})
+    clean_reset_on = _normalize_resource_reset_on(reset_on)
+    return {
+        "id": tracker_id,
+        "label": feature_name,
+        "category": "custom_feature",
+        "initial_current": min(
+            int(current_template.get("initial_current") or max_value),
+            int(max_value),
+        ),
+        "max": int(max_value),
+        "reset_on": clean_reset_on,
+        "reset_to": "max" if clean_reset_on in {"short_rest", "long_rest"} else "unchanged",
+        "rest_behavior": "confirm_before_reset" if clean_reset_on in {"short_rest", "long_rest"} else "manual_only",
+        "notes": str(current_template.get("notes") or "").strip(),
+        "display_order": int(display_order),
+    }
 
 
 def _build_campaign_page_options(campaign_page_records: list[Any]) -> list[dict[str, str]]:
@@ -401,9 +539,27 @@ def _parse_manual_item_quantity(raw_value: str) -> int:
     return quantity
 
 
+def _parse_optional_nonnegative_integer(raw_value: str, *, field_label: str) -> int | None:
+    clean_value = str(raw_value or "").strip()
+    if not clean_value:
+        return None
+    try:
+        value = int(clean_value)
+    except ValueError as exc:
+        raise CharacterEditValidationError(f"The {field_label} must be a whole number.") from exc
+    if value < 0:
+        raise CharacterEditValidationError(f"The {field_label} cannot be negative.")
+    return value
+
+
 def _normalize_activation_type(raw_value: Any) -> str:
     value = str(raw_value or "passive").strip().lower()
     return value if value in VALID_FEATURE_ACTIVATION_TYPES else "passive"
+
+
+def _normalize_resource_reset_on(raw_value: Any) -> str:
+    value = str(raw_value or "manual").strip().lower()
+    return value if value in VALID_FEATURE_RESOURCE_RESET_TYPES else "manual"
 
 
 def _build_unique_manual_id(prefix: str, name: str, used_ids: set[str]) -> str:
