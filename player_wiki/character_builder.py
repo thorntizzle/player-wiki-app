@@ -19,7 +19,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-03-30.06"
+CHARACTER_BUILDER_VERSION = "2026-03-30.07"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -253,7 +253,7 @@ NATIVE_LEVEL_UP_LIMITATIONS = [
     "Native level-up currently advances one level at a time for single-class native characters whose base class has imported native progression support.",
     "Hit point gain is entered manually so your table can choose rolled or fixed HP.",
     "Prepared-caster level-up currently preserves existing prepared spells and adds the new picks needed for the next level.",
-    "Some advanced feat side effects, campaign-driven spell access, and non-standard spell retraining still need manual follow-up.",
+    "Some advanced feat side effects, non-structured campaign spell access, and non-standard spell retraining still need manual follow-up.",
 ]
 LEVEL_ONE_ALWAYS_PREPARED_SPELLS_BY_SUBCLASS = {
     normalize_lookup("Knowledge Domain"): ["Command", "Identify"],
@@ -442,6 +442,7 @@ def build_level_one_builder_context(
         feat_options=feat_options,
         feat_catalog=feat_catalog,
         class_progression=class_progression,
+        subclass_progression=subclass_progression,
         equipment_groups=equipment_groups,
         campaign_feature_options=campaign_feature_options,
         campaign_item_options=campaign_item_options,
@@ -489,7 +490,7 @@ def build_level_one_builder_context(
             "Published campaign wiki features and items can also be linked in during creation through the optional campaign content fields.",
             "Enter level-1 ability scores after species bonuses. Native feat-driven ability increases are applied automatically.",
             "Native attack rows now cover basic PHB weapons, off-hand attacks, key level-1 fighting-style adjustments, and the current modeled feat attack variants, but a few advanced riders still need manual follow-up.",
-            "Gold-alternative loadouts, campaign-driven spell access, and a few class-specific spell extras still need manual follow-up.",
+            "Gold-alternative loadouts, non-structured campaign spell access, and a few class-specific spell extras still need manual follow-up.",
         ],
         "preview": preview,
     }
@@ -622,6 +623,7 @@ def build_level_one_character_definition(
         choice_sections=choice_sections,
         selected_choices=selected_choices,
         spell_catalog=spell_catalog,
+        feature_entries=selected_feature_entries,
         campaign_option_payloads=selected_campaign_option_payloads,
     )
 
@@ -974,6 +976,11 @@ def build_native_level_up_character_definition(
             selected_choices=selected_choices,
             spell_catalog=spell_catalog,
             target_level=target_level,
+            feature_entries=_additional_spell_feature_entries_from_progressions(
+                class_progression=class_progression,
+                subclass_progression=subclass_progression,
+                target_level=target_level,
+            ),
             selected_campaign_option_payloads=selected_campaign_option_payloads,
         ),
         equipment_catalog=list(current_definition.equipment_catalog or []),
@@ -1454,6 +1461,7 @@ def _build_choice_sections(
     feat_options: list[SystemsEntryRecord],
     feat_catalog: dict[str, Any],
     class_progression: list[dict[str, Any]],
+    subclass_progression: list[dict[str, Any]],
     equipment_groups: list[dict[str, Any]],
     campaign_feature_options: list[dict[str, str]],
     campaign_item_options: list[dict[str, str]],
@@ -1497,12 +1505,18 @@ def _build_choice_sections(
     if campaign_item_fields:
         sections.append({"title": "Campaign Equipment", "fields": campaign_item_fields})
 
+    progression_spell_feature_entries = _additional_spell_feature_entries_from_progressions(
+        class_progression=class_progression,
+        subclass_progression=subclass_progression,
+        target_level=1,
+    )
     spell_fields = _build_spell_choice_fields(
         selected_class=selected_class,
         selected_subclass=selected_subclass,
         feat_selections=feat_selections,
         spell_catalog=spell_catalog,
         values=values,
+        feature_entries=progression_spell_feature_entries,
     )
     if spell_fields:
         sections.append({"title": "Spell Choices", "fields": spell_fields})
@@ -1603,6 +1617,11 @@ def _build_level_up_choice_sections(
         selected_choices=preview_selected_choices,
         strict=False,
     )
+    progression_spell_feature_entries = _additional_spell_feature_entries_from_progressions(
+        class_progression=class_progression,
+        subclass_progression=subclass_progression,
+        target_level=target_level,
+    )
     spell_fields = _build_level_up_spell_choice_fields(
         definition=definition,
         selected_class=selected_class,
@@ -1612,6 +1631,7 @@ def _build_level_up_choice_sections(
         target_level=target_level,
         ability_scores=preview_ability_scores,
         values=values,
+        feature_entries=progression_spell_feature_entries,
     )
     if spell_fields:
         sections.append({"title": "Spell Choices", "fields": spell_fields})
@@ -2993,12 +3013,16 @@ def _build_level_one_attacks(
         if str(name or "").strip()
     }
     has_crossbow_expert = normalize_lookup("Crossbow Expert") in active_feat_names
+    has_dual_wielder = normalize_lookup("Dual Wielder") in active_feat_names
     has_great_weapon_master = normalize_lookup("Great Weapon Master") in active_feat_names
     has_martial_adept = normalize_lookup("Martial Adept") in active_feat_names
     has_polearm_master = normalize_lookup("Polearm Master") in active_feat_names
     has_savage_attacker = normalize_lookup("Savage Attacker") in active_feat_names
     has_sharpshooter = normalize_lookup("Sharpshooter") in active_feat_names
-    off_hand_context = _resolve_off_hand_attack_context(attack_contexts)
+    off_hand_context = _resolve_off_hand_attack_context(
+        attack_contexts,
+        allow_non_light=has_dual_wielder,
+    )
     crossbow_expert_bonus_context = _resolve_crossbow_expert_bonus_attack_context(attack_contexts)
     has_shield = any(_is_shield_item(item) for item in equipment_catalog)
 
@@ -3262,6 +3286,7 @@ def _build_level_one_attacks(
                     great_weapon_fighting=False,
                     has_shield=False,
                     off_hand_context=off_hand_context,
+                    show_versatile=False,
                     extra_notes=_base_attack_feat_notes(
                         off_hand_context,
                         has_crossbow_expert=has_crossbow_expert,
@@ -3525,13 +3550,20 @@ def _build_weapon_attack_payload(
     }
 
 
-def _resolve_off_hand_attack_context(attack_contexts: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _resolve_off_hand_attack_context(
+    attack_contexts: list[dict[str, Any]],
+    *,
+    allow_non_light: bool = False,
+) -> dict[str, Any] | None:
     eligible_contexts: list[dict[str, Any]] = []
     for context in attack_contexts:
         profile = dict(context.get("profile") or {})
         if str(profile.get("type") or "").strip().upper() != "M":
             continue
-        if "L" not in set(profile.get("properties") or []):
+        properties = set(profile.get("properties") or [])
+        if "2H" in properties:
+            continue
+        if not allow_non_light and "L" not in properties:
             continue
         quantity = max(int(context.get("quantity") or 1), 1)
         for _ in range(quantity):
@@ -3921,6 +3953,38 @@ def _campaign_option_payloads_from_definition(definition: CharacterDefinition) -
     return payloads
 
 
+def _additional_spell_feature_entries_from_progressions(
+    *,
+    class_progression: list[dict[str, Any]],
+    subclass_progression: list[dict[str, Any]],
+    target_level: int,
+) -> list[dict[str, Any]]:
+    feature_entries: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+    for progression in (class_progression, subclass_progression):
+        for group in list(progression or []):
+            if int(group.get("level") or 0) > target_level:
+                continue
+            for feature_row in list(group.get("feature_rows") or []):
+                entry = feature_row.get("entry")
+                if not isinstance(entry, SystemsEntryRecord):
+                    continue
+                if normalize_lookup(entry.entry_type) not in {
+                    normalize_lookup("classfeature"),
+                    normalize_lookup("subclassfeature"),
+                    normalize_lookup("optionalfeature"),
+                }:
+                    continue
+                if not dict(entry.metadata or {}).get("additional_spells"):
+                    continue
+                entry_key = str(entry.entry_key or entry.slug or entry.title or "").strip()
+                if not entry_key or entry_key in seen_keys:
+                    continue
+                seen_keys.add(entry_key)
+                feature_entries.append({"entry": entry})
+    return feature_entries
+
+
 def _build_selected_campaign_item_specs(
     *,
     choice_sections: list[dict[str, Any]],
@@ -3968,6 +4032,7 @@ def _build_spell_choice_fields(
     feat_selections: list[dict[str, Any]],
     spell_catalog: dict[str, Any],
     values: dict[str, str],
+    feature_entries: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     feat_spell_fields = _build_feat_spell_choice_fields(
         feat_selections=feat_selections,
@@ -4017,6 +4082,7 @@ def _build_spell_choice_fields(
         selected_subclass=selected_subclass,
         spell_catalog=spell_catalog,
         target_level=1,
+        feature_entries=feature_entries,
     )
     selected_bonus_known_values = _selected_form_spell_values_by_field_prefix(values, prefix="bonus_spell_known_")
 
@@ -4028,6 +4094,7 @@ def _build_spell_choice_fields(
             spell_catalog,
             selected_class=selected_class,
             selected_subclass=selected_subclass,
+            feature_entries=feature_entries,
         )
         if str(option.get("value") or "").strip() not in (automatic_known_lookup_keys | selected_bonus_known_values)
     ]
@@ -4055,6 +4122,7 @@ def _build_spell_choice_fields(
             values=values,
             field_prefix="bonus_spell_known",
             group_key_prefix="bonus_spell_known",
+            feature_entries=feature_entries,
         )
     )
     level_one_options = [
@@ -4065,6 +4133,7 @@ def _build_spell_choice_fields(
             spell_catalog,
             selected_class=selected_class,
             selected_subclass=selected_subclass,
+            feature_entries=feature_entries,
         )
         if str(option.get("value") or "").strip() not in (automatic_known_lookup_keys | selected_bonus_known_values)
     ]
@@ -4073,6 +4142,7 @@ def _build_spell_choice_fields(
         selected_subclass=selected_subclass,
         spell_catalog=spell_catalog,
         target_level=1,
+        feature_entries=feature_entries,
     )
     if spell_mode == "prepared" and automatic_prepared_lookup_keys:
         level_one_options = [
@@ -4153,6 +4223,7 @@ def _build_level_up_spell_choice_fields(
     target_level: int,
     ability_scores: dict[str, int],
     values: dict[str, str],
+    feature_entries: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     class_name = selected_class.title
     spell_mode = _spellcasting_mode_for_class(class_name, selected_class=selected_class)
@@ -4186,12 +4257,14 @@ def _build_level_up_spell_choice_fields(
         selected_subclass=selected_subclass,
         spell_catalog=spell_catalog,
         target_level=target_level,
+        feature_entries=feature_entries,
     )
     target_known_bonus_values = _automatic_known_spell_lookup_keys(
         selected_class=selected_class,
         selected_subclass=selected_subclass,
         spell_catalog=spell_catalog,
         target_level=target_level,
+        feature_entries=feature_entries,
     )
     selected_bonus_known_values = _selected_form_spell_values_by_field_prefix(values, prefix="levelup_bonus_spell_known_")
 
@@ -4211,6 +4284,7 @@ def _build_level_up_spell_choice_fields(
             spell_catalog,
             selected_class=selected_class,
             selected_subclass=selected_subclass,
+            feature_entries=feature_entries,
         )
         if option["value"] not in (existing_cantrip_values | target_known_bonus_values | selected_bonus_known_values)
     ]
@@ -4239,6 +4313,7 @@ def _build_level_up_spell_choice_fields(
             values=values,
             field_prefix="levelup_bonus_spell_known",
             group_key_prefix="levelup_bonus_spell_known",
+            feature_entries=feature_entries,
         )
     )
 
@@ -4251,6 +4326,7 @@ def _build_level_up_spell_choice_fields(
         spell_catalog,
         selected_class=selected_class,
         selected_subclass=selected_subclass,
+        feature_entries=feature_entries,
     )
     if not spell_level_options and spell_mode != "wizard":
         return fields + feat_spell_fields
@@ -4598,6 +4674,7 @@ def _build_spell_options_for_class_level(
     *,
     selected_class: SystemsEntryRecord | None = None,
     selected_subclass: SystemsEntryRecord | None = None,
+    feature_entries: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, str]]:
     try:
         spell_level = int(str(level_key or "0").strip())
@@ -4621,6 +4698,7 @@ def _build_spell_options_for_class_level(
             selected_subclass=selected_subclass,
             spell_catalog=spell_catalog,
             spell_level=spell_level,
+            feature_entries=feature_entries,
         )
     )
     return _build_spell_options_from_titles(titles, spell_catalog)
@@ -4655,6 +4733,7 @@ def _build_spell_options_for_class_levels(
     *,
     selected_class: SystemsEntryRecord | None = None,
     selected_subclass: SystemsEntryRecord | None = None,
+    feature_entries: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, str]]:
     options: list[dict[str, str]] = []
     seen_values: set[str] = set()
@@ -4665,6 +4744,7 @@ def _build_spell_options_for_class_levels(
             spell_catalog,
             selected_class=selected_class,
             selected_subclass=selected_subclass,
+            feature_entries=feature_entries,
         ):
             value = str(option.get("value") or "").strip()
             if not value or value in seen_values:
@@ -4764,6 +4844,7 @@ def _build_level_one_preview(
             choice_sections=choice_sections,
             selected_choices=selected_choices,
             spell_catalog=spell_catalog,
+            feature_entries=feature_entries,
             campaign_option_payloads=selected_campaign_option_payloads,
         )
         if selected_class is not None
@@ -6252,6 +6333,11 @@ def _build_native_level_up_preview(
         selected_choices=selected_choices,
         spell_catalog=spell_catalog,
         target_level=target_level,
+        feature_entries=_additional_spell_feature_entries_from_progressions(
+            class_progression=class_progression,
+            subclass_progression=subclass_progression,
+            target_level=target_level,
+        ),
         extra_option_payloads=selected_campaign_option_payloads,
     )
     slot_progression = _level_up_slot_progression_for_class(
@@ -6309,6 +6395,7 @@ def _build_level_one_spellcasting(
     choice_sections: list[dict[str, Any]],
     selected_choices: dict[str, list[str]],
     spell_catalog: dict[str, Any],
+    feature_entries: list[dict[str, Any]] | None = None,
     campaign_option_payloads: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     class_name = selected_class.title
@@ -6320,6 +6407,7 @@ def _build_level_one_spellcasting(
         choice_sections=choice_sections,
         selected_choices=selected_choices,
         spell_catalog=spell_catalog,
+        feature_entries=feature_entries,
         campaign_option_payloads=campaign_option_payloads,
     )
     slot_progression = _spell_slot_progression_for_class_level(
@@ -6369,6 +6457,7 @@ def _build_level_up_spellcasting(
     selected_choices: dict[str, list[str]],
     spell_catalog: dict[str, Any],
     target_level: int,
+    feature_entries: list[dict[str, Any]] | None = None,
     selected_campaign_option_payloads: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     class_name = selected_class.title
@@ -6452,6 +6541,7 @@ def _build_level_up_spellcasting(
         selected_class=selected_class,
         selected_subclass=selected_subclass,
         target_level=target_level,
+        feature_entries=feature_entries,
     ):
         _add_bonus_known_spell_to_payloads(
             spells_by_key,
@@ -6463,6 +6553,7 @@ def _build_level_up_spellcasting(
         selected_class=selected_class,
         selected_subclass=selected_subclass,
         target_level=target_level,
+        feature_entries=feature_entries,
     ):
         _add_spell_to_payloads(
             spells_by_key,
@@ -6563,6 +6654,7 @@ def _build_level_one_spell_payloads(
     choice_sections: list[dict[str, Any]],
     selected_choices: dict[str, list[str]],
     spell_catalog: dict[str, Any],
+    feature_entries: list[dict[str, Any]] | None = None,
     campaign_option_payloads: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     class_name = selected_class.title
@@ -6612,6 +6704,7 @@ def _build_level_one_spell_payloads(
         selected_class=selected_class,
         selected_subclass=selected_subclass,
         target_level=1,
+        feature_entries=feature_entries,
     ):
         _add_bonus_known_spell_to_payloads(
             spells_by_key,
@@ -6623,6 +6716,7 @@ def _build_level_one_spell_payloads(
         selected_class=selected_class,
         selected_subclass=selected_subclass,
         target_level=1,
+        feature_entries=feature_entries,
     ):
         _add_spell_to_payloads(
             spells_by_key,
@@ -6831,6 +6925,7 @@ def _build_additional_known_spell_choice_fields(
     field_prefix: str,
     group_key_prefix: str,
     exact_level: int | None = None,
+    feature_entries: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     fields: list[dict[str, Any]] = []
     specs = _extract_additional_known_choice_specs(
@@ -6838,6 +6933,7 @@ def _build_additional_known_spell_choice_fields(
         selected_subclass=selected_subclass,
         target_level=target_level,
         exact_level=exact_level,
+        feature_entries=feature_entries,
     )
     for spec_index, spec in enumerate(specs, start=1):
         options = _build_additional_spell_filter_options(str(spec.get("filter") or ""), spell_catalog)
@@ -7057,9 +7153,14 @@ def _extract_additional_known_choice_specs(
     selected_subclass: SystemsEntryRecord | None,
     target_level: int,
     exact_level: int | None = None,
+    feature_entries: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     specs: list[dict[str, Any]] = []
-    for additional_spells in _additional_spell_metadata_entries(selected_class, selected_subclass):
+    for additional_spells in _additional_spell_metadata_entries(
+        selected_class,
+        selected_subclass,
+        feature_entries=feature_entries,
+    ):
         for block in list(additional_spells or []):
             if not isinstance(block, dict):
                 continue
@@ -7234,9 +7335,14 @@ def _expanded_spell_titles_for_level(
     selected_subclass: SystemsEntryRecord | None,
     spell_catalog: dict[str, Any],
     spell_level: int,
+    feature_entries: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     titles: list[str] = []
-    for additional_spells in _additional_spell_metadata_entries(selected_class, selected_subclass):
+    for additional_spells in _additional_spell_metadata_entries(
+        selected_class,
+        selected_subclass,
+        feature_entries=feature_entries,
+    ):
         titles.extend(
             _extract_expanded_additional_spell_values(
                 additional_spells,
@@ -7269,13 +7375,30 @@ def _extract_expanded_additional_spell_values(
 def _additional_spell_metadata_entries(
     selected_class: SystemsEntryRecord | None,
     selected_subclass: SystemsEntryRecord | None,
+    *,
+    feature_entries: list[dict[str, Any]] | None = None,
 ) -> list[Any]:
     values: list[Any] = []
+    seen_entries: set[str] = set()
     for entry in (selected_class, selected_subclass):
         metadata = dict((entry.metadata if entry is not None else {}) or {})
         additional_spells = metadata.get("additional_spells")
         if additional_spells:
             values.append(additional_spells)
+        if isinstance(entry, SystemsEntryRecord):
+            seen_entries.add(str(entry.entry_key or entry.slug or entry.title or ""))
+    for feature_entry in list(feature_entries or []):
+        entry = feature_entry.get("entry")
+        if not isinstance(entry, SystemsEntryRecord):
+            continue
+        entry_key = str(entry.entry_key or entry.slug or entry.title or "").strip()
+        if not entry_key or entry_key in seen_entries:
+            continue
+        additional_spells = dict(entry.metadata or {}).get("additional_spells")
+        if not additional_spells:
+            continue
+        values.append(additional_spells)
+        seen_entries.add(entry_key)
     return values
 
 
@@ -7332,9 +7455,14 @@ def _automatic_known_spell_values(
     selected_subclass: SystemsEntryRecord | None,
     target_level: int,
     exact_level: int | None = None,
+    feature_entries: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     values: list[str] = []
-    for additional_spells in _additional_spell_metadata_entries(selected_class, selected_subclass):
+    for additional_spells in _additional_spell_metadata_entries(
+        selected_class,
+        selected_subclass,
+        feature_entries=feature_entries,
+    ):
         values.extend(
             _extract_known_additional_spell_values(
                 additional_spells,
@@ -7352,6 +7480,7 @@ def _automatic_known_spell_lookup_keys(
     spell_catalog: dict[str, Any],
     target_level: int,
     exact_level: int | None = None,
+    feature_entries: list[dict[str, Any]] | None = None,
 ) -> set[str]:
     payload_keys: set[str] = set()
     for selected_value in _automatic_known_spell_values(
@@ -7359,6 +7488,7 @@ def _automatic_known_spell_lookup_keys(
         selected_subclass=selected_subclass,
         target_level=target_level,
         exact_level=exact_level,
+        feature_entries=feature_entries,
     ):
         payload_key = _spell_lookup_key(selected_value, spell_catalog)
         if payload_key:
@@ -7396,9 +7526,14 @@ def _automatic_prepared_spell_values(
     selected_subclass: SystemsEntryRecord | None,
     target_level: int,
     exact_level: int | None = None,
+    feature_entries: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     values: list[str] = []
-    for additional_spells in _additional_spell_metadata_entries(selected_class, selected_subclass):
+    for additional_spells in _additional_spell_metadata_entries(
+        selected_class,
+        selected_subclass,
+        feature_entries=feature_entries,
+    ):
         values.extend(
             _extract_prepared_additional_spell_values(
                 additional_spells,
@@ -7419,6 +7554,7 @@ def _automatic_prepared_spell_lookup_keys(
     spell_catalog: dict[str, Any],
     target_level: int,
     exact_level: int | None = None,
+    feature_entries: list[dict[str, Any]] | None = None,
 ) -> set[str]:
     payload_keys: set[str] = set()
     for selected_value in _automatic_prepared_spell_values(
@@ -7426,6 +7562,7 @@ def _automatic_prepared_spell_lookup_keys(
         selected_subclass=selected_subclass,
         target_level=target_level,
         exact_level=exact_level,
+        feature_entries=feature_entries,
     ):
         payload_key = _spell_lookup_key(selected_value, spell_catalog)
         if payload_key:
@@ -7548,6 +7685,7 @@ def _summarize_level_up_spell_choices(
     selected_choices: dict[str, list[str]],
     spell_catalog: dict[str, Any],
     target_level: int,
+    feature_entries: list[dict[str, Any]] | None = None,
     extra_option_payloads: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     selected_values: list[str] = []
@@ -7578,6 +7716,7 @@ def _summarize_level_up_spell_choices(
         selected_subclass=selected_subclass,
         target_level=target_level,
         exact_level=target_level,
+        feature_entries=feature_entries,
     ):
         payload_key = _spell_lookup_key(selected_value, spell_catalog)
         if payload_key and payload_key in existing_spell_payload_keys:
@@ -7588,6 +7727,7 @@ def _summarize_level_up_spell_choices(
         selected_subclass=selected_subclass,
         target_level=target_level,
         exact_level=target_level,
+        feature_entries=feature_entries,
     ):
         payload_key = _spell_lookup_key(selected_value, spell_catalog)
         if payload_key and payload_key in existing_spell_payload_keys:

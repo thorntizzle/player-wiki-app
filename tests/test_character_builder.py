@@ -259,7 +259,7 @@ def _minimal_import_metadata(character_slug: str = "new-hero") -> CharacterImpor
         character_slug=character_slug,
         source_path="builder://native-level-1",
         imported_at_utc="2026-03-29T00:00:00Z",
-        parser_version="2026-03-30.06",
+        parser_version="2026-03-30.07",
         import_status="clean",
         warnings=[],
     )
@@ -2295,6 +2295,98 @@ def test_level_one_builder_generates_off_hand_attack_and_two_weapon_fighting_dam
     assert attacks_by_name["Handaxe (off-hand)"]["notes"] == "range 20/60, Bonus action."
 
 
+def test_level_one_builder_generates_dual_wielder_off_hand_attack_for_non_light_weapons():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+            "starting_equipment": {
+                "defaultData": [
+                    {"_": ["longsword|phb", "longsword|phb"]},
+                ]
+            },
+        },
+    )
+    variant_human = _systems_entry(
+        "race",
+        "phb-race-variant-human",
+        "Variant Human",
+        metadata={
+            "size": ["M"],
+            "speed": 30,
+            "languages": [{"common": True}],
+            "feats": [{"any": 1}],
+        },
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    dual_wielder = _systems_entry("feat", "phb-feat-dual-wielder", "Dual Wielder")
+    longsword = _systems_entry("item", "phb-item-longsword", "Longsword", metadata={"weight": 3})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [variant_human],
+            "background": [acolyte],
+            "feat": [dual_wielder],
+            "subclass": [],
+            "item": [longsword],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    form_values = {
+        "name": "Tamsin Vale",
+        "character_slug": "tamsin-vale",
+        "alignment": "Chaotic Good",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": variant_human.slug,
+        "background_slug": acolyte.slug,
+        "species_feat_1": dual_wielder.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "acrobatics",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+    attacks_by_name = {attack["name"]: attack for attack in definition.attacks}
+
+    assert "Longsword (+5, 1d8+3 slashing)" in context["preview"]["attacks"]
+    assert "Longsword (off-hand) (+5, 1d8 slashing)" in context["preview"]["attacks"]
+    assert attacks_by_name["Longsword"]["notes"] == "Versatile (1d10)."
+    assert attacks_by_name["Longsword (off-hand)"]["damage"] == "1d8 slashing"
+    assert attacks_by_name["Longsword (off-hand)"]["notes"] == "Bonus action."
+
+
 def test_level_one_builder_populates_starting_equipment_spells_and_currency():
     wizard = _systems_entry(
         "class",
@@ -2634,7 +2726,7 @@ def test_level_one_builder_populates_starting_equipment_spells_and_currency():
     assert spells_by_name["Message"]["components"] == "V, S, M (a short piece of copper wire)"
     assert resource_templates_by_id["arcane-recovery"]["max"] == 1
     assert state_resources_by_id["arcane-recovery"]["current"] == 1
-    assert import_metadata.parser_version == "2026-03-30.06"
+    assert import_metadata.parser_version == "2026-03-30.07"
 
 
 def test_level_one_builder_adds_structured_subclass_prepared_spells():
@@ -2964,6 +3056,174 @@ def test_level_one_builder_adds_known_spell_choice_fields_from_additional_spells
     assert "Shillelagh" not in cantrip_labels
     assert "Shillelagh (Granted, Cantrip)" in context["preview"]["spells"]
     assert spells_by_name["Shillelagh"]["mark"] == "Cantrip"
+    assert spells_by_name["Shillelagh"]["is_bonus_known"] is True
+
+
+def test_level_one_builder_applies_feature_level_additional_spells():
+    cleric = _systems_entry(
+        "class",
+        "phb-class-cleric",
+        "Cleric",
+        metadata={
+            "hit_die": {"faces": 8},
+            "proficiency": ["wis", "cha"],
+            "subclass_title": "Divine Domain",
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "shield"],
+                "weapons": ["simple"],
+                "skills": [{"choose": {"count": 2, "from": ["history", "insight", "medicine", "religion"]}}],
+            },
+        },
+    )
+    nature_domain = _systems_entry(
+        "subclass",
+        "phb-subclass-cleric-nature-domain",
+        "Nature Domain",
+        metadata={"class_name": "Cleric", "class_source": "PHB"},
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    spellcasting_feature = _systems_entry("classfeature", "phb-classfeature-spellcasting", "Spellcasting", metadata={"level": 1})
+    nature_domain_feature = _systems_entry("classfeature", "phb-classfeature-divine-domain", "Divine Domain", metadata={"level": 1})
+    nature_acolyte = _systems_entry(
+        "subclassfeature",
+        "phb-subclassfeature-nature-acolyte",
+        "Nature Acolyte",
+        metadata={
+            "level": 1,
+            "class_name": "Cleric",
+            "class_source": "PHB",
+            "subclass_name": "Nature Domain",
+            "additional_spells": [
+                {
+                    "known": {
+                        "1": {
+                            "_": [
+                                {"choose": "level=0|class=Druid"},
+                            ]
+                        }
+                    },
+                    "prepared": {
+                        "1": ["Animal Friendship", "Speak with Animals"],
+                    },
+                }
+            ],
+        },
+    )
+    light = _systems_entry("spell", "phb-spell-light", "Light", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 0})
+    sacred_flame = _systems_entry("spell", "phb-spell-sacred-flame", "Sacred Flame", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 0})
+    thaumaturgy = _systems_entry("spell", "phb-spell-thaumaturgy", "Thaumaturgy", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 0})
+    druidcraft = _systems_entry("spell", "phb-spell-druidcraft", "Druidcraft", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 0})
+    shillelagh = _systems_entry("spell", "phb-spell-shillelagh", "Shillelagh", metadata={"casting_time": [{"number": 1, "unit": "bonus"}], "level": 0})
+    animal_friendship = _systems_entry("spell", "phb-spell-animal-friendship", "Animal Friendship", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1})
+    speak_with_animals = _systems_entry("spell", "phb-spell-speak-with-animals", "Speak with Animals", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1})
+    detect_magic = _systems_entry("spell", "phb-spell-detect-magic", "Detect Magic", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1})
+    guiding_bolt = _systems_entry("spell", "phb-spell-guiding-bolt", "Guiding Bolt", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1})
+    healing_word = _systems_entry("spell", "phb-spell-healing-word", "Healing Word", metadata={"casting_time": [{"number": 1, "unit": "bonus"}], "level": 1})
+    shield_of_faith = _systems_entry("spell", "phb-spell-shield-of-faith", "Shield of Faith", metadata={"casting_time": [{"number": 1, "unit": "bonus"}], "level": 1})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [cleric],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [nature_domain],
+            "item": [],
+            "spell": [
+                light,
+                sacred_flame,
+                thaumaturgy,
+                druidcraft,
+                shillelagh,
+                animal_friendship,
+                speak_with_animals,
+                detect_magic,
+                guiding_bolt,
+                healing_word,
+                shield_of_faith,
+            ],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Spellcasting", "entry": spellcasting_feature, "embedded_card": {"option_groups": []}},
+                    {"label": "Divine Domain", "entry": nature_domain_feature, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+        subclass_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Nature Acolyte", "entry": nature_acolyte, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    base_form_values = {
+        "name": "Rowan Vale",
+        "character_slug": "rowan-vale",
+        "alignment": "Neutral Good",
+        "experience_model": "Milestone",
+        "class_slug": cleric.slug,
+        "subclass_slug": nature_domain.slug,
+        "species_slug": human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "history",
+        "class_skill_2": "medicine",
+        "str": "10",
+        "dex": "12",
+        "con": "14",
+        "int": "11",
+        "wis": "16",
+        "cha": "13",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", base_form_values)
+    granted_field = _find_builder_field(context, "bonus_spell_known_1_1")
+    granted_option_labels = {option["label"] for option in granted_field["options"]}
+    prepared_option_labels = {option["label"] for option in _find_builder_field(context, "spell_level_one_1")["options"]}
+
+    assert granted_option_labels >= {"Druidcraft", "Shillelagh"}
+    assert "Animal Friendship" not in prepared_option_labels
+    assert "Speak with Animals" not in prepared_option_labels
+
+    form_values = {
+        **base_form_values,
+        "bonus_spell_known_1_1": _field_value_for_label(context, "bonus_spell_known_1_1", "Shillelagh"),
+        "spell_cantrip_1": _field_value_for_label(context, "spell_cantrip_1", "Light"),
+        "spell_cantrip_2": _field_value_for_label(context, "spell_cantrip_2", "Sacred Flame"),
+        "spell_cantrip_3": _field_value_for_label(context, "spell_cantrip_3", "Thaumaturgy"),
+        "spell_level_one_1": _field_value_for_label(context, "spell_level_one_1", "Detect Magic"),
+        "spell_level_one_2": _field_value_for_label(context, "spell_level_one_2", "Guiding Bolt"),
+        "spell_level_one_3": _field_value_for_label(context, "spell_level_one_3", "Healing Word"),
+        "spell_level_one_4": _field_value_for_label(context, "spell_level_one_4", "Shield of Faith"),
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+    spells_by_name = {spell["name"]: spell for spell in definition.spellcasting["spells"]}
+
+    assert "Animal Friendship (Always prepared)" in context["preview"]["spells"]
+    assert "Speak with Animals (Always prepared)" in context["preview"]["spells"]
+    assert "Shillelagh (Granted, Cantrip)" in context["preview"]["spells"]
+    assert spells_by_name["Animal Friendship"]["is_always_prepared"] is True
+    assert spells_by_name["Speak with Animals"]["is_always_prepared"] is True
     assert spells_by_name["Shillelagh"]["is_bonus_known"] is True
 
 
@@ -5205,6 +5465,183 @@ def test_native_level_up_adds_structured_subclass_prepared_spells():
         "phb-subclassfeature-oath-of-devotion",
         "Oath of Devotion",
         metadata={"level": 3, "class_name": "Paladin", "class_source": "PHB", "subclass_name": "Oath of Devotion"},
+    )
+    bless = _systems_entry("spell", "phb-spell-bless", "Bless", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    command = _systems_entry("spell", "phb-spell-command", "Command", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    cure_wounds = _systems_entry("spell", "phb-spell-cure-wounds", "Cure Wounds", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    protection_from_evil = _systems_entry(
+        "spell",
+        "phb-spell-protection-from-evil-and-good",
+        "Protection from Evil and Good",
+        metadata={"casting_time": [{"number": 1, "unit": "action"}]},
+    )
+    sanctuary = _systems_entry("spell", "phb-spell-sanctuary", "Sanctuary", metadata={"casting_time": [{"number": 1, "unit": "bonus"}]})
+    shield_of_faith = _systems_entry("spell", "phb-spell-shield-of-faith", "Shield of Faith", metadata={"casting_time": [{"number": 1, "unit": "bonus"}]})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [paladin],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [devotion],
+            "item": [],
+            "spell": [
+                bless,
+                command,
+                cure_wounds,
+                protection_from_evil,
+                sanctuary,
+                shield_of_faith,
+            ],
+        },
+        class_progression=[
+            {
+                "level": 3,
+                "level_label": "Level 3",
+                "feature_rows": [
+                    {"label": "Sacred Oath", "entry": sacred_oath, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+        subclass_progression=[
+            {
+                "level": 3,
+                "level_label": "Level 3",
+                "feature_rows": [
+                    {"label": "Oath of Devotion", "entry": oath_of_devotion, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    current_definition = _minimal_character_definition("ser-galen", "Ser Galen")
+    current_definition.profile["class_level_text"] = "Paladin 2"
+    current_definition.profile["classes"][0]["class_name"] = "Paladin"
+    current_definition.profile["classes"][0]["level"] = 2
+    current_definition.profile["classes"][0]["systems_ref"] = {
+        "entry_key": "dnd-5e|class|phb|paladin",
+        "entry_type": "class",
+        "title": "Paladin",
+        "slug": paladin.slug,
+        "source_id": "PHB",
+    }
+    current_definition.profile["class_ref"] = dict(current_definition.profile["classes"][0]["systems_ref"])
+    current_definition.stats["max_hp"] = 22
+    current_definition.stats["proficiency_bonus"] = 2
+    current_definition.stats["ability_scores"] = {
+        "str": {"score": 16, "modifier": 3, "save_bonus": 3},
+        "dex": {"score": 10, "modifier": 0, "save_bonus": 0},
+        "con": {"score": 14, "modifier": 2, "save_bonus": 2},
+        "int": {"score": 8, "modifier": -1, "save_bonus": -1},
+        "wis": {"score": 12, "modifier": 1, "save_bonus": 3},
+        "cha": {"score": 16, "modifier": 3, "save_bonus": 5},
+    }
+    current_definition.spellcasting = {
+        "spellcasting_class": "Paladin",
+        "spellcasting_ability": "Charisma",
+        "spell_save_dc": 13,
+        "spell_attack_bonus": 5,
+        "slot_progression": [{"level": 1, "max_slots": 2}],
+        "spells": [
+            {"name": "Bless", "mark": "Prepared", "systems_ref": {"slug": bless.slug, "title": bless.title, "entry_type": "spell", "source_id": "PHB"}},
+            {"name": "Shield of Faith", "mark": "Prepared", "systems_ref": {"slug": shield_of_faith.slug, "title": shield_of_faith.title, "entry_type": "spell", "source_id": "PHB"}},
+        ],
+    }
+    current_definition.source["source_path"] = "builder://native-level-2"
+
+    base_form = {"hp_gain": "6", "subclass_slug": devotion.slug}
+    level_up_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        current_definition,
+        base_form,
+    )
+    prepared_spell_field = next(
+        field
+        for section in level_up_context["choice_sections"]
+        if section["title"] == "Spell Choices"
+        for field in section["fields"]
+        if field["name"] == "levelup_prepared_spell_1"
+    )
+    option_labels = {option["label"] for option in prepared_spell_field["options"]}
+
+    assert "Protection from Evil and Good" not in option_labels
+    assert "Sanctuary" not in option_labels
+    assert level_up_context["preview"]["new_spells"] == ["Protection from Evil and Good", "Sanctuary"]
+
+    level_up_form = {
+        **base_form,
+        "levelup_prepared_spell_1": _field_value_for_label(level_up_context, "levelup_prepared_spell_1", "Command"),
+        "levelup_prepared_spell_2": _field_value_for_label(level_up_context, "levelup_prepared_spell_2", "Cure Wounds"),
+    }
+    leveled_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        level_up_context,
+        level_up_form,
+    )
+    spells_by_name = {spell["name"]: spell for spell in leveled_definition.spellcasting["spells"]}
+
+    assert leveled_definition.profile["subclass_ref"]["slug"] == devotion.slug
+    assert spells_by_name["Command"]["mark"] == "Prepared"
+    assert spells_by_name["Protection from Evil and Good"]["is_always_prepared"] is True
+    assert spells_by_name["Sanctuary"]["is_always_prepared"] is True
+
+
+def test_native_level_up_adds_feature_level_additional_spells():
+    paladin = _systems_entry(
+        "class",
+        "phb-class-paladin",
+        "Paladin",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["wis", "cha"],
+            "subclass_title": "Sacred Oath",
+        },
+    )
+    devotion = _systems_entry(
+        "subclass",
+        "phb-subclass-paladin-oath-of-devotion",
+        "Oath of Devotion",
+        metadata={"class_name": "Paladin", "class_source": "PHB"},
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    sacred_oath = _systems_entry(
+        "classfeature",
+        "phb-classfeature-sacred-oath",
+        "Sacred Oath",
+        metadata={"level": 3},
+    )
+    oath_of_devotion = _systems_entry(
+        "subclassfeature",
+        "phb-subclassfeature-oath-of-devotion",
+        "Oath of Devotion",
+        metadata={
+            "level": 3,
+            "class_name": "Paladin",
+            "class_source": "PHB",
+            "subclass_name": "Oath of Devotion",
+            "additional_spells": [
+                {
+                    "prepared": {
+                        "3": ["Protection from Evil and Good", "Sanctuary"],
+                        "5": ["Lesser Restoration", "Zone of Truth"],
+                    }
+                }
+            ],
+        },
     )
     bless = _systems_entry("spell", "phb-spell-bless", "Bless", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
     command = _systems_entry("spell", "phb-spell-command", "Command", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
