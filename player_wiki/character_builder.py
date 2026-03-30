@@ -11,10 +11,14 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-03-29.11"
+CHARACTER_BUILDER_VERSION = "2026-03-29.12"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
+CAMPAIGN_FEATURE_CHOICE_SLOTS = 2
+CAMPAIGN_ITEM_CHOICE_SLOTS = 3
+CAMPAIGN_ITEMS_SECTION = "Items"
+CAMPAIGN_SESSIONS_SECTION = "Sessions"
 
 ABILITY_KEYS = ("str", "dex", "con", "int", "wis", "cha")
 ABILITY_LABELS = {
@@ -354,6 +358,8 @@ def build_level_one_builder_context(
     systems_service: Any,
     campaign_slug: str,
     form_values: dict[str, str] | None = None,
+    *,
+    campaign_page_records: list[Any] | None = None,
 ) -> dict[str, Any]:
     values = dict(form_values or {})
     class_options = _list_supported_class_entries(systems_service, campaign_slug)
@@ -363,6 +369,14 @@ def build_level_one_builder_context(
     feat_catalog = _build_feat_catalog(feat_options)
     item_catalog = _build_item_catalog(_list_campaign_enabled_entries(systems_service, campaign_slug, "item"))
     spell_catalog = _build_spell_catalog(_list_campaign_enabled_entries(systems_service, campaign_slug, "spell"))
+    campaign_feature_options = _build_campaign_page_choice_options(
+        campaign_page_records or [],
+        include_items=False,
+    )
+    campaign_item_options = _build_campaign_page_choice_options(
+        campaign_page_records or [],
+        include_items=True,
+    )
 
     selected_class = _resolve_selected_entry(class_options, values.get("class_slug", ""))
     selected_species = _resolve_selected_entry(species_options, values.get("species_slug", ""))
@@ -400,6 +414,8 @@ def build_level_one_builder_context(
         feat_catalog=feat_catalog,
         class_progression=class_progression,
         equipment_groups=equipment_groups,
+        campaign_feature_options=campaign_feature_options,
+        campaign_item_options=campaign_item_options,
         item_catalog=item_catalog,
         spell_catalog=spell_catalog,
         values=preview_values,
@@ -440,6 +456,7 @@ def build_level_one_builder_context(
         "spell_catalog": spell_catalog,
         "limitations": [
             "Base classes currently follow the native PHB progression spine, but species, backgrounds, subclasses, feats, spells, and items can come from any enabled Systems source.",
+            "Published campaign wiki features and items can also be linked in during creation through the optional campaign content fields.",
             "Enter level-1 ability scores after species bonuses. Native feat-driven ability increases are applied automatically.",
             "Native attack rows now cover basic PHB weapons, off-hand attacks, and key level-1 fighting-style adjustments, but a few advanced damage riders still need manual follow-up.",
             "Gold-alternative loadouts, some granted spell choices, spell-granting feats, and a few class-specific spell extras still need manual follow-up.",
@@ -524,7 +541,11 @@ def build_level_one_character_definition(
         ability_scores=ability_scores,
         current_level=1,
     )
-    equipment_catalog = _build_level_one_equipment_catalog(equipment_groups)
+    equipment_catalog = _build_level_one_equipment_catalog(
+        equipment_groups,
+        choice_sections=choice_sections,
+        selected_choices=selected_choices,
+    )
     attacks = _build_level_one_attacks(
         equipment_catalog=equipment_catalog,
         item_catalog=item_catalog,
@@ -1145,6 +1166,8 @@ def _build_choice_sections(
     feat_catalog: dict[str, Any],
     class_progression: list[dict[str, Any]],
     equipment_groups: list[dict[str, Any]],
+    campaign_feature_options: list[dict[str, str]],
+    campaign_item_options: list[dict[str, str]],
     item_catalog: dict[str, Any],
     spell_catalog: dict[str, Any],
     values: dict[str, str],
@@ -1175,6 +1198,14 @@ def _build_choice_sections(
     equipment_fields = _build_equipment_choice_fields(equipment_groups)
     if equipment_fields:
         sections.append({"title": "Equipment Choices", "fields": equipment_fields})
+
+    campaign_feature_fields = _build_campaign_feature_choice_fields(campaign_feature_options, values)
+    if campaign_feature_fields:
+        sections.append({"title": "Campaign Features", "fields": campaign_feature_fields})
+
+    campaign_item_fields = _build_campaign_item_choice_fields(campaign_item_options, values)
+    if campaign_item_fields:
+        sections.append({"title": "Campaign Equipment", "fields": campaign_item_fields})
 
     spell_fields = _build_spell_choice_fields(
         selected_class=selected_class,
@@ -2440,7 +2471,12 @@ def _describe_equipment_spec(spec: dict[str, Any]) -> str:
     return name
 
 
-def _build_level_one_equipment_catalog(equipment_groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _build_level_one_equipment_catalog(
+    equipment_groups: list[dict[str, Any]],
+    *,
+    choice_sections: list[dict[str, Any]] | None = None,
+    selected_choices: dict[str, list[str]] | None = None,
+) -> list[dict[str, Any]]:
     selected_specs: list[dict[str, Any]] = []
     for group in equipment_groups:
         options = list(group.get("options") or [])
@@ -2454,20 +2490,29 @@ def _build_level_one_equipment_catalog(equipment_groups: list[dict[str, Any]]) -
         if selected_option is None:
             selected_option = options[0]
         selected_specs.extend(list(selected_option.get("equipment_bundle") or []))
+    if choice_sections and selected_choices:
+        selected_specs.extend(
+            _build_selected_campaign_item_specs(
+                choice_sections=choice_sections,
+                selected_choices=selected_choices,
+            )
+        )
 
     merged_catalog: list[dict[str, Any]] = []
-    merged_index_by_key: dict[tuple[str, str, str, str, bool], int] = {}
+    merged_index_by_key: dict[tuple[str, str, str, str, str, bool], int] = {}
     for spec in selected_specs:
         name = str(spec.get("name") or "").strip()
         if not name:
             continue
         systems_ref = dict(spec.get("systems_ref") or {})
+        page_ref = str(spec.get("page_ref") or "").strip()
         notes = str(spec.get("notes") or "").strip()
         weight = str(spec.get("weight") or "").strip()
         is_currency_only = bool(spec.get("is_currency_only"))
         merge_key = (
             normalize_lookup(name),
             str(systems_ref.get("slug") or ""),
+            page_ref,
             notes,
             weight,
             is_currency_only,
@@ -2481,8 +2526,10 @@ def _build_level_one_equipment_catalog(equipment_groups: list[dict[str, Any]]) -
                 "weight": weight,
                 "notes": notes,
                 "systems_ref": systems_ref or None,
+                "page_ref": page_ref or None,
                 "currency": dict(spec.get("currency") or {}),
                 "is_currency_only": is_currency_only,
+                "source_kind": str(spec.get("source_kind") or "").strip(),
             }
             merged_index_by_key[merge_key] = len(merged_catalog)
             merged_catalog.append(row)
@@ -2885,6 +2932,128 @@ def _build_equipment_choice_fields(equipment_groups: list[dict[str, Any]]) -> li
             }
         )
     return fields
+
+
+def _build_campaign_page_choice_options(
+    campaign_page_records: list[Any],
+    *,
+    include_items: bool,
+) -> list[dict[str, str]]:
+    options: list[dict[str, str]] = []
+    seen_page_refs: set[str] = set()
+    for record in list(campaign_page_records or []):
+        page_ref = _extract_campaign_page_ref(record)
+        page = getattr(record, "page", None)
+        if not page_ref or page is None:
+            continue
+        section = str(getattr(page, "section", "") or "").strip()
+        if section == CAMPAIGN_SESSIONS_SECTION:
+            continue
+        is_item_page = section == CAMPAIGN_ITEMS_SECTION
+        if include_items != is_item_page:
+            continue
+        if page_ref in seen_page_refs:
+            continue
+        seen_page_refs.add(page_ref)
+        title = str(getattr(page, "title", "") or "").strip() or page_ref
+        subsection = str(getattr(page, "subsection", "") or "").strip()
+        summary = str(getattr(page, "summary", "") or "").strip()
+        label_parts = [title]
+        if section:
+            label_parts.append(f"{section} / {subsection}" if subsection else section)
+        options.append(
+            {
+                "value": page_ref,
+                "label": " | ".join(part for part in label_parts if part),
+                "title": title,
+                "summary": summary,
+            }
+        )
+    return options
+
+
+def _build_campaign_feature_choice_fields(
+    campaign_feature_options: list[dict[str, str]],
+    values: dict[str, str],
+) -> list[dict[str, Any]]:
+    if not campaign_feature_options:
+        return []
+    fields: list[dict[str, Any]] = []
+    for index in range(1, CAMPAIGN_FEATURE_CHOICE_SLOTS + 1):
+        field_name = f"campaign_feature_page_ref_{index}"
+        fields.append(
+            {
+                "name": field_name,
+                "label": f"Campaign Feature {index}",
+                "help_text": "Optional. Link a published campaign wiki mechanic, boon, or other player-safe feature page into the character at creation time.",
+                "options": [dict(option) for option in campaign_feature_options],
+                "selected": str(values.get(field_name) or "").strip(),
+                "group_key": field_name,
+                "kind": "campaign_page_feature",
+                "required": False,
+            }
+        )
+    return fields
+
+
+def _build_campaign_item_choice_fields(
+    campaign_item_options: list[dict[str, str]],
+    values: dict[str, str],
+) -> list[dict[str, Any]]:
+    if not campaign_item_options:
+        return []
+    fields: list[dict[str, Any]] = []
+    for index in range(1, CAMPAIGN_ITEM_CHOICE_SLOTS + 1):
+        field_name = f"campaign_item_page_ref_{index}"
+        fields.append(
+            {
+                "name": field_name,
+                "label": f"Campaign Item {index}",
+                "help_text": "Optional. Add a published campaign wiki item page to the new character's starting inventory.",
+                "options": [dict(option) for option in campaign_item_options],
+                "selected": str(values.get(field_name) or "").strip(),
+                "group_key": field_name,
+                "kind": "campaign_page_item",
+                "required": False,
+            }
+        )
+    return fields
+
+
+def _extract_campaign_page_ref(payload: Any) -> str:
+    if isinstance(payload, dict):
+        return str(payload.get("page_ref") or payload.get("slug") or "").strip()
+    return str(getattr(payload, "page_ref", "") or "").strip()
+
+
+def _build_selected_campaign_item_specs(
+    *,
+    choice_sections: list[dict[str, Any]],
+    selected_choices: dict[str, list[str]],
+) -> list[dict[str, Any]]:
+    specs: list[dict[str, Any]] = []
+    for section in choice_sections:
+        for field in list(section.get("fields") or []):
+            if str(field.get("kind") or "") != "campaign_page_item":
+                continue
+            group_key = str(field.get("group_key") or field.get("name") or "").strip()
+            for selected_value in list(selected_choices.get(group_key) or []):
+                option = _resolve_choice_option(choice_sections, group_key, selected_value)
+                page_ref = str(option.get("value") or selected_value).strip()
+                title = str(option.get("title") or option.get("label") or page_ref).strip()
+                if not page_ref or not title:
+                    continue
+                specs.append(
+                    {
+                        "name": title,
+                        "quantity": 1,
+                        "weight": "",
+                        "notes": str(option.get("summary") or "").strip(),
+                        "page_ref": page_ref,
+                        "source_kind": "builder_campaign_page",
+                    }
+                )
+    return specs
 
 
 def _build_spell_choice_fields(
@@ -3429,7 +3598,11 @@ def _build_level_one_preview(
         selected_choices=selected_choices,
         feat_selections=feat_selections,
     )
-    equipment_catalog = _build_level_one_equipment_catalog(equipment_groups)
+    equipment_catalog = _build_level_one_equipment_catalog(
+        equipment_groups,
+        choice_sections=choice_sections,
+        selected_choices=selected_choices,
+    )
     attacks = _build_level_one_attacks(
         equipment_catalog=equipment_catalog,
         item_catalog=item_catalog,
@@ -3548,10 +3721,11 @@ def _resolve_builder_choices(
         for field in list(section.get("fields") or []):
             field_name = str(field.get("name") or "")
             group_key = str(field.get("group_key") or field_name)
+            is_required = bool(field.get("required", True))
             raw_value = str(values.get(field_name) or "").strip()
             allowed_values = {str(option.get("value") or "").strip() for option in list(field.get("options") or [])}
             if not raw_value:
-                if strict:
+                if strict and is_required:
                     raise CharacterBuildError(f"{field.get('label') or 'A required choice'} is required.")
                 continue
             if raw_value not in allowed_values:
@@ -4013,6 +4187,43 @@ def _collect_level_one_feature_entries(
             }
         )
 
+    feature_entries.extend(
+        _collect_selected_campaign_feature_entries(
+            choice_sections=choice_sections,
+            selected_choices=selected_choices,
+        )
+    )
+
+    return feature_entries
+
+
+def _collect_selected_campaign_feature_entries(
+    *,
+    choice_sections: list[dict[str, Any]],
+    selected_choices: dict[str, list[str]],
+) -> list[dict[str, Any]]:
+    feature_entries: list[dict[str, Any]] = []
+    for section in choice_sections:
+        for field in list(section.get("fields") or []):
+            if str(field.get("kind") or "") != "campaign_page_feature":
+                continue
+            group_key = str(field.get("group_key") or field.get("name") or "").strip()
+            for selected_value in list(selected_choices.get(group_key) or []):
+                option = _resolve_choice_option(choice_sections, group_key, selected_value)
+                page_ref = str(option.get("value") or selected_value).strip()
+                title = str(option.get("title") or option.get("label") or page_ref).strip()
+                if not page_ref or not title:
+                    continue
+                feature_entries.append(
+                    {
+                        "kind": "campaign_page_feature",
+                        "entry": None,
+                        "name": title,
+                        "label": title,
+                        "page_ref": page_ref,
+                        "description_markdown": str(option.get("summary") or "").strip(),
+                    }
+                )
     return feature_entries
 
 
@@ -4136,17 +4347,26 @@ def _resolve_choice_label(
     group_key: str,
     selected_value: str,
 ) -> str:
+    option = _resolve_choice_option(choice_sections, group_key, selected_value)
+    return str(option.get("label") or "").strip()
+
+
+def _resolve_choice_option(
+    choice_sections: list[dict[str, Any]],
+    group_key: str,
+    selected_value: str,
+) -> dict[str, Any]:
     normalized_value = str(selected_value or "").strip()
     if not normalized_value:
-        return ""
+        return {}
     for section in choice_sections:
         for field in list(section.get("fields") or []):
             if str(field.get("group_key") or "") != group_key:
                 continue
             for option in list(field.get("options") or []):
                 if str(option.get("value") or "").strip() == normalized_value:
-                    return str(option.get("label") or "").strip()
-    return ""
+                    return dict(option)
+    return {}
 
 
 def _build_feature_payload(
@@ -4252,6 +4472,22 @@ def _build_feature_payload(
             ),
         }
         return feature_payload
+
+    if kind == "campaign_page_feature":
+        feature_name = str(feature_entry.get("label") or feature_entry.get("name") or "").strip()
+        page_ref = str(feature_entry.get("page_ref") or "").strip()
+        if not feature_name or not page_ref:
+            return None
+        return {
+            "id": f"{slugify(feature_name)}-{index}",
+            "name": feature_name,
+            "category": "custom_feature",
+            "source": "Campaign",
+            "description_markdown": str(feature_entry.get("description_markdown") or "").strip(),
+            "activation_type": "passive",
+            "tracker_ref": None,
+            "page_ref": page_ref,
+        }
 
     return None
 

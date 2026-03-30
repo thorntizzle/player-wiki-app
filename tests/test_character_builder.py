@@ -256,7 +256,7 @@ def _minimal_import_metadata(character_slug: str = "new-hero") -> CharacterImpor
         character_slug=character_slug,
         source_path="builder://native-level-1",
         imported_at_utc="2026-03-29T00:00:00Z",
-        parser_version="2026-03-29.11",
+        parser_version="2026-03-29.12",
         import_status="clean",
         warnings=[],
     )
@@ -330,6 +330,25 @@ def _field_value_for_label(builder_context: dict[str, object], field_name: str, 
         if label_fragment.lower() in str(option.get("label") or "").lower():
             return str(option.get("value") or "")
     raise AssertionError(f"builder field '{field_name}' did not contain option '{label_fragment}'")
+
+
+def _campaign_page_record(
+    page_ref: str,
+    title: str,
+    *,
+    section: str,
+    subsection: str = "",
+    summary: str = "",
+):
+    return SimpleNamespace(
+        page_ref=page_ref,
+        page=SimpleNamespace(
+            title=title,
+            section=section,
+            subsection=subsection,
+            summary=summary,
+        ),
+    )
 
 
 def test_level_one_builder_creates_native_character_definition_from_phb_choices():
@@ -482,6 +501,135 @@ def test_level_one_builder_creates_native_character_definition_from_phb_choices(
     assert any(feature["tracker_ref"] == "second-wind" for feature in definition.features if feature["name"] == "Second Wind")
     assert any(template["id"] == "second-wind" and template["max"] == 1 for template in definition.resource_templates)
     assert import_metadata.source_path == "builder://native-level-1"
+
+
+def test_level_one_builder_can_add_campaign_page_features_and_items():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={
+            "size": ["M"],
+            "speed": 30,
+            "languages": [{"common": True}],
+        },
+    )
+    soldier = _systems_entry(
+        "background",
+        "phb-background-soldier",
+        "Soldier",
+        metadata={
+            "skill_proficiencies": [{"athletics": True, "intimidation": True}],
+        },
+    )
+    second_wind = _systems_entry(
+        "classfeature",
+        "phb-classfeature-second-wind",
+        "Second Wind",
+        metadata={"level": 1},
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [soldier],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+    campaign_page_records = [
+        _campaign_page_record(
+            "mechanics/arcane-overload",
+            "Arcane Overload",
+            section="Mechanics",
+            subsection="Class Modifications",
+            summary="A sample class modification for feature-card coverage.",
+        ),
+        _campaign_page_record(
+            "items/stormglass-compass",
+            "Stormglass Compass",
+            section="Items",
+            summary="A sample magic item whose title is used for search coverage.",
+        ),
+    ]
+
+    form_values = {
+        "name": "Campaign Hero",
+        "character_slug": "campaign-hero",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": human.slug,
+        "background_slug": soldier.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=campaign_page_records,
+    )
+
+    assert _field_value_for_label(context, "campaign_feature_page_ref_1", "Arcane Overload")
+    assert _field_value_for_label(context, "campaign_item_page_ref_1", "Stormglass Compass")
+
+    form_values = {
+        **form_values,
+        "campaign_feature_page_ref_1": _field_value_for_label(context, "campaign_feature_page_ref_1", "Arcane Overload"),
+        "campaign_item_page_ref_1": _field_value_for_label(context, "campaign_item_page_ref_1", "Stormglass Compass"),
+    }
+
+    context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=campaign_page_records,
+    )
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+
+    arcane_overload = next(feature for feature in definition.features if feature["name"] == "Arcane Overload")
+    stormglass_compass = next(item for item in definition.equipment_catalog if item["name"] == "Stormglass Compass")
+
+    assert "Arcane Overload" in context["preview"]["features"]
+    assert "Stormglass Compass" in context["preview"]["equipment"]
+    assert arcane_overload["page_ref"] == "mechanics/arcane-overload"
+    assert arcane_overload["category"] == "custom_feature"
+    assert arcane_overload["description_markdown"] == "A sample class modification for feature-card coverage."
+    assert stormglass_compass["page_ref"] == "items/stormglass-compass"
+    assert stormglass_compass["notes"] == "A sample magic item whose title is used for search coverage."
 
 
 def test_level_one_builder_supports_enabled_non_phb_species_background_feat_and_subclass_options():
@@ -1521,7 +1669,7 @@ def test_level_one_builder_populates_starting_equipment_spells_and_currency():
     assert spells_by_name["Message"]["components"] == "V, S, M (a short piece of copper wire)"
     assert resource_templates_by_id["arcane-recovery"]["max"] == 1
     assert state_resources_by_id["arcane-recovery"]["current"] == 1
-    assert import_metadata.parser_version == "2026-03-29.11"
+    assert import_metadata.parser_version == "2026-03-29.12"
 
 
 def test_level_one_builder_adds_structured_subclass_prepared_spells():
@@ -3740,6 +3888,28 @@ def test_character_builder_live_preview_route_returns_fragment(app, client, sign
     assert "data-live-builder-root" in html
     assert "data-live-builder-form" in html
     assert "data-live-refresh-fallback" in html
+
+
+def test_character_builder_route_passes_visible_campaign_pages_into_builder(app, client, sign_in, users, monkeypatch):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    captured_page_refs: list[str] = []
+
+    def _fake_builder_context(_systems_service, _campaign_slug, form_values=None, *, campaign_page_records=None):
+        del form_values
+        captured_page_refs.extend(
+            str(getattr(record, "page_ref", "") or "").strip()
+            for record in list(campaign_page_records or [])
+        )
+        return _builder_context_fixture()
+
+    monkeypatch.setattr(app_module, "build_level_one_builder_context", _fake_builder_context)
+
+    response = client.get("/campaigns/linden-pass/characters/new")
+
+    assert response.status_code == 200
+    assert "items/stormglass-compass" in captured_page_refs
+    assert "mechanics/arcane-overload" in captured_page_refs
+    assert all(not page_ref.startswith("sessions/") for page_ref in captured_page_refs if page_ref)
 
 
 def test_non_manager_cannot_open_character_builder_page(client, sign_in, users, set_campaign_visibility):

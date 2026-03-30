@@ -3223,11 +3223,19 @@ def create_app() -> Flask:
         if not can_manage_campaign_session(campaign_slug):
             abort(403)
 
+        campaign = load_campaign_context(campaign_slug)
+        campaign_page_records = [
+            page_record
+            for page_record in get_campaign_page_store().list_page_records(campaign_slug)
+            if campaign.is_page_visible(page_record.page)
+            and str(page_record.page.section or "").strip() != "Sessions"
+        ]
         form_values = dict(request.form if request.method == "POST" else request.args)
         builder_context = build_level_one_builder_context(
             get_systems_service(),
             campaign_slug,
             form_values,
+            campaign_page_records=campaign_page_records,
         )
         builder_ready = bool(
             builder_context.get("class_options")
