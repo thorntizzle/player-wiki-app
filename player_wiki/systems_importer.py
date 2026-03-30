@@ -739,6 +739,7 @@ class Dnd5eSystemsImporter:
         metadata = {
             "level": raw_entry.get("level"),
             "school": raw_entry.get("school"),
+            "ritual": bool(dict(raw_entry.get("meta") or {}).get("ritual")),
             "casting_time": self._clean_data(raw_entry.get("time")),
             "range": self._clean_data(raw_entry.get("range")),
             "components": self._clean_data(raw_entry.get("components")),

@@ -1014,6 +1014,30 @@ def build_class_progression_metadata_data_root(root: Path) -> Path:
     return root
 
 
+def build_spell_metadata_data_root(root: Path) -> Path:
+    write_json(
+        root / "data/spells/spells-phb.json",
+        {
+            "spell": [
+                {
+                    "name": "Detect Magic",
+                    "source": "PHB",
+                    "page": 231,
+                    "level": 1,
+                    "school": "D",
+                    "time": [{"number": 1, "unit": "action"}],
+                    "range": {"type": "self"},
+                    "components": {"v": True, "s": True},
+                    "duration": [{"type": "timed", "duration": {"type": "minute", "amount": 10}}],
+                    "meta": {"ritual": True},
+                    "entries": ["For the duration, you sense the presence of magic within 30 feet of you."],
+                }
+            ]
+        },
+    )
+    return root
+
+
 def build_subclass_optionalfeature_progression_data_root(root: Path) -> Path:
     write_json(
         root / "data/optionalfeatures.json",
@@ -1434,6 +1458,26 @@ def test_importer_preserves_native_class_progression_and_spell_class_lists(app, 
         [{"level": 1, "max_slots": 3}],
     ]
     assert guidance.metadata["class_lists"] == {"TCE": ["Artificer"]}
+
+
+def test_importer_preserves_spell_ritual_metadata_for_native_builder(app, tmp_path):
+    data_root = build_spell_metadata_data_root(tmp_path / "dnd5e-source-spell-metadata")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("PHB", entry_types=["spell"])
+        store = app.extensions["systems_store"]
+        detect_magic = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "PHB", entry_type="spell", limit=10)
+            if entry.title == "Detect Magic"
+        )
+
+    assert detect_magic.metadata["ritual"] is True
 
 
 def test_importer_preserves_structured_feat_metadata_for_native_builder(app, tmp_path):
