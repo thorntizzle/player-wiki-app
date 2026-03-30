@@ -903,6 +903,117 @@ def build_class_optionalfeature_progression_data_root(root: Path) -> Path:
     return root
 
 
+def build_class_progression_metadata_data_root(root: Path) -> Path:
+    write_json(root / "data/class/index.json", {"artificer": "class-artificer.json"})
+    write_json(
+        root / "data/class/class-artificer.json",
+        {
+            "class": [
+                {
+                    "name": "Artificer",
+                    "source": "TCE",
+                    "page": 9,
+                    "hd": {"number": 1, "faces": 8},
+                    "proficiency": ["con", "int"],
+                    "spellcastingAbility": "int",
+                    "casterProgression": "artificer",
+                    "preparedSpells": "<$level$> / 2 + <$int_mod$>",
+                    "cantripProgression": [2, 2, 2],
+                    "startingProficiencies": {
+                        "armor": ["light", "medium", "shield"],
+                        "weapons": ["simple"],
+                        "tools": ["thieves' tools", "tinker's tools"],
+                        "skills": [{"choose": {"count": 2, "from": ["arcana", "history", "investigation", "medicine"]}}],
+                    },
+                    "classTableGroups": [
+                        {
+                            "colLabels": [
+                                "{@filter Infusions Known|optionalfeatures|feature type=ai|source=TCE}",
+                                "Infused Items",
+                                "{@filter Cantrips Known|spells|level=0|class=artificer}",
+                            ],
+                            "rows": [
+                                [0, 0, 2],
+                                [4, 2, 2],
+                                [4, 2, 2],
+                            ],
+                        },
+                        {
+                            "title": "Spell Slots per Spell Level",
+                            "colLabels": [
+                                "{@filter 1st|spells|level=1|class=Artificer}",
+                                "{@filter 2nd|spells|level=2|class=Artificer}",
+                                "{@filter 3rd|spells|level=3|class=Artificer}",
+                                "{@filter 4th|spells|level=4|class=Artificer}",
+                                "{@filter 5th|spells|level=5|class=Artificer}",
+                            ],
+                            "rowsSpellProgression": [
+                                [2, 0, 0, 0, 0],
+                                [2, 0, 0, 0, 0],
+                                [3, 0, 0, 0, 0],
+                            ],
+                        },
+                    ],
+                    "classFeatures": [
+                        "Magical Tinkering|Artificer|TCE|1",
+                        "Infuse Item|Artificer|TCE|2",
+                    ],
+                }
+            ],
+            "classFeature": [
+                {
+                    "name": "Magical Tinkering",
+                    "source": "TCE",
+                    "className": "Artificer",
+                    "classSource": "TCE",
+                    "level": 1,
+                    "entries": ["You learn how to invest a spark of magic into mundane objects."],
+                },
+                {
+                    "name": "Infuse Item",
+                    "source": "TCE",
+                    "className": "Artificer",
+                    "classSource": "TCE",
+                    "level": 2,
+                    "entries": ["You can infuse mundane items with certain magical infusions."],
+                },
+            ],
+        },
+    )
+    write_json(
+        root / "data/spells/spells-tce.json",
+        {
+            "spell": [
+                {
+                    "name": "Guidance",
+                    "source": "TCE",
+                    "page": 1,
+                    "level": 0,
+                    "school": "D",
+                    "time": [{"number": 1, "unit": "action"}],
+                    "range": {"type": "touch"},
+                    "components": {"v": True, "s": True},
+                    "duration": [{"type": "timed", "duration": {"type": "minute", "amount": 1}, "concentration": True}],
+                    "entries": ["You touch one willing creature."],
+                }
+            ]
+        },
+    )
+    write_json(
+        root / "data/generated/gendata-spell-source-lookup.json",
+        {
+            "tce": {
+                "guidance": {
+                    "class": {
+                        "TCE": {"Artificer": True},
+                    }
+                }
+            }
+        },
+    )
+    return root
+
+
 def build_subclass_optionalfeature_progression_data_root(root: Path) -> Path:
     write_json(
         root / "data/optionalfeatures.json",
@@ -1289,6 +1400,40 @@ def test_importer_preserves_additional_spell_metadata_on_class_entries(app, tmp_
     ]
     assert entries["Spellcasting"].metadata["additional_spells"] == [{"prepared": {"1": ["guidance"]}}]
     assert entries["Disciple of Life"].metadata["additional_spells"] == [{"prepared": {"1": ["bless"]}}]
+
+
+def test_importer_preserves_native_class_progression_and_spell_class_lists(app, tmp_path):
+    data_root = build_class_progression_metadata_data_root(tmp_path / "dnd5e-source-class-progression")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("TCE", entry_types=["class", "classfeature", "spell"])
+        store = app.extensions["systems_store"]
+        artificer = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "TCE", entry_type="class", limit=10)
+            if entry.title == "Artificer"
+        )
+        guidance = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "TCE", entry_type="spell", limit=10)
+            if entry.title == "Guidance"
+        )
+
+    assert artificer.metadata["spellcasting_ability"] == "int"
+    assert artificer.metadata["caster_progression"] == "artificer"
+    assert artificer.metadata["prepared_spells"] == "<$level$> / 2 + <$int_mod$>"
+    assert artificer.metadata["cantrip_progression"] == [2, 2, 2]
+    assert artificer.metadata["slot_progression"] == [
+        [{"level": 1, "max_slots": 2}],
+        [{"level": 1, "max_slots": 2}],
+        [{"level": 1, "max_slots": 3}],
+    ]
+    assert guidance.metadata["class_lists"] == {"TCE": ["Artificer"]}
 
 
 def test_importer_preserves_structured_feat_metadata_for_native_builder(app, tmp_path):

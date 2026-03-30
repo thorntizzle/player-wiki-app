@@ -233,7 +233,7 @@ EXTRA_PHB_LEVEL_ONE_SPELL_LISTS = {
     },
 }
 NATIVE_LEVEL_UP_LIMITATIONS = [
-    "Native level-up currently advances one level at a time for single-class native characters whose base class uses the PHB progression path.",
+    "Native level-up currently advances one level at a time for single-class native characters whose base class has imported native progression support.",
     "Hit point gain is entered manually so your table can choose rolled or fixed HP.",
     "Prepared-caster level-up currently preserves existing prepared spells and adds the new picks needed for the next level.",
     "Spell replacement, some granted spell choices, spell-granting feats, and some advanced feat side effects still need manual follow-up.",
@@ -455,7 +455,7 @@ def build_level_one_builder_context(
         "item_catalog": item_catalog,
         "spell_catalog": spell_catalog,
         "limitations": [
-            "Base classes currently follow the native PHB progression spine, but species, backgrounds, subclasses, feats, spells, and items can come from any enabled Systems source.",
+            "Base classes now come from the campaign's enabled Systems sources when their native progression metadata is available, while older PHB fallback data still covers previously imported local classes.",
             "Published campaign wiki features and items can also be linked in during creation through the optional campaign content fields.",
             "Enter level-1 ability scores after species bonuses. Native feat-driven ability increases are applied automatically.",
             "Native attack rows now cover basic PHB weapons, off-hand attacks, and key level-1 fighting-style adjustments, but a few advanced damage riders still need manual follow-up.",
@@ -671,6 +671,8 @@ def build_native_level_up_context(
     )
     if selected_class is None or selected_species is None or selected_background is None:
         raise CharacterBuildError("This native character is missing enabled Systems links needed for level-up.")
+    if not _supports_native_class_entry(selected_class):
+        raise CharacterBuildError("This native character's base class does not yet expose the progression metadata needed for native level-up.")
 
     subclass_options = _list_subclass_options(systems_service, campaign_slug, selected_class)
     existing_subclass_slug = _systems_ref_slug(definition.profile.get("subclass_ref"))
@@ -937,7 +939,35 @@ def _list_supported_class_entries(
     systems_service: Any,
     campaign_slug: str,
 ) -> list[SystemsEntryRecord]:
-    return _list_phb_entries(systems_service, campaign_slug, "class")
+    return [
+        entry
+        for entry in _list_campaign_enabled_entries(systems_service, campaign_slug, "class")
+        if _supports_native_class_entry(entry)
+    ]
+
+
+def _supports_native_class_entry(entry: SystemsEntryRecord | None) -> bool:
+    if not isinstance(entry, SystemsEntryRecord):
+        return False
+    metadata = dict(entry.metadata or {})
+    if not str(entry.title or "").strip() or not metadata.get("hit_die"):
+        return False
+    if str(entry.source_id or "").strip().upper() == PHB_SOURCE_ID:
+        return True
+    return any(
+        metadata.get(key)
+        for key in (
+            "spellcasting_ability",
+            "caster_progression",
+            "prepared_spells",
+            "prepared_spells_change",
+            "cantrip_progression",
+            "spells_known_progression",
+            "spells_known_progression_fixed",
+            "prepared_spells_progression",
+            "slot_progression",
+        )
+    )
 
 
 def _list_campaign_enabled_entries(
@@ -1104,8 +1134,8 @@ def _native_level_up_support_error(definition: CharacterDefinition) -> str:
         return "Level-up currently supports single-class native characters only."
     class_payload = dict(classes[0] or {})
     class_ref = dict(class_payload.get("systems_ref") or (definition.profile or {}).get("class_ref") or {})
-    if str(class_ref.get("source_id") or "").strip().upper() != PHB_SOURCE_ID:
-        return "Level-up currently supports native characters whose base class uses the PHB progression path."
+    if not str(class_ref.get("title") or class_payload.get("class_name") or "").strip():
+        return "This native character is missing the class link needed for level-up."
     current_level = _resolve_native_character_level(definition)
     if current_level < 1:
         return "This native character is missing a valid current level."
@@ -3066,8 +3096,38 @@ def _build_spell_choice_fields(
     if selected_class is None:
         return []
     class_name = selected_class.title
-    spell_rules = LEVEL_ONE_SPELL_RULES_BY_CLASS.get(class_name)
-    if not spell_rules:
+    spell_mode = _spellcasting_mode_for_class(class_name, selected_class=selected_class)
+    cantrip_count = _spell_progression_value(
+        class_name,
+        "cantrip_progression",
+        1,
+        selected_class=selected_class,
+    )
+    spellbook_count = _spell_progression_value(
+        class_name,
+        "spells_known_progression_fixed",
+        1,
+        selected_class=selected_class,
+    )
+    level_one_count = _spell_progression_value(
+        class_name,
+        "spells_known_progression",
+        1,
+        selected_class=selected_class,
+    )
+    prepared_count = _prepared_spell_count_for_level(
+        class_name,
+        _coerce_ability_scores(values),
+        1,
+        selected_class=selected_class,
+    )
+    slot_progression = _spell_slot_progression_for_class_level(
+        class_name,
+        1,
+        selected_class=selected_class,
+    )
+    has_level_one_spellcasting = bool(slot_progression) or cantrip_count > 0 or level_one_count > 0 or spellbook_count > 0
+    if not spell_mode or not has_level_one_spellcasting:
         return []
     fields: list[dict[str, Any]] = []
     automatic_known_lookup_keys = _automatic_known_spell_lookup_keys(
@@ -3090,7 +3150,7 @@ def _build_spell_choice_fields(
         if str(option.get("value") or "").strip() not in (automatic_known_lookup_keys | selected_bonus_known_values)
     ]
     if cantrip_options:
-        for index in range(int(spell_rules.get("cantrip_count") or 0)):
+        for index in range(cantrip_count):
             field_name = f"spell_cantrip_{index + 1}"
             fields.append(
                 {
@@ -3104,7 +3164,6 @@ def _build_spell_choice_fields(
                 }
             )
 
-    spell_mode = str(spell_rules.get("level_one_mode") or "")
     fields.extend(
         _build_additional_known_spell_choice_fields(
             selected_class=selected_class,
@@ -3140,7 +3199,6 @@ def _build_spell_choice_fields(
     if not level_one_options:
         return fields
     if spell_mode == "wizard":
-        spellbook_count = int(spell_rules.get("spellbook_count") or 0)
         for index in range(spellbook_count):
             field_name = f"wizard_spellbook_{index + 1}"
             fields.append(
@@ -3155,7 +3213,6 @@ def _build_spell_choice_fields(
                 }
             )
 
-        prepared_count = _level_one_spell_selection_count(spell_rules, values)
         selected_spellbook_values = [
             str(values.get(f"wizard_spellbook_{index + 1}") or "").strip()
             for index in range(spellbook_count)
@@ -3181,14 +3238,14 @@ def _build_spell_choice_fields(
             )
         return fields
 
-    level_one_count = _level_one_spell_selection_count(spell_rules, values)
+    selection_count = level_one_count if spell_mode == "known" else prepared_count
     label_prefix = "Known Spell" if spell_mode == "known" else "Prepared Spell"
     help_text = (
         f"Choose a {class_name} spell you know."
         if spell_mode == "known"
         else f"Choose a {class_name} spell you have prepared."
     )
-    for index in range(level_one_count):
+    for index in range(selection_count):
         field_name = f"spell_level_one_{index + 1}"
         fields.append(
             {
@@ -3215,11 +3272,15 @@ def _build_level_up_spell_choice_fields(
     values: dict[str, str],
 ) -> list[dict[str, Any]]:
     class_name = selected_class.title
-    spell_mode = _spellcasting_mode_for_class(class_name)
+    spell_mode = _spellcasting_mode_for_class(class_name, selected_class=selected_class)
     if not spell_mode:
         return []
 
-    slot_progression = _spell_slot_progression_for_class_level(class_name, target_level)
+    slot_progression = _spell_slot_progression_for_class_level(
+        class_name,
+        target_level,
+        selected_class=selected_class,
+    )
     max_spell_level = max((int(slot.get("level") or 0) for slot in slot_progression), default=0)
     existing_spells = list((definition.spellcasting or {}).get("spells") or [])
     existing_cantrip_values = _spell_selection_values_by_mark(existing_spells, "Cantrip", exclude_bonus_known=True)
@@ -3246,7 +3307,12 @@ def _build_level_up_spell_choice_fields(
     selected_bonus_known_values = _selected_form_spell_values_by_field_prefix(values, prefix="levelup_bonus_spell_known_")
 
     fields: list[dict[str, Any]] = []
-    target_cantrip_count = _spell_progression_value(class_name, "cantrip_progression", target_level)
+    target_cantrip_count = _spell_progression_value(
+        class_name,
+        "cantrip_progression",
+        target_level,
+        selected_class=selected_class,
+    )
     additional_cantrips = max(target_cantrip_count - len(existing_cantrip_values), 0)
     cantrip_options = [
         option
@@ -3301,7 +3367,12 @@ def _build_level_up_spell_choice_fields(
         return fields
 
     if spell_mode == "known":
-        target_known_count = _spell_progression_value(class_name, "spells_known_progression", target_level)
+        target_known_count = _spell_progression_value(
+            class_name,
+            "spells_known_progression",
+            target_level,
+            selected_class=selected_class,
+        )
         additional_known = max(target_known_count - len(existing_known_values), 0)
         options = [
             option
@@ -3326,7 +3397,12 @@ def _build_level_up_spell_choice_fields(
         return fields
 
     if spell_mode == "prepared":
-        target_prepared_count = _prepared_spell_count_for_level(class_name, ability_scores, target_level)
+        target_prepared_count = _prepared_spell_count_for_level(
+            class_name,
+            ability_scores,
+            target_level,
+            selected_class=selected_class,
+        )
         additional_prepared = max(target_prepared_count - len(existing_prepared_values), 0)
         excluded_values = existing_prepared_values | existing_always_prepared_values | target_always_prepared_values
         options = [option for option in spell_level_options if option["value"] not in excluded_values]
@@ -3348,7 +3424,12 @@ def _build_level_up_spell_choice_fields(
         return fields
 
     if spell_mode == "wizard":
-        new_spellbook_spells = _spell_progression_value(class_name, "spells_known_progression_fixed", target_level)
+        new_spellbook_spells = _spell_progression_value(
+            class_name,
+            "spells_known_progression_fixed",
+            target_level,
+            selected_class=selected_class,
+        )
         spellbook_options = [option for option in spell_level_options if option["value"] not in existing_spellbook_values]
         if new_spellbook_spells > 0 and not spellbook_options:
             return fields
@@ -3376,7 +3457,12 @@ def _build_level_up_spell_choice_fields(
             if option["value"] in (existing_spellbook_values | set(new_spellbook_values))
             and option["value"] not in (existing_prepared_values | target_always_prepared_values)
         ]
-        target_prepared_count = _prepared_spell_count_for_level(class_name, ability_scores, target_level)
+        target_prepared_count = _prepared_spell_count_for_level(
+            class_name,
+            ability_scores,
+            target_level,
+            selected_class=selected_class,
+        )
         additional_prepared = max(target_prepared_count - len(existing_prepared_values), 0)
         if additional_prepared > 0 and not prepared_options:
             return fields
@@ -3398,12 +3484,55 @@ def _build_level_up_spell_choice_fields(
     return fields
 
 
-def _class_spell_progression(class_name: str) -> dict[str, Any]:
-    return dict(_load_phb_class_progression().get(str(class_name or "").strip()) or {})
+def _class_spell_progression(
+    class_name: str,
+    *,
+    selected_class: SystemsEntryRecord | None = None,
+) -> dict[str, Any]:
+    progression = dict(_load_phb_class_progression().get(str(class_name or "").strip()) or {})
+    if selected_class is None:
+        return progression
+
+    metadata = dict(selected_class.metadata or {})
+    for key in (
+        "spellcasting_ability",
+        "caster_progression",
+        "prepared_spells",
+        "prepared_spells_change",
+    ):
+        value = str(metadata.get(key) or "").strip()
+        if value:
+            progression[key] = value
+    for key in (
+        "cantrip_progression",
+        "spells_known_progression",
+        "spells_known_progression_fixed",
+        "prepared_spells_progression",
+    ):
+        values = [int(value or 0) for value in list(metadata.get(key) or [])]
+        if values:
+            progression[key] = values
+    slot_rows: list[list[dict[str, Any]]] = []
+    for row in list(metadata.get("slot_progression") or []):
+        normalized_row: list[dict[str, Any]] = []
+        for slot in list(row or []):
+            slot_payload = dict(slot or {})
+            level = int(slot_payload.get("level") or 0)
+            max_slots = int(slot_payload.get("max_slots") or 0)
+            if level > 0 and max_slots > 0:
+                normalized_row.append({"level": level, "max_slots": max_slots})
+        slot_rows.append(normalized_row)
+    if slot_rows:
+        progression["slot_progression"] = slot_rows
+    return progression
 
 
-def _spellcasting_mode_for_class(class_name: str) -> str:
-    progression = _class_spell_progression(class_name)
+def _spellcasting_mode_for_class(
+    class_name: str,
+    *,
+    selected_class: SystemsEntryRecord | None = None,
+) -> str:
+    progression = _class_spell_progression(class_name, selected_class=selected_class)
     if list(progression.get("spells_known_progression_fixed") or []):
         return "wizard"
     if str(progression.get("prepared_spells") or "").strip() or list(progression.get("prepared_spells_progression") or []):
@@ -3413,8 +3542,12 @@ def _spellcasting_mode_for_class(class_name: str) -> str:
     return ""
 
 
-def _spellcasting_ability_name_for_class(class_name: str) -> str:
-    progression = _class_spell_progression(class_name)
+def _spellcasting_ability_name_for_class(
+    class_name: str,
+    *,
+    selected_class: SystemsEntryRecord | None = None,
+) -> str:
+    progression = _class_spell_progression(class_name, selected_class=selected_class)
     ability_key = str(progression.get("spellcasting_ability") or "").strip()
     if ability_key in ABILITY_LABELS:
         return ABILITY_LABELS[ability_key]
@@ -3425,16 +3558,23 @@ def _spell_progression_value(
     class_name: str,
     key: str,
     target_level: int,
+    *,
+    selected_class: SystemsEntryRecord | None = None,
 ) -> int:
-    progression = _class_spell_progression(class_name)
+    progression = _class_spell_progression(class_name, selected_class=selected_class)
     values = list(progression.get(key) or [])
     if 1 <= target_level <= len(values):
         return max(int(values[target_level - 1] or 0), 0)
     return 0
 
 
-def _spell_slot_progression_for_class_level(class_name: str, target_level: int) -> list[dict[str, Any]]:
-    progression = _class_spell_progression(class_name)
+def _spell_slot_progression_for_class_level(
+    class_name: str,
+    target_level: int,
+    *,
+    selected_class: SystemsEntryRecord | None = None,
+) -> list[dict[str, Any]]:
+    progression = _class_spell_progression(class_name, selected_class=selected_class)
     slot_rows = list(progression.get("slot_progression") or [])
     if 1 <= target_level <= len(slot_rows):
         return [dict(slot) for slot in list(slot_rows[target_level - 1] or [])]
@@ -3447,8 +3587,10 @@ def _prepared_spell_count_for_level(
     class_name: str,
     ability_scores: dict[str, int],
     target_level: int,
+    *,
+    selected_class: SystemsEntryRecord | None = None,
 ) -> int:
-    progression = _class_spell_progression(class_name)
+    progression = _class_spell_progression(class_name, selected_class=selected_class)
     prepared_progression = list(progression.get("prepared_spells_progression") or [])
     if 1 <= target_level <= len(prepared_progression):
         return max(int(prepared_progression[target_level - 1] or 0), 0)
@@ -3486,13 +3628,22 @@ def _build_spell_options_for_class_level(
     selected_class: SystemsEntryRecord | None = None,
     selected_subclass: SystemsEntryRecord | None = None,
 ) -> list[dict[str, str]]:
-    titles = list(
-        dict(dict(spell_catalog.get("phb_level_one_lists") or {}).get(class_name) or {}).get(str(level_key)) or []
-    )
     try:
         spell_level = int(str(level_key or "0").strip())
     except ValueError:
         spell_level = 0
+    titles: list[str] = []
+    if selected_class is not None:
+        titles.extend(
+            entry.title
+            for entry in list(spell_catalog.get("entries") or [])
+            if int((entry.metadata or {}).get("level") if (entry.metadata or {}).get("level") is not None else -1) == spell_level
+            and _spell_entry_matches_class_list(entry, selected_class)
+        )
+    if not titles:
+        titles.extend(
+            dict(dict(spell_catalog.get("phb_level_one_lists") or {}).get(class_name) or {}).get(str(level_key)) or []
+        )
     titles.extend(
         _expanded_spell_titles_for_level(
             selected_class=selected_class,
@@ -3502,6 +3653,28 @@ def _build_spell_options_for_class_level(
         )
     )
     return _build_spell_options_from_titles(titles, spell_catalog)
+
+
+def _spell_entry_matches_class_list(
+    spell_entry: SystemsEntryRecord,
+    selected_class: SystemsEntryRecord,
+) -> bool:
+    class_lists = dict((spell_entry.metadata or {}).get("class_lists") or {})
+    selected_source_id = str(selected_class.source_id or "").strip().upper()
+    selected_title = normalize_lookup(selected_class.title)
+    if selected_source_id:
+        source_titles = [
+            normalize_lookup(title)
+            for title in list(class_lists.get(selected_source_id) or [])
+            if str(title).strip()
+        ]
+        if selected_title and selected_title in source_titles:
+            return True
+    for titles in class_lists.values():
+        normalized_titles = [normalize_lookup(title) for title in list(titles or []) if str(title).strip()]
+        if selected_title and selected_title in normalized_titles:
+            return True
+    return False
 
 
 def _build_spell_options_for_class_levels(
@@ -4863,7 +5036,11 @@ def _build_native_level_up_preview(
         spell_catalog=spell_catalog,
         target_level=target_level,
     )
-    slot_progression = _level_up_slot_progression_for_class(selected_class.title, target_level)
+    slot_progression = _level_up_slot_progression_for_class(
+        selected_class.title,
+        target_level,
+        selected_class=selected_class,
+    )
     slot_summary = [
         f"Level {int(slot.get('level') or 0)}: {int(slot.get('max_slots') or 0)} slots"
         for slot in slot_progression
@@ -4912,8 +5089,21 @@ def _build_level_one_spellcasting(
     selected_choices: dict[str, list[str]],
     spell_catalog: dict[str, Any],
 ) -> dict[str, Any]:
-    ability_name = SPELLCASTING_ABILITY_BY_CLASS.get(selected_class.title)
-    if not ability_name:
+    class_name = selected_class.title
+    ability_name = _spellcasting_ability_name_for_class(class_name, selected_class=selected_class)
+    spell_payloads = _build_level_one_spell_payloads(
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        choice_sections=choice_sections,
+        selected_choices=selected_choices,
+        spell_catalog=spell_catalog,
+    )
+    slot_progression = _spell_slot_progression_for_class_level(
+        class_name,
+        1,
+        selected_class=selected_class,
+    )
+    if not ability_name and not slot_progression and not spell_payloads:
         return {
             "spellcasting_class": "",
             "spellcasting_ability": "",
@@ -4922,21 +5112,23 @@ def _build_level_one_spellcasting(
             "slot_progression": [],
             "spells": [],
         }
+    if not ability_name:
+        return {
+            "spellcasting_class": "",
+            "spellcasting_ability": "",
+            "spell_save_dc": None,
+            "spell_attack_bonus": None,
+            "slot_progression": slot_progression,
+            "spells": spell_payloads,
+        }
     ability_key = next(key for key, label in ABILITY_LABELS.items() if label == ability_name)
     modifier = _ability_modifier(ability_scores[ability_key])
-    spell_payloads = _build_level_one_spell_payloads(
-        selected_class=selected_class,
-        selected_subclass=selected_subclass,
-        choice_sections=choice_sections,
-        selected_choices=selected_choices,
-        spell_catalog=spell_catalog,
-    )
     return {
-        "spellcasting_class": selected_class.title,
+        "spellcasting_class": class_name,
         "spellcasting_ability": ability_name,
         "spell_save_dc": 8 + proficiency_bonus + modifier,
         "spell_attack_bonus": proficiency_bonus + modifier,
-        "slot_progression": list(LEVEL_ONE_SPELL_SLOTS_BY_CLASS.get(selected_class.title, [])),
+        "slot_progression": slot_progression,
         "spells": spell_payloads,
     }
 
@@ -4955,9 +5147,9 @@ def _build_level_up_spellcasting(
 ) -> dict[str, Any]:
     del choice_sections
     class_name = selected_class.title
-    ability_name = _spellcasting_ability_name_for_class(class_name)
-    spell_mode = _spellcasting_mode_for_class(class_name)
-    slot_progression = _level_up_slot_progression_for_class(class_name, target_level)
+    ability_name = _spellcasting_ability_name_for_class(class_name, selected_class=selected_class)
+    spell_mode = _spellcasting_mode_for_class(class_name, selected_class=selected_class)
+    slot_progression = _level_up_slot_progression_for_class(class_name, target_level, selected_class=selected_class)
     if not ability_name and not spell_mode:
         return dict(current_definition.spellcasting or {})
     if not ability_name:
@@ -5059,8 +5251,17 @@ def _build_level_up_spellcasting(
     }
 
 
-def _level_up_slot_progression_for_class(class_name: str, target_level: int) -> list[dict[str, Any]]:
-    return _spell_slot_progression_for_class_level(class_name, target_level)
+def _level_up_slot_progression_for_class(
+    class_name: str,
+    target_level: int,
+    *,
+    selected_class: SystemsEntryRecord | None = None,
+) -> list[dict[str, Any]]:
+    return _spell_slot_progression_for_class_level(
+        class_name,
+        target_level,
+        selected_class=selected_class,
+    )
 
 
 def _build_level_one_spell_payloads(
@@ -5072,8 +5273,9 @@ def _build_level_one_spell_payloads(
     spell_catalog: dict[str, Any],
 ) -> list[dict[str, Any]]:
     del choice_sections
-    spell_rules = LEVEL_ONE_SPELL_RULES_BY_CLASS.get(selected_class.title)
-    if not spell_rules:
+    class_name = selected_class.title
+    spell_mode = _spellcasting_mode_for_class(class_name, selected_class=selected_class)
+    if not spell_mode:
         return []
 
     spells_by_key: dict[str, dict[str, Any]] = {}
@@ -5091,7 +5293,6 @@ def _build_level_one_spell_payloads(
             spell_catalog=spell_catalog,
         )
 
-    spell_mode = str(spell_rules.get("level_one_mode") or "")
     if spell_mode == "known":
         for selected_value in selected_choices.get("spell_level_one", []):
             _add_spell_to_payloads(
@@ -5359,11 +5560,18 @@ def _spell_entry_matches_additional_filter(entry: SystemsEntryRecord, criteria: 
         return False
     class_name = str(criteria.get("class_name") or "").strip()
     if class_name:
-        allowed_titles = set(
-            dict(dict(_load_phb_level_one_spell_lists() or {}).get(class_name) or {}).get(str(_spell_entry_level(entry))) or []
+        normalized_class_name = normalize_lookup(class_name)
+        class_lists = dict(metadata.get("class_lists") or {})
+        has_dynamic_match = any(
+            normalized_class_name in {normalize_lookup(title) for title in list(titles or []) if str(title).strip()}
+            for titles in class_lists.values()
         )
-        if entry.title not in allowed_titles:
-            return False
+        if not has_dynamic_match:
+            allowed_titles = set(
+                dict(dict(_load_phb_level_one_spell_lists() or {}).get(class_name) or {}).get(str(_spell_entry_level(entry))) or []
+            )
+            if entry.title not in allowed_titles:
+                return False
     return True
 
 
@@ -5657,7 +5865,7 @@ def _summarize_level_up_spell_choices(
     selected_values.extend(selected_choices.get("levelup_spell_cantrips", []))
     selected_values.extend(_selected_additional_known_spell_values(selected_choices, prefix="levelup_bonus_spell_known"))
 
-    spell_mode = _spellcasting_mode_for_class(selected_class.title)
+    spell_mode = _spellcasting_mode_for_class(selected_class.title, selected_class=selected_class)
     if spell_mode == "known":
         selected_values.extend(selected_choices.get("levelup_spell_known", []))
     elif spell_mode == "prepared":

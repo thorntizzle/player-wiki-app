@@ -215,6 +215,7 @@ class Dnd5eSystemsImporter:
         self.systems_service = systems_service
         self.data_root = Path(data_root)
         self.library_slug = library_slug
+        self._spell_source_lookup_cache: dict[str, Any] | None = None
 
     def import_sources(
         self,
@@ -646,6 +647,7 @@ class Dnd5eSystemsImporter:
         return self._build_generic_content(entry_type, raw_entry)
 
     def _build_class_content(self, raw_entry: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], str]:
+        spellcasting_progression = self._extract_class_spellcasting_progression(raw_entry)
         metadata = {
             "hit_die": self._clean_data(raw_entry.get("hd")),
             "proficiency": self._clean_data(raw_entry.get("proficiency")),
@@ -655,6 +657,7 @@ class Dnd5eSystemsImporter:
             "subclass_title": self._clean_data(raw_entry.get("subclassTitle")),
             "optionalfeature_progression": self._clean_data(raw_entry.get("optionalfeatureProgression")),
             "additional_spells": self._clean_data(raw_entry.get("additionalSpells")),
+            **spellcasting_progression,
         }
         feature_progression = self._build_feature_progression_sections(raw_entry.get("classFeatures"))
         body = {
@@ -741,6 +744,7 @@ class Dnd5eSystemsImporter:
             "components": self._clean_data(raw_entry.get("components")),
             "duration": self._clean_data(raw_entry.get("duration")),
             "classes": self._clean_data(raw_entry.get("classes")),
+            "class_lists": self._build_spell_class_lists(raw_entry),
         }
         body = {
             "entries": self._clean_data(raw_entry.get("entries")),
@@ -759,6 +763,128 @@ class Dnd5eSystemsImporter:
             sections.append(("At Higher Levels", body["entries_higher_level"]))
         rendered_html = self._render_entry_html(metadata_pairs=metadata_pairs, sections=sections)
         return metadata, body, rendered_html
+
+    def _extract_class_spellcasting_progression(self, raw_entry: dict[str, Any]) -> dict[str, Any]:
+        slot_progression = self._extract_class_slot_progression(raw_entry)
+        return {
+            "caster_progression": self._clean_data(raw_entry.get("casterProgression")),
+            "spellcasting_ability": self._clean_data(raw_entry.get("spellcastingAbility")),
+            "prepared_spells": self._clean_data(raw_entry.get("preparedSpells")),
+            "prepared_spells_change": self._clean_data(raw_entry.get("preparedSpellsChange")),
+            "prepared_spells_progression": self._clean_data(raw_entry.get("preparedSpellsProgression")),
+            "cantrip_progression": self._clean_data(raw_entry.get("cantripProgression")),
+            "spells_known_progression": self._clean_data(raw_entry.get("spellsKnownProgression")),
+            "spells_known_progression_fixed": self._clean_data(raw_entry.get("spellsKnownProgressionFixed")),
+            "slot_progression": slot_progression,
+        }
+
+    def _extract_class_slot_progression(self, raw_entry: dict[str, Any]) -> list[list[dict[str, int]]]:
+        class_table_groups = list(raw_entry.get("classTableGroups") or [])
+        spell_progression_group = next(
+            (
+                group
+                for group in class_table_groups
+                if isinstance(group, dict) and isinstance(group.get("rowsSpellProgression"), list)
+            ),
+            None,
+        )
+        if isinstance(spell_progression_group, dict):
+            rows = list(spell_progression_group.get("rowsSpellProgression") or [])
+            normalized_rows: list[list[dict[str, int]]] = []
+            for row in rows:
+                if not isinstance(row, list):
+                    normalized_rows.append([])
+                    continue
+                normalized_rows.append(
+                    [
+                        {"level": index + 1, "max_slots": int(value or 0)}
+                        for index, value in enumerate(row)
+                        if isinstance(value, (int, float)) and int(value or 0) > 0
+                    ]
+                )
+            return normalized_rows
+
+        for group in class_table_groups:
+            if not isinstance(group, dict):
+                continue
+            col_labels = list(group.get("colLabels") or [])
+            rows = list(group.get("rows") or [])
+            if not col_labels or not rows:
+                continue
+            normalized_labels = [normalize_lookup(label) for label in col_labels]
+            try:
+                spell_slots_index = normalized_labels.index("spell slots")
+                slot_level_index = normalized_labels.index("slot level")
+            except ValueError:
+                continue
+            normalized_rows = []
+            for row in rows:
+                if not isinstance(row, list):
+                    normalized_rows.append([])
+                    continue
+                raw_slots = row[spell_slots_index] if spell_slots_index < len(row) else 0
+                raw_slot_level = row[slot_level_index] if slot_level_index < len(row) else 0
+                slot_count = int(raw_slots or 0) if isinstance(raw_slots, (int, float)) else 0
+                slot_level = self._extract_spell_slot_level(raw_slot_level)
+                if slot_count > 0 and slot_level > 0:
+                    normalized_rows.append([{"level": slot_level, "max_slots": slot_count}])
+                else:
+                    normalized_rows.append([])
+            if normalized_rows:
+                return normalized_rows
+        return []
+
+    def _extract_spell_slot_level(self, raw_value: Any) -> int:
+        if isinstance(raw_value, (int, float)):
+            return int(raw_value or 0)
+        match = re.search(r"(\d+)(?:st|nd|rd|th)", str(raw_value or ""))
+        if match is not None:
+            return int(match.group(1))
+        return 0
+
+    def _build_spell_class_lists(self, raw_entry: dict[str, Any]) -> dict[str, list[str]]:
+        class_lists: dict[str, list[str]] = {}
+        generated_lookup = self._load_generated_spell_source_lookup()
+        source_key = str(raw_entry.get("source") or "").strip().lower()
+        spell_key = normalize_lookup(raw_entry.get("name"))
+        generated_spell_lookup = dict(dict(generated_lookup.get(source_key) or {}).get(spell_key) or {})
+        generated_class_lookup = dict(generated_spell_lookup.get("class") or {})
+        for class_source_id, class_names in generated_class_lookup.items():
+            if isinstance(class_names, dict):
+                normalized_names = [
+                    str(class_name).strip()
+                    for class_name, is_present in class_names.items()
+                    if is_present and str(class_name).strip()
+                ]
+                if normalized_names:
+                    class_lists[str(class_source_id).strip().upper()] = normalized_names
+
+        raw_classes = self._clean_data(raw_entry.get("classes"))
+        if isinstance(raw_classes, dict):
+            from_class_list = list(raw_classes.get("fromClassList") or [])
+            for entry in from_class_list:
+                if not isinstance(entry, dict):
+                    continue
+                class_name = str(entry.get("name") or "").strip()
+                class_source_id = str(entry.get("source") or "PHB").strip().upper()
+                if not class_name:
+                    continue
+                bucket = class_lists.setdefault(class_source_id, [])
+                if class_name not in bucket:
+                    bucket.append(class_name)
+
+        return class_lists
+
+    def _load_generated_spell_source_lookup(self) -> dict[str, Any]:
+        if self._spell_source_lookup_cache is not None:
+            return self._spell_source_lookup_cache
+        lookup_path = self.data_root / "data" / "generated" / "gendata-spell-source-lookup.json"
+        if not lookup_path.exists():
+            self._spell_source_lookup_cache = {}
+            return self._spell_source_lookup_cache
+        payload = json.loads(lookup_path.read_text(encoding="utf-8"))
+        self._spell_source_lookup_cache = payload if isinstance(payload, dict) else {}
+        return self._spell_source_lookup_cache
 
     def _build_monster_content(self, raw_entry: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], str]:
         metadata = {

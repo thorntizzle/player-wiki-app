@@ -289,7 +289,7 @@ def _builder_context_fixture() -> dict[str, object]:
         "class_progression": [],
         "subclass_progression": [],
         "limitations": [
-            "Base classes currently follow the native PHB progression spine, but species, backgrounds, subclasses, feats, spells, and items can come from any enabled Systems source.",
+            "Base classes now come from the campaign's enabled Systems sources when their native progression metadata is available, while older PHB fallback data still covers previously imported local classes.",
             "Enter level-1 ability scores after any species bonuses. Native feat-driven ability increases are applied automatically.",
             "Native attack rows now cover basic PHB weapons, off-hand attacks, and key level-1 fighting-style adjustments, but a few advanced damage riders still need manual follow-up.",
             "Gold-alternative loadouts, some granted spell choices, spell-granting feats, and a few class-specific spell extras still need manual follow-up.",
@@ -2414,6 +2414,215 @@ def test_level_one_builder_puts_great_weapon_fighting_note_on_versatile_two_hand
     ]
     assert attacks_by_name["Quarterstaff"]["notes"] == ""
     assert attacks_by_name["Quarterstaff (two-handed)"]["notes"] == "Great Weapon Fighting (reroll 1s and 2s)."
+
+
+def test_native_builder_and_level_up_support_non_phb_artificer_progression():
+    artificer = _systems_entry(
+        "class",
+        "tce-class-artificer",
+        "Artificer",
+        source_id="TCE",
+        metadata={
+            "hit_die": {"faces": 8},
+            "proficiency": ["con", "int"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "shield"],
+                "weapons": ["simple"],
+                "tools": ["thieves' tools", "tinker's tools"],
+                "skills": [{"choose": {"count": 2, "from": ["arcana", "history", "investigation", "medicine"]}}],
+            },
+            "spellcasting_ability": "int",
+            "caster_progression": "artificer",
+            "prepared_spells": "<$level$> / 2 + <$int_mod$>",
+            "cantrip_progression": [2, 2, 2, 2],
+            "slot_progression": [
+                [{"level": 1, "max_slots": 2}],
+                [{"level": 1, "max_slots": 2}],
+                [{"level": 1, "max_slots": 3}],
+                [{"level": 1, "max_slots": 3}],
+            ],
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    sage = _systems_entry(
+        "background",
+        "phb-background-sage",
+        "Sage",
+        metadata={"skill_proficiencies": [{"arcana": True, "history": True}]},
+    )
+    magical_tinkering = _systems_entry(
+        "classfeature",
+        "tce-classfeature-magical-tinkering",
+        "Magical Tinkering",
+        source_id="TCE",
+        metadata={"level": 1},
+    )
+    spellcasting = _systems_entry(
+        "classfeature",
+        "tce-classfeature-spellcasting",
+        "Spellcasting",
+        source_id="TCE",
+        metadata={"level": 1},
+    )
+    infuse_item = _systems_entry(
+        "classfeature",
+        "tce-classfeature-infuse-item",
+        "Infuse Item",
+        source_id="TCE",
+        metadata={"level": 2},
+    )
+    guidance = _systems_entry(
+        "spell",
+        "tce-spell-guidance",
+        "Guidance",
+        source_id="TCE",
+        metadata={"level": 0, "class_lists": {"TCE": ["Artificer"]}},
+    )
+    mending = _systems_entry(
+        "spell",
+        "phb-spell-mending",
+        "Mending",
+        source_id="PHB",
+        metadata={"level": 0, "class_lists": {"TCE": ["Artificer"]}},
+    )
+    cure_wounds = _systems_entry(
+        "spell",
+        "phb-spell-cure-wounds",
+        "Cure Wounds",
+        source_id="PHB",
+        metadata={"level": 1, "class_lists": {"TCE": ["Artificer"]}},
+    )
+    detect_magic = _systems_entry(
+        "spell",
+        "phb-spell-detect-magic",
+        "Detect Magic",
+        source_id="PHB",
+        metadata={"level": 1, "class_lists": {"TCE": ["Artificer"]}},
+    )
+    faerie_fire = _systems_entry(
+        "spell",
+        "phb-spell-faerie-fire",
+        "Faerie Fire",
+        source_id="PHB",
+        metadata={"level": 1, "class_lists": {"TCE": ["Artificer"]}},
+    )
+    grease = _systems_entry(
+        "spell",
+        "phb-spell-grease",
+        "Grease",
+        source_id="PHB",
+        metadata={"level": 1, "class_lists": {"TCE": ["Artificer"]}},
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [artificer],
+            "race": [human],
+            "background": [sage],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [guidance, mending, cure_wounds, detect_magic, faerie_fire, grease],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Magical Tinkering", "entry": magical_tinkering, "embedded_card": {"option_groups": []}},
+                    {"label": "Spellcasting", "entry": spellcasting, "embedded_card": {"option_groups": []}},
+                ],
+            },
+            {
+                "level": 2,
+                "level_label": "Level 2",
+                "feature_rows": [
+                    {"label": "Infuse Item", "entry": infuse_item, "embedded_card": {"option_groups": []}},
+                ],
+            },
+        ],
+        enabled_source_ids=["PHB", "TCE"],
+    )
+
+    form_values = {
+        "name": "Copper Finch",
+        "character_slug": "copper-finch",
+        "alignment": "Neutral Good",
+        "experience_model": "Milestone",
+        "class_slug": artificer.slug,
+        "species_slug": human.slug,
+        "background_slug": sage.slug,
+        "class_skill_1": "investigation",
+        "class_skill_2": "medicine",
+        "str": "8",
+        "dex": "14",
+        "con": "13",
+        "int": "16",
+        "wis": "12",
+        "cha": "10",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+
+    assert any(option["slug"] == artificer.slug for option in context["class_options"])
+    assert _field_value_for_label(context, "spell_cantrip_1", "Guidance")
+    assert _field_value_for_label(context, "spell_level_one_1", "Cure Wounds")
+
+    form_values = {
+        **form_values,
+        "spell_cantrip_1": _field_value_for_label(context, "spell_cantrip_1", "Guidance"),
+        "spell_cantrip_2": _field_value_for_label(context, "spell_cantrip_2", "Mending"),
+        "spell_level_one_1": _field_value_for_label(context, "spell_level_one_1", "Cure Wounds"),
+        "spell_level_one_2": _field_value_for_label(context, "spell_level_one_2", "Detect Magic"),
+        "spell_level_one_3": _field_value_for_label(context, "spell_level_one_3", "Faerie Fire"),
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+
+    assert definition.profile["class_level_text"] == "Artificer 1"
+    assert definition.spellcasting["spellcasting_class"] == "Artificer"
+    assert definition.spellcasting["spellcasting_ability"] == "Intelligence"
+    assert definition.spellcasting["slot_progression"] == [{"level": 1, "max_slots": 2}]
+    assert supports_native_level_up(definition) is True
+
+    level_up_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        definition,
+        {"hp_gain": "5"},
+    )
+
+    assert level_up_context["next_level"] == 2
+    assert any(
+        field["name"] == "levelup_prepared_spell_1"
+        for section in level_up_context["choice_sections"]
+        for field in section["fields"]
+    )
+
+    level_up_values = {
+        "hp_gain": "5",
+        "levelup_prepared_spell_1": _field_value_for_label(level_up_context, "levelup_prepared_spell_1", "Grease"),
+    }
+    leveled_definition, _, hp_gain = build_native_level_up_character_definition(
+        "linden-pass",
+        definition,
+        level_up_context,
+        level_up_values,
+    )
+
+    feature_names = {feature["name"] for feature in leveled_definition.features}
+    spells_by_name = {spell["name"]: spell for spell in leveled_definition.spellcasting["spells"]}
+
+    assert hp_gain == 5
+    assert leveled_definition.profile["class_level_text"] == "Artificer 2"
+    assert "Infuse Item" in feature_names
+    assert leveled_definition.spellcasting["slot_progression"] == [{"level": 1, "max_slots": 2}]
+    assert spells_by_name["Grease"]["mark"] == "Prepared"
 
 
 def test_native_level_up_advances_fighter_to_level_two_and_merges_state():
