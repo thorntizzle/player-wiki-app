@@ -1,6 +1,162 @@
 from __future__ import annotations
 
 
+def test_native_character_edits_can_apply_and_remove_campaign_page_spell_grants(
+    app, client, sign_in, users, get_character, set_campaign_visibility
+):
+    blessing_page_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "content"
+        / "mechanics"
+        / "blessing-of-the-tide.md"
+    )
+    blessing_page_path.write_text(
+        """---
+title: Blessing of the Tide
+section: Mechanics
+subsection: Blessings
+published: true
+summary: A tide-bound boon for trusted wardens.
+character_option:
+  name: Blessing of the Tide
+  description_markdown: Call on the tide to steady your footing.
+  activation_type: bonus_action
+  grants:
+    languages:
+      - Primordial
+    spells:
+      - spell: Light
+        mark: Granted
+      - spell: Detect Magic
+        always_prepared: true
+        ritual: true
+---
+Wardens call on the tide when the harbor turns dangerous.
+""",
+        encoding="utf-8",
+    )
+
+    with app.app_context():
+        systems_store = app.extensions["systems_store"]
+        systems_store.upsert_library("DND-5E", title="DND 5E", system_code="DND-5E")
+        systems_store.upsert_source(
+            "DND-5E",
+            "PHB",
+            title="Player's Handbook",
+            license_class="srd_cc",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        systems_store.replace_entries_for_source(
+            "DND-5E",
+            "PHB",
+            entry_types=["spell"],
+            entries=[
+                {
+                    "entry_key": "dnd-5e|spell|phb|light",
+                    "entry_type": "spell",
+                    "slug": "phb-spell-light",
+                    "title": "Light",
+                    "source_page": "255",
+                    "source_path": "data/spells/spells-phb.json",
+                    "search_text": "light",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"casting_time": [{"number": 1, "unit": "action"}], "ritual": False},
+                    "body": {},
+                    "rendered_html": "<p>Light.</p>",
+                },
+                {
+                    "entry_key": "dnd-5e|spell|phb|detect-magic",
+                    "entry_type": "spell",
+                    "slug": "phb-spell-detect-magic",
+                    "title": "Detect Magic",
+                    "source_page": "231",
+                    "source_path": "data/spells/spells-phb.json",
+                    "search_text": "detect magic",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"casting_time": [{"number": 1, "unit": "action"}], "ritual": True},
+                    "body": {},
+                    "rendered_html": "<p>Detect Magic.</p>",
+                },
+            ],
+        )
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    record = get_character("arden-march")
+    assert record is not None
+
+    add_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "",
+            "weapon_proficiencies_text": "Daggers\nLight Crossbows\nQuarterstaffs",
+            "tool_proficiencies_text": "Navigator's Tools",
+            "custom_feature_name_1": "",
+            "custom_feature_page_ref_1": "mechanics/blessing-of-the-tide",
+            "custom_feature_activation_type_1": "bonus_action",
+            "custom_feature_description_1": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert add_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    custom_feature = next(
+        feature
+        for feature in record.definition.features
+        if feature.get("category") == "custom_feature" and feature.get("page_ref") == "mechanics/blessing-of-the-tide"
+    )
+    assert custom_feature["name"] == "Blessing of the Tide"
+    assert custom_feature["description_markdown"] == "Call on the tide to steady your footing."
+    assert "Primordial" in record.definition.proficiencies["languages"]
+
+    spells_by_name = {spell["name"]: spell for spell in record.definition.spellcasting["spells"]}
+    assert spells_by_name["Light"]["mark"] == "Granted"
+    assert spells_by_name["Light"]["systems_ref"]["slug"] == "phb-spell-light"
+    assert spells_by_name["Detect Magic"]["is_always_prepared"] is True
+    assert spells_by_name["Detect Magic"]["is_ritual"] is True
+    assert spells_by_name["Detect Magic"]["systems_ref"]["slug"] == "phb-spell-detect-magic"
+
+    remove_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "",
+            "weapon_proficiencies_text": "Daggers\nLight Crossbows\nQuarterstaffs",
+            "tool_proficiencies_text": "Navigator's Tools",
+            "custom_feature_id_1": custom_feature["id"],
+            "custom_feature_name_1": "",
+            "custom_feature_page_ref_1": "",
+            "custom_feature_activation_type_1": "passive",
+            "custom_feature_description_1": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert remove_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    assert "Primordial" not in record.definition.proficiencies["languages"]
+    assert all(
+        feature.get("page_ref") != "mechanics/blessing-of-the-tide"
+        for feature in record.definition.features
+    )
+    spells_by_name = {spell["name"]: spell for spell in record.definition.spellcasting["spells"]}
+    assert "Light" not in spells_by_name
+    assert "Detect Magic" not in spells_by_name
+
+
 def test_owner_player_can_open_native_character_edit_page(
     client, sign_in, users, set_campaign_visibility
 ):

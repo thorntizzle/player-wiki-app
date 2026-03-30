@@ -7,13 +7,22 @@ from typing import Any
 from .auth_store import isoformat, utcnow
 from .character_adjustments import (
     apply_manual_stat_adjustments,
+    apply_stat_adjustments,
     normalize_manual_stat_adjustments,
     strip_manual_stat_adjustments,
 )
+from .character_builder import _add_spell_to_payloads, _resolve_spell_entry, _spell_payload_key
+from .character_campaign_options import (
+    build_campaign_page_character_option,
+    collect_campaign_option_proficiency_grants,
+    collect_campaign_option_spell_grants,
+    collect_campaign_option_stat_adjustments,
+)
 from .character_models import CharacterDefinition, CharacterImportMetadata
+from .repository import normalize_lookup
 from .repository import slugify
 
-CHARACTER_EDITOR_VERSION = "2026-03-30.02"
+CHARACTER_EDITOR_VERSION = "2026-03-30.03"
 CUSTOM_FEATURE_CATEGORY = "custom_feature"
 CUSTOM_EQUIPMENT_SOURCE_KIND = "manual_edit"
 CUSTOM_FEATURE_TRACKER_PREFIX = "manual-feature-tracker"
@@ -55,7 +64,7 @@ def build_native_character_edit_context(
     form_values: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     values = dict(form_values or {})
-    proficiency_lists = dict(definition.proficiencies or {})
+    proficiency_lists = _display_proficiency_lists_for_editor(definition)
     manual_features = _manual_custom_features(definition)
     manual_items = _manual_equipment_entries(definition)
     resource_template_lookup = {
@@ -253,6 +262,7 @@ def apply_native_character_edits(
     *,
     campaign_page_records: list[Any] | None = None,
     form_values: dict[str, str] | None = None,
+    spell_catalog: dict[str, Any] | None = None,
 ) -> tuple[CharacterDefinition, CharacterImportMetadata, dict[str, int]]:
     values = dict(form_values or {})
     campaign_page_lookup = _build_campaign_page_lookup(campaign_page_records or [])
@@ -276,8 +286,13 @@ def apply_native_character_edits(
         for item in _manual_equipment_entries(current_definition)
         if str(item.get("id") or "").strip()
     }
+    existing_campaign_option_payloads = _campaign_option_payloads_from_entries(
+        _manual_custom_features(current_definition),
+        _manual_equipment_entries(current_definition),
+    )
+    spell_catalog = dict(spell_catalog or {})
 
-    proficiencies = {
+    manual_proficiencies = {
         "languages": _parse_multiline_values(values.get("languages_text", "")),
         "armor": _parse_multiline_values(values.get("armor_proficiencies_text", "")),
         "weapons": _parse_multiline_values(values.get("weapon_proficiencies_text", "")),
@@ -290,6 +305,12 @@ def apply_native_character_edits(
     profile["biography_markdown"] = str(values.get("biography_markdown") or "")
     profile["personality_markdown"] = str(values.get("personality_markdown") or "")
     base_stats, _ = strip_manual_stat_adjustments(dict(current_definition.stats or {}))
+    existing_campaign_stat_adjustments = collect_campaign_option_stat_adjustments(existing_campaign_option_payloads)
+    if existing_campaign_stat_adjustments:
+        base_stats = apply_stat_adjustments(
+            base_stats,
+            {key: -int(value) for key, value in existing_campaign_stat_adjustments.items()},
+        )
     stat_adjustments = _parse_stat_adjustments(values)
 
     used_feature_ids = set(manual_feature_lookup.keys())
@@ -298,17 +319,35 @@ def apply_native_character_edits(
     seen_feature_names: set[str] = set()
     for index in range(1, max(_max_row_index(values, "custom_feature"), MIN_CUSTOM_FEATURE_ROWS) + 1):
         raw_id = str(values.get(f"custom_feature_id_{index}") or "").strip()
-        name = str(values.get(f"custom_feature_name_{index}") or "").strip()
         page_ref = _normalize_selected_campaign_page_ref(
             values.get(f"custom_feature_page_ref_{index}") or "",
             campaign_page_lookup,
         )
-        if not name and page_ref:
-            name = str((campaign_page_lookup.get(page_ref) or {}).get("title") or "").strip()
-        description_markdown = str(values.get(f"custom_feature_description_{index}") or "")
-        activation_type = _normalize_activation_type(values.get(f"custom_feature_activation_type_{index}") or "passive")
+        campaign_option = _editable_campaign_option_for_page_ref(
+            page_ref,
+            campaign_page_lookup,
+            default_kind="feature",
+        )
+        name = str(
+            values.get(f"custom_feature_name_{index}")
+            or (campaign_option or {}).get("feature_name")
+            or (campaign_page_lookup.get(page_ref) or {}).get("title")
+            or ""
+        ).strip()
+        description_markdown = str(
+            values.get(f"custom_feature_description_{index}")
+            or (campaign_option or {}).get("description_markdown")
+            or ""
+        )
+        activation_type = _normalize_activation_type(
+            values.get(f"custom_feature_activation_type_{index}")
+            or (campaign_option or {}).get("activation_type")
+            or "passive"
+        )
         resource_max = _parse_optional_nonnegative_integer(
-            values.get(f"custom_feature_resource_max_{index}") or "",
+            values.get(f"custom_feature_resource_max_{index}")
+            or ((campaign_option or {}).get("resource") or {}).get("max")
+            or "",
             field_label=f"resource max for '{name or f'custom feature {index}'}'",
         )
         has_content = bool(name or page_ref or description_markdown.strip() or resource_max)
@@ -324,6 +363,7 @@ def apply_native_character_edits(
         seen_feature_names.add(normalized_name)
 
         existing = deepcopy(manual_feature_lookup.get(raw_id) or {})
+        existing.pop("campaign_option", None)
         existing.pop("systems_ref", None)
         existing.pop("page_ref", None)
         feature_id = raw_id or _build_unique_manual_id("custom-feature", name, used_feature_ids)
@@ -337,10 +377,13 @@ def apply_native_character_edits(
                 "description_markdown": description_markdown.strip(),
                 "activation_type": activation_type,
                 "tracker_ref": None,
+                "campaign_option": dict(campaign_option or {}) or None,
             }
         )
         resource_reset_on = _normalize_resource_reset_on(
-            values.get(f"custom_feature_resource_reset_on_{index}") or "manual"
+            values.get(f"custom_feature_resource_reset_on_{index}")
+            or ((campaign_option or {}).get("resource") or {}).get("reset_on")
+            or "manual"
         )
         if page_ref:
             existing["page_ref"] = page_ref
@@ -364,16 +407,36 @@ def apply_native_character_edits(
     manual_items: list[dict[str, Any]] = []
     for index in range(1, max(_max_row_index(values, "manual_item"), MIN_CUSTOM_EQUIPMENT_ROWS) + 1):
         raw_id = str(values.get(f"manual_item_id_{index}") or "").strip()
-        name = str(values.get(f"manual_item_name_{index}") or "").strip()
         page_ref = _normalize_selected_campaign_page_ref(
             values.get(f"manual_item_page_ref_{index}") or "",
             campaign_page_lookup,
         )
-        if not name and page_ref:
-            name = str((campaign_page_lookup.get(page_ref) or {}).get("title") or "").strip()
-        quantity_text = str(values.get(f"manual_item_quantity_{index}") or "").strip()
-        weight = str(values.get(f"manual_item_weight_{index}") or "").strip()
-        notes = str(values.get(f"manual_item_notes_{index}") or "")
+        campaign_option = _editable_campaign_option_for_page_ref(
+            page_ref,
+            campaign_page_lookup,
+            default_kind="item",
+        )
+        name = str(
+            values.get(f"manual_item_name_{index}")
+            or (campaign_option or {}).get("item_name")
+            or (campaign_page_lookup.get(page_ref) or {}).get("title")
+            or ""
+        ).strip()
+        quantity_text = str(
+            values.get(f"manual_item_quantity_{index}")
+            or (campaign_option or {}).get("quantity")
+            or ""
+        ).strip()
+        weight = str(
+            values.get(f"manual_item_weight_{index}")
+            or (campaign_option or {}).get("weight")
+            or ""
+        ).strip()
+        notes = str(
+            values.get(f"manual_item_notes_{index}")
+            or (campaign_option or {}).get("notes")
+            or ""
+        )
         has_content = bool(name or page_ref or quantity_text or weight or notes.strip())
         if not has_content:
             continue
@@ -382,6 +445,7 @@ def apply_native_character_edits(
         quantity = _parse_manual_item_quantity(quantity_text)
 
         existing = deepcopy(manual_item_lookup.get(raw_id) or {})
+        existing.pop("campaign_option", None)
         existing.pop("systems_ref", None)
         existing.pop("page_ref", None)
         item_id = raw_id or _build_unique_manual_id("manual-item", name, used_item_ids)
@@ -394,6 +458,7 @@ def apply_native_character_edits(
                 "weight": weight,
                 "notes": notes.strip(),
                 "source_kind": CUSTOM_EQUIPMENT_SOURCE_KIND,
+                "campaign_option": dict(campaign_option or {}) or None,
             }
         )
         if page_ref:
@@ -401,12 +466,32 @@ def apply_native_character_edits(
         manual_items.append(existing)
         inventory_quantity_overrides[item_id] = quantity
 
+    selected_campaign_option_payloads = _campaign_option_payloads_from_entries(
+        manual_features,
+        manual_items,
+    )
+    proficiencies = _merge_editor_proficiencies(
+        manual_proficiencies,
+        selected_campaign_option_payloads,
+    )
+    stats = apply_manual_stat_adjustments(base_stats, stat_adjustments)
+    campaign_stat_adjustments = collect_campaign_option_stat_adjustments(selected_campaign_option_payloads)
+    if campaign_stat_adjustments:
+        stats = apply_stat_adjustments(stats, campaign_stat_adjustments)
+    spellcasting = _apply_campaign_option_spells_to_spellcasting(
+        current_definition.spellcasting,
+        existing_campaign_option_payloads=existing_campaign_option_payloads,
+        selected_campaign_option_payloads=selected_campaign_option_payloads,
+        spell_catalog=spell_catalog,
+    )
+
     payload = deepcopy(current_definition.to_dict())
     payload["campaign_slug"] = campaign_slug
     payload["character_slug"] = current_definition.character_slug
     payload["profile"] = profile
-    payload["stats"] = apply_manual_stat_adjustments(base_stats, stat_adjustments)
+    payload["stats"] = stats
     payload["proficiencies"] = proficiencies
+    payload["spellcasting"] = spellcasting
     payload["reference_notes"] = reference_notes
     payload["features"] = [
         dict(feature)
@@ -453,6 +538,235 @@ def _manual_equipment_entries(definition: CharacterDefinition) -> list[dict[str,
     ]
 
 
+def _campaign_option_payloads_from_entries(
+    features: list[dict[str, Any]],
+    items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    for entry in list(features or []) + list(items or []):
+        option = dict(entry.get("campaign_option") or {})
+        if option:
+            payloads.append(option)
+    return payloads
+
+
+def _display_proficiency_lists_for_editor(definition: CharacterDefinition) -> dict[str, list[str]]:
+    proficiencies = {
+        key: list((definition.proficiencies or {}).get(key) or [])
+        for key in ("languages", "armor", "weapons", "tools")
+    }
+    campaign_grants = collect_campaign_option_proficiency_grants(
+        _campaign_option_payloads_from_entries(
+            _manual_custom_features(definition),
+            _manual_equipment_entries(definition),
+        )
+    )
+    return {
+        key: _subtract_casefold_values(proficiencies[key], campaign_grants.get(key) or [])
+        for key in proficiencies
+    }
+
+
+def _editable_campaign_option_for_page_ref(
+    page_ref: str,
+    campaign_page_lookup: dict[str, dict[str, Any]],
+    *,
+    default_kind: str,
+) -> dict[str, Any] | None:
+    option = dict((campaign_page_lookup.get(page_ref) or {}).get("campaign_option") or {})
+    if not option:
+        return None
+    kind = str(option.get("kind") or default_kind or "").strip().lower()
+    if kind and kind != default_kind:
+        return None
+    return option
+
+
+def _merge_editor_proficiencies(
+    manual_proficiencies: dict[str, list[str]],
+    option_payloads: list[dict[str, Any]],
+) -> dict[str, list[str]]:
+    campaign_grants = collect_campaign_option_proficiency_grants(option_payloads)
+    return {
+        key: _dedupe_casefold_values(list(manual_proficiencies.get(key) or []) + list(campaign_grants.get(key) or []))
+        for key in ("languages", "armor", "weapons", "tools")
+    }
+
+
+def _apply_campaign_option_spells_to_spellcasting(
+    current_spellcasting: dict[str, Any] | None,
+    *,
+    existing_campaign_option_payloads: list[dict[str, Any]],
+    selected_campaign_option_payloads: list[dict[str, Any]],
+    spell_catalog: dict[str, Any],
+) -> dict[str, Any]:
+    spellcasting = dict(current_spellcasting or {})
+    spells_by_key: dict[str, dict[str, Any]] = {}
+    for spell in list(spellcasting.get("spells") or []):
+        payload = _normalize_spell_payload_for_campaign_option_tracking(spell)
+        _reset_spell_payload_to_base(payload)
+        payload_key = _spell_payload_key(payload)
+        if payload_key:
+            spells_by_key[payload_key] = payload
+
+    for spell_grant in _iter_campaign_option_spell_grants(selected_campaign_option_payloads):
+        selected_value = str(spell_grant.get("value") or "").strip()
+        if not selected_value:
+            continue
+        spell_entry = _resolve_spell_entry(selected_value, spell_catalog)
+        payload_key = str((spell_entry.slug if spell_entry is not None else selected_value) or "").strip()
+        if not payload_key:
+            continue
+        existed_before = payload_key in spells_by_key
+        _add_spell_to_payloads(
+            spells_by_key,
+            selected_value=selected_value,
+            spell_catalog=spell_catalog,
+            mark=str(spell_grant.get("mark") or "").strip(),
+            is_always_prepared=bool(spell_grant.get("always_prepared")),
+            is_ritual=bool(spell_grant.get("ritual")),
+        )
+        payload = spells_by_key.get(payload_key)
+        if payload is None:
+            continue
+        if not existed_before:
+            payload["base_mark"] = ""
+            payload["base_is_always_prepared"] = False
+            payload["base_is_bonus_known"] = False
+            payload["base_is_ritual"] = bool(dict((spell_entry.metadata if spell_entry is not None else {}) or {}).get("ritual"))
+            payload["has_base_spell"] = False
+        existing_sources = [
+            dict(source)
+            for source in list(payload.get("campaign_option_sources") or [])
+            if str(source.get("source_ref") or "").strip()
+        ]
+        source_ref = str(spell_grant.get("source_ref") or "").strip()
+        source_marker = (
+            source_ref,
+            str(spell_grant.get("mark") or "").strip(),
+            bool(spell_grant.get("always_prepared")),
+            bool(spell_grant.get("ritual")),
+        )
+        seen_markers = {
+            (
+                str(source.get("source_ref") or "").strip(),
+                str(source.get("mark") or "").strip(),
+                bool(source.get("always_prepared")),
+                bool(source.get("ritual")),
+            )
+            for source in existing_sources
+        }
+        if source_marker not in seen_markers:
+            existing_sources.append(
+                {
+                    "source_ref": source_ref,
+                    "mark": str(spell_grant.get("mark") or "").strip(),
+                    "always_prepared": bool(spell_grant.get("always_prepared")),
+                    "ritual": bool(spell_grant.get("ritual")),
+                }
+            )
+        payload["campaign_option_sources"] = existing_sources
+
+    spellcasting["spells"] = [
+        payload
+        for payload in spells_by_key.values()
+        if bool(payload.get("has_base_spell")) or list(payload.get("campaign_option_sources") or [])
+    ]
+    return spellcasting
+
+
+def _normalize_spell_payload_for_campaign_option_tracking(spell_payload: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(spell_payload or {})
+    payload["base_mark"] = str(
+        payload.get("base_mark")
+        if "base_mark" in payload
+        else payload.get("mark", "")
+    ).strip()
+    payload["base_is_always_prepared"] = bool(
+        payload.get("base_is_always_prepared")
+        if "base_is_always_prepared" in payload
+        else payload.get("is_always_prepared")
+    )
+    payload["base_is_bonus_known"] = bool(
+        payload.get("base_is_bonus_known")
+        if "base_is_bonus_known" in payload
+        else payload.get("is_bonus_known")
+    )
+    payload["base_is_ritual"] = bool(
+        payload.get("base_is_ritual")
+        if "base_is_ritual" in payload
+        else payload.get("is_ritual")
+    )
+    payload["has_base_spell"] = bool(
+        payload.get("has_base_spell")
+        if "has_base_spell" in payload
+        else True
+    )
+    payload["campaign_option_sources"] = [
+        dict(source)
+        for source in list(payload.get("campaign_option_sources") or [])
+        if isinstance(source, dict)
+    ]
+    return payload
+
+
+def _reset_spell_payload_to_base(payload: dict[str, Any]) -> None:
+    payload["mark"] = str(payload.get("base_mark") or "").strip()
+    payload["is_always_prepared"] = bool(payload.get("base_is_always_prepared"))
+    payload["is_bonus_known"] = bool(payload.get("base_is_bonus_known"))
+    payload["is_ritual"] = bool(payload.get("base_is_ritual"))
+    payload["campaign_option_sources"] = []
+
+
+def _iter_campaign_option_spell_grants(option_payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grants: list[dict[str, Any]] = []
+    for option in list(option_payloads or []):
+        source_ref = str(option.get("page_ref") or option.get("title") or option.get("display_name") or "").strip()
+        if not source_ref:
+            continue
+        for grant in list(option.get("spells") or []):
+            payload = dict(grant or {})
+            value = str(payload.get("value") or "").strip()
+            if not value:
+                continue
+            grants.append(
+                {
+                    "source_ref": source_ref,
+                    "value": value,
+                    "mark": str(payload.get("mark") or "").strip(),
+                    "always_prepared": bool(payload.get("always_prepared")),
+                    "ritual": bool(payload.get("ritual")),
+                }
+            )
+    return grants
+
+
+def _dedupe_casefold_values(values: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for value in list(values or []):
+        clean_value = str(value or "").strip()
+        normalized_value = normalize_lookup(clean_value)
+        if not clean_value or normalized_value in seen:
+            continue
+        seen.add(normalized_value)
+        deduped.append(clean_value)
+    return deduped
+
+
+def _subtract_casefold_values(values: list[str], removals: list[str]) -> list[str]:
+    removal_keys = {
+        normalize_lookup(value)
+        for value in list(removals or [])
+        if str(value or "").strip()
+    }
+    return [
+        str(value).strip()
+        for value in list(values or [])
+        if str(value or "").strip() and normalize_lookup(value) not in removal_keys
+    ]
+
+
 def _manual_feature_tracker_id(feature_id: str) -> str:
     return f"{CUSTOM_FEATURE_TRACKER_PREFIX}:{feature_id}"
 
@@ -485,8 +799,8 @@ def _build_manual_feature_resource_template(
     }
 
 
-def _build_campaign_page_options(campaign_page_records: list[Any]) -> list[dict[str, str]]:
-    options: list[dict[str, str]] = []
+def _build_campaign_page_options(campaign_page_records: list[Any]) -> list[dict[str, Any]]:
+    options: list[dict[str, Any]] = []
     for record in list(campaign_page_records or []):
         page_ref = _extract_page_ref_value(getattr(record, "page_ref", ""))
         page = getattr(record, "page", None)
@@ -495,18 +809,29 @@ def _build_campaign_page_options(campaign_page_records: list[Any]) -> list[dict[
         title = str(getattr(page, "title", "") or "").strip() or page_ref
         section = str(getattr(page, "section", "") or "").strip()
         subsection = str(getattr(page, "subsection", "") or "").strip()
+        campaign_option = build_campaign_page_character_option(
+            record,
+            default_kind="item" if section == "Items" else "feature",
+        )
         label_parts = [title]
         if section:
             if subsection:
                 label_parts.append(f"{section} / {subsection}")
             else:
                 label_parts.append(section)
-        options.append({"value": page_ref, "label": " | ".join(label_parts), "title": title})
+        options.append(
+            {
+                "value": page_ref,
+                "label": " | ".join(label_parts),
+                "title": title,
+                "campaign_option": dict(campaign_option or {}) or None,
+            }
+        )
     return options
 
 
-def _build_campaign_page_lookup(campaign_page_records: list[Any]) -> dict[str, dict[str, str]]:
-    lookup: dict[str, dict[str, str]] = {}
+def _build_campaign_page_lookup(campaign_page_records: list[Any]) -> dict[str, dict[str, Any]]:
+    lookup: dict[str, dict[str, Any]] = {}
     for option in _build_campaign_page_options(campaign_page_records):
         page_ref = str(option.get("value") or "").strip()
         if not page_ref:
@@ -515,6 +840,7 @@ def _build_campaign_page_lookup(campaign_page_records: list[Any]) -> dict[str, d
             "page_ref": page_ref,
             "label": str(option.get("label") or page_ref),
             "title": str(option.get("title") or page_ref),
+            "campaign_option": dict(option.get("campaign_option") or {}) or None,
         }
     return lookup
 
@@ -527,7 +853,7 @@ def _extract_page_ref_value(payload: Any) -> str:
 
 def _normalize_selected_campaign_page_ref(
     raw_value: Any,
-    campaign_page_lookup: dict[str, dict[str, str]],
+    campaign_page_lookup: dict[str, dict[str, Any]],
 ) -> str:
     page_ref = _extract_page_ref_value(raw_value)
     if not page_ref:

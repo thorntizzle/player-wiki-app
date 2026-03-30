@@ -35,6 +35,8 @@ from .auth import (
     role_satisfies_visibility,
 )
 from .character_builder import (
+    _build_spell_catalog,
+    _list_campaign_enabled_entries,
     CharacterBuildError,
     build_native_level_up_context,
     build_native_level_up_character_definition,
@@ -3399,12 +3401,20 @@ def create_app() -> Flask:
 
         try:
             expected_revision = parse_expected_revision()
+            spell_catalog = _build_spell_catalog(
+                _list_campaign_enabled_entries(
+                    app.extensions["systems_service"],
+                    campaign_slug,
+                    "spell",
+                )
+            )
             definition, import_metadata, inventory_quantity_overrides = apply_native_character_edits(
                 campaign_slug,
                 record.definition,
                 record.import_metadata,
                 campaign_page_records=campaign_page_records,
                 form_values=form_values,
+                spell_catalog=spell_catalog,
             )
             merged_state = merge_state_with_definition(
                 definition,
