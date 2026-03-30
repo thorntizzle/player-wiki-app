@@ -257,7 +257,7 @@ def _minimal_import_metadata(character_slug: str = "new-hero") -> CharacterImpor
         character_slug=character_slug,
         source_path="builder://native-level-1",
         imported_at_utc="2026-03-29T00:00:00Z",
-        parser_version="2026-03-30.01",
+        parser_version="2026-03-30.02",
         import_status="clean",
         warnings=[],
     )
@@ -340,9 +340,11 @@ def _campaign_page_record(
     section: str,
     subsection: str = "",
     summary: str = "",
+    metadata: dict | None = None,
 ):
     return SimpleNamespace(
         page_ref=page_ref,
+        metadata=dict(metadata or {}),
         page=SimpleNamespace(
             title=title,
             section=section,
@@ -631,6 +633,201 @@ def test_level_one_builder_can_add_campaign_page_features_and_items():
     assert arcane_overload["description_markdown"] == "A sample class modification for feature-card coverage."
     assert stormglass_compass["page_ref"] == "items/stormglass-compass"
     assert stormglass_compass["notes"] == "A sample magic item whose title is used for search coverage."
+
+
+def test_level_one_builder_applies_structured_campaign_page_option_grants():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    soldier = _systems_entry(
+        "background",
+        "phb-background-soldier",
+        "Soldier",
+        metadata={"skill_proficiencies": [{"athletics": True, "intimidation": True}]},
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    light = _systems_entry(
+        "spell",
+        "phb-spell-light",
+        "Light",
+        metadata={
+            "level": 0,
+            "casting_time": [{"number": 1, "unit": "action"}],
+            "range": {"type": "touch"},
+            "components": {"v": True, "m": "a firefly or phosphorescent moss"},
+            "duration": [{"type": "timed", "duration": {"type": "hour", "amount": 1}}],
+        },
+    )
+    detect_magic = _systems_entry(
+        "spell",
+        "phb-spell-detect-magic",
+        "Detect Magic",
+        metadata={
+            "level": 1,
+            "casting_time": [{"number": 1, "unit": "action"}],
+            "range": {"type": "self"},
+            "components": {"v": True, "s": True},
+            "duration": [{"type": "timed", "duration": {"type": "minute", "amount": 10}, "concentration": True}],
+            "ritual": True,
+        },
+        source_page="231",
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [soldier],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [light, detect_magic],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+    campaign_page_records = [
+        _campaign_page_record(
+            "mechanics/blessing-of-the-tide",
+            "Blessing of the Tide",
+            section="Mechanics",
+            subsection="Blessings",
+            summary="A tide-bound boon for trusted wardens.",
+            metadata={
+                "character_option": {
+                    "name": "Blessing of the Tide",
+                    "description_markdown": "Call on the tide to steady your footing.",
+                    "activation_type": "bonus_action",
+                    "resource": {"max": 3, "reset_on": "long_rest"},
+                    "grants": {
+                        "languages": ["Primordial"],
+                        "skills": ["Perception"],
+                        "tools": ["Navigator's Tools"],
+                        "stat_adjustments": {
+                            "initiative_bonus": 2,
+                            "speed": 10,
+                            "passive_perception": 3,
+                        },
+                        "spells": [
+                            {"spell": "Light", "mark": "Granted"},
+                            {"spell": "Detect Magic", "always_prepared": True, "ritual": True},
+                        ],
+                    },
+                }
+            },
+        ),
+        _campaign_page_record(
+            "items/harbor-badge",
+            "Harbor Badge",
+            section="Items",
+            summary="An issued badge for sworn harbor wardens.",
+            metadata={
+                "character_option": {
+                    "quantity": 2,
+                    "weight": "light",
+                    "notes": "Issued by the Harbor Wardens.",
+                    "grants": {
+                        "armor": ["Light Armor"],
+                        "stat_adjustments": {
+                            "armor_class": 1,
+                        },
+                    },
+                }
+            },
+        ),
+    ]
+    form_values = {
+        "name": "Harbor Warden",
+        "character_slug": "harbor-warden",
+        "alignment": "Neutral Good",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": human.slug,
+        "background_slug": soldier.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "12",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=campaign_page_records,
+    )
+    form_values = {
+        **form_values,
+        "campaign_feature_page_ref_1": _field_value_for_label(context, "campaign_feature_page_ref_1", "Blessing of the Tide"),
+        "campaign_item_page_ref_1": _field_value_for_label(context, "campaign_item_page_ref_1", "Harbor Badge"),
+    }
+
+    context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=campaign_page_records,
+    )
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+
+    blessing = next(feature for feature in definition.features if feature["name"] == "Blessing of the Tide")
+    harbor_badge = next(item for item in definition.equipment_catalog if item["name"] == "Harbor Badge")
+    spells_by_name = {spell["name"]: spell for spell in definition.spellcasting["spells"]}
+    skills_by_name = {skill["name"]: skill for skill in definition.skills}
+    tracker_ref = str(blessing.get("tracker_ref") or "")
+    resources_by_id = {resource["id"]: resource for resource in definition.resource_templates}
+
+    assert blessing["page_ref"] == "mechanics/blessing-of-the-tide"
+    assert blessing["activation_type"] == "bonus_action"
+    assert blessing["description_markdown"] == "Call on the tide to steady your footing."
+    assert tracker_ref.startswith("campaign-option-tracker:blessing-of-the-tide-")
+    assert harbor_badge["page_ref"] == "items/harbor-badge"
+    assert harbor_badge["default_quantity"] == 2
+    assert harbor_badge["weight"] == "light"
+    assert harbor_badge["notes"] == "Issued by the Harbor Wardens."
+    assert "Primordial" in definition.proficiencies["languages"]
+    assert "Navigator's Tools" in definition.proficiencies["tools"]
+    assert "Light Armor" in definition.proficiencies["armor"]
+    assert skills_by_name["Perception"]["proficiency_level"] == "proficient"
+    assert definition.stats["initiative_bonus"] == 3
+    assert definition.stats["speed"] == "40 ft."
+    assert definition.stats["armor_class"] == 12
+    assert definition.stats["passive_perception"] == 16
+    assert definition.spellcasting["spellcasting_class"] == ""
+    assert spells_by_name["Light"]["mark"] == "Granted"
+    assert spells_by_name["Detect Magic"]["is_always_prepared"] is True
+    assert spells_by_name["Detect Magic"]["is_ritual"] is True
+    assert resources_by_id[tracker_ref]["max"] == 3
+    assert resources_by_id[tracker_ref]["reset_on"] == "long_rest"
+    assert "Blessing of the Tide: 3 / 3 (Long Rest)" in context["preview"]["resources"]
+    assert any("Detect Magic" in spell_line for spell_line in context["preview"]["spells"])
 
 
 def test_level_one_builder_supports_enabled_non_phb_species_background_feat_and_subclass_options():
@@ -1856,7 +2053,7 @@ def test_level_one_builder_populates_starting_equipment_spells_and_currency():
     assert spells_by_name["Message"]["components"] == "V, S, M (a short piece of copper wire)"
     assert resource_templates_by_id["arcane-recovery"]["max"] == 1
     assert state_resources_by_id["arcane-recovery"]["current"] == 1
-    assert import_metadata.parser_version == "2026-03-30.01"
+    assert import_metadata.parser_version == "2026-03-30.02"
 
 
 def test_level_one_builder_adds_structured_subclass_prepared_spells():
@@ -3117,6 +3314,204 @@ def test_native_level_up_preserves_manual_campaign_stat_adjustments():
     assert leveled_definition.stats["passive_perception"] == level_one_definition.stats["passive_perception"]
     assert leveled_definition.stats["passive_insight"] == level_one_definition.stats["passive_insight"]
     assert leveled_definition.stats["passive_investigation"] == level_one_definition.stats["passive_investigation"]
+    assert merged_state["vitals"]["current_hp"] == leveled_definition.stats["max_hp"]
+
+
+def test_native_level_up_preserves_structured_campaign_page_option_effects():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "subclass_title": "Martial Archetype",
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    soldier = _systems_entry(
+        "background",
+        "phb-background-soldier",
+        "Soldier",
+        metadata={"skill_proficiencies": [{"athletics": True, "intimidation": True}]},
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    action_surge = _systems_entry("classfeature", "phb-classfeature-action-surge", "Action Surge", metadata={"level": 2})
+    light = _systems_entry(
+        "spell",
+        "phb-spell-light",
+        "Light",
+        metadata={"level": 0},
+    )
+    detect_magic = _systems_entry(
+        "spell",
+        "phb-spell-detect-magic",
+        "Detect Magic",
+        metadata={"level": 1, "ritual": True},
+        source_page="231",
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [soldier],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [light, detect_magic],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            },
+            {
+                "level": 2,
+                "level_label": "Level 2",
+                "feature_rows": [
+                    {"label": "Action Surge", "entry": action_surge, "embedded_card": {"option_groups": []}},
+                ],
+            },
+        ],
+    )
+    campaign_page_records = [
+        _campaign_page_record(
+            "mechanics/blessing-of-the-tide",
+            "Blessing of the Tide",
+            section="Mechanics",
+            subsection="Blessings",
+            summary="A tide-bound boon for trusted wardens.",
+            metadata={
+                "character_option": {
+                    "name": "Blessing of the Tide",
+                    "description_markdown": "Call on the tide to steady your footing.",
+                    "activation_type": "bonus_action",
+                    "resource": {"max": 3, "reset_on": "long_rest"},
+                    "grants": {
+                        "languages": ["Primordial"],
+                        "tools": ["Navigator's Tools"],
+                        "stat_adjustments": {
+                            "initiative_bonus": 2,
+                            "speed": 10,
+                            "passive_perception": 3,
+                        },
+                        "spells": [
+                            {"spell": "Light", "mark": "Granted"},
+                            {"spell": "Detect Magic", "always_prepared": True, "ritual": True},
+                        ],
+                    },
+                }
+            },
+        ),
+        _campaign_page_record(
+            "items/harbor-badge",
+            "Harbor Badge",
+            section="Items",
+            summary="An issued badge for sworn harbor wardens.",
+            metadata={
+                "character_option": {
+                    "quantity": 2,
+                    "weight": "light",
+                    "notes": "Issued by the Harbor Wardens.",
+                    "grants": {
+                        "armor": ["Light Armor"],
+                        "stat_adjustments": {
+                            "armor_class": 1,
+                        },
+                    },
+                }
+            },
+        ),
+    ]
+    form_values = {
+        "name": "Harbor Warden",
+        "character_slug": "harbor-warden",
+        "alignment": "Neutral Good",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": human.slug,
+        "background_slug": soldier.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "12",
+        "cha": "8",
+    }
+
+    level_one_context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=campaign_page_records,
+    )
+    level_one_form = {
+        **form_values,
+        "campaign_feature_page_ref_1": _field_value_for_label(level_one_context, "campaign_feature_page_ref_1", "Blessing of the Tide"),
+        "campaign_item_page_ref_1": _field_value_for_label(level_one_context, "campaign_item_page_ref_1", "Harbor Badge"),
+    }
+    level_one_context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        level_one_form,
+        campaign_page_records=campaign_page_records,
+    )
+    level_one_definition, _ = build_level_one_character_definition("linden-pass", level_one_context, level_one_form)
+
+    blessing = next(feature for feature in level_one_definition.features if feature["name"] == "Blessing of the Tide")
+    tracker_ref = str(blessing.get("tracker_ref") or "")
+
+    level_up_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        level_one_definition,
+        {"hp_gain": "8"},
+    )
+    leveled_definition, _, hp_gain = build_native_level_up_character_definition(
+        "linden-pass",
+        level_one_definition,
+        level_up_context,
+        {"hp_gain": "8"},
+    )
+    merged_state = merge_state_with_definition(
+        leveled_definition,
+        build_initial_state(level_one_definition),
+        hp_delta=hp_gain,
+    )
+
+    spells_by_name = {spell["name"]: spell for spell in leveled_definition.spellcasting["spells"]}
+    resources_by_id = {resource["id"]: resource for resource in leveled_definition.resource_templates}
+    merged_resources = {resource["id"]: resource for resource in merged_state["resources"]}
+
+    assert leveled_definition.stats["max_hp"] == level_one_definition.stats["max_hp"] + 8
+    assert leveled_definition.stats["initiative_bonus"] == level_one_definition.stats["initiative_bonus"]
+    assert leveled_definition.stats["speed"] == level_one_definition.stats["speed"]
+    assert leveled_definition.stats["armor_class"] == level_one_definition.stats["armor_class"]
+    assert leveled_definition.stats["passive_perception"] == level_one_definition.stats["passive_perception"]
+    assert "Primordial" in leveled_definition.proficiencies["languages"]
+    assert "Navigator's Tools" in leveled_definition.proficiencies["tools"]
+    assert "Light Armor" in leveled_definition.proficiencies["armor"]
+    assert "Blessing of the Tide" in {feature["name"] for feature in leveled_definition.features}
+    assert spells_by_name["Light"]["mark"] == "Granted"
+    assert spells_by_name["Detect Magic"]["is_always_prepared"] is True
+    assert tracker_ref in resources_by_id
+    assert resources_by_id[tracker_ref]["max"] == 3
+    assert merged_resources[tracker_ref]["current"] == 3
     assert merged_state["vitals"]["current_hp"] == leveled_definition.stats["max_hp"]
 
 

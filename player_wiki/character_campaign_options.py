@@ -1,0 +1,268 @@
+from __future__ import annotations
+
+from typing import Any
+
+from .character_adjustments import normalize_manual_stat_adjustments
+
+VALID_CAMPAIGN_OPTION_KINDS = {"feature", "item"}
+VALID_CAMPAIGN_FEATURE_ACTIVATION_TYPES = {
+    "passive",
+    "action",
+    "bonus_action",
+    "reaction",
+    "special",
+}
+VALID_CAMPAIGN_RESOURCE_RESET_TYPES = {"manual", "short_rest", "long_rest"}
+
+
+def build_campaign_page_character_option(
+    record: Any,
+    *,
+    default_kind: str,
+) -> dict[str, Any] | None:
+    metadata = dict(getattr(record, "metadata", {}) or {})
+    raw_option = metadata.get("character_option")
+    if not isinstance(raw_option, dict):
+        return None
+
+    page_ref = str(getattr(record, "page_ref", "") or "").strip()
+    page = getattr(record, "page", None)
+    title = str(getattr(page, "title", "") or "").strip() or page_ref
+    summary = str(getattr(page, "summary", "") or "").strip()
+    return normalize_campaign_character_option(
+        raw_option,
+        page_ref=page_ref,
+        title=title,
+        summary=summary,
+        default_kind=default_kind,
+    )
+
+
+def normalize_campaign_character_option(
+    payload: Any,
+    *,
+    page_ref: str,
+    title: str,
+    summary: str,
+    default_kind: str,
+) -> dict[str, Any] | None:
+    raw_option = dict(payload or {}) if isinstance(payload, dict) else {}
+    if not raw_option:
+        return None
+
+    kind = str(raw_option.get("kind") or default_kind or "feature").strip().lower()
+    if kind not in VALID_CAMPAIGN_OPTION_KINDS:
+        kind = default_kind if default_kind in VALID_CAMPAIGN_OPTION_KINDS else "feature"
+
+    grants = dict(raw_option.get("grants") or {}) if isinstance(raw_option.get("grants"), dict) else {}
+    proficiencies = dict(raw_option.get("proficiencies") or {}) if isinstance(raw_option.get("proficiencies"), dict) else {}
+    normalized = {
+        "kind": kind,
+        "page_ref": str(page_ref or "").strip(),
+        "title": str(title or "").strip(),
+        "summary": str(summary or "").strip(),
+        "display_name": str(raw_option.get("name") or "").strip() or str(title or "").strip(),
+        "proficiencies": {
+            "armor": _normalize_string_list(
+                proficiencies.get("armor") if "armor" in proficiencies else grants.get("armor", raw_option.get("armor"))
+            ),
+            "weapons": _normalize_string_list(
+                proficiencies.get("weapons") if "weapons" in proficiencies else grants.get("weapons", raw_option.get("weapons"))
+            ),
+            "tools": _normalize_string_list(
+                proficiencies.get("tools") if "tools" in proficiencies else grants.get("tools", raw_option.get("tools"))
+            ),
+            "languages": _normalize_string_list(
+                proficiencies.get("languages") if "languages" in proficiencies else grants.get("languages", raw_option.get("languages"))
+            ),
+            "skills": _normalize_string_list(
+                proficiencies.get("skills") if "skills" in proficiencies else grants.get("skills", raw_option.get("skills"))
+            ),
+        },
+        "stat_adjustments": normalize_manual_stat_adjustments(
+            grants.get("stat_adjustments") if "stat_adjustments" in grants else raw_option.get("stat_adjustments")
+        ),
+        "spells": _normalize_spell_grants(
+            grants.get("spells") if "spells" in grants else raw_option.get("spells")
+        ),
+    }
+
+    if kind == "feature":
+        activation_type = str(raw_option.get("activation_type") or "passive").strip().lower()
+        if activation_type not in VALID_CAMPAIGN_FEATURE_ACTIVATION_TYPES:
+            activation_type = "passive"
+        normalized.update(
+            {
+                "feature_name": str(raw_option.get("name") or "").strip() or str(title or "").strip(),
+                "description_markdown": str(
+                    raw_option.get("description_markdown")
+                    or raw_option.get("description")
+                    or summary
+                    or ""
+                ),
+                "activation_type": activation_type,
+            }
+        )
+        resource = _normalize_resource_grant(
+            grants.get("resource") if "resource" in grants else raw_option.get("resource")
+        )
+        if resource is not None:
+            normalized["resource"] = resource
+        return normalized
+
+    quantity = _normalize_positive_integer(raw_option.get("quantity"), default=1)
+    normalized.update(
+        {
+            "item_name": str(raw_option.get("name") or "").strip() or str(title or "").strip(),
+            "quantity": quantity,
+            "weight": str(raw_option.get("weight") or "").strip(),
+            "notes": str(raw_option.get("notes") or summary or "").strip(),
+        }
+    )
+    return normalized
+
+
+def collect_campaign_option_stat_adjustments(option_payloads: list[Any]) -> dict[str, int]:
+    totals: dict[str, int] = {}
+    for payload in list(option_payloads or []):
+        option = dict(payload or {}) if isinstance(payload, dict) else {}
+        for key, value in normalize_manual_stat_adjustments(option.get("stat_adjustments")).items():
+            totals[key] = int(totals.get(key) or 0) + int(value)
+    return totals
+
+
+def collect_campaign_option_proficiency_grants(option_payloads: list[Any]) -> dict[str, list[str]]:
+    grants = {
+        "armor": [],
+        "weapons": [],
+        "tools": [],
+        "languages": [],
+        "skills": [],
+    }
+    seen_by_key = {key: set() for key in grants}
+    for payload in list(option_payloads or []):
+        option = dict(payload or {}) if isinstance(payload, dict) else {}
+        proficiency_payload = dict(option.get("proficiencies") or {})
+        for key in grants:
+            for value in _normalize_string_list(proficiency_payload.get(key)):
+                normalized_value = value.casefold()
+                if normalized_value in seen_by_key[key]:
+                    continue
+                seen_by_key[key].add(normalized_value)
+                grants[key].append(value)
+    return grants
+
+
+def collect_campaign_option_spell_grants(option_payloads: list[Any]) -> list[dict[str, Any]]:
+    spell_grants: list[dict[str, Any]] = []
+    seen_values: set[tuple[str, str, bool, bool]] = set()
+    for payload in list(option_payloads or []):
+        option = dict(payload or {}) if isinstance(payload, dict) else {}
+        for spell_grant in list(option.get("spells") or []):
+            grant = dict(spell_grant or {}) if isinstance(spell_grant, dict) else {}
+            value = str(grant.get("value") or "").strip()
+            if not value:
+                continue
+            marker = (
+                value.casefold(),
+                str(grant.get("mark") or "").strip().casefold(),
+                bool(grant.get("always_prepared")),
+                bool(grant.get("ritual")),
+            )
+            if marker in seen_values:
+                continue
+            seen_values.add(marker)
+            spell_grants.append(
+                {
+                    "value": value,
+                    "mark": str(grant.get("mark") or "").strip(),
+                    "always_prepared": bool(grant.get("always_prepared")),
+                    "ritual": bool(grant.get("ritual")),
+                }
+            )
+    return spell_grants
+
+
+def _normalize_string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        raw_items = value.replace("\r", "").replace("\n", ",").split(",")
+    elif isinstance(value, list):
+        raw_items = value
+    else:
+        return []
+
+    values: list[str] = []
+    seen: set[str] = set()
+    for raw_item in raw_items:
+        clean_item = str(raw_item or "").strip()
+        normalized_item = clean_item.casefold()
+        if not clean_item or normalized_item in seen:
+            continue
+        seen.add(normalized_item)
+        values.append(clean_item)
+    return values
+
+
+def _normalize_spell_grants(value: Any) -> list[dict[str, Any]]:
+    raw_items = list(value or []) if isinstance(value, list) else []
+    grants: list[dict[str, Any]] = []
+    for raw_item in raw_items:
+        if isinstance(raw_item, str):
+            clean_value = str(raw_item or "").strip()
+            if clean_value:
+                grants.append(
+                    {
+                        "value": clean_value,
+                        "mark": "Granted",
+                        "always_prepared": False,
+                        "ritual": False,
+                    }
+                )
+            continue
+        if not isinstance(raw_item, dict):
+            continue
+        clean_value = str(
+            raw_item.get("value")
+            or raw_item.get("spell")
+            or raw_item.get("title")
+            or raw_item.get("slug")
+            or ""
+        ).strip()
+        if not clean_value:
+            continue
+        grants.append(
+            {
+                "value": clean_value,
+                "mark": str(raw_item.get("mark") or "").strip(),
+                "always_prepared": bool(raw_item.get("always_prepared") or raw_item.get("prepared")),
+                "ritual": bool(raw_item.get("ritual") or raw_item.get("is_ritual")),
+            }
+        )
+    return grants
+
+
+def _normalize_resource_grant(value: Any) -> dict[str, Any] | None:
+    resource = dict(value or {}) if isinstance(value, dict) else {}
+    if not resource:
+        return None
+    max_value = _normalize_positive_integer(resource.get("max"), default=0)
+    if max_value <= 0:
+        return None
+    reset_on = str(resource.get("reset_on") or "manual").strip().lower()
+    if reset_on not in VALID_CAMPAIGN_RESOURCE_RESET_TYPES:
+        reset_on = "manual"
+    return {
+        "label": str(resource.get("label") or "").strip(),
+        "max": max_value,
+        "reset_on": reset_on,
+    }
+
+
+def _normalize_positive_integer(value: Any, *, default: int) -> int:
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError):
+        return int(default)
+    if normalized <= 0:
+        return int(default)
+    return normalized

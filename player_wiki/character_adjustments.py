@@ -28,6 +28,14 @@ def normalize_manual_stat_adjustments(payload: Any) -> dict[str, int]:
     return adjustments
 
 
+def apply_stat_adjustments(stats: dict[str, Any], adjustments: Any) -> dict[str, Any]:
+    return _apply_manual_stat_adjustments(
+        stats,
+        normalize_manual_stat_adjustments(adjustments),
+        include_metadata=False,
+    )
+
+
 def apply_manual_stat_adjustments(stats: dict[str, Any], adjustments: Any) -> dict[str, Any]:
     return _apply_manual_stat_adjustments(stats, normalize_manual_stat_adjustments(adjustments), include_metadata=True)
 
