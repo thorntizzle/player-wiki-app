@@ -3366,10 +3366,18 @@ def create_app() -> Flask:
         if not has_session_mode_access(campaign_slug, character_slug):
             abort(403)
 
-        _, record = load_character_context(campaign_slug, character_slug)
+        campaign, record = load_character_context(campaign_slug, character_slug)
+        campaign_page_records = [
+            page_record
+            for page_record in get_campaign_page_store().list_page_records(campaign_slug)
+            if page_record.page.published
+            and page_record.page.reveal_after_session <= campaign.current_session
+            and str(page_record.page.section or "").strip() != "Sessions"
+        ]
         form_values = dict(request.form if request.method == "POST" else request.args)
         edit_context = build_native_character_edit_context(
             record.definition,
+            campaign_page_records=campaign_page_records,
             form_values=form_values if request.method == "POST" else None,
         )
         edit_context["state_revision"] = record.state_record.revision
@@ -3387,7 +3395,8 @@ def create_app() -> Flask:
                 campaign_slug,
                 record.definition,
                 record.import_metadata,
-                form_values,
+                campaign_page_records=campaign_page_records,
+                form_values=form_values,
             )
             merged_state = merge_state_with_definition(
                 definition,

@@ -30,12 +30,14 @@ class CharacterEditValidationError(ValueError):
 def build_native_character_edit_context(
     definition: CharacterDefinition,
     *,
+    campaign_page_records: list[Any] | None = None,
     form_values: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     values = dict(form_values or {})
     proficiency_lists = dict(definition.proficiencies or {})
     manual_features = _manual_custom_features(definition)
     manual_items = _manual_equipment_entries(definition)
+    campaign_page_options = _build_campaign_page_options(campaign_page_records or [])
 
     proficiency_fields = [
         {
@@ -89,6 +91,11 @@ def build_native_character_edit_context(
                 "index": index,
                 "id": str(values.get(f"custom_feature_id_{index}") or existing.get("id") or "").strip(),
                 "name": str(values.get(f"custom_feature_name_{index}") or existing.get("name") or "").strip(),
+                "page_ref": str(
+                    values.get(f"custom_feature_page_ref_{index}")
+                    or _extract_page_ref_value(existing.get("page_ref"))
+                    or ""
+                ).strip(),
                 "activation_type": _normalize_activation_type(
                     values.get(f"custom_feature_activation_type_{index}")
                     or existing.get("activation_type")
@@ -115,6 +122,11 @@ def build_native_character_edit_context(
                 "index": index,
                 "id": str(values.get(f"manual_item_id_{index}") or existing.get("id") or "").strip(),
                 "name": str(values.get(f"manual_item_name_{index}") or existing.get("name") or "").strip(),
+                "page_ref": str(
+                    values.get(f"manual_item_page_ref_{index}")
+                    or _extract_page_ref_value(existing.get("page_ref"))
+                    or ""
+                ).strip(),
                 "quantity": str(
                     values.get(f"manual_item_quantity_{index}")
                     or existing.get("default_quantity")
@@ -134,6 +146,7 @@ def build_native_character_edit_context(
             {"value": value, "label": label}
             for value, label in FEATURE_ACTIVATION_OPTIONS
         ],
+        "campaign_page_options": campaign_page_options,
         "existing_managed_equipment": [
             {
                 "name": str(item.get("name") or "Item"),
@@ -150,9 +163,12 @@ def apply_native_character_edits(
     campaign_slug: str,
     current_definition: CharacterDefinition,
     current_import_metadata: CharacterImportMetadata,
+    *,
+    campaign_page_records: list[Any] | None = None,
     form_values: dict[str, str] | None = None,
 ) -> tuple[CharacterDefinition, CharacterImportMetadata, dict[str, int]]:
     values = dict(form_values or {})
+    campaign_page_lookup = _build_campaign_page_lookup(campaign_page_records or [])
     manual_feature_lookup = {
         str(feature.get("id") or "").strip(): dict(feature)
         for feature in _manual_custom_features(current_definition)
@@ -177,9 +193,15 @@ def apply_native_character_edits(
     for index in range(1, max(_max_row_index(values, "custom_feature"), MIN_CUSTOM_FEATURE_ROWS) + 1):
         raw_id = str(values.get(f"custom_feature_id_{index}") or "").strip()
         name = str(values.get(f"custom_feature_name_{index}") or "").strip()
+        page_ref = _normalize_selected_campaign_page_ref(
+            values.get(f"custom_feature_page_ref_{index}") or "",
+            campaign_page_lookup,
+        )
+        if not name and page_ref:
+            name = str((campaign_page_lookup.get(page_ref) or {}).get("title") or "").strip()
         description_markdown = str(values.get(f"custom_feature_description_{index}") or "")
         activation_type = _normalize_activation_type(values.get(f"custom_feature_activation_type_{index}") or "passive")
-        has_content = bool(raw_id or name or description_markdown.strip())
+        has_content = bool(raw_id or name or page_ref or description_markdown.strip())
         if not has_content:
             continue
         if not name:
@@ -192,9 +214,8 @@ def apply_native_character_edits(
         seen_feature_names.add(normalized_name)
 
         existing = deepcopy(manual_feature_lookup.get(raw_id) or {})
-        if raw_id and str(existing.get("name") or "").strip() != name:
-            existing.pop("systems_ref", None)
-            existing.pop("page_ref", None)
+        existing.pop("systems_ref", None)
+        existing.pop("page_ref", None)
         feature_id = raw_id or _build_unique_manual_id("custom-feature", name, used_feature_ids)
         used_feature_ids.add(feature_id)
         existing.update(
@@ -208,6 +229,8 @@ def apply_native_character_edits(
                 "tracker_ref": existing.get("tracker_ref"),
             }
         )
+        if page_ref:
+            existing["page_ref"] = page_ref
         manual_features.append(existing)
 
     used_item_ids = set(manual_item_lookup.keys())
@@ -216,10 +239,16 @@ def apply_native_character_edits(
     for index in range(1, max(_max_row_index(values, "manual_item"), MIN_CUSTOM_EQUIPMENT_ROWS) + 1):
         raw_id = str(values.get(f"manual_item_id_{index}") or "").strip()
         name = str(values.get(f"manual_item_name_{index}") or "").strip()
+        page_ref = _normalize_selected_campaign_page_ref(
+            values.get(f"manual_item_page_ref_{index}") or "",
+            campaign_page_lookup,
+        )
+        if not name and page_ref:
+            name = str((campaign_page_lookup.get(page_ref) or {}).get("title") or "").strip()
         quantity_text = str(values.get(f"manual_item_quantity_{index}") or "").strip()
         weight = str(values.get(f"manual_item_weight_{index}") or "").strip()
         notes = str(values.get(f"manual_item_notes_{index}") or "")
-        has_content = bool(raw_id or name or quantity_text or weight or notes.strip())
+        has_content = bool(raw_id or name or page_ref or quantity_text or weight or notes.strip())
         if not has_content:
             continue
         if not name:
@@ -227,9 +256,8 @@ def apply_native_character_edits(
         quantity = _parse_manual_item_quantity(quantity_text)
 
         existing = deepcopy(manual_item_lookup.get(raw_id) or {})
-        if raw_id and str(existing.get("name") or "").strip() != name:
-            existing.pop("systems_ref", None)
-            existing.pop("page_ref", None)
+        existing.pop("systems_ref", None)
+        existing.pop("page_ref", None)
         item_id = raw_id or _build_unique_manual_id("manual-item", name, used_item_ids)
         used_item_ids.add(item_id)
         existing.update(
@@ -242,6 +270,8 @@ def apply_native_character_edits(
                 "source_kind": CUSTOM_EQUIPMENT_SOURCE_KIND,
             }
         )
+        if page_ref:
+            existing["page_ref"] = page_ref
         manual_items.append(existing)
         inventory_quantity_overrides[item_id] = quantity
 
@@ -287,6 +317,58 @@ def _manual_equipment_entries(definition: CharacterDefinition) -> list[dict[str,
         for item in list(definition.equipment_catalog or [])
         if str(item.get("source_kind") or "") == CUSTOM_EQUIPMENT_SOURCE_KIND
     ]
+
+
+def _build_campaign_page_options(campaign_page_records: list[Any]) -> list[dict[str, str]]:
+    options: list[dict[str, str]] = []
+    for record in list(campaign_page_records or []):
+        page_ref = _extract_page_ref_value(getattr(record, "page_ref", ""))
+        page = getattr(record, "page", None)
+        if not page_ref or page is None:
+            continue
+        title = str(getattr(page, "title", "") or "").strip() or page_ref
+        section = str(getattr(page, "section", "") or "").strip()
+        subsection = str(getattr(page, "subsection", "") or "").strip()
+        label_parts = [title]
+        if section:
+            if subsection:
+                label_parts.append(f"{section} / {subsection}")
+            else:
+                label_parts.append(section)
+        options.append({"value": page_ref, "label": " | ".join(label_parts), "title": title})
+    return options
+
+
+def _build_campaign_page_lookup(campaign_page_records: list[Any]) -> dict[str, dict[str, str]]:
+    lookup: dict[str, dict[str, str]] = {}
+    for option in _build_campaign_page_options(campaign_page_records):
+        page_ref = str(option.get("value") or "").strip()
+        if not page_ref:
+            continue
+        lookup[page_ref] = {
+            "page_ref": page_ref,
+            "label": str(option.get("label") or page_ref),
+            "title": str(option.get("title") or page_ref),
+        }
+    return lookup
+
+
+def _extract_page_ref_value(payload: Any) -> str:
+    if isinstance(payload, dict):
+        return str(payload.get("page_ref") or payload.get("slug") or "").strip()
+    return str(payload or "").strip()
+
+
+def _normalize_selected_campaign_page_ref(
+    raw_value: Any,
+    campaign_page_lookup: dict[str, dict[str, str]],
+) -> str:
+    page_ref = _extract_page_ref_value(raw_value)
+    if not page_ref:
+        return ""
+    if page_ref not in campaign_page_lookup:
+        raise CharacterEditValidationError("Choose a valid linked campaign page.")
+    return page_ref
 
 
 def _join_multiline_values(values: list[str]) -> str:

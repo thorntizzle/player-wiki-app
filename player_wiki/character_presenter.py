@@ -486,7 +486,7 @@ def build_systems_entry_href(campaign_slug: str, systems_ref: Any) -> str:
 
 
 def build_campaign_page_href(campaign_slug: str, page_ref: Any) -> str:
-    payload = dict(page_ref or {})
+    payload = dict(page_ref or {}) if isinstance(page_ref, dict) else {}
     slug = str(payload.get("slug") or payload.get("page_slug") or "").strip()
     if not slug:
         slug = str(page_ref or "").strip()

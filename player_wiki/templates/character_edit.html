@@ -7,7 +7,7 @@
     <p class="eyebrow">Character editor</p>
     <h1>Edit {{ character.name }}</h1>
     <p class="lede">
-      Manage campaign-time adjustments that are outside the native level-up flow. This first slice covers languages, proficiencies, custom features, and manual equipment additions.
+      Manage campaign-time adjustments that are outside the native level-up flow. This slice covers languages, proficiencies, custom features, manual equipment additions, and campaign-page links for custom sheet content.
     </p>
     <div class="hero-actions">
       <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">Back to sheet</a>
@@ -62,6 +62,15 @@
                 </label>
               </div>
               <label class="field">
+                <span>Linked Page</span>
+                <select name="custom_feature_page_ref_{{ row.index }}">
+                  <option value="" {% if not row.page_ref %}selected{% endif %}>No linked page</option>
+                  {% for option in edit_context.campaign_page_options %}
+                    <option value="{{ option.value }}"{% if option.value == row.page_ref %} selected{% endif %}>{{ option.label }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label class="field">
                 <span>Description (Markdown)</span>
                 <textarea name="custom_feature_description_{{ row.index }}" rows="6">{{ row.description_markdown }}</textarea>
               </label>
@@ -107,6 +116,15 @@
                   <input type="text" name="manual_item_weight_{{ row.index }}" value="{{ row.weight }}">
                 </label>
               </div>
+              <label class="field">
+                <span>Linked Page</span>
+                <select name="manual_item_page_ref_{{ row.index }}">
+                  <option value="" {% if not row.page_ref %}selected{% endif %}>No linked page</option>
+                  {% for option in edit_context.campaign_page_options %}
+                    <option value="{{ option.value }}"{% if option.value == row.page_ref %} selected{% endif %}>{{ option.label }}</option>
+                  {% endfor %}
+                </select>
+              </label>
               <label class="field">
                 <span>Notes</span>
                 <textarea name="manual_item_notes_{{ row.index }}" rows="4">{{ row.notes }}</textarea>

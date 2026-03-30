@@ -16,6 +16,9 @@ def test_owner_player_can_open_native_character_edit_page(
     assert "Languages" in html
     assert "Custom Features" in html
     assert "Manual Equipment" in html
+    assert "Linked Page" in html
+    assert "Stormglass Compass | Items" in html
+    assert "Arcane Overload | Mechanics / Class Modifications" in html
 
 
 def test_owner_player_can_save_native_character_edits_and_reconcile_inventory_state(
@@ -35,10 +38,12 @@ def test_owner_player_can_save_native_character_edits_and_reconcile_inventory_st
             "armor_proficiencies_text": "Light Armor\nMedium Armor",
             "weapon_proficiencies_text": "Simple Weapons\nMartial Weapons",
             "tool_proficiencies_text": "Navigator's Tools\nThieves' Tools",
-            "custom_feature_name_1": "Dockside Contact",
+            "custom_feature_name_1": "",
+            "custom_feature_page_ref_1": "mechanics/arcane-overload",
             "custom_feature_activation_type_1": "passive",
             "custom_feature_description_1": "You can usually find a friendly runner near the north piers.",
-            "manual_item_name_1": "Harbor Pass",
+            "manual_item_name_1": "",
+            "manual_item_page_ref_1": "items/stormglass-compass",
             "manual_item_quantity_1": "1",
             "manual_item_weight_1": "light",
             "manual_item_notes_1": "Stamped with blue wax.",
@@ -58,22 +63,24 @@ def test_owner_player_can_save_native_character_edits_and_reconcile_inventory_st
     custom_feature = next(
         feature for feature in record.definition.features if feature.get("category") == "custom_feature"
     )
-    assert custom_feature["name"] == "Dockside Contact"
+    assert custom_feature["name"] == "Arcane Overload"
     assert custom_feature["description_markdown"] == "You can usually find a friendly runner near the north piers."
+    assert custom_feature["page_ref"] == "mechanics/arcane-overload"
 
     manual_item = next(
         item
         for item in record.definition.equipment_catalog
         if item.get("source_kind") == "manual_edit"
     )
-    assert manual_item["name"] == "Harbor Pass"
+    assert manual_item["name"] == "Stormglass Compass"
     assert manual_item["default_quantity"] == 1
     assert manual_item["notes"] == "Stamped with blue wax."
+    assert manual_item["page_ref"] == "items/stormglass-compass"
 
     inventory_item = next(
         item for item in record.state_record.state["inventory"] if item.get("catalog_ref") == manual_item["id"]
     )
-    assert inventory_item["name"] == "Harbor Pass"
+    assert inventory_item["name"] == "Stormglass Compass"
     assert inventory_item["quantity"] == 1
     assert inventory_item["notes"] == "Stamped with blue wax."
 
@@ -86,11 +93,13 @@ def test_owner_player_can_save_native_character_edits_and_reconcile_inventory_st
             "weapon_proficiencies_text": "Simple Weapons\nMartial Weapons",
             "tool_proficiencies_text": "Navigator's Tools\nThieves' Tools",
             "custom_feature_id_1": custom_feature["id"],
-            "custom_feature_name_1": "Dockside Contact",
+            "custom_feature_name_1": "Overloaded Arcana",
+            "custom_feature_page_ref_1": "mechanics/arcane-overload",
             "custom_feature_activation_type_1": "passive",
             "custom_feature_description_1": "You can usually find a friendly runner near the north piers.",
             "manual_item_id_1": manual_item["id"],
-            "manual_item_name_1": "Harbor Pass",
+            "manual_item_name_1": "Silver Compass",
+            "manual_item_page_ref_1": "items/stormglass-compass",
             "manual_item_quantity_1": "2",
             "manual_item_weight_1": "1 lb.",
             "manual_item_notes_1": "Stamped with silver wax.",
@@ -105,9 +114,31 @@ def test_owner_player_can_save_native_character_edits_and_reconcile_inventory_st
     inventory_item = next(
         item for item in record.state_record.state["inventory"] if item.get("catalog_ref") == manual_item["id"]
     )
+    custom_feature = next(
+        feature for feature in record.definition.features if feature.get("category") == "custom_feature"
+    )
+    manual_item = next(
+        item
+        for item in record.definition.equipment_catalog
+        if item.get("source_kind") == "manual_edit"
+    )
+    assert custom_feature["name"] == "Overloaded Arcana"
+    assert custom_feature["page_ref"] == "mechanics/arcane-overload"
+    assert manual_item["name"] == "Silver Compass"
+    assert manual_item["page_ref"] == "items/stormglass-compass"
     assert inventory_item["quantity"] == 2
     assert inventory_item["weight"] == "1 lb."
     assert inventory_item["notes"] == "Stamped with silver wax."
+
+    read_response = client.get("/campaigns/linden-pass/characters/arden-march?page=features")
+    assert read_response.status_code == 200
+    read_html = read_response.get_data(as_text=True)
+    assert "/campaigns/linden-pass/pages/mechanics/arcane-overload" in read_html
+
+    equipment_response = client.get("/campaigns/linden-pass/characters/arden-march?page=equipment")
+    assert equipment_response.status_code == 200
+    equipment_html = equipment_response.get_data(as_text=True)
+    assert "/campaigns/linden-pass/pages/items/stormglass-compass" in equipment_html
 
 
 def test_stale_revision_is_rejected_for_native_character_edits(
