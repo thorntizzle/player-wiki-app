@@ -2711,6 +2711,7 @@ def _build_level_one_attacks(
     has_savage_attacker = normalize_lookup("Savage Attacker") in active_feat_names
     has_sharpshooter = normalize_lookup("Sharpshooter") in active_feat_names
     off_hand_context = _resolve_off_hand_attack_context(attack_contexts)
+    crossbow_expert_bonus_context = _resolve_crossbow_expert_bonus_attack_context(attack_contexts)
     has_shield = any(_is_shield_item(item) for item in equipment_catalog)
 
     for context in attack_contexts:
@@ -2988,6 +2989,61 @@ def _build_level_one_attacks(
                 name_suffix=" (off-hand)",
             )
         )
+    if has_crossbow_expert and crossbow_expert_bonus_context is not None:
+        crossbow_profile = dict(crossbow_expert_bonus_context["profile"] or {})
+        crossbow_attack_bonus = int(crossbow_expert_bonus_context["ability_modifier"] or 0)
+        if bool(crossbow_expert_bonus_context["is_proficient"]):
+            crossbow_attack_bonus += proficiency_bonus
+        if has_archery and str(crossbow_profile.get("type") or "").strip().upper() == "R":
+            crossbow_attack_bonus += 2
+        crossbow_damage_bonus = int(crossbow_expert_bonus_context["ability_modifier"] or 0)
+        crossbow_extra_notes = _base_attack_feat_notes(
+            crossbow_expert_bonus_context,
+            has_crossbow_expert=has_crossbow_expert,
+            has_great_weapon_master=has_great_weapon_master,
+            has_martial_adept=has_martial_adept,
+            has_polearm_master=has_polearm_master,
+            has_savage_attacker=has_savage_attacker,
+            has_sharpshooter=has_sharpshooter,
+            ranged_attack=True,
+        ) + ["Crossbow Expert bonus attack"]
+        attacks.append(
+            _build_weapon_attack_payload(
+                crossbow_expert_bonus_context,
+                attack_bonus=crossbow_attack_bonus,
+                damage_bonus=crossbow_damage_bonus,
+                notes=_build_weapon_attack_notes(
+                    crossbow_profile,
+                    bonus_action=True,
+                    great_weapon_fighting=False,
+                    has_shield=has_shield,
+                    ignore_loading=True,
+                    off_hand_context=off_hand_context,
+                    extra_notes=crossbow_extra_notes,
+                ),
+                index=len(attacks) + 1,
+                name_suffix=" (crossbow expert)",
+            )
+        )
+        if has_sharpshooter and _qualifies_for_sharpshooter(crossbow_expert_bonus_context):
+            attacks.append(
+                _build_weapon_attack_payload(
+                    crossbow_expert_bonus_context,
+                    attack_bonus=crossbow_attack_bonus - 5,
+                    damage_bonus=crossbow_damage_bonus + 10,
+                    notes=_build_weapon_attack_notes(
+                        crossbow_profile,
+                        bonus_action=True,
+                        great_weapon_fighting=False,
+                        has_shield=has_shield,
+                        ignore_loading=True,
+                        off_hand_context=off_hand_context,
+                        extra_notes=crossbow_extra_notes + ["Sharpshooter (-5 attack, +10 damage)"],
+                    ),
+                    index=len(attacks) + 1,
+                    name_suffix=" (crossbow expert, sharpshooter)",
+                )
+            )
     return attacks
 
 
@@ -3012,6 +3068,40 @@ def _qualifies_for_crossbow_expert(context: dict[str, Any]) -> bool:
     if str(profile.get("type") or "").strip().upper() != "R":
         return False
     return "crossbow" in normalize_lookup(str(context.get("attack_name") or "").strip())
+
+
+def _qualifies_for_crossbow_expert_bonus_attack(context: dict[str, Any]) -> bool:
+    if not _qualifies_for_crossbow_expert(context):
+        return False
+    item = dict(context.get("item") or {})
+    systems_ref = dict(item.get("systems_ref") or {})
+    candidate_values = [
+        str(context.get("attack_name") or "").strip(),
+        str(item.get("name") or "").strip(),
+        str(systems_ref.get("title") or "").strip(),
+        str(systems_ref.get("slug") or "").strip(),
+    ]
+    normalized_candidates = {
+        normalize_lookup(value)
+        for value in candidate_values
+        if str(value or "").strip()
+    }
+    return bool(
+        normalized_candidates
+        & {
+            normalize_lookup("Hand Crossbow"),
+            normalize_lookup("phb-item-hand-crossbow"),
+        }
+    )
+
+
+def _resolve_crossbow_expert_bonus_attack_context(
+    attack_contexts: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    for context in attack_contexts:
+        if _qualifies_for_crossbow_expert_bonus_attack(context):
+            return context
+    return None
 
 
 def _qualifies_for_great_weapon_master(context: dict[str, Any]) -> bool:
