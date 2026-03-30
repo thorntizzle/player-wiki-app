@@ -2177,7 +2177,29 @@ def test_level_one_builder_applies_metamagic_adept_tracker():
         "Acolyte",
         metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
     )
-    metamagic_adept = _systems_entry("feat", "tce-feat-metamagic-adept", "Metamagic Adept", source_id="TCE")
+    metamagic_adept = _systems_entry(
+        "feat",
+        "tce-feat-metamagic-adept",
+        "Metamagic Adept",
+        source_id="TCE",
+        metadata={
+            "optionalfeature_progression": [
+                {"name": "Metamagic", "featureType": ["MM"], "progression": {"*": 2}}
+            ]
+        },
+    )
+    quickened_spell = _systems_entry(
+        "optionalfeature",
+        "phb-optionalfeature-quickened-spell",
+        "Quickened Spell",
+        metadata={"feature_type": ["MM"]},
+    )
+    subtle_spell = _systems_entry(
+        "optionalfeature",
+        "phb-optionalfeature-subtle-spell",
+        "Subtle Spell",
+        metadata={"feature_type": ["MM"]},
+    )
     second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
 
     systems_service = _FakeSystemsService(
@@ -2187,6 +2209,7 @@ def test_level_one_builder_applies_metamagic_adept_tracker():
             "background": [acolyte],
             "feat": [metamagic_adept],
             "subclass": [],
+            "optionalfeature": [quickened_spell, subtle_spell],
             "item": [],
             "spell": [],
         },
@@ -2221,12 +2244,30 @@ def test_level_one_builder_applies_metamagic_adept_tracker():
     }
 
     context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    assert _find_builder_field(context, "feat_species_feat_1_optionalfeature_1_1")["label"] == "Metamagic Adept Metamagic 1"
+    form_values.update(
+        {
+            "feat_species_feat_1_optionalfeature_1_1": _field_value_for_label(
+                context,
+                "feat_species_feat_1_optionalfeature_1_1",
+                "Quickened Spell",
+            ),
+            "feat_species_feat_1_optionalfeature_1_2": _field_value_for_label(
+                context,
+                "feat_species_feat_1_optionalfeature_1_2",
+                "Subtle Spell",
+            ),
+        }
+    )
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
     definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
 
+    feature_names = {feature["name"] for feature in definition.features}
     metamagic_feature = next(feature for feature in definition.features if feature["name"] == "Metamagic Adept")
     resources_by_id = {resource["id"]: resource for resource in definition.resource_templates}
 
     assert "Metamagic Adept Sorcery Points: 2 / 2 (Long Rest)" in context["preview"]["resources"]
+    assert {"Quickened Spell", "Subtle Spell"} <= feature_names
     assert metamagic_feature["tracker_ref"] == "metamagic-adept"
     assert resources_by_id["metamagic-adept"]["max"] == 2
     assert resources_by_id["metamagic-adept"]["reset_on"] == "long_rest"
@@ -2339,6 +2380,98 @@ def test_level_one_builder_applies_gift_of_the_metallic_dragon_spell_and_tracker
     assert gift_feature["tracker_ref"] == "protective-wings"
     assert resources_by_id["protective-wings"]["max"] == 2
     assert resources_by_id["protective-wings"]["reset_on"] == "long_rest"
+
+
+def test_level_one_builder_applies_gift_of_the_gem_dragon_tracker():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    variant_human = _systems_entry(
+        "race",
+        "phb-race-variant-human",
+        "Variant Human",
+        metadata={
+            "size": ["M"],
+            "speed": 30,
+            "languages": [{"common": True}],
+            "feats": [{"any": 1}],
+        },
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    gift_of_the_gem_dragon = _systems_entry(
+        "feat",
+        "ftd-feat-gift-of-the-gem-dragon",
+        "Gift of the Gem Dragon",
+        source_id="FTD",
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [variant_human],
+            "background": [acolyte],
+            "feat": [gift_of_the_gem_dragon],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    form_values = {
+        "name": "Gem Hero",
+        "character_slug": "gem-hero",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": variant_human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "species_feat_1": gift_of_the_gem_dragon.slug,
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "13",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+
+    gem_feature = next(feature for feature in definition.features if feature["name"] == "Gift of the Gem Dragon")
+    resources_by_id = {resource["id"]: resource for resource in definition.resource_templates}
+
+    assert "Telekinetic Reprisal: 2 / 2 (Long Rest)" in context["preview"]["resources"]
+    assert gem_feature["tracker_ref"] == "telekinetic-reprisal"
+    assert resources_by_id["telekinetic-reprisal"]["max"] == 2
+    assert resources_by_id["telekinetic-reprisal"]["reset_on"] == "long_rest"
 
 
 def test_level_one_builder_applies_alert_feat_to_initiative():
@@ -7936,6 +8069,125 @@ def test_level_up_live_preview_route_returns_fragment(app, client, sign_in, user
     assert "data-live-refresh-fallback" in html
 
 
+def test_level_one_builder_applies_fighting_initiate_optionalfeature_choice_to_attacks():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+            "starting_equipment": {
+                "defaultData": [
+                    {"_": ["longsword|phb", "shield|phb"]},
+                ]
+            },
+        },
+    )
+    variant_human = _systems_entry(
+        "race",
+        "phb-race-variant-human",
+        "Variant Human",
+        metadata={
+            "size": ["M"],
+            "speed": 30,
+            "languages": [{"common": True, "anyStandard": 1}],
+            "skill_proficiencies": [{"any": 1}],
+            "feats": [{"any": 1}],
+        },
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    fighting_initiate = _systems_entry(
+        "feat",
+        "tce-feat-fighting-initiate",
+        "Fighting Initiate",
+        source_id="TCE",
+        metadata={
+            "optionalfeature_progression": [
+                {"name": "Fighting Style", "featureType": ["FS:F"], "progression": {"*": 1}}
+            ]
+        },
+    )
+    dueling = _systems_entry(
+        "optionalfeature",
+        "phb-optionalfeature-dueling",
+        "Dueling",
+        metadata={"feature_type": ["FS:F"]},
+    )
+    defense = _systems_entry(
+        "optionalfeature",
+        "phb-optionalfeature-defense",
+        "Defense",
+        metadata={"feature_type": ["FS:F"]},
+    )
+    longsword = _systems_entry("item", "phb-item-longsword", "Longsword", metadata={"weight": 3})
+    shield = _systems_entry("item", "phb-item-shield", "Shield", metadata={"weight": 6, "type": "S"})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [variant_human],
+            "background": [acolyte],
+            "feat": [fighting_initiate],
+            "subclass": [],
+            "optionalfeature": [dueling, defense],
+            "item": [longsword, shield],
+            "spell": [],
+        },
+        class_progression=[],
+    )
+
+    form_values = {
+        "name": "Style Adept",
+        "character_slug": "style-adept",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": variant_human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "species_skill_1": "perception",
+        "species_language_1": "Elvish",
+        "species_feat_1": fighting_initiate.slug,
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    assert _find_builder_field(context, "feat_species_feat_1_optionalfeature_1_1")["label"] == "Fighting Initiate Fighting Style"
+    form_values["feat_species_feat_1_optionalfeature_1_1"] = _field_value_for_label(
+        context,
+        "feat_species_feat_1_optionalfeature_1_1",
+        "Dueling",
+    )
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+
+    attacks_by_name = {attack["name"]: attack for attack in definition.attacks}
+    feature_names = {feature["name"] for feature in definition.features}
+
+    assert "Fighting Initiate" in context["preview"]["features"]
+    assert "Dueling" in context["preview"]["features"]
+    assert attacks_by_name["Longsword"]["damage"] == "1d8+5 slashing"
+    assert {"Fighting Initiate", "Dueling"} <= feature_names
+
+
 def test_level_one_builder_applies_martial_adept_tracker_and_attack_notes():
     fighter = _systems_entry(
         "class",
@@ -7974,7 +8226,28 @@ def test_level_one_builder_applies_martial_adept_tracker_and_attack_notes():
         "Acolyte",
         metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
     )
-    martial_adept = _systems_entry("feat", "phb-feat-martial-adept", "Martial Adept")
+    martial_adept = _systems_entry(
+        "feat",
+        "phb-feat-martial-adept",
+        "Martial Adept",
+        metadata={
+            "optionalfeature_progression": [
+                {"name": "Maneuvers", "featureType": ["MV:B"], "progression": {"*": 2}}
+            ]
+        },
+    )
+    precision_attack = _systems_entry(
+        "optionalfeature",
+        "phb-optionalfeature-precision-attack",
+        "Precision Attack",
+        metadata={"feature_type": ["MV:B"]},
+    )
+    trip_attack = _systems_entry(
+        "optionalfeature",
+        "phb-optionalfeature-trip-attack",
+        "Trip Attack",
+        metadata={"feature_type": ["MV:B"]},
+    )
     longsword = _systems_entry("item", "phb-item-longsword", "Longsword", metadata={"weight": 3})
     shield = _systems_entry("item", "phb-item-shield", "Shield", metadata={"weight": 6, "type": "S"})
 
@@ -7985,6 +8258,7 @@ def test_level_one_builder_applies_martial_adept_tracker_and_attack_notes():
             "background": [acolyte],
             "feat": [martial_adept],
             "subclass": [],
+            "optionalfeature": [precision_attack, trip_attack],
             "item": [longsword, shield],
             "spell": [],
         },
@@ -8013,14 +8287,32 @@ def test_level_one_builder_applies_martial_adept_tracker_and_attack_notes():
     }
 
     context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    assert _find_builder_field(context, "feat_species_feat_1_optionalfeature_1_1")["label"] == "Martial Adept Maneuvers 1"
+    form_values.update(
+        {
+            "feat_species_feat_1_optionalfeature_1_1": _field_value_for_label(
+                context,
+                "feat_species_feat_1_optionalfeature_1_1",
+                "Precision Attack",
+            ),
+            "feat_species_feat_1_optionalfeature_1_2": _field_value_for_label(
+                context,
+                "feat_species_feat_1_optionalfeature_1_2",
+                "Trip Attack",
+            ),
+        }
+    )
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
     definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
 
     attacks_by_name = {attack["name"]: attack for attack in definition.attacks}
+    feature_names = {feature["name"] for feature in definition.features}
     martial_adept_feature = next(feature for feature in definition.features if feature["name"] == "Martial Adept")
     martial_adept_resource = next(resource for resource in definition.resource_templates if resource["id"] == "martial-adept")
 
     assert "Martial Adept" in context["preview"]["features"]
     assert "Martial Adept: 1 / 1 (Short Rest)" in context["preview"]["resources"]
+    assert {"Precision Attack", "Trip Attack"} <= feature_names
     assert attacks_by_name["Longsword"]["notes"] == "Versatile (1d10), Martial Adept maneuvers available."
     assert martial_adept_feature["tracker_ref"] == "martial-adept"
     assert martial_adept_resource["max"] == 1
@@ -8525,6 +8817,144 @@ def test_native_level_up_preserves_polearm_master_attack_rows():
     assert attacks_by_name["Glaive (polearm master)"]["notes"] == "Bonus action, Polearm Master bonus attack."
 
 
+def test_native_level_up_applies_fighting_initiate_optionalfeature_choice_to_attacks():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    ability_score_improvement = _systems_entry(
+        "classfeature",
+        "phb-classfeature-ability-score-improvement",
+        "Ability Score Improvement",
+        metadata={"level": 4},
+    )
+    fighting_initiate = _systems_entry(
+        "feat",
+        "tce-feat-fighting-initiate",
+        "Fighting Initiate",
+        source_id="TCE",
+        metadata={
+            "optionalfeature_progression": [
+                {"name": "Fighting Style", "featureType": ["FS:F"], "progression": {"*": 1}}
+            ]
+        },
+    )
+    dueling = _systems_entry(
+        "optionalfeature",
+        "phb-optionalfeature-dueling",
+        "Dueling",
+        metadata={"feature_type": ["FS:F"]},
+    )
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [fighting_initiate],
+            "subclass": [],
+            "optionalfeature": [dueling],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 4,
+                "level_label": "Level 4",
+                "feature_rows": [
+                    {
+                        "label": "Ability Score Improvement",
+                        "entry": ability_score_improvement,
+                        "embedded_card": {"option_groups": []},
+                    }
+                ],
+            }
+        ],
+    )
+
+    current_definition = _minimal_character_definition("style-warden", "Style Warden")
+    current_definition.profile["class_level_text"] = "Fighter 3"
+    current_definition.profile["classes"][0]["level"] = 3
+    current_definition.stats["max_hp"] = 28
+    current_definition.proficiencies["weapons"] = ["Simple Weapons", "Martial Weapons"]
+    current_definition.equipment_catalog = [
+        {
+            "name": "Longsword",
+            "default_quantity": 1,
+            "weight": "3 lb.",
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-longsword",
+                "title": "Longsword",
+                "source_id": "PHB",
+            },
+        },
+        {
+            "name": "Shield",
+            "default_quantity": 1,
+            "weight": "6 lb.",
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-shield",
+                "title": "Shield",
+                "source_id": "PHB",
+            },
+        },
+    ]
+
+    form_values = {
+        "hp_gain": "8",
+        "levelup_asi_mode_1": "feat",
+        "levelup_feat_1": fighting_initiate.slug,
+    }
+
+    level_up_context = build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values)
+    assert _find_builder_field(level_up_context, "feat_levelup_feat_1_optionalfeature_1_1")["label"] == "Fighting Initiate Fighting Style"
+    form_values["feat_levelup_feat_1_optionalfeature_1_1"] = _field_value_for_label(
+        level_up_context,
+        "feat_levelup_feat_1_optionalfeature_1_1",
+        "Dueling",
+    )
+
+    level_up_context = build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values)
+    leveled_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        level_up_context,
+        form_values,
+    )
+
+    attacks_by_name = {attack["name"]: attack for attack in leveled_definition.attacks}
+    feature_names = {feature["name"] for feature in leveled_definition.features}
+
+    assert "Fighting Initiate" in level_up_context["preview"]["gained_features"]
+    assert "Dueling" in level_up_context["preview"]["gained_features"]
+    assert attacks_by_name["Longsword"]["damage"] == "1d8+5 slashing"
+    assert {"Fighting Initiate", "Dueling"} <= feature_names
+
+
 def test_native_level_up_adds_martial_adept_resource_and_preserves_melee_feat_variants():
     fighter = _systems_entry(
         "class",
@@ -8558,7 +8988,28 @@ def test_native_level_up_adds_martial_adept_resource_and_preserves_melee_feat_va
         "Ability Score Improvement",
         metadata={"level": 8},
     )
-    martial_adept = _systems_entry("feat", "phb-feat-martial-adept", "Martial Adept")
+    martial_adept = _systems_entry(
+        "feat",
+        "phb-feat-martial-adept",
+        "Martial Adept",
+        metadata={
+            "optionalfeature_progression": [
+                {"name": "Maneuvers", "featureType": ["MV:B"], "progression": {"*": 2}}
+            ]
+        },
+    )
+    precision_attack = _systems_entry(
+        "optionalfeature",
+        "phb-optionalfeature-precision-attack",
+        "Precision Attack",
+        metadata={"feature_type": ["MV:B"]},
+    )
+    trip_attack = _systems_entry(
+        "optionalfeature",
+        "phb-optionalfeature-trip-attack",
+        "Trip Attack",
+        metadata={"feature_type": ["MV:B"]},
+    )
     systems_service = _FakeSystemsService(
         {
             "class": [fighter],
@@ -8566,6 +9017,7 @@ def test_native_level_up_adds_martial_adept_resource_and_preserves_melee_feat_va
             "background": [acolyte],
             "feat": [martial_adept],
             "subclass": [],
+            "optionalfeature": [precision_attack, trip_attack],
             "item": [],
             "spell": [],
         },
@@ -8638,6 +9090,22 @@ def test_native_level_up_adds_martial_adept_resource_and_preserves_melee_feat_va
     }
 
     level_up_context = build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values)
+    assert _find_builder_field(level_up_context, "feat_levelup_feat_1_optionalfeature_1_1")["label"] == "Martial Adept Maneuvers 1"
+    form_values.update(
+        {
+            "feat_levelup_feat_1_optionalfeature_1_1": _field_value_for_label(
+                level_up_context,
+                "feat_levelup_feat_1_optionalfeature_1_1",
+                "Precision Attack",
+            ),
+            "feat_levelup_feat_1_optionalfeature_1_2": _field_value_for_label(
+                level_up_context,
+                "feat_levelup_feat_1_optionalfeature_1_2",
+                "Trip Attack",
+            ),
+        }
+    )
+    level_up_context = build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values)
     leveled_definition, _, hp_delta = build_native_level_up_character_definition(
         "linden-pass",
         current_definition,
@@ -8651,12 +9119,16 @@ def test_native_level_up_adds_martial_adept_resource_and_preserves_melee_feat_va
     )
 
     attacks_by_name = {attack["name"]: attack for attack in leveled_definition.attacks}
+    feature_names = {feature["name"] for feature in leveled_definition.features}
     martial_adept_feature = next(feature for feature in leveled_definition.features if feature["name"] == "Martial Adept")
     resources_by_id = {resource["id"]: resource for resource in leveled_definition.resource_templates}
     state_resources_by_id = {resource["id"]: resource for resource in merged_state["resources"]}
 
     assert "Martial Adept" in level_up_context["preview"]["gained_features"]
+    assert "Precision Attack" in level_up_context["preview"]["gained_features"]
+    assert "Trip Attack" in level_up_context["preview"]["gained_features"]
     assert "Martial Adept: 1 / 1 (Short Rest)" in level_up_context["preview"]["resources"]
+    assert {"Precision Attack", "Trip Attack"} <= feature_names
     assert attacks_by_name["Greatsword"]["attack_bonus"] == 6
     assert attacks_by_name["Greatsword"]["damage"] == "2d6+3 slashing"
     assert attacks_by_name["Greatsword"]["notes"] == (

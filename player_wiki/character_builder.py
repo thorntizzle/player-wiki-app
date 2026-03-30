@@ -929,6 +929,13 @@ def build_native_level_up_character_definition(
         optionalfeature_catalog=optionalfeature_catalog,
     )
     new_feature_entries.extend(level_up_feat_entries)
+    new_feature_entries.extend(
+        _collect_feat_optionalfeature_entries(
+            feat_selections=feat_selections,
+            selected_choices=selected_choices,
+            optionalfeature_catalog=optionalfeature_catalog,
+        )
+    )
     selected_campaign_option_payloads = (
         _campaign_option_payloads_from_feat_selections(feat_selections)
         + _campaign_option_payloads_from_feature_entries(new_feature_entries)
@@ -1623,6 +1630,7 @@ def _build_choice_sections(
     feat_fields = _build_feat_choice_fields(
         feat_selections=feat_selections,
         values=values,
+        optionalfeature_catalog=optionalfeature_catalog,
         item_catalog=item_catalog,
     )
     if feat_fields:
@@ -1744,6 +1752,7 @@ def _build_level_up_choice_sections(
     feat_fields = _build_feat_choice_fields(
         feat_selections=feat_selections,
         values=values,
+        optionalfeature_catalog=optionalfeature_catalog,
         item_catalog=item_catalog,
     )
     if feat_fields:
@@ -2195,6 +2204,7 @@ def _build_feat_choice_fields(
     *,
     feat_selections: list[dict[str, Any]],
     values: dict[str, str],
+    optionalfeature_catalog: dict[str, SystemsEntryRecord],
     item_catalog: dict[str, Any],
 ) -> list[dict[str, Any]]:
     fields: list[dict[str, Any]] = []
@@ -2203,6 +2213,7 @@ def _build_feat_choice_fields(
             _build_feat_choice_fields_for_selection(
                 selection=selection,
                 values=values,
+                optionalfeature_catalog=optionalfeature_catalog,
                 item_catalog=item_catalog,
             )
         )
@@ -2213,6 +2224,7 @@ def _build_feat_choice_fields_for_selection(
     *,
     selection: dict[str, Any],
     values: dict[str, str],
+    optionalfeature_catalog: dict[str, SystemsEntryRecord],
     item_catalog: dict[str, Any],
 ) -> list[dict[str, Any]]:
     feat_entry = selection.get("entry")
@@ -2443,6 +2455,33 @@ def _build_feat_choice_fields_for_selection(
                     }
                 )
 
+    for section in _feat_optionalfeature_sections(feat_entry, optionalfeature_catalog):
+        section_index = int(section.get("index") or 0)
+        if section_index <= 0:
+            continue
+        category = _feat_optionalfeature_category(section_index)
+        options = [dict(option) for option in list(section.get("options") or []) if str(option.get("value") or "").strip()]
+        if not options:
+            continue
+        choice_count = max(int(section.get("count") or 0), 0)
+        if choice_count <= 0:
+            continue
+        section_title = str(section.get("title") or "Optional Feature").strip() or "Optional Feature"
+        for choice_index in range(1, choice_count + 1):
+            field_name = _feat_field_name(instance_key, category, choice_index)
+            label_suffix = f" {choice_index}" if choice_count > 1 else ""
+            fields.append(
+                {
+                    "name": field_name,
+                    "label": f"{feat_title} {section_title}{label_suffix}",
+                    "help_text": f"Choose an option for {section_title} from {feat_title}.",
+                    "options": options,
+                    "selected": str(values.get(field_name) or "").strip(),
+                    "group_key": _feat_group_key(instance_key, category),
+                    "kind": "feat_optionalfeature",
+                }
+            )
+
     spell_source_field = _build_feat_spell_source_field(
         selection=selection,
         values=values,
@@ -2451,6 +2490,75 @@ def _build_feat_choice_fields_for_selection(
         fields.append(spell_source_field)
 
     return fields
+
+
+def _feat_optionalfeature_category(section_index: int) -> str:
+    return f"optionalfeature_{section_index}"
+
+
+def _feat_optionalfeature_sections(
+    feat_entry: SystemsEntryRecord,
+    optionalfeature_catalog: dict[str, SystemsEntryRecord],
+) -> list[dict[str, Any]]:
+    metadata = dict(feat_entry.metadata or {})
+    sections: list[dict[str, Any]] = []
+    for index, raw_section in enumerate(list(metadata.get("optionalfeature_progression") or []), start=1):
+        if not isinstance(raw_section, dict):
+            continue
+        feature_types = {
+            normalize_lookup(value)
+            for value in list(raw_section.get("featureType") or [])
+            if str(value or "").strip()
+        }
+        if not feature_types:
+            continue
+        count = _optionalfeature_progression_choice_count(raw_section.get("progression"))
+        if count <= 0:
+            continue
+        options: list[dict[str, str]] = []
+        seen_values: set[str] = set()
+        for entry in sorted(
+            list(optionalfeature_catalog.values()),
+            key=lambda candidate: (normalize_lookup(candidate.title), str(candidate.slug or "").strip()),
+        ):
+            entry_feature_types = {
+                normalize_lookup(value)
+                for value in list(dict(entry.metadata or {}).get("feature_type") or [])
+                if str(value or "").strip()
+            }
+            if not entry_feature_types or not (entry_feature_types & feature_types):
+                continue
+            value = str(entry.slug or "").strip()
+            if not value or value in seen_values:
+                continue
+            seen_values.add(value)
+            options.append(_choice_option(entry.title, value))
+        if not options:
+            continue
+        title = _clean_embedded_text(str(raw_section.get("name") or "").strip()) or "Optional Feature"
+        sections.append(
+            {
+                "index": index,
+                "title": title,
+                "count": count,
+                "options": options,
+            }
+        )
+    return sections
+
+
+def _optionalfeature_progression_choice_count(raw_progression: Any) -> int:
+    if isinstance(raw_progression, (int, float)):
+        return max(int(raw_progression), 0)
+    if not isinstance(raw_progression, dict):
+        return 0
+    count = 0
+    for raw_value in raw_progression.values():
+        try:
+            count = max(count, int(raw_value or 0))
+        except (TypeError, ValueError):
+            continue
+    return count
 
 
 @lru_cache(maxsize=1)
@@ -5636,6 +5744,14 @@ def _collect_level_one_feature_entries(
         )
 
     feature_entries.extend(
+        _collect_feat_optionalfeature_entries(
+            feat_selections=feat_selections,
+            selected_choices=selected_choices,
+            optionalfeature_catalog=optionalfeature_catalog,
+        )
+    )
+
+    feature_entries.extend(
         _collect_selected_campaign_feature_entries(
             choice_sections=choice_sections,
             selected_choices=selected_choices,
@@ -5687,6 +5803,39 @@ def _collect_selected_campaign_feature_entries(
                 "campaign_option": campaign_option or None,
             }
         )
+    return feature_entries
+
+
+def _collect_feat_optionalfeature_entries(
+    *,
+    feat_selections: list[dict[str, Any]],
+    selected_choices: dict[str, list[str]],
+    optionalfeature_catalog: dict[str, SystemsEntryRecord],
+) -> list[dict[str, Any]]:
+    feature_entries: list[dict[str, Any]] = []
+    for selection in feat_selections:
+        feat_entry = selection.get("entry")
+        instance_key = str(selection.get("instance_key") or "").strip()
+        if not isinstance(feat_entry, SystemsEntryRecord) or not instance_key:
+            continue
+        for section in _feat_optionalfeature_sections(feat_entry, optionalfeature_catalog):
+            section_index = int(section.get("index") or 0)
+            if section_index <= 0:
+                continue
+            category = _feat_optionalfeature_category(section_index)
+            for selected_value in _feat_selected_values(selected_choices, instance_key, category):
+                selected_entry = optionalfeature_catalog.get(str(selected_value or "").strip())
+                if not isinstance(selected_entry, SystemsEntryRecord):
+                    continue
+                feature_entries.append(
+                    {
+                        "kind": "optionalfeature",
+                        "entry": selected_entry,
+                        "name": selected_entry.title,
+                        "label": selected_entry.title,
+                        "slug": str(selected_entry.slug or "").strip(),
+                    }
+                )
     return feature_entries
 
 
@@ -6470,6 +6619,13 @@ def _build_native_level_up_preview(
         optionalfeature_catalog=optionalfeature_catalog,
     )
     gained_feature_entries.extend(level_up_feat_entries)
+    gained_feature_entries.extend(
+        _collect_feat_optionalfeature_entries(
+            feat_selections=feat_selections,
+            selected_choices=selected_choices,
+            optionalfeature_catalog=optionalfeature_catalog,
+        )
+    )
     selected_campaign_option_payloads = (
         _campaign_option_payloads_from_feat_selections(feat_selections)
         + _campaign_option_payloads_from_feature_entries(gained_feature_entries)
@@ -9079,6 +9235,21 @@ def _build_feature_tracker_template(
             "reset_to": "max",
             "rest_behavior": "confirm_before_reset",
             "notes": "Protective Wings",
+            "display_order": display_order,
+            "activation_type": "reaction",
+        }
+    if normalized == normalize_lookup("Gift of the Gem Dragon"):
+        uses = _proficiency_bonus_for_level(current_level)
+        return {
+            "id": "telekinetic-reprisal",
+            "label": "Telekinetic Reprisal",
+            "category": "feat",
+            "initial_current": uses,
+            "max": uses,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Telekinetic Reprisal",
             "display_order": display_order,
             "activation_type": "reaction",
         }
