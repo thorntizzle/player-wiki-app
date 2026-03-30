@@ -157,6 +157,124 @@ Wardens call on the tide when the harbor turns dangerous.
     assert "Detect Magic" not in spells_by_name
 
 
+def test_native_character_edits_accept_page_backed_feat_links_and_preserve_tracker_state(
+    app, client, sign_in, users, get_character, set_campaign_visibility
+):
+    feat_page_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "content"
+        / "mechanics"
+        / "tidecaller-gift.md"
+    )
+    feat_page_path.write_text(
+        """---
+title: Tidecaller Gift
+section: Mechanics
+subsection: Feats
+published: true
+summary: A harbor rite that answers with a little of the sea.
+character_option:
+  kind: feat
+  name: Tidecaller Gift
+  description_markdown: You can call a little of the tide to your side.
+  activation_type: special
+  resource:
+    max: 3
+    reset_on: long_rest
+  grants:
+    languages:
+      - Primordial
+---
+The harbor priests mark trusted wardens with a breath of salt and storm.
+""",
+        encoding="utf-8",
+    )
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    record = get_character("arden-march")
+    assert record is not None
+
+    add_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "",
+            "weapon_proficiencies_text": "Daggers\nLight Crossbows\nQuarterstaffs",
+            "tool_proficiencies_text": "Navigator's Tools",
+            "custom_feature_name_1": "",
+            "custom_feature_page_ref_1": "mechanics/tidecaller-gift",
+            "custom_feature_activation_type_1": "special",
+            "custom_feature_description_1": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert add_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    tidecaller = next(
+        feature
+        for feature in record.definition.features
+        if feature.get("category") == "custom_feature" and feature.get("page_ref") == "mechanics/tidecaller-gift"
+    )
+    tracker_ref = str(tidecaller.get("tracker_ref") or "")
+
+    assert tidecaller["name"] == "Tidecaller Gift"
+    assert tidecaller["activation_type"] == "special"
+    assert tidecaller["description_markdown"] == "You can call a little of the tide to your side."
+    assert "Primordial" in record.definition.proficiencies["languages"]
+    assert any(resource["id"] == tracker_ref and resource["max"] == 3 for resource in record.definition.resource_templates)
+
+    with app.app_context():
+        repository = app.extensions["character_repository"]
+        store = app.extensions["character_state_store"]
+        refreshed = repository.get_character("linden-pass", "arden-march")
+        assert refreshed is not None
+        payload = dict(refreshed.state_record.state or {})
+        resources = [dict(resource) for resource in list(payload.get("resources") or [])]
+        for resource in resources:
+            if resource.get("id") == tracker_ref:
+                resource["current"] = 1
+        payload["resources"] = resources
+        store.replace_state(
+            refreshed.definition,
+            payload,
+            expected_revision=refreshed.state_record.revision,
+        )
+
+    record = get_character("arden-march")
+    assert record is not None
+    save_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "",
+            "weapon_proficiencies_text": "Daggers\nLight Crossbows\nQuarterstaffs",
+            "tool_proficiencies_text": "Navigator's Tools",
+            "custom_feature_id_1": tidecaller["id"],
+            "custom_feature_name_1": "",
+            "custom_feature_page_ref_1": "mechanics/tidecaller-gift",
+            "custom_feature_activation_type_1": "special",
+            "custom_feature_description_1": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert save_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    resource_state = next(resource for resource in record.state_record.state["resources"] if resource["id"] == tracker_ref)
+    assert resource_state["current"] == 1
+    assert resource_state["max"] == 3
+
+
 def test_owner_player_can_open_native_character_edit_page(
     client, sign_in, users, set_campaign_visibility
 ):

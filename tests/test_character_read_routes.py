@@ -61,6 +61,32 @@ def test_dm_can_open_character_roster_and_read_sheet(client, sign_in, users):
     assert "Open campaign wiki" not in sheet_html
 
 
+def test_character_read_sheet_links_species_and_background_to_campaign_pages_when_present(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        profile = dict(payload.get("profile") or {})
+        profile["species"] = "Sea-Blessed"
+        profile["species_ref"] = None
+        profile["species_page_ref"] = "species/sea-blessed"
+        profile["background"] = "Harbor Initiate"
+        profile["background_ref"] = None
+        profile["background_page_ref"] = "backgrounds/harbor-initiate"
+        payload["profile"] = profile
+
+    _write_character_definition(app, "arden-march", _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get("/campaigns/linden-pass/characters/arden-march")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "/campaigns/linden-pass/pages/species/sea-blessed" in html
+    assert "/campaigns/linden-pass/pages/backgrounds/harbor-initiate" in html
+    assert "Sea-Blessed" in html
+    assert "Harbor Initiate" in html
+
+
 def test_player_cannot_open_character_roster_or_sheet_when_characters_are_dm_only(client, sign_in, users):
     sign_in(users["party"]["email"], users["party"]["password"])
 

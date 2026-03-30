@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from .character_adjustments import normalize_manual_stat_adjustments
 
-VALID_CAMPAIGN_OPTION_KINDS = {"feature", "item"}
+VALID_CAMPAIGN_OPTION_KINDS = {"feature", "item", "feat", "species", "background"}
+FEATURE_LIKE_CAMPAIGN_OPTION_KINDS = {"feature", "feat", "species", "background"}
 VALID_CAMPAIGN_FEATURE_ACTIVATION_TYPES = {
     "passive",
     "action",
@@ -87,7 +89,7 @@ def normalize_campaign_character_option(
         ),
     }
 
-    if kind == "feature":
+    if kind in FEATURE_LIKE_CAMPAIGN_OPTION_KINDS:
         activation_type = str(raw_option.get("activation_type") or "passive").strip().lower()
         if activation_type not in VALID_CAMPAIGN_FEATURE_ACTIVATION_TYPES:
             activation_type = "passive"
@@ -108,7 +110,50 @@ def normalize_campaign_character_option(
         )
         if resource is not None:
             normalized["resource"] = resource
-        return normalized
+        if kind == "feature":
+            return normalized
+        if kind == "feat":
+            normalized["feat_name"] = str(raw_option.get("name") or "").strip() or str(title or "").strip()
+            for key in (
+                "ability",
+                "skill_proficiencies",
+                "language_proficiencies",
+                "tool_proficiencies",
+                "weapon_proficiencies",
+                "armor_proficiencies",
+                "saving_throw_proficiencies",
+                "skill_tool_language_proficiencies",
+            ):
+                if key in raw_option:
+                    normalized[key] = deepcopy(raw_option.get(key))
+            additional_spells = raw_option.get("additional_spells", raw_option.get("additionalSpells"))
+            if additional_spells is not None:
+                normalized["additional_spells"] = deepcopy(additional_spells)
+            return normalized
+        if kind == "species":
+            normalized["species_name"] = str(raw_option.get("name") or "").strip() or str(title or "").strip()
+            normalized_size = _normalize_size_value(raw_option.get("size"))
+            if normalized_size:
+                normalized["size"] = normalized_size
+            normalized_speed = _normalize_speed_value(raw_option.get("speed"))
+            if normalized_speed is not None:
+                normalized["speed"] = normalized_speed
+            for key in ("skill_proficiencies", "tool_proficiencies", "feats"):
+                if key in raw_option:
+                    normalized[key] = deepcopy(raw_option.get(key))
+            languages = raw_option.get("languages")
+            if _contains_structured_builder_metadata(languages):
+                normalized["languages"] = deepcopy(languages)
+            language_proficiencies = raw_option.get("language_proficiencies")
+            if language_proficiencies is not None and "languages" not in normalized:
+                normalized["languages"] = deepcopy(language_proficiencies)
+            return normalized
+        if kind == "background":
+            normalized["background_name"] = str(raw_option.get("name") or "").strip() or str(title or "").strip()
+            for key in ("skill_proficiencies", "language_proficiencies", "tool_proficiencies"):
+                if key in raw_option:
+                    normalized[key] = deepcopy(raw_option.get(key))
+            return normalized
 
     quantity = _normalize_positive_integer(raw_option.get("quantity"), default=1)
     normalized.update(
@@ -194,6 +239,8 @@ def _normalize_string_list(value: Any) -> list[str]:
     values: list[str] = []
     seen: set[str] = set()
     for raw_item in raw_items:
+        if isinstance(raw_item, (dict, list, tuple, set)):
+            continue
         clean_item = str(raw_item or "").strip()
         normalized_item = clean_item.casefold()
         if not clean_item or normalized_item in seen:
@@ -266,3 +313,28 @@ def _normalize_positive_integer(value: Any, *, default: int) -> int:
     if normalized <= 0:
         return int(default)
     return normalized
+
+
+def _normalize_size_value(value: Any) -> list[str]:
+    if isinstance(value, str):
+        clean_value = str(value or "").strip()
+        return [clean_value] if clean_value else []
+    if isinstance(value, list):
+        values: list[str] = []
+        for raw_item in value:
+            clean_item = str(raw_item or "").strip()
+            if clean_item:
+                values.append(clean_item)
+        return values
+    return []
+
+
+def _normalize_speed_value(value: Any) -> int | str | None:
+    if isinstance(value, (int, float)):
+        return int(value)
+    clean_value = str(value or "").strip()
+    return clean_value or None
+
+
+def _contains_structured_builder_metadata(value: Any) -> bool:
+    return isinstance(value, list) and any(isinstance(item, dict) for item in value)

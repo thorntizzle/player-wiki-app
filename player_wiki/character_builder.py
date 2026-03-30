@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import re
 from functools import lru_cache
@@ -18,7 +19,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-03-30.03"
+CHARACTER_BUILDER_VERSION = "2026-03-30.04"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -26,6 +27,9 @@ CAMPAIGN_FEATURE_CHOICE_SLOTS = 2
 CAMPAIGN_ITEM_CHOICE_SLOTS = 3
 CAMPAIGN_ITEMS_SECTION = "Items"
 CAMPAIGN_SESSIONS_SECTION = "Sessions"
+CAMPAIGN_PAGE_OPTION_PREFIX = "page:"
+SYSTEMS_OPTION_PREFIX = "systems:"
+CAMPAIGN_PAGE_SOURCE_ID = "Campaign"
 
 ABILITY_KEYS = ("str", "dex", "con", "int", "wis", "cha")
 ABILITY_LABELS = {
@@ -370,9 +374,21 @@ def build_level_one_builder_context(
 ) -> dict[str, Any]:
     values = dict(form_values or {})
     class_options = _list_supported_class_entries(systems_service, campaign_slug)
-    species_options = _list_campaign_enabled_entries(systems_service, campaign_slug, "race")
-    background_options = _list_campaign_enabled_entries(systems_service, campaign_slug, "background")
-    feat_options = _list_campaign_enabled_entries(systems_service, campaign_slug, "feat")
+    species_options = _build_mixed_character_options(
+        _list_campaign_enabled_entries(systems_service, campaign_slug, "race"),
+        campaign_page_records or [],
+        kind="species",
+    )
+    background_options = _build_mixed_character_options(
+        _list_campaign_enabled_entries(systems_service, campaign_slug, "background"),
+        campaign_page_records or [],
+        kind="background",
+    )
+    feat_options = _build_mixed_character_options(
+        _list_campaign_enabled_entries(systems_service, campaign_slug, "feat"),
+        campaign_page_records or [],
+        kind="feat",
+    )
     feat_catalog = _build_feat_catalog(feat_options)
     item_catalog = _build_item_catalog(_list_campaign_enabled_entries(systems_service, campaign_slug, "item"))
     spell_catalog = _build_spell_catalog(_list_campaign_enabled_entries(systems_service, campaign_slug, "spell"))
@@ -463,6 +479,7 @@ def build_level_one_builder_context(
         "spell_catalog": spell_catalog,
         "limitations": [
             "Base classes now come from the campaign's enabled Systems sources when their native progression metadata is available, while older PHB fallback data still covers previously imported local classes.",
+            "Species, backgrounds, and feats can come from either enabled Systems entries or published campaign pages that expose structured character-option metadata.",
             "Published campaign wiki features and items can also be linked in during creation through the optional campaign content fields.",
             "Enter level-1 ability scores after species bonuses. Native feat-driven ability increases are applied automatically.",
             "Native attack rows now cover basic PHB weapons, off-hand attacks, key level-1 fighting-style adjustments, and the current modeled feat attack variants, but a few advanced riders still need manual follow-up.",
@@ -522,6 +539,9 @@ def build_level_one_character_definition(
         selected_choices=selected_choices,
         strict=True,
     )
+    selected_campaign_option_payloads = _campaign_option_payloads_from_selected_entries(
+        [selected_species, selected_background]
+    ) + _campaign_option_payloads_from_feat_selections(feat_selections)
     proficiencies = _build_level_one_proficiencies(
         selected_class=selected_class,
         selected_species=selected_species,
@@ -530,6 +550,7 @@ def build_level_one_character_definition(
         choice_sections=choice_sections,
         selected_choices=selected_choices,
         feat_selections=feat_selections,
+        campaign_option_payloads=selected_campaign_option_payloads,
     )
     skills = _build_skills_payload(ability_scores, proficiencies["skills"], proficiency_bonus)
 
@@ -574,6 +595,7 @@ def build_level_one_character_definition(
         choice_sections=choice_sections,
         selected_choices=selected_choices,
         current_level=1,
+        campaign_option_payloads=selected_campaign_option_payloads,
     )
     profile = _build_level_one_profile(
         name=name,
@@ -592,6 +614,7 @@ def build_level_one_character_definition(
         choice_sections=choice_sections,
         selected_choices=selected_choices,
         spell_catalog=spell_catalog,
+        campaign_option_payloads=selected_campaign_option_payloads,
     )
 
     source_path = "builder://native-level-1"
@@ -649,6 +672,8 @@ def build_native_level_up_context(
     campaign_slug: str,
     definition: CharacterDefinition,
     form_values: dict[str, str] | None = None,
+    *,
+    campaign_page_records: list[Any] | None = None,
 ) -> dict[str, Any]:
     support_error = _native_level_up_support_error(definition)
     if support_error:
@@ -658,9 +683,21 @@ def build_native_level_up_context(
     current_level = _resolve_native_character_level(definition)
     next_level = current_level + 1
     class_options = _list_supported_class_entries(systems_service, campaign_slug)
-    species_options = _list_campaign_enabled_entries(systems_service, campaign_slug, "race")
-    background_options = _list_campaign_enabled_entries(systems_service, campaign_slug, "background")
-    feat_options = _list_campaign_enabled_entries(systems_service, campaign_slug, "feat")
+    species_options = _build_mixed_character_options(
+        _list_campaign_enabled_entries(systems_service, campaign_slug, "race"),
+        campaign_page_records or [],
+        kind="species",
+    )
+    background_options = _build_mixed_character_options(
+        _list_campaign_enabled_entries(systems_service, campaign_slug, "background"),
+        campaign_page_records or [],
+        kind="background",
+    )
+    feat_options = _build_mixed_character_options(
+        _list_campaign_enabled_entries(systems_service, campaign_slug, "feat"),
+        campaign_page_records or [],
+        kind="feat",
+    )
     feat_catalog = _build_feat_catalog(feat_options)
     item_catalog = _build_item_catalog(_list_campaign_enabled_entries(systems_service, campaign_slug, "item"))
     spell_catalog = _build_spell_catalog(_list_campaign_enabled_entries(systems_service, campaign_slug, "spell"))
@@ -673,11 +710,13 @@ def build_native_level_up_context(
     selected_species = _resolve_profile_entry(
         species_options,
         definition.profile.get("species_ref"),
+        page_ref=definition.profile.get("species_page_ref"),
         fallback_title=str(definition.profile.get("species") or "").strip(),
     )
     selected_background = _resolve_profile_entry(
         background_options,
         definition.profile.get("background_ref"),
+        page_ref=definition.profile.get("background_page_ref"),
         fallback_title=str(definition.profile.get("background") or "").strip(),
     )
     if selected_class is None or selected_species is None or selected_background is None:
@@ -804,6 +843,7 @@ def build_native_level_up_character_definition(
         subclass_progression=subclass_progression,
         target_level=target_level,
     )
+    selected_campaign_option_payloads = _campaign_option_payloads_from_feat_selections(feat_selections)
     ability_scores = _apply_feat_ability_score_bonuses(
         base_ability_scores,
         feat_selections=feat_selections,
@@ -816,8 +856,11 @@ def build_native_level_up_character_definition(
         for skill in list(current_definition.skills or [])
         if str(skill.get("proficiency_level") or "").strip() == "proficient"
     ]
+    campaign_option_proficiencies = collect_campaign_option_proficiency_grants(selected_campaign_option_payloads)
     proficient_skills = _dedupe_preserve_order(
-        proficient_skills + _extract_feat_skill_proficiencies(feat_selections, selected_choices)
+        proficient_skills
+        + _extract_feat_skill_proficiencies(feat_selections, selected_choices)
+        + list(campaign_option_proficiencies.get("skills") or [])
     )
     skills = _build_skills_payload(ability_scores, proficient_skills, proficiency_bonus)
 
@@ -882,24 +925,29 @@ def build_native_level_up_character_definition(
             feat_selections=feat_selections,
             selected_choices=selected_choices,
             current_level=target_level,
+            selected_campaign_option_payloads=selected_campaign_option_payloads,
         ),
         skills=skills,
         proficiencies={
             "armor": _dedupe_preserve_order(
                 list((current_definition.proficiencies or {}).get("armor") or [])
                 + _extract_feat_armor_proficiencies(feat_selections, selected_choices)
+                + list(campaign_option_proficiencies.get("armor") or [])
             ),
             "weapons": _dedupe_preserve_order(
                 list((current_definition.proficiencies or {}).get("weapons") or [])
                 + _extract_feat_weapon_proficiencies(feat_selections, selected_choices)
+                + list(campaign_option_proficiencies.get("weapons") or [])
             ),
             "tools": _dedupe_preserve_order(
                 list((current_definition.proficiencies or {}).get("tools") or [])
                 + _extract_feat_tool_proficiencies(feat_selections, selected_choices)
+                + list(campaign_option_proficiencies.get("tools") or [])
             ),
             "languages": _dedupe_preserve_order(
                 list((current_definition.proficiencies or {}).get("languages") or [])
                 + _extract_feat_language_proficiencies(feat_selections, selected_choices)
+                + list(campaign_option_proficiencies.get("languages") or [])
             ),
         },
         attacks=attacks,
@@ -915,6 +963,7 @@ def build_native_level_up_character_definition(
             selected_choices=selected_choices,
             spell_catalog=spell_catalog,
             target_level=target_level,
+            selected_campaign_option_payloads=selected_campaign_option_payloads,
         ),
         equipment_catalog=list(current_definition.equipment_catalog or []),
         reference_notes=dict(current_definition.reference_notes or {}),
@@ -1040,6 +1089,151 @@ def _list_subclass_options(
     ]
 
 
+def _build_mixed_character_options(
+    systems_entries: list[SystemsEntryRecord],
+    campaign_page_records: list[Any],
+    *,
+    kind: str,
+) -> list[SystemsEntryRecord]:
+    options = list(systems_entries or [])
+    options.extend(_build_campaign_page_entries(campaign_page_records, kind=kind))
+    return options
+
+
+def _build_campaign_page_entries(
+    campaign_page_records: list[Any],
+    *,
+    kind: str,
+) -> list[SystemsEntryRecord]:
+    entries: list[SystemsEntryRecord] = []
+    seen_page_refs: set[str] = set()
+    for record in list(campaign_page_records or []):
+        entry = _build_campaign_page_entry(record, kind=kind)
+        if entry is None:
+            continue
+        page_ref = _entry_page_ref(entry)
+        if page_ref in seen_page_refs:
+            continue
+        seen_page_refs.add(page_ref)
+        entries.append(entry)
+    return sorted(entries, key=lambda entry: (normalize_lookup(entry.title), _entry_page_ref(entry)))
+
+
+def _build_campaign_page_entry(
+    record: Any,
+    *,
+    kind: str,
+) -> SystemsEntryRecord | None:
+    page_ref = _extract_campaign_page_ref(record)
+    page = getattr(record, "page", None)
+    if not page_ref or page is None:
+        return None
+    section = str(getattr(page, "section", "") or "").strip()
+    if section == CAMPAIGN_SESSIONS_SECTION:
+        return None
+
+    campaign_option = build_campaign_page_character_option(
+        record,
+        default_kind="item" if section == CAMPAIGN_ITEMS_SECTION else "feature",
+    )
+    if not isinstance(campaign_option, dict):
+        return None
+    if str(campaign_option.get("kind") or "").strip() != kind:
+        return None
+
+    title = str(campaign_option.get("display_name") or getattr(page, "title", "") or page_ref).strip() or page_ref
+    entry_type = {
+        "feat": "feat",
+        "species": "race",
+        "background": "background",
+    }.get(kind, kind)
+    metadata: dict[str, Any] = {
+        "page_ref": page_ref,
+        "campaign_option": deepcopy(campaign_option),
+    }
+    if kind == "feat":
+        for key in (
+            "ability",
+            "skill_proficiencies",
+            "language_proficiencies",
+            "tool_proficiencies",
+            "weapon_proficiencies",
+            "armor_proficiencies",
+            "saving_throw_proficiencies",
+            "skill_tool_language_proficiencies",
+            "additional_spells",
+        ):
+            if key in campaign_option:
+                metadata[key] = deepcopy(campaign_option.get(key))
+    elif kind == "species":
+        for key in ("size", "speed", "languages", "skill_proficiencies", "tool_proficiencies", "feats"):
+            if key in campaign_option:
+                metadata[key] = deepcopy(campaign_option.get(key))
+    elif kind == "background":
+        for key in ("skill_proficiencies", "language_proficiencies", "tool_proficiencies"):
+            if key in campaign_option:
+                metadata[key] = deepcopy(campaign_option.get(key))
+
+    now = utcnow()
+    return SystemsEntryRecord(
+        id=0,
+        library_slug="campaign-pages",
+        source_id=CAMPAIGN_PAGE_SOURCE_ID,
+        entry_key=f"campaign-page|{entry_type}|{page_ref}",
+        entry_type=entry_type,
+        slug=f"campaign-page-{slugify(page_ref)}",
+        title=title,
+        source_page="",
+        source_path=page_ref,
+        search_text=" ".join(
+            part
+            for part in (
+                title,
+                str(getattr(page, "summary", "") or "").strip(),
+                section,
+                str(getattr(page, "subsection", "") or "").strip(),
+            )
+            if part
+        ).casefold(),
+        player_safe_default=True,
+        dm_heavy=False,
+        metadata=metadata,
+        body={"entries": []},
+        rendered_html="",
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _entry_page_ref(entry: Any) -> str:
+    metadata = dict((getattr(entry, "metadata", None) or {}) if not isinstance(entry, dict) else (entry.get("metadata") or {}))
+    return str(
+        metadata.get("page_ref")
+        or (entry.get("page_ref") if isinstance(entry, dict) else "")
+        or ""
+    ).strip()
+
+
+def _entry_campaign_option(entry: Any) -> dict[str, Any]:
+    metadata = dict((getattr(entry, "metadata", None) or {}) if not isinstance(entry, dict) else (entry.get("metadata") or {}))
+    campaign_option = dict(metadata.get("campaign_option") or {})
+    if campaign_option:
+        return campaign_option
+    if isinstance(entry, dict) and isinstance(entry.get("campaign_option"), dict):
+        return dict(entry.get("campaign_option") or {})
+    return {}
+
+
+def _entry_selection_value(entry: Any) -> str:
+    page_ref = _entry_page_ref(entry)
+    if page_ref:
+        return f"{CAMPAIGN_PAGE_OPTION_PREFIX}{page_ref}"
+    slug = _entry_option_slug(entry)
+    if slug:
+        return f"{SYSTEMS_OPTION_PREFIX}{slug}"
+    return ""
+
+
 def _resolve_selected_entry(
     options: list[SystemsEntryRecord],
     selected_slug: str,
@@ -1047,7 +1241,13 @@ def _resolve_selected_entry(
     cleaned_slug = str(selected_slug or "").strip()
     if cleaned_slug:
         for entry in options:
-            if entry.slug == cleaned_slug:
+            if cleaned_slug in {
+                entry.slug,
+                _entry_selection_value(entry),
+                _entry_page_ref(entry),
+            }:
+                return entry
+            if cleaned_slug == f"{SYSTEMS_OPTION_PREFIX}{entry.slug}" and entry.slug:
                 return entry
         return None
     return options[0] if options else None
@@ -1056,8 +1256,11 @@ def _resolve_selected_entry(
 def _entry_option(entry: SystemsEntryRecord) -> dict[str, str]:
     return {
         "slug": entry.slug,
+        "value": _entry_selection_value(entry) or entry.slug,
         "title": entry.title,
         "source_id": entry.source_id,
+        "page_ref": _entry_page_ref(entry),
+        "campaign_option": _entry_campaign_option(entry) or None,
         "label": _entry_option_label(entry),
     }
 
@@ -1072,6 +1275,8 @@ def _entry_option_title(entry: Any) -> str:
 
 def _entry_option_label(entry: Any) -> str:
     title = _entry_option_title(entry)
+    if _entry_page_ref(entry):
+        return f"{title} (Campaign)" if title else "Campaign"
     source_id = _entry_option_source_id(entry)
     if title and source_id and str(source_id).strip().upper() != PHB_SOURCE_ID:
         return f"{title} ({source_id})"
@@ -1104,8 +1309,14 @@ def _resolve_profile_entry(
     options: list[SystemsEntryRecord],
     systems_ref: Any,
     *,
+    page_ref: Any = None,
     fallback_title: str = "",
 ) -> SystemsEntryRecord | None:
+    selected_page_ref = _extract_campaign_page_ref(page_ref)
+    if selected_page_ref:
+        resolved = next((entry for entry in options if _entry_page_ref(entry) == selected_page_ref), None)
+        if resolved is not None:
+            return resolved
     selected_slug = _systems_ref_slug(systems_ref)
     if selected_slug:
         resolved = _resolve_selected_entry(options, selected_slug)
@@ -1494,9 +1705,9 @@ def _build_level_up_ability_score_fields(
 
     ability_options = [_choice_option(label, key) for key, label in ABILITY_LABELS.items()]
     feat_field_options = [
-        _choice_option(_entry_option_label(entry), _entry_option_slug(entry))
+        _choice_option(_entry_option_label(entry), _entry_selection_value(entry) or _entry_option_slug(entry))
         for entry in feat_options
-        if _entry_option_slug(entry)
+        if _entry_selection_value(entry) or _entry_option_slug(entry)
     ]
     mode_options = [
         _choice_option("Ability Scores", "ability_scores"),
@@ -1574,9 +1785,14 @@ def _resolve_level_up_ability_score_choices(
     feat_entries: list[dict[str, Any]] = []
     summaries: list[str] = []
     feat_lookup = {
-        _entry_option_slug(entry): _entry_option_title(entry)
+        candidate: _entry_option_title(entry)
         for entry in feat_options
-        if _entry_option_slug(entry)
+        for candidate in (
+            _entry_selection_value(entry),
+            _entry_option_slug(entry),
+            _entry_page_ref(entry),
+        )
+        if candidate
     }
 
     improvement_count = _count_ability_score_improvements_for_level(
@@ -1597,8 +1813,20 @@ def _resolve_level_up_ability_score_choices(
             feat_title = feat_lookup.get(feat_slug)
             if not feat_title:
                 if strict:
-                    raise CharacterBuildError("Choose a valid PHB feat for this ability score improvement.")
+                    raise CharacterBuildError("Choose a valid feat for this ability score improvement.")
                 continue
+            feat_entry = next(
+                (
+                    entry
+                    for entry in feat_options
+                    if feat_slug in {
+                        _entry_selection_value(entry),
+                        _entry_option_slug(entry),
+                        _entry_page_ref(entry),
+                    }
+                ),
+                None,
+            )
             feat_entries.append(
                 {
                     "kind": "feat",
@@ -1606,6 +1834,9 @@ def _resolve_level_up_ability_score_choices(
                     "name": feat_title,
                     "label": feat_title,
                     "slug": feat_slug,
+                    "systems_entry": feat_entry if isinstance(feat_entry, SystemsEntryRecord) else None,
+                    "page_ref": _entry_page_ref(feat_entry),
+                    "campaign_option": _entry_campaign_option(feat_entry) or None,
                 }
             )
             summaries.append(feat_title)
@@ -1718,7 +1949,11 @@ def _build_species_choice_fields(
                     "name": field_name,
                     "label": "Species Feat",
                     "help_text": "Choose a feat granted by your species.",
-                    "options": [_choice_option(_entry_option_label(entry), entry.slug) for entry in feat_options],
+                    "options": [
+                        _choice_option(_entry_option_label(entry), _entry_selection_value(entry) or entry.slug)
+                        for entry in feat_options
+                        if _entry_selection_value(entry) or entry.slug
+                    ],
                     "selected": str(values.get(field_name) or "").strip(),
                     "group_key": "species_feats",
                     "kind": "feat",
@@ -2145,13 +2380,19 @@ def _build_spell_catalog(spell_entries: list[SystemsEntryRecord]) -> dict[str, A
 
 def _build_feat_catalog(feat_entries: list[SystemsEntryRecord]) -> dict[str, Any]:
     by_slug: dict[str, SystemsEntryRecord] = {}
+    by_value: dict[str, SystemsEntryRecord] = {}
     for entry in feat_entries:
         slug = str(entry.slug or "").strip()
         if slug and slug not in by_slug:
             by_slug[slug] = entry
+        for candidate in (_entry_selection_value(entry), _entry_page_ref(entry), slug):
+            clean_candidate = str(candidate or "").strip()
+            if clean_candidate and clean_candidate not in by_value:
+                by_value[clean_candidate] = entry
     return {
         "entries": list(feat_entries),
         "by_slug": by_slug,
+        "by_value": by_value,
     }
 
 
@@ -2195,20 +2436,26 @@ def _resolve_builder_feat_selections(
     values: dict[str, str],
     feat_catalog: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    by_slug = dict(feat_catalog.get("by_slug") or {})
+    by_value = dict(feat_catalog.get("by_value") or {})
     selections: list[dict[str, Any]] = []
     for field_name in sorted(values.keys()):
         if not str(field_name).startswith("species_feat_"):
             continue
         feat_slug = str(values.get(field_name) or "").strip()
-        feat_entry = by_slug.get(feat_slug)
+        feat_entry = by_value.get(feat_slug)
+        if feat_entry is None and feat_slug and SYSTEMS_OPTION_PREFIX not in feat_slug and CAMPAIGN_PAGE_OPTION_PREFIX not in feat_slug:
+            feat_entry = by_value.get(f"{SYSTEMS_OPTION_PREFIX}{feat_slug}")
         if feat_entry is None:
             continue
         selections.append(
             {
                 "instance_key": str(field_name),
-                "slug": feat_slug,
+                "selection_value": feat_slug,
+                "slug": _entry_option_slug(feat_entry) or feat_slug,
                 "entry": feat_entry,
+                "label": _entry_option_title(feat_entry) or feat_slug,
+                "page_ref": _entry_page_ref(feat_entry),
+                "campaign_option": _entry_campaign_option(feat_entry) or None,
             }
         )
     return selections
@@ -2222,7 +2469,7 @@ def _resolve_level_up_feat_selections(
     subclass_progression: list[dict[str, Any]],
     target_level: int,
 ) -> list[dict[str, Any]]:
-    by_slug = dict(feat_catalog.get("by_slug") or {})
+    by_value = dict(feat_catalog.get("by_value") or {})
     improvement_count = _count_ability_score_improvements_for_level(
         class_progression=class_progression,
         subclass_progression=subclass_progression,
@@ -2234,14 +2481,20 @@ def _resolve_level_up_feat_selections(
             continue
         field_name = f"levelup_feat_{index}"
         feat_slug = str(values.get(field_name) or "").strip()
-        feat_entry = by_slug.get(feat_slug)
+        feat_entry = by_value.get(feat_slug)
+        if feat_entry is None and feat_slug and SYSTEMS_OPTION_PREFIX not in feat_slug and CAMPAIGN_PAGE_OPTION_PREFIX not in feat_slug:
+            feat_entry = by_value.get(f"{SYSTEMS_OPTION_PREFIX}{feat_slug}")
         if feat_entry is None:
             continue
         selections.append(
             {
                 "instance_key": field_name,
-                "slug": feat_slug,
+                "selection_value": feat_slug,
+                "slug": _entry_option_slug(feat_entry) or feat_slug,
                 "entry": feat_entry,
+                "label": _entry_option_title(feat_entry) or feat_slug,
+                "page_ref": _entry_page_ref(feat_entry),
+                "campaign_option": _entry_campaign_option(feat_entry) or None,
             }
         )
     return selections
@@ -3459,12 +3712,14 @@ def _build_campaign_page_choice_options(
             record,
             default_kind="item" if section == CAMPAIGN_ITEMS_SECTION else "feature",
         )
-        is_item_page = (
-            str((campaign_option or {}).get("kind") or "").strip() == "item"
+        option_kind = (
+            str((campaign_option or {}).get("kind") or "").strip()
             if campaign_option is not None
-            else section == CAMPAIGN_ITEMS_SECTION
+            else ("item" if section == CAMPAIGN_ITEMS_SECTION else "feature")
         )
-        if include_items != is_item_page:
+        if include_items and option_kind != "item":
+            continue
+        if not include_items and option_kind != "feature":
             continue
         if page_ref in seen_page_refs:
             continue
@@ -3566,8 +3821,9 @@ def _selected_campaign_option_payloads(
     *,
     choice_sections: list[dict[str, Any]],
     selected_choices: dict[str, list[str]],
+    extra_option_payloads: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    return [
+    payloads = [
         dict(option.get("campaign_option") or {})
         for option in _selected_campaign_choice_options(
             choice_sections=choice_sections,
@@ -3575,6 +3831,34 @@ def _selected_campaign_option_payloads(
         )
         if isinstance(option.get("campaign_option"), dict)
     ]
+    payloads.extend(
+        dict(payload)
+        for payload in list(extra_option_payloads or [])
+        if isinstance(payload, dict) and dict(payload)
+    )
+    return payloads
+
+
+def _campaign_option_payloads_from_selected_entries(entries: list[Any]) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    for entry in list(entries or []):
+        campaign_option = _entry_campaign_option(entry)
+        if campaign_option:
+            payloads.append(dict(campaign_option))
+    return payloads
+
+
+def _campaign_option_payloads_from_feat_selections(
+    feat_selections: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    for selection in list(feat_selections or []):
+        campaign_option = dict(selection.get("campaign_option") or {})
+        if not campaign_option:
+            campaign_option = _entry_campaign_option(selection.get("entry"))
+        if campaign_option:
+            payloads.append(dict(campaign_option))
+    return payloads
 
 
 def _campaign_option_payloads_from_definition(definition: CharacterDefinition) -> list[dict[str, Any]]:
@@ -4383,6 +4667,9 @@ def _build_level_one_preview(
     proficiency_bonus = 2
     class_name = selected_class.title if selected_class is not None else ""
     fixed_proficiencies, selected_choices = _resolve_builder_choices(choice_sections, values, strict=False)
+    selected_campaign_option_payloads = _campaign_option_payloads_from_selected_entries(
+        [selected_species, selected_background]
+    ) + _campaign_option_payloads_from_feat_selections(feat_selections)
     ability_scores = _apply_feat_ability_score_bonuses(
         ability_scores,
         feat_selections=feat_selections,
@@ -4397,6 +4684,7 @@ def _build_level_one_preview(
         choice_sections=choice_sections,
         selected_choices=selected_choices,
         feat_selections=feat_selections,
+        campaign_option_payloads=selected_campaign_option_payloads,
     )
     skills = _build_skills_payload(ability_scores, proficiencies["skills"], proficiency_bonus)
     feature_entries = _collect_level_one_feature_entries(
@@ -4425,6 +4713,7 @@ def _build_level_one_preview(
             choice_sections=choice_sections,
             selected_choices=selected_choices,
             spell_catalog=spell_catalog,
+            campaign_option_payloads=selected_campaign_option_payloads,
         )
         if selected_class is not None
         else {"spells": []}
@@ -4440,6 +4729,7 @@ def _build_level_one_preview(
             choice_sections=choice_sections,
             selected_choices=selected_choices,
             current_level=1,
+            campaign_option_payloads=selected_campaign_option_payloads,
         )
         if selected_class is not None and selected_species is not None
         else {}
@@ -4539,16 +4829,17 @@ def _resolve_builder_choices(
             is_required = bool(field.get("required", True))
             raw_value = str(values.get(field_name) or "").strip()
             allowed_values = {str(option.get("value") or "").strip() for option in list(field.get("options") or [])}
+            selected_value = _normalize_selected_choice_value(raw_value, allowed_values)
             if not raw_value:
                 if strict and is_required:
                     raise CharacterBuildError(f"{field.get('label') or 'A required choice'} is required.")
                 continue
-            if raw_value not in allowed_values:
+            if selected_value not in allowed_values:
                 if strict:
                     raise CharacterBuildError(f"{field.get('label') or 'A choice'} is not valid for the current selection.")
                 continue
-            if raw_value:
-                grouped_values.setdefault(group_key, []).append(raw_value)
+            if selected_value:
+                grouped_values.setdefault(group_key, []).append(selected_value)
         for group_key, group_values in grouped_values.items():
             if strict and len(group_values) != len(set(group_values)):
                 raise CharacterBuildError("Choose distinct options when a choice group grants more than one selection.")
@@ -4560,6 +4851,24 @@ def _resolve_builder_choices(
         "tools": [],
     }
     return fixed_proficiencies, selected_choices
+
+
+def _normalize_selected_choice_value(
+    raw_value: str,
+    allowed_values: set[str],
+) -> str:
+    clean_value = str(raw_value or "").strip()
+    if not clean_value:
+        return ""
+    if clean_value in allowed_values:
+        return clean_value
+    systems_value = f"{SYSTEMS_OPTION_PREFIX}{clean_value}"
+    if systems_value in allowed_values:
+        return systems_value
+    page_value = f"{CAMPAIGN_PAGE_OPTION_PREFIX}{clean_value}"
+    if page_value in allowed_values:
+        return page_value
+    return clean_value
 
 
 def _apply_feat_ability_score_bonuses(
@@ -4840,12 +5149,14 @@ def _build_level_one_proficiencies(
     choice_sections: list[dict[str, Any]],
     selected_choices: dict[str, list[str]],
     feat_selections: list[dict[str, Any]],
+    campaign_option_payloads: list[dict[str, Any]] | None = None,
 ) -> dict[str, list[str]]:
     del fixed_proficiencies
     campaign_option_proficiencies = collect_campaign_option_proficiency_grants(
         _selected_campaign_option_payloads(
             choice_sections=choice_sections,
             selected_choices=selected_choices,
+            extra_option_payloads=campaign_option_payloads,
         )
     )
     armor = _dedupe_preserve_order(
@@ -4992,16 +5303,45 @@ def _collect_level_one_feature_entries(
 
     if selected_species is not None:
         feature_entries.extend(_extract_species_feature_entries(selected_species))
+        species_page_ref = _entry_page_ref(selected_species)
+        if species_page_ref:
+            feature_entries.append(
+                {
+                    "kind": "species_trait",
+                    "label": selected_species.title,
+                    "description_markdown": str(
+                        (_entry_campaign_option(selected_species) or {}).get("description_markdown") or ""
+                    ).strip(),
+                    "page_ref": species_page_ref,
+                    "campaign_option": _entry_campaign_option(selected_species) or None,
+                }
+            )
     if selected_background is not None:
         feature_entries.extend(_extract_background_feature_entries(selected_background))
+        background_page_ref = _entry_page_ref(selected_background)
+        if background_page_ref:
+            feature_entries.append(
+                {
+                    "kind": "background_feature",
+                    "label": selected_background.title,
+                    "description_markdown": str(
+                        (_entry_campaign_option(selected_background) or {}).get("description_markdown") or ""
+                    ).strip(),
+                    "page_ref": background_page_ref,
+                    "campaign_option": _entry_campaign_option(selected_background) or None,
+                }
+            )
 
     for selection in feat_selections:
         feat_entry = selection.get("entry")
-        feat_slug = str(selection.get("slug") or "").strip()
+        feat_slug = str(selection.get("slug") or selection.get("selection_value") or "").strip()
         feat_title = (
-            feat_entry.title
-            if isinstance(feat_entry, SystemsEntryRecord)
-            else _resolve_choice_label(choice_sections, "species_feats", feat_slug) or feat_slug
+            str(selection.get("label") or "").strip()
+            or (
+                feat_entry.title
+                if isinstance(feat_entry, SystemsEntryRecord)
+                else _resolve_choice_label(choice_sections, "species_feats", feat_slug) or feat_slug
+            )
         )
         feature_entries.append(
             {
@@ -5011,6 +5351,8 @@ def _collect_level_one_feature_entries(
                 "label": feat_title,
                 "slug": feat_slug,
                 "systems_entry": feat_entry if isinstance(feat_entry, SystemsEntryRecord) else None,
+                "page_ref": str(selection.get("page_ref") or "").strip(),
+                "campaign_option": dict(selection.get("campaign_option") or {}) or None,
             }
         )
 
@@ -5237,7 +5579,7 @@ def _build_feature_payload(
         slug = str(feature_entry.get("slug") or "").strip()
         feature_name = str(feature_entry.get("label") or "").strip()
         if not slug or not feature_name:
-            return None, None
+            return None
         return {
             "id": f"{slugify(feature_name)}-{index}",
             "name": feature_name,
@@ -5258,61 +5600,89 @@ def _build_feature_payload(
     if kind == "species_trait":
         feature_name = str(feature_entry.get("label") or "").strip()
         systems_entry = feature_entry.get("systems_entry")
-        if not feature_name or not isinstance(systems_entry, SystemsEntryRecord):
-            return None, None
-        return {
+        page_ref = str(feature_entry.get("page_ref") or _entry_page_ref(systems_entry)).strip()
+        campaign_option = dict(feature_entry.get("campaign_option") or {})
+        if not feature_name or (not isinstance(systems_entry, SystemsEntryRecord) and not page_ref):
+            return None
+        feature_payload = {
             "id": f"{slugify(feature_name)}-{index}",
             "name": feature_name,
             "category": "species_trait",
-            "source": systems_entry.source_id,
+            "source": page_ref or (systems_entry.source_id if isinstance(systems_entry, SystemsEntryRecord) else ""),
             "description_markdown": str(feature_entry.get("description_markdown") or "").strip(),
             "activation_type": "passive",
             "tracker_ref": None,
-            "systems_ref": _systems_ref_from_entry(systems_entry),
+            "systems_ref": _systems_ref_from_entry(systems_entry) if isinstance(systems_entry, SystemsEntryRecord) else None,
         }
+        if page_ref:
+            feature_payload["page_ref"] = page_ref
+        if campaign_option:
+            feature_payload["campaign_option"] = campaign_option
+        return feature_payload
 
     if kind == "background_feature":
         feature_name = str(feature_entry.get("label") or "").strip()
         systems_entry = feature_entry.get("systems_entry")
-        if not feature_name or not isinstance(systems_entry, SystemsEntryRecord):
-            return None, None
-        return {
+        page_ref = str(feature_entry.get("page_ref") or _entry_page_ref(systems_entry)).strip()
+        campaign_option = dict(feature_entry.get("campaign_option") or {})
+        if not feature_name or (not isinstance(systems_entry, SystemsEntryRecord) and not page_ref):
+            return None
+        feature_payload = {
             "id": f"{slugify(feature_name)}-{index}",
             "name": feature_name,
             "category": "background_feature",
-            "source": systems_entry.source_id,
+            "source": page_ref or (systems_entry.source_id if isinstance(systems_entry, SystemsEntryRecord) else ""),
             "description_markdown": str(feature_entry.get("description_markdown") or "").strip(),
             "activation_type": "passive",
             "tracker_ref": None,
-            "systems_ref": _systems_ref_from_entry(systems_entry),
+            "systems_ref": _systems_ref_from_entry(systems_entry) if isinstance(systems_entry, SystemsEntryRecord) else None,
         }
+        if page_ref:
+            feature_payload["page_ref"] = page_ref
+        if campaign_option:
+            feature_payload["campaign_option"] = campaign_option
+        return feature_payload
 
     if kind == "feat":
         slug = str(feature_entry.get("slug") or "").strip()
         feature_name = str(feature_entry.get("title") or feature_entry.get("label") or "").strip()
         systems_entry = feature_entry.get("systems_entry")
-        if not slug or not feature_name:
-            return None, None
-        feature_payload = {
+        page_ref = str(feature_entry.get("page_ref") or _entry_page_ref(systems_entry)).strip()
+        campaign_option = dict(feature_entry.get("campaign_option") or _entry_campaign_option(systems_entry) or {})
+        if not (slug or page_ref) or not feature_name:
+            return None
+        feature_payload: dict[str, Any] = {
             "id": f"{slugify(feature_name)}-{index}",
             "name": feature_name,
             "category": "feat",
-            "source": systems_entry.source_id if isinstance(systems_entry, SystemsEntryRecord) else PHB_SOURCE_ID,
-            "description_markdown": "",
+            "source": (
+                CAMPAIGN_PAGE_SOURCE_ID
+                if page_ref
+                else (systems_entry.source_id if isinstance(systems_entry, SystemsEntryRecord) else PHB_SOURCE_ID)
+            ),
+            "description_markdown": str(campaign_option.get("description_markdown") or "").strip(),
             "activation_type": "passive",
             "tracker_ref": None,
             "systems_ref": (
-                _systems_ref_from_entry(systems_entry)
-                if isinstance(systems_entry, SystemsEntryRecord)
-                else {
-                    "entry_key": "",
-                    "entry_type": "feat",
-                    "title": feature_name,
-                    "slug": slug,
-                    "source_id": PHB_SOURCE_ID,
-                }
+                None
+                if page_ref
+                else (
+                    _systems_ref_from_entry(systems_entry)
+                    if isinstance(systems_entry, SystemsEntryRecord)
+                    else {
+                        "entry_key": "",
+                        "entry_type": "feat",
+                        "title": feature_name,
+                        "slug": slug,
+                        "source_id": PHB_SOURCE_ID,
+                    }
+                )
             ),
         }
+        if page_ref:
+            feature_payload["page_ref"] = page_ref
+        if campaign_option:
+            feature_payload["campaign_option"] = campaign_option
         return feature_payload
 
     if kind == "campaign_page_feature":
@@ -5346,6 +5716,7 @@ def _build_level_one_stats(
     choice_sections: list[dict[str, Any]],
     selected_choices: dict[str, list[str]],
     current_level: int,
+    campaign_option_payloads: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     class_metadata = dict(selected_class.metadata or {})
     hit_die_faces = int((class_metadata.get("hit_die") or {}).get("faces") or 0)
@@ -5386,6 +5757,7 @@ def _build_level_one_stats(
             _selected_campaign_option_payloads(
                 choice_sections=choice_sections,
                 selected_choices=selected_choices,
+                extra_option_payloads=campaign_option_payloads,
             )
         ),
     )
@@ -5400,6 +5772,8 @@ def _build_level_one_profile(
     selected_background: SystemsEntryRecord,
     values: dict[str, str],
 ) -> dict[str, Any]:
+    species_page_ref = _entry_page_ref(selected_species)
+    background_page_ref = _entry_page_ref(selected_background)
     class_payload = {
         "class_name": selected_class.title,
         "subclass_name": selected_subclass.title if selected_subclass is not None else "",
@@ -5416,9 +5790,11 @@ def _build_level_one_profile(
         "class_ref": _systems_ref_from_entry(selected_class),
         "subclass_ref": _systems_ref_from_entry(selected_subclass) if selected_subclass is not None else None,
         "species": selected_species.title,
-        "species_ref": _systems_ref_from_entry(selected_species),
+        "species_ref": None if species_page_ref else _systems_ref_from_entry(selected_species),
+        "species_page_ref": species_page_ref or None,
         "background": selected_background.title,
-        "background_ref": _systems_ref_from_entry(selected_background),
+        "background_ref": None if background_page_ref else _systems_ref_from_entry(selected_background),
+        "background_page_ref": background_page_ref or None,
         "alignment": str(values.get("alignment") or "").strip(),
         "experience_model": str(values.get("experience_model") or DEFAULT_EXPERIENCE_MODEL).strip(),
         "size": _extract_size_label(selected_species),
@@ -5435,7 +5811,14 @@ def _proficiency_bonus_for_level(level: int) -> int:
 def _ability_scores_from_definition(definition: CharacterDefinition) -> dict[str, int]:
     ability_scores = dict((definition.stats or {}).get("ability_scores") or {})
     return {
-        ability_key: int(dict(ability_scores.get(ability_key) or {}).get("score") or DEFAULT_ABILITY_SCORE)
+        ability_key: int(
+            dict(
+                ability_scores.get(ability_key)
+                or ability_scores.get(ABILITY_LABELS.get(ability_key, "").lower())
+                or {}
+            ).get("score")
+            or DEFAULT_ABILITY_SCORE
+        )
         for ability_key in ABILITY_KEYS
     }
 
@@ -5464,6 +5847,7 @@ def _build_leveled_stats(
     feat_selections: list[dict[str, Any]],
     selected_choices: dict[str, list[str]],
     current_level: int,
+    selected_campaign_option_payloads: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     stats, manual_adjustments = strip_manual_stat_adjustments(dict(current_definition.stats or {}))
     campaign_option_adjustments = collect_campaign_option_stat_adjustments(
@@ -5501,7 +5885,10 @@ def _build_leveled_stats(
         }
         for ability_key, score in ability_scores.items()
     }
-    stats = apply_stat_adjustments(stats, campaign_option_adjustments)
+    combined_campaign_option_adjustments = dict(campaign_option_adjustments)
+    for key, value in collect_campaign_option_stat_adjustments(selected_campaign_option_payloads or []).items():
+        combined_campaign_option_adjustments[key] = int(combined_campaign_option_adjustments.get(key) or 0) + int(value)
+    stats = apply_stat_adjustments(stats, combined_campaign_option_adjustments)
     return apply_manual_stat_adjustments(stats, manual_adjustments)
 
 
@@ -5724,6 +6111,7 @@ def _build_native_level_up_preview(
         subclass_progression=subclass_progression,
         target_level=target_level,
     )
+    selected_campaign_option_payloads = _campaign_option_payloads_from_feat_selections(feat_selections)
     ability_scores = _apply_feat_ability_score_bonuses(
         base_ability_scores,
         feat_selections=feat_selections,
@@ -5756,6 +6144,7 @@ def _build_native_level_up_preview(
         selected_choices=selected_choices,
         spell_catalog=spell_catalog,
         target_level=target_level,
+        extra_option_payloads=selected_campaign_option_payloads,
     )
     slot_progression = _level_up_slot_progression_for_class(
         selected_class.title,
@@ -5781,12 +6170,14 @@ def _build_native_level_up_preview(
         list(definition.resource_templates or []),
         preview_resource_templates,
     )
+    preview_campaign_stat_adjustments = collect_campaign_option_stat_adjustments(selected_campaign_option_payloads)
     return {
         "class_level_text": f"{selected_class.title} {target_level}",
         "max_hp": max(
             int((definition.stats or {}).get("max_hp") or 0)
             + hp_gain
-            + _feat_hit_point_bonus(feat_selections, current_level=target_level),
+            + _feat_hit_point_bonus(feat_selections, current_level=target_level)
+            + int(preview_campaign_stat_adjustments.get("max_hp") or 0),
             1,
         ),
         "gained_features": gained_features,
@@ -5810,6 +6201,7 @@ def _build_level_one_spellcasting(
     choice_sections: list[dict[str, Any]],
     selected_choices: dict[str, list[str]],
     spell_catalog: dict[str, Any],
+    campaign_option_payloads: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     class_name = selected_class.title
     ability_name = _spellcasting_ability_name_for_class(class_name, selected_class=selected_class)
@@ -5820,6 +6212,7 @@ def _build_level_one_spellcasting(
         choice_sections=choice_sections,
         selected_choices=selected_choices,
         spell_catalog=spell_catalog,
+        campaign_option_payloads=campaign_option_payloads,
     )
     slot_progression = _spell_slot_progression_for_class_level(
         class_name,
@@ -5868,6 +6261,7 @@ def _build_level_up_spellcasting(
     selected_choices: dict[str, list[str]],
     spell_catalog: dict[str, Any],
     target_level: int,
+    selected_campaign_option_payloads: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     class_name = selected_class.title
     ability_name = _spellcasting_ability_name_for_class(class_name, selected_class=selected_class)
@@ -5975,6 +6369,13 @@ def _build_level_up_spellcasting(
         selected_choices=selected_choices,
         spell_catalog=spell_catalog,
     )
+    _apply_selected_campaign_option_spells_to_payloads(
+        spells_by_key,
+        choice_sections=choice_sections,
+        selected_choices=selected_choices,
+        spell_catalog=spell_catalog,
+        extra_option_payloads=selected_campaign_option_payloads,
+    )
     for spell_title in _automatic_feat_known_spell_values(
         feat_selections=feat_selections,
         values=values,
@@ -6054,6 +6455,7 @@ def _build_level_one_spell_payloads(
     choice_sections: list[dict[str, Any]],
     selected_choices: dict[str, list[str]],
     spell_catalog: dict[str, Any],
+    campaign_option_payloads: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     class_name = selected_class.title
     spell_mode = _spellcasting_mode_for_class(class_name, selected_class=selected_class)
@@ -6132,6 +6534,7 @@ def _build_level_one_spell_payloads(
         choice_sections=choice_sections,
         selected_choices=selected_choices,
         spell_catalog=spell_catalog,
+        extra_option_payloads=campaign_option_payloads,
     )
     for spell_title in _automatic_feat_known_spell_values(
         feat_selections=feat_selections,
@@ -6291,11 +6694,13 @@ def _apply_selected_campaign_option_spells_to_payloads(
     choice_sections: list[dict[str, Any]],
     selected_choices: dict[str, list[str]],
     spell_catalog: dict[str, Any],
+    extra_option_payloads: list[dict[str, Any]] | None = None,
 ) -> None:
     for spell_grant in collect_campaign_option_spell_grants(
         _selected_campaign_option_payloads(
             choice_sections=choice_sections,
             selected_choices=selected_choices,
+            extra_option_payloads=extra_option_payloads,
         )
     ):
         _add_spell_to_payloads(
@@ -7035,6 +7440,7 @@ def _summarize_level_up_spell_choices(
     selected_choices: dict[str, list[str]],
     spell_catalog: dict[str, Any],
     target_level: int,
+    extra_option_payloads: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     selected_values: list[str] = []
     selected_values.extend(selected_choices.get("levelup_spell_cantrips", []))
@@ -7079,6 +7485,13 @@ def _summarize_level_up_spell_choices(
         if payload_key and payload_key in existing_spell_payload_keys:
             continue
         selected_values.append(selected_value)
+    for spell_grant in collect_campaign_option_spell_grants(list(extra_option_payloads or [])):
+        selected_value = str(spell_grant.get("value") or "").strip()
+        payload_key = _spell_lookup_key(selected_value, spell_catalog)
+        if payload_key and payload_key in existing_spell_payload_keys:
+            continue
+        if selected_value:
+            selected_values.append(selected_value)
 
     summaries: list[str] = []
     seen: set[str] = set()
@@ -7203,6 +7616,79 @@ def _merge_spell_mark(existing_mark: str, new_mark: str) -> str:
             if part and part not in marks:
                 marks.append(part)
     return " + ".join(marks)
+
+
+def _normalize_spell_payloads(
+    spell_payloads: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    normalized_by_key: dict[str, dict[str, Any]] = {}
+    for spell_payload in list(spell_payloads or []):
+        payload = dict(spell_payload or {})
+        payload_key = _spell_payload_key(payload) or str(payload.get("name") or "").strip()
+        if not payload_key:
+            continue
+        existing_payload = normalized_by_key.get(payload_key)
+        if existing_payload is None:
+            normalized_by_key[payload_key] = payload
+            continue
+        existing_payload["mark"] = _merge_spell_mark(
+            str(existing_payload.get("mark") or "").strip(),
+            str(payload.get("mark") or "").strip(),
+        )
+        for key in ("is_always_prepared", "is_bonus_known", "is_ritual"):
+            if bool(payload.get(key)):
+                existing_payload[key] = True
+        for key in ("casting_time", "range", "duration", "components", "save_or_hit", "source", "reference"):
+            if not str(existing_payload.get(key) or "").strip() and str(payload.get(key) or "").strip():
+                existing_payload[key] = payload.get(key)
+        if not existing_payload.get("systems_ref") and payload.get("systems_ref"):
+            existing_payload["systems_ref"] = dict(payload.get("systems_ref") or {})
+        if not existing_payload.get("page_ref") and payload.get("page_ref"):
+            existing_payload["page_ref"] = payload.get("page_ref")
+        if list(payload.get("campaign_option_sources") or []):
+            existing_payload["campaign_option_sources"] = _dedupe_campaign_spell_sources(
+                list(existing_payload.get("campaign_option_sources") or [])
+                + list(payload.get("campaign_option_sources") or [])
+            )
+    return list(normalized_by_key.values())
+
+
+def _dedupe_campaign_spell_sources(sources: list[Any]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, bool, bool]] = set()
+    for source in list(sources or []):
+        payload = dict(source or {})
+        marker = (
+            str(payload.get("source_ref") or "").strip(),
+            str(payload.get("mark") or "").strip(),
+            bool(payload.get("always_prepared")),
+            bool(payload.get("ritual")),
+        )
+        if marker in seen:
+            continue
+        seen.add(marker)
+        deduped.append(payload)
+    return deduped
+
+
+def normalize_definition_to_native_model(definition: CharacterDefinition) -> CharacterDefinition:
+    payload = deepcopy(definition.to_dict())
+    ability_scores = _ability_scores_from_definition(definition)
+    current_level = max(_resolve_native_character_level(definition), 1)
+    normalized_features, derived_resource_templates = _apply_tracker_templates_to_feature_payloads(
+        [dict(feature) for feature in list(definition.features or [])],
+        ability_scores=ability_scores,
+        current_level=current_level,
+    )
+    payload["features"] = normalized_features
+    payload["resource_templates"] = _merge_resource_templates(
+        list(definition.resource_templates or []),
+        derived_resource_templates,
+    )
+    spellcasting = dict(definition.spellcasting or {})
+    spellcasting["spells"] = _normalize_spell_payloads(list(spellcasting.get("spells") or []))
+    payload["spellcasting"] = spellcasting
+    return CharacterDefinition.from_dict(payload)
 
 
 def _summarize_preview_spell(spell: dict[str, Any]) -> str:

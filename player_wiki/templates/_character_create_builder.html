@@ -51,7 +51,7 @@
               <select name="class_slug">
                 <option value="" {% if not builder.selected_class %}selected{% endif %}>Choose a class</option>
                 {% for option in builder.class_options %}
-                  <option value="{{ option.slug }}" {% if builder.selected_class and builder.selected_class.slug == option.slug %}selected{% endif %}>
+                  <option value="{{ option.value or option.slug }}" {% if builder.selected_class and builder.selected_class.slug == option.slug %}selected{% endif %}>
                     {{ option.label or option.title }}
                   </option>
                 {% endfor %}
@@ -66,7 +66,7 @@
                     {% if builder.requires_subclass %}Choose a subclass{% else %}No subclass{% endif %}
                   </option>
                   {% for option in builder.subclass_options %}
-                    <option value="{{ option.slug }}" {% if builder.selected_subclass and builder.selected_subclass.slug == option.slug %}selected{% endif %}>
+                    <option value="{{ option.value or option.slug }}" {% if builder.selected_subclass and builder.selected_subclass.slug == option.slug %}selected{% endif %}>
                       {{ option.label or option.title }}
                     </option>
                   {% endfor %}
@@ -79,7 +79,7 @@
               <select name="species_slug">
                 <option value="" {% if not builder.selected_species %}selected{% endif %}>Choose a species</option>
                 {% for option in builder.species_options %}
-                  <option value="{{ option.slug }}" {% if builder.selected_species and builder.selected_species.slug == option.slug %}selected{% endif %}>
+                  <option value="{{ option.value or option.slug }}" {% if builder.selected_species and builder.selected_species.slug == option.slug %}selected{% endif %}>
                     {{ option.label or option.title }}
                   </option>
                 {% endfor %}
@@ -91,7 +91,7 @@
               <select name="background_slug">
                 <option value="" {% if not builder.selected_background %}selected{% endif %}>Choose a background</option>
                 {% for option in builder.background_options %}
-                  <option value="{{ option.slug }}" {% if builder.selected_background and builder.selected_background.slug == option.slug %}selected{% endif %}>
+                  <option value="{{ option.value or option.slug }}" {% if builder.selected_background and builder.selected_background.slug == option.slug %}selected{% endif %}>
                     {{ option.label or option.title }}
                   </option>
                 {% endfor %}

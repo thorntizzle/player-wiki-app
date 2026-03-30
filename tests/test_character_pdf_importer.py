@@ -369,6 +369,83 @@ def test_parse_character_sheet_text_merges_split_action_cost_lines_into_features
     assert "second-wind" in resource_ids
 
 
+def test_parse_character_sheet_text_normalizes_modeled_feat_trackers_through_native_helpers():
+    markdown = """
+## Sheet Summary
+| Field | Value |
+| --- | --- |
+| Sheet Name | Mira Salt |
+| Class & Level | Fighter 4 |
+| Species | Human |
+| Background | Sailor |
+
+## Defenses And Core Stats
+| Metric | Value |
+| --- | --- |
+| Armor Class | 15 |
+| Initiative | +2 |
+| Speed | 30 ft. |
+| Max HP | 32 |
+| Proficiency Bonus | +2 |
+
+## Ability Scores
+| Ability | Score | Modifier | Save |
+| --- | --- | --- | --- |
+| Strength | 14 | +2 | +4 |
+| Dexterity | 14 | +2 | +2 |
+| Constitution | 14 | +2 | +4 |
+| Intelligence | 10 | +0 | +0 |
+| Wisdom | 12 | +1 | +1 |
+| Charisma | 8 | -1 | -1 |
+
+## Skills
+| Skill | Bonus | Proficiency |
+| --- | --- | --- |
+| Athletics | +4 | Proficient |
+
+## Proficiencies And Languages
+- Languages: Common
+
+## Features And Traits
+### Feats
+
+- Lucky - PHB 167
+Fortune seems to tilt your way at the worst possible moment.
+
+## Actions
+### Actions
+Attack
+
+## Personality And Story
+
+## Spellcasting
+| Field | Value |
+| --- | --- |
+| Spellcasting Class |  |
+
+## Equipment
+| Item | Qty | Weight |
+| --- | --- | --- |
+| Backpack | 1 | 5 lb. |
+""".strip()
+
+    definition, _ = parse_character_sheet_text(
+        "linden-pass",
+        markdown,
+        source_path="Mira.pdf",
+        source_type="pdf_character_sheet_annotations",
+        imported_from="Mira.pdf",
+        parser_version="test",
+    )
+
+    lucky = next(feature for feature in definition.features if feature["name"] == "Lucky")
+    resources_by_id = {resource["id"]: resource for resource in definition.resource_templates}
+
+    assert lucky["tracker_ref"] == "lucky"
+    assert resources_by_id["lucky"]["max"] == 3
+    assert resources_by_id["lucky"]["reset_on"] == "long_rest"
+
+
 def test_import_character_reconciles_missing_resource_trackers_into_existing_state(tmp_path, monkeypatch):
     campaigns_dir = build_test_campaigns_dir(tmp_path)
     db_path = tmp_path / "player_wiki.sqlite3"

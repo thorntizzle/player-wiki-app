@@ -257,7 +257,7 @@ def _minimal_import_metadata(character_slug: str = "new-hero") -> CharacterImpor
         character_slug=character_slug,
         source_path="builder://native-level-1",
         imported_at_utc="2026-03-29T00:00:00Z",
-        parser_version="2026-03-30.03",
+        parser_version="2026-03-30.04",
         import_status="clean",
         warnings=[],
     )
@@ -331,6 +331,16 @@ def _field_value_for_label(builder_context: dict[str, object], field_name: str, 
         if label_fragment.lower() in str(option.get("label") or "").lower():
             return str(option.get("value") or "")
     raise AssertionError(f"builder field '{field_name}' did not contain option '{label_fragment}'")
+
+
+def _option_value_for_label(options: list[dict[str, object]], label_fragment: str) -> str:
+    for option in list(options or []):
+        if str(option.get("label") or "").strip().lower() == label_fragment.strip().lower():
+            return str(option.get("value") or option.get("slug") or "")
+    for option in list(options or []):
+        if label_fragment.lower() in str(option.get("label") or "").lower():
+            return str(option.get("value") or option.get("slug") or "")
+    raise AssertionError(f"top-level builder options did not contain '{label_fragment}'")
 
 
 def _campaign_page_record(
@@ -830,6 +840,204 @@ def test_level_one_builder_applies_structured_campaign_page_option_grants():
     assert any("Detect Magic" in spell_line for spell_line in context["preview"]["spells"])
 
 
+def test_level_one_builder_supports_page_backed_species_background_and_feat_choices():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    light = _systems_entry(
+        "spell",
+        "phb-spell-light",
+        "Light",
+        metadata={"level": 0, "casting_time": [{"number": 1, "unit": "action"}]},
+    )
+    detect_magic = _systems_entry(
+        "spell",
+        "phb-spell-detect-magic",
+        "Detect Magic",
+        metadata={"level": 1, "casting_time": [{"number": 1, "unit": "action"}], "ritual": True},
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [],
+            "background": [],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [light, detect_magic],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+    campaign_page_records = [
+        _campaign_page_record(
+            "species/sea-blessed",
+            "Sea-Blessed",
+            section="Mechanics",
+            subsection="Species",
+            summary="A people shaped by tide and storm.",
+            metadata={
+                "character_option": {
+                    "kind": "species",
+                    "name": "Sea-Blessed",
+                    "description_markdown": "Children of the surf carry a little of the sea wherever they go.",
+                    "size": ["M"],
+                    "speed": 35,
+                    "languages": [{"common": True, "anyStandard": 1}],
+                    "skill_proficiencies": [{"any": 1}],
+                    "feats": [{"any": 1}],
+                }
+            },
+        ),
+        _campaign_page_record(
+            "backgrounds/harbor-initiate",
+            "Harbor Initiate",
+            section="Mechanics",
+            subsection="Backgrounds",
+            summary="Raised amid watchfires and harbor bells.",
+            metadata={
+                "character_option": {
+                    "kind": "background",
+                    "name": "Harbor Initiate",
+                    "description_markdown": "You learned to read the tides and the people who work them.",
+                    "skill_proficiencies": [{"insight": True}],
+                    "language_proficiencies": [{"anyStandard": 1}],
+                }
+            },
+        ),
+        _campaign_page_record(
+            "mechanics/tidecaller-gift",
+            "Tidecaller Gift",
+            section="Mechanics",
+            subsection="Feats",
+            summary="A blessing that turns the voice of the sea toward you.",
+            metadata={
+                "character_option": {
+                    "kind": "feat",
+                    "name": "Tidecaller Gift",
+                    "description_markdown": "You can briefly call the tide to answer your need.",
+                    "ability": [{"wis": 1}],
+                    "grants": {
+                        "tools": ["Navigator's Tools"],
+                        "stat_adjustments": {"initiative_bonus": 2},
+                        "resource": {"label": "Tidecaller Gift", "max": 1, "reset_on": "long_rest"},
+                        "spells": [
+                            {"spell": "Light", "mark": "Granted"},
+                            {"spell": "Detect Magic", "always_prepared": True, "ritual": True},
+                        ],
+                    },
+                }
+            },
+        ),
+    ]
+
+    initial_context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        {
+            "name": "Maris Vane",
+            "character_slug": "maris-vane",
+            "alignment": "Neutral Good",
+            "experience_model": "Milestone",
+            "class_slug": fighter.slug,
+            "str": "16",
+            "dex": "12",
+            "con": "14",
+            "int": "10",
+            "wis": "12",
+            "cha": "8",
+        },
+        campaign_page_records=campaign_page_records,
+    )
+
+    species_value = _option_value_for_label(initial_context["species_options"], "Sea-Blessed")
+    background_value = _option_value_for_label(initial_context["background_options"], "Harbor Initiate")
+
+    assert species_value.startswith("page:")
+    assert background_value.startswith("page:")
+
+    form_values = {
+        "name": "Maris Vane",
+        "character_slug": "maris-vane",
+        "alignment": "Neutral Good",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": species_value,
+        "background_slug": background_value,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "species_skill_1": "perception",
+        "species_language_1": "Elvish",
+        "background_language_1": "Dwarvish",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "12",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=campaign_page_records,
+    )
+    feat_value = _field_value_for_label(context, "species_feat_1", "Tidecaller Gift")
+    assert feat_value.startswith("page:")
+    form_values["species_feat_1"] = feat_value
+
+    context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=campaign_page_records,
+    )
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+
+    feature_names = {feature["name"] for feature in definition.features}
+    tidecaller = next(feature for feature in definition.features if feature["name"] == "Tidecaller Gift")
+    spells_by_name = {spell["name"]: spell for spell in definition.spellcasting["spells"]}
+    resources_by_id = {resource["id"]: resource for resource in definition.resource_templates}
+
+    assert definition.profile["species"] == "Sea-Blessed"
+    assert definition.profile["species_ref"] is None
+    assert definition.profile["species_page_ref"] == "species/sea-blessed"
+    assert definition.profile["background"] == "Harbor Initiate"
+    assert definition.profile["background_ref"] is None
+    assert definition.profile["background_page_ref"] == "backgrounds/harbor-initiate"
+    assert definition.stats["speed"] == "35 ft."
+    assert definition.stats["initiative_bonus"] == 3
+    assert definition.stats["ability_scores"]["wis"]["score"] == 13
+    assert "Sea-Blessed" in feature_names
+    assert "Harbor Initiate" in feature_names
+    assert tidecaller["page_ref"] == "mechanics/tidecaller-gift"
+    assert "Navigator's Tools" in definition.proficiencies["tools"]
+    assert spells_by_name["Light"]["mark"] == "Granted"
+    assert spells_by_name["Detect Magic"]["is_always_prepared"] is True
+    assert spells_by_name["Detect Magic"]["is_ritual"] is True
+    assert resources_by_id[str(tidecaller.get("tracker_ref") or "")]["max"] == 1
+
+
 def test_level_one_builder_supports_enabled_non_phb_species_background_feat_and_subclass_options():
     fighter = _systems_entry(
         "class",
@@ -948,7 +1156,7 @@ def test_level_one_builder_supports_enabled_non_phb_species_background_feat_and_
         for option in context["subclass_options"]
     )
     assert any(
-        option["value"] == telekinetic.slug and option["label"] == "Telekinetic (TCE)"
+        option["value"] == f"systems:{telekinetic.slug}" and option["label"] == "Telekinetic (TCE)"
         for option in species_feat_field["options"]
     )
     assert definition.profile["species_ref"]["source_id"] == "TCE"
@@ -2053,7 +2261,7 @@ def test_level_one_builder_populates_starting_equipment_spells_and_currency():
     assert spells_by_name["Message"]["components"] == "V, S, M (a short piece of copper wire)"
     assert resource_templates_by_id["arcane-recovery"]["max"] == 1
     assert state_resources_by_id["arcane-recovery"]["current"] == 1
-    assert import_metadata.parser_version == "2026-03-30.03"
+    assert import_metadata.parser_version == "2026-03-30.04"
 
 
 def test_level_one_builder_adds_structured_subclass_prepared_spells():
@@ -3837,6 +4045,153 @@ def test_native_level_up_applies_resilient_feat_side_effects():
     assert dexterity["score"] == 13
     assert dexterity["save_bonus"] == 3
     assert "Resilient" in feature_names
+
+
+def test_native_level_up_applies_page_backed_feat_grants():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    ability_score_improvement = _systems_entry(
+        "classfeature",
+        "phb-classfeature-ability-score-improvement",
+        "Ability Score Improvement",
+        metadata={"level": 4},
+    )
+    light = _systems_entry("spell", "phb-spell-light", "Light", metadata={"level": 0})
+    detect_magic = _systems_entry(
+        "spell",
+        "phb-spell-detect-magic",
+        "Detect Magic",
+        metadata={"level": 1, "ritual": True},
+    )
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [light, detect_magic],
+        },
+        class_progression=[
+            {
+                "level": 4,
+                "level_label": "Level 4",
+                "feature_rows": [
+                    {"label": "Ability Score Improvement", "entry": ability_score_improvement, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+    campaign_page_records = [
+        _campaign_page_record(
+            "mechanics/tidecaller-gift",
+            "Tidecaller Gift",
+            section="Mechanics",
+            subsection="Feats",
+            summary="A storm-marked blessing drawn from harbor rites.",
+            metadata={
+                "character_option": {
+                    "kind": "feat",
+                    "name": "Tidecaller Gift",
+                    "description_markdown": "You can call a little of the tide to your side.",
+                    "grants": {
+                        "resource": {"label": "Tidecaller Gift", "max": 2, "reset_on": "long_rest"},
+                        "stat_adjustments": {"max_hp": 4, "initiative_bonus": 1},
+                        "tools": ["Navigator's Tools"],
+                        "spells": [
+                            {"spell": "Light", "mark": "Granted"},
+                            {"spell": "Detect Magic", "always_prepared": True, "ritual": True},
+                        ],
+                    },
+                }
+            },
+        )
+    ]
+
+    current_definition = _minimal_character_definition("tidecaller", "Tidecaller")
+    current_definition.profile["class_level_text"] = "Fighter 3"
+    current_definition.profile["classes"][0]["level"] = 3
+
+    initial_form = {
+        "hp_gain": "8",
+        "levelup_asi_mode_1": "feat",
+    }
+    initial_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        current_definition,
+        initial_form,
+        campaign_page_records=campaign_page_records,
+    )
+    feat_value = _field_value_for_label(initial_context, "levelup_feat_1", "Tidecaller Gift")
+    assert feat_value.startswith("page:")
+
+    form_values = {
+        **initial_form,
+        "levelup_feat_1": feat_value,
+    }
+    level_up_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        current_definition,
+        form_values,
+        campaign_page_records=campaign_page_records,
+    )
+    leveled_definition, _, hp_delta = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        level_up_context,
+        form_values,
+    )
+    merged_state = merge_state_with_definition(
+        leveled_definition,
+        build_initial_state(current_definition),
+        hp_delta=hp_delta,
+    )
+
+    tidecaller = next(feature for feature in leveled_definition.features if feature["name"] == "Tidecaller Gift")
+    spells_by_name = {spell["name"]: spell for spell in leveled_definition.spellcasting["spells"]}
+    resources_by_id = {resource["id"]: resource for resource in leveled_definition.resource_templates}
+    merged_resources = {resource["id"]: resource for resource in merged_state["resources"]}
+
+    assert "Tidecaller Gift" in level_up_context["preview"]["gained_features"]
+    assert any("Detect Magic" in spell_name for spell_name in level_up_context["preview"]["new_spells"])
+    assert "Tidecaller Gift: 2 / 2 (Long Rest)" in level_up_context["preview"]["resources"]
+    assert leveled_definition.stats["max_hp"] == current_definition.stats["max_hp"] + 8 + 4
+    assert leveled_definition.stats["initiative_bonus"] == current_definition.stats["initiative_bonus"] + 1
+    assert "Navigator's Tools" in leveled_definition.proficiencies["tools"]
+    assert tidecaller["page_ref"] == "mechanics/tidecaller-gift"
+    assert spells_by_name["Light"]["mark"] == "Granted"
+    assert spells_by_name["Detect Magic"]["is_always_prepared"] is True
+    assert spells_by_name["Detect Magic"]["is_ritual"] is True
+    assert resources_by_id[str(tidecaller.get("tracker_ref") or "")]["max"] == 2
+    assert merged_resources[str(tidecaller.get("tracker_ref") or "")]["current"] == 2
 
 
 def test_native_level_up_surfaces_and_applies_magic_initiate_feat_spells():

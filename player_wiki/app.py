@@ -3294,7 +3294,12 @@ def create_app() -> Flask:
             abort(403)
 
         campaign, record = load_character_context(campaign_slug, character_slug)
-        del campaign
+        campaign_page_records = [
+            page_record
+            for page_record in get_campaign_page_store().list_page_records(campaign_slug)
+            if campaign.is_page_visible(page_record.page)
+            and str(page_record.page.section or "").strip() != "Sessions"
+        ]
         if not supports_native_level_up(record.definition):
             flash("This character is not eligible for the current native level-up flow.", "error")
             return redirect(
@@ -3312,6 +3317,7 @@ def create_app() -> Flask:
                 campaign_slug,
                 record.definition,
                 form_values,
+                campaign_page_records=campaign_page_records,
             )
             level_up_context["state_revision"] = record.state_record.revision
         except CharacterBuildError as exc:

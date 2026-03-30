@@ -10,6 +10,7 @@ from typing import Any
 import yaml
 
 from .auth_store import isoformat, utcnow
+from .character_builder import normalize_definition_to_native_model
 from .character_models import CharacterDefinition, CharacterImportMetadata
 from .character_repository import CampaignCharacterConfig, load_campaign_character_config
 from .character_service import build_initial_state, merge_state_with_definition
@@ -17,7 +18,7 @@ from .character_store import CharacterStateStore, CharacterStateWriteResult
 from .db import init_database
 from .repository import slugify
 
-PARSER_VERSION = "2026-03-29.2"
+PARSER_VERSION = "2026-03-30.1"
 REST_TRACKER_PATTERN = re.compile(
     r"^(?P<label>.+?)\s*[-:]\s*(?P<value>\d+)\s*/\s*(?P<reset>Long Rest|Short Rest|Daily|Other|Manual|Never)\b",
     re.IGNORECASE,
@@ -943,6 +944,7 @@ def parse_character_sheet_text(
             "parse_warnings": warnings,
         },
     )
+    definition = normalize_definition_to_native_model(definition)
     import_metadata = CharacterImportMetadata(
         campaign_slug=campaign_slug,
         character_slug=resolved_character_slug,

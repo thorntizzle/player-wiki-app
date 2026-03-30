@@ -370,14 +370,22 @@ def present_character_detail(
         header_segments.append(
             {
                 "text": str(profile.get("species") or ""),
-                "href": build_systems_entry_href(campaign.slug, profile.get("species_ref")),
+                "href": build_character_entry_href(
+                    campaign.slug,
+                    systems_ref=profile.get("species_ref"),
+                    page_ref=profile.get("species_page_ref"),
+                ),
             }
         )
     if str(profile.get("background") or "").strip():
         header_segments.append(
             {
                 "text": str(profile.get("background") or ""),
-                "href": build_systems_entry_href(campaign.slug, profile.get("background_ref")),
+                "href": build_character_entry_href(
+                    campaign.slug,
+                    systems_ref=profile.get("background_ref"),
+                    page_ref=profile.get("background_page_ref"),
+                ),
             }
         )
 

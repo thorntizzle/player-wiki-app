@@ -13,6 +13,7 @@ from .character_adjustments import (
 )
 from .character_builder import _add_spell_to_payloads, _resolve_spell_entry, _spell_payload_key
 from .character_campaign_options import (
+    FEATURE_LIKE_CAMPAIGN_OPTION_KINDS,
     build_campaign_page_character_option,
     collect_campaign_option_proficiency_grants,
     collect_campaign_option_spell_grants,
@@ -22,7 +23,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup
 from .repository import slugify
 
-CHARACTER_EDITOR_VERSION = "2026-03-30.03"
+CHARACTER_EDITOR_VERSION = "2026-03-30.04"
 CUSTOM_FEATURE_CATEGORY = "custom_feature"
 CUSTOM_EQUIPMENT_SOURCE_KIND = "manual_edit"
 CUSTOM_FEATURE_TRACKER_PREFIX = "manual-feature-tracker"
@@ -577,7 +578,12 @@ def _editable_campaign_option_for_page_ref(
     if not option:
         return None
     kind = str(option.get("kind") or default_kind or "").strip().lower()
-    if kind and kind != default_kind:
+    allowed_kinds = (
+        FEATURE_LIKE_CAMPAIGN_OPTION_KINDS
+        if default_kind == "feature"
+        else {default_kind}
+    )
+    if kind and kind not in allowed_kinds:
         return None
     return option
 
@@ -813,7 +819,8 @@ def _build_campaign_page_options(campaign_page_records: list[Any]) -> list[dict[
             record,
             default_kind="item" if section == "Items" else "feature",
         )
-        label_parts = [title]
+        option_title = str((campaign_option or {}).get("display_name") or title).strip() or title
+        label_parts = [option_title]
         if section:
             if subsection:
                 label_parts.append(f"{section} / {subsection}")
@@ -823,7 +830,7 @@ def _build_campaign_page_options(campaign_page_records: list[Any]) -> list[dict[
             {
                 "value": page_ref,
                 "label": " | ".join(label_parts),
-                "title": title,
+                "title": option_title,
                 "campaign_option": dict(campaign_option or {}) or None,
             }
         )
