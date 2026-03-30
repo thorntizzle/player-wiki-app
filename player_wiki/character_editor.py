@@ -5,10 +5,15 @@ import re
 from typing import Any
 
 from .auth_store import isoformat, utcnow
+from .character_adjustments import (
+    apply_manual_stat_adjustments,
+    normalize_manual_stat_adjustments,
+    strip_manual_stat_adjustments,
+)
 from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import slugify
 
-CHARACTER_EDITOR_VERSION = "2026-03-30.01"
+CHARACTER_EDITOR_VERSION = "2026-03-30.02"
 CUSTOM_FEATURE_CATEGORY = "custom_feature"
 CUSTOM_EQUIPMENT_SOURCE_KIND = "manual_edit"
 CUSTOM_FEATURE_TRACKER_PREFIX = "manual-feature-tracker"
@@ -28,6 +33,15 @@ FEATURE_RESOURCE_RESET_OPTIONS = (
     ("long_rest", "Long Rest"),
 )
 VALID_FEATURE_RESOURCE_RESET_TYPES = {value for value, _ in FEATURE_RESOURCE_RESET_OPTIONS}
+STAT_ADJUSTMENT_FIELDS = (
+    ("max_hp", "Max HP Adjustment", "Apply a persistent bonus or penalty to max HP."),
+    ("armor_class", "Armor Class Adjustment", "Apply a persistent bonus or penalty to Armor Class."),
+    ("initiative_bonus", "Initiative Adjustment", "Apply a persistent bonus or penalty to initiative."),
+    ("speed", "Speed Adjustment (ft.)", "Apply a persistent speed change in feet."),
+    ("passive_perception", "Passive Perception Adjustment", "Apply a persistent bonus or penalty to passive Perception."),
+    ("passive_insight", "Passive Insight Adjustment", "Apply a persistent bonus or penalty to passive Insight."),
+    ("passive_investigation", "Passive Investigation Adjustment", "Apply a persistent bonus or penalty to passive Investigation."),
+)
 
 
 class CharacterEditValidationError(ValueError):
@@ -49,6 +63,7 @@ def build_native_character_edit_context(
         for template in list(definition.resource_templates or [])
         if str(template.get("id") or "").strip()
     }
+    stat_adjustments = normalize_manual_stat_adjustments((definition.stats or {}).get("manual_adjustments"))
     campaign_page_options = _build_campaign_page_options(campaign_page_records or [])
 
     proficiency_fields = [
@@ -122,6 +137,15 @@ def build_native_character_edit_context(
                 or ""
             ),
         },
+    ]
+    stat_adjustment_fields = [
+        {
+            "name": f"stat_adjustment_{key}",
+            "label": label,
+            "help_text": help_text,
+            "value": str(values.get(f"stat_adjustment_{key}") or stat_adjustments.get(key) or "").strip(),
+        }
+        for key, label, help_text in STAT_ADJUSTMENT_FIELDS
     ]
 
     feature_row_count = max(
@@ -198,6 +222,7 @@ def build_native_character_edit_context(
         "values": values,
         "proficiency_fields": proficiency_fields,
         "reference_fields": reference_fields,
+        "stat_adjustment_fields": stat_adjustment_fields,
         "feature_rows": feature_rows,
         "equipment_rows": equipment_rows,
         "activation_options": [
@@ -264,6 +289,8 @@ def apply_native_character_edits(
     profile = dict(current_definition.profile or {})
     profile["biography_markdown"] = str(values.get("biography_markdown") or "")
     profile["personality_markdown"] = str(values.get("personality_markdown") or "")
+    base_stats, _ = strip_manual_stat_adjustments(dict(current_definition.stats or {}))
+    stat_adjustments = _parse_stat_adjustments(values)
 
     used_feature_ids = set(manual_feature_lookup.keys())
     manual_features: list[dict[str, Any]] = []
@@ -378,6 +405,7 @@ def apply_native_character_edits(
     payload["campaign_slug"] = campaign_slug
     payload["character_slug"] = current_definition.character_slug
     payload["profile"] = profile
+    payload["stats"] = apply_manual_stat_adjustments(base_stats, stat_adjustments)
     payload["proficiencies"] = proficiencies
     payload["reference_notes"] = reference_notes
     payload["features"] = [
@@ -550,6 +578,25 @@ def _parse_optional_nonnegative_integer(raw_value: str, *, field_label: str) -> 
     if value < 0:
         raise CharacterEditValidationError(f"The {field_label} cannot be negative.")
     return value
+
+
+def _parse_optional_integer(raw_value: str, *, field_label: str) -> int | None:
+    clean_value = str(raw_value or "").strip()
+    if not clean_value:
+        return None
+    try:
+        return int(clean_value)
+    except ValueError as exc:
+        raise CharacterEditValidationError(f"The {field_label} must be a whole number.") from exc
+
+
+def _parse_stat_adjustments(values: dict[str, str]) -> dict[str, int]:
+    adjustments: dict[str, int] = {}
+    for key, label, _ in STAT_ADJUSTMENT_FIELDS:
+        value = _parse_optional_integer(values.get(f"stat_adjustment_{key}") or "", field_label=label.lower())
+        if value:
+            adjustments[key] = value
+    return adjustments
 
 
 def _normalize_activation_type(raw_value: Any) -> str:

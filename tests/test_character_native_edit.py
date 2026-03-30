@@ -15,6 +15,7 @@ def test_owner_player_can_open_native_character_edit_page(
     assert "Save character edits" in html
     assert "Languages" in html
     assert "Reference Text" in html
+    assert "Campaign Adjustments" in html
     assert "Custom Features" in html
     assert "Uses / Max" in html
     assert "Manual Equipment" in html
@@ -295,3 +296,60 @@ def test_native_character_edits_can_manage_reference_text_and_feature_trackers(
     )
     assert all(template.get("id") != tracker_ref for template in record.definition.resource_templates)
     assert all(resource.get("id") != tracker_ref for resource in record.state_record.state["resources"])
+
+
+def test_native_character_edits_can_apply_campaign_stat_adjustments(
+    client, sign_in, users, get_character, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    record = get_character("arden-march")
+    assert record is not None
+    base_stats = dict(record.definition.stats or {})
+
+    response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "Light Armor",
+            "weapon_proficiencies_text": "Simple Weapons",
+            "tool_proficiencies_text": "Thieves' Tools",
+            "stat_adjustment_max_hp": "4",
+            "stat_adjustment_armor_class": "1",
+            "stat_adjustment_initiative_bonus": "2",
+            "stat_adjustment_speed": "10",
+            "stat_adjustment_passive_perception": "3",
+            "stat_adjustment_passive_insight": "-1",
+            "stat_adjustment_passive_investigation": "2",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    adjustments = record.definition.stats["manual_adjustments"]
+    assert adjustments == {
+        "max_hp": 4,
+        "armor_class": 1,
+        "initiative_bonus": 2,
+        "speed": 10,
+        "passive_perception": 3,
+        "passive_insight": -1,
+        "passive_investigation": 2,
+    }
+    assert record.definition.stats["max_hp"] == int(base_stats["max_hp"]) + 4
+    assert record.definition.stats["armor_class"] == int(base_stats["armor_class"]) + 1
+    assert record.definition.stats["initiative_bonus"] == int(base_stats["initiative_bonus"]) + 2
+    assert record.definition.stats["speed"] == "40 ft."
+    assert record.definition.stats["passive_perception"] == int(base_stats["passive_perception"]) + 3
+    assert record.definition.stats["passive_insight"] == int(base_stats["passive_insight"]) - 1
+    assert record.definition.stats["passive_investigation"] == int(base_stats["passive_investigation"]) + 2
+
+    read_response = client.get("/campaigns/linden-pass/characters/arden-march?page=quick")
+    assert read_response.status_code == 200
+    read_html = read_response.get_data(as_text=True)
+    assert "40 ft." in read_html

@@ -12,6 +12,7 @@ from player_wiki.character_builder import (
     build_level_one_character_definition,
     supports_native_level_up,
 )
+from player_wiki.character_adjustments import apply_manual_stat_adjustments
 from player_wiki.character_service import build_initial_state, merge_state_with_definition
 from player_wiki.character_models import CharacterDefinition, CharacterImportMetadata
 from player_wiki.systems_models import SystemsEntryRecord
@@ -256,7 +257,7 @@ def _minimal_import_metadata(character_slug: str = "new-hero") -> CharacterImpor
         character_slug=character_slug,
         source_path="builder://native-level-1",
         imported_at_utc="2026-03-29T00:00:00Z",
-        parser_version="2026-03-29.12",
+        parser_version="2026-03-30.01",
         import_status="clean",
         warnings=[],
     )
@@ -1855,7 +1856,7 @@ def test_level_one_builder_populates_starting_equipment_spells_and_currency():
     assert spells_by_name["Message"]["components"] == "V, S, M (a short piece of copper wire)"
     assert resource_templates_by_id["arcane-recovery"]["max"] == 1
     assert state_resources_by_id["arcane-recovery"]["current"] == 1
-    assert import_metadata.parser_version == "2026-03-29.12"
+    assert import_metadata.parser_version == "2026-03-30.01"
 
 
 def test_level_one_builder_adds_structured_subclass_prepared_spells():
@@ -2955,6 +2956,168 @@ def test_native_level_up_advances_fighter_to_level_two_and_merges_state():
     assert attacks_by_name["Longsword"]["damage"] == "1d8+5 slashing"
     assert merged_state["vitals"]["current_hp"] == leveled_definition.stats["max_hp"]
     assert {slot["level"]: slot["max"] for slot in merged_state["spell_slots"]} == {}
+
+
+def test_native_level_up_preserves_manual_campaign_stat_adjustments():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "subclass_title": "Martial Archetype",
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+            "starting_equipment": {
+                "defaultData": [
+                    {"_": ["longsword|phb", "shield|phb"]},
+                ]
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+        body={"entries": [{"name": "Feature: Adaptable", "entries": ["You fit in almost anywhere."]}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+        body={
+            "entries": [
+                {
+                    "name": "Feature: Shelter of the Faithful",
+                    "entries": ["You can find refuge among the faithful."],
+                    "data": {"isFeature": True},
+                }
+            ]
+        },
+    )
+    fighting_style = _systems_entry("classfeature", "phb-classfeature-fighting-style", "Fighting Style", metadata={"level": 1})
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    action_surge = _systems_entry("classfeature", "phb-classfeature-action-surge", "Action Surge", metadata={"level": 2})
+    longsword = _systems_entry("item", "phb-item-longsword", "Longsword", metadata={"weight": 3})
+    shield = _systems_entry("item", "phb-item-shield", "Shield", metadata={"weight": 6, "type": "S"})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "item": [longsword, shield],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {
+                        "label": "Fighting Style",
+                        "entry": fighting_style,
+                        "embedded_card": {
+                            "option_groups": [
+                                {
+                                    "options": [
+                                        {"label": "Dueling", "slug": "phb-optionalfeature-dueling"},
+                                        {"label": "Defense", "slug": "phb-optionalfeature-defense"},
+                                    ]
+                                }
+                            ]
+                        },
+                    },
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            },
+            {
+                "level": 2,
+                "level_label": "Level 2",
+                "feature_rows": [
+                    {"label": "Action Surge", "entry": action_surge, "embedded_card": {"option_groups": []}},
+                ],
+            },
+        ],
+    )
+
+    form_values = {
+        "name": "Ser Rowan",
+        "character_slug": "ser-rowan",
+        "alignment": "Lawful Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "class_option_1": "phb-optionalfeature-dueling",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    level_one_context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    level_one_definition, _ = build_level_one_character_definition("linden-pass", level_one_context, form_values)
+    level_one_definition.stats = apply_manual_stat_adjustments(
+        dict(level_one_definition.stats or {}),
+        {
+            "max_hp": 4,
+            "armor_class": 1,
+            "initiative_bonus": 2,
+            "speed": 10,
+            "passive_perception": 3,
+            "passive_insight": -1,
+            "passive_investigation": 2,
+        },
+    )
+
+    level_up_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        level_one_definition,
+        {"hp_gain": "8"},
+    )
+    leveled_definition, _, hp_gain = build_native_level_up_character_definition(
+        "linden-pass",
+        level_one_definition,
+        level_up_context,
+        {"hp_gain": "8"},
+    )
+    merged_state = merge_state_with_definition(
+        leveled_definition,
+        build_initial_state(level_one_definition),
+        hp_delta=hp_gain,
+    )
+
+    assert leveled_definition.stats["manual_adjustments"] == {
+        "max_hp": 4,
+        "armor_class": 1,
+        "initiative_bonus": 2,
+        "speed": 10,
+        "passive_perception": 3,
+        "passive_insight": -1,
+        "passive_investigation": 2,
+    }
+    assert leveled_definition.stats["max_hp"] == level_one_definition.stats["max_hp"] + 8
+    assert leveled_definition.stats["armor_class"] == level_one_definition.stats["armor_class"]
+    assert leveled_definition.stats["initiative_bonus"] == level_one_definition.stats["initiative_bonus"]
+    assert leveled_definition.stats["speed"] == level_one_definition.stats["speed"]
+    assert leveled_definition.stats["passive_perception"] == level_one_definition.stats["passive_perception"]
+    assert leveled_definition.stats["passive_insight"] == level_one_definition.stats["passive_insight"]
+    assert leveled_definition.stats["passive_investigation"] == level_one_definition.stats["passive_investigation"]
+    assert merged_state["vitals"]["current_hp"] == leveled_definition.stats["max_hp"]
 
 
 def test_native_level_up_advances_fighter_to_level_four_with_ability_score_improvement():

@@ -7,7 +7,7 @@
     <p class="eyebrow">Character editor</p>
     <h1>Edit {{ character.name }}</h1>
     <p class="lede">
-      Manage campaign-time adjustments that are outside the native level-up flow. This slice covers proficiencies, persistent reference text, custom features with optional trackers, manual equipment additions, and campaign-page links for custom sheet content.
+      Manage campaign-time adjustments that are outside the native level-up flow. This slice covers proficiencies, persistent reference text, controlled sheet-math adjustments, custom features with optional trackers, manual equipment additions, and campaign-page links for custom sheet content.
     </p>
     <div class="hero-actions">
       <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">Back to sheet</a>
@@ -48,6 +48,24 @@
               <label class="field">
                 <span>{{ field.label }}</span>
                 <textarea name="{{ field.name }}" rows="6">{{ field.value }}</textarea>
+              </label>
+              <p class="meta">{{ field.help_text }}</p>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="read-section">
+        <div class="section-heading">
+          <h2>Campaign Adjustments</h2>
+        </div>
+        <p class="meta">Use these controlled numeric adjustments when campaign play has changed the sheet math outside the normal builder and level-up rules.</p>
+        <div class="detail-grid character-edit-grid">
+          {% for field in edit_context.stat_adjustment_fields %}
+            <article class="detail-card">
+              <label class="field">
+                <span>{{ field.label }}</span>
+                <input type="number" name="{{ field.name }}" value="{{ field.value }}">
               </label>
               <p class="meta">{{ field.help_text }}</p>
             </article>

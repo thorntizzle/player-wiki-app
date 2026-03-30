@@ -7,11 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from .auth_store import isoformat, utcnow
+from .character_adjustments import apply_manual_stat_adjustments, strip_manual_stat_adjustments
 from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-03-29.12"
+CHARACTER_BUILDER_VERSION = "2026-03-30.01"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -4963,7 +4964,7 @@ def _build_leveled_stats(
     selected_choices: dict[str, list[str]],
     current_level: int,
 ) -> dict[str, Any]:
-    stats = dict(current_definition.stats or {})
+    stats, manual_adjustments = strip_manual_stat_adjustments(dict(current_definition.stats or {}))
     skill_lookup = {normalize_lookup(skill["name"]): skill for skill in skills}
     save_proficiencies = set(
         _class_save_proficiencies(selected_class)
@@ -4991,7 +4992,7 @@ def _build_leveled_stats(
         }
         for ability_key, score in ability_scores.items()
     }
-    return stats
+    return apply_manual_stat_adjustments(stats, manual_adjustments)
 
 
 def _build_leveled_profile(
