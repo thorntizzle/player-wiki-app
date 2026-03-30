@@ -1250,6 +1250,149 @@ def test_level_one_builder_supports_page_backed_species_background_and_feat_choi
     assert resources_by_id[str(tidecaller.get("tracker_ref") or "")]["max"] == 1
 
 
+def test_level_one_builder_supports_campaign_feat_optionalfeature_progression_and_modeled_effects():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    variant_human = _systems_entry(
+        "race",
+        "phb-race-variant-human",
+        "Variant Human",
+        metadata={
+            "size": ["M"],
+            "speed": 30,
+            "languages": [{"common": True}],
+            "feats": [{"any": 1}],
+        },
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    defense = _systems_entry(
+        "optionalfeature",
+        "phb-optionalfeature-defense",
+        "Defense",
+        metadata={"feature_type": ["FS:F"]},
+    )
+    dueling = _systems_entry(
+        "optionalfeature",
+        "phb-optionalfeature-dueling",
+        "Dueling",
+        metadata={"feature_type": ["FS:F"]},
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [variant_human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+            "optionalfeature": [defense, dueling],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+    campaign_page_records = [
+        _campaign_page_record(
+            "mechanics/harbor-drill",
+            "Harbor Drill",
+            section="Mechanics",
+            subsection="Feats",
+            metadata={
+                "character_option": {
+                    "kind": "feat",
+                    "name": "Harbor Drill",
+                    "description_markdown": "A campaign feat that teaches a drilled fighting style.",
+                    "modeled_effects": ["Squire of Solamnia"],
+                    "optionalfeature_progression": [
+                        {
+                            "name": "Fighting Style",
+                            "featureType": ["FS:F"],
+                            "progression": {"1": 1},
+                        }
+                    ],
+                }
+            },
+        )
+    ]
+
+    form_values = {
+        "name": "Harbor Guard",
+        "character_slug": "harbor-guard",
+        "alignment": "Lawful Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": variant_human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=campaign_page_records,
+    )
+    form_values["species_feat_1"] = _field_value_for_label(context, "species_feat_1", "Harbor Drill")
+
+    context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=campaign_page_records,
+    )
+    assert _find_builder_field(context, "feat_species_feat_1_optionalfeature_1_1")["label"] == "Harbor Drill Fighting Style"
+
+    form_values["feat_species_feat_1_optionalfeature_1_1"] = "phb-optionalfeature-defense"
+    context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=campaign_page_records,
+    )
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+
+    feature_names = {feature["name"] for feature in definition.features}
+    harbor_drill = next(feature for feature in definition.features if feature["name"] == "Harbor Drill")
+    resources_by_id = {resource["id"]: resource for resource in definition.resource_templates}
+
+    assert "Defense" in feature_names
+    assert harbor_drill["page_ref"] == "mechanics/harbor-drill"
+    assert harbor_drill["tracker_ref"] == "precise-strike"
+    assert resources_by_id["precise-strike"]["max"] == 2
+
+
 def test_level_one_builder_limits_mixed_source_page_options_to_structured_mechanics_pages():
     fighter = _systems_entry(
         "class",
@@ -1692,6 +1835,56 @@ def test_normalize_definition_to_native_model_adds_proficiency_bonus_feat_tracke
     assert resources_by_id["poisoner-doses"]["reset_on"] == "long_rest"
     assert resources_by_id["protective-wings"]["max"] == 3
     assert resources_by_id["protective-wings"]["reset_on"] == "long_rest"
+
+
+def test_normalize_definition_to_native_model_adds_additional_modeled_feat_trackers():
+    definition = _minimal_character_definition("arlen-voss", "Arlen Voss")
+    definition.profile["class_level_text"] = "Wizard 5"
+    definition.profile["classes"] = [{"class_name": "Wizard", "subclass_name": "", "level": 5}]
+    definition.features = [
+        {
+            "id": "adept-red-robes-1",
+            "name": "Adept of the Red Robes",
+            "category": "feat",
+            "source": "DSotDQ",
+            "description_markdown": "",
+        },
+        {
+            "id": "knight-crown-1",
+            "name": "Knight of the Crown",
+            "category": "feat",
+            "source": "DSotDQ",
+            "description_markdown": "",
+        },
+        {
+            "id": "squire-solamnia-1",
+            "name": "Squire of Solamnia",
+            "category": "feat",
+            "source": "DSotDQ",
+            "description_markdown": "",
+        },
+        {
+            "id": "boon-recovery-1",
+            "name": "Boon of Recovery",
+            "category": "feat",
+            "source": "XPHB",
+            "description_markdown": "",
+        },
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+    features_by_name = {feature["name"]: feature for feature in normalized.features}
+    resources_by_id = {resource["id"]: resource for resource in normalized.resource_templates}
+
+    assert features_by_name["Adept of the Red Robes"]["tracker_ref"] == "magical-balance"
+    assert features_by_name["Knight of the Crown"]["tracker_ref"] == "commanding-rally"
+    assert features_by_name["Squire of Solamnia"]["tracker_ref"] == "precise-strike"
+    assert features_by_name["Boon of Recovery"]["tracker_ref"] == "recover-vitality-dice"
+    assert resources_by_id["magical-balance"]["max"] == 3
+    assert resources_by_id["commanding-rally"]["max"] == 3
+    assert resources_by_id["precise-strike"]["max"] == 3
+    assert resources_by_id["recover-vitality-dice"]["max"] == 10
+    assert resources_by_id["recover-vitality-dice"]["reset_on"] == "long_rest"
 
 
 def test_level_one_builder_surfaces_and_applies_skilled_feat_choices():
@@ -3005,6 +3198,346 @@ def test_level_one_builder_generates_dual_wielder_off_hand_attack_for_non_light_
     assert attacks_by_name["Longsword"]["notes"] == "Versatile (1d10)."
     assert attacks_by_name["Longsword (off-hand)"]["damage"] == "1d8 slashing"
     assert attacks_by_name["Longsword (off-hand)"]["notes"] == "Bonus action."
+
+
+def test_level_one_builder_generates_phb_charger_bonus_attack_row():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+            "starting_equipment": {
+                "defaultData": [
+                    {"_": ["greatsword|phb"]},
+                ]
+            },
+        },
+    )
+    variant_human = _systems_entry(
+        "race",
+        "phb-race-variant-human",
+        "Variant Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}], "feats": [{"any": 1}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    charger = _systems_entry("feat", "phb-feat-charger", "Charger", source_id="PHB")
+    greatsword = _systems_entry("item", "phb-item-greatsword", "Greatsword", metadata={"weight": 6})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [variant_human],
+            "background": [acolyte],
+            "feat": [charger],
+            "subclass": [],
+            "item": [greatsword],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+    form_values = {
+        "name": "Brom Vale",
+        "character_slug": "brom-vale",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": variant_human.slug,
+        "background_slug": acolyte.slug,
+        "species_feat_1": charger.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+    attacks_by_name = {attack["name"]: attack for attack in definition.attacks}
+
+    assert "Greatsword (charger) (+5, 2d6+8 slashing)" in context["preview"]["attacks"]
+    assert attacks_by_name["Greatsword (charger)"]["notes"] == "Bonus action, Charger (after Dash, move 10 feet straight for +5 damage)."
+
+
+def test_level_one_builder_generates_xphb_charger_attack_profile():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+            "starting_equipment": {
+                "defaultData": [
+                    {"_": ["greatsword|phb"]},
+                ]
+            },
+        },
+    )
+    variant_human = _systems_entry(
+        "race",
+        "phb-race-variant-human",
+        "Variant Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}], "feats": [{"any": 1}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    charger = _systems_entry("feat", "xphb-feat-charger", "Charger", source_id="XPHB")
+    greatsword = _systems_entry("item", "phb-item-greatsword", "Greatsword", metadata={"weight": 6})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [variant_human],
+            "background": [acolyte],
+            "feat": [charger],
+            "subclass": [],
+            "item": [greatsword],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+    form_values = {
+        "name": "Nell Voss",
+        "character_slug": "nell-voss",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": variant_human.slug,
+        "background_slug": acolyte.slug,
+        "species_feat_1": charger.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+    attacks_by_name = {attack["name"]: attack for attack in definition.attacks}
+
+    assert "Greatsword (charger) (+5, 2d6+1d8+3 slashing)" in context["preview"]["attacks"]
+    assert attacks_by_name["Greatsword (charger)"]["notes"] == "Charger (move 10 feet straight, +1d8 damage, once per turn)."
+
+
+def test_level_one_builder_applies_gunner_to_firearm_attacks():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+            "starting_equipment": {
+                "defaultData": [
+                    {"_": ["pistol|dmg"]},
+                ]
+            },
+        },
+    )
+    variant_human = _systems_entry(
+        "race",
+        "phb-race-variant-human",
+        "Variant Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}], "feats": [{"any": 1}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    gunner = _systems_entry(
+        "feat",
+        "tce-feat-gunner",
+        "Gunner",
+        source_id="TCE",
+        metadata={"weapon_proficiencies": [{"firearms": True}], "ability": [{"dex": 1}]},
+    )
+    pistol = _systems_entry("item", "dmg-item-pistol", "Pistol", metadata={"weight": 3}, source_id="DMG")
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [variant_human],
+            "background": [acolyte],
+            "feat": [gunner],
+            "subclass": [],
+            "item": [pistol],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+    form_values = {
+        "name": "Mira Flint",
+        "character_slug": "mira-flint",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": variant_human.slug,
+        "background_slug": acolyte.slug,
+        "species_feat_1": gunner.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "str": "16",
+        "dex": "14",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+    pistol_attack = next(attack for attack in definition.attacks if attack["name"] == "Pistol")
+
+    assert "Firearms" in definition.proficiencies["weapons"]
+    assert "Pistol (+4, 1d10+2 piercing)" in context["preview"]["attacks"]
+    assert pistol_attack["notes"] == "Ammunition, range 30/90, Gunner (ignore loading, no adjacent disadvantage)."
+
+
+def test_level_one_builder_adds_tavern_brawler_unarmed_attack_and_improvised_proficiency():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    variant_human = _systems_entry(
+        "race",
+        "phb-race-variant-human",
+        "Variant Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}], "feats": [{"any": 1}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    tavern_brawler = _systems_entry(
+        "feat",
+        "xphb-feat-tavern-brawler",
+        "Tavern Brawler",
+        source_id="XPHB",
+        metadata={"weapon_proficiencies": [{"improvised": True}]},
+    )
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [variant_human],
+            "background": [acolyte],
+            "feat": [tavern_brawler],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+    form_values = {
+        "name": "Rook Dane",
+        "character_slug": "rook-dane",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": variant_human.slug,
+        "background_slug": acolyte.slug,
+        "species_feat_1": tavern_brawler.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+    unarmed_attack = next(attack for attack in definition.attacks if attack["name"] == "Unarmed Strike")
+
+    assert "Improvised Weapons" in definition.proficiencies["weapons"]
+    assert "Unarmed Strike (+5, 1d4+3 bludgeoning)" in context["preview"]["attacks"]
+    assert unarmed_attack["notes"] == "Tavern Brawler enhanced unarmed strike."
 
 
 def test_level_one_builder_populates_starting_equipment_spells_and_currency():

@@ -1256,7 +1256,9 @@ def _build_campaign_page_entry(
             "armor_proficiencies",
             "saving_throw_proficiencies",
             "skill_tool_language_proficiencies",
+            "optionalfeature_progression",
             "additional_spells",
+            "modeled_effects",
         ):
             if key in campaign_option:
                 metadata[key] = deepcopy(campaign_option.get(key))
@@ -3266,18 +3268,22 @@ def _build_level_one_attacks(
         "phb-optionalfeature-two-weapon-fighting",
         "Two-Weapon Fighting",
     )
-    active_feat_names = {
+    active_feat_effects = {
         normalize_lookup(name)
-        for name in _extract_feat_feature_names(features)
+        for name in _extract_feat_effect_keys(features)
         if str(name or "").strip()
     }
-    has_crossbow_expert = normalize_lookup("Crossbow Expert") in active_feat_names
-    has_dual_wielder = normalize_lookup("Dual Wielder") in active_feat_names
-    has_great_weapon_master = normalize_lookup("Great Weapon Master") in active_feat_names
-    has_martial_adept = normalize_lookup("Martial Adept") in active_feat_names
-    has_polearm_master = normalize_lookup("Polearm Master") in active_feat_names
-    has_savage_attacker = normalize_lookup("Savage Attacker") in active_feat_names
-    has_sharpshooter = normalize_lookup("Sharpshooter") in active_feat_names
+    has_charger_phb = normalize_lookup("charger-phb") in active_feat_effects
+    has_charger_xphb = normalize_lookup("charger-xphb") in active_feat_effects
+    has_crossbow_expert = normalize_lookup("Crossbow Expert") in active_feat_effects
+    has_dual_wielder = normalize_lookup("Dual Wielder") in active_feat_effects
+    has_great_weapon_master = normalize_lookup("Great Weapon Master") in active_feat_effects
+    has_gunner = normalize_lookup("Gunner") in active_feat_effects
+    has_martial_adept = normalize_lookup("Martial Adept") in active_feat_effects
+    has_polearm_master = normalize_lookup("Polearm Master") in active_feat_effects
+    has_savage_attacker = normalize_lookup("Savage Attacker") in active_feat_effects
+    has_sharpshooter = normalize_lookup("Sharpshooter") in active_feat_effects
+    has_tavern_brawler = normalize_lookup("Tavern Brawler") in active_feat_effects
     off_hand_context = _resolve_off_hand_attack_context(
         attack_contexts,
         allow_non_light=has_dual_wielder,
@@ -3301,7 +3307,10 @@ def _build_level_one_attacks(
         damage_bonus = int(context["ability_modifier"] or 0)
         if has_dueling and _qualifies_for_dueling(context, off_hand_context=off_hand_context):
             damage_bonus += 2
-        ignore_loading = has_crossbow_expert and _qualifies_for_crossbow_expert(context)
+        ignore_loading = (
+            (has_crossbow_expert and _qualifies_for_crossbow_expert(context))
+            or (has_gunner and _qualifies_for_gunner(context))
+        )
         base_attack_notes = _build_weapon_attack_notes(
             profile,
             great_weapon_fighting=has_great_weapon_fighting,
@@ -3312,8 +3321,11 @@ def _build_level_one_attacks(
             show_versatile=not has_two_handed_variant,
             extra_notes=_base_attack_feat_notes(
                 context,
+                has_charger_phb=has_charger_phb,
+                has_charger_xphb=has_charger_xphb,
                 has_crossbow_expert=has_crossbow_expert,
                 has_great_weapon_master=has_great_weapon_master,
+                has_gunner=has_gunner,
                 has_martial_adept=has_martial_adept,
                 has_polearm_master=has_polearm_master,
                 has_savage_attacker=has_savage_attacker,
@@ -3346,8 +3358,11 @@ def _build_level_one_attacks(
                         show_versatile=not has_two_handed_variant,
                         extra_notes=_base_attack_feat_notes(
                             context,
+                            has_charger_phb=has_charger_phb,
+                            has_charger_xphb=has_charger_xphb,
                             has_crossbow_expert=has_crossbow_expert,
                             has_great_weapon_master=has_great_weapon_master,
+                            has_gunner=has_gunner,
                             has_martial_adept=has_martial_adept,
                             has_polearm_master=has_polearm_master,
                             has_savage_attacker=has_savage_attacker,
@@ -3380,8 +3395,11 @@ def _build_level_one_attacks(
                         show_versatile=False,
                         extra_notes=_base_attack_feat_notes(
                             context,
+                            has_charger_phb=has_charger_phb,
+                            has_charger_xphb=has_charger_xphb,
                             has_crossbow_expert=has_crossbow_expert,
                             has_great_weapon_master=has_great_weapon_master,
+                            has_gunner=has_gunner,
                             has_martial_adept=has_martial_adept,
                             has_polearm_master=has_polearm_master,
                             has_savage_attacker=has_savage_attacker,
@@ -3415,8 +3433,11 @@ def _build_level_one_attacks(
                             wielded_two_handed=True,
                             extra_notes=_base_attack_feat_notes(
                                 context,
+                                has_charger_phb=has_charger_phb,
+                                has_charger_xphb=has_charger_xphb,
                                 has_crossbow_expert=has_crossbow_expert,
                                 has_great_weapon_master=has_great_weapon_master,
+                                has_gunner=has_gunner,
                                 has_martial_adept=has_martial_adept,
                                 has_polearm_master=has_polearm_master,
                                 has_savage_attacker=has_savage_attacker,
@@ -3431,6 +3452,40 @@ def _build_level_one_attacks(
                         profile_override=polearm_two_handed_profile,
                     )
                 )
+        if has_charger_xphb and _qualifies_for_charger(context):
+            attacks.append(
+                _build_weapon_attack_payload(
+                    context,
+                    attack_bonus=attack_bonus,
+                    damage_bonus=damage_bonus,
+                    extra_damage="1d8",
+                    notes=_build_weapon_attack_notes(
+                        profile,
+                        great_weapon_fighting=has_great_weapon_fighting,
+                        has_shield=has_shield,
+                        ignore_loading=ignore_loading,
+                        off_hand_context=off_hand_context,
+                        show_range=not has_thrown_variant,
+                        show_versatile=not has_two_handed_variant,
+                        extra_notes=_base_attack_feat_notes(
+                            context,
+                            has_charger_phb=has_charger_phb,
+                            has_charger_xphb=has_charger_xphb,
+                            has_crossbow_expert=has_crossbow_expert,
+                            has_great_weapon_master=has_great_weapon_master,
+                            has_gunner=has_gunner,
+                            has_martial_adept=has_martial_adept,
+                            has_polearm_master=has_polearm_master,
+                            has_savage_attacker=has_savage_attacker,
+                            has_sharpshooter=has_sharpshooter,
+                            ranged_attack=False,
+                        )
+                        + ["Charger (move 10 feet straight, +1d8 damage, once per turn)"],
+                    ),
+                    index=len(attacks) + 1,
+                    name_suffix=" (charger)",
+                )
+            )
         if has_thrown_variant:
             attacks.append(
                 _build_weapon_attack_payload(
@@ -3445,8 +3500,11 @@ def _build_level_one_attacks(
                         show_versatile=False,
                         extra_notes=_base_attack_feat_notes(
                             context,
+                            has_charger_phb=has_charger_phb,
+                            has_charger_xphb=has_charger_xphb,
                             has_crossbow_expert=has_crossbow_expert,
                             has_great_weapon_master=has_great_weapon_master,
+                            has_gunner=has_gunner,
                             has_martial_adept=has_martial_adept,
                             has_polearm_master=has_polearm_master,
                             has_savage_attacker=has_savage_attacker,
@@ -3480,8 +3538,11 @@ def _build_level_one_attacks(
                         wielded_two_handed=True,
                         extra_notes=_base_attack_feat_notes(
                             context,
+                            has_charger_phb=has_charger_phb,
+                            has_charger_xphb=has_charger_xphb,
                             has_crossbow_expert=has_crossbow_expert,
                             has_great_weapon_master=has_great_weapon_master,
+                            has_gunner=has_gunner,
                             has_martial_adept=has_martial_adept,
                             has_polearm_master=has_polearm_master,
                             has_savage_attacker=has_savage_attacker,
@@ -3510,8 +3571,11 @@ def _build_level_one_attacks(
                         show_versatile=not has_two_handed_variant,
                         extra_notes=_base_attack_feat_notes(
                             context,
+                            has_charger_phb=has_charger_phb,
+                            has_charger_xphb=has_charger_xphb,
                             has_crossbow_expert=has_crossbow_expert,
                             has_great_weapon_master=has_great_weapon_master,
+                            has_gunner=has_gunner,
                             has_martial_adept=has_martial_adept,
                             has_polearm_master=has_polearm_master,
                             has_savage_attacker=has_savage_attacker,
@@ -3522,6 +3586,40 @@ def _build_level_one_attacks(
                     ),
                     index=len(attacks) + 1,
                     name_suffix=" (sharpshooter)",
+                )
+            )
+        if has_charger_phb and _qualifies_for_charger(context):
+            attacks.append(
+                _build_weapon_attack_payload(
+                    context,
+                    attack_bonus=attack_bonus,
+                    damage_bonus=damage_bonus + 5,
+                    notes=_build_weapon_attack_notes(
+                        profile,
+                        bonus_action=True,
+                        great_weapon_fighting=has_great_weapon_fighting,
+                        has_shield=has_shield,
+                        ignore_loading=ignore_loading,
+                        off_hand_context=off_hand_context,
+                        show_range=False,
+                        show_versatile=not has_two_handed_variant,
+                        extra_notes=_base_attack_feat_notes(
+                            context,
+                            has_charger_phb=has_charger_phb,
+                            has_charger_xphb=has_charger_xphb,
+                            has_crossbow_expert=has_crossbow_expert,
+                            has_great_weapon_master=has_great_weapon_master,
+                            has_gunner=has_gunner,
+                            has_martial_adept=has_martial_adept,
+                            has_polearm_master=has_polearm_master,
+                            has_savage_attacker=has_savage_attacker,
+                            has_sharpshooter=has_sharpshooter,
+                            ranged_attack=False,
+                        )
+                        + ["Charger (after Dash, move 10 feet straight for +5 damage)"],
+                    ),
+                    index=len(attacks) + 1,
+                    name_suffix=" (charger)",
                 )
             )
 
@@ -3548,8 +3646,11 @@ def _build_level_one_attacks(
                     show_versatile=False,
                     extra_notes=_base_attack_feat_notes(
                         off_hand_context,
+                        has_charger_phb=has_charger_phb,
+                        has_charger_xphb=has_charger_xphb,
                         has_crossbow_expert=has_crossbow_expert,
                         has_great_weapon_master=has_great_weapon_master,
+                        has_gunner=has_gunner,
                         has_martial_adept=has_martial_adept,
                         has_polearm_master=has_polearm_master,
                         has_savage_attacker=has_savage_attacker,
@@ -3571,8 +3672,11 @@ def _build_level_one_attacks(
         crossbow_damage_bonus = int(crossbow_expert_bonus_context["ability_modifier"] or 0)
         crossbow_extra_notes = _base_attack_feat_notes(
             crossbow_expert_bonus_context,
+            has_charger_phb=has_charger_phb,
+            has_charger_xphb=has_charger_xphb,
             has_crossbow_expert=has_crossbow_expert,
             has_great_weapon_master=has_great_weapon_master,
+            has_gunner=has_gunner,
             has_martial_adept=has_martial_adept,
             has_polearm_master=has_polearm_master,
             has_savage_attacker=has_savage_attacker,
@@ -3616,10 +3720,18 @@ def _build_level_one_attacks(
                     name_suffix=" (crossbow expert, sharpshooter)",
                 )
             )
+    if has_tavern_brawler:
+        attacks.append(
+            _build_unarmed_attack_payload(
+                ability_scores=ability_scores,
+                proficiency_bonus=proficiency_bonus,
+                index=len(attacks) + 1,
+            )
+        )
     return attacks
 
 
-def _extract_feat_feature_names(features: list[dict[str, Any]] | None) -> list[str]:
+def _extract_feat_effect_keys(features: list[dict[str, Any]] | None) -> list[str]:
     results: list[str] = []
     for feature in list(features or []):
         category = normalize_lookup(str(feature.get("category") or "").strip())
@@ -3627,10 +3739,28 @@ def _extract_feat_feature_names(features: list[dict[str, Any]] | None) -> list[s
         entry_type = normalize_lookup(str(systems_ref.get("entry_type") or "").strip())
         if category != normalize_lookup("feat") and entry_type != normalize_lookup("feat"):
             continue
-        feature_name = str(feature.get("name") or systems_ref.get("title") or "").strip()
-        if feature_name:
-            results.append(feature_name)
+        results.extend(_feat_effect_keys_for_feature(feature))
     return _dedupe_preserve_order(results)
+
+
+def _feat_effect_keys_for_feature(feature: dict[str, Any]) -> list[str]:
+    systems_ref = dict(feature.get("systems_ref") or {})
+    campaign_option = dict(feature.get("campaign_option") or {})
+    feature_name = str(feature.get("name") or systems_ref.get("title") or "").strip()
+    effect_keys: list[str] = []
+    if feature_name:
+        effect_keys.append(feature_name)
+        normalized_name = normalize_lookup(feature_name)
+        source_id = str(systems_ref.get("source_id") or feature.get("source") or "").strip().upper()
+        if normalized_name == normalize_lookup("Charger"):
+            effect_keys.append("charger-xphb" if source_id == "XPHB" else "charger-phb")
+        if normalized_name == normalize_lookup("Tavern Brawler"):
+            effect_keys.append("tavern-brawler")
+    for effect in list(campaign_option.get("modeled_effects") or []):
+        clean_effect = str(effect or "").strip()
+        if clean_effect:
+            effect_keys.append(clean_effect)
+    return effect_keys
 
 
 def _qualifies_for_crossbow_expert(context: dict[str, Any]) -> bool:
@@ -3640,6 +3770,20 @@ def _qualifies_for_crossbow_expert(context: dict[str, Any]) -> bool:
     if str(profile.get("type") or "").strip().upper() != "R":
         return False
     return "crossbow" in normalize_lookup(str(context.get("attack_name") or "").strip())
+
+
+def _qualifies_for_gunner(context: dict[str, Any]) -> bool:
+    profile = dict(context.get("profile") or {})
+    if not bool(context.get("is_proficient")):
+        return False
+    if str(profile.get("type") or "").strip().upper() != "R":
+        return False
+    return _weapon_uses_firearm_proficiency(profile, attack_name=str(context.get("attack_name") or "").strip())
+
+
+def _qualifies_for_charger(context: dict[str, Any]) -> bool:
+    profile = dict(context.get("profile") or {})
+    return bool(context.get("is_proficient")) and str(profile.get("type") or "").strip().upper() == "M"
 
 
 def _qualifies_for_crossbow_expert_bonus_attack(context: dict[str, Any]) -> bool:
@@ -3724,8 +3868,11 @@ def _qualifies_for_sharpshooter(context: dict[str, Any]) -> bool:
 def _base_attack_feat_notes(
     context: dict[str, Any],
     *,
+    has_charger_phb: bool = False,
+    has_charger_xphb: bool = False,
     has_crossbow_expert: bool,
     has_great_weapon_master: bool,
+    has_gunner: bool = False,
     has_martial_adept: bool,
     has_polearm_master: bool,
     has_savage_attacker: bool,
@@ -3736,6 +3883,8 @@ def _base_attack_feat_notes(
     notes: list[str] = []
     if has_crossbow_expert and _qualifies_for_crossbow_expert(context):
         notes.append("Crossbow Expert (ignore loading, no adjacent disadvantage)")
+    if has_gunner and _qualifies_for_gunner(context):
+        notes.append("Gunner (ignore loading, no adjacent disadvantage)")
     if has_great_weapon_master and _qualifies_for_great_weapon_master(context):
         notes.append("Great Weapon Master (bonus attack on crit or kill)")
     if has_martial_adept and not ranged_attack:
@@ -3789,6 +3938,7 @@ def _build_weapon_attack_payload(
     *,
     attack_bonus: int,
     damage_bonus: int,
+    extra_damage: str | None = None,
     notes: str,
     index: int,
     name_suffix: str = "",
@@ -3802,7 +3952,7 @@ def _build_weapon_attack_payload(
         "name": attack_name,
         "category": str(category_override or _weapon_attack_category(profile)),
         "attack_bonus": attack_bonus,
-        "damage": _format_weapon_damage(profile, damage_bonus),
+        "damage": _format_weapon_damage(profile, damage_bonus, extra_damage=extra_damage),
         "damage_type": DAMAGE_TYPE_LABELS.get(str(profile.get("damage_type") or "").strip().upper(), ""),
         "notes": notes,
         "systems_ref": dict(dict(context.get("item") or {}).get("systems_ref") or {}) or None,
@@ -3876,7 +4026,31 @@ def _is_proficient_with_weapon(
         return True
     if weapon_category == "martial" and normalize_lookup("Martial Weapons") in normalized_proficiencies:
         return True
+    if _weapon_uses_firearm_proficiency(profile, attack_name=attack_name):
+        return normalize_lookup("Firearms") in normalized_proficiencies
     return False
+
+
+def _weapon_uses_firearm_proficiency(profile: dict[str, Any], *, attack_name: str) -> bool:
+    weapon_category = str(profile.get("weapon_category") or "").strip().lower()
+    if weapon_category == "firearm":
+        return True
+    candidate_values = [
+        str(profile.get("title") or "").strip(),
+        str(attack_name or "").strip(),
+    ]
+    return any(
+        normalize_lookup(value)
+        in {
+            normalize_lookup("Pistol"),
+            normalize_lookup("Musket"),
+            normalize_lookup("Pepperbox"),
+            normalize_lookup("Blunderbuss"),
+            normalize_lookup("Firearm"),
+        }
+        for value in candidate_values
+        if str(value or "").strip()
+    )
 
 
 def _has_fighting_style(selected_choices: dict[str, list[str]], *style_values: str) -> bool:
@@ -3943,10 +4117,14 @@ def _weapon_attack_category(profile: dict[str, Any]) -> str:
     return "ranged weapon" if str(profile.get("type") or "").strip().upper() == "R" else "melee weapon"
 
 
-def _format_weapon_damage(profile: dict[str, Any], damage_bonus: int) -> str:
+def _format_weapon_damage(profile: dict[str, Any], damage_bonus: int, *, extra_damage: str | None = None) -> str:
     base_damage = str(profile.get("damage") or "").strip()
     if not base_damage:
         return "--"
+    parts = [base_damage]
+    if str(extra_damage or "").strip():
+        parts.append(str(extra_damage).strip())
+    damage_text = "+".join(parts)
     bonus_text = ""
     if damage_bonus > 0:
         bonus_text = f"+{damage_bonus}"
@@ -3954,8 +4132,33 @@ def _format_weapon_damage(profile: dict[str, Any], damage_bonus: int) -> str:
         bonus_text = str(damage_bonus)
     damage_type = DAMAGE_TYPE_LABELS.get(str(profile.get("damage_type") or "").strip().upper(), "").strip()
     if damage_type:
-        return f"{base_damage}{bonus_text} {damage_type}"
-    return f"{base_damage}{bonus_text}"
+        return f"{damage_text}{bonus_text} {damage_type}"
+    return f"{damage_text}{bonus_text}"
+
+
+def _build_unarmed_attack_payload(
+    *,
+    ability_scores: dict[str, int],
+    proficiency_bonus: int,
+    index: int,
+) -> dict[str, Any]:
+    strength_modifier = _ability_modifier(ability_scores.get("str", DEFAULT_ABILITY_SCORE))
+    damage_bonus = strength_modifier
+    damage = "1d4"
+    if damage_bonus > 0:
+        damage = f"{damage}+{damage_bonus}"
+    elif damage_bonus < 0:
+        damage = f"{damage}{damage_bonus}"
+    return {
+        "id": f"unarmed-strike-{index}",
+        "name": "Unarmed Strike",
+        "category": "melee weapon",
+        "attack_bonus": proficiency_bonus + strength_modifier,
+        "damage": f"{damage} bludgeoning",
+        "damage_type": "Bludgeoning",
+        "notes": "Tavern Brawler enhanced unarmed strike.",
+        "systems_ref": None,
+    }
 
 
 def _build_weapon_attack_notes(
@@ -6425,7 +6628,7 @@ def _apply_tracker_templates_to_feature_payloads(
         )
         if tracker_template is None:
             tracker_template = _build_feature_tracker_template(
-                str(feature_payload.get("name") or "").strip(),
+                feature_payload,
                 ability_scores=ability_scores,
                 current_level=current_level,
                 display_order=display_order,
@@ -8964,14 +9167,20 @@ def _resource_value_by_level(current_level: int, thresholds: list[tuple[int, int
     return value
 
 
+def _feature_has_effect(effect_keys: set[str], *values: str) -> bool:
+    return any(normalize_lookup(value) in effect_keys for value in values if str(value or "").strip())
+
+
 def _build_feature_tracker_template(
-    feature_name: str,
+    feature_payload: dict[str, Any],
     *,
     ability_scores: dict[str, int],
     current_level: int,
     display_order: int,
 ) -> dict[str, Any] | None:
+    feature_name = str(feature_payload.get("name") or "").strip()
     normalized = normalize_lookup(feature_name)
+    effect_keys = {normalize_lookup(value) for value in _feat_effect_keys_for_feature(feature_payload) if str(value or "").strip()}
     if normalized == normalize_lookup("Second Wind"):
         return {
             "id": "second-wind",
@@ -9193,7 +9402,7 @@ def _build_feature_tracker_template(
             "display_order": display_order,
             "activation_type": "special",
         }
-    if normalized == normalize_lookup("Chef"):
+    if _feature_has_effect(effect_keys, "Chef"):
         uses = _proficiency_bonus_for_level(current_level)
         return {
             "id": "chef-treats",
@@ -9208,7 +9417,7 @@ def _build_feature_tracker_template(
             "display_order": display_order,
             "activation_type": "bonus_action",
         }
-    if normalized == normalize_lookup("Poisoner"):
+    if _feature_has_effect(effect_keys, "Poisoner"):
         uses = _proficiency_bonus_for_level(current_level)
         return {
             "id": "poisoner-doses",
@@ -9223,7 +9432,7 @@ def _build_feature_tracker_template(
             "display_order": display_order,
             "activation_type": "bonus_action",
         }
-    if normalized == normalize_lookup("Gift of the Metallic Dragon"):
+    if _feature_has_effect(effect_keys, "Gift of the Metallic Dragon"):
         uses = _proficiency_bonus_for_level(current_level)
         return {
             "id": "protective-wings",
@@ -9238,7 +9447,7 @@ def _build_feature_tracker_template(
             "display_order": display_order,
             "activation_type": "reaction",
         }
-    if normalized == normalize_lookup("Gift of the Gem Dragon"):
+    if _feature_has_effect(effect_keys, "Gift of the Gem Dragon"):
         uses = _proficiency_bonus_for_level(current_level)
         return {
             "id": "telekinetic-reprisal",
@@ -9253,7 +9462,7 @@ def _build_feature_tracker_template(
             "display_order": display_order,
             "activation_type": "reaction",
         }
-    if normalized == normalize_lookup("Lucky"):
+    if _feature_has_effect(effect_keys, "Lucky"):
         return {
             "id": "lucky",
             "label": "Lucky",
@@ -9267,7 +9476,7 @@ def _build_feature_tracker_template(
             "display_order": display_order,
             "activation_type": "special",
         }
-    if normalized == normalize_lookup("Martial Adept"):
+    if _feature_has_effect(effect_keys, "Martial Adept"):
         return {
             "id": "martial-adept",
             "label": "Martial Adept",
@@ -9281,7 +9490,7 @@ def _build_feature_tracker_template(
             "display_order": display_order,
             "activation_type": "special",
         }
-    if normalized == normalize_lookup("Metamagic Adept"):
+    if _feature_has_effect(effect_keys, "Metamagic Adept"):
         return {
             "id": "metamagic-adept",
             "label": "Metamagic Adept Sorcery Points",
@@ -9294,6 +9503,230 @@ def _build_feature_tracker_template(
             "notes": "Metamagic Adept Sorcery Points",
             "display_order": display_order,
             "activation_type": "special",
+        }
+    if _feature_has_effect(effect_keys, "Adept of the Red Robes"):
+        uses = _proficiency_bonus_for_level(current_level)
+        return {
+            "id": "magical-balance",
+            "label": "Magical Balance",
+            "category": "feat",
+            "initial_current": uses,
+            "max": uses,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Magical Balance",
+            "display_order": display_order,
+            "activation_type": "special",
+        }
+    if _feature_has_effect(effect_keys, "Agent of Order"):
+        uses = _proficiency_bonus_for_level(current_level)
+        return {
+            "id": "stasis-strike",
+            "label": "Stasis Strike",
+            "category": "feat",
+            "initial_current": uses,
+            "max": uses,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Stasis Strike",
+            "display_order": display_order,
+            "activation_type": "special",
+        }
+    if _feature_has_effect(effect_keys, "Baleful Scion"):
+        uses = _proficiency_bonus_for_level(current_level)
+        return {
+            "id": "grasp-of-avarice",
+            "label": "Grasp of Avarice",
+            "category": "feat",
+            "initial_current": uses,
+            "max": uses,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Grasp of Avarice",
+            "display_order": display_order,
+            "activation_type": "special",
+        }
+    if _feature_has_effect(effect_keys, "Ember of the Fire Giant"):
+        uses = _proficiency_bonus_for_level(current_level)
+        return {
+            "id": "searing-ignition",
+            "label": "Searing Ignition",
+            "category": "feat",
+            "initial_current": uses,
+            "max": uses,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Searing Ignition",
+            "display_order": display_order,
+            "activation_type": "action",
+        }
+    if _feature_has_effect(effect_keys, "Fury of the Frost Giant"):
+        uses = _proficiency_bonus_for_level(current_level)
+        return {
+            "id": "frigid-retaliation",
+            "label": "Frigid Retaliation",
+            "category": "feat",
+            "initial_current": uses,
+            "max": uses,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Frigid Retaliation",
+            "display_order": display_order,
+            "activation_type": "reaction",
+        }
+    if _feature_has_effect(effect_keys, "Guile of the Cloud Giant"):
+        uses = _proficiency_bonus_for_level(current_level)
+        return {
+            "id": "cloudy-escape",
+            "label": "Cloudy Escape",
+            "category": "feat",
+            "initial_current": uses,
+            "max": uses,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Cloudy Escape",
+            "display_order": display_order,
+            "activation_type": "reaction",
+        }
+    if _feature_has_effect(effect_keys, "Keenness of the Stone Giant"):
+        uses = _proficiency_bonus_for_level(current_level)
+        return {
+            "id": "stone-throw",
+            "label": "Stone Throw",
+            "category": "feat",
+            "initial_current": uses,
+            "max": uses,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Stone Throw",
+            "display_order": display_order,
+            "activation_type": "bonus_action",
+        }
+    if _feature_has_effect(effect_keys, "Knight of the Crown"):
+        uses = _proficiency_bonus_for_level(current_level)
+        return {
+            "id": "commanding-rally",
+            "label": "Commanding Rally",
+            "category": "feat",
+            "initial_current": uses,
+            "max": uses,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Commanding Rally",
+            "display_order": display_order,
+            "activation_type": "bonus_action",
+        }
+    if _feature_has_effect(effect_keys, "Knight of the Rose"):
+        uses = _proficiency_bonus_for_level(current_level)
+        return {
+            "id": "bolstering-rally",
+            "label": "Bolstering Rally",
+            "category": "feat",
+            "initial_current": uses,
+            "max": uses,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Bolstering Rally",
+            "display_order": display_order,
+            "activation_type": "bonus_action",
+        }
+    if _feature_has_effect(effect_keys, "Knight of the Sword"):
+        uses = _proficiency_bonus_for_level(current_level)
+        return {
+            "id": "demoralizing-strike",
+            "label": "Demoralizing Strike",
+            "category": "feat",
+            "initial_current": uses,
+            "max": uses,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Demoralizing Strike",
+            "display_order": display_order,
+            "activation_type": "special",
+        }
+    if _feature_has_effect(effect_keys, "Righteous Heritor"):
+        uses = _proficiency_bonus_for_level(current_level)
+        return {
+            "id": "soothe-pain",
+            "label": "Soothe Pain",
+            "category": "feat",
+            "initial_current": uses,
+            "max": uses,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Soothe Pain",
+            "display_order": display_order,
+            "activation_type": "reaction",
+        }
+    if _feature_has_effect(effect_keys, "Soul of the Storm Giant"):
+        uses = _proficiency_bonus_for_level(current_level)
+        return {
+            "id": "maelstrom-aura",
+            "label": "Maelstrom Aura",
+            "category": "feat",
+            "initial_current": uses,
+            "max": uses,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Maelstrom Aura",
+            "display_order": display_order,
+            "activation_type": "bonus_action",
+        }
+    if _feature_has_effect(effect_keys, "Squire of Solamnia"):
+        uses = _proficiency_bonus_for_level(current_level)
+        return {
+            "id": "precise-strike",
+            "label": "Precise Strike",
+            "category": "feat",
+            "initial_current": uses,
+            "max": uses,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Precise Strike",
+            "display_order": display_order,
+            "activation_type": "special",
+        }
+    if _feature_has_effect(effect_keys, "Strike of the Giants"):
+        uses = _proficiency_bonus_for_level(current_level)
+        return {
+            "id": "strike-of-the-giants",
+            "label": "Strike of the Giants",
+            "category": "feat",
+            "initial_current": uses,
+            "max": uses,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Strike of the Giants",
+            "display_order": display_order,
+            "activation_type": "special",
+        }
+    if _feature_has_effect(effect_keys, "Boon of Recovery"):
+        return {
+            "id": "recover-vitality-dice",
+            "label": "Recover Vitality Dice",
+            "category": "feat",
+            "initial_current": 10,
+            "max": 10,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Recover Vitality d10s",
+            "display_order": display_order,
+            "activation_type": "bonus_action",
         }
     return None
 
@@ -9377,6 +9810,8 @@ def _humanize_proficiency_value(value: str, *, category: str) -> str:
         return {
             "simple": "Simple Weapons",
             "martial": "Martial Weapons",
+            "firearms": "Firearms",
+            "improvised": "Improvised Weapons",
         }.get(normalized, _humanize_words(cleaned))
     return _humanize_words(cleaned)
 

@@ -128,9 +128,20 @@ def normalize_campaign_character_option(
             ):
                 if key in raw_option:
                     normalized[key] = deepcopy(raw_option.get(key))
+            optionalfeature_progression = raw_option.get(
+                "optionalfeature_progression",
+                raw_option.get("optionalfeatureProgression"),
+            )
+            if optionalfeature_progression is not None:
+                normalized["optionalfeature_progression"] = deepcopy(optionalfeature_progression)
             additional_spells = raw_option.get("additional_spells", raw_option.get("additionalSpells"))
             if additional_spells is not None:
                 normalized["additional_spells"] = deepcopy(additional_spells)
+            modeled_effects = _normalize_modeled_effects(
+                raw_option.get("modeled_effects", raw_option.get("modeledEffects"))
+            )
+            if modeled_effects:
+                normalized["modeled_effects"] = modeled_effects
             return normalized
         if kind == "species":
             normalized["species_name"] = str(raw_option.get("name") or "").strip() or str(title or "").strip()
@@ -231,6 +242,28 @@ def collect_campaign_option_spell_grants(option_payloads: list[Any]) -> list[dic
 
 
 def _normalize_string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        raw_items = value.replace("\r", "").replace("\n", ",").split(",")
+    elif isinstance(value, list):
+        raw_items = value
+    else:
+        return []
+
+    values: list[str] = []
+    seen: set[str] = set()
+    for raw_item in raw_items:
+        if isinstance(raw_item, (dict, list, tuple, set)):
+            continue
+        clean_item = str(raw_item or "").strip()
+        normalized_item = clean_item.casefold()
+        if not clean_item or normalized_item in seen:
+            continue
+        seen.add(normalized_item)
+        values.append(clean_item)
+    return values
+
+
+def _normalize_modeled_effects(value: Any) -> list[str]:
     if isinstance(value, str):
         raw_items = value.replace("\r", "").replace("\n", ",").split(",")
     elif isinstance(value, list):
