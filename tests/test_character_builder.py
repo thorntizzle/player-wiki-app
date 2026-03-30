@@ -259,7 +259,7 @@ def _minimal_import_metadata(character_slug: str = "new-hero") -> CharacterImpor
         character_slug=character_slug,
         source_path="builder://native-level-1",
         imported_at_utc="2026-03-29T00:00:00Z",
-        parser_version="2026-03-30.09",
+        parser_version="2026-03-30.10",
         import_status="clean",
         warnings=[],
     )
@@ -1663,6 +1663,37 @@ def test_normalize_definition_to_native_model_merges_linked_duplicate_equipment_
     assert normalized.equipment_catalog[0]["systems_ref"]["slug"] == "phb-item-longsword"
 
 
+def test_normalize_definition_to_native_model_adds_proficiency_bonus_feat_trackers():
+    definition = _minimal_character_definition("mira-salt", "Mira Salt")
+    definition.profile["class_level_text"] = "Fighter 5"
+    definition.profile["classes"] = [{"class_name": "Fighter", "subclass_name": "", "level": 5}]
+    definition.features = [
+        {"id": "chef-1", "name": "Chef", "category": "feat", "source": "TCE", "description_markdown": ""},
+        {"id": "poisoner-1", "name": "Poisoner", "category": "feat", "source": "TCE", "description_markdown": ""},
+        {
+            "id": "gift-metallic-dragon-1",
+            "name": "Gift of the Metallic Dragon",
+            "category": "feat",
+            "source": "FTD",
+            "description_markdown": "",
+        },
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+    features_by_name = {feature["name"]: feature for feature in normalized.features}
+    resources_by_id = {resource["id"]: resource for resource in normalized.resource_templates}
+
+    assert features_by_name["Chef"]["tracker_ref"] == "chef-treats"
+    assert features_by_name["Poisoner"]["tracker_ref"] == "poisoner-doses"
+    assert features_by_name["Gift of the Metallic Dragon"]["tracker_ref"] == "protective-wings"
+    assert resources_by_id["chef-treats"]["max"] == 3
+    assert resources_by_id["chef-treats"]["reset_on"] == "long_rest"
+    assert resources_by_id["poisoner-doses"]["max"] == 3
+    assert resources_by_id["poisoner-doses"]["reset_on"] == "long_rest"
+    assert resources_by_id["protective-wings"]["max"] == 3
+    assert resources_by_id["protective-wings"]["reset_on"] == "long_rest"
+
+
 def test_level_one_builder_surfaces_and_applies_skilled_feat_choices():
     fighter = _systems_entry(
         "class",
@@ -2199,6 +2230,115 @@ def test_level_one_builder_applies_metamagic_adept_tracker():
     assert metamagic_feature["tracker_ref"] == "metamagic-adept"
     assert resources_by_id["metamagic-adept"]["max"] == 2
     assert resources_by_id["metamagic-adept"]["reset_on"] == "long_rest"
+
+
+def test_level_one_builder_applies_gift_of_the_metallic_dragon_spell_and_tracker():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    variant_human = _systems_entry(
+        "race",
+        "phb-race-variant-human",
+        "Variant Human",
+        metadata={
+            "size": ["M"],
+            "speed": 30,
+            "languages": [{"common": True}],
+            "feats": [{"any": 1}],
+        },
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    gift_of_the_metallic_dragon = _systems_entry(
+        "feat",
+        "ftd-feat-gift-of-the-metallic-dragon",
+        "Gift of the Metallic Dragon",
+        source_id="FTD",
+        metadata={
+            "additional_spells": [
+                {
+                    "ability": {"choose": ["int", "wis", "cha"]},
+                    "innate": {"_": {"daily": {"1": ["Cure Wounds"]}}},
+                }
+            ]
+        },
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    cure_wounds = _systems_entry(
+        "spell",
+        "phb-spell-cure-wounds",
+        "Cure Wounds",
+        metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1},
+    )
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [variant_human],
+            "background": [acolyte],
+            "feat": [gift_of_the_metallic_dragon],
+            "subclass": [],
+            "item": [],
+            "spell": [cure_wounds],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    form_values = {
+        "name": "Ari Vale",
+        "character_slug": "ari-vale",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": variant_human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "species_feat_1": gift_of_the_metallic_dragon.slug,
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "13",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+
+    spells_by_name = {spell["name"]: spell for spell in definition.spellcasting["spells"]}
+    gift_feature = next(feature for feature in definition.features if feature["name"] == "Gift of the Metallic Dragon")
+    resources_by_id = {resource["id"]: resource for resource in definition.resource_templates}
+
+    assert "Cure Wounds (1 / Long Rest)" in context["preview"]["spells"]
+    assert "Protective Wings: 2 / 2 (Long Rest)" in context["preview"]["resources"]
+    assert spells_by_name["Cure Wounds"]["mark"] == "1 / Long Rest"
+    assert gift_feature["tracker_ref"] == "protective-wings"
+    assert resources_by_id["protective-wings"]["max"] == 2
+    assert resources_by_id["protective-wings"]["reset_on"] == "long_rest"
 
 
 def test_level_one_builder_applies_alert_feat_to_initiative():
@@ -3073,7 +3213,7 @@ def test_level_one_builder_populates_starting_equipment_spells_and_currency():
     assert spells_by_name["Message"]["components"] == "V, S, M (a short piece of copper wire)"
     assert resource_templates_by_id["arcane-recovery"]["max"] == 1
     assert state_resources_by_id["arcane-recovery"]["current"] == 1
-    assert import_metadata.parser_version == "2026-03-30.09"
+    assert import_metadata.parser_version == "2026-03-30.10"
 
 
 def test_level_one_builder_adds_structured_subclass_prepared_spells():
@@ -6387,6 +6527,167 @@ def test_native_level_up_adds_feature_level_additional_spells():
     assert spells_by_name["Command"]["mark"] == "Prepared"
     assert spells_by_name["Protection from Evil and Good"]["is_always_prepared"] is True
     assert spells_by_name["Sanctuary"]["is_always_prepared"] is True
+
+
+def test_native_level_up_adds_feature_level_innate_spells():
+    paladin = _systems_entry(
+        "class",
+        "phb-class-paladin",
+        "Paladin",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["wis", "cha"],
+            "subclass_title": "Sacred Oath",
+        },
+    )
+    devotion = _systems_entry(
+        "subclass",
+        "phb-subclass-paladin-oath-of-devotion",
+        "Oath of Devotion",
+        metadata={"class_name": "Paladin", "class_source": "PHB"},
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    sacred_oath = _systems_entry(
+        "classfeature",
+        "phb-classfeature-sacred-oath",
+        "Sacred Oath",
+        metadata={"level": 3},
+    )
+    oath_of_devotion = _systems_entry(
+        "subclassfeature",
+        "phb-subclassfeature-oath-of-devotion",
+        "Oath of Devotion",
+        metadata={
+            "level": 3,
+            "class_name": "Paladin",
+            "class_source": "PHB",
+            "subclass_name": "Oath of Devotion",
+            "additional_spells": [
+                {
+                    "innate": {
+                        "3": {
+                            "daily": {
+                                "1": ["Sanctuary"],
+                            }
+                        }
+                    }
+                }
+            ],
+        },
+    )
+    bless = _systems_entry("spell", "phb-spell-bless", "Bless", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    command = _systems_entry("spell", "phb-spell-command", "Command", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    cure_wounds = _systems_entry("spell", "phb-spell-cure-wounds", "Cure Wounds", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    sanctuary = _systems_entry("spell", "phb-spell-sanctuary", "Sanctuary", metadata={"casting_time": [{"number": 1, "unit": "bonus"}]})
+    shield_of_faith = _systems_entry("spell", "phb-spell-shield-of-faith", "Shield of Faith", metadata={"casting_time": [{"number": 1, "unit": "bonus"}]})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [paladin],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [devotion],
+            "item": [],
+            "spell": [
+                bless,
+                command,
+                cure_wounds,
+                sanctuary,
+                shield_of_faith,
+            ],
+        },
+        class_progression=[
+            {
+                "level": 3,
+                "level_label": "Level 3",
+                "feature_rows": [
+                    {"label": "Sacred Oath", "entry": sacred_oath, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+        subclass_progression=[
+            {
+                "level": 3,
+                "level_label": "Level 3",
+                "feature_rows": [
+                    {"label": "Oath of Devotion", "entry": oath_of_devotion, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    current_definition = _minimal_character_definition("ser-galen", "Ser Galen")
+    current_definition.profile["class_level_text"] = "Paladin 2"
+    current_definition.profile["classes"][0]["class_name"] = "Paladin"
+    current_definition.profile["classes"][0]["level"] = 2
+    current_definition.profile["classes"][0]["systems_ref"] = {
+        "entry_key": "dnd-5e|class|phb|paladin",
+        "entry_type": "class",
+        "title": "Paladin",
+        "slug": paladin.slug,
+        "source_id": "PHB",
+    }
+    current_definition.profile["class_ref"] = dict(current_definition.profile["classes"][0]["systems_ref"])
+    current_definition.stats["max_hp"] = 22
+    current_definition.stats["proficiency_bonus"] = 2
+    current_definition.stats["ability_scores"] = {
+        "str": {"score": 16, "modifier": 3, "save_bonus": 3},
+        "dex": {"score": 10, "modifier": 0, "save_bonus": 0},
+        "con": {"score": 14, "modifier": 2, "save_bonus": 2},
+        "int": {"score": 8, "modifier": -1, "save_bonus": -1},
+        "wis": {"score": 12, "modifier": 1, "save_bonus": 3},
+        "cha": {"score": 16, "modifier": 3, "save_bonus": 5},
+    }
+    current_definition.spellcasting = {
+        "spellcasting_class": "Paladin",
+        "spellcasting_ability": "Charisma",
+        "spell_save_dc": 13,
+        "spell_attack_bonus": 5,
+        "slot_progression": [{"level": 1, "max_slots": 2}],
+        "spells": [
+            {"name": "Bless", "mark": "Prepared", "systems_ref": {"slug": bless.slug, "title": bless.title, "entry_type": "spell", "source_id": "PHB"}},
+            {"name": "Shield of Faith", "mark": "Prepared", "systems_ref": {"slug": shield_of_faith.slug, "title": shield_of_faith.title, "entry_type": "spell", "source_id": "PHB"}},
+        ],
+    }
+    current_definition.source["source_path"] = "builder://native-level-2"
+
+    base_form = {"hp_gain": "6", "subclass_slug": devotion.slug}
+    level_up_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        current_definition,
+        base_form,
+    )
+
+    assert "Sanctuary" in level_up_context["preview"]["new_spells"]
+
+    level_up_form = {
+        **base_form,
+        "levelup_prepared_spell_1": _field_value_for_label(level_up_context, "levelup_prepared_spell_1", "Command"),
+        "levelup_prepared_spell_2": _field_value_for_label(level_up_context, "levelup_prepared_spell_2", "Cure Wounds"),
+    }
+    leveled_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        level_up_context,
+        level_up_form,
+    )
+    spells_by_name = {spell["name"]: spell for spell in leveled_definition.spellcasting["spells"]}
+
+    assert spells_by_name["Sanctuary"]["mark"] == "1 / Long Rest"
+    assert spells_by_name["Command"]["mark"] == "Prepared"
 
 
 def test_native_level_up_applies_optionalfeature_additional_spells():

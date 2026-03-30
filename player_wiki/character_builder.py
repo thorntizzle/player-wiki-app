@@ -19,7 +19,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-03-30.09"
+CHARACTER_BUILDER_VERSION = "2026-03-30.10"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -6496,6 +6496,8 @@ def _build_native_level_up_preview(
         definition=definition,
         selected_class=selected_class,
         selected_subclass=selected_subclass,
+        feat_selections=feat_selections,
+        values=values,
         selected_choices=selected_choices,
         spell_catalog=spell_catalog,
         target_level=target_level,
@@ -6758,17 +6760,30 @@ def _build_level_up_spellcasting(
             spell_catalog=spell_catalog,
             is_always_prepared=True,
         )
-    for spell_title, is_ritual in _automatic_feat_innate_spell_values(
+    for spell_grant in _automatic_feat_innate_spell_values(
         feat_selections=feat_selections,
         values=values,
         target_level=target_level,
     ):
         _add_spell_to_payloads(
             spells_by_key,
-            selected_value=spell_title,
+            selected_value=str(spell_grant.get("name") or "").strip(),
             spell_catalog=spell_catalog,
-            mark="Ritual" if is_ritual else "Granted",
-            is_ritual=is_ritual,
+            mark=str(spell_grant.get("mark") or "").strip(),
+            is_ritual=bool(spell_grant.get("is_ritual")),
+        )
+    for spell_grant in _automatic_innate_spell_values(
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        target_level=target_level,
+        feature_entries=feature_entries,
+    ):
+        _add_spell_to_payloads(
+            spells_by_key,
+            selected_value=str(spell_grant.get("name") or "").strip(),
+            spell_catalog=spell_catalog,
+            mark=str(spell_grant.get("mark") or "").strip(),
+            is_ritual=bool(spell_grant.get("is_ritual")),
         )
 
     if not ability_name:
@@ -6921,17 +6936,30 @@ def _build_level_one_spell_payloads(
             spell_catalog=spell_catalog,
             is_always_prepared=True,
         )
-    for spell_title, is_ritual in _automatic_feat_innate_spell_values(
+    for spell_grant in _automatic_feat_innate_spell_values(
         feat_selections=feat_selections,
         values=_values_from_selected_choices(choice_sections, selected_choices),
         target_level=1,
     ):
         _add_spell_to_payloads(
             spells_by_key,
-            selected_value=spell_title,
+            selected_value=str(spell_grant.get("name") or "").strip(),
             spell_catalog=spell_catalog,
-            mark="Ritual" if is_ritual else "Granted",
-            is_ritual=is_ritual,
+            mark=str(spell_grant.get("mark") or "").strip(),
+            is_ritual=bool(spell_grant.get("is_ritual")),
+        )
+    for spell_grant in _automatic_innate_spell_values(
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        target_level=1,
+        feature_entries=feature_entries,
+    ):
+        _add_spell_to_payloads(
+            spells_by_key,
+            selected_value=str(spell_grant.get("name") or "").strip(),
+            spell_catalog=spell_catalog,
+            mark=str(spell_grant.get("mark") or "").strip(),
+            is_ritual=bool(spell_grant.get("is_ritual")),
         )
 
     return list(spells_by_key.values())
@@ -7262,14 +7290,24 @@ def _build_feat_spell_fields_from_spec(
     return fields
 
 
-def _iter_unlocked_additional_spell_values(raw_map: Any, *, target_level: int) -> list[Any]:
+def _iter_unlocked_additional_spell_values(
+    raw_map: Any,
+    *,
+    target_level: int,
+    exact_level: int | None = None,
+) -> list[Any]:
     values: list[Any] = []
     for raw_unlock_level, raw_value in dict(raw_map or {}).items():
         if str(raw_unlock_level).strip() == "_":
             values.append(raw_value)
             continue
         unlock_level = _parse_additional_spell_unlock_level(raw_unlock_level)
-        if unlock_level is None or unlock_level > target_level:
+        if unlock_level is None:
+            continue
+        if exact_level is not None:
+            if unlock_level != exact_level:
+                continue
+        elif unlock_level > target_level:
             continue
         values.append(raw_value)
     return values
@@ -7302,7 +7340,7 @@ def _extract_feat_innate_choice_specs(block: dict[str, Any], *, target_level: in
                 specs.append(
                     {
                         **spec,
-                        "spell_mark": "Ritual" if ritual_filter else f"{raw_daily_uses} / Long Rest",
+                        "spell_mark": _format_innate_spell_mark(raw_daily_uses, is_ritual=ritual_filter),
                         "spell_is_ritual": ritual_filter,
                     }
                 )
@@ -7595,20 +7633,12 @@ def _automatic_feat_innate_spell_values(
     feat_selections: list[dict[str, Any]],
     values: dict[str, str],
     target_level: int,
-) -> list[tuple[str, bool]]:
-    spell_values: list[tuple[str, bool]] = []
+) -> list[dict[str, Any]]:
+    spell_values: list[dict[str, Any]] = []
     for selection in feat_selections:
         for block in _selected_feat_additional_spell_blocks(selection=selection, values=values):
             spell_values.extend(_extract_innate_additional_spell_values([block], target_level=target_level))
-    deduped: list[tuple[str, bool]] = []
-    seen: set[str] = set()
-    for spell_name, is_ritual in spell_values:
-        normalized_name = normalize_lookup(spell_name)
-        if not spell_name or normalized_name in seen:
-            continue
-        seen.add(normalized_name)
-        deduped.append((spell_name, is_ritual))
-    return deduped
+    return _dedupe_innate_spell_values(spell_values)
 
 
 def _automatic_known_spell_values(
@@ -7732,6 +7762,30 @@ def _automatic_prepared_spell_lookup_keys(
     return payload_keys
 
 
+def _automatic_innate_spell_values(
+    *,
+    selected_class: SystemsEntryRecord | None,
+    selected_subclass: SystemsEntryRecord | None,
+    target_level: int,
+    exact_level: int | None = None,
+    feature_entries: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    values: list[dict[str, Any]] = []
+    for additional_spells in _additional_spell_metadata_entries(
+        selected_class,
+        selected_subclass,
+        feature_entries=feature_entries,
+    ):
+        values.extend(
+            _extract_innate_additional_spell_values(
+                additional_spells,
+                target_level=target_level,
+                exact_level=exact_level,
+            )
+        )
+    return _dedupe_innate_spell_values(values)
+
+
 def _extract_prepared_additional_spell_values(
     additional_spells: Any,
     *,
@@ -7760,20 +7814,65 @@ def _extract_innate_additional_spell_values(
     additional_spells: Any,
     *,
     target_level: int,
-) -> list[tuple[str, bool]]:
-    values: list[tuple[str, bool]] = []
+    exact_level: int | None = None,
+) -> list[dict[str, Any]]:
+    values: list[dict[str, Any]] = []
     for block in list(additional_spells or []):
         if not isinstance(block, dict):
             continue
-        for raw_value in _iter_unlocked_additional_spell_values(block.get("innate"), target_level=target_level):
+        for raw_value in _iter_unlocked_additional_spell_values(
+            block.get("innate"),
+            target_level=target_level,
+            exact_level=exact_level,
+        ):
             innate_block = dict(raw_value or {})
-            for daily_values in dict(innate_block.get("daily") or {}).values():
+            for raw_daily_uses, daily_values in dict(innate_block.get("daily") or {}).items():
                 ritual = False
                 for spec in _extract_choose_additional_spell_specs(daily_values):
                     ritual = ritual or _additional_spell_filter_requires_ritual(str(spec.get("filter") or ""))
                 for spell_name in _flatten_additional_spell_values(daily_values):
-                    values.append((spell_name, ritual))
-    return values
+                    values.append(
+                        {
+                            "name": spell_name,
+                            "mark": _format_innate_spell_mark(raw_daily_uses, is_ritual=ritual),
+                            "is_ritual": ritual,
+                        }
+                    )
+    return _dedupe_innate_spell_values(values)
+
+
+def _format_innate_spell_mark(raw_daily_uses: Any, *, is_ritual: bool) -> str:
+    if is_ritual:
+        return "Ritual"
+    uses_match = re.search(r"(\d+)", str(raw_daily_uses or "").strip())
+    if uses_match is not None:
+        return f"{int(uses_match.group(1))} / Long Rest"
+    clean_uses = str(raw_daily_uses or "").strip()
+    if clean_uses:
+        return f"{clean_uses} / Long Rest"
+    return "Granted"
+
+
+def _dedupe_innate_spell_values(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, bool]] = set()
+    for spell_payload in list(values or []):
+        payload = dict(spell_payload or {})
+        spell_name = str(payload.get("name") or "").strip()
+        mark = str(payload.get("mark") or "").strip()
+        is_ritual = bool(payload.get("is_ritual"))
+        marker = (normalize_lookup(spell_name), mark, is_ritual)
+        if not spell_name or marker in seen:
+            continue
+        seen.add(marker)
+        deduped.append(
+            {
+                "name": spell_name,
+                "mark": mark,
+                "is_ritual": is_ritual,
+            }
+        )
+    return deduped
 
 
 def _parse_additional_spell_unlock_level(raw_value: Any) -> int | None:
@@ -7844,6 +7943,8 @@ def _summarize_level_up_spell_choices(
     definition: CharacterDefinition,
     selected_class: SystemsEntryRecord,
     selected_subclass: SystemsEntryRecord | None,
+    feat_selections: list[dict[str, Any]],
+    values: dict[str, str],
     selected_choices: dict[str, list[str]],
     spell_catalog: dict[str, Any],
     target_level: int,
@@ -7895,6 +7996,30 @@ def _summarize_level_up_spell_choices(
         if payload_key and payload_key in existing_spell_payload_keys:
             continue
         selected_values.append(selected_value)
+    for spell_grant in _automatic_feat_innate_spell_values(
+        feat_selections=feat_selections,
+        values=values,
+        target_level=target_level,
+    ):
+        selected_value = str(spell_grant.get("name") or "").strip()
+        payload_key = _spell_lookup_key(selected_value, spell_catalog)
+        if payload_key and payload_key in existing_spell_payload_keys:
+            continue
+        if selected_value:
+            selected_values.append(selected_value)
+    for spell_grant in _automatic_innate_spell_values(
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        target_level=target_level,
+        exact_level=target_level,
+        feature_entries=feature_entries,
+    ):
+        selected_value = str(spell_grant.get("name") or "").strip()
+        payload_key = _spell_lookup_key(selected_value, spell_catalog)
+        if payload_key and payload_key in existing_spell_payload_keys:
+            continue
+        if selected_value:
+            selected_values.append(selected_value)
     for spell_grant in collect_campaign_option_spell_grants(list(extra_option_payloads or [])):
         selected_value = str(spell_grant.get("value") or "").strip()
         payload_key = _spell_lookup_key(selected_value, spell_catalog)
@@ -8911,6 +9036,51 @@ def _build_feature_tracker_template(
             "notes": "Indomitable",
             "display_order": display_order,
             "activation_type": "special",
+        }
+    if normalized == normalize_lookup("Chef"):
+        uses = _proficiency_bonus_for_level(current_level)
+        return {
+            "id": "chef-treats",
+            "label": "Chef Treats",
+            "category": "feat",
+            "initial_current": uses,
+            "max": uses,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Chef treats",
+            "display_order": display_order,
+            "activation_type": "bonus_action",
+        }
+    if normalized == normalize_lookup("Poisoner"):
+        uses = _proficiency_bonus_for_level(current_level)
+        return {
+            "id": "poisoner-doses",
+            "label": "Poisoner Doses",
+            "category": "feat",
+            "initial_current": uses,
+            "max": uses,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Poisoner doses",
+            "display_order": display_order,
+            "activation_type": "bonus_action",
+        }
+    if normalized == normalize_lookup("Gift of the Metallic Dragon"):
+        uses = _proficiency_bonus_for_level(current_level)
+        return {
+            "id": "protective-wings",
+            "label": "Protective Wings",
+            "category": "feat",
+            "initial_current": uses,
+            "max": uses,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Protective Wings",
+            "display_order": display_order,
+            "activation_type": "reaction",
         }
     if normalized == normalize_lookup("Lucky"):
         return {
