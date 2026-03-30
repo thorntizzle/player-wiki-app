@@ -1538,6 +1538,41 @@ def test_normalize_definition_to_native_model_updates_bardic_inspiration_to_shor
     assert tracker["reset_on"] == "short_rest"
 
 
+def test_normalize_definition_to_native_model_merges_duplicate_attack_and_equipment_rows_ignoring_case():
+    definition = _minimal_character_definition("mira-salt", "Mira Salt")
+    definition.attacks = [
+        {
+            "id": "longsword-1",
+            "name": "Longsword",
+            "category": "Weapon",
+            "attack_bonus": 5,
+            "damage": "1d8+3 Slashing",
+            "damage_type": "Slashing",
+            "notes": "Versatile",
+        },
+        {
+            "id": "longsword-2",
+            "name": "Longsword",
+            "category": "weapon",
+            "attack_bonus": 5,
+            "damage": "1d8+3 slashing",
+            "damage_type": "slashing",
+            "notes": "versatile",
+        },
+    ]
+    definition.equipment_catalog = [
+        {"id": "longsword-a", "name": "Longsword", "default_quantity": 1, "weight": "3 LB.", "notes": "Martial"},
+        {"id": "longsword-b", "name": "Longsword", "default_quantity": 1, "weight": "3 lb.", "notes": "martial"},
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+
+    assert len(normalized.attacks) == 1
+    assert normalized.attacks[0]["name"] == "Longsword"
+    assert len(normalized.equipment_catalog) == 1
+    assert normalized.equipment_catalog[0]["default_quantity"] == 2
+
+
 def test_level_one_builder_surfaces_and_applies_skilled_feat_choices():
     fighter = _systems_entry(
         "class",
@@ -3225,6 +3260,154 @@ def test_level_one_builder_applies_feature_level_additional_spells():
     assert spells_by_name["Animal Friendship"]["is_always_prepared"] is True
     assert spells_by_name["Speak with Animals"]["is_always_prepared"] is True
     assert spells_by_name["Shillelagh"]["is_bonus_known"] is True
+
+
+def test_level_one_builder_applies_optionalfeature_additional_spells():
+    cleric = _systems_entry(
+        "class",
+        "phb-class-cleric",
+        "Cleric",
+        metadata={
+            "hit_die": {"faces": 8},
+            "proficiency": ["wis", "cha"],
+            "subclass_title": "Divine Domain",
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "shield"],
+                "weapons": ["simple"],
+                "skills": [{"choose": {"count": 2, "from": ["history", "insight", "medicine", "religion"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    spellcasting_feature = _systems_entry("classfeature", "phb-classfeature-spellcasting", "Spellcasting", metadata={"level": 1})
+    mystic_training = _systems_entry(
+        "classfeature",
+        "phb-classfeature-mystic-training",
+        "Mystic Training",
+        metadata={"level": 1},
+    )
+    druidic_initiate = _systems_entry(
+        "optionalfeature",
+        "phb-optionalfeature-druidic-initiate",
+        "Druidic Initiate",
+        metadata={
+            "additional_spells": [
+                {
+                    "known": {"1": {"_": [{"choose": "level=0|class=Druid"}]}},
+                    "prepared": {"1": ["Animal Friendship"]},
+                }
+            ]
+        },
+    )
+    light = _systems_entry("spell", "phb-spell-light", "Light", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 0})
+    sacred_flame = _systems_entry("spell", "phb-spell-sacred-flame", "Sacred Flame", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 0})
+    thaumaturgy = _systems_entry("spell", "phb-spell-thaumaturgy", "Thaumaturgy", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 0})
+    druidcraft = _systems_entry("spell", "phb-spell-druidcraft", "Druidcraft", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 0})
+    shillelagh = _systems_entry("spell", "phb-spell-shillelagh", "Shillelagh", metadata={"casting_time": [{"number": 1, "unit": "bonus"}], "level": 0})
+    animal_friendship = _systems_entry("spell", "phb-spell-animal-friendship", "Animal Friendship", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1})
+    bless = _systems_entry("spell", "phb-spell-bless", "Bless", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1})
+    detect_magic = _systems_entry("spell", "phb-spell-detect-magic", "Detect Magic", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1})
+    guiding_bolt = _systems_entry("spell", "phb-spell-guiding-bolt", "Guiding Bolt", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1})
+    healing_word = _systems_entry("spell", "phb-spell-healing-word", "Healing Word", metadata={"casting_time": [{"number": 1, "unit": "bonus"}], "level": 1})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [cleric],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "optionalfeature": [druidic_initiate],
+            "item": [],
+            "spell": [
+                light,
+                sacred_flame,
+                thaumaturgy,
+                druidcraft,
+                shillelagh,
+                animal_friendship,
+                bless,
+                detect_magic,
+                guiding_bolt,
+                healing_word,
+            ],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Spellcasting", "entry": spellcasting_feature, "embedded_card": {"option_groups": []}},
+                    {
+                        "label": "Mystic Training",
+                        "entry": mystic_training,
+                        "embedded_card": {
+                            "option_groups": [
+                                {
+                                    "options": [
+                                        {"label": "Druidic Initiate", "slug": druidic_initiate.slug},
+                                    ]
+                                }
+                            ]
+                        },
+                    },
+                ],
+            }
+        ],
+    )
+    base_form_values = {
+        "name": "Sister Elm",
+        "character_slug": "sister-elm",
+        "alignment": "Neutral Good",
+        "experience_model": "Milestone",
+        "class_slug": cleric.slug,
+        "species_slug": human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "history",
+        "class_skill_2": "medicine",
+        "class_option_1": druidic_initiate.slug,
+        "str": "10",
+        "dex": "12",
+        "con": "14",
+        "int": "11",
+        "wis": "16",
+        "cha": "13",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", base_form_values)
+    granted_field = _find_builder_field(context, "bonus_spell_known_1_1")
+    granted_labels = {option["label"] for option in granted_field["options"]}
+    form_values = {
+        **base_form_values,
+        "bonus_spell_known_1_1": _field_value_for_label(context, "bonus_spell_known_1_1", "Shillelagh"),
+        "spell_cantrip_1": _field_value_for_label(context, "spell_cantrip_1", "Light"),
+        "spell_cantrip_2": _field_value_for_label(context, "spell_cantrip_2", "Sacred Flame"),
+        "spell_cantrip_3": _field_value_for_label(context, "spell_cantrip_3", "Thaumaturgy"),
+        "spell_level_one_1": _field_value_for_label(context, "spell_level_one_1", "Detect Magic"),
+        "spell_level_one_2": _field_value_for_label(context, "spell_level_one_2", "Guiding Bolt"),
+        "spell_level_one_3": _field_value_for_label(context, "spell_level_one_3", "Healing Word"),
+        "spell_level_one_4": _field_value_for_label(context, "spell_level_one_4", "Bless"),
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+    spells_by_name = {spell["name"]: spell for spell in definition.spellcasting["spells"]}
+
+    assert {"Druidcraft", "Shillelagh"} <= granted_labels
+    assert "Shillelagh (Granted, Cantrip)" in context["preview"]["spells"]
+    assert spells_by_name["Shillelagh"]["is_bonus_known"] is True
+    assert spells_by_name["Animal Friendship"]["is_always_prepared"] is True
 
 
 def test_level_one_builder_surfaces_expanded_subclass_spells_in_known_options():
@@ -5764,6 +5947,192 @@ def test_native_level_up_adds_feature_level_additional_spells():
     assert spells_by_name["Command"]["mark"] == "Prepared"
     assert spells_by_name["Protection from Evil and Good"]["is_always_prepared"] is True
     assert spells_by_name["Sanctuary"]["is_always_prepared"] is True
+
+
+def test_native_level_up_applies_optionalfeature_additional_spells():
+    cleric = _systems_entry(
+        "class",
+        "phb-class-cleric",
+        "Cleric",
+        metadata={
+            "hit_die": {"faces": 8},
+            "proficiency": ["wis", "cha"],
+            "subclass_title": "Divine Domain",
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "shield"],
+                "weapons": ["simple"],
+                "skills": [{"choose": {"count": 2, "from": ["history", "insight", "medicine", "religion"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    spellcasting_feature = _systems_entry("classfeature", "phb-classfeature-spellcasting", "Spellcasting", metadata={"level": 1})
+    mystic_training = _systems_entry(
+        "classfeature",
+        "phb-classfeature-mystic-training",
+        "Mystic Training",
+        metadata={"level": 2},
+    )
+    druidic_initiate = _systems_entry(
+        "optionalfeature",
+        "phb-optionalfeature-druidic-initiate",
+        "Druidic Initiate",
+        metadata={
+            "additional_spells": [
+                {
+                    "known": {"2": {"_": [{"choose": "level=0|class=Druid"}]}},
+                    "prepared": {"2": ["Animal Friendship"]},
+                }
+            ]
+        },
+    )
+    light = _systems_entry("spell", "phb-spell-light", "Light", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 0})
+    sacred_flame = _systems_entry("spell", "phb-spell-sacred-flame", "Sacred Flame", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 0})
+    thaumaturgy = _systems_entry("spell", "phb-spell-thaumaturgy", "Thaumaturgy", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 0})
+    druidcraft = _systems_entry("spell", "phb-spell-druidcraft", "Druidcraft", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 0})
+    shillelagh = _systems_entry("spell", "phb-spell-shillelagh", "Shillelagh", metadata={"casting_time": [{"number": 1, "unit": "bonus"}], "level": 0})
+    animal_friendship = _systems_entry("spell", "phb-spell-animal-friendship", "Animal Friendship", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1})
+    detect_magic = _systems_entry("spell", "phb-spell-detect-magic", "Detect Magic", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1})
+    guiding_bolt = _systems_entry("spell", "phb-spell-guiding-bolt", "Guiding Bolt", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1})
+    healing_word = _systems_entry("spell", "phb-spell-healing-word", "Healing Word", metadata={"casting_time": [{"number": 1, "unit": "bonus"}], "level": 1})
+    bless = _systems_entry("spell", "phb-spell-bless", "Bless", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1})
+    cure_wounds = _systems_entry("spell", "phb-spell-cure-wounds", "Cure Wounds", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [cleric],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "optionalfeature": [druidic_initiate],
+            "item": [],
+            "spell": [
+                light,
+                sacred_flame,
+                thaumaturgy,
+                druidcraft,
+                shillelagh,
+                animal_friendship,
+                detect_magic,
+                guiding_bolt,
+                healing_word,
+                bless,
+                cure_wounds,
+            ],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Spellcasting", "entry": spellcasting_feature, "embedded_card": {"option_groups": []}},
+                ],
+            },
+            {
+                "level": 2,
+                "level_label": "Level 2",
+                "feature_rows": [
+                    {
+                        "label": "Mystic Training",
+                        "entry": mystic_training,
+                        "embedded_card": {
+                            "option_groups": [
+                                {
+                                    "options": [
+                                        {"label": "Druidic Initiate", "slug": druidic_initiate.slug},
+                                    ]
+                                }
+                            ]
+                        },
+                    },
+                ],
+            },
+        ],
+    )
+    level_one_form = {
+        "name": "Sister Elm",
+        "character_slug": "sister-elm",
+        "alignment": "Neutral Good",
+        "experience_model": "Milestone",
+        "class_slug": cleric.slug,
+        "species_slug": human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "history",
+        "class_skill_2": "medicine",
+        "str": "10",
+        "dex": "12",
+        "con": "14",
+        "int": "11",
+        "wis": "16",
+        "cha": "13",
+    }
+
+    level_one_context = build_level_one_builder_context(systems_service, "linden-pass", level_one_form)
+    level_one_form = {
+        **level_one_form,
+        "spell_cantrip_1": _field_value_for_label(level_one_context, "spell_cantrip_1", "Light"),
+        "spell_cantrip_2": _field_value_for_label(level_one_context, "spell_cantrip_2", "Sacred Flame"),
+        "spell_cantrip_3": _field_value_for_label(level_one_context, "spell_cantrip_3", "Thaumaturgy"),
+        "spell_level_one_1": _field_value_for_label(level_one_context, "spell_level_one_1", "Detect Magic"),
+        "spell_level_one_2": _field_value_for_label(level_one_context, "spell_level_one_2", "Guiding Bolt"),
+        "spell_level_one_3": _field_value_for_label(level_one_context, "spell_level_one_3", "Healing Word"),
+        "spell_level_one_4": _field_value_for_label(level_one_context, "spell_level_one_4", "Bless"),
+    }
+    level_one_context = build_level_one_builder_context(systems_service, "linden-pass", level_one_form)
+    current_definition, _ = build_level_one_character_definition("linden-pass", level_one_context, level_one_form)
+
+    level_up_form = {
+        "hp_gain": "5",
+        "levelup_class_option_1": druidic_initiate.slug,
+    }
+    level_up_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        current_definition,
+        level_up_form,
+    )
+    granted_field = _find_builder_field(level_up_context, "levelup_bonus_spell_known_1_1")
+    granted_labels = {option["label"] for option in granted_field["options"]}
+    level_up_form = {
+        **level_up_form,
+        "levelup_bonus_spell_known_1_1": _field_value_for_label(
+            level_up_context,
+            "levelup_bonus_spell_known_1_1",
+            "Shillelagh",
+        ),
+        "levelup_prepared_spell_1": _field_value_for_label(level_up_context, "levelup_prepared_spell_1", "Cure Wounds"),
+    }
+
+    level_up_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        current_definition,
+        level_up_form,
+    )
+    leveled_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        level_up_context,
+        level_up_form,
+    )
+    spells_by_name = {spell["name"]: spell for spell in leveled_definition.spellcasting["spells"]}
+
+    assert {"Druidcraft", "Shillelagh"} <= granted_labels
+    assert "Shillelagh" in level_up_context["preview"]["new_spells"]
+    assert spells_by_name["Shillelagh"]["is_bonus_known"] is True
+    assert spells_by_name["Animal Friendship"]["is_always_prepared"] is True
 
 
 def test_native_level_up_advances_wizard_to_level_four_with_cantrip_and_asi_growth():

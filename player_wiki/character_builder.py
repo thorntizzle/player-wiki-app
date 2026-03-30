@@ -396,6 +396,9 @@ def build_level_one_builder_context(
         kind="feat",
     )
     feat_catalog = _build_feat_catalog(feat_options)
+    optionalfeature_catalog = _build_entry_slug_catalog(
+        _list_campaign_enabled_entries(systems_service, campaign_slug, "optionalfeature")
+    )
     item_catalog = _build_item_catalog(_list_campaign_enabled_entries(systems_service, campaign_slug, "item"))
     spell_catalog = _build_spell_catalog(_list_campaign_enabled_entries(systems_service, campaign_slug, "spell"))
     campaign_feature_options = _build_campaign_page_choice_options(
@@ -441,6 +444,7 @@ def build_level_one_builder_context(
         selected_background=selected_background,
         feat_options=feat_options,
         feat_catalog=feat_catalog,
+        optionalfeature_catalog=optionalfeature_catalog,
         class_progression=class_progression,
         subclass_progression=subclass_progression,
         equipment_groups=equipment_groups,
@@ -461,6 +465,7 @@ def build_level_one_builder_context(
         equipment_groups=equipment_groups,
         choice_sections=choice_sections,
         feat_catalog=feat_catalog,
+        optionalfeature_catalog=optionalfeature_catalog,
         item_catalog=item_catalog,
         spell_catalog=spell_catalog,
         values=preview_values,
@@ -482,6 +487,7 @@ def build_level_one_builder_context(
         "subclass_progression": subclass_progression,
         "equipment_groups": equipment_groups,
         "feat_catalog": feat_catalog,
+        "optionalfeature_catalog": optionalfeature_catalog,
         "item_catalog": item_catalog,
         "spell_catalog": spell_catalog,
         "limitations": [
@@ -490,7 +496,7 @@ def build_level_one_builder_context(
             "Published campaign wiki features and items can also be linked in during creation through the optional campaign content fields.",
             "Enter level-1 ability scores after species bonuses. Native feat-driven ability increases are applied automatically.",
             "Native attack rows now cover basic PHB weapons, off-hand attacks, key level-1 fighting-style adjustments, and the current modeled feat attack variants, but a few advanced riders still need manual follow-up.",
-            "Gold-alternative loadouts, non-structured campaign spell access, and a few class-specific spell extras still need manual follow-up.",
+            "Gold-alternative loadouts, non-structured campaign spell access, and a few remaining feat/spell edge cases still need manual follow-up.",
         ],
         "preview": preview,
     }
@@ -511,6 +517,7 @@ def build_level_one_character_definition(
     subclass_progression = list(builder_context.get("subclass_progression") or [])
     equipment_groups = list(builder_context.get("equipment_groups") or [])
     feat_catalog = dict(builder_context.get("feat_catalog") or {})
+    optionalfeature_catalog = dict(builder_context.get("optionalfeature_catalog") or {})
     item_catalog = dict(builder_context.get("item_catalog") or {})
     spell_catalog = dict(builder_context.get("spell_catalog") or {})
     limitations = list(builder_context.get("limitations") or [])
@@ -556,6 +563,7 @@ def build_level_one_character_definition(
         choice_sections=choice_sections,
         selected_choices=selected_choices,
         feat_selections=feat_selections,
+        optionalfeature_catalog=optionalfeature_catalog,
     )
     selected_campaign_option_payloads = (
         _campaign_option_payloads_from_selected_entries([selected_species, selected_background])
@@ -709,6 +717,9 @@ def build_native_level_up_context(
         kind="feat",
     )
     feat_catalog = _build_feat_catalog(feat_options)
+    optionalfeature_catalog = _build_entry_slug_catalog(
+        _list_campaign_enabled_entries(systems_service, campaign_slug, "optionalfeature")
+    )
     item_catalog = _build_item_catalog(_list_campaign_enabled_entries(systems_service, campaign_slug, "item"))
     spell_catalog = _build_spell_catalog(_list_campaign_enabled_entries(systems_service, campaign_slug, "spell"))
 
@@ -761,6 +772,7 @@ def build_native_level_up_context(
         requires_subclass=requires_subclass,
         class_progression=class_progression,
         subclass_progression=subclass_progression,
+        optionalfeature_catalog=optionalfeature_catalog,
         item_catalog=item_catalog,
         spell_catalog=spell_catalog,
         target_level=next_level,
@@ -776,6 +788,7 @@ def build_native_level_up_context(
         feat_options=feat_options,
         feat_catalog=feat_catalog,
         choice_sections=choice_sections,
+        optionalfeature_catalog=optionalfeature_catalog,
         spell_catalog=spell_catalog,
         target_level=next_level,
         current_ability_scores=ability_scores,
@@ -793,6 +806,7 @@ def build_native_level_up_context(
         "subclass_options": [_entry_option(entry) for entry in subclass_options],
         "feat_options": [_entry_option(entry) for entry in feat_options],
         "feat_catalog": feat_catalog,
+        "optionalfeature_catalog": optionalfeature_catalog,
         "requires_subclass": requires_subclass,
         "choice_sections": choice_sections,
         "class_progression": class_progression,
@@ -824,6 +838,7 @@ def build_native_level_up_character_definition(
     subclass_progression = list(level_up_context.get("subclass_progression") or [])
     feat_options = list(level_up_context.get("feat_options") or [])
     feat_catalog = dict(level_up_context.get("feat_catalog") or {})
+    optionalfeature_catalog = dict(level_up_context.get("optionalfeature_catalog") or {})
     spell_catalog = dict(level_up_context.get("spell_catalog") or {})
     if selected_class is None or selected_species is None or selected_background is None:
         raise CharacterBuildError("This native character is missing the class, species, or background needed for level-up.")
@@ -858,6 +873,7 @@ def build_native_level_up_character_definition(
         subclass_progression=subclass_progression,
         target_level=target_level,
         selected_choices=selected_choices,
+        optionalfeature_catalog=optionalfeature_catalog,
     )
     new_feature_entries.extend(level_up_feat_entries)
     selected_campaign_option_payloads = (
@@ -976,11 +992,7 @@ def build_native_level_up_character_definition(
             selected_choices=selected_choices,
             spell_catalog=spell_catalog,
             target_level=target_level,
-            feature_entries=_additional_spell_feature_entries_from_progressions(
-                class_progression=class_progression,
-                subclass_progression=subclass_progression,
-                target_level=target_level,
-            ),
+            feature_entries=new_feature_entries,
             selected_campaign_option_payloads=selected_campaign_option_payloads,
         ),
         equipment_catalog=list(current_definition.equipment_catalog or []),
@@ -1460,6 +1472,7 @@ def _build_choice_sections(
     selected_background: SystemsEntryRecord | None,
     feat_options: list[SystemsEntryRecord],
     feat_catalog: dict[str, Any],
+    optionalfeature_catalog: dict[str, SystemsEntryRecord],
     class_progression: list[dict[str, Any]],
     subclass_progression: list[dict[str, Any]],
     equipment_groups: list[dict[str, Any]],
@@ -1505,10 +1518,14 @@ def _build_choice_sections(
     if campaign_item_fields:
         sections.append({"title": "Campaign Equipment", "fields": campaign_item_fields})
 
+    preview_choice_sections = list(sections)
+    _, preview_selected_choices = _resolve_builder_choices(preview_choice_sections, values, strict=False)
     progression_spell_feature_entries = _additional_spell_feature_entries_from_progressions(
         class_progression=class_progression,
         subclass_progression=subclass_progression,
         target_level=1,
+        selected_choices=preview_selected_choices,
+        optionalfeature_catalog=optionalfeature_catalog,
     )
     spell_fields = _build_spell_choice_fields(
         selected_class=selected_class,
@@ -1535,6 +1552,7 @@ def _build_level_up_choice_sections(
     requires_subclass: bool,
     class_progression: list[dict[str, Any]],
     subclass_progression: list[dict[str, Any]],
+    optionalfeature_catalog: dict[str, SystemsEntryRecord],
     item_catalog: dict[str, Any],
     spell_catalog: dict[str, Any],
     target_level: int,
@@ -1621,6 +1639,8 @@ def _build_level_up_choice_sections(
         class_progression=class_progression,
         subclass_progression=subclass_progression,
         target_level=target_level,
+        selected_choices=preview_selected_choices,
+        optionalfeature_catalog=optionalfeature_catalog,
     )
     spell_fields = _build_level_up_spell_choice_fields(
         definition=definition,
@@ -2449,6 +2469,15 @@ def _build_feat_catalog(feat_entries: list[SystemsEntryRecord]) -> dict[str, Any
         "by_slug": by_slug,
         "by_value": by_value,
     }
+
+
+def _build_entry_slug_catalog(entries: list[SystemsEntryRecord]) -> dict[str, SystemsEntryRecord]:
+    by_slug: dict[str, SystemsEntryRecord] = {}
+    for entry in list(entries or []):
+        slug = str(entry.slug or "").strip()
+        if slug and slug not in by_slug:
+            by_slug[slug] = entry
+    return by_slug
 
 
 def _item_type_code(entry: SystemsEntryRecord) -> str:
@@ -3958,30 +3987,68 @@ def _additional_spell_feature_entries_from_progressions(
     class_progression: list[dict[str, Any]],
     subclass_progression: list[dict[str, Any]],
     target_level: int,
+    selected_choices: dict[str, list[str]] | None = None,
+    optionalfeature_catalog: dict[str, SystemsEntryRecord] | None = None,
 ) -> list[dict[str, Any]]:
     feature_entries: list[dict[str, Any]] = []
     seen_keys: set[str] = set()
+
+    def append_entry(entry: SystemsEntryRecord | None) -> None:
+        if not isinstance(entry, SystemsEntryRecord):
+            return
+        if normalize_lookup(entry.entry_type) not in {
+            normalize_lookup("classfeature"),
+            normalize_lookup("subclassfeature"),
+            normalize_lookup("optionalfeature"),
+        }:
+            return
+        if not dict(entry.metadata or {}).get("additional_spells"):
+            return
+        entry_key = str(entry.entry_key or entry.slug or entry.title or "").strip()
+        if not entry_key or entry_key in seen_keys:
+            return
+        seen_keys.add(entry_key)
+        feature_entries.append({"entry": entry})
+
     for progression in (class_progression, subclass_progression):
         for group in list(progression or []):
             if int(group.get("level") or 0) > target_level:
                 continue
             for feature_row in list(group.get("feature_rows") or []):
-                entry = feature_row.get("entry")
-                if not isinstance(entry, SystemsEntryRecord):
-                    continue
-                if normalize_lookup(entry.entry_type) not in {
-                    normalize_lookup("classfeature"),
-                    normalize_lookup("subclassfeature"),
-                    normalize_lookup("optionalfeature"),
-                }:
-                    continue
-                if not dict(entry.metadata or {}).get("additional_spells"):
-                    continue
-                entry_key = str(entry.entry_key or entry.slug or entry.title or "").strip()
-                if not entry_key or entry_key in seen_keys:
-                    continue
-                seen_keys.add(entry_key)
-                feature_entries.append({"entry": entry})
+                append_entry(feature_row.get("entry"))
+    if selected_choices:
+        for feature_entry in _collect_progression_feature_entries(
+            progression=class_progression,
+            target_level=target_level,
+            selected_choices=selected_choices,
+            group_key="levelup_class_options",
+            optionalfeature_catalog=optionalfeature_catalog,
+        ):
+            append_entry(feature_entry.get("entry"))
+        for feature_entry in _collect_progression_feature_entries(
+            progression=subclass_progression,
+            target_level=target_level,
+            selected_choices=selected_choices,
+            group_key="levelup_subclass_options",
+            optionalfeature_catalog=optionalfeature_catalog,
+        ):
+            append_entry(feature_entry.get("entry"))
+        for feature_entry in _collect_progression_feature_entries(
+            progression=class_progression,
+            target_level=target_level,
+            selected_choices=selected_choices,
+            group_key="class_option",
+            optionalfeature_catalog=optionalfeature_catalog,
+        ):
+            append_entry(feature_entry.get("entry"))
+        for feature_entry in _collect_progression_feature_entries(
+            progression=subclass_progression,
+            target_level=target_level,
+            selected_choices=selected_choices,
+            group_key="subclass_option",
+            optionalfeature_catalog=optionalfeature_catalog,
+        ):
+            append_entry(feature_entry.get("entry"))
     return feature_entries
 
 
@@ -4787,6 +4854,7 @@ def _build_level_one_preview(
     equipment_groups: list[dict[str, Any]],
     choice_sections: list[dict[str, Any]],
     feat_catalog: dict[str, Any],
+    optionalfeature_catalog: dict[str, SystemsEntryRecord],
     item_catalog: dict[str, Any],
     spell_catalog: dict[str, Any],
     values: dict[str, str],
@@ -4806,6 +4874,7 @@ def _build_level_one_preview(
         choice_sections=choice_sections,
         selected_choices=selected_choices,
         feat_selections=feat_selections,
+        optionalfeature_catalog=optionalfeature_catalog,
     )
     selected_campaign_option_payloads = (
         _campaign_option_payloads_from_selected_entries([selected_species, selected_background])
@@ -5365,73 +5434,29 @@ def _collect_level_one_feature_entries(
     choice_sections: list[dict[str, Any]],
     selected_choices: dict[str, list[str]],
     feat_selections: list[dict[str, Any]],
+    optionalfeature_catalog: dict[str, SystemsEntryRecord],
 ) -> list[dict[str, Any]]:
     del selected_class
     feature_entries: list[dict[str, Any]] = []
 
-    class_option_index = 0
-    for group in class_progression:
-        if int(group.get("level") or 0) != 1:
-            continue
-        for feature_row in list(group.get("feature_rows") or []):
-            label = str(feature_row.get("label") or "").strip()
-            normalized_label = normalize_lookup(label)
-            if "choose subclass feature" in normalized_label:
-                continue
-            if normalized_label in ABILITY_SCORE_IMPROVEMENT_NAMES:
-                continue
-            embedded_card = dict(feature_row.get("embedded_card") or {})
-            option_groups = list(embedded_card.get("option_groups") or [])
-            if option_groups:
-                for option_group in option_groups:
-                    class_option_index += 1
-                    group_key = f"class_option_{class_option_index}"
-                    selected_slug = next((slug for slug in selected_choices.get(group_key, []) if slug), "")
-                    selected_option = next(
-                        (
-                            option
-                            for option in list(option_group.get("options") or [])
-                            if str(option.get("slug") or "").strip() == selected_slug
-                        ),
-                        None,
-                    )
-                    if selected_option is None:
-                        continue
-                    feature_entries.append(
-                        {
-                            "kind": "optionalfeature",
-                            "entry": None,
-                            "name": str(selected_option.get("label") or "").strip(),
-                            "label": str(selected_option.get("label") or "").strip(),
-                            "slug": str(selected_option.get("slug") or "").strip(),
-                        }
-                    )
-                continue
-            entry = feature_row.get("entry")
-            if isinstance(entry, SystemsEntryRecord):
-                feature_entries.append(
-                    {
-                        "kind": "systems",
-                        "entry": entry,
-                        "name": entry.title,
-                        "label": entry.title,
-                    }
-                )
-
-    for group in subclass_progression:
-        if int(group.get("level") or 0) != 1:
-            continue
-        for feature_row in list(group.get("feature_rows") or []):
-            entry = feature_row.get("entry")
-            if isinstance(entry, SystemsEntryRecord):
-                feature_entries.append(
-                    {
-                        "kind": "systems",
-                        "entry": entry,
-                        "name": entry.title,
-                        "label": entry.title,
-                    }
-                )
+    feature_entries.extend(
+        _collect_progression_feature_entries(
+            progression=class_progression,
+            target_level=1,
+            selected_choices=selected_choices,
+            group_key="class_option",
+            optionalfeature_catalog=optionalfeature_catalog,
+        )
+    )
+    feature_entries.extend(
+        _collect_progression_feature_entries(
+            progression=subclass_progression,
+            target_level=1,
+            selected_choices=selected_choices,
+            group_key="subclass_option",
+            optionalfeature_catalog=optionalfeature_catalog,
+        )
+    )
 
     if selected_species is not None:
         feature_entries.extend(_extract_species_feature_entries(selected_species))
@@ -5549,6 +5574,7 @@ def _collect_progression_feature_entries_for_level(
     subclass_progression: list[dict[str, Any]],
     target_level: int,
     selected_choices: dict[str, list[str]],
+    optionalfeature_catalog: dict[str, SystemsEntryRecord],
 ) -> list[dict[str, Any]]:
     feature_entries: list[dict[str, Any]] = []
     feature_entries.extend(
@@ -5557,6 +5583,7 @@ def _collect_progression_feature_entries_for_level(
             target_level=target_level,
             selected_choices=selected_choices,
             group_key="levelup_class_options",
+            optionalfeature_catalog=optionalfeature_catalog,
         )
     )
     feature_entries.extend(
@@ -5565,6 +5592,7 @@ def _collect_progression_feature_entries_for_level(
             target_level=target_level,
             selected_choices=selected_choices,
             group_key="levelup_subclass_options",
+            optionalfeature_catalog=optionalfeature_catalog,
         )
     )
     return feature_entries
@@ -5576,9 +5604,18 @@ def _collect_progression_feature_entries(
     target_level: int,
     selected_choices: dict[str, list[str]],
     group_key: str,
+    optionalfeature_catalog: dict[str, SystemsEntryRecord] | None = None,
 ) -> list[dict[str, Any]]:
     feature_entries: list[dict[str, Any]] = []
     selected_values = list(selected_choices.get(group_key) or [])
+    if not selected_values:
+        selected_value_lookup: dict[str, list[str]] = {}
+        for key, values in selected_choices.items():
+            clean_key = str(key or "").strip()
+            if clean_key == group_key or clean_key.startswith(f"{group_key}_"):
+                selected_value_lookup[clean_key] = list(values or [])
+        for key in sorted(selected_value_lookup):
+            selected_values.extend(selected_value_lookup[key])
     selected_index = 0
     for group in progression:
         if int(group.get("level") or 0) != target_level:
@@ -5606,10 +5643,15 @@ def _collect_progression_feature_entries(
                     )
                     if selected_option is None:
                         continue
+                    selected_entry = selected_option.get("entry")
+                    if not isinstance(selected_entry, SystemsEntryRecord):
+                        selected_entry = dict(optionalfeature_catalog or {}).get(
+                            str(selected_option.get("slug") or "").strip()
+                        )
                     feature_entries.append(
                         {
                             "kind": "optionalfeature",
-                            "entry": None,
+                            "entry": selected_entry if isinstance(selected_entry, SystemsEntryRecord) else None,
                             "name": str(selected_option.get("label") or "").strip(),
                             "label": str(selected_option.get("label") or "").strip(),
                             "slug": str(selected_option.get("slug") or "").strip(),
@@ -6275,6 +6317,7 @@ def _build_native_level_up_preview(
     feat_options: list[dict[str, str]],
     feat_catalog: dict[str, Any],
     choice_sections: list[dict[str, Any]],
+    optionalfeature_catalog: dict[str, SystemsEntryRecord],
     spell_catalog: dict[str, Any],
     target_level: int,
     current_ability_scores: dict[str, int],
@@ -6302,6 +6345,7 @@ def _build_native_level_up_preview(
         subclass_progression=subclass_progression,
         target_level=target_level,
         selected_choices=selected_choices,
+        optionalfeature_catalog=optionalfeature_catalog,
     )
     gained_feature_entries.extend(level_up_feat_entries)
     selected_campaign_option_payloads = (
@@ -6333,11 +6377,7 @@ def _build_native_level_up_preview(
         selected_choices=selected_choices,
         spell_catalog=spell_catalog,
         target_level=target_level,
-        feature_entries=_additional_spell_feature_entries_from_progressions(
-            class_progression=class_progression,
-            subclass_progression=subclass_progression,
-            target_level=target_level,
-        ),
+        feature_entries=gained_feature_entries,
         extra_option_payloads=selected_campaign_option_payloads,
     )
     slot_progression = _level_up_slot_progression_for_class(
@@ -7938,10 +7978,10 @@ def _normalize_attack_payloads(
         merge_key = (
             normalize_lookup(name),
             payload.get("attack_bonus"),
-            str(payload.get("damage") or ""),
-            str(payload.get("damage_type") or ""),
-            str(payload.get("notes") or ""),
-            str(payload.get("category") or ""),
+            _normalize_merge_text(payload.get("damage")),
+            _normalize_merge_text(payload.get("damage_type")),
+            _normalize_merge_text(payload.get("notes")),
+            _normalize_merge_text(payload.get("category")),
         )
         existing_index = index_by_key.get(merge_key)
         if existing_index is None:
@@ -7998,8 +8038,8 @@ def _normalize_equipment_payloads(
         merge_key = (
             identity_key,
             _extract_campaign_page_ref(normalized_page_ref),
-            str(payload.get("notes") or ""),
-            str(payload.get("weight") or ""),
+            _normalize_merge_text(payload.get("notes")),
+            _normalize_merge_text(payload.get("weight")),
             is_currency_only,
         )
         existing_index = index_by_key.get(merge_key)
@@ -8033,6 +8073,10 @@ def _normalize_page_ref_payload(page_ref: Any) -> Any:
     if clean_page_ref:
         return clean_page_ref
     return None
+
+
+def _normalize_merge_text(value: Any) -> str:
+    return str(value or "").strip().lower()
 
 
 def _normalize_equipment_quantity(value: Any, *, fallback: int) -> int:
