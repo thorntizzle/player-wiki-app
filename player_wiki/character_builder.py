@@ -18,7 +18,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-03-30.02"
+CHARACTER_BUILDER_VERSION = "2026-03-30.03"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -243,7 +243,7 @@ NATIVE_LEVEL_UP_LIMITATIONS = [
     "Native level-up currently advances one level at a time for single-class native characters whose base class has imported native progression support.",
     "Hit point gain is entered manually so your table can choose rolled or fixed HP.",
     "Prepared-caster level-up currently preserves existing prepared spells and adds the new picks needed for the next level.",
-    "Spell replacement, some granted spell choices, spell-granting feats, and some advanced feat side effects still need manual follow-up.",
+    "Some advanced feat side effects, campaign-driven spell access, and non-standard spell retraining still need manual follow-up.",
 ]
 LEVEL_ONE_ALWAYS_PREPARED_SPELLS_BY_SUBCLASS = {
     normalize_lookup("Knowledge Domain"): ["Command", "Identify"],
@@ -465,8 +465,8 @@ def build_level_one_builder_context(
             "Base classes now come from the campaign's enabled Systems sources when their native progression metadata is available, while older PHB fallback data still covers previously imported local classes.",
             "Published campaign wiki features and items can also be linked in during creation through the optional campaign content fields.",
             "Enter level-1 ability scores after species bonuses. Native feat-driven ability increases are applied automatically.",
-            "Native attack rows now cover basic PHB weapons, off-hand attacks, and key level-1 fighting-style adjustments, but a few advanced damage riders still need manual follow-up.",
-            "Gold-alternative loadouts, some granted spell choices, spell-granting feats, and a few class-specific spell extras still need manual follow-up.",
+            "Native attack rows now cover basic PHB weapons, off-hand attacks, key level-1 fighting-style adjustments, and the current modeled feat attack variants, but a few advanced riders still need manual follow-up.",
+            "Gold-alternative loadouts, campaign-driven spell access, and a few class-specific spell extras still need manual follow-up.",
         ],
         "preview": preview,
     }
@@ -561,6 +561,7 @@ def build_level_one_character_definition(
         proficiency_bonus=proficiency_bonus,
         weapon_proficiencies=proficiencies["weapons"],
         selected_choices=selected_choices,
+        features=features,
     )
 
     stats = _build_level_one_stats(
@@ -854,6 +855,7 @@ def build_native_level_up_character_definition(
             + _extract_feat_weapon_proficiencies(feat_selections, selected_choices)
         ),
         selected_choices=combined_selected_choices,
+        features=merged_features,
     )
     total_hp_delta = hp_gain + _feat_hit_point_bonus(
         feat_selections,
@@ -2676,6 +2678,7 @@ def _build_level_one_attacks(
     proficiency_bonus: int,
     weapon_proficiencies: list[str],
     selected_choices: dict[str, list[str]],
+    features: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     attacks: list[dict[str, Any]] = []
     attack_contexts = _build_weapon_attack_contexts(
@@ -2696,6 +2699,16 @@ def _build_level_one_attacks(
         "phb-optionalfeature-two-weapon-fighting",
         "Two-Weapon Fighting",
     )
+    active_feat_names = {
+        normalize_lookup(name)
+        for name in _extract_feat_feature_names(features)
+        if str(name or "").strip()
+    }
+    has_crossbow_expert = normalize_lookup("Crossbow Expert") in active_feat_names
+    has_great_weapon_master = normalize_lookup("Great Weapon Master") in active_feat_names
+    has_martial_adept = normalize_lookup("Martial Adept") in active_feat_names
+    has_savage_attacker = normalize_lookup("Savage Attacker") in active_feat_names
+    has_sharpshooter = normalize_lookup("Sharpshooter") in active_feat_names
     off_hand_context = _resolve_off_hand_attack_context(attack_contexts)
     has_shield = any(_is_shield_item(item) for item in equipment_catalog)
 
@@ -2715,22 +2728,63 @@ def _build_level_one_attacks(
         damage_bonus = int(context["ability_modifier"] or 0)
         if has_dueling and _qualifies_for_dueling(context, off_hand_context=off_hand_context):
             damage_bonus += 2
+        ignore_loading = has_crossbow_expert and _qualifies_for_crossbow_expert(context)
+        base_attack_notes = _build_weapon_attack_notes(
+            profile,
+            great_weapon_fighting=has_great_weapon_fighting,
+            has_shield=has_shield,
+            ignore_loading=ignore_loading,
+            off_hand_context=off_hand_context,
+            show_range=not has_thrown_variant,
+            show_versatile=not has_two_handed_variant,
+            extra_notes=_base_attack_feat_notes(
+                context,
+                has_crossbow_expert=has_crossbow_expert,
+                has_great_weapon_master=has_great_weapon_master,
+                has_martial_adept=has_martial_adept,
+                has_savage_attacker=has_savage_attacker,
+                has_sharpshooter=has_sharpshooter,
+                ranged_attack=False,
+            ),
+        )
         attacks.append(
             _build_weapon_attack_payload(
                 context,
                 attack_bonus=attack_bonus,
                 damage_bonus=damage_bonus,
-                notes=_build_weapon_attack_notes(
-                    profile,
-                    great_weapon_fighting=has_great_weapon_fighting,
-                    has_shield=has_shield,
-                    off_hand_context=off_hand_context,
-                    show_range=not has_thrown_variant,
-                    show_versatile=not has_two_handed_variant,
-                ),
+                notes=base_attack_notes,
                 index=len(attacks) + 1,
             )
         )
+        if has_great_weapon_master and _qualifies_for_great_weapon_master(context):
+            attacks.append(
+                _build_weapon_attack_payload(
+                    context,
+                    attack_bonus=attack_bonus - 5,
+                    damage_bonus=damage_bonus + 10,
+                    notes=_build_weapon_attack_notes(
+                        profile,
+                        great_weapon_fighting=has_great_weapon_fighting,
+                        has_shield=has_shield,
+                        ignore_loading=ignore_loading,
+                        off_hand_context=off_hand_context,
+                        show_range=not has_thrown_variant,
+                        show_versatile=not has_two_handed_variant,
+                        extra_notes=_base_attack_feat_notes(
+                            context,
+                            has_crossbow_expert=has_crossbow_expert,
+                            has_great_weapon_master=has_great_weapon_master,
+                            has_martial_adept=has_martial_adept,
+                            has_savage_attacker=has_savage_attacker,
+                            has_sharpshooter=has_sharpshooter,
+                            ranged_attack=False,
+                        )
+                        + ["Great Weapon Master (-5 attack, +10 damage)"],
+                    ),
+                    index=len(attacks) + 1,
+                    name_suffix=" (great weapon master)",
+                )
+            )
         if has_thrown_variant:
             attacks.append(
                 _build_weapon_attack_payload(
@@ -2743,6 +2797,15 @@ def _build_level_one_attacks(
                         has_shield=has_shield,
                         off_hand_context=off_hand_context,
                         show_versatile=False,
+                        extra_notes=_base_attack_feat_notes(
+                            context,
+                            has_crossbow_expert=has_crossbow_expert,
+                            has_great_weapon_master=has_great_weapon_master,
+                            has_martial_adept=has_martial_adept,
+                            has_savage_attacker=has_savage_attacker,
+                            has_sharpshooter=has_sharpshooter,
+                            ranged_attack=True,
+                        ),
                     ),
                     index=len(attacks) + 1,
                     name_suffix=" (thrown)",
@@ -2768,10 +2831,48 @@ def _build_level_one_attacks(
                         off_hand_context=None,
                         show_versatile=False,
                         wielded_two_handed=True,
+                        extra_notes=_base_attack_feat_notes(
+                            context,
+                            has_crossbow_expert=has_crossbow_expert,
+                            has_great_weapon_master=has_great_weapon_master,
+                            has_martial_adept=has_martial_adept,
+                            has_savage_attacker=has_savage_attacker,
+                            has_sharpshooter=has_sharpshooter,
+                            ranged_attack=False,
+                        ),
                     ),
                     index=len(attacks) + 1,
                     name_suffix=" (two-handed)",
                     profile_override=two_handed_profile,
+                )
+            )
+        if has_sharpshooter and _qualifies_for_sharpshooter(context):
+            attacks.append(
+                _build_weapon_attack_payload(
+                    context,
+                    attack_bonus=attack_bonus - 5,
+                    damage_bonus=damage_bonus + 10,
+                    notes=_build_weapon_attack_notes(
+                        profile,
+                        great_weapon_fighting=False,
+                        has_shield=has_shield,
+                        ignore_loading=ignore_loading,
+                        off_hand_context=off_hand_context,
+                        show_range=not has_thrown_variant,
+                        show_versatile=not has_two_handed_variant,
+                        extra_notes=_base_attack_feat_notes(
+                            context,
+                            has_crossbow_expert=has_crossbow_expert,
+                            has_great_weapon_master=has_great_weapon_master,
+                            has_martial_adept=has_martial_adept,
+                            has_savage_attacker=has_savage_attacker,
+                            has_sharpshooter=has_sharpshooter,
+                            ranged_attack=True,
+                        )
+                        + ["Sharpshooter (-5 attack, +10 damage)"],
+                    ),
+                    index=len(attacks) + 1,
+                    name_suffix=" (sharpshooter)",
                 )
             )
 
@@ -2795,12 +2896,84 @@ def _build_level_one_attacks(
                     great_weapon_fighting=False,
                     has_shield=False,
                     off_hand_context=off_hand_context,
+                    extra_notes=_base_attack_feat_notes(
+                        off_hand_context,
+                        has_crossbow_expert=has_crossbow_expert,
+                        has_great_weapon_master=has_great_weapon_master,
+                        has_martial_adept=has_martial_adept,
+                        has_savage_attacker=has_savage_attacker,
+                        has_sharpshooter=has_sharpshooter,
+                        ranged_attack=False,
+                    ),
                 ),
                 index=len(attacks) + 1,
                 name_suffix=" (off-hand)",
             )
         )
     return attacks
+
+
+def _extract_feat_feature_names(features: list[dict[str, Any]] | None) -> list[str]:
+    results: list[str] = []
+    for feature in list(features or []):
+        category = normalize_lookup(str(feature.get("category") or "").strip())
+        systems_ref = dict(feature.get("systems_ref") or {})
+        entry_type = normalize_lookup(str(systems_ref.get("entry_type") or "").strip())
+        if category != normalize_lookup("feat") and entry_type != normalize_lookup("feat"):
+            continue
+        feature_name = str(feature.get("name") or systems_ref.get("title") or "").strip()
+        if feature_name:
+            results.append(feature_name)
+    return _dedupe_preserve_order(results)
+
+
+def _qualifies_for_crossbow_expert(context: dict[str, Any]) -> bool:
+    profile = dict(context.get("profile") or {})
+    if not bool(context.get("is_proficient")):
+        return False
+    if str(profile.get("type") or "").strip().upper() != "R":
+        return False
+    return "crossbow" in normalize_lookup(str(context.get("attack_name") or "").strip())
+
+
+def _qualifies_for_great_weapon_master(context: dict[str, Any]) -> bool:
+    profile = dict(context.get("profile") or {})
+    properties = set(profile.get("properties") or [])
+    return bool(context.get("is_proficient")) and str(profile.get("type") or "").strip().upper() == "M" and "H" in properties
+
+
+def _qualifies_for_savage_attacker(context: dict[str, Any], *, ranged_attack: bool) -> bool:
+    profile = dict(context.get("profile") or {})
+    return not ranged_attack and str(profile.get("type") or "").strip().upper() == "M"
+
+
+def _qualifies_for_sharpshooter(context: dict[str, Any]) -> bool:
+    profile = dict(context.get("profile") or {})
+    return bool(context.get("is_proficient")) and str(profile.get("type") or "").strip().upper() == "R"
+
+
+def _base_attack_feat_notes(
+    context: dict[str, Any],
+    *,
+    has_crossbow_expert: bool,
+    has_great_weapon_master: bool,
+    has_martial_adept: bool,
+    has_savage_attacker: bool,
+    has_sharpshooter: bool,
+    ranged_attack: bool,
+) -> list[str]:
+    notes: list[str] = []
+    if has_crossbow_expert and _qualifies_for_crossbow_expert(context):
+        notes.append("Crossbow Expert (ignore loading, no adjacent disadvantage)")
+    if has_great_weapon_master and _qualifies_for_great_weapon_master(context):
+        notes.append("Great Weapon Master (bonus attack on crit or kill)")
+    if has_martial_adept and not ranged_attack:
+        notes.append("Martial Adept maneuvers available")
+    if has_savage_attacker and _qualifies_for_savage_attacker(context, ranged_attack=ranged_attack):
+        notes.append("Savage Attacker (reroll damage once per turn)")
+    if has_sharpshooter and _qualifies_for_sharpshooter(context):
+        notes.append("Sharpshooter (ignore cover, no long-range disadvantage)")
+    return notes
 
 
 def _build_weapon_attack_contexts(
@@ -3004,8 +3177,10 @@ def _build_weapon_attack_notes(
     profile: dict[str, Any],
     *,
     bonus_action: bool = False,
+    extra_notes: list[str] | None = None,
     great_weapon_fighting: bool = False,
     has_shield: bool = False,
+    ignore_loading: bool = False,
     off_hand_context: dict[str, Any] | None = None,
     show_range: bool = True,
     show_versatile: bool = True,
@@ -3015,7 +3190,7 @@ def _build_weapon_attack_notes(
     notes: list[str] = []
     if "A" in properties:
         notes.append("Ammunition")
-    if "LD" in properties:
+    if "LD" in properties and not ignore_loading:
         notes.append("loading")
     attack_range = str(profile.get("range") or "").strip()
     if show_range and attack_range:
@@ -3026,6 +3201,10 @@ def _build_weapon_attack_notes(
         notes.append("Great Weapon Fighting (reroll 1s and 2s)")
     if bonus_action:
         notes.append("Bonus action")
+    for note in list(extra_notes or []):
+        note_text = str(note or "").strip().rstrip(".")
+        if note_text:
+            notes.append(note_text)
     if not notes:
         return ""
     return ", ".join(notes) + "."
@@ -4030,14 +4209,6 @@ def _build_level_one_preview(
         choice_sections=choice_sections,
         selected_choices=selected_choices,
     )
-    attacks = _build_level_one_attacks(
-        equipment_catalog=equipment_catalog,
-        item_catalog=item_catalog,
-        ability_scores=ability_scores,
-        proficiency_bonus=proficiency_bonus,
-        weapon_proficiencies=proficiencies["weapons"],
-        selected_choices=selected_choices,
-    )
     spellcasting = (
         _build_level_one_spellcasting(
             selected_class=selected_class,
@@ -4071,6 +4242,15 @@ def _build_level_one_preview(
         feature_entries,
         ability_scores=ability_scores,
         current_level=1,
+    )
+    attacks = _build_level_one_attacks(
+        equipment_catalog=equipment_catalog,
+        item_catalog=item_catalog,
+        ability_scores=ability_scores,
+        proficiency_bonus=proficiency_bonus,
+        weapon_proficiencies=proficiencies["weapons"],
+        selected_choices=selected_choices,
+        features=feature_payloads,
     )
     feature_names = [
         str(feature.get("name") or feature.get("label") or "").strip()
@@ -7375,6 +7555,20 @@ def _build_feature_tracker_template(
             "reset_to": "max",
             "rest_behavior": "confirm_before_reset",
             "notes": "Lucky",
+            "display_order": display_order,
+            "activation_type": "special",
+        }
+    if normalized == normalize_lookup("Martial Adept"):
+        return {
+            "id": "martial-adept",
+            "label": "Martial Adept",
+            "category": "feat",
+            "initial_current": 1,
+            "max": 1,
+            "reset_on": "short_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Superiority Die (d6)",
             "display_order": display_order,
             "activation_type": "special",
         }

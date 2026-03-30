@@ -257,7 +257,7 @@ def _minimal_import_metadata(character_slug: str = "new-hero") -> CharacterImpor
         character_slug=character_slug,
         source_path="builder://native-level-1",
         imported_at_utc="2026-03-29T00:00:00Z",
-        parser_version="2026-03-30.02",
+        parser_version="2026-03-30.03",
         import_status="clean",
         warnings=[],
     )
@@ -292,8 +292,8 @@ def _builder_context_fixture() -> dict[str, object]:
         "limitations": [
             "Base classes now come from the campaign's enabled Systems sources when their native progression metadata is available, while older PHB fallback data still covers previously imported local classes.",
             "Enter level-1 ability scores after any species bonuses. Native feat-driven ability increases are applied automatically.",
-            "Native attack rows now cover basic PHB weapons, off-hand attacks, and key level-1 fighting-style adjustments, but a few advanced damage riders still need manual follow-up.",
-            "Gold-alternative loadouts, some granted spell choices, spell-granting feats, and a few class-specific spell extras still need manual follow-up.",
+            "Native attack rows now cover basic PHB weapons, off-hand attacks, key level-1 fighting-style adjustments, and the current modeled feat attack variants, but a few advanced riders still need manual follow-up.",
+            "Gold-alternative loadouts, campaign-driven spell access, and a few class-specific spell extras still need manual follow-up.",
         ],
         "preview": {
             "class_level_text": "Fighter 1",
@@ -2053,7 +2053,7 @@ def test_level_one_builder_populates_starting_equipment_spells_and_currency():
     assert spells_by_name["Message"]["components"] == "V, S, M (a short piece of copper wire)"
     assert resource_templates_by_id["arcane-recovery"]["max"] == 1
     assert state_resources_by_id["arcane-recovery"]["current"] == 1
-    assert import_metadata.parser_version == "2026-03-30.02"
+    assert import_metadata.parser_version == "2026-03-30.03"
 
 
 def test_level_one_builder_adds_structured_subclass_prepared_spells():
@@ -5409,3 +5409,349 @@ def test_level_up_live_preview_route_returns_fragment(app, client, sign_in, user
     assert "data-live-builder-root" in html
     assert "data-live-builder-form" in html
     assert "data-live-refresh-fallback" in html
+
+
+def test_level_one_builder_applies_martial_adept_tracker_and_attack_notes():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+            "starting_equipment": {
+                "defaultData": [
+                    {"_": ["longsword|phb", "shield|phb"]},
+                ]
+            },
+        },
+    )
+    variant_human = _systems_entry(
+        "race",
+        "phb-race-variant-human",
+        "Variant Human",
+        metadata={
+            "size": ["M"],
+            "speed": 30,
+            "languages": [{"common": True, "anyStandard": 1}],
+            "skill_proficiencies": [{"any": 1}],
+            "feats": [{"any": 1}],
+        },
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    martial_adept = _systems_entry("feat", "phb-feat-martial-adept", "Martial Adept")
+    longsword = _systems_entry("item", "phb-item-longsword", "Longsword", metadata={"weight": 3})
+    shield = _systems_entry("item", "phb-item-shield", "Shield", metadata={"weight": 6, "type": "S"})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [variant_human],
+            "background": [acolyte],
+            "feat": [martial_adept],
+            "subclass": [],
+            "item": [longsword, shield],
+            "spell": [],
+        },
+        class_progression=[],
+    )
+
+    form_values = {
+        "name": "Maneuver Adept",
+        "character_slug": "maneuver-adept",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": variant_human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "species_skill_1": "perception",
+        "species_language_1": "Elvish",
+        "species_feat_1": martial_adept.slug,
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+
+    attacks_by_name = {attack["name"]: attack for attack in definition.attacks}
+    martial_adept_feature = next(feature for feature in definition.features if feature["name"] == "Martial Adept")
+    martial_adept_resource = next(resource for resource in definition.resource_templates if resource["id"] == "martial-adept")
+
+    assert "Martial Adept" in context["preview"]["features"]
+    assert "Martial Adept: 1 / 1 (Short Rest)" in context["preview"]["resources"]
+    assert attacks_by_name["Longsword"]["notes"] == "Versatile (1d10), Martial Adept maneuvers available."
+    assert martial_adept_feature["tracker_ref"] == "martial-adept"
+    assert martial_adept_resource["max"] == 1
+    assert martial_adept_resource["reset_on"] == "short_rest"
+
+
+def test_native_level_up_preserves_ranged_feat_attack_variants():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[],
+    )
+
+    current_definition = _minimal_character_definition("marksman", "Marksman")
+    current_definition.profile["class_level_text"] = "Fighter 5"
+    current_definition.profile["classes"][0]["level"] = 5
+    current_definition.stats["max_hp"] = 44
+    current_definition.stats["ability_scores"]["str"] = {"score": 12, "modifier": 1, "save_bonus": 4}
+    current_definition.stats["ability_scores"]["dex"] = {"score": 16, "modifier": 3, "save_bonus": 3}
+    current_definition.proficiencies["weapons"] = ["Simple Weapons", "Martial Weapons"]
+    current_definition.equipment_catalog = [
+        {
+            "name": "Light Crossbow",
+            "default_quantity": 1,
+            "weight": "5 lb.",
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-light-crossbow",
+                "title": "Light Crossbow",
+                "source_id": "PHB",
+            },
+        }
+    ]
+    current_definition.features = [
+        {
+            "id": "sharpshooter-1",
+            "name": "Sharpshooter",
+            "category": "feat",
+            "source": "PHB",
+            "description_markdown": "",
+            "systems_ref": {"entry_type": "feat", "slug": "phb-feat-sharpshooter", "title": "Sharpshooter", "source_id": "PHB"},
+        },
+        {
+            "id": "crossbow-expert-1",
+            "name": "Crossbow Expert",
+            "category": "feat",
+            "source": "PHB",
+            "description_markdown": "",
+            "systems_ref": {"entry_type": "feat", "slug": "phb-feat-crossbow-expert", "title": "Crossbow Expert", "source_id": "PHB"},
+        },
+    ]
+
+    form_values = {"hp_gain": "8"}
+    leveled_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values),
+        form_values,
+    )
+
+    attacks_by_name = {attack["name"]: attack for attack in leveled_definition.attacks}
+
+    assert attacks_by_name["Light Crossbow"]["attack_bonus"] == 6
+    assert attacks_by_name["Light Crossbow"]["damage"] == "1d8+3 piercing"
+    assert attacks_by_name["Light Crossbow"]["notes"] == (
+        "Ammunition, range 80/320, Crossbow Expert (ignore loading, no adjacent disadvantage), "
+        "Sharpshooter (ignore cover, no long-range disadvantage)."
+    )
+    assert "Ammunition, loading" not in attacks_by_name["Light Crossbow"]["notes"]
+    assert attacks_by_name["Light Crossbow (sharpshooter)"]["attack_bonus"] == 1
+    assert attacks_by_name["Light Crossbow (sharpshooter)"]["damage"] == "1d8+13 piercing"
+    assert attacks_by_name["Light Crossbow (sharpshooter)"]["notes"] == (
+        "Ammunition, range 80/320, Crossbow Expert (ignore loading, no adjacent disadvantage), "
+        "Sharpshooter (ignore cover, no long-range disadvantage), Sharpshooter (-5 attack, +10 damage)."
+    )
+
+
+def test_native_level_up_adds_martial_adept_resource_and_preserves_melee_feat_variants():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    ability_score_improvement = _systems_entry(
+        "classfeature",
+        "phb-classfeature-ability-score-improvement",
+        "Ability Score Improvement",
+        metadata={"level": 8},
+    )
+    martial_adept = _systems_entry("feat", "phb-feat-martial-adept", "Martial Adept")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [martial_adept],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 8,
+                "level_label": "Level 8",
+                "feature_rows": [
+                    {
+                        "label": "Ability Score Improvement",
+                        "entry": ability_score_improvement,
+                        "embedded_card": {"option_groups": []},
+                    }
+                ],
+            }
+        ],
+    )
+
+    current_definition = _minimal_character_definition("steel-warden", "Steel Warden")
+    current_definition.profile["class_level_text"] = "Fighter 7"
+    current_definition.profile["classes"][0]["level"] = 7
+    current_definition.stats["max_hp"] = 60
+    current_definition.proficiencies["weapons"] = ["Simple Weapons", "Martial Weapons"]
+    current_definition.equipment_catalog = [
+        {
+            "name": "Greatsword",
+            "default_quantity": 1,
+            "weight": "6 lb.",
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-greatsword",
+                "title": "Greatsword",
+                "source_id": "PHB",
+            },
+        }
+    ]
+    current_definition.features = [
+        {
+            "id": "great-weapon-master-1",
+            "name": "Great Weapon Master",
+            "category": "feat",
+            "source": "PHB",
+            "description_markdown": "",
+            "systems_ref": {
+                "entry_type": "feat",
+                "slug": "phb-feat-great-weapon-master",
+                "title": "Great Weapon Master",
+                "source_id": "PHB",
+            },
+        },
+        {
+            "id": "savage-attacker-1",
+            "name": "Savage Attacker",
+            "category": "feat",
+            "source": "PHB",
+            "description_markdown": "",
+            "systems_ref": {
+                "entry_type": "feat",
+                "slug": "phb-feat-savage-attacker",
+                "title": "Savage Attacker",
+                "source_id": "PHB",
+            },
+        },
+    ]
+
+    form_values = {
+        "hp_gain": "8",
+        "levelup_asi_mode_1": "feat",
+        "levelup_feat_1": martial_adept.slug,
+    }
+
+    level_up_context = build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values)
+    leveled_definition, _, hp_delta = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        level_up_context,
+        form_values,
+    )
+    merged_state = merge_state_with_definition(
+        leveled_definition,
+        build_initial_state(current_definition),
+        hp_delta=hp_delta,
+    )
+
+    attacks_by_name = {attack["name"]: attack for attack in leveled_definition.attacks}
+    martial_adept_feature = next(feature for feature in leveled_definition.features if feature["name"] == "Martial Adept")
+    resources_by_id = {resource["id"]: resource for resource in leveled_definition.resource_templates}
+    state_resources_by_id = {resource["id"]: resource for resource in merged_state["resources"]}
+
+    assert "Martial Adept" in level_up_context["preview"]["gained_features"]
+    assert "Martial Adept: 1 / 1 (Short Rest)" in level_up_context["preview"]["resources"]
+    assert attacks_by_name["Greatsword"]["attack_bonus"] == 6
+    assert attacks_by_name["Greatsword"]["damage"] == "2d6+3 slashing"
+    assert attacks_by_name["Greatsword"]["notes"] == (
+        "Great Weapon Master (bonus attack on crit or kill), Martial Adept maneuvers available, "
+        "Savage Attacker (reroll damage once per turn)."
+    )
+    assert attacks_by_name["Greatsword (great weapon master)"]["attack_bonus"] == 1
+    assert attacks_by_name["Greatsword (great weapon master)"]["damage"] == "2d6+13 slashing"
+    assert attacks_by_name["Greatsword (great weapon master)"]["notes"] == (
+        "Great Weapon Master (bonus attack on crit or kill), Martial Adept maneuvers available, "
+        "Savage Attacker (reroll damage once per turn), Great Weapon Master (-5 attack, +10 damage)."
+    )
+    assert martial_adept_feature["tracker_ref"] == "martial-adept"
+    assert resources_by_id["martial-adept"]["max"] == 1
+    assert resources_by_id["martial-adept"]["reset_on"] == "short_rest"
+    assert state_resources_by_id["martial-adept"]["current"] == 1
+    assert state_resources_by_id["martial-adept"]["max"] == 1
