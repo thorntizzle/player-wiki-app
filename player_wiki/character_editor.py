@@ -23,7 +23,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup
 from .repository import slugify
 
-CHARACTER_EDITOR_VERSION = "2026-03-30.04"
+CHARACTER_EDITOR_VERSION = "2026-03-30.05"
 CUSTOM_FEATURE_CATEGORY = "custom_feature"
 CUSTOM_EQUIPMENT_SOURCE_KIND = "manual_edit"
 CUSTOM_FEATURE_TRACKER_PREFIX = "manual-feature-tracker"

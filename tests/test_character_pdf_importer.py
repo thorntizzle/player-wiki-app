@@ -8,7 +8,12 @@ import yaml
 
 from player_wiki.app import create_app
 from player_wiki.character_importer import import_character, parse_character_sheet_text
-from player_wiki.character_pdf_importer import build_pdf_character_markdown, resolve_definition_systems_links
+from player_wiki.character_models import CharacterDefinition
+from player_wiki.character_pdf_importer import (
+    apply_systems_links_to_definition,
+    build_pdf_character_markdown,
+    resolve_definition_systems_links,
+)
 from player_wiki.config import Config
 from player_wiki.db import init_database
 from player_wiki.systems_models import SystemsEntryRecord
@@ -444,6 +449,156 @@ Attack
     assert lucky["tracker_ref"] == "lucky"
     assert resources_by_id["lucky"]["max"] == 3
     assert resources_by_id["lucky"]["reset_on"] == "long_rest"
+
+
+def test_parse_character_sheet_text_normalizes_duplicate_attack_and_equipment_rows():
+    markdown = """
+## Sheet Summary
+| Field | Value |
+| --- | --- |
+| Sheet Name | Mira Salt |
+| Class & Level | Fighter 1 |
+| Species | Human |
+| Background | Sailor |
+
+## Defenses And Core Stats
+| Metric | Value |
+| --- | --- |
+| Armor Class | 15 |
+| Initiative | +2 |
+| Speed | 30 ft. |
+| Max HP | 12 |
+| Proficiency Bonus | +2 |
+
+## Ability Scores
+| Ability | Score | Modifier | Save |
+| --- | --- | --- | --- |
+| Strength | 16 | +3 | +5 |
+| Dexterity | 12 | +1 | +1 |
+| Constitution | 14 | +2 | +4 |
+| Intelligence | 10 | +0 | +0 |
+| Wisdom | 12 | +1 | +1 |
+| Charisma | 8 | -1 | -1 |
+
+## Skills
+| Skill | Bonus | Proficiency |
+| --- | --- | --- |
+| Athletics | +5 | Proficient |
+
+## Proficiencies And Languages
+- Languages: Common
+
+## Features And Traits
+### Fighter Features
+
+- Second Wind - PHB 72
+
+## Actions
+### Actions
+Attack
+
+## Personality And Story
+
+## Spellcasting
+| Field | Value |
+| --- | --- |
+| Spellcasting Class |  |
+
+## Attacks And Cantrips
+| Attack | Hit | Damage | Notes |
+| --- | --- | --- | --- |
+| Longsword | +5 | 1d8+3 Slashing | Versatile |
+| Longsword | +5 | 1d8+3 Slashing | Versatile |
+
+## Equipment
+| Item | Qty | Weight |
+| --- | --- | --- |
+| Longsword | 1 | 3 lb. |
+| Longsword | 1 | 3 lb. |
+""".strip()
+
+    definition, _ = parse_character_sheet_text(
+        "linden-pass",
+        markdown,
+        source_path="Mira.pdf",
+        source_type="pdf_character_sheet_annotations",
+        imported_from="Mira.pdf",
+        parser_version="test",
+    )
+
+    longsword_attacks = [attack for attack in definition.attacks if attack["name"] == "Longsword"]
+    longsword_items = [item for item in definition.equipment_catalog if item["name"] == "Longsword"]
+
+    assert len(longsword_attacks) == 1
+    assert len(longsword_items) == 1
+    assert longsword_items[0]["default_quantity"] == 2
+
+
+def test_apply_systems_links_to_definition_re_normalizes_duplicate_rows_and_keeps_matches():
+    definition = CharacterDefinition(
+        campaign_slug="linden-pass",
+        character_slug="mira-salt",
+        name="Mira Salt",
+        status="active",
+        profile={
+            "sheet_name": "Mira Salt",
+            "display_name": "Mira Salt",
+            "class_level_text": "Fighter 1",
+            "classes": [{"class_name": "Fighter", "subclass_name": "", "level": 1}],
+            "species": "Human",
+            "background": "Sailor",
+        },
+        stats={
+            "ability_scores": {
+                "str": {"score": 16, "modifier": 3, "save_bonus": 5},
+                "dex": {"score": 12, "modifier": 1, "save_bonus": 1},
+                "con": {"score": 14, "modifier": 2, "save_bonus": 4},
+                "int": {"score": 10, "modifier": 0, "save_bonus": 0},
+                "wis": {"score": 12, "modifier": 1, "save_bonus": 1},
+                "cha": {"score": 8, "modifier": -1, "save_bonus": -1},
+            }
+        },
+        skills=[],
+        proficiencies={"armor": [], "weapons": [], "tools": [], "languages": ["Common"]},
+        attacks=[
+            {"id": "longsword-1", "name": "Longsword", "category": "weapon", "attack_bonus": 5, "damage": "1d8+3 Slashing", "damage_type": "", "notes": "Versatile"},
+            {"id": "longsword-2", "name": "Longsword", "category": "weapon", "attack_bonus": 5, "damage": "1d8+3 Slashing", "damage_type": "", "notes": "Versatile"},
+        ],
+        features=[],
+        spellcasting={"spellcasting_class": "", "spellcasting_ability": "", "spell_save_dc": None, "spell_attack_bonus": None, "slot_progression": [], "spells": []},
+        equipment_catalog=[
+            {"id": "longsword-a", "name": "Longsword", "default_quantity": 1, "weight": "3 lb.", "notes": ""},
+            {"id": "longsword-b", "name": "Longsword", "default_quantity": 1, "weight": "3 lb.", "notes": ""},
+        ],
+        reference_notes={"additional_notes_markdown": "", "allies_and_organizations_markdown": "", "custom_sections": []},
+        resource_templates=[],
+        source={"source_path": "Mira.pdf", "source_type": "pdf_character_sheet_annotations", "imported_from": "Mira.pdf", "imported_at": "2026-03-30T00:00:00Z", "parse_warnings": []},
+    )
+    linked_definition = apply_systems_links_to_definition(
+        definition,
+        {
+            "profile": {},
+            "features": [],
+            "attacks": [
+                {"match": {"status": "unresolved"}},
+                {"match": {"status": "matched", "entry_type": "item", "slug": "phb-item-longsword", "title": "Longsword", "source_id": "PHB"}},
+            ],
+            "equipment": [
+                {"match": {"status": "unresolved"}},
+                {"match": {"status": "matched", "entry_type": "item", "slug": "phb-item-longsword", "title": "Longsword", "source_id": "PHB"}},
+            ],
+            "spells": [],
+        },
+    )
+
+    longsword_attacks = [attack for attack in linked_definition.attacks if attack["name"] == "Longsword"]
+    longsword_items = [item for item in linked_definition.equipment_catalog if item["name"] == "Longsword"]
+
+    assert len(longsword_attacks) == 1
+    assert longsword_attacks[0]["systems_ref"]["slug"] == "phb-item-longsword"
+    assert len(longsword_items) == 1
+    assert longsword_items[0]["default_quantity"] == 2
+    assert longsword_items[0]["systems_ref"]["slug"] == "phb-item-longsword"
 
 
 def test_import_character_reconciles_missing_resource_trackers_into_existing_state(tmp_path, monkeypatch):

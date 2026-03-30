@@ -10,6 +10,7 @@ from player_wiki.character_builder import (
     build_native_level_up_context,
     build_level_one_builder_context,
     build_level_one_character_definition,
+    normalize_definition_to_native_model,
     supports_native_level_up,
 )
 from player_wiki.character_adjustments import apply_manual_stat_adjustments
@@ -257,7 +258,7 @@ def _minimal_import_metadata(character_slug: str = "new-hero") -> CharacterImpor
         character_slug=character_slug,
         source_path="builder://native-level-1",
         imported_at_utc="2026-03-29T00:00:00Z",
-        parser_version="2026-03-30.04",
+        parser_version="2026-03-30.05",
         import_status="clean",
         warnings=[],
     )
@@ -1038,6 +1039,151 @@ def test_level_one_builder_supports_page_backed_species_background_and_feat_choi
     assert resources_by_id[str(tidecaller.get("tracker_ref") or "")]["max"] == 1
 
 
+def test_level_one_builder_limits_mixed_source_page_options_to_structured_mechanics_pages():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [],
+            "background": [],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+    campaign_page_records = [
+        _campaign_page_record(
+            "species/sea-blessed",
+            "Sea-Blessed",
+            section="Mechanics",
+            subsection="Species",
+            metadata={
+                "character_option": {
+                    "kind": "species",
+                    "name": "Sea-Blessed",
+                    "size": ["M"],
+                    "speed": 35,
+                    "feats": [{"any": 1}],
+                }
+            },
+        ),
+        _campaign_page_record(
+            "backgrounds/harbor-initiate",
+            "Harbor Initiate",
+            section="Mechanics",
+            subsection="Backgrounds",
+            metadata={"character_option": {"kind": "background", "name": "Harbor Initiate"}},
+        ),
+        _campaign_page_record(
+            "mechanics/tidecaller-gift",
+            "Tidecaller Gift",
+            section="Mechanics",
+            subsection="Feats",
+            metadata={"character_option": {"kind": "feat", "name": "Tidecaller Gift"}},
+        ),
+        _campaign_page_record(
+            "mechanics/blessing-of-the-tide",
+            "Blessing of the Tide",
+            section="Mechanics",
+            subsection="Blessings",
+            metadata={"character_option": {"kind": "feat", "name": "Blessing of the Tide"}},
+        ),
+        _campaign_page_record(
+            "items/field-training",
+            "Field Training",
+            section="Items",
+            metadata={"character_option": {"kind": "background", "name": "Field Training"}},
+        ),
+        _campaign_page_record(
+            "species/reefborn",
+            "Reefborn",
+            section="Lore",
+            subsection="Species",
+            metadata={"character_option": {"kind": "species", "name": "Reefborn", "size": ["M"], "speed": 30}},
+        ),
+    ]
+
+    context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        {
+            "name": "Maris Vane",
+            "character_slug": "maris-vane",
+            "alignment": "Neutral Good",
+            "experience_model": "Milestone",
+            "class_slug": fighter.slug,
+            "str": "16",
+            "dex": "12",
+            "con": "14",
+            "int": "10",
+            "wis": "12",
+            "cha": "8",
+        },
+        campaign_page_records=campaign_page_records,
+    )
+
+    species_labels = {option["label"] for option in context["species_options"]}
+    background_labels = {option["label"] for option in context["background_options"]}
+
+    assert any("Sea-Blessed" in label for label in species_labels)
+    assert any("Harbor Initiate" in label for label in background_labels)
+    assert not any("Reefborn" in label for label in species_labels)
+    assert not any("Field Training" in label for label in background_labels)
+
+    form_values = {
+        "name": "Maris Vane",
+        "character_slug": "maris-vane",
+        "alignment": "Neutral Good",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": _option_value_for_label(context["species_options"], "Sea-Blessed"),
+        "background_slug": _option_value_for_label(context["background_options"], "Harbor Initiate"),
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "12",
+        "cha": "8",
+    }
+    context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=campaign_page_records,
+    )
+    feat_field = _find_builder_field(context, "species_feat_1")
+    feat_labels = {option["label"] for option in list(feat_field.get("options") or [])}
+
+    assert any("Tidecaller Gift" in label for label in feat_labels)
+    assert not any("Blessing of the Tide" in label for label in feat_labels)
+
+
 def test_level_one_builder_supports_enabled_non_phb_species_background_feat_and_subclass_options():
     fighter = _systems_entry(
         "class",
@@ -1163,6 +1309,31 @@ def test_level_one_builder_supports_enabled_non_phb_species_background_feat_and_
     assert definition.profile["background_ref"]["source_id"] == "XGE"
     assert any(feature["name"] == "Telekinetic" for feature in definition.features)
     assert import_metadata.source_path == "builder://native-level-1"
+
+
+def test_normalize_definition_to_native_model_updates_bardic_inspiration_to_short_rest_at_level_five():
+    definition = _minimal_character_definition("bard-hero", "Bard Hero")
+    definition.profile["class_level_text"] = "Bard 5"
+    definition.profile["classes"] = [{"class_name": "Bard", "subclass_name": "", "level": 5}]
+    definition.profile["class_ref"] = None
+    definition.features = [
+        {
+            "id": "bardic-inspiration",
+            "name": "Bardic Inspiration",
+            "category": "class_feature",
+            "source": "PHB",
+            "description_markdown": "",
+            "activation_type": "bonus_action",
+        }
+    ]
+    definition.resource_templates = []
+    definition.stats["ability_scores"]["cha"] = {"score": 16, "modifier": 3, "save_bonus": 3}
+
+    normalized = normalize_definition_to_native_model(definition)
+    tracker = next(resource for resource in normalized.resource_templates if resource["id"] == "bardic-inspiration")
+
+    assert tracker["max"] == 3
+    assert tracker["reset_on"] == "short_rest"
 
 
 def test_level_one_builder_surfaces_and_applies_skilled_feat_choices():
@@ -2261,7 +2432,7 @@ def test_level_one_builder_populates_starting_equipment_spells_and_currency():
     assert spells_by_name["Message"]["components"] == "V, S, M (a short piece of copper wire)"
     assert resource_templates_by_id["arcane-recovery"]["max"] == 1
     assert state_resources_by_id["arcane-recovery"]["current"] == 1
-    assert import_metadata.parser_version == "2026-03-30.04"
+    assert import_metadata.parser_version == "2026-03-30.05"
 
 
 def test_level_one_builder_adds_structured_subclass_prepared_spells():

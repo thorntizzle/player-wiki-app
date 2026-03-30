@@ -19,17 +19,23 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-03-30.04"
+CHARACTER_BUILDER_VERSION = "2026-03-30.05"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
 CAMPAIGN_FEATURE_CHOICE_SLOTS = 2
 CAMPAIGN_ITEM_CHOICE_SLOTS = 3
+CAMPAIGN_MECHANICS_SECTION = "Mechanics"
 CAMPAIGN_ITEMS_SECTION = "Items"
 CAMPAIGN_SESSIONS_SECTION = "Sessions"
 CAMPAIGN_PAGE_OPTION_PREFIX = "page:"
 SYSTEMS_OPTION_PREFIX = "systems:"
 CAMPAIGN_PAGE_SOURCE_ID = "Campaign"
+CAMPAIGN_MIXED_SOURCE_SUBSECTIONS_BY_KIND = {
+    "species": {"species"},
+    "background": {"background", "backgrounds"},
+    "feat": {"feat", "feats"},
+}
 
 ABILITY_KEYS = ("str", "dex", "con", "int", "wis", "cha")
 ABILITY_LABELS = {
@@ -1140,6 +1146,11 @@ def _build_campaign_page_entry(
         return None
     if str(campaign_option.get("kind") or "").strip() != kind:
         return None
+    if not _campaign_page_option_allowed_for_mixed_source(
+        record,
+        kind=kind,
+    ):
+        return None
 
     title = str(campaign_option.get("display_name") or getattr(page, "title", "") or page_ref).strip() or page_ref
     entry_type = {
@@ -1203,6 +1214,25 @@ def _build_campaign_page_entry(
         created_at=now,
         updated_at=now,
     )
+
+
+def _campaign_page_option_allowed_for_mixed_source(
+    record: Any,
+    *,
+    kind: str,
+) -> bool:
+    if kind not in CAMPAIGN_MIXED_SOURCE_SUBSECTIONS_BY_KIND:
+        return True
+    page = getattr(record, "page", None)
+    if page is None:
+        return False
+    section = str(getattr(page, "section", "") or "").strip()
+    if section != CAMPAIGN_MECHANICS_SECTION:
+        return False
+    subsection = normalize_lookup(str(getattr(page, "subsection", "") or "").strip())
+    if not subsection:
+        return True
+    return subsection in CAMPAIGN_MIXED_SOURCE_SUBSECTIONS_BY_KIND.get(kind, set())
 
 
 def _entry_page_ref(entry: Any) -> str:
@@ -7653,6 +7683,149 @@ def _normalize_spell_payloads(
     return list(normalized_by_key.values())
 
 
+def _normalize_attack_payloads(
+    attack_payloads: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    normalized_attacks: list[dict[str, Any]] = []
+    index_by_key: dict[tuple[str, Any, str, str, str, str], int] = {}
+    for attack_payload in list(attack_payloads or []):
+        payload = dict(attack_payload or {})
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            continue
+        payload["name"] = name
+        payload["id"] = str(payload.get("id") or "").strip() or f"{slugify(name)}-{len(normalized_attacks) + 1}"
+        payload["category"] = str(payload.get("category") or "").strip()
+        payload["damage"] = str(payload.get("damage") or "").strip()
+        payload["damage_type"] = str(payload.get("damage_type") or "").strip()
+        payload["notes"] = str(payload.get("notes") or "").strip()
+        attack_bonus = payload.get("attack_bonus")
+        if attack_bonus in {"", None}:
+            payload["attack_bonus"] = None
+        else:
+            try:
+                payload["attack_bonus"] = int(attack_bonus)
+            except (TypeError, ValueError):
+                pass
+        systems_ref = dict(payload.get("systems_ref") or {})
+        if systems_ref:
+            payload["systems_ref"] = systems_ref
+        else:
+            payload.pop("systems_ref", None)
+        normalized_page_ref = _normalize_page_ref_payload(payload.get("page_ref"))
+        if normalized_page_ref is not None:
+            payload["page_ref"] = normalized_page_ref
+        else:
+            payload.pop("page_ref", None)
+        merge_key = (
+            normalize_lookup(name),
+            payload.get("attack_bonus"),
+            str(payload.get("damage") or ""),
+            str(payload.get("damage_type") or ""),
+            str(payload.get("notes") or ""),
+            str(payload.get("category") or ""),
+        )
+        existing_index = index_by_key.get(merge_key)
+        if existing_index is None:
+            index_by_key[merge_key] = len(normalized_attacks)
+            normalized_attacks.append(payload)
+            continue
+        existing_payload = normalized_attacks[existing_index]
+        if not existing_payload.get("systems_ref") and payload.get("systems_ref"):
+            existing_payload["systems_ref"] = dict(payload.get("systems_ref") or {})
+        if not existing_payload.get("page_ref") and payload.get("page_ref"):
+            existing_payload["page_ref"] = payload.get("page_ref")
+    return normalized_attacks
+
+
+def _normalize_equipment_payloads(
+    equipment_payloads: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    normalized_equipment: list[dict[str, Any]] = []
+    index_by_key: dict[tuple[str, str, str, str, bool], int] = {}
+    for equipment_payload in list(equipment_payloads or []):
+        payload = dict(equipment_payload or {})
+        currency = dict(payload.get("currency") or {})
+        is_currency_only = bool(payload.get("is_currency_only"))
+        name = str(payload.get("name") or "").strip() or (_format_currency_seed(currency) if currency else "")
+        if not name:
+            continue
+        payload["name"] = name
+        payload["id"] = str(payload.get("id") or "").strip() or f"{slugify(name)}-{len(normalized_equipment) + 1}"
+        quantity = payload.get("default_quantity", payload.get("quantity"))
+        payload["default_quantity"] = _normalize_equipment_quantity(quantity, fallback=1 if name else 0)
+        payload["weight"] = str(payload.get("weight") or "").strip()
+        payload["notes"] = str(payload.get("notes") or "").strip()
+        payload["source_kind"] = str(payload.get("source_kind") or "").strip()
+        systems_ref = dict(payload.get("systems_ref") or {})
+        if systems_ref:
+            payload["systems_ref"] = systems_ref
+        else:
+            payload.pop("systems_ref", None)
+        normalized_page_ref = _normalize_page_ref_payload(payload.get("page_ref"))
+        if normalized_page_ref is not None:
+            payload["page_ref"] = normalized_page_ref
+        else:
+            payload.pop("page_ref", None)
+        campaign_option = dict(payload.get("campaign_option") or {})
+        if campaign_option:
+            payload["campaign_option"] = campaign_option
+        else:
+            payload.pop("campaign_option", None)
+        payload["currency"] = currency
+        payload["is_currency_only"] = is_currency_only
+        identity_key = _extract_campaign_page_ref(normalized_page_ref) or normalize_lookup(
+            str(systems_ref.get("title") or name)
+        )
+        merge_key = (
+            identity_key,
+            _extract_campaign_page_ref(normalized_page_ref),
+            str(payload.get("notes") or ""),
+            str(payload.get("weight") or ""),
+            is_currency_only,
+        )
+        existing_index = index_by_key.get(merge_key)
+        if existing_index is None:
+            index_by_key[merge_key] = len(normalized_equipment)
+            normalized_equipment.append(payload)
+            continue
+        existing_payload = normalized_equipment[existing_index]
+        existing_payload["default_quantity"] = int(existing_payload.get("default_quantity") or 0) + int(
+            payload.get("default_quantity") or 0
+        )
+        existing_payload["currency"] = _merge_currency_seed(
+            dict(existing_payload.get("currency") or {}),
+            dict(payload.get("currency") or {}),
+        )
+        if not existing_payload.get("systems_ref") and payload.get("systems_ref"):
+            existing_payload["systems_ref"] = dict(payload.get("systems_ref") or {})
+        if not existing_payload.get("page_ref") and payload.get("page_ref"):
+            existing_payload["page_ref"] = payload.get("page_ref")
+        if not existing_payload.get("source_kind") and payload.get("source_kind"):
+            existing_payload["source_kind"] = str(payload.get("source_kind") or "").strip()
+        if not existing_payload.get("campaign_option") and payload.get("campaign_option"):
+            existing_payload["campaign_option"] = dict(payload.get("campaign_option") or {})
+    return normalized_equipment
+
+
+def _normalize_page_ref_payload(page_ref: Any) -> Any:
+    if isinstance(page_ref, dict):
+        return dict(page_ref)
+    clean_page_ref = str(page_ref or "").strip()
+    if clean_page_ref:
+        return clean_page_ref
+    return None
+
+
+def _normalize_equipment_quantity(value: Any, *, fallback: int) -> int:
+    if value in {"", None}:
+        return max(int(fallback or 0), 0)
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return max(int(fallback or 0), 0)
+
+
 def _dedupe_campaign_spell_sources(sources: list[Any]) -> list[dict[str, Any]]:
     deduped: list[dict[str, Any]] = []
     seen: set[tuple[str, str, bool, bool]] = set()
@@ -7685,6 +7858,8 @@ def normalize_definition_to_native_model(definition: CharacterDefinition) -> Cha
         list(definition.resource_templates or []),
         derived_resource_templates,
     )
+    payload["attacks"] = _normalize_attack_payloads(list(definition.attacks or []))
+    payload["equipment_catalog"] = _normalize_equipment_payloads(list(definition.equipment_catalog or []))
     spellcasting = dict(definition.spellcasting or {})
     spellcasting["spells"] = _normalize_spell_payloads(list(spellcasting.get("spells") or []))
     payload["spellcasting"] = spellcasting
@@ -8081,7 +8256,7 @@ def _build_feature_tracker_template(
             "category": "class_feature",
             "initial_current": uses,
             "max": uses,
-            "reset_on": "long_rest",
+            "reset_on": "short_rest" if current_level >= 5 else "long_rest",
             "reset_to": "max",
             "rest_behavior": "confirm_before_reset",
             "notes": "Bardic Inspiration",

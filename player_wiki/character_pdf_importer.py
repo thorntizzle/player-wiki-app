@@ -8,6 +8,7 @@ from typing import Any
 
 from pypdf import PdfReader
 
+from .character_builder import normalize_definition_to_native_model
 from .character_importer import (
     initialize_or_reconcile_imported_state,
     parse_character_sheet_text,
@@ -21,7 +22,7 @@ from .repository import normalize_lookup
 from .systems_models import SystemsEntryRecord
 from .systems_service import SystemsService
 
-PDF_PARSER_VERSION = "2026-03-29.2"
+PDF_PARSER_VERSION = "2026-03-30.1"
 BULLET_CHAR = "\u2022"
 EN_DASH_CHAR = "\u2013"
 
@@ -964,7 +965,7 @@ def apply_systems_links_to_definition(
         spellcasting["spells"] = linked_spells
     linked_definition.spellcasting = spellcasting
 
-    return linked_definition
+    return normalize_definition_to_native_model(linked_definition)
 
 
 def build_pdf_character_artifacts(
