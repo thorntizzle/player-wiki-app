@@ -259,7 +259,7 @@ def _minimal_import_metadata(character_slug: str = "new-hero") -> CharacterImpor
         character_slug=character_slug,
         source_path="builder://native-level-1",
         imported_at_utc="2026-03-29T00:00:00Z",
-        parser_version="2026-03-30.07",
+        parser_version="2026-03-30.08",
         import_status="clean",
         warnings=[],
     )
@@ -343,6 +343,15 @@ def _option_value_for_label(options: list[dict[str, object]], label_fragment: st
         if label_fragment.lower() in str(option.get("label") or "").lower():
             return str(option.get("value") or option.get("slug") or "")
     raise AssertionError(f"top-level builder options did not contain '{label_fragment}'")
+
+
+def _builder_field_names(builder_context: dict[str, object]) -> set[str]:
+    return {
+        str(field.get("name") or "")
+        for section in list(builder_context.get("choice_sections") or [])
+        for field in list(section.get("fields") or [])
+        if str(field.get("name") or "").strip()
+    }
 
 
 def _campaign_page_record(
@@ -1889,6 +1898,228 @@ def test_level_one_builder_surfaces_and_applies_magic_initiate_feat_spells():
     assert "Cure Wounds (1 / Long Rest)" in context["preview"]["spells"]
 
 
+def test_level_one_builder_clears_stale_species_feat_and_spell_fields_after_species_change():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    variant_human = _systems_entry(
+        "race",
+        "phb-race-variant-human",
+        "Variant Human",
+        metadata={
+            "size": ["M"],
+            "speed": 30,
+            "languages": [{"common": True}],
+            "feats": [{"any": 1}],
+        },
+    )
+    elf = _systems_entry(
+        "race",
+        "phb-race-elf",
+        "Elf",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True, "elvish": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    magic_initiate = _systems_entry(
+        "feat",
+        "phb-feat-magic-initiate",
+        "Magic Initiate",
+        metadata={
+            "additional_spells": [
+                {
+                    "ability": "wis",
+                    "known": {"_": [{"choose": "level=0|class=Cleric", "count": 1}]},
+                    "innate": {"_": {"daily": {"1": [{"choose": "level=1|class=Cleric"}]}}},
+                }
+            ]
+        },
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    guidance = _systems_entry(
+        "spell",
+        "phb-spell-guidance",
+        "Guidance",
+        metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 0, "class_lists": {"PHB": ["Cleric"]}},
+    )
+    cure_wounds = _systems_entry(
+        "spell",
+        "phb-spell-cure-wounds",
+        "Cure Wounds",
+        metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1, "class_lists": {"PHB": ["Cleric"]}},
+    )
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [variant_human, elf],
+            "background": [acolyte],
+            "feat": [magic_initiate],
+            "subclass": [],
+            "item": [],
+            "spell": [guidance, cure_wounds],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    base_form = {
+        "name": "Shifted Hero",
+        "character_slug": "shifted-hero",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": variant_human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "species_feat_1": magic_initiate.slug,
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "13",
+        "cha": "8",
+    }
+
+    base_context = build_level_one_builder_context(systems_service, "linden-pass", base_form)
+    stale_form = {
+        **base_form,
+        "species_slug": elf.slug,
+        "feat_species_feat_1_spell_known_1_1": _field_value_for_label(
+            base_context,
+            "feat_species_feat_1_spell_known_1_1",
+            "Guidance",
+        ),
+        "feat_species_feat_1_spell_granted_1_1": _field_value_for_label(
+            base_context,
+            "feat_species_feat_1_spell_granted_1_1",
+            "Cure Wounds",
+        ),
+    }
+
+    stale_context = build_level_one_builder_context(systems_service, "linden-pass", stale_form)
+    field_names = _builder_field_names(stale_context)
+    definition, _ = build_level_one_character_definition("linden-pass", stale_context, stale_form)
+
+    assert "species_feat_1" not in field_names
+    assert not any(name.startswith("feat_species_feat_1_") for name in field_names)
+    assert stale_context["values"].get("species_feat_1", "") == ""
+    assert stale_context["values"].get("feat_species_feat_1_spell_known_1_1", "") == ""
+    assert stale_context["preview"]["spells"] == []
+    assert definition.spellcasting["spells"] == []
+    assert all(feature["name"] != "Magic Initiate" for feature in definition.features)
+
+
+def test_level_one_builder_applies_metamagic_adept_tracker():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    variant_human = _systems_entry(
+        "race",
+        "phb-race-variant-human",
+        "Variant Human",
+        metadata={
+            "size": ["M"],
+            "speed": 30,
+            "languages": [{"common": True}],
+            "feats": [{"any": 1}],
+        },
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    metamagic_adept = _systems_entry("feat", "tce-feat-metamagic-adept", "Metamagic Adept", source_id="TCE")
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [variant_human],
+            "background": [acolyte],
+            "feat": [metamagic_adept],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    form_values = {
+        "name": "Ari Vale",
+        "character_slug": "ari-vale",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": variant_human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "species_feat_1": metamagic_adept.slug,
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "13",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+
+    metamagic_feature = next(feature for feature in definition.features if feature["name"] == "Metamagic Adept")
+    resources_by_id = {resource["id"]: resource for resource in definition.resource_templates}
+
+    assert "Metamagic Adept Sorcery Points: 2 / 2 (Long Rest)" in context["preview"]["resources"]
+    assert metamagic_feature["tracker_ref"] == "metamagic-adept"
+    assert resources_by_id["metamagic-adept"]["max"] == 2
+    assert resources_by_id["metamagic-adept"]["reset_on"] == "long_rest"
+
+
 def test_level_one_builder_applies_alert_feat_to_initiative():
     fighter = _systems_entry(
         "class",
@@ -2761,7 +2992,7 @@ def test_level_one_builder_populates_starting_equipment_spells_and_currency():
     assert spells_by_name["Message"]["components"] == "V, S, M (a short piece of copper wire)"
     assert resource_templates_by_id["arcane-recovery"]["max"] == 1
     assert state_resources_by_id["arcane-recovery"]["current"] == 1
-    assert import_metadata.parser_version == "2026-03-30.07"
+    assert import_metadata.parser_version == "2026-03-30.08"
 
 
 def test_level_one_builder_adds_structured_subclass_prepared_spells():
@@ -5144,6 +5375,134 @@ def test_native_level_up_surfaces_and_applies_magic_initiate_feat_spells():
     assert spells_by_name["Cure Wounds"]["mark"] == "1 / Long Rest"
 
 
+def test_native_level_up_clears_stale_feat_and_spell_fields_after_switching_back_to_ability_scores():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    ability_score_improvement = _systems_entry(
+        "classfeature",
+        "phb-classfeature-ability-score-improvement",
+        "Ability Score Improvement",
+        metadata={"level": 4},
+    )
+    magic_initiate = _systems_entry(
+        "feat",
+        "phb-feat-magic-initiate",
+        "Magic Initiate",
+        metadata={
+            "additional_spells": [
+                {
+                    "ability": "wis",
+                    "known": {"_": [{"choose": "level=0|class=Cleric", "count": 1}]},
+                    "innate": {"_": {"daily": {"1": [{"choose": "level=1|class=Cleric"}]}}},
+                }
+            ]
+        },
+    )
+    guidance = _systems_entry(
+        "spell",
+        "phb-spell-guidance",
+        "Guidance",
+        metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 0, "class_lists": {"PHB": ["Cleric"]}},
+    )
+    cure_wounds = _systems_entry(
+        "spell",
+        "phb-spell-cure-wounds",
+        "Cure Wounds",
+        metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1, "class_lists": {"PHB": ["Cleric"]}},
+    )
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [magic_initiate],
+            "subclass": [],
+            "item": [],
+            "spell": [guidance, cure_wounds],
+        },
+        class_progression=[
+            {
+                "level": 4,
+                "level_label": "Level 4",
+                "feature_rows": [
+                    {"label": "Ability Score Improvement", "entry": ability_score_improvement, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    current_definition = _minimal_character_definition("asi-shift", "ASI Shift")
+    current_definition.profile["class_level_text"] = "Fighter 3"
+    current_definition.profile["classes"][0]["level"] = 3
+
+    feat_form = {
+        "hp_gain": "8",
+        "levelup_asi_mode_1": "feat",
+        "levelup_feat_1": magic_initiate.slug,
+    }
+    feat_context = build_native_level_up_context(systems_service, "linden-pass", current_definition, feat_form)
+    stale_form = {
+        **feat_form,
+        "levelup_asi_mode_1": "ability_scores",
+        "levelup_asi_ability_1_1": "str",
+        "levelup_asi_ability_1_2": "str",
+        "feat_levelup_feat_1_spell_known_1_1": _field_value_for_label(
+            feat_context,
+            "feat_levelup_feat_1_spell_known_1_1",
+            "Guidance",
+        ),
+        "feat_levelup_feat_1_spell_granted_1_1": _field_value_for_label(
+            feat_context,
+            "feat_levelup_feat_1_spell_granted_1_1",
+            "Cure Wounds",
+        ),
+    }
+
+    stale_context = build_native_level_up_context(systems_service, "linden-pass", current_definition, stale_form)
+    field_names = _builder_field_names(stale_context)
+    leveled_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        stale_context,
+        stale_form,
+    )
+
+    assert "levelup_feat_1" not in field_names
+    assert not any(name.startswith("feat_levelup_feat_1_") for name in field_names)
+    assert {"levelup_asi_ability_1_1", "levelup_asi_ability_1_2"} <= field_names
+    assert stale_context["values"].get("levelup_feat_1", "") == ""
+    assert stale_context["values"].get("feat_levelup_feat_1_spell_known_1_1", "") == ""
+    assert stale_context["preview"]["new_spells"] == []
+    assert leveled_definition.stats["ability_scores"]["str"]["score"] == 18
+    assert leveled_definition.spellcasting["spells"] == []
+    assert all(feature["name"] != "Magic Initiate" for feature in leveled_definition.features)
+
+
 def test_native_level_up_can_replace_known_spell():
     warlock = _systems_entry(
         "class",
@@ -6410,6 +6769,143 @@ def test_native_level_up_applies_tough_feat_hit_points_to_definition_and_state()
     assert merged_state["vitals"]["current_hp"] == 44
 
 
+def test_level_one_builder_applies_war_priest_tracker_from_level_one_subclass():
+    cleric = _systems_entry(
+        "class",
+        "phb-class-cleric",
+        "Cleric",
+        metadata={
+            "hit_die": {"faces": 8},
+            "proficiency": ["wis", "cha"],
+            "subclass_title": "Divine Domain",
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "shield"],
+                "weapons": ["simple"],
+                "skills": [{"choose": {"count": 2, "from": ["history", "insight", "medicine", "religion"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    war_domain = _systems_entry(
+        "subclass",
+        "phb-subclass-cleric-war-domain",
+        "War Domain",
+        metadata={"class_name": "Cleric", "class_source": "PHB"},
+    )
+    divine_domain = _systems_entry(
+        "classfeature",
+        "phb-classfeature-divine-domain",
+        "Divine Domain",
+        metadata={"level": 1},
+    )
+    war_priest = _systems_entry(
+        "subclassfeature",
+        "phb-subclassfeature-war-priest",
+        "War Priest",
+        metadata={"level": 1, "class_name": "Cleric", "class_source": "PHB", "subclass_name": "War Domain"},
+    )
+    guidance = _systems_entry("spell", "phb-spell-guidance", "Guidance", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    sacred_flame = _systems_entry(
+        "spell",
+        "phb-spell-sacred-flame",
+        "Sacred Flame",
+        metadata={"casting_time": [{"number": 1, "unit": "action"}]},
+    )
+    thaumaturgy = _systems_entry(
+        "spell",
+        "phb-spell-thaumaturgy",
+        "Thaumaturgy",
+        metadata={"casting_time": [{"number": 1, "unit": "action"}]},
+    )
+    bless = _systems_entry("spell", "phb-spell-bless", "Bless", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    cure_wounds = _systems_entry(
+        "spell",
+        "phb-spell-cure-wounds",
+        "Cure Wounds",
+        metadata={"casting_time": [{"number": 1, "unit": "action"}]},
+    )
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [cleric],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [war_domain],
+            "item": [],
+            "spell": [guidance, sacred_flame, thaumaturgy, bless, cure_wounds],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Divine Domain", "entry": divine_domain, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+        subclass_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "War Priest", "entry": war_priest, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    form_values = {
+        "name": "Sister Arden",
+        "character_slug": "sister-arden",
+        "alignment": "Lawful Good",
+        "experience_model": "Milestone",
+        "class_slug": cleric.slug,
+        "subclass_slug": war_domain.slug,
+        "species_slug": human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "history",
+        "class_skill_2": "medicine",
+        "str": "12",
+        "dex": "10",
+        "con": "14",
+        "int": "10",
+        "wis": "13",
+        "cha": "15",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    form_values = {
+        **form_values,
+        "spell_cantrip_1": _field_value_for_label(context, "spell_cantrip_1", "Guidance"),
+        "spell_cantrip_2": _field_value_for_label(context, "spell_cantrip_2", "Sacred Flame"),
+        "spell_cantrip_3": _field_value_for_label(context, "spell_cantrip_3", "Thaumaturgy"),
+        "spell_level_one_1": _field_value_for_label(context, "spell_level_one_1", "Bless"),
+        "spell_level_one_2": _field_value_for_label(context, "spell_level_one_2", "Cure Wounds"),
+    }
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+
+    war_priest_feature = next(feature for feature in definition.features if feature["name"] == "War Priest")
+    resources_by_id = {resource["id"]: resource for resource in definition.resource_templates}
+
+    assert "War Priest: 1 / 1 (Long Rest)" in context["preview"]["resources"]
+    assert war_priest_feature["tracker_ref"] == "war-priest"
+    assert resources_by_id["war-priest"]["max"] == 1
+    assert resources_by_id["war-priest"]["reset_on"] == "long_rest"
+
+
 def test_native_level_up_refreshes_scaling_fighter_resource_templates():
     fighter = _systems_entry(
         "class",
@@ -6670,6 +7166,119 @@ def test_native_level_up_refreshes_scaling_rage_resource():
     assert resources_by_id["rage"]["max"] == 3
     assert merged_resources["rage"]["current"] == 1
     assert merged_resources["rage"]["max"] == 3
+
+
+def test_native_level_up_adds_arcane_shot_tracker_on_subclass_selection():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "subclass_title": "Martial Archetype",
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    arcane_archer = _systems_entry(
+        "subclass",
+        "xge-subclass-fighter-arcane-archer",
+        "Arcane Archer",
+        source_id="XGE",
+        metadata={"class_name": "Fighter", "class_source": "PHB"},
+    )
+    martial_archetype = _systems_entry(
+        "classfeature",
+        "phb-classfeature-martial-archetype",
+        "Martial Archetype",
+        metadata={"level": 3},
+    )
+    arcane_shot = _systems_entry(
+        "subclassfeature",
+        "xge-subclassfeature-arcane-shot",
+        "Arcane Shot",
+        source_id="XGE",
+        metadata={"level": 3, "class_name": "Fighter", "class_source": "PHB", "subclass_name": "Arcane Archer"},
+    )
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [arcane_archer],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 3,
+                "level_label": "Level 3",
+                "feature_rows": [
+                    {"label": "Martial Archetype", "entry": martial_archetype, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+        subclass_progression=[
+            {
+                "level": 3,
+                "level_label": "Level 3",
+                "feature_rows": [
+                    {"label": "Arcane Shot", "entry": arcane_shot, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    current_definition = _minimal_character_definition("arrow-ace", "Arrow Ace")
+    current_definition.profile["class_level_text"] = "Fighter 2"
+    current_definition.profile["classes"][0]["level"] = 2
+    current_definition.stats["max_hp"] = 20
+
+    form_values = {
+        "hp_gain": "8",
+        "subclass_slug": arcane_archer.slug,
+    }
+
+    level_up_context = build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values)
+    leveled_definition, _, hp_delta = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        level_up_context,
+        form_values,
+    )
+    merged_state = merge_state_with_definition(
+        leveled_definition,
+        build_initial_state(current_definition),
+        hp_delta=hp_delta,
+    )
+
+    arcane_shot_feature = next(feature for feature in leveled_definition.features if feature["name"] == "Arcane Shot")
+    resources_by_id = {resource["id"]: resource for resource in leveled_definition.resource_templates}
+    merged_resources = {resource["id"]: resource for resource in merged_state["resources"]}
+
+    assert "Arcane Shot: 2 / 2 (Short Rest)" in level_up_context["preview"]["resources"]
+    assert arcane_shot_feature["tracker_ref"] == "arcane-shot"
+    assert resources_by_id["arcane-shot"]["max"] == 2
+    assert resources_by_id["arcane-shot"]["reset_on"] == "short_rest"
+    assert merged_resources["arcane-shot"]["current"] == 2
 
 
 def test_dm_roster_shows_create_character_link(client, sign_in, users):

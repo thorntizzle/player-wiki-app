@@ -19,7 +19,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-03-30.07"
+CHARACTER_BUILDER_VERSION = "2026-03-30.08"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -38,6 +38,20 @@ CAMPAIGN_MIXED_SOURCE_SUBSECTIONS_BY_KIND = {
 }
 
 ABILITY_KEYS = ("str", "dex", "con", "int", "wis", "cha")
+LEVEL_ONE_BUILDER_STATIC_KEYS = frozenset(
+    {
+        "name",
+        "character_slug",
+        "alignment",
+        "experience_model",
+        "class_slug",
+        "subclass_slug",
+        "species_slug",
+        "background_slug",
+        *ABILITY_KEYS,
+    }
+)
+LEVEL_UP_BUILDER_STATIC_KEYS = frozenset({"hp_gain", "subclass_slug"})
 ABILITY_LABELS = {
     "str": "Strength",
     "dex": "Dexterity",
@@ -378,7 +392,7 @@ def build_level_one_builder_context(
     *,
     campaign_page_records: list[Any] | None = None,
 ) -> dict[str, Any]:
-    values = dict(form_values or {})
+    preview_values = _normalize_preview_values(form_values or {})
     class_options = _list_supported_class_entries(systems_service, campaign_slug)
     species_options = _build_mixed_character_options(
         _list_campaign_enabled_entries(systems_service, campaign_slug, "race"),
@@ -410,12 +424,22 @@ def build_level_one_builder_context(
         include_items=True,
     )
 
-    selected_class = _resolve_selected_entry(class_options, values.get("class_slug", ""))
-    selected_species = _resolve_selected_entry(species_options, values.get("species_slug", ""))
-    selected_background = _resolve_selected_entry(background_options, values.get("background_slug", ""))
+    preview_values["class_slug"] = _sanitize_entry_selection_value(preview_values.get("class_slug"), class_options)
+    preview_values["species_slug"] = _sanitize_entry_selection_value(preview_values.get("species_slug"), species_options)
+    preview_values["background_slug"] = _sanitize_entry_selection_value(
+        preview_values.get("background_slug"),
+        background_options,
+    )
+    selected_class = _resolve_selected_entry(class_options, preview_values.get("class_slug", ""))
+    selected_species = _resolve_selected_entry(species_options, preview_values.get("species_slug", ""))
+    selected_background = _resolve_selected_entry(background_options, preview_values.get("background_slug", ""))
 
     subclass_options = _list_subclass_options(systems_service, campaign_slug, selected_class)
-    selected_subclass = _resolve_selected_entry(subclass_options, values.get("subclass_slug", ""))
+    preview_values["subclass_slug"] = _sanitize_entry_selection_value(
+        preview_values.get("subclass_slug"),
+        subclass_options,
+    )
+    selected_subclass = _resolve_selected_entry(subclass_options, preview_values.get("subclass_slug", ""))
 
     class_progression = (
         systems_service.build_class_feature_progression_for_class_entry(campaign_slug, selected_class)
@@ -429,7 +453,6 @@ def build_level_one_builder_context(
     )
     requires_subclass = _class_requires_subclass_at_level_one(selected_class, class_progression)
 
-    preview_values = _normalize_preview_values(values)
     equipment_groups = _build_equipment_groups(
         selected_class=selected_class,
         selected_background=selected_background,
@@ -437,22 +460,26 @@ def build_level_one_builder_context(
         values=preview_values,
     )
 
-    choice_sections = _build_choice_sections(
-        selected_class=selected_class,
-        selected_subclass=selected_subclass,
-        selected_species=selected_species,
-        selected_background=selected_background,
-        feat_options=feat_options,
-        feat_catalog=feat_catalog,
-        optionalfeature_catalog=optionalfeature_catalog,
-        class_progression=class_progression,
-        subclass_progression=subclass_progression,
-        equipment_groups=equipment_groups,
-        campaign_feature_options=campaign_feature_options,
-        campaign_item_options=campaign_item_options,
-        item_catalog=item_catalog,
-        spell_catalog=spell_catalog,
-        values=preview_values,
+    preview_values, choice_sections = _stabilize_choice_section_values(
+        preview_values,
+        static_keys=LEVEL_ONE_BUILDER_STATIC_KEYS,
+        build_sections=lambda current_values: _build_choice_sections(
+            selected_class=selected_class,
+            selected_subclass=selected_subclass,
+            selected_species=selected_species,
+            selected_background=selected_background,
+            feat_options=feat_options,
+            feat_catalog=feat_catalog,
+            optionalfeature_catalog=optionalfeature_catalog,
+            class_progression=class_progression,
+            subclass_progression=subclass_progression,
+            equipment_groups=equipment_groups,
+            campaign_feature_options=campaign_feature_options,
+            campaign_item_options=campaign_item_options,
+            item_catalog=item_catalog,
+            spell_catalog=spell_catalog,
+            values=current_values,
+        ),
     )
 
     preview = _build_level_one_preview(
@@ -507,7 +534,6 @@ def build_level_one_character_definition(
     builder_context: dict[str, Any],
     form_values: dict[str, str] | None = None,
 ) -> tuple[CharacterDefinition, CharacterImportMetadata]:
-    values = _normalize_preview_values(form_values or {})
     selected_class = builder_context.get("selected_class")
     selected_species = builder_context.get("selected_species")
     selected_background = builder_context.get("selected_background")
@@ -521,6 +547,17 @@ def build_level_one_character_definition(
     item_catalog = dict(builder_context.get("item_catalog") or {})
     spell_catalog = dict(builder_context.get("spell_catalog") or {})
     limitations = list(builder_context.get("limitations") or [])
+    context_values = builder_context.get("values")
+    values = _normalize_preview_values(
+        _sanitize_choice_section_values(
+            {
+                **(dict(context_values) if isinstance(context_values, dict) else {}),
+                **{key: str(value) for key, value in dict(form_values or {}).items()},
+            },
+            choice_sections=choice_sections,
+            static_keys=LEVEL_ONE_BUILDER_STATIC_KEYS,
+        )
+    )
 
     if selected_class is None:
         raise CharacterBuildError("Choose a class to build the character.")
@@ -749,6 +786,7 @@ def build_native_level_up_context(
     existing_subclass_slug = _systems_ref_slug(definition.profile.get("subclass_ref"))
     if existing_subclass_slug and not str(values.get("subclass_slug") or "").strip():
         values["subclass_slug"] = existing_subclass_slug
+    values["subclass_slug"] = _sanitize_entry_selection_value(values.get("subclass_slug"), subclass_options)
     selected_subclass = _resolve_selected_entry(subclass_options, values.get("subclass_slug", ""))
 
     class_progression = systems_service.build_class_feature_progression_for_class_entry(campaign_slug, selected_class)
@@ -762,22 +800,26 @@ def build_native_level_up_context(
         else []
     )
     ability_scores = _ability_scores_from_definition(definition)
-    choice_sections = _build_level_up_choice_sections(
-        definition=definition,
-        selected_class=selected_class,
-        selected_subclass=selected_subclass,
-        feat_options=feat_options,
-        feat_catalog=feat_catalog,
-        subclass_options=subclass_options,
-        requires_subclass=requires_subclass,
-        class_progression=class_progression,
-        subclass_progression=subclass_progression,
-        optionalfeature_catalog=optionalfeature_catalog,
-        item_catalog=item_catalog,
-        spell_catalog=spell_catalog,
-        target_level=next_level,
-        current_ability_scores=ability_scores,
-        values=values,
+    values, choice_sections = _stabilize_choice_section_values(
+        values,
+        static_keys=LEVEL_UP_BUILDER_STATIC_KEYS,
+        build_sections=lambda current_values: _build_level_up_choice_sections(
+            definition=definition,
+            selected_class=selected_class,
+            selected_subclass=selected_subclass,
+            feat_options=feat_options,
+            feat_catalog=feat_catalog,
+            subclass_options=subclass_options,
+            requires_subclass=requires_subclass,
+            class_progression=class_progression,
+            subclass_progression=subclass_progression,
+            optionalfeature_catalog=optionalfeature_catalog,
+            item_catalog=item_catalog,
+            spell_catalog=spell_catalog,
+            target_level=next_level,
+            current_ability_scores=ability_scores,
+            values=current_values,
+        ),
     )
     preview = _build_native_level_up_preview(
         definition=definition,
@@ -828,7 +870,6 @@ def build_native_level_up_character_definition(
     if support_error:
         raise CharacterBuildError(support_error)
 
-    values = _normalize_level_up_values(current_definition, form_values or {})
     selected_class = level_up_context.get("selected_class")
     selected_species = level_up_context.get("selected_species")
     selected_background = level_up_context.get("selected_background")
@@ -840,6 +881,18 @@ def build_native_level_up_character_definition(
     feat_catalog = dict(level_up_context.get("feat_catalog") or {})
     optionalfeature_catalog = dict(level_up_context.get("optionalfeature_catalog") or {})
     spell_catalog = dict(level_up_context.get("spell_catalog") or {})
+    context_values = level_up_context.get("values")
+    values = _normalize_level_up_values(
+        current_definition,
+        _sanitize_choice_section_values(
+            {
+                **(dict(context_values) if isinstance(context_values, dict) else {}),
+                **{key: str(value) for key, value in dict(form_values or {}).items()},
+            },
+            choice_sections=choice_sections,
+            static_keys=LEVEL_UP_BUILDER_STATIC_KEYS,
+        ),
+    )
     if selected_class is None or selected_species is None or selected_background is None:
         raise CharacterBuildError("This native character is missing the class, species, or background needed for level-up.")
     if level_up_context.get("requires_subclass") and selected_subclass is None:
@@ -1432,6 +1485,75 @@ def _normalize_level_up_values(
     if existing_subclass_slug and not str(normalized.get("subclass_slug") or "").strip():
         normalized["subclass_slug"] = existing_subclass_slug
     return normalized
+
+
+def _sanitize_entry_selection_value(
+    raw_value: Any,
+    options: list[SystemsEntryRecord],
+) -> str:
+    allowed_values = {
+        candidate
+        for entry in list(options or [])
+        for candidate in (
+            _entry_selection_value(entry),
+            _entry_page_ref(entry),
+            _entry_option_slug(entry),
+        )
+        if str(candidate or "").strip()
+    }
+    selected_value = _normalize_selected_choice_value(str(raw_value or "").strip(), allowed_values)
+    return selected_value if selected_value in allowed_values else ""
+
+
+def _sanitize_choice_section_values(
+    values: dict[str, str],
+    *,
+    choice_sections: list[dict[str, Any]],
+    static_keys: frozenset[str] | set[str],
+) -> dict[str, str]:
+    sanitized = {key: str(values.get(key) or "") for key in static_keys if key in values}
+    selected_by_group: dict[str, set[str]] = {}
+    for section in list(choice_sections or []):
+        for field in list(section.get("fields") or []):
+            field_name = str(field.get("name") or "").strip()
+            if not field_name:
+                continue
+            allowed_values = {
+                str(option.get("value") or "").strip()
+                for option in list(field.get("options") or [])
+                if str(option.get("value") or "").strip()
+            }
+            raw_value = str(values.get(field_name) or "").strip()
+            selected_value = _normalize_selected_choice_value(raw_value, allowed_values)
+            if selected_value not in allowed_values:
+                continue
+            group_key = str(field.get("group_key") or field_name).strip() or field_name
+            if selected_value in selected_by_group.setdefault(group_key, set()):
+                continue
+            selected_by_group[group_key].add(selected_value)
+            sanitized[field_name] = selected_value
+    return sanitized
+
+
+def _stabilize_choice_section_values(
+    values: dict[str, str],
+    *,
+    static_keys: frozenset[str] | set[str],
+    build_sections,
+) -> tuple[dict[str, str], list[dict[str, Any]]]:
+    current_values = {key: str(value) for key, value in dict(values or {}).items()}
+    choice_sections = list(build_sections(current_values) or [])
+    for _ in range(4):
+        sanitized_values = _sanitize_choice_section_values(
+            current_values,
+            choice_sections=choice_sections,
+            static_keys=static_keys,
+        )
+        if sanitized_values == current_values:
+            break
+        current_values = sanitized_values
+        choice_sections = list(build_sections(current_values) or [])
+    return current_values, choice_sections
 
 
 def _class_requires_subclass_at_level(
@@ -8613,6 +8735,35 @@ def _build_feature_tracker_template(
             "display_order": display_order,
             "activation_type": "action",
         }
+    if normalized == normalize_lookup("War Priest"):
+        uses = max(_ability_modifier(ability_scores.get("wis", DEFAULT_ABILITY_SCORE)), 1)
+        return {
+            "id": "war-priest",
+            "label": "War Priest",
+            "category": "subclass_feature",
+            "initial_current": uses,
+            "max": uses,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "War Priest",
+            "display_order": display_order,
+            "activation_type": "bonus_action",
+        }
+    if normalized == normalize_lookup("Arcane Shot"):
+        return {
+            "id": "arcane-shot",
+            "label": "Arcane Shot",
+            "category": "subclass_feature",
+            "initial_current": 2,
+            "max": 2,
+            "reset_on": "short_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Arcane Shot",
+            "display_order": display_order,
+            "activation_type": "special",
+        }
     if normalized == normalize_lookup("Ki"):
         points = max(current_level, 2)
         return {
@@ -8698,6 +8849,20 @@ def _build_feature_tracker_template(
             "reset_to": "max",
             "rest_behavior": "confirm_before_reset",
             "notes": "Superiority Die (d6)",
+            "display_order": display_order,
+            "activation_type": "special",
+        }
+    if normalized == normalize_lookup("Metamagic Adept"):
+        return {
+            "id": "metamagic-adept",
+            "label": "Metamagic Adept Sorcery Points",
+            "category": "feat",
+            "initial_current": 2,
+            "max": 2,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Metamagic Adept Sorcery Points",
             "display_order": display_order,
             "activation_type": "special",
         }
