@@ -4,8 +4,10 @@ from html import escape
 import re
 from collections import defaultdict
 from dataclasses import dataclass
+from pathlib import Path
 
 from .auth_store import isoformat, utcnow
+from .character_campaign_progression import build_campaign_page_progression_entries
 from .campaign_visibility import (
     VISIBILITY_DM,
     VISIBILITY_PLAYERS,
@@ -344,6 +346,9 @@ class SystemsService:
                 matching_entries.append(candidate)
 
         progression_rows = entry.body.get("feature_progression")
+        matching_entries.extend(
+            self._campaign_progression_entries_for_class_entry(campaign_slug, entry)
+        )
         return self._build_feature_progression_groups(
             campaign_slug,
             matching_entries=matching_entries,
@@ -386,6 +391,9 @@ class SystemsService:
                 matching_entries.append(candidate)
 
         progression_rows = entry.body.get("feature_progression")
+        matching_entries.extend(
+            self._campaign_progression_entries_for_subclass_entry(campaign_slug, entry)
+        )
         return self._build_feature_progression_groups(
             campaign_slug,
             matching_entries=matching_entries,
@@ -913,11 +921,14 @@ class SystemsService:
             grouped_entries[self._coerce_int(candidate.metadata.get("level"), default=0)].append(candidate)
 
         rows: list[dict[str, object]] = []
+        rendered_levels: set[int] = set()
         for group in progression_rows:
             if not isinstance(group, dict):
                 continue
             level_label = str(group.get("name", "") or "").strip()
             level = self._extract_level_from_progression_label(level_label)
+            if level > 0:
+                rendered_levels.add(level)
             entries_for_level = sorted(
                 grouped_entries.get(level, []),
                 key=lambda item: (
@@ -963,6 +974,35 @@ class SystemsService:
             if not feature_rows:
                 continue
             rows.append({"level": level, "level_label": level_label or f"Level {level}", "feature_rows": feature_rows})
+        for level in sorted(level_key for level_key in grouped_entries if level_key > 0 and level_key not in rendered_levels):
+            extra_entries = sorted(
+                grouped_entries.get(level, []),
+                key=lambda item: (
+                    item.title.lower(),
+                    item.source_id,
+                    item.id,
+                ),
+            )
+            if not extra_entries:
+                continue
+            rows.append(
+                {
+                    "level": level,
+                    "level_label": f"Level {level}",
+                    "feature_rows": [
+                        {
+                            "label": extra_entry.title,
+                            "entry": extra_entry,
+                            "embedded_card": self._build_embedded_feature_card(
+                                campaign_slug,
+                                extra_entry,
+                                optionalfeature_lookup=optionalfeature_lookup,
+                            ),
+                        }
+                        for extra_entry in extra_entries
+                    ],
+                }
+            )
         return rows
 
     def _build_embedded_feature_card(
@@ -972,6 +1012,13 @@ class SystemsService:
         *,
         optionalfeature_lookup: dict[str, list[SystemsEntryRecord]],
     ) -> dict[str, object]:
+        page_ref = str(entry.metadata.get("page_ref") or "").strip()
+        if page_ref:
+            return {
+                "meta_badges": self._build_embedded_feature_badges(entry),
+                "body_html": self._build_campaign_page_body_html(campaign_slug, page_ref),
+                "option_groups": [],
+            }
         body_html, option_groups = self._render_embedded_content(
             campaign_slug,
             entry.body.get("entries"),
@@ -1012,6 +1059,103 @@ class SystemsService:
         if level > 0:
             badges.append(f"Level {level}")
         return badges
+
+    def _campaign_progression_entries_for_class_entry(
+        self,
+        campaign_slug: str,
+        entry: SystemsEntryRecord,
+    ) -> list[SystemsEntryRecord]:
+        return [
+            candidate
+            for candidate in self._list_campaign_progression_entries(campaign_slug)
+            if candidate.entry_type == "classfeature"
+            and self._campaign_progression_entry_matches_class(entry, candidate)
+        ]
+
+    def _campaign_progression_entries_for_subclass_entry(
+        self,
+        campaign_slug: str,
+        entry: SystemsEntryRecord,
+    ) -> list[SystemsEntryRecord]:
+        return [
+            candidate
+            for candidate in self._list_campaign_progression_entries(campaign_slug)
+            if candidate.entry_type == "subclassfeature"
+            and self._campaign_progression_entry_matches_subclass(entry, candidate)
+        ]
+
+    def _list_campaign_progression_entries(self, campaign_slug: str) -> list[SystemsEntryRecord]:
+        campaign = self._get_campaign(campaign_slug)
+        page_store = getattr(self.repository_store, "page_store", None)
+        if campaign is None or page_store is None:
+            return []
+        records = page_store.list_page_records(
+            campaign_slug,
+            content_dir=Path(campaign.player_content_dir),
+            include_body=True,
+        )
+        entries: list[SystemsEntryRecord] = []
+        seen_keys: set[str] = set()
+        for record in records:
+            page = getattr(record, "page", None)
+            if page is None or not campaign.is_page_visible(page):
+                continue
+            if str(getattr(page, "section", "") or "").strip() != "Mechanics":
+                continue
+            for entry in build_campaign_page_progression_entries(record):
+                entry_key = str(entry.entry_key or "").strip()
+                if entry_key and entry_key in seen_keys:
+                    continue
+                if entry_key:
+                    seen_keys.add(entry_key)
+                entries.append(entry)
+        return entries
+
+    def _campaign_progression_entry_matches_class(
+        self,
+        class_entry: SystemsEntryRecord,
+        progression_entry: SystemsEntryRecord,
+    ) -> bool:
+        class_name = str(progression_entry.metadata.get("class_name", "") or "").strip()
+        if class_name != class_entry.title:
+            return False
+        class_source = str(progression_entry.metadata.get("class_source", "") or "").strip().upper()
+        return not class_source or class_source == str(class_entry.source_id or "").strip().upper()
+
+    def _campaign_progression_entry_matches_subclass(
+        self,
+        subclass_entry: SystemsEntryRecord,
+        progression_entry: SystemsEntryRecord,
+    ) -> bool:
+        if not self._campaign_progression_entry_matches_class_name_only(subclass_entry, progression_entry):
+            return False
+        subclass_name = str(progression_entry.metadata.get("subclass_name", "") or "").strip()
+        if subclass_name:
+            subclass_title_variants = self._build_optionalfeature_title_variants(subclass_entry.title)
+            feature_title_variants = self._build_optionalfeature_title_variants(subclass_name)
+            if not (
+                self._optionalfeature_titles_exactly_match(subclass_title_variants, feature_title_variants)
+                or self._optionalfeature_titles_loosely_match(subclass_title_variants, feature_title_variants)
+            ):
+                return False
+        subclass_source = str(progression_entry.metadata.get("subclass_source", "") or "").strip().upper()
+        return not subclass_source or subclass_source == str(subclass_entry.source_id or "").strip().upper()
+
+    def _campaign_progression_entry_matches_class_name_only(
+        self,
+        subclass_entry: SystemsEntryRecord,
+        progression_entry: SystemsEntryRecord,
+    ) -> bool:
+        class_name = str(progression_entry.metadata.get("class_name", "") or "").strip()
+        if class_name != str(subclass_entry.metadata.get("class_name", "") or "").strip():
+            return False
+        class_source = str(progression_entry.metadata.get("class_source", "") or "").strip().upper()
+        subclass_class_source = str(subclass_entry.metadata.get("class_source", "") or "").strip().upper()
+        return not class_source or class_source == subclass_class_source
+
+    def _build_campaign_page_body_html(self, campaign_slug: str, page_ref: str) -> str:
+        repository = self.repository_store.get()
+        return str(repository.get_page_body_html(campaign_slug, page_ref) or "").strip()
 
     def _render_character_sheet_progression_groups(self, groups: list[dict[str, object]]) -> str:
         list_items: list[str] = []

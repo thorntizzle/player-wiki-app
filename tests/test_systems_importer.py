@@ -1190,6 +1190,69 @@ def build_unsupported_cross_source_subclassfeature_data_root(root: Path) -> Path
     return root
 
 
+def build_campaign_subclass_progression_data_root(root: Path) -> Path:
+    write_json(root / "data/class/index.json", {"sorcerer": "class-sorcerer.json"})
+    write_json(
+        root / "data/class/class-sorcerer.json",
+        {
+            "class": [
+                {
+                    "name": "Sorcerer",
+                    "source": "PHB",
+                    "page": 99,
+                    "hd": {"number": 1, "faces": 6},
+                    "proficiency": ["con", "cha"],
+                    "startingProficiencies": {
+                        "weapons": ["dagger", "dart", "sling", "quarterstaff", "light crossbow"],
+                        "skills": [{"choose": {"count": 2, "from": ["arcana", "deception", "insight", "persuasion"]}}],
+                    },
+                    "subclassTitle": "Sorcerous Origin",
+                    "classFeatures": [
+                        "Spellcasting|Sorcerer|PHB|1",
+                    ],
+                }
+            ],
+            "classFeature": [
+                {
+                    "name": "Spellcasting",
+                    "source": "PHB",
+                    "className": "Sorcerer",
+                    "classSource": "PHB",
+                    "level": 1,
+                    "entries": ["You have learned to untangle and reshape the fabric of reality in harmony with your wishes and music."],
+                }
+            ],
+            "subclass": [
+                {
+                    "name": "Wild Magic",
+                    "shortName": "Wild Magic",
+                    "source": "PHB",
+                    "className": "Sorcerer",
+                    "classSource": "PHB",
+                    "page": 103,
+                    "subclassFeatures": [
+                        "Wild Magic Surge|Sorcerer||Wild Magic|PHB|1",
+                    ],
+                }
+            ],
+            "subclassFeature": [
+                {
+                    "name": "Wild Magic Surge",
+                    "source": "PHB",
+                    "className": "Sorcerer",
+                    "classSource": "PHB",
+                    "subclassShortName": "Wild Magic",
+                    "subclassSource": "PHB",
+                    "level": 1,
+                    "page": 103,
+                    "entries": ["Your spellcasting can unleash surges of untamed magic."],
+                }
+            ],
+        },
+    )
+    return root
+
+
 def test_embedded_feature_cards_strip_inline_import_tags(app):
     with app.app_context():
         systems_service = app.extensions["systems_service"]
@@ -1811,6 +1874,70 @@ def test_subclass_pages_match_subclassfeature_short_names_to_full_titles(
     assert "Bonus Proficiencies" in subclass_body
     assert "You gain proficiency with three skills of your choice." in subclass_body
     assert f'href="/campaigns/linden-pass/systems/entries/{subclassfeature_entry.slug}"' in subclass_body
+
+
+def test_subclass_pages_surface_campaign_mechanics_progression_overlays(
+    app, client, sign_in, users, tmp_path
+):
+    data_root = build_campaign_subclass_progression_data_root(tmp_path / "dnd5e-source-campaign-subclass-progression")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("PHB", entry_types=["class", "classfeature", "subclass", "subclassfeature"])
+
+        store = app.extensions["systems_store"]
+        subclass_entry = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "PHB", entry_type="subclass", limit=20)
+            if entry.title == "Wild Magic"
+        )
+
+        campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])
+        page_path = campaigns_dir / "linden-pass" / "content" / "mechanics" / "wild-magic-modification.md"
+        page_path.parent.mkdir(parents=True, exist_ok=True)
+        page_path.write_text(
+            "---\n"
+            "title: Wild Magic Modification\n"
+            "section: Mechanics\n"
+            "type: mechanic\n"
+            "subsection: Class Modifications\n"
+            "character_progression:\n"
+            "  kind: subclass\n"
+            "  class_name: Sorcerer\n"
+            "  subclass_name: Wild Magic\n"
+            "  level: 1\n"
+            "  character_option:\n"
+            "    name: Wild Magic Modification\n"
+            "    activation_type: special\n"
+            "    grants:\n"
+            "      resource:\n"
+            "        label: Wild Die\n"
+            "        reset_on: long_rest\n"
+            "        scaling:\n"
+            "          mode: half_level\n"
+            "          minimum: 1\n"
+            "          round: down\n"
+            "---\n\n"
+            "You gain a number of Wild Die equal to half your level. A Wild Die is a d6.\n",
+            encoding="utf-8",
+        )
+        app.extensions["repository_store"].refresh()
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    subclass_response = client.get(f"/campaigns/linden-pass/systems/entries/{subclass_entry.slug}")
+
+    assert subclass_response.status_code == 200
+    subclass_body = subclass_response.get_data(as_text=True)
+    assert "Wild Magic Surge" in subclass_body
+    assert "Wild Magic Modification" in subclass_body
+    assert "Wild Die" in subclass_body
+    assert "You gain a number of Wild Die equal to half your level." in subclass_body
+    assert '/campaigns/linden-pass/pages/mechanics/wild-magic-modification' in subclass_body
 
 
 def test_importer_skips_subclassfeatures_for_unsupported_subclass_sources(app, tmp_path):

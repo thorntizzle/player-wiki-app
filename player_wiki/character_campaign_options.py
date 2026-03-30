@@ -15,6 +15,8 @@ VALID_CAMPAIGN_FEATURE_ACTIVATION_TYPES = {
     "special",
 }
 VALID_CAMPAIGN_RESOURCE_RESET_TYPES = {"manual", "short_rest", "long_rest"}
+VALID_CAMPAIGN_RESOURCE_SCALING_MODES = {"level", "half_level", "proficiency_bonus", "thresholds"}
+VALID_CAMPAIGN_RESOURCE_SCALING_ROUNDS = {"down", "up", "nearest"}
 
 
 def build_campaign_page_character_option(
@@ -293,16 +295,58 @@ def _normalize_resource_grant(value: Any) -> dict[str, Any] | None:
     if not resource:
         return None
     max_value = _normalize_positive_integer(resource.get("max"), default=0)
-    if max_value <= 0:
+    scaling = _normalize_resource_scaling(resource.get("scaling"))
+    if max_value <= 0 and scaling is None:
         return None
     reset_on = str(resource.get("reset_on") or "manual").strip().lower()
     if reset_on not in VALID_CAMPAIGN_RESOURCE_RESET_TYPES:
         reset_on = "manual"
-    return {
+    normalized = {
         "label": str(resource.get("label") or "").strip(),
-        "max": max_value,
         "reset_on": reset_on,
     }
+    if max_value > 0:
+        normalized["max"] = max_value
+    if scaling is not None:
+        normalized["scaling"] = scaling
+    return normalized
+
+
+def _normalize_resource_scaling(value: Any) -> dict[str, Any] | None:
+    scaling = dict(value or {}) if isinstance(value, dict) else {}
+    if not scaling:
+        return None
+    mode = str(scaling.get("mode") or "").strip().lower()
+    if mode not in VALID_CAMPAIGN_RESOURCE_SCALING_MODES:
+        return None
+    normalized: dict[str, Any] = {"mode": mode}
+    minimum = _normalize_nonnegative_integer(scaling.get("minimum"), default=0)
+    maximum = _normalize_nonnegative_integer(scaling.get("maximum"), default=0)
+    if minimum > 0:
+        normalized["minimum"] = minimum
+    if maximum > 0:
+        normalized["maximum"] = maximum
+    round_mode = str(scaling.get("round") or "").strip().lower()
+    if round_mode in VALID_CAMPAIGN_RESOURCE_SCALING_ROUNDS:
+        normalized["round"] = round_mode
+    if mode == "thresholds":
+        thresholds = _normalize_resource_scaling_thresholds(scaling.get("thresholds") or scaling.get("levels"))
+        if not thresholds:
+            return None
+        normalized["thresholds"] = thresholds
+    return normalized
+
+
+def _normalize_resource_scaling_thresholds(value: Any) -> list[dict[str, int]]:
+    thresholds: list[dict[str, int]] = []
+    for raw_item in list(value or []):
+        item = dict(raw_item or {}) if isinstance(raw_item, dict) else {}
+        level = _normalize_positive_integer(item.get("level"), default=0)
+        scaled_value = _normalize_positive_integer(item.get("value"), default=0)
+        if level <= 0 or scaled_value <= 0:
+            continue
+        thresholds.append({"level": level, "value": scaled_value})
+    return sorted(thresholds, key=lambda item: (item["level"], item["value"]))
 
 
 def _normalize_positive_integer(value: Any, *, default: int) -> int:
@@ -311,6 +355,16 @@ def _normalize_positive_integer(value: Any, *, default: int) -> int:
     except (TypeError, ValueError):
         return int(default)
     if normalized <= 0:
+        return int(default)
+    return normalized
+
+
+def _normalize_nonnegative_integer(value: Any, *, default: int) -> int:
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError):
+        return int(default)
+    if normalized < 0:
         return int(default)
     return normalized
 

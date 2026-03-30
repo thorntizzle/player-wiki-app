@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import player_wiki.app as app_module
 import yaml
+from player_wiki.character_campaign_progression import build_campaign_page_progression_entries
 from player_wiki.character_builder import (
     build_native_level_up_character_definition,
     build_native_level_up_context,
@@ -258,7 +259,7 @@ def _minimal_import_metadata(character_slug: str = "new-hero") -> CharacterImpor
         character_slug=character_slug,
         source_path="builder://native-level-1",
         imported_at_utc="2026-03-29T00:00:00Z",
-        parser_version="2026-03-30.05",
+        parser_version="2026-03-30.06",
         import_status="clean",
         warnings=[],
     )
@@ -352,10 +353,12 @@ def _campaign_page_record(
     subsection: str = "",
     summary: str = "",
     metadata: dict | None = None,
+    body_markdown: str = "",
 ):
     return SimpleNamespace(
         page_ref=page_ref,
         metadata=dict(metadata or {}),
+        body_markdown=body_markdown,
         page=SimpleNamespace(
             title=title,
             section=section,
@@ -363,6 +366,205 @@ def _campaign_page_record(
             summary=summary,
         ),
     )
+
+
+def _sorcerer_spell_entry(slug: str, title: str, *, level: int) -> SystemsEntryRecord:
+    return _systems_entry(
+        "spell",
+        slug,
+        title,
+        metadata={
+            "level": level,
+            "class_lists": {"PHB": ["Sorcerer"]},
+        },
+    )
+
+
+def _build_sorcerer_wild_magic_fixture() -> dict[str, object]:
+    sorcerer = _systems_entry(
+        "class",
+        "phb-class-sorcerer",
+        "Sorcerer",
+        metadata={
+            "hit_die": {"faces": 6},
+            "proficiency": ["con", "cha"],
+            "subclass_title": "Sorcerous Origin",
+            "starting_proficiencies": {
+                "weapons": ["dagger", "dart", "sling", "quarterstaff", "light crossbow"],
+                "skills": [{"choose": {"count": 2, "from": ["arcana", "deception", "insight", "persuasion"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={
+            "size": ["M"],
+            "speed": 30,
+            "languages": ["Common"],
+        },
+    )
+    soldier = _systems_entry(
+        "background",
+        "phb-background-soldier",
+        "Soldier",
+        metadata={
+            "skill_proficiencies": [{"athletics": True, "intimidation": True}],
+        },
+        body={
+            "entries": [
+                {
+                    "name": "Feature: Military Rank",
+                    "entries": ["You have a military rank from your career as a soldier."],
+                    "data": {"isFeature": True},
+                }
+            ]
+        },
+    )
+    wild_magic = _systems_entry(
+        "subclass",
+        "phb-subclass-wild-magic",
+        "Wild Magic",
+        metadata={
+            "class_name": "Sorcerer",
+            "class_source": "PHB",
+        },
+    )
+    spellcasting = _systems_entry(
+        "classfeature",
+        "phb-classfeature-spellcasting",
+        "Spellcasting",
+        metadata={"level": 1},
+    )
+    wild_magic_progression_entry = build_campaign_page_progression_entries(
+        _campaign_page_record(
+            "mechanics/wild-magic-modification",
+            "Wild Magic Modification",
+            section="Mechanics",
+            subsection="Class Modifications",
+            metadata={
+                "character_progression": {
+                    "kind": "subclass",
+                    "class_name": "Sorcerer",
+                    "subclass_name": "Wild Magic",
+                    "level": 1,
+                    "character_option": {
+                        "name": "Wild Magic Modification",
+                        "activation_type": "special",
+                        "grants": {
+                            "resource": {
+                                "label": "Wild Die",
+                                "reset_on": "long_rest",
+                                "scaling": {
+                                    "mode": "half_level",
+                                    "minimum": 1,
+                                    "round": "down",
+                                },
+                            }
+                        },
+                    },
+                }
+            },
+            body_markdown=(
+                "You gain a number of Wild Die equal to half your level. "
+                "A Wild Die is a d6."
+            ),
+        )
+    )[0]
+    spells = [
+        _sorcerer_spell_entry("phb-spell-mage-hand", "Mage Hand", level=0),
+        _sorcerer_spell_entry("phb-spell-fire-bolt", "Fire Bolt", level=0),
+        _sorcerer_spell_entry("phb-spell-prestidigitation", "Prestidigitation", level=0),
+        _sorcerer_spell_entry("phb-spell-ray-of-frost", "Ray of Frost", level=0),
+        _sorcerer_spell_entry("phb-spell-magic-missile", "Magic Missile", level=1),
+        _sorcerer_spell_entry("phb-spell-shield", "Shield", level=1),
+        _sorcerer_spell_entry("phb-spell-chromatic-orb", "Chromatic Orb", level=1),
+        _sorcerer_spell_entry("phb-spell-sleep", "Sleep", level=1),
+        _sorcerer_spell_entry("phb-spell-mage-armor", "Mage Armor", level=1),
+    ]
+    systems_service = _FakeSystemsService(
+        {
+            "class": [sorcerer],
+            "race": [human],
+            "background": [soldier],
+            "feat": [],
+            "subclass": [wild_magic],
+            "spell": spells,
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {
+                        "label": "Spellcasting",
+                        "entry": spellcasting,
+                        "embedded_card": {"option_groups": []},
+                    },
+                    {
+                        "label": "Sorcerous Origin (choose subclass feature)",
+                        "entry": None,
+                        "embedded_card": None,
+                    },
+                ],
+            },
+            {
+                "level": 4,
+                "level_label": "Level 4",
+                "feature_rows": [
+                    {
+                        "label": "Ability Score Improvement",
+                        "entry": None,
+                        "embedded_card": None,
+                    }
+                ],
+            },
+        ],
+        subclass_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {
+                        "label": "Wild Magic Modification",
+                        "entry": wild_magic_progression_entry,
+                        "embedded_card": None,
+                    }
+                ],
+            }
+        ],
+    )
+    level_one_values = {
+        "name": "Aeris Vale",
+        "character_slug": "aeris-vale",
+        "class_slug": sorcerer.slug,
+        "subclass_slug": wild_magic.slug,
+        "species_slug": human.slug,
+        "background_slug": soldier.slug,
+        "str": "8",
+        "dex": "14",
+        "con": "14",
+        "int": "10",
+        "wis": "12",
+        "cha": "16",
+        "class_skill_1": "arcana",
+        "class_skill_2": "deception",
+        "spell_cantrip_1": "phb-spell-mage-hand",
+        "spell_cantrip_2": "phb-spell-fire-bolt",
+        "spell_cantrip_3": "phb-spell-prestidigitation",
+        "spell_cantrip_4": "phb-spell-ray-of-frost",
+        "spell_level_one_1": "phb-spell-magic-missile",
+        "spell_level_one_2": "phb-spell-shield",
+    }
+    return {
+        "systems_service": systems_service,
+        "sorcerer": sorcerer,
+        "human": human,
+        "soldier": soldier,
+        "wild_magic": wild_magic,
+        "level_one_values": level_one_values,
+    }
 
 
 def test_level_one_builder_creates_native_character_definition_from_phb_choices():
@@ -2432,7 +2634,7 @@ def test_level_one_builder_populates_starting_equipment_spells_and_currency():
     assert spells_by_name["Message"]["components"] == "V, S, M (a short piece of copper wire)"
     assert resource_templates_by_id["arcane-recovery"]["max"] == 1
     assert state_resources_by_id["arcane-recovery"]["current"] == 1
-    assert import_metadata.parser_version == "2026-03-30.05"
+    assert import_metadata.parser_version == "2026-03-30.06"
 
 
 def test_level_one_builder_adds_structured_subclass_prepared_spells():
@@ -6675,3 +6877,113 @@ def test_native_level_up_adds_martial_adept_resource_and_preserves_melee_feat_va
     assert resources_by_id["martial-adept"]["reset_on"] == "short_rest"
     assert state_resources_by_id["martial-adept"]["current"] == 1
     assert state_resources_by_id["martial-adept"]["max"] == 1
+
+
+def test_level_one_builder_applies_campaign_subclass_progression_feature_and_tracker():
+    fixture = _build_sorcerer_wild_magic_fixture()
+    systems_service = fixture["systems_service"]
+    level_one_values = dict(fixture["level_one_values"])
+
+    builder_context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        level_one_values,
+    )
+
+    assert "Wild Magic Modification" in builder_context["preview"]["features"]
+    assert "Wild Die: 1 / 1 (Long Rest)" in builder_context["preview"]["resources"]
+
+    definition, _import_metadata = build_level_one_character_definition(
+        "linden-pass",
+        builder_context,
+        level_one_values,
+    )
+
+    wild_magic_feature = next(
+        feature for feature in definition.features if feature.get("name") == "Wild Magic Modification"
+    )
+    wild_die_resource = next(
+        template for template in definition.resource_templates if template.get("label") == "Wild Die"
+    )
+
+    assert wild_magic_feature["page_ref"] == "mechanics/wild-magic-modification"
+    assert wild_magic_feature["activation_type"] == "special"
+    assert wild_magic_feature["tracker_ref"] == wild_die_resource["id"]
+    assert wild_magic_feature["campaign_option"]["resource"]["scaling"]["mode"] == "half_level"
+    assert wild_die_resource["max"] == 1
+    assert wild_die_resource["reset_on"] == "long_rest"
+
+
+def test_native_level_up_recalculates_scaled_campaign_progression_trackers():
+    fixture = _build_sorcerer_wild_magic_fixture()
+    systems_service = fixture["systems_service"]
+    level_one_values = dict(fixture["level_one_values"])
+
+    builder_context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        level_one_values,
+    )
+    current_definition, _import_metadata = build_level_one_character_definition(
+        "linden-pass",
+        builder_context,
+        level_one_values,
+    )
+
+    current_definition.profile["class_level_text"] = "Sorcerer 3"
+    current_definition.profile["classes"][0]["level"] = 3
+    current_definition.spellcasting["spells"].extend(
+        [
+            {
+                "name": "Chromatic Orb",
+                "mark": "Known",
+                "systems_ref": {
+                    "entry_type": "spell",
+                    "slug": "phb-spell-chromatic-orb",
+                    "title": "Chromatic Orb",
+                    "source_id": "PHB",
+                },
+            },
+            {
+                "name": "Sleep",
+                "mark": "Known",
+                "systems_ref": {
+                    "entry_type": "spell",
+                    "slug": "phb-spell-sleep",
+                    "title": "Sleep",
+                    "source_id": "PHB",
+                },
+            },
+        ]
+    )
+
+    level_up_values = {
+        "hp_gain": "4",
+        "levelup_asi_mode_1": "ability_scores",
+        "levelup_asi_ability_1_1": "cha",
+        "levelup_asi_ability_1_2": "cha",
+        "levelup_spell_known_1": "phb-spell-mage-armor",
+    }
+    level_up_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        current_definition,
+        level_up_values,
+    )
+
+    assert "Wild Die: 2 / 2 (Long Rest)" in level_up_context["preview"]["resources"]
+
+    leveled_definition, _leveled_import, hp_gain = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        level_up_context,
+        level_up_values,
+    )
+
+    wild_die_resource = next(
+        template for template in leveled_definition.resource_templates if template.get("label") == "Wild Die"
+    )
+
+    assert hp_gain == 4
+    assert wild_die_resource["max"] == 2
+    assert wild_die_resource["initial_current"] == 2

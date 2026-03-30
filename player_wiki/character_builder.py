@@ -19,7 +19,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-03-30.05"
+CHARACTER_BUILDER_VERSION = "2026-03-30.06"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -545,9 +545,22 @@ def build_level_one_character_definition(
         selected_choices=selected_choices,
         strict=True,
     )
-    selected_campaign_option_payloads = _campaign_option_payloads_from_selected_entries(
-        [selected_species, selected_background]
-    ) + _campaign_option_payloads_from_feat_selections(feat_selections)
+    selected_feature_entries = _collect_level_one_feature_entries(
+        class_progression=class_progression,
+        subclass_progression=subclass_progression,
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        selected_species=selected_species,
+        selected_background=selected_background,
+        choice_sections=choice_sections,
+        selected_choices=selected_choices,
+        feat_selections=feat_selections,
+    )
+    selected_campaign_option_payloads = (
+        _campaign_option_payloads_from_selected_entries([selected_species, selected_background])
+        + _campaign_option_payloads_from_feat_selections(feat_selections)
+        + _campaign_option_payloads_from_feature_entries(selected_feature_entries)
+    )
     proficiencies = _build_level_one_proficiencies(
         selected_class=selected_class,
         selected_species=selected_species,
@@ -560,17 +573,6 @@ def build_level_one_character_definition(
     )
     skills = _build_skills_payload(ability_scores, proficiencies["skills"], proficiency_bonus)
 
-    selected_feature_entries = _collect_level_one_feature_entries(
-        class_progression=class_progression,
-        subclass_progression=subclass_progression,
-        selected_class=selected_class,
-        selected_subclass=selected_subclass,
-        selected_species=selected_species,
-        selected_background=selected_background,
-        choice_sections=choice_sections,
-        selected_choices=selected_choices,
-        feat_selections=feat_selections,
-    )
     features, resource_templates = _build_feature_payloads(
         selected_feature_entries,
         ability_scores=ability_scores,
@@ -849,7 +851,17 @@ def build_native_level_up_character_definition(
         subclass_progression=subclass_progression,
         target_level=target_level,
     )
-    selected_campaign_option_payloads = _campaign_option_payloads_from_feat_selections(feat_selections)
+    new_feature_entries = _collect_progression_feature_entries_for_level(
+        class_progression=class_progression,
+        subclass_progression=subclass_progression,
+        target_level=target_level,
+        selected_choices=selected_choices,
+    )
+    new_feature_entries.extend(level_up_feat_entries)
+    selected_campaign_option_payloads = (
+        _campaign_option_payloads_from_feat_selections(feat_selections)
+        + _campaign_option_payloads_from_feature_entries(new_feature_entries)
+    )
     ability_scores = _apply_feat_ability_score_bonuses(
         base_ability_scores,
         feat_selections=feat_selections,
@@ -870,13 +882,6 @@ def build_native_level_up_character_definition(
     )
     skills = _build_skills_payload(ability_scores, proficient_skills, proficiency_bonus)
 
-    new_feature_entries = _collect_progression_feature_entries_for_level(
-        class_progression=class_progression,
-        subclass_progression=subclass_progression,
-        target_level=target_level,
-        selected_choices=selected_choices,
-    )
-    new_feature_entries.extend(level_up_feat_entries)
     new_features, _ = _build_feature_payloads(
         new_feature_entries,
         ability_scores=ability_scores,
@@ -3891,6 +3896,20 @@ def _campaign_option_payloads_from_feat_selections(
     return payloads
 
 
+def _campaign_option_payloads_from_feature_entries(
+    feature_entries: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    for feature_entry in list(feature_entries or []):
+        entry = feature_entry.get("entry")
+        if not isinstance(entry, SystemsEntryRecord):
+            continue
+        campaign_option = _entry_campaign_option(entry)
+        if campaign_option:
+            payloads.append(dict(campaign_option))
+    return payloads
+
+
 def _campaign_option_payloads_from_definition(definition: CharacterDefinition) -> list[dict[str, Any]]:
     payloads: list[dict[str, Any]] = []
     for feature in list(definition.features or []):
@@ -4697,9 +4716,22 @@ def _build_level_one_preview(
     proficiency_bonus = 2
     class_name = selected_class.title if selected_class is not None else ""
     fixed_proficiencies, selected_choices = _resolve_builder_choices(choice_sections, values, strict=False)
-    selected_campaign_option_payloads = _campaign_option_payloads_from_selected_entries(
-        [selected_species, selected_background]
-    ) + _campaign_option_payloads_from_feat_selections(feat_selections)
+    feature_entries = _collect_level_one_feature_entries(
+        class_progression=class_progression,
+        subclass_progression=subclass_progression,
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        selected_species=selected_species,
+        selected_background=selected_background,
+        choice_sections=choice_sections,
+        selected_choices=selected_choices,
+        feat_selections=feat_selections,
+    )
+    selected_campaign_option_payloads = (
+        _campaign_option_payloads_from_selected_entries([selected_species, selected_background])
+        + _campaign_option_payloads_from_feat_selections(feat_selections)
+        + _campaign_option_payloads_from_feature_entries(feature_entries)
+    )
     ability_scores = _apply_feat_ability_score_bonuses(
         ability_scores,
         feat_selections=feat_selections,
@@ -4717,17 +4749,6 @@ def _build_level_one_preview(
         campaign_option_payloads=selected_campaign_option_payloads,
     )
     skills = _build_skills_payload(ability_scores, proficiencies["skills"], proficiency_bonus)
-    feature_entries = _collect_level_one_feature_entries(
-        class_progression=class_progression,
-        subclass_progression=subclass_progression,
-        selected_class=selected_class,
-        selected_subclass=selected_subclass,
-        selected_species=selected_species,
-        selected_background=selected_background,
-        choice_sections=choice_sections,
-        selected_choices=selected_choices,
-        feat_selections=feat_selections,
-    )
     equipment_catalog = _build_level_one_equipment_catalog(
         equipment_groups,
         choice_sections=choice_sections,
@@ -5593,16 +5614,22 @@ def _build_feature_payload(
 
     if isinstance(entry, SystemsEntryRecord):
         feature_name = str(entry.title or "").strip()
+        page_ref = _entry_page_ref(entry)
+        campaign_option = _entry_campaign_option(entry)
         feature_payload = {
             "id": f"{slugify(feature_name)}-{index}",
             "name": feature_name,
             "category": _character_feature_category(entry.entry_type),
-            "source": entry.source_id,
-            "description_markdown": "",
-            "activation_type": "passive",
+            "source": CAMPAIGN_PAGE_SOURCE_ID if page_ref else entry.source_id,
+            "description_markdown": str(campaign_option.get("description_markdown") or "").strip(),
+            "activation_type": str(campaign_option.get("activation_type") or "passive").strip() or "passive",
             "tracker_ref": None,
-            "systems_ref": _systems_ref_from_entry(entry),
+            "systems_ref": None if page_ref else _systems_ref_from_entry(entry),
         }
+        if page_ref:
+            feature_payload["page_ref"] = page_ref
+        if campaign_option:
+            feature_payload["campaign_option"] = campaign_option
         return feature_payload
 
     if kind == "optionalfeature":
@@ -6000,6 +6027,7 @@ def _apply_tracker_templates_to_feature_payloads(
         tracker_template = _build_campaign_option_tracker_template(
             feature_payload,
             display_order=display_order,
+            current_level=current_level,
         )
         if tracker_template is None:
             tracker_template = _build_feature_tracker_template(
@@ -6031,10 +6059,11 @@ def _build_campaign_option_tracker_template(
     feature_payload: dict[str, Any],
     *,
     display_order: int,
+    current_level: int,
 ) -> dict[str, Any] | None:
     option = dict(feature_payload.get("campaign_option") or {})
     resource = dict(option.get("resource") or {})
-    max_value = int(resource.get("max") or 0)
+    max_value = _resolve_campaign_option_resource_max(resource, current_level=current_level)
     if max_value <= 0:
         return None
     tracker_id = str(feature_payload.get("tracker_ref") or "").strip() or f"campaign-option-tracker:{feature_payload.get('id')}"
@@ -6052,6 +6081,52 @@ def _build_campaign_option_tracker_template(
         "display_order": display_order,
         "activation_type": str(feature_payload.get("activation_type") or "passive").strip() or "passive",
     }
+
+
+def _resolve_campaign_option_resource_max(
+    resource: dict[str, Any],
+    *,
+    current_level: int,
+) -> int:
+    max_value = int(resource.get("max") or 0)
+    scaling = dict(resource.get("scaling") or {})
+    if not scaling:
+        return max_value
+    mode = str(scaling.get("mode") or "").strip().lower()
+    scaled_value = 0
+    if mode == "level":
+        scaled_value = max(int(current_level or 0), 0)
+    elif mode == "half_level":
+        scaled_value = _round_scaled_level_value(
+            int(current_level or 0) / 2,
+            round_mode=str(scaling.get("round") or "down").strip().lower() or "down",
+        )
+    elif mode == "proficiency_bonus":
+        scaled_value = _proficiency_bonus_for_level(max(int(current_level or 0), 1))
+    elif mode == "thresholds":
+        for threshold in list(scaling.get("thresholds") or []):
+            threshold_payload = dict(threshold or {}) if isinstance(threshold, dict) else {}
+            minimum_level = int(threshold_payload.get("level") or 0)
+            threshold_value = int(threshold_payload.get("value") or 0)
+            if minimum_level > 0 and threshold_value > 0 and current_level >= minimum_level:
+                scaled_value = threshold_value
+    minimum_value = int(scaling.get("minimum") or 0)
+    maximum_value = int(scaling.get("maximum") or 0)
+    if minimum_value > 0:
+        scaled_value = max(scaled_value, minimum_value)
+    if maximum_value > 0:
+        scaled_value = min(scaled_value, maximum_value)
+    if scaled_value <= 0:
+        return max_value
+    return scaled_value
+
+
+def _round_scaled_level_value(value: float, *, round_mode: str) -> int:
+    if round_mode == "up":
+        return int(-(-value // 1))
+    if round_mode == "nearest":
+        return int(round(value))
+    return int(value // 1)
 
 
 def _merge_resource_templates(
@@ -6141,7 +6216,17 @@ def _build_native_level_up_preview(
         subclass_progression=subclass_progression,
         target_level=target_level,
     )
-    selected_campaign_option_payloads = _campaign_option_payloads_from_feat_selections(feat_selections)
+    gained_feature_entries = _collect_progression_feature_entries_for_level(
+        class_progression=class_progression,
+        subclass_progression=subclass_progression,
+        target_level=target_level,
+        selected_choices=selected_choices,
+    )
+    gained_feature_entries.extend(level_up_feat_entries)
+    selected_campaign_option_payloads = (
+        _campaign_option_payloads_from_feat_selections(feat_selections)
+        + _campaign_option_payloads_from_feature_entries(gained_feature_entries)
+    )
     ability_scores = _apply_feat_ability_score_bonuses(
         base_ability_scores,
         feat_selections=feat_selections,
@@ -6153,13 +6238,6 @@ def _build_native_level_up_preview(
         hp_gain = _parse_level_up_hit_point_gain(values)
     except CharacterBuildError:
         hp_gain = 0
-    gained_feature_entries = _collect_progression_feature_entries_for_level(
-        class_progression=class_progression,
-        subclass_progression=subclass_progression,
-        target_level=target_level,
-        selected_choices=selected_choices,
-    )
-    gained_feature_entries.extend(level_up_feat_entries)
     gained_features = [
         str(entry.get("label") or entry.get("name") or "").strip()
         for entry in gained_feature_entries
