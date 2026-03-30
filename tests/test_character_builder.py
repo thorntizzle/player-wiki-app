@@ -5502,6 +5502,97 @@ def test_level_one_builder_applies_martial_adept_tracker_and_attack_notes():
     assert martial_adept_resource["reset_on"] == "short_rest"
 
 
+def test_level_one_builder_adds_polearm_master_attack_rows():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+            "starting_equipment": {
+                "defaultData": [
+                    {"_": ["glaive|phb"]},
+                ]
+            },
+        },
+    )
+    variant_human = _systems_entry(
+        "race",
+        "phb-race-variant-human",
+        "Variant Human",
+        metadata={
+            "size": ["M"],
+            "speed": 30,
+            "languages": [{"common": True, "anyStandard": 1}],
+            "skill_proficiencies": [{"any": 1}],
+            "feats": [{"any": 1}],
+        },
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    polearm_master = _systems_entry("feat", "phb-feat-polearm-master", "Polearm Master")
+    glaive = _systems_entry("item", "phb-item-glaive", "Glaive", metadata={"weight": 6})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [variant_human],
+            "background": [acolyte],
+            "feat": [polearm_master],
+            "subclass": [],
+            "item": [glaive],
+            "spell": [],
+        },
+        class_progression=[],
+    )
+
+    form_values = {
+        "name": "Polearm Hero",
+        "character_slug": "polearm-hero",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": variant_human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "species_skill_1": "perception",
+        "species_language_1": "Elvish",
+        "species_feat_1": polearm_master.slug,
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+
+    attacks_by_name = {attack["name"]: attack for attack in definition.attacks}
+
+    assert "Polearm Master" in context["preview"]["features"]
+    assert attacks_by_name["Glaive"]["attack_bonus"] == 5
+    assert attacks_by_name["Glaive"]["damage"] == "1d10+3 slashing"
+    assert attacks_by_name["Glaive"]["notes"] == (
+        "Polearm Master (bonus attack, opportunity attack when creatures enter reach)."
+    )
+    assert attacks_by_name["Glaive (polearm master)"]["attack_bonus"] == 5
+    assert attacks_by_name["Glaive (polearm master)"]["damage"] == "1d4+3 bludgeoning"
+    assert attacks_by_name["Glaive (polearm master)"]["notes"] == "Bonus action, Polearm Master bonus attack."
+
+
 def test_native_level_up_preserves_ranged_feat_attack_variants():
     fighter = _systems_entry(
         "class",
@@ -5604,6 +5695,100 @@ def test_native_level_up_preserves_ranged_feat_attack_variants():
         "Ammunition, range 80/320, Crossbow Expert (ignore loading, no adjacent disadvantage), "
         "Sharpshooter (ignore cover, no long-range disadvantage), Sharpshooter (-5 attack, +10 damage)."
     )
+
+
+def test_native_level_up_preserves_polearm_master_attack_rows():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[],
+    )
+
+    current_definition = _minimal_character_definition("reach-warden", "Reach Warden")
+    current_definition.profile["class_level_text"] = "Fighter 5"
+    current_definition.profile["classes"][0]["level"] = 5
+    current_definition.stats["max_hp"] = 44
+    current_definition.proficiencies["weapons"] = ["Simple Weapons", "Martial Weapons"]
+    current_definition.equipment_catalog = [
+        {
+            "name": "Glaive",
+            "default_quantity": 1,
+            "weight": "6 lb.",
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-glaive",
+                "title": "Glaive",
+                "source_id": "PHB",
+            },
+        }
+    ]
+    current_definition.features = [
+        {
+            "id": "polearm-master-1",
+            "name": "Polearm Master",
+            "category": "feat",
+            "source": "PHB",
+            "description_markdown": "",
+            "systems_ref": {
+                "entry_type": "feat",
+                "slug": "phb-feat-polearm-master",
+                "title": "Polearm Master",
+                "source_id": "PHB",
+            },
+        },
+    ]
+
+    form_values = {"hp_gain": "8"}
+    leveled_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values),
+        form_values,
+    )
+
+    attacks_by_name = {attack["name"]: attack for attack in leveled_definition.attacks}
+
+    assert attacks_by_name["Glaive"]["attack_bonus"] == 6
+    assert attacks_by_name["Glaive"]["damage"] == "1d10+3 slashing"
+    assert attacks_by_name["Glaive"]["notes"] == (
+        "Polearm Master (bonus attack, opportunity attack when creatures enter reach)."
+    )
+    assert attacks_by_name["Glaive (polearm master)"]["attack_bonus"] == 6
+    assert attacks_by_name["Glaive (polearm master)"]["damage"] == "1d4+3 bludgeoning"
+    assert attacks_by_name["Glaive (polearm master)"]["notes"] == "Bonus action, Polearm Master bonus attack."
 
 
 def test_native_level_up_adds_martial_adept_resource_and_preserves_melee_feat_variants():

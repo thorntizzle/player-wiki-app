@@ -2707,6 +2707,7 @@ def _build_level_one_attacks(
     has_crossbow_expert = normalize_lookup("Crossbow Expert") in active_feat_names
     has_great_weapon_master = normalize_lookup("Great Weapon Master") in active_feat_names
     has_martial_adept = normalize_lookup("Martial Adept") in active_feat_names
+    has_polearm_master = normalize_lookup("Polearm Master") in active_feat_names
     has_savage_attacker = normalize_lookup("Savage Attacker") in active_feat_names
     has_sharpshooter = normalize_lookup("Sharpshooter") in active_feat_names
     off_hand_context = _resolve_off_hand_attack_context(attack_contexts)
@@ -2742,6 +2743,7 @@ def _build_level_one_attacks(
                 has_crossbow_expert=has_crossbow_expert,
                 has_great_weapon_master=has_great_weapon_master,
                 has_martial_adept=has_martial_adept,
+                has_polearm_master=has_polearm_master,
                 has_savage_attacker=has_savage_attacker,
                 has_sharpshooter=has_sharpshooter,
                 ranged_attack=False,
@@ -2775,6 +2777,7 @@ def _build_level_one_attacks(
                             has_crossbow_expert=has_crossbow_expert,
                             has_great_weapon_master=has_great_weapon_master,
                             has_martial_adept=has_martial_adept,
+                            has_polearm_master=has_polearm_master,
                             has_savage_attacker=has_savage_attacker,
                             has_sharpshooter=has_sharpshooter,
                             ranged_attack=False,
@@ -2785,6 +2788,77 @@ def _build_level_one_attacks(
                     name_suffix=" (great weapon master)",
                 )
             )
+        if has_polearm_master and _qualifies_for_polearm_master(context):
+            polearm_bonus_profile = dict(profile)
+            polearm_bonus_profile["damage"] = "1d4"
+            polearm_bonus_profile["damage_type"] = "B"
+            attacks.append(
+                _build_weapon_attack_payload(
+                    context,
+                    attack_bonus=attack_bonus,
+                    damage_bonus=damage_bonus,
+                    notes=_build_weapon_attack_notes(
+                        polearm_bonus_profile,
+                        bonus_action=True,
+                        great_weapon_fighting=has_great_weapon_fighting,
+                        has_shield=has_shield,
+                        ignore_loading=ignore_loading,
+                        off_hand_context=off_hand_context,
+                        show_range=False,
+                        show_versatile=False,
+                        extra_notes=_base_attack_feat_notes(
+                            context,
+                            has_crossbow_expert=has_crossbow_expert,
+                            has_great_weapon_master=has_great_weapon_master,
+                            has_martial_adept=has_martial_adept,
+                            has_polearm_master=has_polearm_master,
+                            has_savage_attacker=has_savage_attacker,
+                            has_sharpshooter=has_sharpshooter,
+                            ranged_attack=False,
+                            include_polearm_master_note=False,
+                        )
+                        + ["Polearm Master bonus attack"],
+                    ),
+                    index=len(attacks) + 1,
+                    name_suffix=" (polearm master)",
+                    profile_override=polearm_bonus_profile,
+                )
+            )
+            if has_two_handed_variant:
+                polearm_two_handed_profile = dict(polearm_bonus_profile)
+                polearm_two_handed_damage_bonus = int(context["ability_modifier"] or 0)
+                attacks.append(
+                    _build_weapon_attack_payload(
+                        context,
+                        attack_bonus=attack_bonus,
+                        damage_bonus=polearm_two_handed_damage_bonus,
+                        notes=_build_weapon_attack_notes(
+                            polearm_two_handed_profile,
+                            bonus_action=True,
+                            great_weapon_fighting=has_great_weapon_fighting,
+                            has_shield=False,
+                            off_hand_context=None,
+                            show_range=False,
+                            show_versatile=False,
+                            wielded_two_handed=True,
+                            extra_notes=_base_attack_feat_notes(
+                                context,
+                                has_crossbow_expert=has_crossbow_expert,
+                                has_great_weapon_master=has_great_weapon_master,
+                                has_martial_adept=has_martial_adept,
+                                has_polearm_master=has_polearm_master,
+                                has_savage_attacker=has_savage_attacker,
+                                has_sharpshooter=has_sharpshooter,
+                                ranged_attack=False,
+                                include_polearm_master_note=False,
+                            )
+                            + ["Polearm Master bonus attack"],
+                        ),
+                        index=len(attacks) + 1,
+                        name_suffix=" (polearm master, two-handed)",
+                        profile_override=polearm_two_handed_profile,
+                    )
+                )
         if has_thrown_variant:
             attacks.append(
                 _build_weapon_attack_payload(
@@ -2802,6 +2876,7 @@ def _build_level_one_attacks(
                             has_crossbow_expert=has_crossbow_expert,
                             has_great_weapon_master=has_great_weapon_master,
                             has_martial_adept=has_martial_adept,
+                            has_polearm_master=has_polearm_master,
                             has_savage_attacker=has_savage_attacker,
                             has_sharpshooter=has_sharpshooter,
                             ranged_attack=True,
@@ -2836,6 +2911,7 @@ def _build_level_one_attacks(
                             has_crossbow_expert=has_crossbow_expert,
                             has_great_weapon_master=has_great_weapon_master,
                             has_martial_adept=has_martial_adept,
+                            has_polearm_master=has_polearm_master,
                             has_savage_attacker=has_savage_attacker,
                             has_sharpshooter=has_sharpshooter,
                             ranged_attack=False,
@@ -2865,6 +2941,7 @@ def _build_level_one_attacks(
                             has_crossbow_expert=has_crossbow_expert,
                             has_great_weapon_master=has_great_weapon_master,
                             has_martial_adept=has_martial_adept,
+                            has_polearm_master=has_polearm_master,
                             has_savage_attacker=has_savage_attacker,
                             has_sharpshooter=has_sharpshooter,
                             ranged_attack=True,
@@ -2901,6 +2978,7 @@ def _build_level_one_attacks(
                         has_crossbow_expert=has_crossbow_expert,
                         has_great_weapon_master=has_great_weapon_master,
                         has_martial_adept=has_martial_adept,
+                        has_polearm_master=has_polearm_master,
                         has_savage_attacker=has_savage_attacker,
                         has_sharpshooter=has_sharpshooter,
                         ranged_attack=False,
@@ -2942,6 +3020,35 @@ def _qualifies_for_great_weapon_master(context: dict[str, Any]) -> bool:
     return bool(context.get("is_proficient")) and str(profile.get("type") or "").strip().upper() == "M" and "H" in properties
 
 
+def _qualifies_for_polearm_master(context: dict[str, Any]) -> bool:
+    profile = dict(context.get("profile") or {})
+    if str(profile.get("type") or "").strip().upper() != "M":
+        return False
+    item = dict(context.get("item") or {})
+    systems_ref = dict(item.get("systems_ref") or {})
+    candidate_values = [
+        str(context.get("attack_name") or "").strip(),
+        str(item.get("name") or "").strip(),
+        str(systems_ref.get("title") or "").strip(),
+    ]
+    normalized_candidates = {
+        normalize_lookup(value)
+        for value in candidate_values
+        if str(value or "").strip()
+    }
+    return bool(
+        normalized_candidates
+        & {
+            normalize_lookup("Glaive"),
+            normalize_lookup("Halberd"),
+            normalize_lookup("Quarterstaff"),
+            normalize_lookup("Spear"),
+            normalize_lookup("Staff"),
+            normalize_lookup("Wooden Staff"),
+        }
+    )
+
+
 def _qualifies_for_savage_attacker(context: dict[str, Any], *, ranged_attack: bool) -> bool:
     profile = dict(context.get("profile") or {})
     return not ranged_attack and str(profile.get("type") or "").strip().upper() == "M"
@@ -2958,9 +3065,11 @@ def _base_attack_feat_notes(
     has_crossbow_expert: bool,
     has_great_weapon_master: bool,
     has_martial_adept: bool,
+    has_polearm_master: bool,
     has_savage_attacker: bool,
     has_sharpshooter: bool,
     ranged_attack: bool,
+    include_polearm_master_note: bool = True,
 ) -> list[str]:
     notes: list[str] = []
     if has_crossbow_expert and _qualifies_for_crossbow_expert(context):
@@ -2969,6 +3078,13 @@ def _base_attack_feat_notes(
         notes.append("Great Weapon Master (bonus attack on crit or kill)")
     if has_martial_adept and not ranged_attack:
         notes.append("Martial Adept maneuvers available")
+    if (
+        has_polearm_master
+        and include_polearm_master_note
+        and not ranged_attack
+        and _qualifies_for_polearm_master(context)
+    ):
+        notes.append("Polearm Master (bonus attack, opportunity attack when creatures enter reach)")
     if has_savage_attacker and _qualifies_for_savage_attacker(context, ranged_attack=ranged_attack):
         notes.append("Savage Attacker (reroll damage once per turn)")
     if has_sharpshooter and _qualifies_for_sharpshooter(context):
