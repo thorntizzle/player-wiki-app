@@ -19,7 +19,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-03-30.08"
+CHARACTER_BUILDER_VERSION = "2026-03-30.09"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -8067,7 +8067,7 @@ def _normalize_attack_payloads(
     attack_payloads: list[dict[str, Any]] | None,
 ) -> list[dict[str, Any]]:
     normalized_attacks: list[dict[str, Any]] = []
-    index_by_key: dict[tuple[str, Any, str, str, str, str], int] = {}
+    index_by_key: dict[tuple[str, Any, str, str, str, str, str], int] = {}
     for attack_payload in list(attack_payloads or []):
         payload = dict(attack_payload or {})
         name = str(payload.get("name") or "").strip()
@@ -8097,24 +8097,63 @@ def _normalize_attack_payloads(
             payload["page_ref"] = normalized_page_ref
         else:
             payload.pop("page_ref", None)
-        merge_key = (
-            normalize_lookup(name),
-            payload.get("attack_bonus"),
-            _normalize_merge_text(payload.get("damage")),
-            _normalize_merge_text(payload.get("damage_type")),
-            _normalize_merge_text(payload.get("notes")),
-            _normalize_merge_text(payload.get("category")),
+        normalized_damage = _normalize_merge_text(payload.get("damage"))
+        normalized_damage_type = _normalize_merge_text(payload.get("damage_type"))
+        normalized_notes = _normalize_merge_text(payload.get("notes"))
+        normalized_category = _normalize_merge_text(payload.get("category"))
+        normalized_page_identity = _extract_campaign_page_ref(normalized_page_ref)
+        explicit_identity = _normalize_explicit_link_identity(
+            systems_ref=systems_ref,
+            page_ref=normalized_page_ref,
         )
-        existing_index = index_by_key.get(merge_key)
+        merge_key_tail = (
+            payload.get("attack_bonus"),
+            normalized_damage,
+            normalized_damage_type,
+            normalized_notes,
+            normalized_category,
+            normalized_page_identity,
+        )
+        candidate_keys = []
+        if explicit_identity:
+            candidate_keys.append((explicit_identity, *merge_key_tail))
+        candidate_keys.append((f"name:{normalize_lookup(name)}", *merge_key_tail))
+        existing_index = None
+        for candidate_key in candidate_keys:
+            candidate_index = index_by_key.get(candidate_key)
+            if candidate_index is None:
+                continue
+            if candidate_key[0].startswith("name:") and explicit_identity:
+                existing_payload = normalized_attacks[candidate_index]
+                existing_explicit_identity = _normalize_explicit_link_identity(
+                    systems_ref=dict(existing_payload.get("systems_ref") or {}),
+                    page_ref=existing_payload.get("page_ref"),
+                )
+                if existing_explicit_identity and existing_explicit_identity != explicit_identity:
+                    continue
+            existing_index = candidate_index
+            break
         if existing_index is None:
-            index_by_key[merge_key] = len(normalized_attacks)
+            existing_index = len(normalized_attacks)
             normalized_attacks.append(payload)
+            for candidate_key in candidate_keys:
+                index_by_key[candidate_key] = existing_index
             continue
         existing_payload = normalized_attacks[existing_index]
         if not existing_payload.get("systems_ref") and payload.get("systems_ref"):
             existing_payload["systems_ref"] = dict(payload.get("systems_ref") or {})
         if not existing_payload.get("page_ref") and payload.get("page_ref"):
             existing_payload["page_ref"] = payload.get("page_ref")
+        updated_explicit_identity = _normalize_explicit_link_identity(
+            systems_ref=dict(existing_payload.get("systems_ref") or {}),
+            page_ref=existing_payload.get("page_ref"),
+        )
+        updated_keys = []
+        if updated_explicit_identity:
+            updated_keys.append((updated_explicit_identity, *merge_key_tail))
+        updated_keys.append((f"name:{normalize_lookup(str(existing_payload.get('name') or '').strip())}", *merge_key_tail))
+        for candidate_key in updated_keys:
+            index_by_key[candidate_key] = existing_index
     return normalized_attacks
 
 
@@ -8154,20 +8193,40 @@ def _normalize_equipment_payloads(
             payload.pop("campaign_option", None)
         payload["currency"] = currency
         payload["is_currency_only"] = is_currency_only
-        identity_key = _extract_campaign_page_ref(normalized_page_ref) or normalize_lookup(
-            str(systems_ref.get("title") or name)
+        explicit_identity = _normalize_explicit_link_identity(
+            systems_ref=systems_ref,
+            page_ref=normalized_page_ref,
         )
-        merge_key = (
-            identity_key,
+        merge_key_tail = (
             _extract_campaign_page_ref(normalized_page_ref),
             _normalize_merge_text(payload.get("notes")),
             _normalize_merge_text(payload.get("weight")),
             is_currency_only,
         )
-        existing_index = index_by_key.get(merge_key)
+        candidate_keys = []
+        if explicit_identity:
+            candidate_keys.append((explicit_identity, *merge_key_tail))
+        candidate_keys.append((f"name:{normalize_lookup(name)}", *merge_key_tail))
+        existing_index = None
+        for candidate_key in candidate_keys:
+            candidate_index = index_by_key.get(candidate_key)
+            if candidate_index is None:
+                continue
+            if candidate_key[0].startswith("name:") and explicit_identity:
+                existing_payload = normalized_equipment[candidate_index]
+                existing_explicit_identity = _normalize_explicit_link_identity(
+                    systems_ref=dict(existing_payload.get("systems_ref") or {}),
+                    page_ref=existing_payload.get("page_ref"),
+                )
+                if existing_explicit_identity and existing_explicit_identity != explicit_identity:
+                    continue
+            existing_index = candidate_index
+            break
         if existing_index is None:
-            index_by_key[merge_key] = len(normalized_equipment)
+            existing_index = len(normalized_equipment)
             normalized_equipment.append(payload)
+            for candidate_key in candidate_keys:
+                index_by_key[candidate_key] = existing_index
             continue
         existing_payload = normalized_equipment[existing_index]
         existing_payload["default_quantity"] = int(existing_payload.get("default_quantity") or 0) + int(
@@ -8185,6 +8244,16 @@ def _normalize_equipment_payloads(
             existing_payload["source_kind"] = str(payload.get("source_kind") or "").strip()
         if not existing_payload.get("campaign_option") and payload.get("campaign_option"):
             existing_payload["campaign_option"] = dict(payload.get("campaign_option") or {})
+        updated_explicit_identity = _normalize_explicit_link_identity(
+            systems_ref=dict(existing_payload.get("systems_ref") or {}),
+            page_ref=existing_payload.get("page_ref"),
+        )
+        updated_keys = []
+        if updated_explicit_identity:
+            updated_keys.append((updated_explicit_identity, *merge_key_tail))
+        updated_keys.append((f"name:{normalize_lookup(str(existing_payload.get('name') or '').strip())}", *merge_key_tail))
+        for candidate_key in updated_keys:
+            index_by_key[candidate_key] = existing_index
     return normalized_equipment
 
 
@@ -8195,6 +8264,25 @@ def _normalize_page_ref_payload(page_ref: Any) -> Any:
     if clean_page_ref:
         return clean_page_ref
     return None
+
+
+def _normalize_explicit_link_identity(*, systems_ref: dict[str, Any] | None, page_ref: Any) -> str:
+    page_identity = _extract_campaign_page_ref(page_ref)
+    if page_identity:
+        return f"page:{normalize_lookup(page_identity)}"
+    systems_payload = dict(systems_ref or {})
+    systems_slug = str(systems_payload.get("slug") or "").strip()
+    if systems_slug:
+        return f"systems:{normalize_lookup(systems_slug)}"
+    systems_entry_type = normalize_lookup(str(systems_payload.get("entry_type") or "").strip())
+    systems_source_id = normalize_lookup(str(systems_payload.get("source_id") or "").strip())
+    systems_title = str(systems_payload.get("title") or "").strip()
+    if systems_title:
+        qualifier = ":".join(part for part in (systems_entry_type, systems_source_id) if part)
+        if qualifier:
+            return f"systems-title:{qualifier}:{normalize_lookup(systems_title)}"
+        return f"systems-title:{normalize_lookup(systems_title)}"
+    return ""
 
 
 def _normalize_merge_text(value: Any) -> str:

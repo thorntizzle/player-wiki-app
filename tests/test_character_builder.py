@@ -259,7 +259,7 @@ def _minimal_import_metadata(character_slug: str = "new-hero") -> CharacterImpor
         character_slug=character_slug,
         source_path="builder://native-level-1",
         imported_at_utc="2026-03-29T00:00:00Z",
-        parser_version="2026-03-30.08",
+        parser_version="2026-03-30.09",
         import_status="clean",
         warnings=[],
     )
@@ -1580,6 +1580,87 @@ def test_normalize_definition_to_native_model_merges_duplicate_attack_and_equipm
     assert normalized.attacks[0]["name"] == "Longsword"
     assert len(normalized.equipment_catalog) == 1
     assert normalized.equipment_catalog[0]["default_quantity"] == 2
+
+
+def test_normalize_definition_to_native_model_merges_linked_duplicate_attack_rows_when_names_differ():
+    definition = _minimal_character_definition("mira-salt", "Mira Salt")
+    definition.attacks = [
+        {
+            "id": "huron-blade-1",
+            "name": "Huron Blade",
+            "category": "Weapon",
+            "attack_bonus": 5,
+            "damage": "1d8+3 Slashing",
+            "damage_type": "Slashing",
+            "notes": "Versatile",
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-longsword",
+                "title": "Longsword",
+                "source_id": "PHB",
+            },
+        },
+        {
+            "id": "longsword-2",
+            "name": "Longsword",
+            "category": "weapon",
+            "attack_bonus": 5,
+            "damage": "1d8+3 slashing",
+            "damage_type": "slashing",
+            "notes": "versatile",
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-longsword",
+                "title": "Longsword",
+                "source_id": "PHB",
+            },
+        },
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+
+    assert len(normalized.attacks) == 1
+    assert normalized.attacks[0]["name"] == "Huron Blade"
+    assert normalized.attacks[0]["systems_ref"]["slug"] == "phb-item-longsword"
+
+
+def test_normalize_definition_to_native_model_merges_linked_duplicate_equipment_rows_when_names_differ():
+    definition = _minimal_character_definition("mira-salt", "Mira Salt")
+    definition.equipment_catalog = [
+        {
+            "id": "huron-blade-1",
+            "name": "Huron Blade",
+            "default_quantity": 1,
+            "weight": "3 lb.",
+            "notes": "",
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-longsword",
+                "title": "Longsword",
+                "source_id": "PHB",
+            },
+        },
+        {
+            "id": "longsword-2",
+            "name": "Longsword",
+            "default_quantity": 1,
+            "weight": "3 lb.",
+            "notes": "",
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-longsword",
+                "title": "Longsword",
+                "source_id": "PHB",
+            },
+        },
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+
+    assert len(normalized.equipment_catalog) == 1
+    assert normalized.equipment_catalog[0]["name"] == "Huron Blade"
+    assert normalized.equipment_catalog[0]["default_quantity"] == 2
+    assert normalized.equipment_catalog[0]["systems_ref"]["slug"] == "phb-item-longsword"
 
 
 def test_level_one_builder_surfaces_and_applies_skilled_feat_choices():
@@ -2992,7 +3073,7 @@ def test_level_one_builder_populates_starting_equipment_spells_and_currency():
     assert spells_by_name["Message"]["components"] == "V, S, M (a short piece of copper wire)"
     assert resource_templates_by_id["arcane-recovery"]["max"] == 1
     assert state_resources_by_id["arcane-recovery"]["current"] == 1
-    assert import_metadata.parser_version == "2026-03-30.08"
+    assert import_metadata.parser_version == "2026-03-30.09"
 
 
 def test_level_one_builder_adds_structured_subclass_prepared_spells():

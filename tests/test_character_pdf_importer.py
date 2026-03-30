@@ -601,6 +601,62 @@ def test_apply_systems_links_to_definition_re_normalizes_duplicate_rows_and_keep
     assert longsword_items[0]["systems_ref"]["slug"] == "phb-item-longsword"
 
 
+def test_apply_systems_links_to_definition_merges_linked_duplicate_attack_rows_with_different_names():
+    definition = CharacterDefinition(
+        campaign_slug="linden-pass",
+        character_slug="mira-salt",
+        name="Mira Salt",
+        status="active",
+        profile={
+            "sheet_name": "Mira Salt",
+            "display_name": "Mira Salt",
+            "class_level_text": "Fighter 1",
+            "classes": [{"class_name": "Fighter", "subclass_name": "", "level": 1}],
+            "species": "Human",
+            "background": "Sailor",
+        },
+        stats={
+            "ability_scores": {
+                "str": {"score": 16, "modifier": 3, "save_bonus": 5},
+                "dex": {"score": 12, "modifier": 1, "save_bonus": 1},
+                "con": {"score": 14, "modifier": 2, "save_bonus": 4},
+                "int": {"score": 10, "modifier": 0, "save_bonus": 0},
+                "wis": {"score": 12, "modifier": 1, "save_bonus": 1},
+                "cha": {"score": 8, "modifier": -1, "save_bonus": -1},
+            }
+        },
+        skills=[],
+        proficiencies={"armor": [], "weapons": [], "tools": [], "languages": ["Common"]},
+        attacks=[
+            {"id": "huron-blade-1", "name": "Huron Blade", "category": "weapon", "attack_bonus": 5, "damage": "1d8+3 Slashing", "damage_type": "", "notes": "Versatile"},
+            {"id": "longsword-2", "name": "Longsword", "category": "weapon", "attack_bonus": 5, "damage": "1d8+3 Slashing", "damage_type": "", "notes": "Versatile"},
+        ],
+        features=[],
+        spellcasting={"spellcasting_class": "", "spellcasting_ability": "", "spell_save_dc": None, "spell_attack_bonus": None, "slot_progression": [], "spells": []},
+        equipment_catalog=[],
+        reference_notes={"additional_notes_markdown": "", "allies_and_organizations_markdown": "", "custom_sections": []},
+        resource_templates=[],
+        source={"source_path": "Mira.pdf", "source_type": "pdf_character_sheet_annotations", "imported_from": "Mira.pdf", "imported_at": "2026-03-30T00:00:00Z", "parse_warnings": []},
+    )
+    linked_definition = apply_systems_links_to_definition(
+        definition,
+        {
+            "profile": {},
+            "features": [],
+            "attacks": [
+                {"match": {"status": "matched", "entry_type": "item", "slug": "phb-item-longsword", "title": "Longsword", "source_id": "PHB"}},
+                {"match": {"status": "matched", "entry_type": "item", "slug": "phb-item-longsword", "title": "Longsword", "source_id": "PHB"}},
+            ],
+            "equipment": [],
+            "spells": [],
+        },
+    )
+
+    assert len(linked_definition.attacks) == 1
+    assert linked_definition.attacks[0]["name"] == "Huron Blade"
+    assert linked_definition.attacks[0]["systems_ref"]["slug"] == "phb-item-longsword"
+
+
 def test_import_character_reconciles_missing_resource_trackers_into_existing_state(tmp_path, monkeypatch):
     campaigns_dir = build_test_campaigns_dir(tmp_path)
     db_path = tmp_path / "player_wiki.sqlite3"
