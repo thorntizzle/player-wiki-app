@@ -7,7 +7,7 @@
     <p class="eyebrow">Character editor</p>
     <h1>Edit {{ character.name }}</h1>
     <p class="lede">
-      Manage campaign-time adjustments that are outside the native level-up flow. This slice covers proficiencies, persistent reference text, controlled sheet-math adjustments, custom features with optional trackers, manual equipment additions, and campaign-page links for custom sheet content.
+      Manage campaign-time adjustments that are outside the native level-up flow. This slice covers proficiencies, persistent reference text, controlled sheet-math adjustments, custom features with optional trackers, manual equipment additions, campaign-page links for custom sheet content, and supported structured spell replacements tied to linked campaign features.
     </p>
     <div class="hero-actions">
       <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">Back to sheet</a>
@@ -123,6 +123,24 @@
                   </select>
                 </label>
               </div>
+              {% if row.spell_fields %}
+                <div class="detail-grid character-edit-grid">
+                  {% for field in row.spell_fields %}
+                    <label class="field">
+                      <span>{{ field.label }}</span>
+                      <select name="{{ field.name }}">
+                        <option value="" {% if not field.selected %}selected{% endif %}>Choose an option</option>
+                        {% for option in field.options %}
+                          <option value="{{ option.value }}"{% if field.selected == option.value %} selected{% endif %}>{{ option.label }}</option>
+                        {% endfor %}
+                      </select>
+                      {% if field.help_text %}
+                        <small>{{ field.help_text }}</small>
+                      {% endif %}
+                    </label>
+                  {% endfor %}
+                </div>
+              {% endif %}
               <p class="meta">Leave Uses / Max blank for a non-tracked feature. Existing spent values are preserved when you change the limit.</p>
             </article>
           {% endfor %}

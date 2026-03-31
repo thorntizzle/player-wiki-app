@@ -111,6 +111,9 @@ def _normalize_campaign_progression_item(
         for key in ("grants", "proficiencies", "stat_adjustments", "spells", "resource"):
             if key in payload:
                 raw_option[key] = deepcopy(payload.get(key))
+        spell_support = payload.get("spell_support", payload.get("spellSupport"))
+        if spell_support is not None:
+            raw_option["spell_support"] = deepcopy(spell_support)
     elif "kind" not in raw_option:
         raw_option["kind"] = "feature"
     if "name" not in raw_option and "feature_name" in payload:
@@ -165,6 +168,8 @@ def _build_campaign_progression_entry(
         "level": level,
         "campaign_progression_kind": kind,
     }
+    if campaign_option.get("spell_support") is not None:
+        metadata["spell_support"] = deepcopy(campaign_option.get("spell_support"))
     subclass_name = str(normalized.get("subclass_name") or "").strip()
     subclass_source = str(normalized.get("subclass_source") or "").strip().upper()
     if subclass_name:

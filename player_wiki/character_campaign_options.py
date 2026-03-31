@@ -90,6 +90,9 @@ def normalize_campaign_character_option(
             grants.get("spells") if "spells" in grants else raw_option.get("spells")
         ),
     }
+    spell_support = raw_option.get("spell_support", raw_option.get("spellSupport"))
+    if spell_support is not None:
+        normalized["spell_support"] = deepcopy(spell_support)
 
     if kind in FEATURE_LIKE_CAMPAIGN_OPTION_KINDS:
         activation_type = str(raw_option.get("activation_type") or "passive").strip().lower()
