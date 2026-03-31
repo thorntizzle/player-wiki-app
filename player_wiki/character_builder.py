@@ -23,6 +23,10 @@ CHARACTER_BUILDER_VERSION = "2026-03-31.01"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
+NATIVE_LEVEL_UP_READY = "ready"
+NATIVE_LEVEL_UP_REPAIRABLE = "repairable"
+NATIVE_LEVEL_UP_UNSUPPORTED = "unsupported"
+IMPORTED_CHARACTER_SOURCE_TYPES = frozenset({"markdown_character_sheet", "pdf_character_sheet_annotations"})
 CAMPAIGN_FEATURE_CHOICE_SLOTS = 2
 CAMPAIGN_ITEM_CHOICE_SLOTS = 3
 CAMPAIGN_MECHANICS_SECTION = "Mechanics"
@@ -718,8 +722,330 @@ def build_level_one_character_definition(
     return definition, import_metadata
 
 
-def supports_native_level_up(definition: CharacterDefinition) -> bool:
+def supports_native_level_up(
+    definition: CharacterDefinition,
+    *,
+    systems_service: Any | None = None,
+    campaign_slug: str = "",
+    campaign_page_records: list[Any] | None = None,
+) -> bool:
+    if systems_service is not None and str(campaign_slug or "").strip():
+        readiness = native_level_up_readiness(
+            systems_service,
+            campaign_slug,
+            definition,
+            campaign_page_records=campaign_page_records,
+        )
+        return str(readiness.get("status") or "").strip() == NATIVE_LEVEL_UP_READY
     return _native_level_up_support_error(definition) == ""
+
+
+def native_level_up_readiness(
+    systems_service: Any,
+    campaign_slug: str,
+    definition: CharacterDefinition,
+    *,
+    campaign_page_records: list[Any] | None = None,
+) -> dict[str, Any]:
+    source_type = _character_source_type(definition)
+    is_native = source_type == "native_character_builder"
+    is_imported = source_type in IMPORTED_CHARACTER_SOURCE_TYPES
+    current_level = _resolve_native_character_level(definition)
+
+    if not is_native and not is_imported:
+        return {
+            "status": NATIVE_LEVEL_UP_UNSUPPORTED,
+            "message": "Level-up currently supports native in-app characters and imported character sheets only.",
+            "reasons": ["This character source is outside the current native progression flow."],
+            "source_type": source_type,
+            "is_native": is_native,
+            "is_imported": is_imported,
+            "current_level": current_level,
+        }
+
+    classes = list((definition.profile or {}).get("classes") or [])
+    if len(classes) != 1:
+        character_label = "imported" if is_imported else "native"
+        return {
+            "status": NATIVE_LEVEL_UP_UNSUPPORTED,
+            "message": f"Level-up currently supports single-class {character_label} characters only.",
+            "reasons": ["This sheet must stay single-class for the current level-up flow."],
+            "source_type": source_type,
+            "is_native": is_native,
+            "is_imported": is_imported,
+            "current_level": current_level,
+        }
+
+    if current_level < 1:
+        character_label = "imported" if is_imported else "native"
+        return {
+            "status": NATIVE_LEVEL_UP_UNSUPPORTED,
+            "message": f"This {character_label} character is missing a valid current level.",
+            "reasons": ["The character needs a valid level before native level-up can continue."],
+            "source_type": source_type,
+            "is_native": is_native,
+            "is_imported": is_imported,
+            "current_level": current_level,
+        }
+
+    if current_level >= 20:
+        character_label = "imported" if is_imported else "native"
+        return {
+            "status": NATIVE_LEVEL_UP_UNSUPPORTED,
+            "message": f"This {character_label} character is already at level 20.",
+            "reasons": ["The current native level-up flow stops at level 20."],
+            "source_type": source_type,
+            "is_native": is_native,
+            "is_imported": is_imported,
+            "current_level": current_level,
+        }
+
+    class_payload = dict(classes[0] or {})
+    enabled_class_options = _list_campaign_enabled_entries(systems_service, campaign_slug, "class")
+    class_options = [entry for entry in enabled_class_options if _supports_native_class_entry(entry)]
+    species_options = _build_mixed_character_options(
+        _list_campaign_enabled_entries(systems_service, campaign_slug, "race"),
+        campaign_page_records or [],
+        kind="species",
+    )
+    background_options = _build_mixed_character_options(
+        _list_campaign_enabled_entries(systems_service, campaign_slug, "background"),
+        campaign_page_records or [],
+        kind="background",
+    )
+
+    profile_class_ref = definition.profile.get("class_ref")
+    class_row_ref = class_payload.get("systems_ref")
+    selected_enabled_class = _resolve_profile_entry(
+        enabled_class_options,
+        profile_class_ref or class_row_ref,
+        fallback_title=_native_character_class_name(definition),
+    )
+    if selected_enabled_class is not None and not _supports_native_class_entry(selected_enabled_class):
+        character_label = "imported" if is_imported else "native"
+        return {
+            "status": NATIVE_LEVEL_UP_UNSUPPORTED,
+            "message": (
+                f"This {character_label} character's base class does not yet expose the progression metadata "
+                "needed for native level-up."
+            ),
+            "reasons": [
+                "This class is enabled in Systems, but its progression metadata is still outside the current native level-up flow."
+            ],
+            "source_type": source_type,
+            "is_native": is_native,
+            "is_imported": is_imported,
+            "current_level": current_level,
+            "selected_class": None,
+            "selected_species": None,
+            "selected_background": None,
+            "selected_subclass": None,
+            "spell_repair_rows": [],
+        }
+
+    selected_class = _resolve_profile_entry(
+        class_options,
+        profile_class_ref or class_row_ref,
+        fallback_title=_native_character_class_name(definition),
+    )
+    selected_species = _resolve_profile_entry(
+        species_options,
+        definition.profile.get("species_ref"),
+        page_ref=definition.profile.get("species_page_ref"),
+        fallback_title=str(definition.profile.get("species") or "").strip(),
+    )
+    selected_background = _resolve_profile_entry(
+        background_options,
+        definition.profile.get("background_ref"),
+        page_ref=definition.profile.get("background_page_ref"),
+        fallback_title=str(definition.profile.get("background") or "").strip(),
+    )
+
+    repair_reasons: list[str] = []
+    if selected_class is None:
+        repair_reasons.append("Choose a supported base class link for this character.")
+    elif is_imported:
+        if not _systems_ref_slug(profile_class_ref):
+            repair_reasons.append("Confirm the supported base class link on the character profile before leveling up.")
+        if not _systems_ref_slug(class_row_ref):
+            repair_reasons.append("Confirm the class row link so native level-up can extend the imported class baseline cleanly.")
+    if selected_species is None:
+        repair_reasons.append("Choose a species link that the native level-up flow can resolve.")
+    elif is_imported and not _has_profile_entry_link(
+        definition.profile.get("species_ref"),
+        page_ref=definition.profile.get("species_page_ref"),
+    ):
+        repair_reasons.append("Confirm the species link so native level-up can keep using the imported baseline.")
+    if selected_background is None:
+        repair_reasons.append("Choose a background link that the native level-up flow can resolve.")
+    elif is_imported and not _has_profile_entry_link(
+        definition.profile.get("background_ref"),
+        page_ref=definition.profile.get("background_page_ref"),
+    ):
+        repair_reasons.append("Confirm the background link so native level-up can keep using the imported baseline.")
+
+    subclass_options: list[SystemsEntryRecord] = []
+    selected_subclass: SystemsEntryRecord | None = None
+    if selected_class is not None:
+        subclass_options = _list_subclass_options(systems_service, campaign_slug, selected_class)
+        selected_subclass = _resolve_profile_entry(
+            subclass_options,
+            definition.profile.get("subclass_ref") or dict((classes[0] or {}).get("subclass_ref") or {}),
+            fallback_title=_native_character_subclass_name(definition),
+        )
+        class_progression = systems_service.build_class_feature_progression_for_class_entry(campaign_slug, selected_class)
+        if _class_requires_subclass_at_level(selected_class, class_progression, current_level) and selected_subclass is None:
+            repair_reasons.append(
+                f"Choose a {str(selected_class.metadata.get('subclass_title') or 'subclass').strip() or 'subclass'} link before leveling up."
+            )
+        elif (
+            is_imported
+            and _class_requires_subclass_at_level(selected_class, class_progression, current_level)
+            and not _systems_ref_slug(definition.profile.get("subclass_ref"))
+        ):
+            repair_reasons.append(
+                f"Confirm the {str(selected_class.metadata.get('subclass_title') or 'subclass').strip() or 'subclass'} link before leveling up."
+            )
+
+    spell_repair_rows: list[dict[str, Any]] = []
+    if is_imported and selected_class is not None:
+        spell_repair_rows = _build_imported_spell_repair_rows(
+            definition,
+            selected_class=selected_class,
+        )
+        if spell_repair_rows:
+            repair_reasons.append("Classify the current imported spell rows so native spell progression can trust them.")
+
+    if repair_reasons:
+        return {
+            "status": NATIVE_LEVEL_UP_REPAIRABLE if is_imported else NATIVE_LEVEL_UP_UNSUPPORTED,
+            "message": (
+                "This imported character needs a quick progression repair before native level-up."
+                if is_imported
+                else "This native character is missing enabled links needed for level-up."
+            ),
+            "reasons": repair_reasons,
+            "source_type": source_type,
+            "is_native": is_native,
+            "is_imported": is_imported,
+            "current_level": current_level,
+            "selected_class": selected_class,
+            "selected_species": selected_species,
+            "selected_background": selected_background,
+            "selected_subclass": selected_subclass,
+            "spell_repair_rows": spell_repair_rows,
+        }
+
+    return {
+        "status": NATIVE_LEVEL_UP_READY,
+        "message": "",
+        "reasons": [],
+        "source_type": source_type,
+        "is_native": is_native,
+        "is_imported": is_imported,
+        "current_level": current_level,
+        "selected_class": selected_class,
+        "selected_species": selected_species,
+        "selected_background": selected_background,
+        "selected_subclass": selected_subclass,
+        "spell_repair_rows": spell_repair_rows,
+    }
+
+
+def _character_source_type(definition: CharacterDefinition) -> str:
+    return str((definition.source or {}).get("source_type") or "").strip()
+
+
+def _native_character_subclass_name(definition: CharacterDefinition) -> str:
+    classes = list((definition.profile or {}).get("classes") or [])
+    if classes:
+        class_payload = dict(classes[0] or {})
+        subclass_ref = dict(class_payload.get("subclass_ref") or {})
+        return str(subclass_ref.get("title") or class_payload.get("subclass_name") or "").strip()
+    subclass_ref = dict((definition.profile or {}).get("subclass_ref") or {})
+    return str(subclass_ref.get("title") or "").strip()
+
+
+def _native_progression_payload(source_payload: dict[str, Any] | None) -> dict[str, Any]:
+    source = dict(source_payload or {})
+    payload = dict(source.get("native_progression") or {})
+    history = [dict(entry) for entry in list(payload.get("history") or []) if isinstance(entry, dict)]
+    if history:
+        payload["history"] = history
+    return payload
+
+
+def _with_native_progression_event(
+    source_payload: dict[str, Any] | None,
+    *,
+    kind: str,
+    target_level: int,
+    previous_level: int | None = None,
+    baseline_repaired: bool = False,
+) -> dict[str, Any]:
+    source = dict(source_payload or {})
+    native_progression = _native_progression_payload(source)
+    if baseline_repaired:
+        native_progression["baseline_repaired_at"] = isoformat(utcnow())
+    history = [dict(entry) for entry in list(native_progression.get("history") or []) if isinstance(entry, dict)]
+    event: dict[str, Any] = {
+        "kind": str(kind or "").strip() or "managed",
+        "at": isoformat(utcnow()),
+        "target_level": int(target_level or 0),
+    }
+    if previous_level is not None:
+        event["from_level"] = int(previous_level)
+        event["to_level"] = int(target_level or 0)
+    history.append(event)
+    native_progression["history"] = history
+    source["native_progression"] = native_progression
+    return source
+
+
+def _build_imported_spell_repair_rows(
+    definition: CharacterDefinition,
+    *,
+    selected_class: SystemsEntryRecord,
+) -> list[dict[str, Any]]:
+    spell_mode = _spellcasting_mode_for_class(selected_class.title, selected_class=selected_class)
+    if not spell_mode:
+        return []
+    rows: list[dict[str, Any]] = []
+    mark_options = _imported_spell_mark_options(spell_mode)
+    if not mark_options:
+        return rows
+    for index, spell in enumerate(list((definition.spellcasting or {}).get("spells") or []), start=1):
+        payload = dict(spell or {})
+        name = str(payload.get("name") or "").strip()
+        mark = str(payload.get("mark") or "").strip()
+        if not name or mark:
+            continue
+        rows.append(
+            {
+                "index": index,
+                "name": name,
+                "field_name": f"repair_spell_mark_{index}",
+                "selected": "",
+                "options": [_choice_option(label, value) for value, label in mark_options],
+            }
+        )
+    return rows
+
+
+def _imported_spell_mark_options(spell_mode: str) -> list[tuple[str, str]]:
+    if spell_mode == "known":
+        return [("Cantrip", "Cantrip"), ("Known", "Known")]
+    if spell_mode == "prepared":
+        return [("Cantrip", "Cantrip"), ("Prepared", "Prepared"), ("Known", "Known")]
+    if spell_mode == "wizard":
+        return [
+            ("Cantrip", "Cantrip"),
+            ("Spellbook", "Spellbook"),
+            ("Prepared + Spellbook", "Prepared + Spellbook"),
+            ("Prepared", "Prepared"),
+            ("Known", "Known"),
+        ]
+    return []
 
 
 def build_native_level_up_context(
@@ -730,7 +1056,12 @@ def build_native_level_up_context(
     *,
     campaign_page_records: list[Any] | None = None,
 ) -> dict[str, Any]:
-    support_error = _native_level_up_support_error(definition)
+    support_error = _native_level_up_support_error(
+        definition,
+        systems_service=systems_service,
+        campaign_slug=campaign_slug,
+        campaign_page_records=campaign_page_records,
+    )
     if support_error:
         raise CharacterBuildError(support_error)
 
@@ -841,6 +1172,9 @@ def build_native_level_up_context(
         "character_name": definition.name,
         "current_level": current_level,
         "next_level": next_level,
+        "campaign_slug": campaign_slug,
+        "campaign_page_records": list(campaign_page_records or []),
+        "systems_service": systems_service,
         "selected_class": selected_class,
         "selected_species": selected_species,
         "selected_background": selected_background,
@@ -865,8 +1199,15 @@ def build_native_level_up_character_definition(
     current_definition: CharacterDefinition,
     level_up_context: dict[str, Any],
     form_values: dict[str, str] | None = None,
+    *,
+    current_import_metadata: CharacterImportMetadata | None = None,
 ) -> tuple[CharacterDefinition, CharacterImportMetadata, int]:
-    support_error = _native_level_up_support_error(current_definition)
+    support_error = _native_level_up_support_error(
+        current_definition,
+        systems_service=level_up_context.get("systems_service"),
+        campaign_slug=str(level_up_context.get("campaign_slug") or campaign_slug or "").strip(),
+        campaign_page_records=level_up_context.get("campaign_page_records"),
+    )
     if support_error:
         raise CharacterBuildError(support_error)
 
@@ -1061,18 +1402,328 @@ def build_native_level_up_character_definition(
             list(current_definition.resource_templates or []),
             derived_resource_templates,
         ),
-        source=_build_leveled_source(current_definition.source, target_level),
+        source=_build_leveled_source(
+            current_definition.source,
+            target_level,
+            current_level=current_level,
+        ),
     )
+    import_metadata = _build_leveled_import_metadata(
+        campaign_slug=campaign_slug,
+        current_definition=current_definition,
+        current_import_metadata=current_import_metadata,
+        target_level=target_level,
+    )
+    return definition, import_metadata, total_hp_delta
+
+
+def build_imported_progression_repair_context(
+    systems_service: Any,
+    campaign_slug: str,
+    definition: CharacterDefinition,
+    *,
+    form_values: dict[str, str] | None = None,
+    campaign_page_records: list[Any] | None = None,
+) -> dict[str, Any]:
+    if _character_source_type(definition) not in IMPORTED_CHARACTER_SOURCE_TYPES:
+        raise CharacterBuildError("Only imported character sheets use the progression repair flow.")
+
+    values = {key: str(value) for key, value in dict(form_values or {}).items()}
+    current_level = max(_resolve_native_character_level(definition), 1)
+    readiness = native_level_up_readiness(
+        systems_service,
+        campaign_slug,
+        definition,
+        campaign_page_records=campaign_page_records,
+    )
+
+    class_options = _list_supported_class_entries(systems_service, campaign_slug)
+    species_options = _build_mixed_character_options(
+        _list_campaign_enabled_entries(systems_service, campaign_slug, "race"),
+        campaign_page_records or [],
+        kind="species",
+    )
+    background_options = _build_mixed_character_options(
+        _list_campaign_enabled_entries(systems_service, campaign_slug, "background"),
+        campaign_page_records or [],
+        kind="background",
+    )
+    feat_options = _build_mixed_character_options(
+        _list_campaign_enabled_entries(systems_service, campaign_slug, "feat"),
+        campaign_page_records or [],
+        kind="feat",
+    )
+    optionalfeature_options = list(_list_campaign_enabled_entries(systems_service, campaign_slug, "optionalfeature"))
+
+    selected_class = _resolve_profile_entry(
+        class_options,
+        definition.profile.get("class_ref"),
+        fallback_title=_native_character_class_name(definition),
+    )
+
+    values.setdefault(
+        "repair_class_slug",
+        _entry_selection_value(selected_class) if selected_class is not None else "",
+    )
+    values.setdefault(
+        "repair_species_slug",
+        _entry_selection_value(
+            _resolve_profile_entry(
+                species_options,
+                definition.profile.get("species_ref"),
+                page_ref=definition.profile.get("species_page_ref"),
+                fallback_title=str(definition.profile.get("species") or "").strip(),
+            )
+        )
+        if species_options
+        else "",
+    )
+    values.setdefault(
+        "repair_background_slug",
+        _entry_selection_value(
+            _resolve_profile_entry(
+                background_options,
+                definition.profile.get("background_ref"),
+                page_ref=definition.profile.get("background_page_ref"),
+                fallback_title=str(definition.profile.get("background") or "").strip(),
+            )
+        )
+        if background_options
+        else "",
+    )
+    values.setdefault(
+        "repair_subclass_slug",
+        _entry_selection_value(
+            _resolve_profile_entry(
+                _list_subclass_options(systems_service, campaign_slug, selected_class) if selected_class is not None else [],
+                definition.profile.get("subclass_ref") or dict((definition.profile.get("classes") or [{}])[0].get("subclass_ref") or {}),
+                fallback_title=_native_character_subclass_name(definition),
+            )
+        )
+        if selected_class is not None
+        else "",
+    )
+    selected_class_for_values = _resolve_selected_entry(class_options, values.get("repair_class_slug", ""))
+    subclass_options = (
+        _list_subclass_options(systems_service, campaign_slug, selected_class_for_values)
+        if selected_class_for_values is not None
+        else []
+    )
+
+    feat_row_count = 2 if current_level >= 4 or any(str((feature.get("category") or "")).strip() == "feat" for feature in list(definition.features or [])) else 0
+    optionalfeature_row_count = 3 if current_level >= 2 else 0
+    feat_rows = []
+    for index in range(1, feat_row_count + 1):
+        field_name = f"repair_feat_{index}"
+        feat_rows.append(
+            {
+                "index": index,
+                "name": field_name,
+                "selected": str(values.get(field_name) or "").strip(),
+                "options": [_choice_option(_entry_option_label(entry), _entry_selection_value(entry) or entry.slug) for entry in feat_options],
+            }
+        )
+    optionalfeature_rows = []
+    for index in range(1, optionalfeature_row_count + 1):
+        field_name = f"repair_optionalfeature_{index}"
+        optionalfeature_rows.append(
+            {
+                "index": index,
+                "name": field_name,
+                "selected": str(values.get(field_name) or "").strip(),
+                "options": [_choice_option(entry.title, str(entry.slug or "").strip()) for entry in optionalfeature_options if str(entry.slug or "").strip()],
+            }
+        )
+
+    spell_rows = []
+    selected_spell_class = _resolve_selected_entry(
+        class_options,
+        values.get("repair_class_slug") or (_entry_selection_value(selected_class) if selected_class is not None else ""),
+    )
+    for row in _build_imported_spell_repair_rows(definition, selected_class=selected_spell_class) if selected_spell_class is not None else []:
+        field_name = str(row.get("field_name") or "").strip()
+        if field_name:
+            row = dict(row)
+            row["selected"] = str(values.get(field_name) or row.get("selected") or "").strip()
+            spell_rows.append(row)
+
+    return {
+        "values": values,
+        "character_name": definition.name,
+        "current_level": current_level,
+        "readiness": readiness,
+        "class_options": [_entry_option(entry) for entry in class_options],
+        "species_options": [_entry_option(entry) for entry in species_options],
+        "background_options": [_entry_option(entry) for entry in background_options],
+        "subclass_options": [_entry_option(entry) for entry in subclass_options],
+        "feat_rows": feat_rows,
+        "optionalfeature_rows": optionalfeature_rows,
+        "spell_rows": spell_rows,
+        "class_entries": class_options,
+        "species_entries": species_options,
+        "background_entries": background_options,
+        "subclass_entries": subclass_options,
+        "feat_entries": feat_options,
+        "optionalfeature_entries": optionalfeature_options,
+    }
+
+
+def apply_imported_progression_repairs(
+    campaign_slug: str,
+    current_definition: CharacterDefinition,
+    current_import_metadata: CharacterImportMetadata,
+    repair_context: dict[str, Any],
+    form_values: dict[str, str] | None = None,
+) -> tuple[CharacterDefinition, CharacterImportMetadata]:
+    if _character_source_type(current_definition) not in IMPORTED_CHARACTER_SOURCE_TYPES:
+        raise CharacterBuildError("Only imported character sheets can use progression repair.")
+
+    values = {key: str(value) for key, value in dict(form_values or {}).items()}
+    class_entries = list(repair_context.get("class_entries") or [])
+    species_entries = list(repair_context.get("species_entries") or [])
+    background_entries = list(repair_context.get("background_entries") or [])
+    subclass_entries = list(repair_context.get("subclass_entries") or [])
+    feat_entries = list(repair_context.get("feat_entries") or [])
+    optionalfeature_entries = list(repair_context.get("optionalfeature_entries") or [])
+
+    selected_class = _resolve_selected_entry(class_entries, values.get("repair_class_slug", ""))
+    selected_species = _resolve_selected_entry(species_entries, values.get("repair_species_slug", ""))
+    selected_background = _resolve_selected_entry(background_entries, values.get("repair_background_slug", ""))
+    selected_subclass = _resolve_selected_entry(subclass_entries, values.get("repair_subclass_slug", ""))
+
+    missing_refs = []
+    if selected_class is None:
+        missing_refs.append("class")
+    if selected_species is None:
+        missing_refs.append("species")
+    if selected_background is None:
+        missing_refs.append("background")
+    if missing_refs:
+        joined = ", ".join(missing_refs)
+        raise CharacterBuildError(f"Choose the missing {joined} links before saving progression repair.")
+
+    ability_scores = _ability_scores_from_definition(current_definition)
+    current_level = max(_resolve_native_character_level(current_definition), 1)
+
+    repaired_feature_entries: list[dict[str, Any]] = []
+    for row in list(repair_context.get("feat_rows") or []):
+        selected_value = str(values.get(str(row.get("name") or "").strip()) or "").strip()
+        selected_entry = _resolve_selected_entry(feat_entries, selected_value)
+        if selected_entry is None:
+            continue
+        repaired_feature_entries.append(
+            {
+                "kind": "feat",
+                "slug": str(selected_entry.slug or "").strip(),
+                "title": selected_entry.title,
+                "label": selected_entry.title,
+                "systems_entry": selected_entry,
+                "page_ref": _entry_page_ref(selected_entry),
+                "campaign_option": _entry_campaign_option(selected_entry) or None,
+            }
+        )
+    optionalfeature_lookup = {
+        str(entry.slug or "").strip(): entry
+        for entry in optionalfeature_entries
+        if str(entry.slug or "").strip()
+    }
+    for row in list(repair_context.get("optionalfeature_rows") or []):
+        selected_value = str(values.get(str(row.get("name") or "").strip()) or "").strip()
+        selected_entry = optionalfeature_lookup.get(selected_value)
+        if selected_entry is None:
+            continue
+        repaired_feature_entries.append(
+            {
+                "kind": "optionalfeature",
+                "slug": str(selected_entry.slug or "").strip(),
+                "label": selected_entry.title,
+            }
+        )
+
+    repaired_features, _unused_templates = _build_feature_payloads(
+        repaired_feature_entries,
+        ability_scores=ability_scores,
+        current_level=current_level,
+    )
+    merged_features = _merge_feature_payloads(list(current_definition.features or []), repaired_features)
+    merged_features, derived_resource_templates = _apply_tracker_templates_to_feature_payloads(
+        merged_features,
+        ability_scores=ability_scores,
+        current_level=current_level,
+    )
+
+    profile = dict(current_definition.profile or {})
+    classes = [dict(row or {}) for row in list(profile.get("classes") or [])]
+    class_payload = dict(classes[0] or {}) if classes else {}
+    class_payload["class_name"] = selected_class.title
+    class_payload["level"] = current_level
+    class_payload["systems_ref"] = _systems_ref_from_entry(selected_class)
+    if selected_subclass is not None:
+        class_payload["subclass_name"] = selected_subclass.title
+        class_payload["subclass_ref"] = _systems_ref_from_entry(selected_subclass)
+        profile["subclass_ref"] = _systems_ref_from_entry(selected_subclass)
+    classes = [class_payload]
+    profile["classes"] = classes
+    profile["class_ref"] = _systems_ref_from_entry(selected_class)
+    profile["class_level_text"] = f"{selected_class.title} {current_level}"
+
+    species_page_ref = _entry_page_ref(selected_species)
+    profile["species"] = selected_species.title
+    profile["species_ref"] = None if species_page_ref else _systems_ref_from_entry(selected_species)
+    profile["species_page_ref"] = species_page_ref or None
+
+    background_page_ref = _entry_page_ref(selected_background)
+    profile["background"] = selected_background.title
+    profile["background_ref"] = None if background_page_ref else _systems_ref_from_entry(selected_background)
+    profile["background_page_ref"] = background_page_ref or None
+
+    spellcasting = dict(current_definition.spellcasting or {})
+    repaired_spells = [dict(payload or {}) for payload in list(spellcasting.get("spells") or [])]
+    for row in list(repair_context.get("spell_rows") or []):
+        field_name = str(row.get("field_name") or "").strip()
+        if not field_name:
+            continue
+        selected_mark = str(values.get(field_name) or "").strip()
+        if not selected_mark:
+            continue
+        spell_index = max(int(row.get("index") or 0) - 1, 0)
+        if spell_index >= len(repaired_spells):
+            continue
+        repaired_spells[spell_index]["mark"] = selected_mark
+    spellcasting["spells"] = _normalize_spell_payloads(repaired_spells)
+
+    payload = deepcopy(current_definition.to_dict())
+    payload["campaign_slug"] = campaign_slug
+    payload["character_slug"] = current_definition.character_slug
+    payload["profile"] = profile
+    payload["features"] = merged_features
+    payload["resource_templates"] = _merge_resource_templates(
+        list(current_definition.resource_templates or []),
+        derived_resource_templates,
+    )
+    payload["spellcasting"] = spellcasting
+    payload["source"] = _with_native_progression_event(
+        current_definition.source,
+        kind="repair",
+        target_level=current_level,
+        baseline_repaired=True,
+    )
+
+    definition = normalize_definition_to_native_model(CharacterDefinition.from_dict(payload))
     import_metadata = CharacterImportMetadata(
         campaign_slug=campaign_slug,
         character_slug=current_definition.character_slug,
-        source_path=f"builder://native-level-{target_level}",
+        source_path=str(
+            current_import_metadata.source_path
+            or (current_definition.source or {}).get("source_path")
+            or f"managed://{campaign_slug}/{current_definition.character_slug}"
+        ),
         imported_at_utc=isoformat(utcnow()),
         parser_version=CHARACTER_BUILDER_VERSION,
-        import_status="clean",
-        warnings=[],
+        import_status="managed",
+        warnings=list(current_import_metadata.warnings or []),
     )
-    return definition, import_metadata, total_hp_delta
+    return definition, import_metadata
 
 
 def _list_phb_entries(
@@ -1422,6 +2073,14 @@ def _systems_ref_slug(payload: Any) -> str:
     return str(payload.get("slug") or "").strip()
 
 
+def _has_profile_entry_link(
+    systems_ref: Any,
+    *,
+    page_ref: Any = None,
+) -> bool:
+    return bool(_systems_ref_slug(systems_ref) or _extract_campaign_page_ref(page_ref))
+
+
 def _resolve_profile_entry(
     options: list[SystemsEntryRecord],
     systems_ref: Any,
@@ -1466,8 +2125,23 @@ def _native_character_class_name(definition: CharacterDefinition) -> str:
     return str(class_ref.get("title") or "").strip()
 
 
-def _native_level_up_support_error(definition: CharacterDefinition) -> str:
-    source_type = str((definition.source or {}).get("source_type") or "").strip()
+def _native_level_up_support_error(
+    definition: CharacterDefinition,
+    *,
+    systems_service: Any | None = None,
+    campaign_slug: str = "",
+    campaign_page_records: list[Any] | None = None,
+) -> str:
+    if systems_service is not None and str(campaign_slug or "").strip():
+        readiness = native_level_up_readiness(
+            systems_service,
+            campaign_slug,
+            definition,
+            campaign_page_records=campaign_page_records,
+        )
+        return str(readiness.get("message") or "").strip()
+
+    source_type = _character_source_type(definition)
     if source_type != "native_character_builder":
         return "Level-up currently supports native in-app characters only."
     classes = list((definition.profile or {}).get("classes") or [])
@@ -6748,8 +7422,21 @@ def _build_leveled_profile(
 def _build_leveled_source(
     source_payload: dict[str, Any],
     target_level: int,
+    *,
+    current_level: int | None = None,
 ) -> dict[str, Any]:
     source = dict(source_payload or {})
+    source_type = str(source.get("source_type") or "").strip()
+    if source_type in IMPORTED_CHARACTER_SOURCE_TYPES:
+        source["imported_at"] = isoformat(utcnow())
+        source["parse_warnings"] = list(source.get("parse_warnings") or [])
+        source = _with_native_progression_event(
+            source,
+            kind="level_up",
+            previous_level=current_level,
+            target_level=target_level,
+        )
+        return source
     source.update(
         {
             "source_path": f"builder://native-level-{target_level}",
@@ -6760,6 +7447,40 @@ def _build_leveled_source(
         }
     )
     return source
+
+
+def _build_leveled_import_metadata(
+    *,
+    campaign_slug: str,
+    current_definition: CharacterDefinition,
+    current_import_metadata: CharacterImportMetadata | None,
+    target_level: int,
+) -> CharacterImportMetadata:
+    source_type = _character_source_type(current_definition)
+    if source_type in IMPORTED_CHARACTER_SOURCE_TYPES:
+        existing_import = current_import_metadata
+        return CharacterImportMetadata(
+            campaign_slug=campaign_slug,
+            character_slug=current_definition.character_slug,
+            source_path=str(
+                (existing_import.source_path if existing_import is not None else "")
+                or (current_definition.source or {}).get("source_path")
+                or f"managed://{campaign_slug}/{current_definition.character_slug}"
+            ),
+            imported_at_utc=isoformat(utcnow()),
+            parser_version=CHARACTER_BUILDER_VERSION,
+            import_status="managed",
+            warnings=list(existing_import.warnings if existing_import is not None else []),
+        )
+    return CharacterImportMetadata(
+        campaign_slug=campaign_slug,
+        character_slug=current_definition.character_slug,
+        source_path=f"builder://native-level-{target_level}",
+        imported_at_utc=isoformat(utcnow()),
+        parser_version=CHARACTER_BUILDER_VERSION,
+        import_status="clean",
+        warnings=[],
+    )
 
 
 def _merge_feature_payloads(

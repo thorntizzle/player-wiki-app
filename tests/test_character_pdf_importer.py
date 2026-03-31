@@ -1480,3 +1480,54 @@ def test_converged_imported_definitions_keep_profile_refs_but_remain_level_up_in
     assert supports_native_level_up(converged) is False
 
 
+def test_converge_imported_definition_does_not_downgrade_native_progression_from_stale_reimport():
+    existing_definition = _minimal_imported_definition(
+        profile={
+            "class_level_text": "Wizard 4",
+            "class_ref": {"slug": "phb-class-wizard", "title": "Wizard", "entry_type": "class", "source_id": "PHB"},
+            "subclass_ref": {"slug": "phb-subclass-evocation", "title": "School of Evocation", "entry_type": "subclass", "source_id": "PHB"},
+            "species_ref": {"slug": "phb-race-human", "title": "Human", "entry_type": "race", "source_id": "PHB"},
+            "background_ref": {"slug": "phb-background-sage", "title": "Sage", "entry_type": "background", "source_id": "PHB"},
+            "classes": [
+                {
+                    "class_name": "Wizard",
+                    "subclass_name": "School of Evocation",
+                    "level": 4,
+                    "systems_ref": {"slug": "phb-class-wizard", "title": "Wizard", "entry_type": "class", "source_id": "PHB"},
+                    "subclass_ref": {"slug": "phb-subclass-evocation", "title": "School of Evocation", "entry_type": "subclass", "source_id": "PHB"},
+                }
+            ],
+        },
+        features=[
+            {
+                "id": "wizard-asi",
+                "name": "Ability Score Improvement",
+                "category": "class_feature",
+                "source": "PHB",
+                "description_markdown": "",
+                "activation_type": "passive",
+                "tracker_ref": None,
+            }
+        ],
+    )
+    existing_definition.stats["max_hp"] = 24
+    existing_definition.source["native_progression"] = {
+        "baseline_repaired_at": "2026-03-31T00:00:00Z",
+        "history": [
+            {"kind": "repair", "at": "2026-03-31T00:00:00Z", "target_level": 3},
+            {"kind": "level_up", "at": "2026-03-31T01:00:00Z", "from_level": 3, "to_level": 4, "target_level": 4},
+        ],
+    }
+    incoming_definition = _minimal_imported_definition()
+
+    converged = converge_imported_definition(
+        incoming_definition,
+        existing_definition=existing_definition,
+    )
+
+    assert converged.profile["class_level_text"] == "Wizard 4"
+    assert converged.profile["classes"][0]["level"] == 4
+    assert converged.stats["max_hp"] == 24
+    assert converged.source["native_progression"]["history"][-1]["to_level"] == 4
+
+

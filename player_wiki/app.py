@@ -38,10 +38,13 @@ from .character_builder import (
     _build_spell_catalog,
     _list_campaign_enabled_entries,
     CharacterBuildError,
+    apply_imported_progression_repairs,
     build_native_level_up_context,
     build_native_level_up_character_definition,
+    build_imported_progression_repair_context,
     build_level_one_builder_context,
     build_level_one_character_definition,
+    native_level_up_readiness,
     supports_native_level_up,
 )
 from .character_editor import (
@@ -648,7 +651,24 @@ def create_app() -> Flask:
     ):
         campaign, record = load_character_context(campaign_slug, character_slug)
         can_use_session_mode = has_session_mode_access(campaign_slug, character_slug)
-        can_level_up = can_manage_campaign_session(campaign_slug) and supports_native_level_up(record.definition)
+        can_manage_character = can_manage_campaign_session(campaign_slug)
+        campaign_page_records = [
+            page_record
+            for page_record in get_campaign_page_store().list_page_records(campaign_slug)
+            if campaign.is_page_visible(page_record.page)
+            and str(page_record.page.section or "").strip() != "Sessions"
+        ]
+        level_up_readiness = (
+            native_level_up_readiness(
+                get_systems_service(),
+                campaign_slug,
+                record.definition,
+                campaign_page_records=campaign_page_records,
+            )
+            if can_manage_character
+            else None
+        )
+        can_level_up = bool(level_up_readiness and level_up_readiness.get("status") == "ready")
         character_subpage = normalize_character_read_subpage(request.args.get("page", ""))
         requested_mode = request.args.get("mode", "").strip().lower()
         is_session_mode = force_session_mode or (requested_mode == "session" and can_use_session_mode)
@@ -697,6 +717,7 @@ def create_app() -> Flask:
                 active_nav="characters",
                 can_use_session_mode=can_use_session_mode,
                 can_level_up=can_level_up,
+                level_up_readiness=level_up_readiness,
                 is_session_mode=is_session_mode,
                 rest_preview=rest_preview,
             ),
@@ -774,6 +795,25 @@ def create_app() -> Flask:
                 campaign=campaign,
                 character_slug=character_slug,
                 level_up=level_up_context,
+                active_nav="characters",
+            ),
+            status_code,
+        )
+
+    def render_character_progression_repair_page(
+        campaign_slug: str,
+        character_slug: str,
+        repair_context: dict[str, object],
+        *,
+        status_code: int = 200,
+    ):
+        campaign = load_campaign_context(campaign_slug)
+        return (
+            render_template(
+                "character_progression_repair.html",
+                campaign=campaign,
+                character_slug=character_slug,
+                repair=repair_context,
                 active_nav="characters",
             ),
             status_code,
@@ -3300,8 +3340,23 @@ def create_app() -> Flask:
             if campaign.is_page_visible(page_record.page)
             and str(page_record.page.section or "").strip() != "Sessions"
         ]
-        if not supports_native_level_up(record.definition):
-            flash("This character is not eligible for the current native level-up flow.", "error")
+        readiness = native_level_up_readiness(
+            get_systems_service(),
+            campaign_slug,
+            record.definition,
+            campaign_page_records=campaign_page_records,
+        )
+        if readiness.get("status") == "repairable":
+            flash(str(readiness.get("message") or "This imported character needs progression repair first."), "error")
+            return redirect(
+                url_for(
+                    "character_progression_repair_view",
+                    campaign_slug=campaign_slug,
+                    character_slug=character_slug,
+                )
+            )
+        if readiness.get("status") != "ready":
+            flash(str(readiness.get("message") or "This character is not eligible for the current native level-up flow."), "error")
             return redirect(
                 url_for(
                     "character_read_view",
@@ -3344,6 +3399,7 @@ def create_app() -> Flask:
                 record.definition,
                 level_up_context,
                 form_values,
+                current_import_metadata=record.import_metadata,
             )
             merged_state = merge_state_with_definition(
                 definition,
@@ -3368,6 +3424,127 @@ def create_app() -> Flask:
         write_yaml(character_dir / "definition.yaml", definition.to_dict())
         write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
         flash(f"{definition.name} advanced to level {int(level_up_context.get('next_level') or 0)}.", "success")
+        return redirect(
+            url_for(
+                "character_read_view",
+                campaign_slug=campaign_slug,
+                character_slug=character_slug,
+            )
+        )
+
+    @app.route("/campaigns/<campaign_slug>/characters/<character_slug>/progression-repair", methods=["GET", "POST"])
+    @campaign_scope_access_required("characters")
+    def character_progression_repair_view(campaign_slug: str, character_slug: str):
+        if not can_manage_campaign_session(campaign_slug):
+            abort(403)
+
+        campaign, record = load_character_context(campaign_slug, character_slug)
+        campaign_page_records = [
+            page_record
+            for page_record in get_campaign_page_store().list_page_records(campaign_slug)
+            if campaign.is_page_visible(page_record.page)
+            and str(page_record.page.section or "").strip() != "Sessions"
+        ]
+        readiness = native_level_up_readiness(
+            get_systems_service(),
+            campaign_slug,
+            record.definition,
+            campaign_page_records=campaign_page_records,
+        )
+        if readiness.get("status") == "ready":
+            flash("This character is already ready for native level-up.", "success")
+            return redirect(
+                url_for(
+                    "character_level_up_view",
+                    campaign_slug=campaign_slug,
+                    character_slug=character_slug,
+                )
+            )
+        if readiness.get("status") == "unsupported":
+            flash(str(readiness.get("message") or "This character cannot use the current native progression flow."), "error")
+            return redirect(
+                url_for(
+                    "character_read_view",
+                    campaign_slug=campaign_slug,
+                    character_slug=character_slug,
+                )
+            )
+
+        form_values = dict(request.form if request.method == "POST" else request.args)
+        repair_context = build_imported_progression_repair_context(
+            get_systems_service(),
+            campaign_slug,
+            record.definition,
+            form_values=form_values if request.method == "POST" else None,
+            campaign_page_records=campaign_page_records,
+        )
+        repair_context["state_revision"] = record.state_record.revision
+
+        if request.method != "POST":
+            return render_character_progression_repair_page(campaign_slug, character_slug, repair_context)
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        try:
+            expected_revision = parse_expected_revision()
+            definition, import_metadata = apply_imported_progression_repairs(
+                campaign_slug,
+                record.definition,
+                record.import_metadata,
+                repair_context,
+                form_values,
+            )
+            post_repair_readiness = native_level_up_readiness(
+                get_systems_service(),
+                campaign_slug,
+                definition,
+                campaign_page_records=campaign_page_records,
+            )
+            merged_state = merge_state_with_definition(definition, record.state_record.state)
+            character_state_store.replace_state(
+                definition,
+                merged_state,
+                expected_revision=expected_revision,
+                updated_by_user_id=user.id,
+            )
+        except CharacterStateConflictError:
+            flash("This sheet changed in another session. Refresh the page and try again.", "error")
+            return render_character_progression_repair_page(campaign_slug, character_slug, repair_context, status_code=409)
+        except (CharacterBuildError, CharacterStateValidationError, ValueError) as exc:
+            flash(str(exc), "error")
+            return render_character_progression_repair_page(campaign_slug, character_slug, repair_context, status_code=400)
+
+        config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
+        character_dir = config.characters_dir / character_slug
+        write_yaml(character_dir / "definition.yaml", definition.to_dict())
+        write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
+        if post_repair_readiness.get("status") == "ready":
+            flash(f"{definition.name} is ready for native level-up.", "success")
+            return redirect(
+                url_for(
+                    "character_level_up_view",
+                    campaign_slug=campaign_slug,
+                    character_slug=character_slug,
+                )
+            )
+        if post_repair_readiness.get("status") == "repairable":
+            flash(
+                "Progression repair saved, but this character still needs a few more linked details before native level-up.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "character_progression_repair_view",
+                    campaign_slug=campaign_slug,
+                    character_slug=character_slug,
+                )
+            )
+        flash(
+            str(post_repair_readiness.get("message") or "This character cannot use the current native progression flow."),
+            "error",
+        )
         return redirect(
             url_for(
                 "character_read_view",

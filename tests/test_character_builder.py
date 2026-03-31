@@ -10,10 +10,13 @@ from player_wiki.character_campaign_progression import build_campaign_page_progr
 from player_wiki.character_builder import (
     CHARACTER_BUILDER_VERSION,
     _resolve_builder_choices,
+    apply_imported_progression_repairs,
     build_native_level_up_character_definition,
     build_native_level_up_context,
+    build_imported_progression_repair_context,
     build_level_one_builder_context,
     build_level_one_character_definition,
+    native_level_up_readiness,
     normalize_definition_to_native_model,
     supports_native_level_up,
 )
@@ -268,6 +271,34 @@ def _minimal_import_metadata(character_slug: str = "new-hero") -> CharacterImpor
     )
 
 
+def _minimal_imported_character_definition(
+    character_slug: str = "imported-hero",
+    name: str = "Imported Hero",
+    *,
+    source_type: str = "markdown_character_sheet",
+) -> CharacterDefinition:
+    definition = _minimal_character_definition(character_slug, name)
+    definition.source = {
+        "source_path": f"imports://{character_slug}.md",
+        "source_type": source_type,
+        "imported_from": f"{name}.md",
+        "imported_at": "2026-03-31T00:00:00Z",
+        "parse_warnings": [],
+    }
+    definition.profile["classes"][0]["level"] = 3
+    definition.profile["class_level_text"] = "Fighter 3"
+    definition.profile["subclass_ref"] = {
+        "entry_key": "dnd-5e|subclass|phb|champion",
+        "entry_type": "subclass",
+        "title": "Champion",
+        "slug": "phb-subclass-champion",
+        "source_id": "PHB",
+    }
+    definition.profile["classes"][0]["subclass_name"] = "Champion"
+    definition.profile["classes"][0]["subclass_ref"] = dict(definition.profile["subclass_ref"])
+    return definition
+
+
 def _builder_context_fixture() -> dict[str, object]:
     return {
         "values": {
@@ -346,6 +377,339 @@ def _option_value_for_label(options: list[dict[str, object]], label_fragment: st
         if label_fragment.lower() in str(option.get("label") or "").lower():
             return str(option.get("value") or option.get("slug") or "")
     raise AssertionError(f"top-level builder options did not contain '{label_fragment}'")
+
+
+def test_imported_character_readiness_is_ready_when_required_links_are_present():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "subclass_title": "Martial Archetype"},
+    )
+    champion = _systems_entry(
+        "subclass",
+        "phb-subclass-champion",
+        "Champion",
+        metadata={"class_name": "Fighter", "class_source": "PHB"},
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "subclass": [champion],
+            "race": [human],
+            "background": [acolyte],
+        },
+        class_progression=[{"level": 3, "feature_rows": [{"label": "Martial Archetype"}]}],
+    )
+    definition = _minimal_imported_character_definition()
+
+    readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
+
+    assert readiness["status"] == "ready"
+    assert readiness["selected_class"].slug == fighter.slug
+    assert readiness["selected_subclass"].slug == champion.slug
+
+
+def test_imported_character_with_missing_progression_links_is_repairable_even_when_titles_match():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "subclass_title": "Martial Archetype"},
+    )
+    champion = _systems_entry(
+        "subclass",
+        "phb-subclass-champion",
+        "Champion",
+        metadata={"class_name": "Fighter", "class_source": "PHB"},
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "subclass": [champion],
+            "race": [human],
+            "background": [acolyte],
+        },
+        class_progression=[{"level": 3, "feature_rows": [{"label": "Martial Archetype"}]}],
+    )
+    definition = _minimal_imported_character_definition()
+    definition.profile.pop("class_ref", None)
+    definition.profile["classes"][0].pop("systems_ref", None)
+    definition.profile.pop("species_ref", None)
+    definition.profile.pop("background_ref", None)
+    definition.profile.pop("subclass_ref", None)
+    definition.profile["classes"][0].pop("subclass_ref", None)
+
+    readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
+
+    assert readiness["status"] == "repairable"
+    assert any("base class link" in reason for reason in readiness["reasons"])
+    assert any("species link" in reason for reason in readiness["reasons"])
+    assert any("background link" in reason for reason in readiness["reasons"])
+    assert any("before leveling up" in reason.lower() and "link" in reason.lower() for reason in readiness["reasons"])
+
+
+def test_imported_character_with_unsupported_enabled_class_is_blocked():
+    mystic = _systems_entry(
+        "class",
+        "ua-class-mystic",
+        "Mystic",
+        metadata={"hit_die": {"faces": 8}},
+        source_id="UA",
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [mystic],
+            "race": [human],
+            "background": [acolyte],
+            "subclass": [],
+        },
+        class_progression=[],
+    )
+    definition = _minimal_imported_character_definition()
+    definition.profile["class_level_text"] = "Mystic 3"
+    definition.profile["classes"][0]["class_name"] = "Mystic"
+    definition.profile["classes"][0]["systems_ref"] = {
+        "entry_key": "dnd-5e|class|ua|mystic",
+        "entry_type": "class",
+        "title": "Mystic",
+        "slug": "ua-class-mystic",
+        "source_id": "UA",
+    }
+    definition.profile["class_ref"] = dict(definition.profile["classes"][0]["systems_ref"])
+    definition.profile["classes"][0]["subclass_name"] = ""
+    definition.profile["classes"][0].pop("subclass_ref", None)
+    definition.profile.pop("subclass_ref", None)
+
+    readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
+
+    assert readiness["status"] == "unsupported"
+    assert "progression metadata" in readiness["message"].lower()
+
+
+def test_imported_progression_repair_can_restore_refs_and_add_prior_feature_links():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "subclass_title": "Martial Archetype"},
+    )
+    champion = _systems_entry(
+        "subclass",
+        "phb-subclass-champion",
+        "Champion",
+        metadata={"class_name": "Fighter", "class_source": "PHB"},
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    lucky = _systems_entry("feat", "phb-feat-lucky", "Lucky")
+    archery = _systems_entry(
+        "optionalfeature",
+        "phb-optionalfeature-archery",
+        "Archery",
+        metadata={"feature_type": ["Fighting Style"]},
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "subclass": [champion],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [lucky],
+            "optionalfeature": [archery],
+        },
+        class_progression=[{"level": 3, "feature_rows": [{"label": "Martial Archetype"}]}],
+    )
+    definition = _minimal_imported_character_definition()
+    definition.profile.pop("class_ref", None)
+    definition.profile.pop("subclass_ref", None)
+    definition.profile["classes"][0].pop("systems_ref", None)
+    definition.profile["classes"][0].pop("subclass_ref", None)
+    definition.profile.pop("species_ref", None)
+    definition.profile.pop("background_ref", None)
+    definition.profile["class_level_text"] = "Fighter 4"
+    definition.profile["classes"][0]["level"] = 4
+    import_metadata = CharacterImportMetadata(
+        campaign_slug="linden-pass",
+        character_slug=definition.character_slug,
+        source_path="imports://imported-hero.md",
+        imported_at_utc="2026-03-31T00:00:00Z",
+        parser_version="fixture",
+        import_status="clean",
+        warnings=[],
+    )
+
+    repair_context = build_imported_progression_repair_context(
+        systems_service,
+        "linden-pass",
+        definition,
+    )
+    assert repair_context["readiness"]["status"] == "repairable"
+    repaired_definition, repaired_import = apply_imported_progression_repairs(
+        "linden-pass",
+        definition,
+        import_metadata,
+        repair_context,
+        {
+            "repair_class_slug": f"systems:{fighter.slug}",
+            "repair_subclass_slug": f"systems:{champion.slug}",
+            "repair_species_slug": f"systems:{human.slug}",
+            "repair_background_slug": f"systems:{acolyte.slug}",
+            "repair_feat_1": f"systems:{lucky.slug}",
+            "repair_optionalfeature_1": archery.slug,
+        },
+    )
+
+    repaired_feature_names = {feature["name"] for feature in repaired_definition.features}
+
+    assert repaired_definition.source["source_type"] == "markdown_character_sheet"
+    assert repaired_definition.profile["class_ref"]["slug"] == fighter.slug
+    assert repaired_definition.profile["subclass_ref"]["slug"] == champion.slug
+    assert repaired_definition.profile["species_ref"]["slug"] == human.slug
+    assert repaired_definition.profile["background_ref"]["slug"] == acolyte.slug
+    assert "Lucky" in repaired_feature_names
+    assert "Archery" in repaired_feature_names
+    assert repaired_definition.source["native_progression"]["baseline_repaired_at"]
+    assert repaired_import.source_path == "imports://imported-hero.md"
+
+
+def test_imported_level_up_preserves_imported_source_and_records_native_progression():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}},
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+        },
+        class_progression=[{"level": 2, "feature_rows": [{"label": "Action Surge"}]}],
+    )
+    definition = _minimal_imported_character_definition()
+    definition.profile["class_level_text"] = "Fighter 1"
+    definition.profile["classes"][0]["level"] = 1
+    definition.profile["classes"][0]["subclass_name"] = ""
+    definition.profile["classes"][0].pop("subclass_ref", None)
+    definition.profile.pop("subclass_ref", None)
+    import_metadata = CharacterImportMetadata(
+        campaign_slug="linden-pass",
+        character_slug=definition.character_slug,
+        source_path="imports://imported-hero.md",
+        imported_at_utc="2026-03-31T00:00:00Z",
+        parser_version="fixture",
+        import_status="clean",
+        warnings=[],
+    )
+
+    level_up_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        definition,
+        {"hp_gain": "6"},
+    )
+    leveled_definition, leveled_import, hp_gain = build_native_level_up_character_definition(
+        "linden-pass",
+        definition,
+        level_up_context,
+        {"hp_gain": "6"},
+        current_import_metadata=import_metadata,
+    )
+
+    history = list((leveled_definition.source.get("native_progression") or {}).get("history") or [])
+
+    assert hp_gain == 6
+    assert leveled_definition.source["source_type"] == "markdown_character_sheet"
+    assert leveled_definition.profile["class_level_text"] == "Fighter 2"
+    assert leveled_import.source_path == "imports://imported-hero.md"
+    assert history[-1]["kind"] == "level_up"
+    assert history[-1]["from_level"] == 1
+    assert history[-1]["to_level"] == 2
+
+
+def test_imported_spell_baseline_with_blank_marks_is_repairable():
+    wizard = _systems_entry(
+        "class",
+        "phb-class-wizard",
+        "Wizard",
+        metadata={
+            "hit_die": {"faces": 6},
+            "subclass_title": "Arcane Tradition",
+            "spellcasting_ability": "int",
+            "spells_known_progression_fixed": [6],
+            "cantrip_progression": [3],
+            "slot_progression": [[{"level": 1, "max_slots": 2}]],
+        },
+    )
+    evocation = _systems_entry(
+        "subclass",
+        "phb-subclass-evocation",
+        "School of Evocation",
+        metadata={"class_name": "Wizard", "class_source": "PHB"},
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    sage = _systems_entry("background", "phb-background-sage", "Sage")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [wizard],
+            "subclass": [evocation],
+            "race": [human],
+            "background": [sage],
+        },
+        class_progression=[{"level": 2, "feature_rows": [{"label": "Arcane Tradition"}]}],
+    )
+    definition = _minimal_imported_character_definition("wizard-import", "Wizard Import")
+    definition.profile["class_level_text"] = "Wizard 3"
+    definition.profile["classes"][0] = {
+        "class_name": "Wizard",
+        "subclass_name": "School of Evocation",
+        "level": 3,
+        "systems_ref": {
+            "entry_key": "dnd-5e|class|phb|wizard",
+            "entry_type": "class",
+            "title": "Wizard",
+            "slug": "phb-class-wizard",
+            "source_id": "PHB",
+        },
+        "subclass_ref": {
+            "entry_key": "dnd-5e|subclass|phb|school-of-evocation",
+            "entry_type": "subclass",
+            "title": "School of Evocation",
+            "slug": "phb-subclass-evocation",
+            "source_id": "PHB",
+        },
+    }
+    definition.profile["class_ref"] = dict(definition.profile["classes"][0]["systems_ref"])
+    definition.profile["subclass_ref"] = dict(definition.profile["classes"][0]["subclass_ref"])
+    definition.profile["background"] = "Sage"
+    definition.profile["background_ref"] = {
+        "entry_key": "dnd-5e|background|phb|sage",
+        "entry_type": "background",
+        "title": "Sage",
+        "slug": "phb-background-sage",
+        "source_id": "PHB",
+    }
+    definition.spellcasting["spells"] = [{"name": "Magic Missile", "mark": ""}]
+
+    readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
+    repair_context = build_imported_progression_repair_context(
+        systems_service,
+        "linden-pass",
+        definition,
+    )
+
+    assert readiness["status"] == "repairable"
+    assert repair_context["spell_rows"]
 
 
 def _builder_field_names(builder_context: dict[str, object]) -> set[str]:
@@ -9972,7 +10336,11 @@ def test_dm_can_see_level_up_entry_for_supported_native_character(app, client, s
     (character_dir / "definition.yaml").write_text(yaml.safe_dump(definition.to_dict(), sort_keys=False), encoding="utf-8")
     (character_dir / "import.yaml").write_text(yaml.safe_dump(import_metadata.to_dict(), sort_keys=False), encoding="utf-8")
 
-    monkeypatch.setattr(app_module, "supports_native_level_up", lambda definition: True)
+    monkeypatch.setattr(
+        app_module,
+        "native_level_up_readiness",
+        lambda *args, **kwargs: {"status": "ready", "message": "", "reasons": []},
+    )
 
     response = client.get("/campaigns/linden-pass/characters/leveler")
 
@@ -9980,6 +10348,34 @@ def test_dm_can_see_level_up_entry_for_supported_native_character(app, client, s
     html = response.get_data(as_text=True)
     assert "/campaigns/linden-pass/characters/leveler/level-up" in html
     assert "Level up" in html
+
+
+def test_dm_can_see_progression_repair_entry_for_repairable_imported_character(app, client, sign_in, users, monkeypatch):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    character_dir = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "characters" / "repairer"
+    character_dir.mkdir(parents=True, exist_ok=True)
+    definition = _minimal_imported_character_definition("repairer", "Repairer")
+    import_metadata = _minimal_import_metadata("repairer")
+    (character_dir / "definition.yaml").write_text(yaml.safe_dump(definition.to_dict(), sort_keys=False), encoding="utf-8")
+    (character_dir / "import.yaml").write_text(yaml.safe_dump(import_metadata.to_dict(), sort_keys=False), encoding="utf-8")
+
+    monkeypatch.setattr(
+        app_module,
+        "native_level_up_readiness",
+        lambda *args, **kwargs: {
+            "status": "repairable",
+            "message": "This imported character needs a quick progression repair before native level-up.",
+            "reasons": ["Choose a supported base class link for this character."],
+        },
+    )
+
+    response = client.get("/campaigns/linden-pass/characters/repairer")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "/campaigns/linden-pass/characters/repairer/progression-repair" in html
+    assert "Prepare for level-up" in html
 
 
 def test_dm_can_apply_native_level_up_route(app, client, sign_in, users, get_character, monkeypatch):
@@ -9992,7 +10388,11 @@ def test_dm_can_apply_native_level_up_route(app, client, sign_in, users, get_cha
     (character_dir / "definition.yaml").write_text(yaml.safe_dump(definition.to_dict(), sort_keys=False), encoding="utf-8")
     (character_dir / "import.yaml").write_text(yaml.safe_dump(import_metadata.to_dict(), sort_keys=False), encoding="utf-8")
 
-    monkeypatch.setattr(app_module, "supports_native_level_up", lambda definition: True)
+    monkeypatch.setattr(
+        app_module,
+        "native_level_up_readiness",
+        lambda *args, **kwargs: {"status": "ready", "message": "", "reasons": []},
+    )
     monkeypatch.setattr(
         app_module,
         "build_native_level_up_context",
@@ -10082,6 +10482,111 @@ def test_dm_can_apply_native_level_up_route(app, client, sign_in, users, get_cha
     assert any(resource["id"] == "action-surge" for resource in record.state_record.state["resources"])
 
 
+def test_level_up_route_redirects_repairable_imported_character_to_progression_repair(
+    app, client, sign_in, users, monkeypatch
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    character_dir = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "characters" / "repairer"
+    character_dir.mkdir(parents=True, exist_ok=True)
+    definition = _minimal_imported_character_definition("repairer", "Repairer")
+    import_metadata = _minimal_import_metadata("repairer")
+    (character_dir / "definition.yaml").write_text(yaml.safe_dump(definition.to_dict(), sort_keys=False), encoding="utf-8")
+    (character_dir / "import.yaml").write_text(yaml.safe_dump(import_metadata.to_dict(), sort_keys=False), encoding="utf-8")
+
+    monkeypatch.setattr(
+        app_module,
+        "native_level_up_readiness",
+        lambda *args, **kwargs: {
+            "status": "repairable",
+            "message": "This imported character needs a quick progression repair before native level-up.",
+            "reasons": ["Choose a supported base class link for this character."],
+        },
+    )
+
+    response = client.get("/campaigns/linden-pass/characters/repairer/level-up", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/campaigns/linden-pass/characters/repairer/progression-repair")
+
+
+def test_progression_repair_route_saves_partial_repairs_and_redirects_back_when_more_work_remains(
+    app, client, sign_in, users, monkeypatch
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    character_dir = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "characters" / "repairer"
+    character_dir.mkdir(parents=True, exist_ok=True)
+    definition = _minimal_imported_character_definition("repairer", "Repairer")
+    import_metadata = _minimal_import_metadata("repairer")
+    import_metadata.source_path = "imports://repairer.md"
+    (character_dir / "definition.yaml").write_text(yaml.safe_dump(definition.to_dict(), sort_keys=False), encoding="utf-8")
+    (character_dir / "import.yaml").write_text(yaml.safe_dump(import_metadata.to_dict(), sort_keys=False), encoding="utf-8")
+
+    readiness_states = iter(
+        [
+            {
+                "status": "repairable",
+                "message": "This imported character needs a quick progression repair before native level-up.",
+                "reasons": ["Choose a supported base class link for this character."],
+            },
+            {
+                "status": "repairable",
+                "message": "This imported character needs a quick progression repair before native level-up.",
+                "reasons": ["Confirm the subclass link before leveling up."],
+            },
+        ]
+    )
+    monkeypatch.setattr(app_module, "native_level_up_readiness", lambda *args, **kwargs: next(readiness_states))
+    monkeypatch.setattr(
+        app_module,
+        "build_imported_progression_repair_context",
+        lambda *args, **kwargs: {
+            "values": {},
+            "character_name": "Repairer",
+            "current_level": 3,
+            "readiness": {"message": "repair"},
+            "class_options": [],
+            "species_options": [],
+            "background_options": [],
+            "subclass_options": [],
+            "feat_rows": [],
+            "optionalfeature_rows": [],
+            "spell_rows": [],
+            "class_entries": [],
+            "species_entries": [],
+            "background_entries": [],
+            "subclass_entries": [],
+            "feat_entries": [],
+            "optionalfeature_entries": [],
+        },
+    )
+    repaired_definition = _minimal_imported_character_definition("repairer", "Repairer")
+    repaired_definition.source["native_progression"] = {
+        "baseline_repaired_at": "2026-03-31T00:00:00Z",
+        "history": [{"kind": "repair", "at": "2026-03-31T00:00:00Z", "target_level": 3}],
+    }
+    repaired_import = _minimal_import_metadata("repairer")
+    repaired_import.source_path = "imports://repairer.md"
+    repaired_import.import_status = "managed"
+    monkeypatch.setattr(
+        app_module,
+        "apply_imported_progression_repairs",
+        lambda *args, **kwargs: (repaired_definition, repaired_import),
+    )
+
+    response = client.post(
+        "/campaigns/linden-pass/characters/repairer/progression-repair",
+        data={"expected_revision": "1"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/campaigns/linden-pass/characters/repairer/progression-repair")
+    definition_payload = yaml.safe_load((character_dir / "definition.yaml").read_text(encoding="utf-8"))
+    assert definition_payload["source"]["native_progression"]["history"][-1]["kind"] == "repair"
+
+
 def test_level_up_live_preview_route_returns_fragment(app, client, sign_in, users, monkeypatch):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
@@ -10092,7 +10597,11 @@ def test_level_up_live_preview_route_returns_fragment(app, client, sign_in, user
     (character_dir / "definition.yaml").write_text(yaml.safe_dump(definition.to_dict(), sort_keys=False), encoding="utf-8")
     (character_dir / "import.yaml").write_text(yaml.safe_dump(import_metadata.to_dict(), sort_keys=False), encoding="utf-8")
 
-    monkeypatch.setattr(app_module, "supports_native_level_up", lambda definition: True)
+    monkeypatch.setattr(
+        app_module,
+        "native_level_up_readiness",
+        lambda *args, **kwargs: {"status": "ready", "message": "", "reasons": []},
+    )
     monkeypatch.setattr(
         app_module,
         "build_native_level_up_context",

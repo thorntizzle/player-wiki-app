@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 import fnmatch
 import re
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ from .character_builder import (
     _merge_name_candidates,
     _normalize_explicit_link_identity,
     _normalize_page_ref_payload,
+    _resolve_native_character_level,
     _spell_payload_key,
     normalize_definition_to_native_model,
 )
@@ -1187,6 +1189,28 @@ def _preserve_existing_profile_refs(
     return profile
 
 
+def _preserve_existing_source_metadata(
+    imported_source: dict[str, Any],
+    existing_source: dict[str, Any],
+) -> dict[str, Any]:
+    source = dict(imported_source or {})
+    previous_source = dict(existing_source or {})
+    native_progression = dict(previous_source.get("native_progression") or {})
+    if native_progression and not source.get("native_progression"):
+        source["native_progression"] = native_progression
+    for field in ("source_path", "source_type", "imported_from"):
+        if source.get(field):
+            continue
+        if previous_source.get(field):
+            source[field] = previous_source.get(field)
+    return source
+
+
+def _has_native_progression_history(source_payload: dict[str, Any]) -> bool:
+    native_progression = dict(source_payload.get("native_progression") or {})
+    return bool(list(native_progression.get("history") or []))
+
+
 def _preserve_existing_attack_or_equipment_overrides(
     imported_entries: list[dict[str, Any]],
     existing_entries: list[dict[str, Any]],
@@ -1356,6 +1380,30 @@ def converge_imported_definition(
     normalized_existing = normalize_definition_to_native_model(existing_definition)
     payload = normalized_definition.to_dict()
     existing_payload = normalized_existing.to_dict()
+
+    payload["source"] = _preserve_existing_source_metadata(
+        dict(payload.get("source") or {}),
+        dict(existing_payload.get("source") or {}),
+    )
+
+    if (
+        _has_native_progression_history(dict(existing_payload.get("source") or {}))
+        and _resolve_native_character_level(normalized_definition) < _resolve_native_character_level(normalized_existing)
+    ):
+        for field in (
+            "profile",
+            "stats",
+            "skills",
+            "proficiencies",
+            "attacks",
+            "features",
+            "spellcasting",
+            "equipment_catalog",
+            "reference_notes",
+            "resource_templates",
+        ):
+            payload[field] = deepcopy(existing_payload.get(field))
+        return CharacterDefinition.from_dict(_assign_missing_imported_ids(payload))
 
     payload["profile"] = _preserve_existing_profile_refs(
         dict(payload.get("profile") or {}),
