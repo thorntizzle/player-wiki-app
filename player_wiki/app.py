@@ -3390,11 +3390,19 @@ def create_app() -> Flask:
             and page_record.page.reveal_after_session <= campaign.current_session
             and str(page_record.page.section or "").strip() != "Sessions"
         ]
+        spell_catalog = _build_spell_catalog(
+            _list_campaign_enabled_entries(
+                app.extensions["systems_service"],
+                campaign_slug,
+                "spell",
+            )
+        )
         form_values = dict(request.form if request.method == "POST" else request.args)
         edit_context = build_native_character_edit_context(
             record.definition,
             campaign_page_records=campaign_page_records,
             form_values=form_values if request.method == "POST" else None,
+            spell_catalog=spell_catalog,
         )
         edit_context["state_revision"] = record.state_record.revision
 
@@ -3407,13 +3415,6 @@ def create_app() -> Flask:
 
         try:
             expected_revision = parse_expected_revision()
-            spell_catalog = _build_spell_catalog(
-                _list_campaign_enabled_entries(
-                    app.extensions["systems_service"],
-                    campaign_slug,
-                    "spell",
-                )
-            )
             definition, import_metadata, inventory_quantity_overrides = apply_native_character_edits(
                 campaign_slug,
                 record.definition,
@@ -3422,10 +3423,25 @@ def create_app() -> Flask:
                 form_values=form_values,
                 spell_catalog=spell_catalog,
             )
+            removed_resource_ids: set[str] = set()
+            source_type = str((record.definition.source or {}).get("source_type") or "").strip()
+            if source_type and source_type != "native_character_builder":
+                previous_resource_ids = {
+                    str(template.get("id") or "").strip()
+                    for template in list(record.definition.resource_templates or [])
+                    if str(template.get("id") or "").strip()
+                }
+                current_resource_ids = {
+                    str(template.get("id") or "").strip()
+                    for template in list(definition.resource_templates or [])
+                    if str(template.get("id") or "").strip()
+                }
+                removed_resource_ids = previous_resource_ids - current_resource_ids
             merged_state = merge_state_with_definition(
                 definition,
                 record.state_record.state,
                 inventory_quantity_overrides=inventory_quantity_overrides,
+                removed_resource_ids=removed_resource_ids,
             )
             character_state_store.replace_state(
                 definition,

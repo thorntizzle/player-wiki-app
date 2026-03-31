@@ -19,7 +19,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-03-30.10"
+CHARACTER_BUILDER_VERSION = "2026-03-31.01"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -267,7 +267,7 @@ NATIVE_LEVEL_UP_LIMITATIONS = [
     "Native level-up currently advances one level at a time for single-class native characters whose base class has imported native progression support.",
     "Hit point gain is entered manually so your table can choose rolled or fixed HP.",
     "Prepared-caster level-up currently preserves existing prepared spells and adds the new picks needed for the next level.",
-    "Some advanced feat side effects, non-structured campaign spell access, and non-standard spell retraining still need manual follow-up.",
+    "Some advanced feat side effects and non-structured campaign spell access still need manual follow-up.",
 ]
 LEVEL_ONE_ALWAYS_PREPARED_SPELLS_BY_SUBCLASS = {
     normalize_lookup("Knowledge Domain"): ["Command", "Identify"],
@@ -1258,16 +1258,17 @@ def _build_campaign_page_entry(
             "skill_tool_language_proficiencies",
             "optionalfeature_progression",
             "additional_spells",
+            "spell_support",
             "modeled_effects",
         ):
             if key in campaign_option:
                 metadata[key] = deepcopy(campaign_option.get(key))
     elif kind == "species":
-        for key in ("size", "speed", "languages", "skill_proficiencies", "tool_proficiencies", "feats"):
+        for key in ("size", "speed", "languages", "skill_proficiencies", "tool_proficiencies", "feats", "spell_support"):
             if key in campaign_option:
                 metadata[key] = deepcopy(campaign_option.get(key))
     elif kind == "background":
-        for key in ("skill_proficiencies", "language_proficiencies", "tool_proficiencies"):
+        for key in ("skill_proficiencies", "language_proficiencies", "tool_proficiencies", "spell_support"):
             if key in campaign_option:
                 metadata[key] = deepcopy(campaign_option.get(key))
 
@@ -1652,12 +1653,22 @@ def _build_choice_sections(
 
     preview_choice_sections = list(sections)
     _, preview_selected_choices = _resolve_builder_choices(preview_choice_sections, values, strict=False)
-    progression_spell_feature_entries = _additional_spell_feature_entries_from_progressions(
+    selected_feature_entries = _collect_level_one_feature_entries(
         class_progression=class_progression,
         subclass_progression=subclass_progression,
-        target_level=1,
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        selected_species=selected_species,
+        selected_background=selected_background,
+        choice_sections=preview_choice_sections,
         selected_choices=preview_selected_choices,
+        feat_selections=feat_selections,
         optionalfeature_catalog=optionalfeature_catalog,
+    )
+    preview_campaign_option_payloads = (
+        _campaign_option_payloads_from_selected_entries([selected_species, selected_background])
+        + _campaign_option_payloads_from_feat_selections(feat_selections)
+        + _campaign_option_payloads_from_feature_entries(selected_feature_entries)
     )
     spell_fields = _build_spell_choice_fields(
         selected_class=selected_class,
@@ -1665,7 +1676,8 @@ def _build_choice_sections(
         feat_selections=feat_selections,
         spell_catalog=spell_catalog,
         values=values,
-        feature_entries=progression_spell_feature_entries,
+        feature_entries=selected_feature_entries,
+        campaign_option_payloads=preview_campaign_option_payloads,
     )
     if spell_fields:
         sections.append({"title": "Spell Choices", "fields": spell_fields})
@@ -1700,7 +1712,7 @@ def _build_level_up_choice_sections(
         target_level=target_level,
         values=values,
     )
-    preview_ability_scores, _, _ = _resolve_level_up_ability_score_choices(
+    preview_ability_scores, level_up_feat_entries, _ = _resolve_level_up_ability_score_choices(
         current_ability_scores=current_ability_scores,
         class_progression=class_progression,
         subclass_progression=subclass_progression,
@@ -1768,12 +1780,20 @@ def _build_level_up_choice_sections(
         selected_choices=preview_selected_choices,
         strict=False,
     )
-    progression_spell_feature_entries = _additional_spell_feature_entries_from_progressions(
+    preview_feature_entries = _collect_progression_feature_entries_for_level(
         class_progression=class_progression,
         subclass_progression=subclass_progression,
         target_level=target_level,
         selected_choices=preview_selected_choices,
         optionalfeature_catalog=optionalfeature_catalog,
+    )
+    preview_feature_entries.extend(level_up_feat_entries)
+    preview_feature_entries.extend(
+        _collect_feat_optionalfeature_entries(
+            feat_selections=feat_selections,
+            selected_choices=preview_selected_choices,
+            optionalfeature_catalog=optionalfeature_catalog,
+        )
     )
     spell_fields = _build_level_up_spell_choice_fields(
         definition=definition,
@@ -1784,7 +1804,7 @@ def _build_level_up_choice_sections(
         target_level=target_level,
         ability_scores=preview_ability_scores,
         values=values,
-        feature_entries=progression_spell_feature_entries,
+        feature_entries=preview_feature_entries,
     )
     if spell_fields:
         sections.append({"title": "Spell Choices", "fields": spell_fields})
@@ -4415,7 +4435,7 @@ def _campaign_option_payloads_from_definition(definition: CharacterDefinition) -
     return payloads
 
 
-def _additional_spell_feature_entries_from_progressions(
+def _spell_support_feature_entries_from_progressions(
     *,
     class_progression: list[dict[str, Any]],
     subclass_progression: list[dict[str, Any]],
@@ -4435,7 +4455,8 @@ def _additional_spell_feature_entries_from_progressions(
             normalize_lookup("optionalfeature"),
         }:
             return
-        if not dict(entry.metadata or {}).get("additional_spells"):
+        metadata = dict(entry.metadata or {})
+        if not metadata.get("additional_spells") and not metadata.get("spell_support"):
             return
         entry_key = str(entry.entry_key or entry.slug or entry.title or "").strip()
         if not entry_key or entry_key in seen_keys:
@@ -4533,6 +4554,7 @@ def _build_spell_choice_fields(
     spell_catalog: dict[str, Any],
     values: dict[str, str],
     feature_entries: list[dict[str, Any]] | None = None,
+    campaign_option_payloads: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     feat_spell_fields = _build_feat_spell_choice_fields(
         feat_selections=feat_selections,
@@ -4540,8 +4562,18 @@ def _build_spell_choice_fields(
         values=values,
         target_level=1,
     )
+    spell_support_fields = _build_spell_support_choice_fields(
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        spell_catalog=spell_catalog,
+        target_level=1,
+        values=values,
+        field_prefix="spell_support",
+        group_key_prefix="spell_support",
+        feature_entries=feature_entries,
+    )
     if selected_class is None:
-        return feat_spell_fields
+        return spell_support_fields + feat_spell_fields
     class_name = selected_class.title
     spell_mode = _spellcasting_mode_for_class(class_name, selected_class=selected_class)
     cantrip_count = _spell_progression_value(
@@ -4574,143 +4606,201 @@ def _build_spell_choice_fields(
         selected_class=selected_class,
     )
     has_level_one_spellcasting = bool(slot_progression) or cantrip_count > 0 or level_one_count > 0 or spellbook_count > 0
-    if not spell_mode or not has_level_one_spellcasting:
-        return feat_spell_fields
     fields: list[dict[str, Any]] = []
-    automatic_known_lookup_keys = _automatic_known_spell_lookup_keys(
-        selected_class=selected_class,
-        selected_subclass=selected_subclass,
-        spell_catalog=spell_catalog,
-        target_level=1,
-        feature_entries=feature_entries,
-    )
-    selected_bonus_known_values = _selected_form_spell_values_by_field_prefix(values, prefix="bonus_spell_known_")
-
-    cantrip_options = [
-        option
-        for option in _build_spell_options_for_class_level(
-            class_name,
-            "0",
-            spell_catalog,
-            selected_class=selected_class,
-            selected_subclass=selected_subclass,
-            feature_entries=feature_entries,
-        )
-        if str(option.get("value") or "").strip() not in (automatic_known_lookup_keys | selected_bonus_known_values)
-    ]
-    if cantrip_options:
-        for index in range(cantrip_count):
-            field_name = f"spell_cantrip_{index + 1}"
-            fields.append(
-                {
-                    "name": field_name,
-                    "label": f"Cantrip {index + 1}",
-                    "help_text": f"Choose a {class_name} cantrip.",
-                    "options": cantrip_options,
-                    "selected": str(values.get(field_name) or "").strip(),
-                    "group_key": "spell_cantrips",
-                    "kind": "spell",
-                }
-            )
-
-    fields.extend(
-        _build_additional_known_spell_choice_fields(
+    if spell_mode and has_level_one_spellcasting:
+        automatic_known_lookup_keys = _automatic_known_spell_lookup_keys(
             selected_class=selected_class,
             selected_subclass=selected_subclass,
             spell_catalog=spell_catalog,
             target_level=1,
-            values=values,
-            field_prefix="bonus_spell_known",
-            group_key_prefix="bonus_spell_known",
             feature_entries=feature_entries,
         )
-    )
-    level_one_options = [
-        option
-        for option in _build_spell_options_for_class_level(
-            class_name,
-            "1",
-            spell_catalog,
+        automatic_spell_support_lookup_keys = _automatic_spell_support_lookup_keys(
             selected_class=selected_class,
             selected_subclass=selected_subclass,
+            spell_catalog=spell_catalog,
+            target_level=1,
             feature_entries=feature_entries,
         )
-        if str(option.get("value") or "").strip() not in (automatic_known_lookup_keys | selected_bonus_known_values)
-    ]
-    automatic_prepared_lookup_keys = _automatic_prepared_spell_lookup_keys(
+        selected_bonus_known_values = _selected_form_spell_values_by_field_prefix(values, prefix="bonus_spell_known_")
+
+        cantrip_options = [
+            option
+            for option in _build_spell_options_for_class_level(
+                class_name,
+                "0",
+                spell_catalog,
+                selected_class=selected_class,
+                selected_subclass=selected_subclass,
+                feature_entries=feature_entries,
+            )
+            if str(option.get("value") or "").strip()
+            not in (automatic_known_lookup_keys | automatic_spell_support_lookup_keys | selected_bonus_known_values)
+        ]
+        if cantrip_options:
+            for index in range(cantrip_count):
+                field_name = f"spell_cantrip_{index + 1}"
+                fields.append(
+                    {
+                        "name": field_name,
+                        "label": f"Cantrip {index + 1}",
+                        "help_text": f"Choose a {class_name} cantrip.",
+                        "options": cantrip_options,
+                        "selected": str(values.get(field_name) or "").strip(),
+                        "group_key": "spell_cantrips",
+                        "kind": "spell",
+                    }
+                )
+
+        fields.extend(
+            _build_additional_known_spell_choice_fields(
+                selected_class=selected_class,
+                selected_subclass=selected_subclass,
+                spell_catalog=spell_catalog,
+                target_level=1,
+                values=values,
+                field_prefix="bonus_spell_known",
+                group_key_prefix="bonus_spell_known",
+                feature_entries=feature_entries,
+            )
+        )
+        fields.extend(spell_support_fields)
+        level_one_options = [
+            option
+            for option in _build_spell_options_for_class_level(
+                class_name,
+                "1",
+                spell_catalog,
+                selected_class=selected_class,
+                selected_subclass=selected_subclass,
+                feature_entries=feature_entries,
+            )
+            if str(option.get("value") or "").strip()
+            not in (automatic_known_lookup_keys | automatic_spell_support_lookup_keys | selected_bonus_known_values)
+        ]
+        automatic_prepared_lookup_keys = _automatic_prepared_spell_lookup_keys(
+            selected_class=selected_class,
+            selected_subclass=selected_subclass,
+            spell_catalog=spell_catalog,
+            target_level=1,
+            feature_entries=feature_entries,
+        )
+        if spell_mode == "prepared" and automatic_prepared_lookup_keys:
+            level_one_options = [
+                option
+                for option in level_one_options
+                if str(option.get("value") or "").strip()
+                not in (automatic_prepared_lookup_keys | automatic_spell_support_lookup_keys)
+            ]
+        if level_one_options:
+            if spell_mode == "wizard":
+                for index in range(spellbook_count):
+                    field_name = f"wizard_spellbook_{index + 1}"
+                    fields.append(
+                        {
+                            "name": field_name,
+                            "label": f"Spellbook Spell {index + 1}",
+                            "help_text": "Choose a 1st-level wizard spell for your spellbook.",
+                            "options": level_one_options,
+                            "selected": str(values.get(field_name) or "").strip(),
+                            "group_key": "wizard_spellbook",
+                            "kind": "spell",
+                        }
+                    )
+
+                selected_spellbook_values = [
+                    str(values.get(f"wizard_spellbook_{index + 1}") or "").strip()
+                    for index in range(spellbook_count)
+                    if str(values.get(f"wizard_spellbook_{index + 1}") or "").strip()
+                ]
+                prepared_options = (
+                    [option for option in level_one_options if option["value"] in selected_spellbook_values]
+                    if selected_spellbook_values
+                    else level_one_options
+                )
+                for index in range(prepared_count):
+                    field_name = f"wizard_prepared_{index + 1}"
+                    fields.append(
+                        {
+                            "name": field_name,
+                            "label": f"Prepared Spell {index + 1}",
+                            "help_text": "Choose a prepared wizard spell from your selected spellbook spells.",
+                            "options": prepared_options,
+                            "selected": str(values.get(field_name) or "").strip(),
+                            "group_key": "wizard_prepared",
+                            "kind": "spell",
+                        }
+                    )
+            else:
+                selection_count = level_one_count if spell_mode == "known" else prepared_count
+                label_prefix = "Known Spell" if spell_mode == "known" else "Prepared Spell"
+                help_text = (
+                    f"Choose a {class_name} spell you know."
+                    if spell_mode == "known"
+                    else f"Choose a {class_name} spell you have prepared."
+                )
+                for index in range(selection_count):
+                    field_name = f"spell_level_one_{index + 1}"
+                    fields.append(
+                        {
+                            "name": field_name,
+                            "label": f"{label_prefix} {index + 1}",
+                            "help_text": help_text,
+                            "options": level_one_options,
+                            "selected": str(values.get(field_name) or "").strip(),
+                            "group_key": "spell_level_one",
+                            "kind": "spell",
+                        }
+                    )
+    else:
+        fields.extend(spell_support_fields)
+
+    replacement_fields = _build_level_one_spell_support_replacement_fields(
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        feat_selections=feat_selections,
+        spell_catalog=spell_catalog,
+        values=values,
+        existing_fields=fields + feat_spell_fields,
+        feature_entries=feature_entries,
+        campaign_option_payloads=campaign_option_payloads,
+    )
+    return fields + replacement_fields + feat_spell_fields
+
+
+def _build_level_one_spell_support_replacement_fields(
+    *,
+    selected_class: SystemsEntryRecord,
+    selected_subclass: SystemsEntryRecord | None,
+    feat_selections: list[dict[str, Any]],
+    spell_catalog: dict[str, Any],
+    values: dict[str, str],
+    existing_fields: list[dict[str, Any]],
+    feature_entries: list[dict[str, Any]] | None = None,
+    campaign_option_payloads: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    provisional_choice_sections = [{"title": "Spell Choices", "fields": list(existing_fields or [])}]
+    _, provisional_selected_choices = _resolve_builder_choices(provisional_choice_sections, values, strict=False)
+    provisional_spell_payloads = _build_level_one_spell_payloads(
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        feat_selections=feat_selections,
+        choice_sections=provisional_choice_sections,
+        selected_choices=provisional_selected_choices,
+        spell_catalog=spell_catalog,
+        feature_entries=feature_entries,
+        campaign_option_payloads=campaign_option_payloads,
+    )
+    return _build_spell_support_replacement_fields(
+        existing_spells=provisional_spell_payloads,
         selected_class=selected_class,
         selected_subclass=selected_subclass,
         spell_catalog=spell_catalog,
         target_level=1,
+        values=values,
+        field_prefix="spell_support",
         feature_entries=feature_entries,
     )
-    if spell_mode == "prepared" and automatic_prepared_lookup_keys:
-        level_one_options = [
-            option for option in level_one_options if str(option.get("value") or "").strip() not in automatic_prepared_lookup_keys
-        ]
-    if not level_one_options:
-        return fields + feat_spell_fields
-    if spell_mode == "wizard":
-        for index in range(spellbook_count):
-            field_name = f"wizard_spellbook_{index + 1}"
-            fields.append(
-                {
-                    "name": field_name,
-                    "label": f"Spellbook Spell {index + 1}",
-                    "help_text": "Choose a 1st-level wizard spell for your spellbook.",
-                    "options": level_one_options,
-                    "selected": str(values.get(field_name) or "").strip(),
-                    "group_key": "wizard_spellbook",
-                    "kind": "spell",
-                }
-            )
-
-        selected_spellbook_values = [
-            str(values.get(f"wizard_spellbook_{index + 1}") or "").strip()
-            for index in range(spellbook_count)
-            if str(values.get(f"wizard_spellbook_{index + 1}") or "").strip()
-        ]
-        prepared_options = (
-            [option for option in level_one_options if option["value"] in selected_spellbook_values]
-            if selected_spellbook_values
-            else level_one_options
-        )
-        for index in range(prepared_count):
-            field_name = f"wizard_prepared_{index + 1}"
-            fields.append(
-                {
-                    "name": field_name,
-                    "label": f"Prepared Spell {index + 1}",
-                    "help_text": "Choose a prepared wizard spell from your selected spellbook spells.",
-                    "options": prepared_options,
-                    "selected": str(values.get(field_name) or "").strip(),
-                    "group_key": "wizard_prepared",
-                    "kind": "spell",
-                }
-            )
-        return fields + feat_spell_fields
-
-    selection_count = level_one_count if spell_mode == "known" else prepared_count
-    label_prefix = "Known Spell" if spell_mode == "known" else "Prepared Spell"
-    help_text = (
-        f"Choose a {class_name} spell you know."
-        if spell_mode == "known"
-        else f"Choose a {class_name} spell you have prepared."
-    )
-    for index in range(selection_count):
-        field_name = f"spell_level_one_{index + 1}"
-        fields.append(
-            {
-                "name": field_name,
-                "label": f"{label_prefix} {index + 1}",
-                "help_text": help_text,
-                "options": level_one_options,
-                "selected": str(values.get(field_name) or "").strip(),
-                "group_key": "spell_level_one",
-                "kind": "spell",
-            }
-        )
-    return fields + feat_spell_fields
 
 
 def _build_level_up_spell_choice_fields(
@@ -4733,9 +4823,6 @@ def _build_level_up_spell_choice_fields(
         values=values,
         target_level=target_level,
     )
-    if not spell_mode:
-        return feat_spell_fields
-
     slot_progression = _spell_slot_progression_for_class_level(
         class_name,
         target_level,
@@ -4766,9 +4853,45 @@ def _build_level_up_spell_choice_fields(
         target_level=target_level,
         feature_entries=feature_entries,
     )
+    target_spell_support_lookup_keys = _automatic_spell_support_lookup_keys(
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        spell_catalog=spell_catalog,
+        target_level=target_level,
+        exact_level=target_level,
+        feature_entries=feature_entries,
+    )
     selected_bonus_known_values = _selected_form_spell_values_by_field_prefix(values, prefix="levelup_bonus_spell_known_")
 
     fields: list[dict[str, Any]] = []
+    fields.extend(
+        _build_spell_support_choice_fields(
+            selected_class=selected_class,
+            selected_subclass=selected_subclass,
+            spell_catalog=spell_catalog,
+            target_level=target_level,
+            exact_level=target_level,
+            values=values,
+            field_prefix="levelup_spell_support",
+            group_key_prefix="levelup_spell_support",
+            feature_entries=feature_entries,
+        )
+    )
+    structured_replacement_fields = _build_spell_support_replacement_fields(
+        existing_spells=existing_spells,
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        spell_catalog=spell_catalog,
+        target_level=target_level,
+        values=values,
+        field_prefix="levelup_spell_support",
+        exact_level=target_level,
+        feature_entries=feature_entries,
+    )
+    fields.extend(structured_replacement_fields)
+    if not spell_mode:
+        return fields + feat_spell_fields
+
     target_cantrip_count = _spell_progression_value(
         class_name,
         "cantrip_progression",
@@ -4786,7 +4909,13 @@ def _build_level_up_spell_choice_fields(
             selected_subclass=selected_subclass,
             feature_entries=feature_entries,
         )
-        if option["value"] not in (existing_cantrip_values | target_known_bonus_values | selected_bonus_known_values)
+        if option["value"]
+        not in (
+            existing_cantrip_values
+            | target_known_bonus_values
+            | target_spell_support_lookup_keys
+            | selected_bonus_known_values
+        )
     ]
     if cantrip_options:
         for index in range(additional_cantrips):
@@ -4842,7 +4971,13 @@ def _build_level_up_spell_choice_fields(
         options = [
             option
             for option in spell_level_options
-            if option["value"] not in (existing_known_values | target_known_bonus_values | selected_bonus_known_values)
+            if option["value"]
+            not in (
+                existing_known_values
+                | target_known_bonus_values
+                | target_spell_support_lookup_keys
+                | selected_bonus_known_values
+            )
         ]
         if additional_known > 0 and not options:
             return fields + feat_spell_fields
@@ -4860,7 +4995,9 @@ def _build_level_up_spell_choice_fields(
                 }
             )
         fields.extend(
-            _build_level_up_known_spell_replacement_fields(
+            []
+            if structured_replacement_fields
+            else _build_level_up_known_spell_replacement_fields(
                 existing_spells=existing_spells,
                 existing_known_values=existing_known_values,
                 replacement_options=options,
@@ -4878,7 +5015,12 @@ def _build_level_up_spell_choice_fields(
             selected_class=selected_class,
         )
         additional_prepared = max(target_prepared_count - len(existing_prepared_values), 0)
-        excluded_values = existing_prepared_values | existing_always_prepared_values | target_always_prepared_values
+        excluded_values = (
+            existing_prepared_values
+            | existing_always_prepared_values
+            | target_always_prepared_values
+            | target_spell_support_lookup_keys
+        )
         options = [option for option in spell_level_options if option["value"] not in excluded_values]
         if additional_prepared > 0 and not options:
             return fields + feat_spell_fields
@@ -4929,7 +5071,7 @@ def _build_level_up_spell_choice_fields(
             option
             for option in spell_level_options
             if option["value"] in (existing_spellbook_values | set(new_spellbook_values))
-            and option["value"] not in (existing_prepared_values | target_always_prepared_values)
+            and option["value"] not in (existing_prepared_values | target_always_prepared_values | target_spell_support_lookup_keys)
         ]
         target_prepared_count = _prepared_spell_count_for_level(
             class_name,
@@ -5455,12 +5597,20 @@ def _resolve_builder_choices(
     strict: bool = True,
 ) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
     selected_choices: dict[str, list[str]] = {}
+    paired_field_metadata: dict[str, dict[str, str]] = {}
     for section in choice_sections:
         grouped_values: dict[str, list[str]] = {}
         for field in list(section.get("fields") or []):
             field_name = str(field.get("name") or "")
             group_key = str(field.get("group_key") or field_name)
             is_required = bool(field.get("required", True))
+            paired_field_name = str(field.get("paired_field_name") or "").strip()
+            if paired_field_name:
+                paired_field_metadata[field_name] = {
+                    "label": str(field.get("label") or field_name).strip() or field_name,
+                    "paired_field_name": paired_field_name,
+                    "paired_label": str(field.get("paired_field_label") or paired_field_name).strip() or paired_field_name,
+                }
             raw_value = str(values.get(field_name) or "").strip()
             allowed_values = {str(option.get("value") or "").strip() for option in list(field.get("options") or [])}
             selected_value = _normalize_selected_choice_value(raw_value, allowed_values)
@@ -5478,6 +5628,8 @@ def _resolve_builder_choices(
             if strict and len(group_values) != len(set(group_values)):
                 raise CharacterBuildError("Choose distinct options when a choice group grants more than one selection.")
             selected_choices[group_key] = group_values
+    if strict:
+        _validate_paired_choice_fields(values, paired_field_metadata)
 
     fixed_proficiencies = {
         "skills": [],
@@ -5503,6 +5655,28 @@ def _normalize_selected_choice_value(
     if page_value in allowed_values:
         return page_value
     return clean_value
+
+
+def _validate_paired_choice_fields(
+    values: dict[str, str],
+    paired_field_metadata: dict[str, dict[str, str]],
+) -> None:
+    seen_pairs: set[tuple[str, str]] = set()
+    for field_name, metadata in paired_field_metadata.items():
+        paired_field_name = str(metadata.get("paired_field_name") or "").strip()
+        if not paired_field_name:
+            continue
+        pair_key = tuple(sorted((field_name, paired_field_name)))
+        if pair_key in seen_pairs:
+            continue
+        seen_pairs.add(pair_key)
+        left_value = str(values.get(field_name) or "").strip()
+        right_value = str(values.get(paired_field_name) or "").strip()
+        if bool(left_value) == bool(right_value):
+            continue
+        left_label = str(metadata.get("label") or field_name).strip() or field_name
+        right_label = str(metadata.get("paired_label") or paired_field_name).strip() or paired_field_name
+        raise CharacterBuildError(f"{left_label} and {right_label} must both be chosen together.")
 
 
 def _apply_feat_ability_score_bonuses(
@@ -6856,6 +7030,7 @@ def _build_native_level_up_preview(
         selected_class=selected_class,
         selected_subclass=selected_subclass,
         feat_selections=feat_selections,
+        choice_sections=choice_sections,
         values=values,
         selected_choices=selected_choices,
         spell_catalog=spell_catalog,
@@ -6985,8 +7160,59 @@ def _build_level_up_spellcasting(
 ) -> dict[str, Any]:
     class_name = selected_class.title
     ability_name = _spellcasting_ability_name_for_class(class_name, selected_class=selected_class)
-    spell_mode = _spellcasting_mode_for_class(class_name, selected_class=selected_class)
     slot_progression = _level_up_slot_progression_for_class(class_name, target_level, selected_class=selected_class)
+    spell_payloads = _build_level_up_spell_payloads(
+        current_definition=current_definition,
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        feat_selections=feat_selections,
+        choice_sections=choice_sections,
+        selected_choices=selected_choices,
+        spell_catalog=spell_catalog,
+        target_level=target_level,
+        feature_entries=feature_entries,
+        selected_campaign_option_payloads=selected_campaign_option_payloads,
+    )
+
+    if not ability_name:
+        if not slot_progression and not spell_payloads:
+            return dict(current_definition.spellcasting or {})
+        return {
+            "spellcasting_class": str((current_definition.spellcasting or {}).get("spellcasting_class") or ""),
+            "spellcasting_ability": str((current_definition.spellcasting or {}).get("spellcasting_ability") or ""),
+            "spell_save_dc": (current_definition.spellcasting or {}).get("spell_save_dc"),
+            "spell_attack_bonus": (current_definition.spellcasting or {}).get("spell_attack_bonus"),
+            "slot_progression": slot_progression,
+            "spells": spell_payloads,
+        }
+
+    ability_key = next(key for key, label in ABILITY_LABELS.items() if label == ability_name)
+    modifier = _ability_modifier(ability_scores[ability_key])
+    return {
+        "spellcasting_class": class_name,
+        "spellcasting_ability": ability_name,
+        "spell_save_dc": 8 + proficiency_bonus + modifier,
+        "spell_attack_bonus": proficiency_bonus + modifier,
+        "slot_progression": slot_progression,
+        "spells": spell_payloads,
+    }
+
+
+def _build_level_up_spell_payloads(
+    *,
+    current_definition: CharacterDefinition,
+    selected_class: SystemsEntryRecord,
+    selected_subclass: SystemsEntryRecord | None,
+    feat_selections: list[dict[str, Any]],
+    choice_sections: list[dict[str, Any]],
+    selected_choices: dict[str, list[str]],
+    spell_catalog: dict[str, Any],
+    target_level: int,
+    feature_entries: list[dict[str, Any]] | None = None,
+    selected_campaign_option_payloads: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    class_name = selected_class.title
+    spell_mode = _spellcasting_mode_for_class(class_name, selected_class=selected_class)
     existing_spells = list((current_definition.spellcasting or {}).get("spells") or [])
     spells_by_key: dict[str, dict[str, Any]] = {}
     for spell in existing_spells:
@@ -7071,7 +7297,6 @@ def _build_level_up_spellcasting(
             selected_value=selected_value,
             spell_catalog=spell_catalog,
         )
-
     for selected_value in _automatic_prepared_spell_values(
         selected_class=selected_class,
         selected_subclass=selected_subclass,
@@ -7084,7 +7309,28 @@ def _build_level_up_spellcasting(
             spell_catalog=spell_catalog,
             is_always_prepared=True,
         )
-
+    _apply_spell_support_grants_to_payloads(
+        spells_by_key,
+        grants=_automatic_spell_support_grants(
+            selected_class=selected_class,
+            selected_subclass=selected_subclass,
+            target_level=target_level,
+            exact_level=target_level,
+            feature_entries=feature_entries,
+        ),
+        spell_catalog=spell_catalog,
+    )
+    _apply_selected_spell_support_fields_to_payloads(
+        spells_by_key,
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        spell_catalog=spell_catalog,
+        target_level=target_level,
+        values=values,
+        field_prefix="levelup_spell_support",
+        exact_level=target_level,
+        feature_entries=feature_entries,
+    )
     _apply_selected_feat_spell_fields_to_payloads(
         spells_by_key,
         choice_sections=choice_sections,
@@ -7144,29 +7390,19 @@ def _build_level_up_spellcasting(
             mark=str(spell_grant.get("mark") or "").strip(),
             is_ritual=bool(spell_grant.get("is_ritual")),
         )
+    _apply_selected_spell_support_replacements_to_payloads(
+        spells_by_key,
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        spell_catalog=spell_catalog,
+        target_level=target_level,
+        values=values,
+        field_prefix="levelup_spell_support",
+        exact_level=target_level,
+        feature_entries=feature_entries,
+    )
 
-    if not ability_name:
-        if not slot_progression and not spells_by_key:
-            return dict(current_definition.spellcasting or {})
-        return {
-            "spellcasting_class": str((current_definition.spellcasting or {}).get("spellcasting_class") or ""),
-            "spellcasting_ability": str((current_definition.spellcasting or {}).get("spellcasting_ability") or ""),
-            "spell_save_dc": (current_definition.spellcasting or {}).get("spell_save_dc"),
-            "spell_attack_bonus": (current_definition.spellcasting or {}).get("spell_attack_bonus"),
-            "slot_progression": slot_progression,
-            "spells": list(spells_by_key.values()),
-        }
-
-    ability_key = next(key for key, label in ABILITY_LABELS.items() if label == ability_name)
-    modifier = _ability_modifier(ability_scores[ability_key])
-    return {
-        "spellcasting_class": class_name,
-        "spellcasting_ability": ability_name,
-        "spell_save_dc": 8 + proficiency_bonus + modifier,
-        "spell_attack_bonus": proficiency_bonus + modifier,
-        "slot_progression": slot_progression,
-        "spells": list(spells_by_key.values()),
-    }
+    return list(spells_by_key.values())
 
 
 def _level_up_slot_progression_for_class(
@@ -7196,6 +7432,7 @@ def _build_level_one_spell_payloads(
     class_name = selected_class.title
     spell_mode = _spellcasting_mode_for_class(class_name, selected_class=selected_class)
     spells_by_key: dict[str, dict[str, Any]] = {}
+    values = _values_from_selected_choices(choice_sections, selected_choices)
     for selected_value in selected_choices.get("spell_cantrips", []):
         _add_spell_to_payloads(
             spells_by_key,
@@ -7261,22 +7498,29 @@ def _build_level_one_spell_payloads(
             is_always_prepared=True,
         )
 
-    _apply_selected_feat_spell_fields_to_payloads(
+    _apply_spell_support_grants_to_payloads(
         spells_by_key,
-        choice_sections=choice_sections,
-        selected_choices=selected_choices,
+        grants=_automatic_spell_support_grants(
+            selected_class=selected_class,
+            selected_subclass=selected_subclass,
+            target_level=1,
+            feature_entries=feature_entries,
+        ),
         spell_catalog=spell_catalog,
     )
-    _apply_selected_campaign_option_spells_to_payloads(
+    _apply_selected_spell_support_fields_to_payloads(
         spells_by_key,
-        choice_sections=choice_sections,
-        selected_choices=selected_choices,
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
         spell_catalog=spell_catalog,
-        extra_option_payloads=campaign_option_payloads,
+        target_level=1,
+        values=values,
+        field_prefix="spell_support",
+        feature_entries=feature_entries,
     )
     for spell_title in _automatic_feat_known_spell_values(
         feat_selections=feat_selections,
-        values=_values_from_selected_choices(choice_sections, selected_choices),
+        values=values,
         target_level=1,
     ):
         _add_bonus_known_spell_to_payloads(
@@ -7286,7 +7530,7 @@ def _build_level_one_spell_payloads(
         )
     for spell_title in _automatic_feat_prepared_spell_values(
         feat_selections=feat_selections,
-        values=_values_from_selected_choices(choice_sections, selected_choices),
+        values=values,
         target_level=1,
     ):
         _add_spell_to_payloads(
@@ -7297,7 +7541,7 @@ def _build_level_one_spell_payloads(
         )
     for spell_grant in _automatic_feat_innate_spell_values(
         feat_selections=feat_selections,
-        values=_values_from_selected_choices(choice_sections, selected_choices),
+        values=values,
         target_level=1,
     ):
         _add_spell_to_payloads(
@@ -7320,6 +7564,29 @@ def _build_level_one_spell_payloads(
             mark=str(spell_grant.get("mark") or "").strip(),
             is_ritual=bool(spell_grant.get("is_ritual")),
         )
+    _apply_selected_feat_spell_fields_to_payloads(
+        spells_by_key,
+        choice_sections=choice_sections,
+        selected_choices=selected_choices,
+        spell_catalog=spell_catalog,
+    )
+    _apply_selected_campaign_option_spells_to_payloads(
+        spells_by_key,
+        choice_sections=choice_sections,
+        selected_choices=selected_choices,
+        spell_catalog=spell_catalog,
+        extra_option_payloads=campaign_option_payloads,
+    )
+    _apply_selected_spell_support_replacements_to_payloads(
+        spells_by_key,
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        spell_catalog=spell_catalog,
+        target_level=1,
+        values=values,
+        field_prefix="spell_support",
+        feature_entries=feature_entries,
+    )
 
     return list(spells_by_key.values())
 
@@ -7511,6 +7778,405 @@ def _build_additional_known_spell_choice_fields(
                 }
             )
     return fields
+
+
+def _build_spell_support_choice_fields(
+    *,
+    selected_class: SystemsEntryRecord | None,
+    selected_subclass: SystemsEntryRecord | None,
+    spell_catalog: dict[str, Any],
+    target_level: int,
+    values: dict[str, str],
+    field_prefix: str,
+    group_key_prefix: str,
+    exact_level: int | None = None,
+    feature_entries: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    fields: list[dict[str, Any]] = []
+    specs = _extract_spell_support_choice_specs(
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        target_level=target_level,
+        exact_level=exact_level,
+        feature_entries=feature_entries,
+    )
+    for spec_index, spec in enumerate(specs, start=1):
+        options = _build_spell_support_options_from_spec(spec, spell_catalog)
+        if not options:
+            continue
+        category = str(spec.get("category") or "").strip()
+        count = max(int(spec.get("count") or 1), 1)
+        is_cantrip = _spell_options_are_cantrips(options, spell_catalog)
+        label_prefix = str(spec.get("label_prefix") or "").strip()
+        if not label_prefix:
+            label_prefix = "Granted Cantrip" if is_cantrip else "Granted Spell"
+        help_text = str(spec.get("help_text") or "").strip()
+        if not help_text:
+            help_text = (
+                "Choose a feature-granted cantrip."
+                if is_cantrip
+                else "Choose a feature-granted spell."
+            )
+        group_key = f"{group_key_prefix}_{category}_{spec_index}"
+        for choice_index in range(1, count + 1):
+            field_name = _spell_support_choice_field_name(field_prefix, category, spec_index, choice_index)
+            fields.append(
+                {
+                    "name": field_name,
+                    "label": f"{label_prefix} {choice_index}",
+                    "help_text": help_text,
+                    "options": options,
+                    "selected": str(values.get(field_name) or "").strip(),
+                    "group_key": group_key,
+                    "kind": f"spell_support_{category}",
+                    "spell_mark": str(spec.get("mark") or "").strip(),
+                    "spell_is_always_prepared": bool(spec.get("always_prepared")),
+                    "spell_is_ritual": bool(spec.get("ritual")),
+                }
+            )
+    return fields
+
+
+def _build_spell_support_replacement_fields(
+    *,
+    existing_spells: list[dict[str, Any]],
+    selected_class: SystemsEntryRecord | None,
+    selected_subclass: SystemsEntryRecord | None,
+    spell_catalog: dict[str, Any],
+    target_level: int,
+    values: dict[str, str],
+    field_prefix: str,
+    exact_level: int | None = None,
+    feature_entries: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    fields: list[dict[str, Any]] = []
+    specs = _extract_spell_support_replacement_specs(
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        target_level=target_level,
+        exact_level=exact_level,
+        feature_entries=feature_entries,
+    )
+    for spec_index, spec in enumerate(specs, start=1):
+        to_options = _build_spell_support_options_from_spec(
+            {
+                "filter": str(spec.get("to_filter") or "").strip(),
+                "options": list(spec.get("to_options") or []),
+            },
+            spell_catalog,
+        )
+        from_options = _build_spell_support_existing_options_from_replacement_spec(
+            existing_spells=existing_spells,
+            spell_catalog=spell_catalog,
+            spec=spec,
+        )
+        if not from_options or not to_options:
+            continue
+        category = str(spec.get("category") or "known").strip() or "known"
+        count = max(int(spec.get("count") or 1), 1)
+        from_group_key = f"{field_prefix}_replace_{category}_{spec_index}_from"
+        to_group_key = f"{field_prefix}_replace_{category}_{spec_index}_to"
+        from_help_text = str(spec.get("help_text_from") or "").strip() or "Choose the spell you are replacing."
+        to_help_text = str(spec.get("help_text_to") or "").strip() or "Choose the replacement spell."
+        for choice_index in range(1, count + 1):
+            from_name = _spell_support_replacement_field_name(
+                field_prefix,
+                category,
+                spec_index,
+                choice_index,
+                "from",
+            )
+            to_name = _spell_support_replacement_field_name(
+                field_prefix,
+                category,
+                spec_index,
+                choice_index,
+                "to",
+            )
+            fields.append(
+                {
+                    "name": from_name,
+                    "label": f"Replace Spell {choice_index}",
+                    "help_text": from_help_text,
+                    "options": from_options,
+                    "selected": str(values.get(from_name) or "").strip(),
+                    "group_key": from_group_key,
+                    "kind": "spell_support_replace_from",
+                    "required": False,
+                    "paired_field_name": to_name,
+                    "paired_field_label": f"Replacement Spell {choice_index}",
+                    "spell_mark": str(spec.get("mark") or "").strip(),
+                    "spell_is_always_prepared": bool(spec.get("always_prepared")),
+                    "spell_is_ritual": bool(spec.get("ritual")),
+                }
+            )
+            fields.append(
+                {
+                    "name": to_name,
+                    "label": f"Replacement Spell {choice_index}",
+                    "help_text": to_help_text,
+                    "options": to_options,
+                    "selected": str(values.get(to_name) or "").strip(),
+                    "group_key": to_group_key,
+                    "kind": "spell_support_replace_to",
+                    "required": False,
+                    "paired_field_name": from_name,
+                    "paired_field_label": f"Replace Spell {choice_index}",
+                    "spell_mark": str(spec.get("mark") or "").strip(),
+                    "spell_is_always_prepared": bool(spec.get("always_prepared")),
+                    "spell_is_ritual": bool(spec.get("ritual")),
+                }
+            )
+    return fields
+
+
+def _build_spell_support_existing_options_from_replacement_spec(
+    *,
+    existing_spells: list[dict[str, Any]],
+    spell_catalog: dict[str, Any],
+    spec: dict[str, Any],
+) -> list[dict[str, str]]:
+    allowed_payload_keys: set[str] = set()
+    if list(spec.get("from_options") or []) or str(spec.get("from_filter") or "").strip():
+        allowed_payload_keys = {
+            str(option.get("value") or "").strip()
+            for option in _build_spell_support_options_from_spec(
+                {
+                    "filter": str(spec.get("from_filter") or "").strip(),
+                    "options": list(spec.get("from_options") or []),
+                },
+                spell_catalog,
+            )
+            if str(option.get("value") or "").strip()
+        }
+    return _build_spell_options_from_existing_payloads(
+        existing_spells=existing_spells,
+        spell_catalog=spell_catalog,
+        filter_spec={
+            "mark": str(spec.get("from_mark") or "").strip(),
+            "level": int(spec.get("from_level") or 0),
+            "payload_keys": allowed_payload_keys,
+        },
+    )
+
+
+def _build_spell_support_options_from_spec(
+    spec: dict[str, Any],
+    spell_catalog: dict[str, Any],
+) -> list[dict[str, str]]:
+    option_values = list(spec.get("options") or [])
+    filter_expression = str(spec.get("filter") or "").strip()
+    options = _build_spell_options_from_references(option_values, spell_catalog)
+    if filter_expression:
+        options.extend(_build_additional_spell_filter_options(filter_expression, spell_catalog))
+    deduped_options: list[dict[str, str]] = []
+    seen_values: set[str] = set()
+    for option in options:
+        value = str(option.get("value") or "").strip()
+        if not value or value in seen_values:
+            continue
+        seen_values.add(value)
+        deduped_options.append(dict(option))
+    return deduped_options
+
+
+def _build_spell_options_from_existing_payloads(
+    *,
+    existing_spells: list[dict[str, Any]],
+    spell_catalog: dict[str, Any],
+    filter_spec: dict[str, Any],
+) -> list[dict[str, str]]:
+    payload_keys: set[str] = set()
+    for spell_payload in list(existing_spells or []):
+        payload_key = _spell_payload_key(spell_payload)
+        if not payload_key:
+            continue
+        spell_entry = _resolve_spell_entry(payload_key, spell_catalog)
+        if not _spell_payload_matches_replacement_filter(
+            spell_payload,
+            spell_entry=spell_entry,
+            filter_spec=filter_spec,
+        ):
+            continue
+        payload_keys.add(payload_key)
+    return _build_spell_options_from_payload_keys(
+        payload_keys=payload_keys,
+        existing_spells=existing_spells,
+        spell_catalog=spell_catalog,
+    )
+
+
+def _spell_payload_matches_replacement_filter(
+    spell_payload: dict[str, Any],
+    *,
+    spell_entry: SystemsEntryRecord | None,
+    filter_spec: dict[str, Any],
+) -> bool:
+    allowed_payload_keys = {
+        str(payload_key or "").strip()
+        for payload_key in list(filter_spec.get("payload_keys") or [])
+        if str(payload_key or "").strip()
+    }
+    payload_key = str((spell_entry.slug if spell_entry is not None else _spell_payload_key(spell_payload)) or "").strip()
+    if allowed_payload_keys and payload_key not in allowed_payload_keys:
+        return False
+    mark_filter = normalize_lookup(str(filter_spec.get("mark") or "").strip())
+    if mark_filter and mark_filter not in normalize_lookup(str(spell_payload.get("mark") or "").strip()):
+        return False
+    spell_level = int(filter_spec.get("level") or 0)
+    if spell_level > 0 and (spell_entry is None or _spell_entry_level(spell_entry) != spell_level):
+        return False
+    return True
+
+
+def _build_spell_options_from_references(
+    values: list[str],
+    spell_catalog: dict[str, Any],
+) -> list[dict[str, str]]:
+    options: list[dict[str, str]] = []
+    seen_values: set[str] = set()
+    for raw_value in list(values or []):
+        clean_value = str(raw_value or "").strip()
+        if not clean_value:
+            continue
+        entry = _resolve_spell_entry(clean_value, spell_catalog)
+        value = entry.slug if entry is not None else _normalize_additional_spell_reference(clean_value)
+        label = entry.title if entry is not None else _normalize_additional_spell_reference(clean_value)
+        if not value or not label or value in seen_values:
+            continue
+        seen_values.add(value)
+        options.append(_choice_option(label, value))
+    return options
+
+
+def _apply_spell_support_grants_to_payloads(
+    spells_by_key: dict[str, dict[str, Any]],
+    *,
+    grants: list[dict[str, Any]],
+    spell_catalog: dict[str, Any],
+) -> None:
+    for grant in list(grants or []):
+        selected_value = str(grant.get("value") or "").strip()
+        if not selected_value:
+            continue
+        if bool(grant.get("bonus_known")):
+            _add_bonus_known_spell_to_payloads(
+                spells_by_key,
+                selected_value=selected_value,
+                spell_catalog=spell_catalog,
+            )
+            continue
+        _add_spell_to_payloads(
+            spells_by_key,
+            selected_value=selected_value,
+            spell_catalog=spell_catalog,
+            mark=str(grant.get("mark") or "").strip(),
+            is_always_prepared=bool(grant.get("always_prepared")),
+            is_ritual=bool(grant.get("ritual")),
+        )
+
+
+def _apply_selected_spell_support_fields_to_payloads(
+    spells_by_key: dict[str, dict[str, Any]],
+    *,
+    selected_class: SystemsEntryRecord | None,
+    selected_subclass: SystemsEntryRecord | None,
+    spell_catalog: dict[str, Any],
+    target_level: int,
+    values: dict[str, str],
+    field_prefix: str,
+    exact_level: int | None = None,
+    feature_entries: list[dict[str, Any]] | None = None,
+) -> None:
+    specs = _extract_spell_support_choice_specs(
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        target_level=target_level,
+        exact_level=exact_level,
+        feature_entries=feature_entries,
+    )
+    for spec_index, spec in enumerate(specs, start=1):
+        category = str(spec.get("category") or "").strip()
+        count = max(int(spec.get("count") or 1), 1)
+        for choice_index in range(1, count + 1):
+            field_name = _spell_support_choice_field_name(field_prefix, category, spec_index, choice_index)
+            selected_value = str(values.get(field_name) or "").strip()
+            if not selected_value:
+                continue
+            if category == "known":
+                _add_bonus_known_spell_to_payloads(
+                    spells_by_key,
+                    selected_value=selected_value,
+                    spell_catalog=spell_catalog,
+                )
+                continue
+            _add_spell_to_payloads(
+                spells_by_key,
+                selected_value=selected_value,
+                spell_catalog=spell_catalog,
+                mark=str(spec.get("mark") or "").strip(),
+                is_always_prepared=bool(spec.get("always_prepared")),
+                is_ritual=bool(spec.get("ritual")),
+            )
+
+
+def _apply_selected_spell_support_replacements_to_payloads(
+    spells_by_key: dict[str, dict[str, Any]],
+    *,
+    selected_class: SystemsEntryRecord | None,
+    selected_subclass: SystemsEntryRecord | None,
+    spell_catalog: dict[str, Any],
+    target_level: int,
+    values: dict[str, str],
+    field_prefix: str,
+    exact_level: int | None = None,
+    feature_entries: list[dict[str, Any]] | None = None,
+) -> None:
+    specs = _extract_spell_support_replacement_specs(
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        target_level=target_level,
+        exact_level=exact_level,
+        feature_entries=feature_entries,
+    )
+    for spec_index, spec in enumerate(specs, start=1):
+        category = str(spec.get("category") or "known").strip() or "known"
+        count = max(int(spec.get("count") or 1), 1)
+        for choice_index in range(1, count + 1):
+            from_name = _spell_support_replacement_field_name(
+                field_prefix,
+                category,
+                spec_index,
+                choice_index,
+                "from",
+            )
+            to_name = _spell_support_replacement_field_name(
+                field_prefix,
+                category,
+                spec_index,
+                choice_index,
+                "to",
+            )
+            replacement_from = str(values.get(from_name) or "").strip()
+            replacement_to = str(values.get(to_name) or "").strip()
+            if not replacement_from or not replacement_to:
+                continue
+            spells_by_key.pop(_spell_lookup_key(replacement_from, spell_catalog), None)
+            if category == "known":
+                _add_bonus_known_spell_to_payloads(
+                    spells_by_key,
+                    selected_value=replacement_to,
+                    spell_catalog=spell_catalog,
+                )
+                continue
+            _add_spell_to_payloads(
+                spells_by_key,
+                selected_value=replacement_to,
+                spell_catalog=spell_catalog,
+                mark=str(spec.get("mark") or "").strip(),
+                is_always_prepared=bool(spec.get("always_prepared")),
+                is_ritual=bool(spec.get("ritual")),
+            )
 
 
 def _build_feat_spell_choice_fields(
@@ -7961,6 +8627,332 @@ def _additional_spell_metadata_entries(
     return values
 
 
+def _spell_support_metadata_entries(
+    selected_class: SystemsEntryRecord | None,
+    selected_subclass: SystemsEntryRecord | None,
+    *,
+    feature_entries: list[dict[str, Any]] | None = None,
+) -> list[Any]:
+    values: list[Any] = []
+    seen_entries: set[str] = set()
+    for entry in (selected_class, selected_subclass):
+        metadata = dict((entry.metadata if entry is not None else {}) or {})
+        spell_support = metadata.get("spell_support")
+        if spell_support:
+            values.append(spell_support)
+        if isinstance(entry, SystemsEntryRecord):
+            seen_entries.add(str(entry.entry_key or entry.slug or entry.title or ""))
+    for feature_entry in list(feature_entries or []):
+        entry = feature_entry.get("entry")
+        if not isinstance(entry, SystemsEntryRecord):
+            campaign_option = dict(feature_entry.get("campaign_option") or {})
+            spell_support = campaign_option.get("spell_support")
+            if spell_support:
+                values.append(spell_support)
+            continue
+        entry_key = str(entry.entry_key or entry.slug or entry.title or "").strip()
+        if entry_key and entry_key not in seen_entries:
+            spell_support = dict(entry.metadata or {}).get("spell_support")
+            if spell_support:
+                values.append(spell_support)
+                seen_entries.add(entry_key)
+    return values
+
+
+def _spell_support_choice_field_name(
+    field_prefix: str,
+    category: str,
+    spec_index: int,
+    choice_index: int,
+) -> str:
+    return f"{field_prefix}_{category}_{spec_index}_{choice_index}"
+
+
+def _spell_support_replacement_field_name(
+    field_prefix: str,
+    category: str,
+    spec_index: int,
+    choice_index: int,
+    part: str,
+) -> str:
+    return f"{field_prefix}_replace_{category}_{spec_index}_{part}_{choice_index}"
+
+
+def _automatic_spell_support_grants(
+    *,
+    selected_class: SystemsEntryRecord | None,
+    selected_subclass: SystemsEntryRecord | None,
+    target_level: int,
+    exact_level: int | None = None,
+    feature_entries: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    grants: list[dict[str, Any]] = []
+    for spell_support in _spell_support_metadata_entries(
+        selected_class,
+        selected_subclass,
+        feature_entries=feature_entries,
+    ):
+        grants.extend(
+            _extract_spell_support_grants(
+                spell_support,
+                target_level=target_level,
+                exact_level=exact_level,
+            )
+        )
+    return _dedupe_spell_support_grants(grants)
+
+
+def _automatic_spell_support_lookup_keys(
+    *,
+    selected_class: SystemsEntryRecord | None,
+    selected_subclass: SystemsEntryRecord | None,
+    spell_catalog: dict[str, Any],
+    target_level: int,
+    exact_level: int | None = None,
+    feature_entries: list[dict[str, Any]] | None = None,
+) -> set[str]:
+    payload_keys: set[str] = set()
+    for grant in _automatic_spell_support_grants(
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        target_level=target_level,
+        exact_level=exact_level,
+        feature_entries=feature_entries,
+    ):
+        payload_key = _spell_lookup_key(str(grant.get("value") or "").strip(), spell_catalog)
+        if payload_key:
+            payload_keys.add(payload_key)
+    return payload_keys
+
+
+def _extract_spell_support_grants(
+    spell_support: Any,
+    *,
+    target_level: int,
+    exact_level: int | None = None,
+) -> list[dict[str, Any]]:
+    grants: list[dict[str, Any]] = []
+    for block in list(spell_support or []):
+        if not isinstance(block, dict):
+            continue
+        for raw_value in _iter_unlocked_additional_spell_values(
+            block.get("grants", block.get("fixed")),
+            target_level=target_level,
+            exact_level=exact_level,
+        ):
+            grants.extend(_extract_spell_support_grants_from_value(raw_value))
+    return grants
+
+
+def _extract_spell_support_grants_from_value(raw_value: Any) -> list[dict[str, Any]]:
+    if isinstance(raw_value, list):
+        grants: list[dict[str, Any]] = []
+        for item in raw_value:
+            grants.extend(_extract_spell_support_grants_from_value(item))
+        return grants
+    if isinstance(raw_value, str):
+        clean_value = _normalize_additional_spell_reference(raw_value)
+        return (
+            [
+                {
+                    "value": clean_value,
+                    "mark": "Granted",
+                    "always_prepared": False,
+                    "ritual": False,
+                    "bonus_known": False,
+                }
+            ]
+            if clean_value
+            else []
+        )
+    if not isinstance(raw_value, dict):
+        return []
+
+    grants: list[dict[str, Any]] = []
+    if "_" in raw_value:
+        grants.extend(_extract_spell_support_grants_from_value(raw_value.get("_")))
+    clean_value = _normalize_additional_spell_reference(
+        str(
+            raw_value.get("spell")
+            or raw_value.get("value")
+            or raw_value.get("title")
+            or raw_value.get("slug")
+            or ""
+        )
+    )
+    if not clean_value:
+        return grants
+    normalized_mark = str(raw_value.get("mark") or "").strip()
+    bonus_known = bool(raw_value.get("bonus_known") or raw_value.get("is_bonus_known"))
+    if not bonus_known and normalize_lookup(normalized_mark) in {"known", "cantrip"}:
+        bonus_known = True
+        normalized_mark = ""
+    grants.append(
+        {
+            "value": clean_value,
+            "mark": normalized_mark,
+            "always_prepared": bool(raw_value.get("always_prepared") or raw_value.get("prepared")),
+            "ritual": bool(raw_value.get("ritual") or raw_value.get("is_ritual")),
+            "bonus_known": bonus_known,
+        }
+    )
+    return grants
+
+
+def _dedupe_spell_support_grants(grants: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, bool, bool, bool]] = set()
+    for grant in list(grants or []):
+        payload = dict(grant or {})
+        value = str(payload.get("value") or "").strip()
+        if not value:
+            continue
+        marker = (
+            value.casefold(),
+            str(payload.get("mark") or "").strip().casefold(),
+            bool(payload.get("always_prepared")),
+            bool(payload.get("ritual")),
+            bool(payload.get("bonus_known")),
+        )
+        if marker in seen:
+            continue
+        seen.add(marker)
+        deduped.append(payload)
+    return deduped
+
+
+def _extract_spell_support_choice_specs(
+    *,
+    selected_class: SystemsEntryRecord | None,
+    selected_subclass: SystemsEntryRecord | None,
+    target_level: int,
+    exact_level: int | None = None,
+    feature_entries: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    specs: list[dict[str, Any]] = []
+    for spell_support in _spell_support_metadata_entries(
+        selected_class,
+        selected_subclass,
+        feature_entries=feature_entries,
+    ):
+        for block in list(spell_support or []):
+            if not isinstance(block, dict):
+                continue
+            for raw_value in _iter_unlocked_additional_spell_values(
+                block.get("choices", block.get("select")),
+                target_level=target_level,
+                exact_level=exact_level,
+            ):
+                specs.extend(_extract_spell_support_choice_specs_from_value(raw_value))
+    return specs
+
+
+def _extract_spell_support_choice_specs_from_value(raw_value: Any) -> list[dict[str, Any]]:
+    if isinstance(raw_value, list):
+        specs: list[dict[str, Any]] = []
+        for item in raw_value:
+            specs.extend(_extract_spell_support_choice_specs_from_value(item))
+        return specs
+    if not isinstance(raw_value, dict):
+        return []
+
+    specs: list[dict[str, Any]] = []
+    if "_" in raw_value:
+        specs.extend(_extract_spell_support_choice_specs_from_value(raw_value.get("_")))
+    category = normalize_lookup(str(raw_value.get("category") or raw_value.get("kind") or "").strip())
+    if category not in {"known", "prepared", "granted"}:
+        return specs
+    filter_expression = str(raw_value.get("filter") or raw_value.get("choose") or "").strip()
+    option_values = _flatten_additional_spell_values(raw_value.get("options", raw_value.get("spells")))
+    if not filter_expression and not option_values:
+        return specs
+    specs.append(
+        {
+            "category": category,
+            "filter": filter_expression,
+            "options": option_values,
+            "count": max(int(raw_value.get("count") or 1), 1),
+            "label_prefix": str(raw_value.get("label_prefix") or "").strip(),
+            "help_text": str(raw_value.get("help_text") or "").strip(),
+            "always_prepared": bool(raw_value.get("always_prepared") or raw_value.get("prepared") or category == "prepared"),
+            "ritual": bool(raw_value.get("ritual") or raw_value.get("is_ritual")),
+            "mark": str(raw_value.get("mark") or ("Granted" if category == "granted" else "")).strip(),
+        }
+    )
+    return specs
+
+
+def _extract_spell_support_replacement_specs(
+    *,
+    selected_class: SystemsEntryRecord | None,
+    selected_subclass: SystemsEntryRecord | None,
+    target_level: int,
+    exact_level: int | None = None,
+    feature_entries: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    specs: list[dict[str, Any]] = []
+    for spell_support in _spell_support_metadata_entries(
+        selected_class,
+        selected_subclass,
+        feature_entries=feature_entries,
+    ):
+        for block in list(spell_support or []):
+            if not isinstance(block, dict):
+                continue
+            for raw_value in _iter_unlocked_additional_spell_values(
+                block.get("replacement", block.get("replacements")),
+                target_level=target_level,
+                exact_level=exact_level,
+            ):
+                specs.extend(_extract_spell_support_replacement_specs_from_value(raw_value))
+    return specs
+
+
+def _extract_spell_support_replacement_specs_from_value(raw_value: Any) -> list[dict[str, Any]]:
+    if isinstance(raw_value, list):
+        specs: list[dict[str, Any]] = []
+        for item in raw_value:
+            specs.extend(_extract_spell_support_replacement_specs_from_value(item))
+        return specs
+    if not isinstance(raw_value, dict):
+        return []
+
+    specs: list[dict[str, Any]] = []
+    if "_" in raw_value:
+        specs.extend(_extract_spell_support_replacement_specs_from_value(raw_value.get("_")))
+    category = normalize_lookup(str(raw_value.get("category") or raw_value.get("kind") or "known").strip()) or "known"
+    if category not in {"known", "prepared", "granted"}:
+        return specs
+    to_payload = dict(raw_value.get("to") or {}) if isinstance(raw_value.get("to"), dict) else {}
+    if not to_payload:
+        to_payload = dict(raw_value)
+    from_payload = dict(raw_value.get("from") or {}) if isinstance(raw_value.get("from"), dict) else {}
+    from_filter = str(from_payload.get("filter") or from_payload.get("choose") or "").strip()
+    from_options = _flatten_additional_spell_values(from_payload.get("options", from_payload.get("spells")))
+    to_filter = str(to_payload.get("filter") or to_payload.get("choose") or "").strip()
+    to_options = _flatten_additional_spell_values(to_payload.get("options", to_payload.get("spells")))
+    if not to_filter and not to_options:
+        return specs
+    specs.append(
+        {
+            "category": category,
+            "count": max(int(raw_value.get("count") or 1), 1),
+            "from_mark": str(from_payload.get("mark") or "").strip(),
+            "from_level": int(from_payload.get("level") or 0),
+            "from_filter": from_filter,
+            "from_options": from_options,
+            "to_filter": to_filter,
+            "to_options": to_options,
+            "mark": str(raw_value.get("mark") or to_payload.get("mark") or "").strip(),
+            "always_prepared": bool(raw_value.get("always_prepared") or to_payload.get("always_prepared")),
+            "ritual": bool(raw_value.get("ritual") or to_payload.get("ritual")),
+            "help_text_from": str(raw_value.get("help_text_from") or "").strip(),
+            "help_text_to": str(raw_value.get("help_text_to") or "").strip(),
+        }
+    )
+    return specs
+
+
 def _automatic_feat_known_spell_values(
     *,
     feat_selections: list[dict[str, Any]],
@@ -8303,6 +9295,7 @@ def _summarize_level_up_spell_choices(
     selected_class: SystemsEntryRecord,
     selected_subclass: SystemsEntryRecord | None,
     feat_selections: list[dict[str, Any]],
+    choice_sections: list[dict[str, Any]],
     values: dict[str, str],
     selected_choices: dict[str, list[str]],
     spell_catalog: dict[str, Any],
@@ -8310,88 +9303,31 @@ def _summarize_level_up_spell_choices(
     feature_entries: list[dict[str, Any]] | None = None,
     extra_option_payloads: list[dict[str, Any]] | None = None,
 ) -> list[str]:
-    selected_values: list[str] = []
-    selected_values.extend(selected_choices.get("levelup_spell_cantrips", []))
-    selected_values.extend(_selected_additional_known_spell_values(selected_choices, prefix="levelup_bonus_spell_known"))
-    for group_key, group_values in selected_choices.items():
-        clean_group_key = str(group_key or "").strip()
-        if any(token in clean_group_key for token in ("_spell_known_", "_spell_prepared_", "_spell_granted_")):
-            selected_values.extend(str(value).strip() for value in group_values if str(value).strip())
-
-    spell_mode = _spellcasting_mode_for_class(selected_class.title, selected_class=selected_class)
-    if spell_mode == "known":
-        selected_values.extend(selected_choices.get("levelup_spell_known", []))
-        selected_values.extend(selected_choices.get("levelup_spell_replace_to_1", []))
-    elif spell_mode == "prepared":
-        selected_values.extend(selected_choices.get("levelup_prepared_spells", []))
-    elif spell_mode == "wizard":
-        selected_values.extend(selected_choices.get("levelup_wizard_spellbook", []))
-        selected_values.extend(selected_choices.get("levelup_wizard_prepared", []))
-
     existing_spell_payload_keys = {
         payload_key
         for spell_payload in list((definition.spellcasting or {}).get("spells") or [])
         if (payload_key := _spell_payload_key(spell_payload))
     }
-    for selected_value in _automatic_known_spell_values(
+    simulated_payloads = _build_level_up_spell_payloads(
+        current_definition=definition,
         selected_class=selected_class,
         selected_subclass=selected_subclass,
-        target_level=target_level,
-        exact_level=target_level,
-        feature_entries=feature_entries,
-    ):
-        payload_key = _spell_lookup_key(selected_value, spell_catalog)
-        if payload_key and payload_key in existing_spell_payload_keys:
-            continue
-        selected_values.append(selected_value)
-    for selected_value in _automatic_prepared_spell_values(
-        selected_class=selected_class,
-        selected_subclass=selected_subclass,
-        target_level=target_level,
-        exact_level=target_level,
-        feature_entries=feature_entries,
-    ):
-        payload_key = _spell_lookup_key(selected_value, spell_catalog)
-        if payload_key and payload_key in existing_spell_payload_keys:
-            continue
-        selected_values.append(selected_value)
-    for spell_grant in _automatic_feat_innate_spell_values(
         feat_selections=feat_selections,
-        values=values,
+        choice_sections=choice_sections,
+        selected_choices=selected_choices,
+        spell_catalog=spell_catalog,
         target_level=target_level,
-    ):
-        selected_value = str(spell_grant.get("name") or "").strip()
-        payload_key = _spell_lookup_key(selected_value, spell_catalog)
-        if payload_key and payload_key in existing_spell_payload_keys:
-            continue
-        if selected_value:
-            selected_values.append(selected_value)
-    for spell_grant in _automatic_innate_spell_values(
-        selected_class=selected_class,
-        selected_subclass=selected_subclass,
-        target_level=target_level,
-        exact_level=target_level,
         feature_entries=feature_entries,
-    ):
-        selected_value = str(spell_grant.get("name") or "").strip()
-        payload_key = _spell_lookup_key(selected_value, spell_catalog)
-        if payload_key and payload_key in existing_spell_payload_keys:
-            continue
-        if selected_value:
-            selected_values.append(selected_value)
-    for spell_grant in collect_campaign_option_spell_grants(list(extra_option_payloads or [])):
-        selected_value = str(spell_grant.get("value") or "").strip()
-        payload_key = _spell_lookup_key(selected_value, spell_catalog)
-        if payload_key and payload_key in existing_spell_payload_keys:
-            continue
-        if selected_value:
-            selected_values.append(selected_value)
+        selected_campaign_option_payloads=extra_option_payloads,
+    )
 
     summaries: list[str] = []
     seen: set[str] = set()
-    for selected_value in selected_values:
-        spell_entry = _resolve_spell_entry(selected_value, spell_catalog)
-        label = spell_entry.title if spell_entry is not None else str(selected_value or "").strip()
+    for spell_payload in simulated_payloads:
+        payload_key = _spell_payload_key(spell_payload)
+        if payload_key and payload_key in existing_spell_payload_keys:
+            continue
+        label = str(spell_payload.get("name") or "").strip()
         normalized_label = normalize_lookup(label)
         if not label or normalized_label in seen:
             continue
@@ -8512,18 +9448,95 @@ def _merge_spell_mark(existing_mark: str, new_mark: str) -> str:
     return " + ".join(marks)
 
 
+_MERGE_NAME_ALIASES = {
+    "chain mail": "chain mail armor",
+    "chain mail armor": "chain mail armor",
+    "crossbow, light": "light crossbow",
+    "light crossbow": "light crossbow",
+    "crossbow bolts": "crossbow bolts (20)",
+    "crossbow bolts (20)": "crossbow bolts (20)",
+    "rope, hempen (50 feet)": "hempen rope (50 feet)",
+    "hempen rope (50 feet)": "hempen rope (50 feet)",
+    "rations": "rations (1 day)",
+    "rations (1 day)": "rations (1 day)",
+}
+
+
+def _merge_name_candidates(name: Any) -> list[str]:
+    cleaned_name = str(name or "").strip()
+    if not cleaned_name:
+        return []
+    candidates = [cleaned_name]
+    if "," in cleaned_name:
+        parts = [part.strip() for part in cleaned_name.split(",", 1)]
+        if len(parts) == 2 and all(parts):
+            candidates.append(f"{parts[1]} {parts[0]}")
+    alias_variants = [_MERGE_NAME_ALIASES.get(candidate.lower(), "") for candidate in list(candidates)]
+    candidates.extend(alias for alias in alias_variants if alias)
+
+    normalized_candidates: list[str] = []
+    for candidate in candidates:
+        normalized = normalize_lookup(candidate)
+        if normalized and normalized not in normalized_candidates:
+            normalized_candidates.append(normalized)
+    return normalized_candidates
+
+
 def _normalize_spell_payloads(
     spell_payloads: list[dict[str, Any]] | None,
 ) -> list[dict[str, Any]]:
-    normalized_by_key: dict[str, dict[str, Any]] = {}
+    normalized_spells: list[dict[str, Any]] = []
+    index_by_key: dict[str, int] = {}
     for spell_payload in list(spell_payloads or []):
         payload = dict(spell_payload or {})
-        payload_key = _spell_payload_key(payload) or str(payload.get("name") or "").strip()
+        name = str(payload.get("name") or "").strip()
+        payload_key = _spell_payload_key(payload) or name
         if not payload_key:
             continue
-        existing_payload = normalized_by_key.get(payload_key)
+        payload["name"] = name
+        payload["id"] = str(payload.get("id") or "").strip() or f"{slugify(name)}-{len(normalized_spells) + 1}"
+        systems_ref = dict(payload.get("systems_ref") or {})
+        if systems_ref:
+            payload["systems_ref"] = systems_ref
+        else:
+            payload.pop("systems_ref", None)
+        normalized_page_ref = _normalize_page_ref_payload(payload.get("page_ref"))
+        if normalized_page_ref is not None:
+            payload["page_ref"] = normalized_page_ref
+        else:
+            payload.pop("page_ref", None)
+
+        explicit_identity = _normalize_explicit_link_identity(
+            systems_ref=systems_ref,
+            page_ref=normalized_page_ref,
+        )
+        candidate_keys: list[str] = []
+        if explicit_identity:
+            candidate_keys.append(explicit_identity)
+        candidate_keys.extend(f"name:{candidate}" for candidate in _merge_name_candidates(name))
+
+        existing_index = None
+        for candidate_key in candidate_keys:
+            candidate_index = index_by_key.get(candidate_key)
+            if candidate_index is None:
+                continue
+            if candidate_key.startswith("name:") and explicit_identity:
+                existing_payload = normalized_spells[candidate_index]
+                existing_explicit_identity = _normalize_explicit_link_identity(
+                    systems_ref=dict(existing_payload.get("systems_ref") or {}),
+                    page_ref=existing_payload.get("page_ref"),
+                )
+                if existing_explicit_identity and existing_explicit_identity != explicit_identity:
+                    continue
+            existing_index = candidate_index
+            break
+
+        existing_payload = normalized_spells[existing_index] if existing_index is not None else None
         if existing_payload is None:
-            normalized_by_key[payload_key] = payload
+            existing_index = len(normalized_spells)
+            normalized_spells.append(payload)
+            for candidate_key in candidate_keys:
+                index_by_key[candidate_key] = existing_index
             continue
         existing_payload["mark"] = _merge_spell_mark(
             str(existing_payload.get("mark") or "").strip(),
@@ -8544,7 +9557,96 @@ def _normalize_spell_payloads(
                 list(existing_payload.get("campaign_option_sources") or [])
                 + list(payload.get("campaign_option_sources") or [])
             )
-    return list(normalized_by_key.values())
+        updated_explicit_identity = _normalize_explicit_link_identity(
+            systems_ref=dict(existing_payload.get("systems_ref") or {}),
+            page_ref=existing_payload.get("page_ref"),
+        )
+        updated_keys: list[str] = []
+        if updated_explicit_identity:
+            updated_keys.append(updated_explicit_identity)
+        updated_keys.extend(
+            f"name:{candidate}"
+            for candidate in _merge_name_candidates(str(existing_payload.get("name") or "").strip())
+        )
+        for candidate_key in updated_keys:
+            index_by_key[candidate_key] = existing_index
+    return normalized_spells
+
+
+def _normalize_feature_payloads(
+    feature_payloads: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    normalized_features: list[dict[str, Any]] = []
+    for feature_payload in list(feature_payloads or []):
+        payload = dict(feature_payload or {})
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            continue
+        payload["name"] = name
+        payload["id"] = str(payload.get("id") or "").strip() or f"{slugify(name)}-{len(normalized_features) + 1}"
+        payload["category"] = str(payload.get("category") or "").strip() or "class_feature"
+        payload["source"] = str(payload.get("source") or "").strip()
+        payload["description_markdown"] = str(payload.get("description_markdown") or "").strip()
+        payload["activation_type"] = str(payload.get("activation_type") or "passive").strip() or "passive"
+        tracker_ref = str(payload.get("tracker_ref") or "").strip()
+        if tracker_ref:
+            payload["tracker_ref"] = tracker_ref
+        else:
+            payload.pop("tracker_ref", None)
+        systems_ref = dict(payload.get("systems_ref") or {})
+        if systems_ref:
+            payload["systems_ref"] = systems_ref
+        else:
+            payload.pop("systems_ref", None)
+        normalized_page_ref = _normalize_page_ref_payload(payload.get("page_ref"))
+        if normalized_page_ref is not None:
+            payload["page_ref"] = normalized_page_ref
+        else:
+            payload.pop("page_ref", None)
+        campaign_option = dict(payload.get("campaign_option") or {})
+        if campaign_option:
+            payload["campaign_option"] = campaign_option
+        else:
+            payload.pop("campaign_option", None)
+        normalized_features.append(payload)
+    return normalized_features
+
+
+def _normalize_resource_template_payloads(
+    resource_templates: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    normalized_templates: list[dict[str, Any]] = []
+    index_by_key: dict[str, int] = {}
+    for template in list(resource_templates or []):
+        payload = dict(template or {})
+        template_id = str(payload.get("id") or "").strip()
+        label = str(payload.get("label") or "").strip()
+        if not template_id and not label:
+            continue
+        payload["id"] = template_id or f"resource-{slugify(label or 'template')}-{len(normalized_templates) + 1}"
+        payload["label"] = label or payload["id"]
+        payload["category"] = str(payload.get("category") or "custom_progress").strip() or "custom_progress"
+        max_value = payload.get("max")
+        payload["max"] = int(max_value) if max_value not in {"", None} else None
+        initial_current = payload.get("initial_current")
+        payload["initial_current"] = (
+            int(initial_current)
+            if initial_current not in {"", None}
+            else payload.get("max")
+        )
+        payload["reset_on"] = str(payload.get("reset_on") or "manual").strip() or "manual"
+        payload["reset_to"] = str(payload.get("reset_to") or "unchanged").strip() or "unchanged"
+        payload["rest_behavior"] = str(payload.get("rest_behavior") or "manual_only").strip() or "manual_only"
+        payload["notes"] = str(payload.get("notes") or "").strip()
+        payload["display_order"] = int(payload.get("display_order") or 0)
+        merge_key = payload["id"]
+        existing_index = index_by_key.get(merge_key)
+        if existing_index is None:
+            index_by_key[merge_key] = len(normalized_templates)
+            normalized_templates.append(payload)
+            continue
+        normalized_templates[existing_index] = payload
+    return normalized_templates
 
 
 def _normalize_attack_payloads(
@@ -8601,7 +9703,10 @@ def _normalize_attack_payloads(
         candidate_keys = []
         if explicit_identity:
             candidate_keys.append((explicit_identity, *merge_key_tail))
-        candidate_keys.append((f"name:{normalize_lookup(name)}", *merge_key_tail))
+        candidate_keys.extend(
+            (f"name:{candidate}", *merge_key_tail)
+            for candidate in _merge_name_candidates(name)
+        )
         existing_index = None
         for candidate_key in candidate_keys:
             candidate_index = index_by_key.get(candidate_key)
@@ -8635,7 +9740,10 @@ def _normalize_attack_payloads(
         updated_keys = []
         if updated_explicit_identity:
             updated_keys.append((updated_explicit_identity, *merge_key_tail))
-        updated_keys.append((f"name:{normalize_lookup(str(existing_payload.get('name') or '').strip())}", *merge_key_tail))
+        updated_keys.extend(
+            (f"name:{candidate}", *merge_key_tail)
+            for candidate in _merge_name_candidates(str(existing_payload.get("name") or "").strip())
+        )
         for candidate_key in updated_keys:
             index_by_key[candidate_key] = existing_index
     return normalized_attacks
@@ -8690,7 +9798,10 @@ def _normalize_equipment_payloads(
         candidate_keys = []
         if explicit_identity:
             candidate_keys.append((explicit_identity, *merge_key_tail))
-        candidate_keys.append((f"name:{normalize_lookup(name)}", *merge_key_tail))
+        candidate_keys.extend(
+            (f"name:{candidate}", *merge_key_tail)
+            for candidate in _merge_name_candidates(name)
+        )
         existing_index = None
         for candidate_key in candidate_keys:
             candidate_index = index_by_key.get(candidate_key)
@@ -8735,7 +9846,10 @@ def _normalize_equipment_payloads(
         updated_keys = []
         if updated_explicit_identity:
             updated_keys.append((updated_explicit_identity, *merge_key_tail))
-        updated_keys.append((f"name:{normalize_lookup(str(existing_payload.get('name') or '').strip())}", *merge_key_tail))
+        updated_keys.extend(
+            (f"name:{candidate}", *merge_key_tail)
+            for candidate in _merge_name_candidates(str(existing_payload.get("name") or "").strip())
+        )
         for candidate_key in updated_keys:
             index_by_key[candidate_key] = existing_index
     return normalized_equipment
@@ -8805,15 +9919,15 @@ def normalize_definition_to_native_model(definition: CharacterDefinition) -> Cha
     ability_scores = _ability_scores_from_definition(definition)
     current_level = max(_resolve_native_character_level(definition), 1)
     normalized_features, derived_resource_templates = _apply_tracker_templates_to_feature_payloads(
-        [dict(feature) for feature in list(definition.features or [])],
+        _normalize_feature_payloads(list(definition.features or [])),
         ability_scores=ability_scores,
         current_level=current_level,
     )
     payload["features"] = normalized_features
-    payload["resource_templates"] = _merge_resource_templates(
+    payload["resource_templates"] = _normalize_resource_template_payloads(_merge_resource_templates(
         list(definition.resource_templates or []),
         derived_resource_templates,
-    )
+    ))
     payload["attacks"] = _normalize_attack_payloads(list(definition.attacks or []))
     payload["equipment_catalog"] = _normalize_equipment_payloads(list(definition.equipment_catalog or []))
     spellcasting = dict(definition.spellcasting or {})

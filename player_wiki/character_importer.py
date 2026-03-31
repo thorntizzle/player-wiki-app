@@ -4,13 +4,21 @@ import argparse
 import fnmatch
 import re
 from dataclasses import dataclass
+from hashlib import sha1
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from .auth_store import isoformat, utcnow
-from .character_builder import normalize_definition_to_native_model
+from .character_builder import (
+    _extract_campaign_page_ref,
+    _merge_name_candidates,
+    _normalize_explicit_link_identity,
+    _normalize_page_ref_payload,
+    _spell_payload_key,
+    normalize_definition_to_native_model,
+)
 from .character_models import CharacterDefinition, CharacterImportMetadata
 from .character_repository import CampaignCharacterConfig, load_campaign_character_config
 from .character_service import build_initial_state, merge_state_with_definition
@@ -986,74 +994,438 @@ def write_yaml(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(rendered, encoding="utf-8")
 
 
-def _preserve_existing_page_overrides(
+def _normalize_import_match_text(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _hash_import_identity(prefix: str, identity: str) -> str:
+    return f"{prefix}:{sha1(identity.encode('utf-8')).hexdigest()[:16]}"
+
+
+def _load_existing_character_definition(character_dir: Path) -> CharacterDefinition | None:
+    definition_path = character_dir / "definition.yaml"
+    if not definition_path.exists():
+        return None
+
+    existing_payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(existing_payload, dict) or not existing_payload.get("character_slug"):
+        return None
+
+    try:
+        return CharacterDefinition.from_dict(existing_payload)
+    except ValueError:
+        return None
+
+
+def load_existing_character_definition(character_dir: Path) -> CharacterDefinition | None:
+    return _load_existing_character_definition(character_dir)
+
+
+def _attack_match_keys(payload: dict[str, Any]) -> list[tuple[Any, ...]]:
+    attack_id = str(payload.get("id") or "").strip()
+    systems_ref = dict(payload.get("systems_ref") or {})
+    page_ref = _normalize_page_ref_payload(payload.get("page_ref"))
+    explicit_identity = _normalize_explicit_link_identity(
+        systems_ref=systems_ref,
+        page_ref=page_ref,
+    )
+    tail = (
+        payload.get("attack_bonus"),
+        _normalize_import_match_text(payload.get("damage")),
+        _normalize_import_match_text(payload.get("damage_type")),
+        _normalize_import_match_text(payload.get("notes")),
+        _normalize_import_match_text(payload.get("category")),
+    )
+    keys: list[tuple[Any, ...]] = []
+    if attack_id:
+        keys.append(("id", attack_id))
+    if explicit_identity:
+        keys.append(("explicit", explicit_identity, *tail))
+    keys.extend(("name", candidate, *tail) for candidate in _merge_name_candidates(payload.get("name")))
+    return keys
+
+
+def _equipment_match_keys(payload: dict[str, Any]) -> list[tuple[Any, ...]]:
+    equipment_id = str(payload.get("id") or "").strip()
+    systems_ref = dict(payload.get("systems_ref") or {})
+    page_ref = _normalize_page_ref_payload(payload.get("page_ref"))
+    explicit_identity = _normalize_explicit_link_identity(
+        systems_ref=systems_ref,
+        page_ref=page_ref,
+    )
+    tail = (
+        _normalize_import_match_text(payload.get("weight")),
+        _normalize_import_match_text(payload.get("notes")),
+        bool(payload.get("is_currency_only")),
+        _normalize_import_match_text(payload.get("source_kind")),
+    )
+    keys: list[tuple[Any, ...]] = []
+    if equipment_id:
+        keys.append(("id", equipment_id))
+    if explicit_identity:
+        keys.append(("explicit", explicit_identity, *tail))
+    keys.extend(("name", candidate, *tail) for candidate in _merge_name_candidates(payload.get("name")))
+    return keys
+
+
+def _spell_match_keys(payload: dict[str, Any]) -> list[tuple[Any, ...]]:
+    spell_id = str(payload.get("id") or "").strip()
+    systems_ref = dict(payload.get("systems_ref") or {})
+    page_ref = _normalize_page_ref_payload(payload.get("page_ref"))
+    explicit_identity = _normalize_explicit_link_identity(
+        systems_ref=systems_ref,
+        page_ref=page_ref,
+    )
+    keys: list[tuple[Any, ...]] = []
+    if spell_id:
+        keys.append(("id", spell_id))
+    if explicit_identity:
+        keys.append(("explicit", explicit_identity))
+    spell_key = _spell_payload_key(payload)
+    if spell_key:
+        keys.append(("spell-key", spell_key.strip().lower()))
+    keys.extend(("name", candidate) for candidate in _merge_name_candidates(payload.get("name")))
+    return keys
+
+
+def _feature_match_keys(payload: dict[str, Any]) -> list[tuple[Any, ...]]:
+    feature_id = str(payload.get("id") or "").strip()
+    systems_ref = dict(payload.get("systems_ref") or {})
+    page_ref = _normalize_page_ref_payload(payload.get("page_ref"))
+    explicit_identity = _normalize_explicit_link_identity(
+        systems_ref=systems_ref,
+        page_ref=page_ref,
+    )
+    keys: list[tuple[Any, ...]] = []
+    if feature_id:
+        keys.append(("id", feature_id))
+    if explicit_identity:
+        keys.append(("explicit", explicit_identity))
+    keys.append(
+        (
+            "feature",
+            _normalize_import_match_text(payload.get("category")),
+            _normalize_import_match_text(payload.get("name")),
+            _normalize_import_match_text(payload.get("source")),
+            _normalize_import_match_text(payload.get("description_markdown")),
+            _normalize_import_match_text(payload.get("activation_type")),
+        )
+    )
+    return keys
+
+
+def _resource_template_match_keys(payload: dict[str, Any]) -> list[tuple[Any, ...]]:
+    template_id = str(payload.get("id") or "").strip()
+    keys: list[tuple[Any, ...]] = []
+    if template_id:
+        keys.append(("id", template_id))
+    keys.append(
+        (
+            "resource",
+            _normalize_import_match_text(payload.get("label")),
+            _normalize_import_match_text(payload.get("category")),
+            payload.get("max"),
+            _normalize_import_match_text(payload.get("reset_on")),
+            _normalize_import_match_text(payload.get("notes")),
+        )
+    )
+    return keys
+
+
+def _build_existing_match_lookup(
+    entries: list[dict[str, Any]],
+    key_builder,
+) -> dict[tuple[Any, ...], dict[str, Any]]:
+    lookup: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for entry in entries:
+        payload = dict(entry or {})
+        for key in key_builder(payload):
+            lookup.setdefault(key, payload)
+    return lookup
+
+
+def _matched_existing_entry(
+    payload: dict[str, Any],
+    existing_lookup: dict[tuple[Any, ...], dict[str, Any]],
+    key_builder,
+) -> dict[str, Any] | None:
+    for key in key_builder(payload):
+        existing = existing_lookup.get(key)
+        if existing is not None:
+            return existing
+    return None
+
+
+def _clone_link_payload(value: Any) -> Any:
+    if isinstance(value, dict):
+        return dict(value)
+    return value
+
+
+def _preserve_existing_profile_refs(
+    imported_profile: dict[str, Any],
+    existing_profile: dict[str, Any],
+) -> dict[str, Any]:
+    profile = dict(imported_profile or {})
+    previous_profile = dict(existing_profile or {})
+    for field in ("class_ref", "subclass_ref", "species_ref", "background_ref"):
+        if profile.get(field):
+            continue
+        if previous_profile.get(field):
+            profile[field] = dict(previous_profile.get(field) or {})
+    imported_classes = [dict(row or {}) for row in list(profile.get("classes") or [])]
+    existing_classes = [dict(row or {}) for row in list(previous_profile.get("classes") or [])]
+    if imported_classes and existing_classes:
+        first_imported = dict(imported_classes[0] or {})
+        first_existing = dict(existing_classes[0] or {})
+        if first_existing.get("systems_ref") and not first_imported.get("systems_ref"):
+            first_imported["systems_ref"] = dict(first_existing.get("systems_ref") or {})
+        if first_existing.get("subclass_ref") and not first_imported.get("subclass_ref"):
+            first_imported["subclass_ref"] = dict(first_existing.get("subclass_ref") or {})
+        imported_classes[0] = first_imported
+        profile["classes"] = imported_classes
+    return profile
+
+
+def _preserve_existing_attack_or_equipment_overrides(
     imported_entries: list[dict[str, Any]],
     existing_entries: list[dict[str, Any]],
+    *,
+    key_builder,
 ) -> list[dict[str, Any]]:
-    existing_by_id = {
-        str(entry.get("id") or "").strip(): dict(entry or {})
-        for entry in existing_entries
-        if str(entry.get("id") or "").strip()
-    }
+    existing_lookup = _build_existing_match_lookup(existing_entries, key_builder)
     merged: list[dict[str, Any]] = []
     for entry in imported_entries:
         payload = dict(entry or {})
-        entry_id = str(payload.get("id") or "").strip()
-        existing = existing_by_id.get(entry_id)
-        if existing is not None and existing.get("page_ref"):
+        existing = _matched_existing_entry(payload, existing_lookup, key_builder)
+        if existing is not None:
+            existing_id = str(existing.get("id") or "").strip()
+            if existing_id:
+                payload["id"] = existing_id
             existing_page_ref = existing.get("page_ref")
-            payload["page_ref"] = (
-                dict(existing_page_ref)
-                if isinstance(existing_page_ref, dict)
-                else existing_page_ref
-            )
-            payload.pop("systems_ref", None)
-            existing_name = str(existing.get("name") or "").strip()
-            if existing_name:
-                payload["name"] = existing_name
+            if existing_page_ref:
+                payload["page_ref"] = _clone_link_payload(existing_page_ref)
+                payload.pop("systems_ref", None)
+                existing_name = str(existing.get("name") or "").strip()
+                if existing_name:
+                    payload["name"] = existing_name
+            elif existing.get("systems_ref") and not payload.get("systems_ref"):
+                payload["systems_ref"] = dict(existing.get("systems_ref") or {})
         merged.append(payload)
     return merged
+
+
+def _preserve_existing_spell_overrides(
+    imported_spells: list[dict[str, Any]],
+    existing_spells: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    existing_lookup = _build_existing_match_lookup(existing_spells, _spell_match_keys)
+    merged: list[dict[str, Any]] = []
+    for spell in imported_spells:
+        payload = dict(spell or {})
+        existing = _matched_existing_entry(payload, existing_lookup, _spell_match_keys)
+        if existing is not None:
+            existing_id = str(existing.get("id") or "").strip()
+            if existing_id:
+                payload["id"] = existing_id
+            existing_page_ref = existing.get("page_ref")
+            if existing_page_ref:
+                payload["page_ref"] = _clone_link_payload(existing_page_ref)
+                existing_name = str(existing.get("name") or "").strip()
+                if existing_name:
+                    payload["name"] = existing_name
+            if existing.get("systems_ref") and not payload.get("systems_ref"):
+                payload["systems_ref"] = dict(existing.get("systems_ref") or {})
+        merged.append(payload)
+    return merged
+
+
+def _preserve_existing_feature_overrides(
+    imported_features: list[dict[str, Any]],
+    existing_features: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    existing_lookup = _build_existing_match_lookup(existing_features, _feature_match_keys)
+    tracker_id_map: dict[str, str] = {}
+    merged: list[dict[str, Any]] = []
+    for feature in imported_features:
+        payload = dict(feature or {})
+        existing = _matched_existing_entry(payload, existing_lookup, _feature_match_keys)
+        if existing is not None:
+            existing_id = str(existing.get("id") or "").strip()
+            if existing_id:
+                payload["id"] = existing_id
+            existing_page_ref = existing.get("page_ref")
+            if existing_page_ref and not payload.get("page_ref"):
+                payload["page_ref"] = _clone_link_payload(existing_page_ref)
+            if existing.get("systems_ref") and not payload.get("systems_ref"):
+                payload["systems_ref"] = dict(existing.get("systems_ref") or {})
+            old_tracker_ref = str(existing.get("tracker_ref") or "").strip()
+            new_tracker_ref = str(payload.get("tracker_ref") or "").strip()
+            if old_tracker_ref:
+                payload["tracker_ref"] = old_tracker_ref
+                if new_tracker_ref and new_tracker_ref != old_tracker_ref:
+                    tracker_id_map[new_tracker_ref] = old_tracker_ref
+        merged.append(payload)
+    return merged, tracker_id_map
+
+
+def _preserve_existing_resource_template_overrides(
+    imported_templates: list[dict[str, Any]],
+    existing_templates: list[dict[str, Any]],
+    *,
+    tracker_id_map: dict[str, str],
+) -> list[dict[str, Any]]:
+    existing_lookup = _build_existing_match_lookup(existing_templates, _resource_template_match_keys)
+    merged: list[dict[str, Any]] = []
+    for template in imported_templates:
+        payload = dict(template or {})
+        template_id = str(payload.get("id") or "").strip()
+        if template_id in tracker_id_map:
+            payload["id"] = tracker_id_map[template_id]
+        existing = _matched_existing_entry(payload, existing_lookup, _resource_template_match_keys)
+        if existing is not None:
+            existing_id = str(existing.get("id") or "").strip()
+            if existing_id:
+                payload["id"] = existing_id
+        merged.append(payload)
+    return merged
+
+
+def _assign_missing_imported_ids(payload: dict[str, Any]) -> dict[str, Any]:
+    definition = dict(payload or {})
+    attacks: list[dict[str, Any]] = []
+    for attack in list(definition.get("attacks") or []):
+        attack_payload = dict(attack or {})
+        if not str(attack_payload.get("id") or "").strip():
+            attack_identity = "|".join(str(part) for part in (_attack_match_keys(attack_payload)[:1] or [attack_payload.get("name")]))
+            attack_payload["id"] = _hash_import_identity("imported-attack", attack_identity)
+        attacks.append(attack_payload)
+    definition["attacks"] = attacks
+
+    equipment_catalog: list[dict[str, Any]] = []
+    for item in list(definition.get("equipment_catalog") or []):
+        item_payload = dict(item or {})
+        if not str(item_payload.get("id") or "").strip():
+            item_identity = "|".join(str(part) for part in (_equipment_match_keys(item_payload)[:1] or [item_payload.get("name")]))
+            item_payload["id"] = _hash_import_identity("imported-item", item_identity)
+        equipment_catalog.append(item_payload)
+    definition["equipment_catalog"] = equipment_catalog
+
+    features: list[dict[str, Any]] = []
+    for feature in list(definition.get("features") or []):
+        feature_payload = dict(feature or {})
+        if not str(feature_payload.get("id") or "").strip():
+            feature_identity = "|".join(str(part) for part in _feature_match_keys(feature_payload)[:1])
+            feature_payload["id"] = _hash_import_identity("imported-feature", feature_identity)
+        features.append(feature_payload)
+    definition["features"] = features
+
+    spellcasting = dict(definition.get("spellcasting") or {})
+    spells: list[dict[str, Any]] = []
+    for spell in list(spellcasting.get("spells") or []):
+        spell_payload = dict(spell or {})
+        if not str(spell_payload.get("id") or "").strip():
+            spell_identity = "|".join(str(part) for part in (_spell_match_keys(spell_payload)[:1] or [spell_payload.get("name")]))
+            spell_payload["id"] = _hash_import_identity("imported-spell", spell_identity)
+        spells.append(spell_payload)
+    spellcasting["spells"] = spells
+    definition["spellcasting"] = spellcasting
+
+    resource_templates: list[dict[str, Any]] = []
+    for template in list(definition.get("resource_templates") or []):
+        template_payload = dict(template or {})
+        if not str(template_payload.get("id") or "").strip():
+            template_identity = "|".join(str(part) for part in _resource_template_match_keys(template_payload)[:1])
+            template_payload["id"] = _hash_import_identity("imported-resource", template_identity)
+        resource_templates.append(template_payload)
+    definition["resource_templates"] = resource_templates
+    return definition
+
+
+def converge_imported_definition(
+    definition: CharacterDefinition,
+    *,
+    existing_definition: CharacterDefinition | None = None,
+) -> CharacterDefinition:
+    normalized_definition = normalize_definition_to_native_model(definition)
+    if existing_definition is None:
+        return CharacterDefinition.from_dict(
+            _assign_missing_imported_ids(normalized_definition.to_dict())
+        )
+
+    normalized_existing = normalize_definition_to_native_model(existing_definition)
+    payload = normalized_definition.to_dict()
+    existing_payload = normalized_existing.to_dict()
+
+    payload["profile"] = _preserve_existing_profile_refs(
+        dict(payload.get("profile") or {}),
+        dict(existing_payload.get("profile") or {}),
+    )
+    payload["attacks"] = _preserve_existing_attack_or_equipment_overrides(
+        list(payload.get("attacks") or []),
+        list(existing_payload.get("attacks") or []),
+        key_builder=_attack_match_keys,
+    )
+    payload["equipment_catalog"] = _preserve_existing_attack_or_equipment_overrides(
+        list(payload.get("equipment_catalog") or []),
+        list(existing_payload.get("equipment_catalog") or []),
+        key_builder=_equipment_match_keys,
+    )
+    payload["features"], tracker_id_map = _preserve_existing_feature_overrides(
+        list(payload.get("features") or []),
+        list(existing_payload.get("features") or []),
+    )
+    payload["resource_templates"] = _preserve_existing_resource_template_overrides(
+        list(payload.get("resource_templates") or []),
+        list(existing_payload.get("resource_templates") or []),
+        tracker_id_map=tracker_id_map,
+    )
+    spellcasting = dict(payload.get("spellcasting") or {})
+    existing_spellcasting = dict(existing_payload.get("spellcasting") or {})
+    spellcasting["spells"] = _preserve_existing_spell_overrides(
+        list(spellcasting.get("spells") or []),
+        list(existing_spellcasting.get("spells") or []),
+    )
+    payload["spellcasting"] = spellcasting
+    return CharacterDefinition.from_dict(_assign_missing_imported_ids(payload))
 
 
 def preserve_existing_character_overrides(
     definition: CharacterDefinition,
     character_dir: Path,
 ) -> CharacterDefinition:
-    definition_path = character_dir / "definition.yaml"
-    if not definition_path.exists():
-        return definition
-
-    existing_payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
-    if not isinstance(existing_payload, dict) or not existing_payload.get("character_slug"):
-        return definition
-
-    try:
-        existing_definition = CharacterDefinition.from_dict(existing_payload)
-    except ValueError:
-        return definition
-
-    merged_definition = CharacterDefinition.from_dict(definition.to_dict())
-    merged_definition.attacks = _preserve_existing_page_overrides(
-        list(merged_definition.attacks or []),
-        list(existing_definition.attacks or []),
-    )
-    merged_definition.equipment_catalog = _preserve_existing_page_overrides(
-        list(merged_definition.equipment_catalog or []),
-        list(existing_definition.equipment_catalog or []),
-    )
-    return merged_definition
+    existing_definition = _load_existing_character_definition(character_dir)
+    return converge_imported_definition(definition, existing_definition=existing_definition)
 
 
 def initialize_or_reconcile_imported_state(
     state_store: CharacterStateStore,
     definition: CharacterDefinition,
+    *,
+    previous_definition: CharacterDefinition | None = None,
 ) -> CharacterStateWriteResult:
     existing = state_store.get_state(definition.campaign_slug, definition.character_slug)
     if existing is None:
         initial_state = build_initial_state(definition)
         return state_store.initialize_state_if_missing(definition, initial_state)
 
+    previous_resource_ids = {
+        str(template.get("id") or "").strip()
+        for template in list((previous_definition.resource_templates if previous_definition is not None else []) or [])
+        if str(template.get("id") or "").strip()
+    }
+    current_resource_ids = {
+        str(template.get("id") or "").strip()
+        for template in list(definition.resource_templates or [])
+        if str(template.get("id") or "").strip()
+    }
     reconciled_state = merge_state_with_definition(definition, existing.state)
+    if previous_resource_ids:
+        reconciled_state = merge_state_with_definition(
+            definition,
+            existing.state,
+            removed_resource_ids=previous_resource_ids - current_resource_ids,
+        )
     if reconciled_state == existing.state:
         return CharacterStateWriteResult(record=existing, created=False)
 
@@ -1087,10 +1459,15 @@ def import_character(
             character_slug=character_slug,
         )
         character_dir = config.characters_dir / definition.character_slug
+        existing_definition = load_existing_character_definition(character_dir)
         definition = preserve_existing_character_overrides(definition, character_dir)
         write_yaml(character_dir / "definition.yaml", definition.to_dict())
         write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
-        state_result = initialize_or_reconcile_imported_state(state_store, definition)
+        state_result = initialize_or_reconcile_imported_state(
+            state_store,
+            definition,
+            previous_definition=existing_definition,
+        )
         return CharacterImportResult(
             definition=definition,
             import_metadata=import_metadata,

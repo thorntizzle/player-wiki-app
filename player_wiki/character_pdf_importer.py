@@ -8,9 +8,10 @@ from typing import Any
 
 from pypdf import PdfReader
 
-from .character_builder import normalize_definition_to_native_model
 from .character_importer import (
+    converge_imported_definition,
     initialize_or_reconcile_imported_state,
+    load_existing_character_definition,
     parse_character_sheet_text,
     preserve_existing_character_overrides,
     write_yaml,
@@ -887,6 +888,8 @@ def _systems_ref_from_match(match: dict[str, Any]) -> dict[str, Any] | None:
 def apply_systems_links_to_definition(
     definition: CharacterDefinition,
     systems_links: dict[str, Any],
+    *,
+    existing_definition: CharacterDefinition | None = None,
 ) -> CharacterDefinition:
     linked_definition = CharacterDefinition.from_dict(copy.deepcopy(definition.to_dict()))
     profile_links = dict(systems_links.get("profile") or {})
@@ -965,7 +968,10 @@ def apply_systems_links_to_definition(
         spellcasting["spells"] = linked_spells
     linked_definition.spellcasting = spellcasting
 
-    return normalize_definition_to_native_model(linked_definition)
+    return converge_imported_definition(
+        linked_definition,
+        existing_definition=existing_definition,
+    )
 
 
 def build_pdf_character_artifacts(
@@ -1031,10 +1037,15 @@ def import_pdf_character(
         campaigns_dir: Path = app.config["CAMPAIGNS_DIR"]
         config = load_campaign_character_config(campaigns_dir, campaign_slug)
         character_dir = config.characters_dir / artifacts.definition.character_slug
+        existing_definition = load_existing_character_definition(character_dir)
         definition = preserve_existing_character_overrides(artifacts.definition, character_dir)
         write_yaml(character_dir / "definition.yaml", definition.to_dict())
         write_yaml(character_dir / "import.yaml", artifacts.import_metadata.to_dict())
-        state_result = initialize_or_reconcile_imported_state(state_store, definition)
+        state_result = initialize_or_reconcile_imported_state(
+            state_store,
+            definition,
+            previous_definition=existing_definition,
+        )
         return CharacterPdfImportResult(
             definition=definition,
             import_metadata=artifacts.import_metadata,

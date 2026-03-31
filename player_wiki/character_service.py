@@ -96,9 +96,15 @@ def merge_state_with_definition(
     *,
     hp_delta: int = 0,
     inventory_quantity_overrides: dict[str, int] | None = None,
+    removed_resource_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     payload = deepcopy(state)
     existing_resources = list(payload.get("resources") or [])
+    removed_managed_resources = {
+        str(resource_id).strip()
+        for resource_id in set(removed_resource_ids or set())
+        if str(resource_id).strip()
+    }
     template_resource_ids: set[str] = set()
     existing_by_id = {
         str(resource.get("id") or "").strip(): resource
@@ -133,6 +139,8 @@ def merge_state_with_definition(
         if resource_id and resource_id in template_resource_ids:
             continue
         if resource_id.startswith(MANAGED_CUSTOM_TRACKER_PREFIX):
+            continue
+        if resource_id and resource_id in removed_managed_resources:
             continue
         merged_resources.append(deepcopy(resource))
 

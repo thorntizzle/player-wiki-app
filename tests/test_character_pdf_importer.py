@@ -7,7 +7,8 @@ from pathlib import Path
 import yaml
 
 from player_wiki.app import create_app
-from player_wiki.character_importer import import_character, parse_character_sheet_text
+from player_wiki.character_builder import supports_native_level_up
+from player_wiki.character_importer import converge_imported_definition, import_character, parse_character_sheet_text
 from player_wiki.character_models import CharacterDefinition
 from player_wiki.character_pdf_importer import (
     apply_systems_links_to_definition,
@@ -18,6 +19,74 @@ from player_wiki.config import Config
 from player_wiki.db import init_database
 from player_wiki.systems_models import SystemsEntryRecord
 from tests.sample_data import build_test_campaigns_dir
+
+
+def _minimal_imported_definition(
+    *,
+    profile: dict[str, object] | None = None,
+    attacks: list[dict[str, object]] | None = None,
+    features: list[dict[str, object]] | None = None,
+    spellcasting: dict[str, object] | None = None,
+    equipment_catalog: list[dict[str, object]] | None = None,
+    resource_templates: list[dict[str, object]] | None = None,
+    source_type: str = "markdown_character_sheet",
+) -> CharacterDefinition:
+    return CharacterDefinition(
+        campaign_slug="linden-pass",
+        character_slug="tobin-slate",
+        name="Tobin Slate",
+        status="active",
+        profile={
+            "sheet_name": "Tobin Slate",
+            "display_name": "Tobin Slate",
+            "class_level_text": "Wizard 3",
+            "classes": [{"class_name": "Wizard", "subclass_name": "", "level": 3}],
+            "species": "Human",
+            "background": "Sage",
+            **dict(profile or {}),
+        },
+        stats={
+            "max_hp": 18,
+            "armor_class": 12,
+            "initiative_bonus": 2,
+            "speed": "30 ft.",
+            "proficiency_bonus": 2,
+            "passive_perception": 12,
+            "passive_insight": 11,
+            "passive_investigation": 14,
+            "ability_scores": {
+                "str": {"score": 8, "modifier": -1, "save_bonus": -1},
+                "dex": {"score": 14, "modifier": 2, "save_bonus": 2},
+                "con": {"score": 12, "modifier": 1, "save_bonus": 1},
+                "int": {"score": 16, "modifier": 3, "save_bonus": 5},
+                "wis": {"score": 12, "modifier": 1, "save_bonus": 1},
+                "cha": {"score": 10, "modifier": 0, "save_bonus": 0},
+            },
+        },
+        skills=[],
+        proficiencies={"armor": [], "weapons": [], "tools": [], "languages": ["Common"]},
+        attacks=list(attacks or []),
+        features=list(features or []),
+        spellcasting={
+            "spellcasting_class": "Wizard",
+            "spellcasting_ability": "Intelligence",
+            "spell_save_dc": 13,
+            "spell_attack_bonus": 5,
+            "slot_progression": [{"level": 1, "max_slots": 4}],
+            "spells": [],
+            **dict(spellcasting or {}),
+        },
+        equipment_catalog=list(equipment_catalog or []),
+        reference_notes={"additional_notes_markdown": "", "allies_and_organizations_markdown": "", "custom_sections": []},
+        resource_templates=list(resource_templates or []),
+        source={
+            "source_path": "Tobin.pdf",
+            "source_type": source_type,
+            "imported_from": "Tobin.pdf",
+            "imported_at": "2026-03-31T00:00:00Z",
+            "parse_warnings": [],
+        },
+    )
 
 
 def _sample_pdf_fields() -> dict[str, str]:
@@ -323,6 +392,82 @@ Psionic Power: Protective Field
 ### Slots
 
 ### Spells
+
+## Equipment
+| Item | Qty | Weight |
+| --- | --- | --- |
+| Backpack | 1 | 5 lb. |
+""".strip()
+
+
+def _sample_spell_reimport_markdown(*spell_rows: str) -> str:
+    rendered_rows = "\n".join(spell_rows).strip()
+    return f"""
+## Sheet Summary
+| Field | Value |
+| --- | --- |
+| Sheet Name | Mira Salt |
+| Class & Level | Wizard 3 |
+| Species | Human |
+| Background | Sage |
+
+## Defenses And Core Stats
+| Metric | Value |
+| --- | --- |
+| Armor Class | 12 |
+| Initiative | +2 |
+| Speed | 30 ft. |
+| Max HP | 18 |
+| Proficiency Bonus | +2 |
+
+## Ability Scores
+| Ability | Score | Modifier | Save |
+| --- | --- | --- | --- |
+| Strength | 8 | -1 | -1 |
+| Dexterity | 14 | +2 | +2 |
+| Constitution | 12 | +1 | +1 |
+| Intelligence | 16 | +3 | +5 |
+| Wisdom | 12 | +1 | +1 |
+| Charisma | 10 | +0 | +0 |
+
+## Skills
+| Skill | Bonus | Proficiency |
+| --- | --- | --- |
+| Arcana | +5 | Proficient |
+
+## Proficiencies And Languages
+- Languages: Common
+
+## Attacks And Cantrips
+| Attack | Hit | Damage | Notes |
+| --- | --- | --- | --- |
+
+## Features And Traits
+### Wizard Features
+
+- Arcane Recovery - PHB 115
+
+## Actions
+### Actions
+Cast a spell
+
+## Personality And Story
+
+## Spellcasting
+| Field | Value |
+| --- | --- |
+| Spellcasting Class | Wizard |
+| Spellcasting Ability | Intelligence |
+| Spell Save DC | 13 |
+| Spell Attack Bonus | +5 |
+
+### Slots
+- 4 Slots
+
+### Spells
+| Spell | Mark | Save/Hit | Time | Range | Duration | Components | Source | Reference |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+{rendered_rows}
 
 ## Equipment
 | Item | Qty | Weight |
@@ -984,5 +1129,354 @@ def test_resolve_definition_systems_links_prefers_contextual_matches():
     assert equipment_by_name["Longsword"]["match"]["title"] == "Longsword"
     assert equipment_by_name["Chain Mail"]["match"]["title"] == "Chain Mail"
     assert equipment_by_name["Crossbow Bolts"]["match"]["title"] == "Crossbow Bolts (20)"
+
+
+def test_converge_imported_definition_preserves_existing_spell_links_when_duplicates_collapse():
+    existing_definition = _minimal_imported_definition(
+        spellcasting={
+            "spells": [
+                {
+                    "id": "light-1",
+                    "name": "Beacon Spark",
+                    "mark": "Known",
+                    "casting_time": "1 action",
+                    "range": "Touch",
+                    "duration": "1 hour",
+                    "components": "V, M",
+                    "save_or_hit": "",
+                    "source": "PHB",
+                    "reference": "p. 255",
+                    "page_ref": {
+                        "slug": "spells/beacon-spark",
+                        "title": "Beacon Spark",
+                    },
+                    "systems_ref": {
+                        "entry_type": "spell",
+                        "slug": "phb-spell-light",
+                        "title": "Light",
+                        "source_id": "PHB",
+                    },
+                }
+            ]
+        },
+    )
+    incoming_definition = _minimal_imported_definition(
+        spellcasting={
+            "spells": [
+                {
+                    "id": "light-a",
+                    "name": "Light",
+                    "mark": "Known",
+                    "casting_time": "1 action",
+                    "range": "Touch",
+                    "duration": "1 hour",
+                    "components": "V, M",
+                    "save_or_hit": "",
+                    "source": "PHB",
+                    "reference": "p. 255",
+                },
+                {
+                    "id": "light-b",
+                    "name": "LIGHT",
+                    "mark": "",
+                    "casting_time": "1 action",
+                    "range": "Touch",
+                    "duration": "1 hour",
+                    "components": "V, M",
+                    "save_or_hit": "",
+                    "source": "PHB",
+                    "reference": "p. 255",
+                    "systems_ref": {
+                        "entry_type": "spell",
+                        "slug": "phb-spell-light",
+                        "title": "Light",
+                        "source_id": "PHB",
+                    },
+                },
+            ]
+        },
+    )
+
+    converged = converge_imported_definition(
+        incoming_definition,
+        existing_definition=existing_definition,
+    )
+
+    assert len(converged.spellcasting["spells"]) == 1
+    spell = converged.spellcasting["spells"][0]
+    assert spell["id"] == "light-1"
+    assert spell["name"] == "Beacon Spark"
+    assert spell["page_ref"]["slug"] == "spells/beacon-spark"
+    assert spell["systems_ref"]["slug"] == "phb-spell-light"
+
+
+def test_converge_imported_definition_preserves_feature_tracker_identity():
+    existing_definition = _minimal_imported_definition(
+        features=[
+            {
+                "id": "psi-power",
+                "name": "Psionic Power",
+                "category": "class_feature",
+                "source": "TCE 43",
+                "description_markdown": "You have a reserve of psionic energy.",
+                "activation_type": "special",
+                "tracker_ref": "harbor-energy",
+            }
+        ],
+        resource_templates=[
+            {
+                "id": "harbor-energy",
+                "label": "Harbor Energy",
+                "category": "class_feature",
+                "initial_current": 4,
+                "max": 4,
+                "reset_on": "long_rest",
+                "reset_to": "max",
+                "rest_behavior": "confirm_before_reset",
+                "notes": "Psionic Power",
+                "display_order": 0,
+            }
+        ],
+    )
+    incoming_definition = _minimal_imported_definition(
+        features=[
+            {
+                "id": "psi-power-new",
+                "name": "Psionic Power",
+                "category": "class_feature",
+                "source": "TCE 43",
+                "description_markdown": "You have a reserve of psionic energy.",
+                "activation_type": "special",
+                "tracker_ref": "psionic-power-energy",
+            }
+        ],
+        resource_templates=[
+            {
+                "id": "psionic-power-energy",
+                "label": "Harbor Energy",
+                "category": "class_feature",
+                "initial_current": 5,
+                "max": 5,
+                "reset_on": "long_rest",
+                "reset_to": "max",
+                "rest_behavior": "confirm_before_reset",
+                "notes": "Psionic Power",
+                "display_order": 0,
+            }
+        ],
+    )
+
+    converged = converge_imported_definition(
+        incoming_definition,
+        existing_definition=existing_definition,
+    )
+
+    assert converged.features[0]["id"] == "psi-power"
+    assert converged.features[0]["tracker_ref"] == "harbor-energy"
+    assert converged.resource_templates[0]["id"] == "harbor-energy"
+    assert converged.resource_templates[0]["max"] == 5
+
+
+def test_apply_systems_links_to_definition_merges_alias_equipment_rows_with_quantity():
+    definition = _minimal_imported_definition(
+        equipment_catalog=[
+            {
+                "id": "bolts-a",
+                "name": "Crossbow Bolts",
+                "default_quantity": 1,
+                "weight": "1 lb.",
+                "notes": "",
+                "tags": [],
+            },
+            {
+                "id": "bolts-b",
+                "name": "Crossbow Bolts (20)",
+                "default_quantity": 2,
+                "weight": "1 lb.",
+                "notes": "",
+                "tags": [],
+            },
+        ],
+    )
+
+    linked_definition = apply_systems_links_to_definition(
+        definition,
+        {
+            "profile": {},
+            "features": [],
+            "attacks": [],
+            "equipment": [
+                {"match": {"status": "unresolved"}},
+                {
+                    "match": {
+                        "status": "matched",
+                        "entry_type": "item",
+                        "slug": "phb-item-crossbow-bolts",
+                        "title": "Crossbow Bolts (20)",
+                        "source_id": "PHB",
+                    }
+                },
+            ],
+            "spells": [],
+        },
+    )
+
+    assert len(linked_definition.equipment_catalog) == 1
+    item = linked_definition.equipment_catalog[0]
+    assert item["default_quantity"] == 3
+    assert item["systems_ref"]["slug"] == "phb-item-crossbow-bolts"
+
+
+def test_import_character_reimport_removes_missing_trackers_and_preserves_surviving_state(tmp_path, monkeypatch):
+    campaigns_dir = build_test_campaigns_dir(tmp_path)
+    db_path = tmp_path / "player_wiki.sqlite3"
+    source_path = tmp_path / "Zigzag - Character Sheet.md"
+    source_path.write_text(_sample_split_action_markdown(), encoding="utf-8")
+
+    monkeypatch.setattr(Config, "CAMPAIGNS_DIR", campaigns_dir)
+    monkeypatch.setattr(Config, "DB_PATH", db_path)
+
+    project_root = Path(__file__).resolve().parents[1]
+    import_character(
+        project_root,
+        "linden-pass",
+        str(source_path),
+        character_slug="zigzag-blackscar",
+    )
+
+    app = create_app()
+    with app.app_context():
+        init_database()
+        repository = app.extensions["character_repository"]
+        state_store = app.extensions["character_state_store"]
+        record = repository.get_character("linden-pass", "zigzag-blackscar")
+        assert record is not None
+        payload = deepcopy(record.state_record.state)
+        second_wind = next(resource for resource in payload["resources"] if resource["id"] == "second-wind")
+        second_wind["current"] = 0
+        state_store.replace_state(
+            record.definition,
+            payload,
+            expected_revision=record.state_record.revision,
+        )
+
+    updated_source = _sample_split_action_markdown().replace(
+        "- Action Surge - PHB 72\nYou can take one additional action on your turn.\n\n",
+        "",
+    )
+    updated_source = updated_source.replace("- 1 / Short Rest - Special\n\n", "", 1)
+    source_path.write_text(updated_source, encoding="utf-8")
+
+    result = import_character(
+        project_root,
+        "linden-pass",
+        str(source_path),
+        character_slug="zigzag-blackscar",
+    )
+    assert result.state_created is False
+
+    app = create_app()
+    with app.app_context():
+        init_database()
+        repository = app.extensions["character_repository"]
+        record = repository.get_character("linden-pass", "zigzag-blackscar")
+        assert record is not None
+        resources = {resource["id"]: resource for resource in record.state_record.state["resources"]}
+
+    assert "action-surge" not in resources
+    assert resources["second-wind"]["current"] == 0
+
+
+def test_import_character_reimport_preserves_spell_links_and_removes_missing_spells(tmp_path, monkeypatch):
+    campaigns_dir = build_test_campaigns_dir(tmp_path)
+    db_path = tmp_path / "player_wiki.sqlite3"
+    source_path = tmp_path / "Mira - Character Sheet.md"
+    source_path.write_text(
+        _sample_spell_reimport_markdown(
+            "| Light | Known | | 1 action | Touch | 1 hour | V, M | PHB | p. 255 |",
+            "| Message | Known | | 1 action | 120 feet | 1 round | V, S, M | PHB | p. 259 |",
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(Config, "CAMPAIGNS_DIR", campaigns_dir)
+    monkeypatch.setattr(Config, "DB_PATH", db_path)
+
+    project_root = Path(__file__).resolve().parents[1]
+    character_dir = campaigns_dir / "linden-pass" / "characters" / "mira-salt"
+    import_character(
+        project_root,
+        "linden-pass",
+        str(source_path),
+        character_slug="mira-salt",
+    )
+
+    definition_path = character_dir / "definition.yaml"
+    payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
+    light = next(spell for spell in payload["spellcasting"]["spells"] if spell["name"] == "Light")
+    light["name"] = "Beacon Spark"
+    light["page_ref"] = {"slug": "spells/beacon-spark", "title": "Beacon Spark"}
+    light["systems_ref"] = {
+        "entry_type": "spell",
+        "slug": "phb-spell-light",
+        "title": "Light",
+        "source_id": "PHB",
+    }
+    definition_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    source_path.write_text(
+        _sample_spell_reimport_markdown(
+            "| Light | Known | | 1 action | Touch | 1 hour | V, M | PHB | p. 255 |",
+            "| Mage Hand | Known | | 1 action | 30 feet | 1 minute | V, S | PHB | p. 256 |",
+        ),
+        encoding="utf-8",
+    )
+
+    result = import_character(
+        project_root,
+        "linden-pass",
+        str(source_path),
+        character_slug="mira-salt",
+    )
+    spells_by_name = {spell["name"]: spell for spell in result.definition.spellcasting["spells"]}
+
+    assert "Message" not in spells_by_name
+    assert "Mage Hand" in spells_by_name
+    assert spells_by_name["Beacon Spark"]["page_ref"]["slug"] == "spells/beacon-spark"
+    assert spells_by_name["Beacon Spark"]["systems_ref"]["slug"] == "phb-spell-light"
+
+
+def test_converged_imported_definitions_keep_profile_refs_but_remain_level_up_ineligible():
+    existing_definition = _minimal_imported_definition(
+        profile={
+            "class_ref": {"slug": "phb-class-wizard", "title": "Wizard", "entry_type": "class", "source_id": "PHB"},
+            "subclass_ref": {"slug": "phb-subclass-evocation", "title": "School of Evocation", "entry_type": "subclass", "source_id": "PHB"},
+            "species_ref": {"slug": "phb-race-human", "title": "Human", "entry_type": "race", "source_id": "PHB"},
+            "background_ref": {"slug": "phb-background-sage", "title": "Sage", "entry_type": "background", "source_id": "PHB"},
+            "classes": [
+                {
+                    "class_name": "Wizard",
+                    "subclass_name": "School of Evocation",
+                    "level": 3,
+                    "systems_ref": {"slug": "phb-class-wizard", "title": "Wizard", "entry_type": "class", "source_id": "PHB"},
+                    "subclass_ref": {"slug": "phb-subclass-evocation", "title": "School of Evocation", "entry_type": "subclass", "source_id": "PHB"},
+                }
+            ],
+        },
+    )
+    incoming_definition = _minimal_imported_definition()
+
+    converged = converge_imported_definition(
+        incoming_definition,
+        existing_definition=existing_definition,
+    )
+
+    assert converged.profile["class_ref"]["slug"] == "phb-class-wizard"
+    assert converged.profile["subclass_ref"]["slug"] == "phb-subclass-evocation"
+    assert converged.profile["species_ref"]["slug"] == "phb-race-human"
+    assert converged.profile["background_ref"]["slug"] == "phb-background-sage"
+    assert converged.profile["classes"][0]["systems_ref"]["slug"] == "phb-class-wizard"
+    assert converged.profile["classes"][0]["subclass_ref"]["slug"] == "phb-subclass-evocation"
+    assert supports_native_level_up(converged) is False
 
 
