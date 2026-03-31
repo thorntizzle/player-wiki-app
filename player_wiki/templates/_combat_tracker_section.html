@@ -1,4 +1,5 @@
 <section class="section-block" id="combat-tracker">
+  {% set return_to_dm = combat_return_view == 'dm' %}
   <div class="section-heading">
     <h2>Turn order</h2>
     <p class="meta">Highest turn value acts first. The current-turn badge marks the active combatant.</p>
@@ -11,7 +12,13 @@
           <div class="combatant-card__header">
             <div>
               <p class="card-kicker">{{ combatant.type_label }}</p>
-              <h3>{{ combatant.name }}</h3>
+              <h3>
+                {% if combatant.can_open_character_page %}
+                  <a href="{{ url_for('campaign_combat_character_view', campaign_slug=campaign.slug, combatant=combatant.id) }}">{{ combatant.name }}</a>
+                {% else %}
+                  {{ combatant.name }}
+                {% endif %}
+              </h3>
               {% if combatant.subtitle %}
                 <p class="meta">{{ combatant.subtitle }}</p>
               {% endif %}
@@ -60,6 +67,9 @@
               class="stack-form combat-form"
               data-combat-async
             >
+              {% if return_to_dm %}
+                <input type="hidden" name="combat_view" value="dm">
+              {% endif %}
               {% if combatant.state_revision is not none %}
                 <input type="hidden" name="expected_revision" value="{{ combatant.state_revision }}">
               {% endif %}
@@ -97,6 +107,9 @@
                 class="stack-form combat-form combat-form--compact"
                 data-combat-async
               >
+                {% if return_to_dm %}
+                  <input type="hidden" name="combat_view" value="dm">
+                {% endif %}
                 <label class="field">
                   <span>Turn value</span>
                   <input type="number" name="turn_value" value="{{ combatant.turn_value }}">
@@ -110,6 +123,9 @@
                 class="stack-form combat-form combat-form--compact"
                 data-combat-async
               >
+                {% if return_to_dm %}
+                  <input type="hidden" name="combat_view" value="dm">
+                {% endif %}
                 <p class="meta">Refreshes action, bonus action, reaction, and movement at the start of this turn.</p>
                 <button type="submit">Set current turn</button>
               </form>
@@ -120,6 +136,9 @@
                 class="stack-form combat-form"
                 data-combat-async
               >
+                {% if return_to_dm %}
+                  <input type="hidden" name="combat_view" value="dm">
+                {% endif %}
                 <div class="combat-checkbox-row">
                   <label><input type="checkbox" name="has_action" value="1" {% if combatant.has_action %}checked{% endif %}> Action ready</label>
                   <label><input type="checkbox" name="has_bonus_action" value="1" {% if combatant.has_bonus_action %}checked{% endif %}> Bonus action ready</label>
@@ -155,6 +174,9 @@
                         action="{{ url_for('campaign_combat_delete_condition', campaign_slug=campaign.slug, condition_id=condition.id) }}"
                         data-combat-async
                       >
+                        {% if return_to_dm %}
+                          <input type="hidden" name="combat_view" value="dm">
+                        {% endif %}
                         <button class="ghost-button" type="submit">Remove</button>
                       </form>
                     {% endif %}
@@ -172,6 +194,9 @@
                 class="stack-form combat-form"
                 data-combat-async
               >
+                {% if return_to_dm %}
+                  <input type="hidden" name="combat_view" value="dm">
+                {% endif %}
                 <div class="combat-form-grid">
                   <label class="field">
                     <span>Condition</span>
@@ -191,6 +216,9 @@
                 action="{{ url_for('campaign_combat_delete_combatant', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
                 data-combat-async
               >
+                {% if return_to_dm %}
+                  <input type="hidden" name="combat_view" value="dm">
+                {% endif %}
                 <button class="ghost-button" type="submit">Remove combatant</button>
               </form>
             {% endif %}

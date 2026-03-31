@@ -1768,8 +1768,14 @@ button {
 }
 
 .combat-layout .sidebar,
-.combat-layout .sidebar-card {
+.combat-layout .sidebar-card,
+.combat-character-layout .sidebar,
+.combat-character-layout .sidebar-card {
   min-width: 0;
+}
+
+.combat-character-layout {
+  grid-template-columns: minmax(0, 1.25fr) minmax(260px, 0.75fr);
 }
 
 .combat-summary-card,
@@ -1789,6 +1795,10 @@ button {
 
 .combat-summary-grid {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.combat-summary-grid--snapshot {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 }
 
 .combat-summary-grid h2 {
@@ -1905,6 +1915,20 @@ button {
 
 .combat-condition-item p {
   margin: 0.25rem 0 0;
+}
+
+.combat-target-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.combat-character-snapshot {
+  display: grid;
+  gap: 1rem;
+}
+
+.combat-conditions--compact {
+  gap: 0.75rem;
 }
 
 @media (max-width: 820px) {

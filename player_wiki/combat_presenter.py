@@ -84,6 +84,12 @@ def present_combat_tracker(
                     and bool(combatant.character_slug)
                     and combatant.character_slug in owned_character_slugs
                 ),
+                "can_open_character_page": combatant.is_player_character
+                and bool(combatant.character_slug)
+                and (
+                    can_manage_combat
+                    or combatant.character_slug in owned_character_slugs
+                ),
                 "can_manage_combat": can_manage_combat,
                 "state_revision": (
                     character_record.state_record.revision if character_record is not None else None

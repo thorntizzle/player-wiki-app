@@ -1,0 +1,10 @@
+<nav aria-label="Combat pages">
+  {% for subpage in combat_subpages %}
+    <a
+      class="{% if subpage.is_active %}button-link{% else %}ghost-button{% endif %}"
+      href="{{ subpage.href }}"
+    >
+      {{ subpage.label }}
+    </a>
+  {% endfor %}
+</nav>

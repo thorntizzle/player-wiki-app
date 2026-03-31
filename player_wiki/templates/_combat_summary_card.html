@@ -1,4 +1,5 @@
 <article class="card combat-summary-card" id="combat-summary">
+  {% set return_to_dm = combat_return_view == 'dm' %}
   <div class="combat-summary-grid">
     <div>
       <p class="card-kicker">Round</p>
@@ -26,15 +27,23 @@
         action="{{ url_for('campaign_combat_advance_turn', campaign_slug=campaign.slug) }}"
         data-combat-async
       >
+        {% if return_to_dm %}
+          <input type="hidden" name="combat_view" value="dm">
+        {% endif %}
         <button type="submit">Advance turn</button>
       </form>
-      <form
-        method="post"
-        action="{{ url_for('campaign_combat_clear', campaign_slug=campaign.slug) }}"
-        data-combat-async
-      >
-        <button class="ghost-button" type="submit">Clear tracker</button>
-      </form>
+      {% if show_clear_tracker_in_summary %}
+        <form
+          method="post"
+          action="{{ url_for('campaign_combat_clear', campaign_slug=campaign.slug) }}"
+          data-combat-async
+        >
+          {% if return_to_dm %}
+            <input type="hidden" name="combat_view" value="dm">
+          {% endif %}
+          <button class="ghost-button" type="submit">Clear tracker</button>
+        </form>
+      {% endif %}
     </div>
   {% endif %}
 </article>

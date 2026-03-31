@@ -105,6 +105,34 @@ def test_campaign_member_can_open_combat_page_and_campaign_links_to_it(client, s
     assert "Combat tracker" in combat_html
     assert "Turn order" in combat_html
     assert "Current limits" in combat_html
+    assert "Character" in combat_html
+    assert "DM page" not in combat_html
+    assert "Add player character" not in combat_html
+    assert "Add NPC from Systems" not in combat_html
+    assert "Add custom NPC combatant" not in combat_html
+
+
+def test_dm_can_open_combat_dm_page_and_players_cannot(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    dm_page = client.get("/campaigns/linden-pass/combat/dm")
+
+    assert dm_page.status_code == 200
+    dm_html = dm_page.get_data(as_text=True)
+    assert "Combat DM" in dm_html
+    assert "Combat" in dm_html
+    assert "Character" in dm_html
+    assert "DM page" in dm_html
+    assert ">Status<" not in dm_html
+    assert "Add player character" in dm_html
+    assert "Add NPC from Systems" in dm_html
+    assert "Add custom NPC combatant" in dm_html
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    player_dm_page = client.get("/campaigns/linden-pass/combat/dm")
+    assert player_dm_page.status_code == 403
 
 
 def test_combat_live_state_and_async_updates_return_partials(app, client, sign_in, users):
@@ -122,6 +150,7 @@ def test_combat_live_state_and_async_updates_return_partials(app, client, sign_i
     assert add_player_payload["ok"] is True
     assert "Player character added to the combat tracker." in add_player_payload["flash_html"]
     assert "Arden March" in add_player_payload["tracker_html"]
+    assert "controls_html" not in add_player_payload
 
     glenn = _find_combatant(app, character_slug="arden-march")
     assert glenn is not None
@@ -155,7 +184,7 @@ def test_dm_can_add_systems_monster_to_combat_tracker(app, client, sign_in, user
     goblin_entry_key = _import_systems_goblin(app, tmp_path)
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
-    combat_page = client.get("/campaigns/linden-pass/combat")
+    combat_page = client.get("/campaigns/linden-pass/combat/dm")
     assert combat_page.status_code == 200
     combat_html = combat_page.get_data(as_text=True)
     assert "Add NPC from Systems" in combat_html
@@ -199,7 +228,7 @@ def test_dm_can_add_systems_monster_to_combat_tracker(app, client, sign_in, user
     assert combatant.movement_total == 30
 
 
-def test_dm_combat_page_does_not_eager_load_system_monster_choices(
+def test_dm_combat_dm_page_does_not_eager_load_system_monster_choices(
     app, client, sign_in, users, tmp_path, monkeypatch
 ):
     _import_systems_goblin(app, tmp_path)
@@ -214,13 +243,49 @@ def test_dm_combat_page_does_not_eager_load_system_monster_choices(
     monkeypatch.setattr(systems_service, "search_monster_entries_for_campaign", fail_load)
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
-    response = client.get("/campaigns/linden-pass/combat")
+    response = client.get("/campaigns/linden-pass/combat/dm")
 
     assert response.status_code == 200
     body = response.get_data(as_text=True)
     assert "Add NPC from Systems" in body
     assert "Search monsters" in body
     assert "Goblin - MM" not in body
+
+
+def test_dm_page_async_mutations_return_controls_partial_and_non_async_redirects_back_to_dm_page(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    async_response = client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18, "combat_view": "dm"},
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert async_response.status_code == 200
+    async_payload = async_response.get_json()
+    assert async_payload["ok"] is True
+    assert "Arden March" in async_payload["tracker_html"]
+    assert "Add player character" in async_payload["controls_html"]
+
+    redirect_response = client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+            "combat_view": "dm",
+        },
+        follow_redirects=False,
+    )
+
+    assert redirect_response.status_code == 302
+    assert redirect_response.headers["Location"].endswith("/campaigns/linden-pass/combat/dm#combat-tracker")
 
 
 def test_dm_can_add_player_character_and_npc_combatants_and_turn_order_sorts_high_to_low(
@@ -371,6 +436,79 @@ def test_owner_player_can_update_own_pc_vitals_from_combat_tracker(
     assert updated_combatant is not None
     assert updated_combatant.current_hp == 35
     assert updated_combatant.temp_hp == 4
+
+
+def test_owner_player_can_open_combat_character_page_for_assigned_tracked_pc(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get("/campaigns/linden-pass/combat/character")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "Combat Character" in body
+    assert "Arden March" in body
+    assert "Combat snapshot" in body
+    assert "Tracked player characters" in body
+    assert "Open full sheet" not in body
+
+
+def test_dm_can_open_combat_character_page_for_any_tracked_pc(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    response = client.get("/campaigns/linden-pass/combat/character?character=arden-march")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "Arden March" in body
+    assert "Combat snapshot" in body
+    assert "Open full sheet" in body
+
+
+def test_player_without_owned_tracked_pc_gets_combat_character_empty_state(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    response = client.get("/campaigns/linden-pass/combat/character")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "No tracked player character available" in body
+
+
+def test_unassigned_player_cannot_open_other_pc_combat_character_page(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    response = client.get("/campaigns/linden-pass/combat/character?character=arden-march")
+
+    assert response.status_code == 403
 
 
 def test_unassigned_player_cannot_update_other_pc_combat_vitals(app, client, sign_in, users, get_character):

@@ -1,0 +1,291 @@
+{% extends "base.html" %}
+
+{% block title %}Combat Character | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Combat Character</p>
+    <h1>{{ campaign.title }} Combat Character</h1>
+    <p class="lede">
+      Focus on one tracked player character's combat-relevant details without leaving the encounter flow.
+    </p>
+    <div class="hero-actions">
+      {% include "_combat_view_switch.html" %}
+      {% if can_view_full_character_sheet and full_character_sheet_url %}
+        <a class="ghost-button" href="{{ full_character_sheet_url }}">Open full sheet</a>
+      {% endif %}
+    </div>
+  </section>
+
+  {% if not combat_system_supported %}
+    <section class="card auth-card">
+      <h2>Combat tracker not configured for this system yet</h2>
+      <p>This campaign uses {{ campaign.system or "an unknown system" }}, and the current combat tracker is only implemented for DND-5E right now.</p>
+    </section>
+  {% elif selected_combatant and selected_combat_character %}
+    <div class="page-layout combat-character-layout">
+      <section class="section-list">
+        <div
+          data-combat-character-live-root
+          data-combat-live-url="{{ url_for('campaign_combat_character_live_state', campaign_slug=campaign.slug, combatant=selected_combatant_id) }}"
+          data-combat-state-token="{{ combat_character_state_token }}"
+        >
+          <div data-combat-character-snapshot-root>
+            {% include "_combat_character_snapshot.html" %}
+          </div>
+        </div>
+
+        {% if selected_combat_overview_stats %}
+          <section class="read-section">
+            <div class="section-heading">
+              <h2>At a glance</h2>
+            </div>
+            <div class="glance-grid">
+              {% for stat in selected_combat_overview_stats %}
+                <div class="glance-card">
+                  <span class="meta">{{ stat.label }}</span>
+                  <strong>{{ stat.value }}</strong>
+                </div>
+              {% endfor %}
+            </div>
+          </section>
+        {% endif %}
+
+        {% if selected_combat_character.resources %}
+          <section class="read-section">
+            <div class="section-heading">
+              <h2>Resources</h2>
+            </div>
+            <div class="resource-grid">
+              {% for resource in selected_combat_character.resources %}
+                <article class="resource-card">
+                  <h3>{{ resource.label }}</h3>
+                  <p class="resource-card__value">{{ resource.value }}</p>
+                  <p class="meta">Resets: {{ resource.reset_label }}</p>
+                  {% if resource.notes %}
+                    <p class="meta">{{ resource.notes }}</p>
+                  {% endif %}
+                </article>
+              {% endfor %}
+            </div>
+          </section>
+        {% endif %}
+
+        {% if selected_combat_character.attacks %}
+          <section class="read-section">
+            <div class="section-heading">
+              <h2>Attacks</h2>
+            </div>
+            <div class="attack-grid">
+              {% for attack in selected_combat_character.attacks %}
+                <article class="attack-card">
+                  <div class="section-heading">
+                    <h3>
+                      {% if attack.href %}
+                        <a href="{{ attack.href }}">{{ attack.name }}</a>
+                      {% else %}
+                        {{ attack.name }}
+                      {% endif %}
+                    </h3>
+                    <span class="meta">{{ attack.category }}</span>
+                  </div>
+                  <p><strong>{{ attack.attack_bonus }}</strong> to hit</p>
+                  <p><strong>{{ attack.damage }}</strong></p>
+                  {% if attack.notes %}
+                    <p class="meta">{{ attack.notes }}</p>
+                  {% endif %}
+                </article>
+              {% endfor %}
+            </div>
+          </section>
+        {% endif %}
+
+        {% if selected_combat_character.spellcasting %}
+          <section class="read-section">
+            <div class="section-heading">
+              <h2>Spellcasting</h2>
+            </div>
+            <div class="detail-grid">
+              <article class="detail-card">
+                <h3>{{ selected_combat_character.spellcasting.spellcasting_class or "Spellcasting" }}</h3>
+                <p>
+                  {{ selected_combat_character.spellcasting.spellcasting_ability }} spellcasting
+                  {% if selected_combat_character.spellcasting.spell_save_dc %}
+                    | Save DC {{ selected_combat_character.spellcasting.spell_save_dc }}
+                  {% endif %}
+                  {% if selected_combat_character.spellcasting.spell_attack_bonus %}
+                    | Attack {{ selected_combat_character.spellcasting.spell_attack_bonus }}
+                  {% endif %}
+                </p>
+              </article>
+              {% if selected_combat_character.spellcasting.slots %}
+                <article class="detail-card">
+                  <h3>Spell slots</h3>
+                  <ul class="plain-list slot-list">
+                    {% for slot in selected_combat_character.spellcasting.slots %}
+                      <li>
+                        <span>{{ slot.label }}</span>
+                        <strong>{{ slot.available }} available / {{ slot.max }}</strong>
+                      </li>
+                    {% endfor %}
+                  </ul>
+                </article>
+              {% endif %}
+            </div>
+
+            {% if selected_combat_character.spellcasting.spells %}
+              <div class="spell-list">
+                {% for spell in selected_combat_character.spellcasting.spells %}
+                  <article class="spell-row">
+                    <div class="spell-row__header">
+                      <h3>
+                        {% if spell.href %}
+                          <a href="{{ spell.href }}">{{ spell.name }}</a>
+                        {% else %}
+                          {{ spell.name }}
+                        {% endif %}
+                      </h3>
+                      {% if spell.badges %}
+                        <div class="badge-list">
+                          {% for badge in spell.badges %}
+                            <span class="meta-badge">{{ badge }}</span>
+                          {% endfor %}
+                        </div>
+                      {% endif %}
+                    </div>
+                    <p class="meta">
+                      {{ spell.casting_time }} | {{ spell.range }} | {{ spell.duration }} | {{ spell.components }}
+                      {% if spell.save_or_hit and spell.save_or_hit != '--' %}
+                        | {{ spell.save_or_hit }}
+                      {% endif %}
+                    </p>
+                  </article>
+                {% endfor %}
+              </div>
+            {% endif %}
+          </section>
+        {% endif %}
+
+        {% if selected_combat_character.feature_groups %}
+          <section class="read-section">
+            <div class="section-heading">
+              <h2>Features and traits</h2>
+            </div>
+            <div class="feature-groups">
+              {% for group in selected_combat_character.feature_groups %}
+                <section class="feature-group">
+                  <h3>{{ group.title }}</h3>
+                  <div class="feature-stack">
+                    {% for feature in group.entries %}
+                      <article class="feature-row">
+                        <div class="feature-row__header">
+                          <h4>
+                            {% if feature.href %}
+                              <a href="{{ feature.href }}">{{ feature.name }}</a>
+                            {% else %}
+                              {{ feature.name }}
+                            {% endif %}
+                          </h4>
+                          {% if feature.metadata %}
+                            <p class="meta">{{ feature.metadata | join(" | ") }}</p>
+                          {% endif %}
+                        </div>
+                        {% if feature.description_html %}
+                          <div class="article-body article-body--compact">{{ feature.description_html | safe }}</div>
+                        {% endif %}
+                      </article>
+                    {% endfor %}
+                  </div>
+                </section>
+              {% endfor %}
+            </div>
+          </section>
+        {% endif %}
+      </section>
+
+      <aside class="sidebar combat-character-sidebar">
+        <section class="card sidebar-card">
+          <h2>Tracked player characters</h2>
+          {% if combat_character_targets %}
+            <div class="combat-target-list">
+              {% for target in combat_character_targets %}
+                <a class="{% if target.is_active %}button-link{% else %}ghost-button{% endif %}" href="{{ target.href }}">
+                  {{ target.name }}
+                </a>
+                {% if target.subtitle %}
+                  <p class="meta">{{ target.subtitle }}</p>
+                {% endif %}
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="meta">No player characters you can open are currently in the tracker.</p>
+          {% endif %}
+        </section>
+      </aside>
+    </div>
+  {% else %}
+    <section class="card auth-card">
+      <h2>No tracked player character available</h2>
+      <p>
+        There is not currently a tracked player character you can open from combat.
+        Once a DM adds your character to the tracker, it will appear here.
+      </p>
+    </section>
+  {% endif %}
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    (() => {
+      const liveRoot = document.querySelector("[data-combat-character-live-root]");
+      if (!liveRoot) {
+        return;
+      }
+
+      const snapshotRoot = document.querySelector("[data-combat-character-snapshot-root]");
+      const pollUrl = liveRoot.dataset.combatLiveUrl;
+      let combatStateToken = liveRoot.dataset.combatStateToken || "";
+      let pollInFlight = false;
+
+      const refreshLiveState = async () => {
+        if (pollInFlight || document.hidden) {
+          return;
+        }
+
+        pollInFlight = true;
+        try {
+          const response = await fetch(pollUrl, {
+            headers: { "X-Requested-With": "XMLHttpRequest" },
+            cache: "no-store",
+            credentials: "same-origin",
+          });
+          if (!response.ok) {
+            return;
+          }
+
+          const payload = await response.json();
+          const nextToken = payload.combat_state_token ? String(payload.combat_state_token) : "";
+          if (nextToken === combatStateToken) {
+            return;
+          }
+          if (snapshotRoot && typeof payload.snapshot_html === "string") {
+            snapshotRoot.innerHTML = payload.snapshot_html;
+          }
+          combatStateToken = nextToken;
+          liveRoot.dataset.combatStateToken = combatStateToken;
+        } catch (_) {
+          return;
+        } finally {
+          pollInFlight = false;
+        }
+      };
+
+      window.setInterval(refreshLiveState, 1000);
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) {
+          refreshLiveState();
+        }
+      });
+    })();
+  </script>
+{% endblock %}

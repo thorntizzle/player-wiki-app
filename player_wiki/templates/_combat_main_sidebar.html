@@ -1,0 +1,25 @@
+<aside class="sidebar">
+  <section class="card sidebar-card">
+    <h2>Combat pages</h2>
+    <p class="meta">Use the main board for quick encounter state changes and turn order.</p>
+    <p class="meta">The Character page focuses on a tracked player character during combat.</p>
+    {% if can_manage_combat %}
+      <p class="meta">Encounter setup, seeding, and cleanup live on the DM page.</p>
+    {% endif %}
+    <div class="hero-actions">
+      <a class="ghost-button" href="{{ url_for('campaign_combat_character_view', campaign_slug=campaign.slug) }}">Character</a>
+      {% if can_manage_combat %}
+        <a class="ghost-button" href="{{ url_for('campaign_combat_dm_view', campaign_slug=campaign.slug) }}">DM page</a>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card sidebar-card">
+    <h2>Current limits</h2>
+    <p class="meta">This first pass is tuned for DND-5E action economy and combat conditions.</p>
+    <p class="meta">Systems monster entries can seed NPC combatants directly from the shared DND 5E library.</p>
+    <p class="meta">Uploaded DM Content statblocks can seed NPC combatants, and custom DM Content conditions appear in the combat condition picker.</p>
+    <p class="meta">Inline statblock inspection and the dedicated DM Status board are still upcoming slices.</p>
+    <p class="meta">Player-character HP and temp HP edits made here sync back into the existing character state.</p>
+  </section>
+</aside>
