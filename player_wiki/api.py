@@ -2390,6 +2390,8 @@ def register_api(app) -> None:
                 max_hp=statblock.max_hp,
                 temp_hp=0,
                 movement_total=statblock.movement_total,
+                source_kind="dm_statblock",
+                source_ref=str(statblock.id),
                 created_by_user_id=user.id,
             )
         except CampaignCombatValidationError as exc:
@@ -2432,6 +2434,8 @@ def register_api(app) -> None:
                 max_hp=monster_seed.max_hp,
                 temp_hp=0,
                 movement_total=monster_seed.movement_total,
+                source_kind="systems_monster",
+                source_ref=monster_entry.entry_key,
                 created_by_user_id=user.id,
             )
         except CampaignCombatValidationError as exc:

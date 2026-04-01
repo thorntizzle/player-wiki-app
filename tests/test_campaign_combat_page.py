@@ -1,9 +1,14 @@
 ﻿from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
+from player_wiki.app import create_app
+from player_wiki.config import Config
+from player_wiki.db import init_database
 from player_wiki.systems_importer import Dnd5eSystemsImporter
+from tests.sample_data import TEST_CAMPAIGN_SLUG, build_test_campaigns_dir
 
 
 def _async_headers():
@@ -89,6 +94,28 @@ def _import_systems_goblin(app, tmp_path) -> str:
         return goblin.entry_key
 
 
+def _create_dm_statblock(app, *, created_by_user_id: int | None = None):
+    markdown_text = """---
+title: Brass Hound
+armor_class: 15
+hp: 30
+speed: 40 ft.
+initiative_bonus: 2
+---
+
+## Bite
+
++6 to hit, 8 piercing damage.
+"""
+    with app.app_context():
+        return app.extensions["campaign_dm_content_service"].create_statblock(
+            TEST_CAMPAIGN_SLUG,
+            filename="brass-hound.md",
+            data_blob=markdown_text.encode("utf-8"),
+            created_by_user_id=created_by_user_id,
+        )
+
+
 def test_campaign_member_can_open_combat_page_and_campaign_links_to_it(client, sign_in, users):
     sign_in(users["party"]["email"], users["party"]["password"])
 
@@ -107,23 +134,26 @@ def test_campaign_member_can_open_combat_page_and_campaign_links_to_it(client, s
     assert "Current limits" in combat_html
     assert "Character" in combat_html
     assert "DM page" not in combat_html
+    assert "/campaigns/linden-pass/combat/status" not in combat_html
     assert "Add player character" not in combat_html
     assert "Add NPC from Systems" not in combat_html
     assert "Add custom NPC combatant" not in combat_html
 
 
-def test_dm_can_open_combat_dm_page_and_players_cannot(client, sign_in, users):
+def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
     dm_page = client.get("/campaigns/linden-pass/combat/dm")
+    status_page = client.get("/campaigns/linden-pass/combat/status")
 
     assert dm_page.status_code == 200
+    assert status_page.status_code == 200
     dm_html = dm_page.get_data(as_text=True)
     assert "Combat DM" in dm_html
     assert "Combat" in dm_html
     assert "Character" in dm_html
+    assert "Status" in dm_html
     assert "DM page" in dm_html
-    assert ">Status<" not in dm_html
     assert "Add player character" in dm_html
     assert "Add NPC from Systems" in dm_html
     assert "Add custom NPC combatant" in dm_html
@@ -132,7 +162,16 @@ def test_dm_can_open_combat_dm_page_and_players_cannot(client, sign_in, users):
     sign_in(users["party"]["email"], users["party"]["password"])
 
     player_dm_page = client.get("/campaigns/linden-pass/combat/dm")
+    player_status_page = client.get("/campaigns/linden-pass/combat/status")
     assert player_dm_page.status_code == 403
+    assert player_status_page.status_code == 403
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+
+    admin_status_page = client.get("/campaigns/linden-pass/combat/status")
+    assert admin_status_page.status_code == 200
+    assert "/campaigns/linden-pass/combat/status" in admin_status_page.get_data(as_text=True)
 
 
 def test_combat_live_state_and_async_updates_return_partials(app, client, sign_in, users):
@@ -668,4 +707,359 @@ def test_player_cannot_clear_combat_tracker(app, client, sign_in, users):
     assert response.status_code == 403
     combatant = _find_combatant(app, name="Clockwork Hound")
     assert combatant is not None
+
+
+def test_init_db_backfills_legacy_combatant_source_identity(tmp_path, monkeypatch):
+    campaigns_dir = build_test_campaigns_dir(tmp_path)
+    monkeypatch.setattr(Config, "CAMPAIGNS_DIR", campaigns_dir)
+
+    db_path = tmp_path / "legacy-player-wiki.sqlite3"
+    connection = sqlite3.connect(db_path)
+    connection.executescript(
+        """
+        CREATE TABLE campaign_combatants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            campaign_slug TEXT NOT NULL,
+            combatant_type TEXT NOT NULL,
+            character_slug TEXT,
+            display_name TEXT NOT NULL,
+            turn_value INTEGER NOT NULL DEFAULT 0,
+            initiative_bonus INTEGER NOT NULL DEFAULT 0,
+            current_hp INTEGER NOT NULL DEFAULT 0,
+            max_hp INTEGER NOT NULL DEFAULT 0,
+            temp_hp INTEGER NOT NULL DEFAULT 0,
+            movement_total INTEGER NOT NULL DEFAULT 0,
+            movement_remaining INTEGER NOT NULL DEFAULT 0,
+            has_action INTEGER NOT NULL DEFAULT 1,
+            has_bonus_action INTEGER NOT NULL DEFAULT 1,
+            has_reaction INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            created_by_user_id INTEGER,
+            updated_by_user_id INTEGER
+        );
+
+        INSERT INTO campaign_combatants (
+            campaign_slug,
+            combatant_type,
+            character_slug,
+            display_name,
+            turn_value,
+            initiative_bonus,
+            current_hp,
+            max_hp,
+            temp_hp,
+            movement_total,
+            movement_remaining,
+            has_action,
+            has_bonus_action,
+            has_reaction,
+            created_at,
+            updated_at
+        )
+        VALUES
+            ('linden-pass', 'player_character', 'arden-march', 'Arden March', 18, 3, 38, 38, 0, 30, 30, 1, 1, 1, '2026-03-31T12:00:00Z', '2026-03-31T12:00:00Z'),
+            ('linden-pass', 'npc', NULL, 'Clockwork Hound', 12, 2, 22, 22, 0, 40, 40, 1, 1, 1, '2026-03-31T12:00:00Z', '2026-03-31T12:00:00Z');
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    app = create_app()
+    app.config.update(TESTING=True, DB_PATH=db_path)
+
+    with app.app_context():
+        init_database()
+
+    connection = sqlite3.connect(db_path)
+    connection.row_factory = sqlite3.Row
+    rows = connection.execute(
+        """
+        SELECT display_name, character_slug, source_kind, source_ref
+        FROM campaign_combatants
+        ORDER BY id ASC
+        """
+    ).fetchall()
+    connection.close()
+
+    assert [dict(row) for row in rows] == [
+        {
+            "display_name": "Arden March",
+            "character_slug": "arden-march",
+            "source_kind": "character",
+            "source_ref": "arden-march",
+        },
+        {
+            "display_name": "Clockwork Hound",
+            "character_slug": None,
+            "source_kind": "manual_npc",
+            "source_ref": "",
+        },
+    ]
+
+
+def test_combat_and_dm_pages_render_context_panel_for_current_or_selected_combatant(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    hound = _find_combatant(app, name="Clockwork Hound")
+    assert arden is not None
+    assert hound is not None
+
+    client.post(
+        f"/campaigns/linden-pass/combat/combatants/{arden.id}/set-current",
+        follow_redirects=False,
+    )
+
+    combat_page = client.get("/campaigns/linden-pass/combat")
+    dm_page = client.get(f"/campaigns/linden-pass/combat/dm?combatant={hound.id}")
+
+    assert combat_page.status_code == 200
+    assert dm_page.status_code == 200
+    combat_html = combat_page.get_data(as_text=True)
+    dm_html = dm_page.get_data(as_text=True)
+    assert "Encounter context" in combat_html
+    assert "Arden March" in combat_html
+    assert "Encounter context" in dm_html
+    assert "Clockwork Hound" in dm_html
+    assert "Manual NPC" in dm_html
+
+
+def test_non_async_combat_mutations_preserve_explicit_combatant_focus_in_redirects(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+    hound = _find_combatant(app, name="Clockwork Hound")
+    assert hound is not None
+
+    combat_redirect = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{hound.id}/resources",
+        data={
+            "has_action": "1",
+            "movement_remaining": 15,
+            "combatant": hound.id,
+        },
+        follow_redirects=False,
+    )
+    dm_redirect = client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Brass Sentry",
+            "turn_value": 8,
+            "current_hp": 18,
+            "max_hp": 18,
+            "temp_hp": 0,
+            "movement_total": 30,
+            "combat_view": "dm",
+            "combatant": hound.id,
+        },
+        follow_redirects=False,
+    )
+
+    assert combat_redirect.status_code == 302
+    assert dm_redirect.status_code == 302
+    assert "/campaigns/linden-pass/combat?combatant=" in combat_redirect.headers["Location"]
+    assert f"combatant={hound.id}" in combat_redirect.headers["Location"]
+    assert "/campaigns/linden-pass/combat/dm?combatant=" in dm_redirect.headers["Location"]
+    assert f"combatant={hound.id}" in dm_redirect.headers["Location"]
+
+
+def test_dm_status_page_returns_404_for_invalid_explicit_target(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get("/campaigns/linden-pass/combat/status?combatant=9999")
+
+    assert response.status_code == 404
+
+
+def test_dm_status_page_renders_only_selected_pc_detail(app, client, sign_in, users, tmp_path):
+    goblin_entry_key = _import_systems_goblin(app, tmp_path)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/systems-monsters",
+        data={"entry_key": goblin_entry_key},
+        follow_redirects=False,
+    )
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    assert arden is not None
+
+    response = client.get(f"/campaigns/linden-pass/combat/status?combatant={arden.id}")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "Combat Status" in body
+    assert "Character detail" in body
+    assert "Arden March" in body
+    assert "Resources" in body
+    assert "Scimitar" not in body
+
+
+def test_dm_status_page_can_render_systems_monster_detail(app, client, sign_in, users, tmp_path):
+    goblin_entry_key = _import_systems_goblin(app, tmp_path)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/systems-monsters",
+        data={"entry_key": goblin_entry_key},
+        follow_redirects=False,
+    )
+
+    goblin = _find_combatant(app, name="Goblin")
+    assert goblin is not None
+
+    response = client.get(f"/campaigns/linden-pass/combat/status?combatant={goblin.id}")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "Systems monster" in body
+    assert "Open Systems entry" in body
+    assert "Scimitar" in body
+
+
+def test_dm_status_page_can_render_dm_content_statblock_detail(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    statblock = _create_dm_statblock(app, created_by_user_id=users["dm"]["id"])
+    client.post(
+        "/campaigns/linden-pass/combat/statblock-combatants",
+        data={"statblock_id": statblock.id},
+        follow_redirects=False,
+    )
+
+    brass_hound = _find_combatant(app, name="Brass Hound")
+    assert brass_hound is not None
+
+    response = client.get(f"/campaigns/linden-pass/combat/status?combatant={brass_hound.id}")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "DM Content statblock" in body
+    assert "Source file: brass-hound.md" in body
+    assert "Bite" in body
+
+
+def test_dm_status_page_shows_manual_npc_fallback_and_missing_source_fallback(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+    statblock = _create_dm_statblock(app, created_by_user_id=users["dm"]["id"])
+    client.post(
+        "/campaigns/linden-pass/combat/statblock-combatants",
+        data={"statblock_id": statblock.id},
+        follow_redirects=False,
+    )
+
+    clockwork_hound = _find_combatant(app, name="Clockwork Hound")
+    brass_hound = _find_combatant(app, name="Brass Hound")
+    assert clockwork_hound is not None
+    assert brass_hound is not None
+
+    manual_response = client.get(f"/campaigns/linden-pass/combat/status?combatant={clockwork_hound.id}")
+    assert manual_response.status_code == 200
+    assert "added manually" in manual_response.get_data(as_text=True)
+
+    with app.app_context():
+        app.extensions["campaign_dm_content_service"].delete_statblock(TEST_CAMPAIGN_SLUG, statblock.id)
+
+    missing_response = client.get(f"/campaigns/linden-pass/combat/status?combatant={brass_hound.id}")
+    assert missing_response.status_code == 200
+    missing_body = missing_response.get_data(as_text=True)
+    assert "Source detail unavailable" in missing_body
+    assert "no longer available" in missing_body
+
+
+def test_status_live_state_preserves_selected_target_and_returns_selected_detail(
+    app, client, sign_in, users, tmp_path
+):
+    goblin_entry_key = _import_systems_goblin(app, tmp_path)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/systems-monsters",
+        data={"entry_key": goblin_entry_key},
+        follow_redirects=False,
+    )
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    goblin = _find_combatant(app, name="Goblin")
+    assert arden is not None
+    assert goblin is not None
+
+    first_live_state = client.get(
+        f"/campaigns/linden-pass/combat/status/live-state?combatant={goblin.id}",
+        headers=_async_headers(),
+    )
+
+    assert first_live_state.status_code == 200
+    first_payload = first_live_state.get_json()
+    assert first_payload["selected_combatant_id"] == goblin.id
+    assert "Goblin" in first_payload["detail_html"]
+    assert "Scimitar" in first_payload["detail_html"]
+    assert "Arden March" not in first_payload["detail_html"]
+
+    client.post(
+        f"/campaigns/linden-pass/combat/combatants/{arden.id}/set-current",
+        follow_redirects=False,
+    )
+    second_live_state = client.get(
+        f"/campaigns/linden-pass/combat/status/live-state?combatant={goblin.id}",
+        headers=_async_headers(),
+    )
+
+    assert second_live_state.status_code == 200
+    second_payload = second_live_state.get_json()
+    assert second_payload["selected_combatant_id"] == goblin.id
+    assert "Goblin" in second_payload["detail_html"]
+    assert "Scimitar" in second_payload["detail_html"]
 

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Combat Status | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Combat Status</p>
+    <h1>{{ campaign.title }} Combat Status</h1>
+    <p class="lede">
+      Inspect active combatants in detail without leaving the combat feature.
+    </p>
+    <div class="hero-actions">
+      {% include "_combat_view_switch.html" %}
+    </div>
+  </section>
+
+  {% if not combat_system_supported %}
+    <section class="card auth-card">
+      <h2>Combat tracker not configured for this system yet</h2>
+      <p>This campaign uses {{ campaign.system or "an unknown system" }}, and the current combat tracker is only implemented for DND-5E right now.</p>
+    </section>
+  {% else %}
+    <div
+      class="page-layout combat-status-layout"
+      data-combat-status-live-root
+      data-combat-live-url="{{ url_for('campaign_combat_status_live_state', campaign_slug=campaign.slug) }}"
+      data-combat-status-base-url="{{ url_for('campaign_combat_status_view', campaign_slug=campaign.slug) }}"
+      data-combat-state-token="{{ combat_live_state_token }}"
+      data-selected-combatant-id="{{ selected_combatant_id or '' }}"
+    >
+      <aside class="sidebar combat-status-sidebar" data-combat-status-board-root>
+        {% include "_combat_status_board.html" %}
+      </aside>
+
+      <div data-combat-status-detail-root>
+        {% include "_combat_status_detail.html" %}
+      </div>
+    </div>
+  {% endif %}
+{% endblock %}
+
+{% block scripts %}
+  {% include "_combat_status_live_scripts.html" %}
+{% endblock %}

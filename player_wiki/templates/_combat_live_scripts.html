@@ -8,6 +8,7 @@
     const flashRoot = document.querySelector("[data-flash-stack-root]");
     const summaryRoot = document.querySelector("[data-combat-summary-root]");
     const trackerRoot = document.querySelector("[data-combat-tracker-root]");
+    const contextRoot = document.querySelector("[data-combat-context-root]");
     const controlsRoot = document.querySelector("[data-combat-controls-root]");
     const pollUrl = liveRoot.dataset.combatLiveUrl;
     let combatStateToken = liveRoot.dataset.combatStateToken || "";
@@ -168,6 +169,9 @@
       }
       if (trackerRoot && typeof payload.tracker_html === "string") {
         trackerRoot.innerHTML = payload.tracker_html;
+      }
+      if (contextRoot && typeof payload.context_html === "string") {
+        contextRoot.innerHTML = payload.context_html;
       }
       if (controlsRoot && typeof payload.controls_html === "string") {
         if (monsterSearchAbortController) {

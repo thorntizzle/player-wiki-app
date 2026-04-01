@@ -1767,11 +1767,26 @@ button {
   grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
 }
 
+.combat-status-layout {
+  grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.2fr);
+  align-items: start;
+}
+
 .combat-layout .sidebar,
 .combat-layout .sidebar-card,
+.combat-status-layout .sidebar,
+.combat-status-layout .sidebar-card,
 .combat-character-layout .sidebar,
 .combat-character-layout .sidebar-card {
   min-width: 0;
+}
+
+.combat-sidebar-stack,
+.combat-status-sidebar,
+.combat-status-board,
+.combat-status-detail-card {
+  display: grid;
+  gap: 1rem;
 }
 
 .combat-character-layout {
@@ -1862,6 +1877,10 @@ button {
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
 }
 
+.combat-stat-grid--compact {
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+}
+
 .combat-stat {
   display: grid;
   gap: 0.25rem;
@@ -1922,9 +1941,51 @@ button {
   gap: 0.65rem;
 }
 
+.combat-status-row {
+  display: grid;
+  gap: 0.85rem;
+  color: inherit;
+  text-decoration: none;
+}
+
+.combat-status-row--active {
+  border-color: var(--border-accent);
+  box-shadow: var(--shadow-strong);
+}
+
+.combat-status-row__header,
+.combat-status-row__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.combat-status-row__header {
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.combat-status-row__stats {
+  color: var(--muted);
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
 .combat-character-snapshot {
   display: grid;
   gap: 1rem;
+}
+
+.combat-context-card {
+  gap: 0.85rem;
+}
+
+.combat-status-detail-card {
+  align-content: start;
+}
+
+[data-combat-status-detail-root][data-loading='1'] {
+  opacity: 0.7;
 }
 
 .combat-conditions--compact {
@@ -1995,6 +2056,7 @@ button {
   .inventory-row__header,
   .dm-content-item__header,
   .combatant-card__header,
+  .combat-status-row__header,
   .combat-condition-item,
   .audit-row__header {
     flex-direction: column;
@@ -2007,6 +2069,14 @@ button {
 
   .character-layout {
     grid-template-columns: 1fr;
+  }
+
+  .combat-status-layout > [data-combat-status-detail-root] {
+    order: 1;
+  }
+
+  .combat-status-layout > .combat-status-sidebar {
+    order: 2;
   }
 
   .session-bar {

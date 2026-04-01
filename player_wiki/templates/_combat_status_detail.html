@@ -1,0 +1,81 @@
+{% if selected_combatant %}
+  <section class="section-list">
+    <div>
+      {% include "_combat_character_snapshot.html" %}
+    </div>
+
+    {% if combat_status_source_mode == "character" and selected_combat_character %}
+      <section class="card combat-status-detail-card">
+        <div class="section-heading">
+          <div>
+            <h2>Character detail</h2>
+            <p class="meta">Combat-relevant sheet detail for the selected tracked player character.</p>
+          </div>
+          <div class="hero-actions">
+            {% if combat_status_character_url %}
+              <a class="ghost-button" href="{{ combat_status_character_url }}">Open Character</a>
+            {% endif %}
+            {% if can_view_full_character_sheet and full_character_sheet_url %}
+              <a class="ghost-button" href="{{ full_character_sheet_url }}">Open full sheet</a>
+            {% endif %}
+          </div>
+        </div>
+      </section>
+      {% include "_combat_character_detail_sections.html" %}
+    {% elif combat_status_source_mode == "dm_statblock" and combat_status_source_available and combat_status_statblock %}
+      <section class="card combat-status-detail-card">
+        <div class="section-heading">
+          <div>
+            <h2>DM Content statblock</h2>
+            <p class="meta">Source file: {{ combat_status_statblock.source_filename }}</p>
+          </div>
+          <div class="badge-list">
+            {% if combat_status_statblock.armor_class is not none %}
+              <span class="meta-badge">AC {{ combat_status_statblock.armor_class }}</span>
+            {% endif %}
+            <span class="meta-badge">HP {{ combat_status_statblock.max_hp }}</span>
+            <span class="meta-badge">Speed {{ combat_status_statblock.speed_text }}</span>
+            <span class="meta-badge">Init {{ combat_status_statblock.initiative_bonus_label }}</span>
+          </div>
+        </div>
+        {% if combat_status_statblock.body_html %}
+          <div class="article-body article-body--compact">{{ combat_status_statblock.body_html | safe }}</div>
+        {% else %}
+          <p class="meta">This statblock does not currently have rendered body text.</p>
+        {% endif %}
+      </section>
+    {% elif combat_status_source_mode == "systems_monster" and combat_status_source_available and combat_status_systems_entry %}
+      <section class="card combat-status-detail-card">
+        <div class="section-heading">
+          <div>
+            <h2>Systems monster</h2>
+            <p class="meta">Source {{ combat_status_systems_entry.source_id }}</p>
+          </div>
+          <div class="hero-actions">
+            <a class="ghost-button" href="{{ combat_status_systems_entry.href }}">Open Systems entry</a>
+          </div>
+        </div>
+        <div class="badge-list">
+          <span class="meta-badge">HP {{ combat_status_systems_entry.max_hp }}</span>
+          <span class="meta-badge">Speed {{ combat_status_systems_entry.speed_label }}</span>
+          <span class="meta-badge">Init {{ combat_status_systems_entry.initiative_bonus_label }}</span>
+        </div>
+        {% if combat_status_systems_entry.body_html %}
+          <div class="article-body article-body--compact">{{ combat_status_systems_entry.body_html | safe }}</div>
+        {% else %}
+          <p class="meta">This Systems monster does not currently have rendered detail text.</p>
+        {% endif %}
+      </section>
+    {% else %}
+      <section class="card combat-status-detail-card">
+        <h2>Source detail unavailable</h2>
+        <p>{{ combat_status_source_unavailable_message }}</p>
+      </section>
+    {% endif %}
+  </section>
+{% else %}
+  <section class="card auth-card">
+    <h2>No combatant selected</h2>
+    <p>Add combatants and set a current turn to inspect encounter detail here.</p>
+  </section>
+{% endif %}

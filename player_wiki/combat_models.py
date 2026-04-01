@@ -3,6 +3,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+COMBAT_SOURCE_KIND_CHARACTER = "character"
+COMBAT_SOURCE_KIND_MANUAL_NPC = "manual_npc"
+COMBAT_SOURCE_KIND_DM_STATBLOCK = "dm_statblock"
+COMBAT_SOURCE_KIND_SYSTEMS_MONSTER = "systems_monster"
+COMBAT_SOURCE_KINDS = (
+    COMBAT_SOURCE_KIND_CHARACTER,
+    COMBAT_SOURCE_KIND_MANUAL_NPC,
+    COMBAT_SOURCE_KIND_DM_STATBLOCK,
+    COMBAT_SOURCE_KIND_SYSTEMS_MONSTER,
+)
+
 
 @dataclass(slots=True)
 class CampaignCombatTrackerRecord:
@@ -19,6 +30,8 @@ class CampaignCombatantRecord:
     campaign_slug: str
     combatant_type: str
     character_slug: str | None
+    source_kind: str
+    source_ref: str
     display_name: str
     turn_value: int
     initiative_bonus: int

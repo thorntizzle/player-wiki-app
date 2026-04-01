@@ -70,6 +70,9 @@
               {% if return_to_dm %}
                 <input type="hidden" name="combat_view" value="dm">
               {% endif %}
+              {% if requested_combatant_id %}
+                <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
+              {% endif %}
               {% if combatant.state_revision is not none %}
                 <input type="hidden" name="expected_revision" value="{{ combatant.state_revision }}">
               {% endif %}
@@ -110,6 +113,9 @@
                 {% if return_to_dm %}
                   <input type="hidden" name="combat_view" value="dm">
                 {% endif %}
+                {% if requested_combatant_id %}
+                  <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
+                {% endif %}
                 <label class="field">
                   <span>Turn value</span>
                   <input type="number" name="turn_value" value="{{ combatant.turn_value }}">
@@ -126,6 +132,9 @@
                 {% if return_to_dm %}
                   <input type="hidden" name="combat_view" value="dm">
                 {% endif %}
+                {% if requested_combatant_id %}
+                  <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
+                {% endif %}
                 <p class="meta">Refreshes action, bonus action, reaction, and movement at the start of this turn.</p>
                 <button type="submit">Set current turn</button>
               </form>
@@ -138,6 +147,9 @@
               >
                 {% if return_to_dm %}
                   <input type="hidden" name="combat_view" value="dm">
+                {% endif %}
+                {% if requested_combatant_id %}
+                  <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
                 {% endif %}
                 <div class="combat-checkbox-row">
                   <label><input type="checkbox" name="has_action" value="1" {% if combatant.has_action %}checked{% endif %}> Action ready</label>
@@ -177,6 +189,9 @@
                         {% if return_to_dm %}
                           <input type="hidden" name="combat_view" value="dm">
                         {% endif %}
+                        {% if requested_combatant_id %}
+                          <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
+                        {% endif %}
                         <button class="ghost-button" type="submit">Remove</button>
                       </form>
                     {% endif %}
@@ -196,6 +211,9 @@
               >
                 {% if return_to_dm %}
                   <input type="hidden" name="combat_view" value="dm">
+                {% endif %}
+                {% if requested_combatant_id %}
+                  <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
                 {% endif %}
                 <div class="combat-form-grid">
                   <label class="field">
@@ -218,6 +236,9 @@
               >
                 {% if return_to_dm %}
                   <input type="hidden" name="combat_view" value="dm">
+                {% endif %}
+                {% if requested_combatant_id %}
+                  <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
                 {% endif %}
                 <button class="ghost-button" type="submit">Remove combatant</button>
               </form>

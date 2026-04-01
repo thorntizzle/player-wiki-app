@@ -246,6 +246,8 @@ CREATE TABLE IF NOT EXISTS campaign_combatants (
     campaign_slug TEXT NOT NULL,
     combatant_type TEXT NOT NULL CHECK (combatant_type IN ('player_character', 'npc')),
     character_slug TEXT,
+    source_kind TEXT NOT NULL DEFAULT 'manual_npc' CHECK (source_kind IN ('character', 'manual_npc', 'dm_statblock', 'systems_monster')),
+    source_ref TEXT NOT NULL DEFAULT '',
     display_name TEXT NOT NULL,
     turn_value INTEGER NOT NULL DEFAULT 0,
     initiative_bonus INTEGER NOT NULL DEFAULT 0,
@@ -491,6 +493,7 @@ def init_database() -> None:
     _migrate_user_preferences_for_session_chat_order(connection)
     _migrate_campaign_visibility_settings_for_additional_scopes(connection)
     _migrate_campaign_session_articles_for_source_page_ref(connection)
+    _migrate_campaign_combatants_for_source_identity(connection)
     connection.commit()
 
 
@@ -571,5 +574,55 @@ def _migrate_campaign_session_articles_for_source_page_ref(connection: sqlite3.C
         """
         ALTER TABLE campaign_session_articles
         ADD COLUMN source_page_ref TEXT NOT NULL DEFAULT ''
+        """
+    )
+
+
+def _migrate_campaign_combatants_for_source_identity(connection: sqlite3.Connection) -> None:
+    columns = {
+        str(row["name"] or "")
+        for row in connection.execute("PRAGMA table_info(campaign_combatants)").fetchall()
+    }
+    if not columns:
+        return
+
+    if "source_kind" not in columns:
+        connection.execute(
+            """
+            ALTER TABLE campaign_combatants
+            ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'manual_npc'
+            """
+        )
+    if "source_ref" not in columns:
+        connection.execute(
+            """
+            ALTER TABLE campaign_combatants
+            ADD COLUMN source_ref TEXT NOT NULL DEFAULT ''
+            """
+        )
+
+    connection.execute(
+        """
+        UPDATE campaign_combatants
+        SET source_kind = CASE
+            WHEN character_slug IS NOT NULL
+                 AND TRIM(COALESCE(source_kind, '')) IN ('', 'manual_npc')
+                THEN 'character'
+            WHEN TRIM(COALESCE(source_kind, '')) = ''
+                THEN 'manual_npc'
+            ELSE source_kind
+        END
+        """
+    )
+    connection.execute(
+        """
+        UPDATE campaign_combatants
+        SET source_ref = CASE
+            WHEN source_kind = 'character'
+                THEN COALESCE(character_slug, '')
+            WHEN source_ref IS NULL
+                THEN ''
+            ELSE source_ref
+        END
         """
     )

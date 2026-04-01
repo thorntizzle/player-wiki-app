@@ -1,0 +1,58 @@
+<section class="card sidebar-card combat-context-card" id="combat-context-panel">
+  <div class="section-heading">
+    <div>
+      <h2>Encounter context</h2>
+      <p class="meta">Follow the active or selected combatant without leaving the live board.</p>
+    </div>
+    {% if selected_combatant_source_label %}
+      <span class="meta-badge">{{ selected_combatant_source_label }}</span>
+    {% endif %}
+  </div>
+
+  {% if selected_combatant %}
+    <div class="combat-status-row__header">
+      <div>
+        <h3>{{ selected_combatant.name }}</h3>
+        {% if selected_combatant.subtitle %}
+          <p class="meta">{{ selected_combatant.subtitle }}</p>
+        {% endif %}
+      </div>
+      <div class="combatant-badges">
+        <span class="combat-badge">Turn {{ selected_combatant.turn_value }}</span>
+        {% if selected_combatant.is_current_turn %}
+          <span class="combat-badge combat-badge--active">Current turn</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="combat-stat-grid combat-stat-grid--compact">
+      <div class="combat-stat">
+        <span class="meta">HP</span>
+        <strong>{{ selected_combatant.current_hp }} / {{ selected_combatant.max_hp }}</strong>
+      </div>
+      <div class="combat-stat">
+        <span class="meta">Temp HP</span>
+        <strong>{{ selected_combatant.temp_hp }}</strong>
+      </div>
+      <div class="combat-stat">
+        <span class="meta">Movement</span>
+        <strong>{{ selected_combatant.movement_remaining }} / {{ selected_combatant.movement_total }}</strong>
+      </div>
+      <div class="combat-stat">
+        <span class="meta">Conditions</span>
+        <strong>{{ selected_combatant.conditions | length }}</strong>
+      </div>
+    </div>
+
+    <div class="hero-actions">
+      {% if selected_combatant_character_url %}
+        <a class="ghost-button" href="{{ selected_combatant_character_url }}">Character</a>
+      {% endif %}
+      {% if selected_combatant_status_url %}
+        <a class="ghost-button" href="{{ selected_combatant_status_url }}">Status</a>
+      {% endif %}
+    </div>
+  {% else %}
+    <p class="meta">Add combatants and set a current turn to keep the encounter context pinned here.</p>
+  {% endif %}
+</section>

@@ -29,7 +29,7 @@
     <div
       class="page-layout combat-layout"
       data-combat-live-root
-      data-combat-live-url="{{ url_for('campaign_combat_dm_live_state', campaign_slug=campaign.slug) }}"
+      data-combat-live-url="{{ url_for('campaign_combat_dm_live_state', campaign_slug=campaign.slug, combatant=requested_combatant_id) }}"
       data-combat-state-token="{{ combat_live_state_token }}"
     >
       <section class="section-list">
@@ -42,9 +42,14 @@
         </div>
       </section>
 
-      <div data-combat-controls-root>
-        {% include "_combat_dm_controls.html" %}
-      </div>
+      <aside class="sidebar combat-sidebar-stack" id="combat-controls">
+        <div data-combat-context-root>
+          {% include "_combat_context_panel.html" %}
+        </div>
+        <div data-combat-controls-root>
+          {% include "_combat_dm_controls.html" %}
+        </div>
+      </aside>
     </div>
   {% endif %}
 {% endblock %}

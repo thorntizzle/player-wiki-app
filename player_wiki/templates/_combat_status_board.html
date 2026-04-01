@@ -1,0 +1,49 @@
+<section class="section-block" id="combat-status-board">
+  <div class="section-heading">
+    <div>
+      <h2>Status board</h2>
+      <p class="meta">Select a combatant to inspect their live encounter state and linked source detail.</p>
+    </div>
+  </div>
+
+  {% if combat_tracker.combatants %}
+    <div class="combat-status-board">
+      {% for combatant in combat_tracker.combatants %}
+        <a
+          class="card combat-status-row{% if selected_combatant_id == combatant.id %} combat-status-row--active{% endif %}"
+          href="{{ url_for('campaign_combat_status_view', campaign_slug=campaign.slug, combatant=combatant.id) }}"
+          data-combat-status-select
+          data-combatant-id="{{ combatant.id }}"
+        >
+          <div class="combat-status-row__header">
+            <div>
+              <p class="card-kicker">{{ combatant.type_label }}</p>
+              <h3>{{ combatant.name }}</h3>
+              {% if combatant.subtitle %}
+                <p class="meta">{{ combatant.subtitle }}</p>
+              {% endif %}
+            </div>
+            <div class="badge-list">
+              <span class="meta-badge">{{ combatant.source_label }}</span>
+              <span class="meta-badge">Turn {{ combatant.turn_value }}</span>
+              {% if combatant.is_current_turn %}
+                <span class="meta-badge">Current turn</span>
+              {% endif %}
+            </div>
+          </div>
+          <div class="combat-status-row__stats">
+            <span>HP {{ combatant.current_hp }}/{{ combatant.max_hp }}</span>
+            <span>Temp {{ combatant.temp_hp }}</span>
+            <span>Move {{ combatant.movement_remaining }}/{{ combatant.movement_total }}</span>
+            <span>Conditions {{ combatant.conditions | length }}</span>
+          </div>
+        </a>
+      {% endfor %}
+    </div>
+  {% else %}
+    <article class="card">
+      <h3>No combatants in the tracker yet</h3>
+      <p>Once the encounter is seeded on the DM page, status inspection will appear here.</p>
+    </article>
+  {% endif %}
+</section>

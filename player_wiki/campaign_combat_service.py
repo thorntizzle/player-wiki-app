@@ -8,6 +8,11 @@ from .campaign_combat_store import CampaignCombatConflictError, CampaignCombatSt
 from .character_repository import CharacterRepository
 from .character_state_service import CharacterStateService
 from .combat_models import (
+    COMBAT_SOURCE_KIND_CHARACTER,
+    COMBAT_SOURCE_KIND_DM_STATBLOCK,
+    COMBAT_SOURCE_KIND_MANUAL_NPC,
+    COMBAT_SOURCE_KIND_SYSTEMS_MONSTER,
+    COMBAT_SOURCE_KINDS,
     CampaignCombatConditionRecord,
     CampaignCombatantRecord,
     CampaignCombatTrackerRecord,
@@ -93,6 +98,8 @@ class CampaignCombatService:
                 campaign_slug,
                 combatant_type="player_character",
                 character_slug=record.definition.character_slug,
+                source_kind=COMBAT_SOURCE_KIND_CHARACTER,
+                source_ref=record.definition.character_slug,
                 display_name=record.definition.name,
                 turn_value=normalized_turn_value,
                 initiative_bonus=snapshot["initiative_bonus"],
@@ -119,6 +126,8 @@ class CampaignCombatService:
         max_hp: Any | None,
         temp_hp: Any | None = 0,
         movement_total: Any | None = 0,
+        source_kind: str = COMBAT_SOURCE_KIND_MANUAL_NPC,
+        source_ref: str = "",
         created_by_user_id: int | None = None,
     ) -> CampaignCombatantRecord:
         normalized_name = (display_name or "").strip()
@@ -146,6 +155,12 @@ class CampaignCombatService:
             default=0,
             minimum=0,
         )
+        normalized_source_kind = str(source_kind or "").strip() or COMBAT_SOURCE_KIND_MANUAL_NPC
+        if normalized_source_kind not in COMBAT_SOURCE_KINDS:
+            raise CampaignCombatValidationError("Choose a valid NPC source.")
+        normalized_source_ref = str(source_ref or "").strip()
+        if normalized_source_kind == COMBAT_SOURCE_KIND_MANUAL_NPC:
+            normalized_source_ref = ""
         if normalized_current_hp > normalized_max_hp:
             raise CampaignCombatValidationError("Current HP cannot exceed max HP.")
 
@@ -153,6 +168,8 @@ class CampaignCombatService:
         return self.store.create_combatant(
             campaign_slug,
             combatant_type="npc",
+            source_kind=normalized_source_kind,
+            source_ref=normalized_source_ref,
             display_name=normalized_name,
             turn_value=normalized_turn_value,
             initiative_bonus=normalized_initiative_bonus,

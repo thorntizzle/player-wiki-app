@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from .character_models import CharacterRecord
 from .combat_models import (
+    COMBAT_SOURCE_KIND_CHARACTER,
+    COMBAT_SOURCE_KIND_DM_STATBLOCK,
+    COMBAT_SOURCE_KIND_MANUAL_NPC,
+    COMBAT_SOURCE_KIND_SYSTEMS_MONSTER,
     CampaignCombatConditionRecord,
     CampaignCombatantRecord,
     CampaignCombatTrackerRecord,
@@ -24,6 +28,12 @@ DND_5E_CONDITION_OPTIONS = (
     "Stunned",
     "Unconscious",
 )
+COMBAT_SOURCE_LABELS = {
+    COMBAT_SOURCE_KIND_CHARACTER: "Character",
+    COMBAT_SOURCE_KIND_MANUAL_NPC: "Manual NPC",
+    COMBAT_SOURCE_KIND_DM_STATBLOCK: "DM Content",
+    COMBAT_SOURCE_KIND_SYSTEMS_MONSTER: "Systems",
+}
 
 
 def format_signed(value: int) -> str:
@@ -55,16 +65,22 @@ def present_combat_tracker(
         profile = dict(character_record.definition.profile or {}) if character_record is not None else {}
         stats = dict(character_record.definition.stats or {}) if character_record is not None else {}
         conditions = conditions_by_combatant.get(combatant.id, [])
+        source_kind = combatant.source_kind or (
+            COMBAT_SOURCE_KIND_CHARACTER if combatant.character_slug else COMBAT_SOURCE_KIND_MANUAL_NPC
+        )
         presented_combatants.append(
             {
                 "id": combatant.id,
                 "name": combatant.display_name,
                 "character_slug": combatant.character_slug or "",
+                "source_kind": source_kind,
+                "source_ref": combatant.source_ref or "",
+                "source_label": COMBAT_SOURCE_LABELS.get(source_kind, "Unknown source"),
                 "type_label": "Player character" if combatant.is_player_character else "NPC",
                 "subtitle": (
                     str(profile.get("class_level_text") or "").strip()
                     if character_record is not None
-                    else "Statblock import TODO"
+                    else COMBAT_SOURCE_LABELS.get(source_kind, "NPC")
                 ),
                 "turn_value": combatant.turn_value,
                 "initiative_bonus_label": format_signed(combatant.initiative_bonus),
@@ -90,6 +106,7 @@ def present_combat_tracker(
                     can_manage_combat
                     or combatant.character_slug in owned_character_slugs
                 ),
+                "can_open_status_page": can_manage_combat,
                 "can_manage_combat": can_manage_combat,
                 "state_revision": (
                     character_record.state_record.revision if character_record is not None else None

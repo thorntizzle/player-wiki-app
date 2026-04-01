@@ -30,6 +30,9 @@
         {% if return_to_dm %}
           <input type="hidden" name="combat_view" value="dm">
         {% endif %}
+        {% if requested_combatant_id %}
+          <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
+        {% endif %}
         <button type="submit">Advance turn</button>
       </form>
       {% if show_clear_tracker_in_summary %}
@@ -40,6 +43,9 @@
         >
           {% if return_to_dm %}
             <input type="hidden" name="combat_view" value="dm">
+          {% endif %}
+          {% if requested_combatant_id %}
+            <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
           {% endif %}
           <button class="ghost-button" type="submit">Clear tracker</button>
         </form>

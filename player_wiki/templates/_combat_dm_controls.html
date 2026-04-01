@@ -1,37 +1,39 @@
-<aside class="sidebar" id="combat-controls">
-  <section class="card sidebar-card">
-    <h2>Encounter setup</h2>
-    <p class="meta">Seed the tracker here so the main combat board can stay focused on the live encounter.</p>
-  </section>
+<section class="card sidebar-card">
+  <h2>Encounter setup</h2>
+  <p class="meta">Seed the tracker here so the main combat board can stay focused on the live encounter.</p>
+</section>
 
-  <section class="card sidebar-card">
-    <h2>Add player character</h2>
-    {% if available_character_choices %}
-      <form
-        method="post"
-        action="{{ url_for('campaign_combat_add_player', campaign_slug=campaign.slug) }}"
-        class="stack-form"
-        data-combat-async
-      >
-        <input type="hidden" name="combat_view" value="dm">
-        <label class="field">
-          <span>Character</span>
-          <select name="character_slug">
-            {% for choice in available_character_choices %}
-              <option value="{{ choice.slug }}">{{ choice.name }} - {{ choice.subtitle }} - Init {{ choice.initiative_bonus }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <label class="field">
-          <span>Turn value</span>
-          <input type="number" name="turn_value" placeholder="Defaults to initiative bonus">
-        </label>
-        <button type="submit">Add player character</button>
-      </form>
-    {% else %}
-      <p class="meta">All visible player characters are already in the tracker.</p>
-    {% endif %}
-  </section>
+<section class="card sidebar-card">
+  <h2>Add player character</h2>
+  {% if available_character_choices %}
+    <form
+      method="post"
+      action="{{ url_for('campaign_combat_add_player', campaign_slug=campaign.slug) }}"
+      class="stack-form"
+      data-combat-async
+    >
+      <input type="hidden" name="combat_view" value="dm">
+      {% if requested_combatant_id %}
+        <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
+      {% endif %}
+      <label class="field">
+        <span>Character</span>
+        <select name="character_slug">
+          {% for choice in available_character_choices %}
+            <option value="{{ choice.slug }}">{{ choice.name }} - {{ choice.subtitle }} - Init {{ choice.initiative_bonus }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field">
+        <span>Turn value</span>
+        <input type="number" name="turn_value" placeholder="Defaults to initiative bonus">
+      </label>
+      <button type="submit">Add player character</button>
+    </form>
+  {% else %}
+    <p class="meta">All visible player characters are already in the tracker.</p>
+  {% endif %}
+</section>
 
   {% if can_access_systems %}
     <section class="card sidebar-card">
@@ -45,6 +47,9 @@
         data-systems-monster-search-url="{{ url_for('campaign_combat_search_systems_monsters', campaign_slug=campaign.slug) }}"
       >
         <input type="hidden" name="combat_view" value="dm">
+        {% if requested_combatant_id %}
+          <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
+        {% endif %}
         <label class="field">
           <span>Search monsters</span>
           <input
@@ -86,6 +91,9 @@
           data-combat-async
         >
           <input type="hidden" name="combat_view" value="dm">
+          {% if requested_combatant_id %}
+            <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
+          {% endif %}
           <label class="field">
             <span>Statblock</span>
             <select name="statblock_id">
@@ -110,52 +118,57 @@
     </section>
   {% endif %}
 
-  <section class="card sidebar-card">
-    <h2>Add custom NPC combatant</h2>
-    <form
-      method="post"
-      action="{{ url_for('campaign_combat_add_npc', campaign_slug=campaign.slug) }}"
-      class="stack-form"
-      data-combat-async
-    >
-      <input type="hidden" name="combat_view" value="dm">
-      <label class="field">
-        <span>Name</span>
-        <input type="text" name="display_name" placeholder="Clockwork Hound">
-      </label>
-      <label class="field">
-        <span>Turn value</span>
-        <input type="number" name="turn_value" value="0">
-      </label>
-      <label class="field">
-        <span>Current HP</span>
-        <input type="number" name="current_hp" value="0">
-      </label>
-      <label class="field">
-        <span>Max HP</span>
-        <input type="number" name="max_hp" value="0">
-      </label>
-      <label class="field">
-        <span>Temp HP</span>
-        <input type="number" name="temp_hp" value="0">
-      </label>
-      <label class="field">
-        <span>Movement</span>
-        <input type="number" name="movement_total" value="30">
-      </label>
-      <button type="submit">Add NPC combatant</button>
-    </form>
-  </section>
+<section class="card sidebar-card">
+  <h2>Add custom NPC combatant</h2>
+  <form
+    method="post"
+    action="{{ url_for('campaign_combat_add_npc', campaign_slug=campaign.slug) }}"
+    class="stack-form"
+    data-combat-async
+  >
+    <input type="hidden" name="combat_view" value="dm">
+    {% if requested_combatant_id %}
+      <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
+    {% endif %}
+    <label class="field">
+      <span>Name</span>
+      <input type="text" name="display_name" placeholder="Clockwork Hound">
+    </label>
+    <label class="field">
+      <span>Turn value</span>
+      <input type="number" name="turn_value" value="0">
+    </label>
+    <label class="field">
+      <span>Current HP</span>
+      <input type="number" name="current_hp" value="0">
+    </label>
+    <label class="field">
+      <span>Max HP</span>
+      <input type="number" name="max_hp" value="0">
+    </label>
+    <label class="field">
+      <span>Temp HP</span>
+      <input type="number" name="temp_hp" value="0">
+    </label>
+    <label class="field">
+      <span>Movement</span>
+      <input type="number" name="movement_total" value="30">
+    </label>
+    <button type="submit">Add NPC combatant</button>
+  </form>
+</section>
 
-  <section class="card sidebar-card">
-    <h2>Encounter cleanup</h2>
-    <form
-      method="post"
-      action="{{ url_for('campaign_combat_clear', campaign_slug=campaign.slug) }}"
-      data-combat-async
-    >
-      <input type="hidden" name="combat_view" value="dm">
-      <button class="ghost-button" type="submit">Clear tracker</button>
-    </form>
-  </section>
-</aside>
+<section class="card sidebar-card">
+  <h2>Encounter cleanup</h2>
+  <form
+    method="post"
+    action="{{ url_for('campaign_combat_clear', campaign_slug=campaign.slug) }}"
+    data-combat-async
+  >
+    <input type="hidden" name="combat_view" value="dm">
+    {% if requested_combatant_id %}
+      <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
+    {% endif %}
+    <button class="ghost-button" type="submit">Clear tracker</button>
+  </form>
+</section>
