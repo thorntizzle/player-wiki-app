@@ -4,6 +4,7 @@
     const formSelector = "[data-live-builder-form]";
     const textInputSelector = "input[type='text'], input[type='number'], textarea";
     const fieldSelector = "input:not([type='hidden']):not([type='submit']):not([type='button']):not([disabled]), select:not([disabled]), textarea:not([disabled])";
+    const diagnosticsTools = window.__playerWikiLiveDiagnosticsTools || null;
 
     function captureFocus(root) {
       const active = document.activeElement;
@@ -72,8 +73,22 @@
       let activeRequestId = 0;
       let activeController = null;
       let liveRoot = root;
+      const diagnosticsEnabled = liveRoot.dataset.liveDiagnosticsEnabled === "1";
 
-      async function refreshPreview() {
+      const recordLiveMetric = (metric) => {
+        if (!diagnosticsEnabled || !diagnosticsTools) {
+          return metric;
+        }
+        const formAction = liveRoot.querySelector(formSelector)?.getAttribute("action") || window.location.pathname;
+        const normalizedAction = formAction.includes("/level-up") ? "builder_level_up" : "builder_create";
+        return diagnosticsTools.recordMetric(normalizedAction, metric);
+      };
+
+      async function refreshPreview({
+        bypassDebounce = false,
+        queryOverride = null,
+        reschedule = true,
+      } = {}) {
         const focusState = captureFocus(liveRoot);
         activeRequestId += 1;
         const requestId = activeRequestId;
@@ -83,7 +98,11 @@
         activeController = new AbortController();
         liveRoot.setAttribute("aria-busy", "true");
         try {
-          const response = await fetch(buildPreviewUrl(form), {
+          const previewUrl = typeof queryOverride === "string" && queryOverride
+            ? queryOverride
+            : buildPreviewUrl(form);
+          const requestStartedAt = performance.now();
+          const response = await fetch(previewUrl, {
             credentials: "same-origin",
             headers: {"X-Requested-With": "XMLHttpRequest"},
             signal: activeController.signal,
@@ -91,6 +110,11 @@
           if (!response.ok || requestId !== activeRequestId) {
             return;
           }
+          const requestTimeMs = Number.parseFloat(response.headers.get("X-Live-Request-Time-Ms") || "0");
+          const queryCount = Number.parseInt(response.headers.get("X-Live-Query-Count") || "0", 10);
+          const queryTimeMs = Number.parseFloat(response.headers.get("X-Live-Query-Time-Ms") || "0");
+          const payloadBytes = Number.parseInt(response.headers.get("X-Live-Payload-Bytes") || "0", 10);
+          const applyStartedAt = performance.now();
           const wrapper = document.createElement("div");
           wrapper.innerHTML = await response.text();
           const nextRoot = wrapper.querySelector(rootSelector);
@@ -101,6 +125,18 @@
           liveRoot = nextRoot;
           restoreFocus(liveRoot, focusState);
           initLiveBuilder(liveRoot);
+          recordLiveMetric({
+            mode: "preview",
+            bypassDebounce,
+            changed: true,
+            requestMs: Number((performance.now() - requestStartedAt).toFixed(2)),
+            applyMs: Number((performance.now() - applyStartedAt).toFixed(2)),
+            payloadBytes: Number.isFinite(payloadBytes) ? payloadBytes : 0,
+            queryCount: Number.isFinite(queryCount) ? queryCount : 0,
+            queryTimeMs: Number.isFinite(queryTimeMs) ? Number(queryTimeMs.toFixed(2)) : 0,
+            requestTimeMs: Number.isFinite(requestTimeMs) ? Number(requestTimeMs.toFixed(2)) : 0,
+            serverTiming: response.headers.get("Server-Timing") || "",
+          });
         } catch (error) {
           if (error?.name !== "AbortError") {
             console.error("Character builder live preview failed.", error);
@@ -128,6 +164,20 @@
           scheduleRefresh(250);
         }
       });
+
+      if (diagnosticsEnabled && diagnosticsTools) {
+        diagnosticsTools.ensureMetricsStore();
+        const formAction = form.getAttribute("action") || window.location.pathname;
+        const normalizedAction = formAction.includes("/level-up") ? "builder_level_up" : "builder_create";
+        diagnosticsTools.registerSampler(normalizedAction, async (options = {}) => {
+          const previewUrl = buildPreviewUrl(form);
+          return refreshPreview({
+            bypassDebounce: true,
+            queryOverride: previewUrl,
+            reschedule: false,
+          });
+        });
+      }
     }
 
     window.addEventListener("DOMContentLoaded", () => {

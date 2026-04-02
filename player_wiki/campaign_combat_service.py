@@ -39,6 +39,9 @@ class CampaignCombatService:
     def get_tracker(self, campaign_slug: str) -> CampaignCombatTrackerRecord:
         return self.store.ensure_tracker(campaign_slug)
 
+    def get_live_revision(self, campaign_slug: str) -> int:
+        return self.store.ensure_tracker(campaign_slug).revision
+
     def list_combatants(self, campaign_slug: str) -> list[CampaignCombatantRecord]:
         self.sync_player_character_snapshots(campaign_slug)
         return self.store.list_combatants(campaign_slug)
@@ -94,7 +97,7 @@ class CampaignCombatService:
 
         try:
             self.store.ensure_tracker(campaign_slug, updated_by_user_id=created_by_user_id)
-            return self.store.create_combatant(
+            combatant = self.store.create_combatant(
                 campaign_slug,
                 combatant_type="player_character",
                 character_slug=record.definition.character_slug,
@@ -110,6 +113,8 @@ class CampaignCombatService:
                 movement_remaining=snapshot["movement_total"],
                 created_by_user_id=created_by_user_id,
             )
+            self.store.bump_tracker_revision(campaign_slug, updated_by_user_id=created_by_user_id)
+            return combatant
         except CampaignCombatConflictError as exc:
             raise CampaignCombatValidationError(
                 "That player character is already in the combat tracker."
@@ -165,7 +170,7 @@ class CampaignCombatService:
             raise CampaignCombatValidationError("Current HP cannot exceed max HP.")
 
         self.store.ensure_tracker(campaign_slug, updated_by_user_id=created_by_user_id)
-        return self.store.create_combatant(
+        combatant = self.store.create_combatant(
             campaign_slug,
             combatant_type="npc",
             source_kind=normalized_source_kind,
@@ -180,6 +185,8 @@ class CampaignCombatService:
             movement_remaining=normalized_movement_total,
             created_by_user_id=created_by_user_id,
         )
+        self.store.bump_tracker_revision(campaign_slug, updated_by_user_id=created_by_user_id)
+        return combatant
 
     def update_turn_value(
         self,
@@ -197,12 +204,14 @@ class CampaignCombatService:
             minimum=None,
         )
         try:
-            return self.store.update_combatant(
+            combatant = self.store.update_combatant(
                 campaign_slug,
                 combatant_id,
                 turn_value=normalized_turn_value,
                 updated_by_user_id=updated_by_user_id,
             )
+            self.store.bump_tracker_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
+            return combatant
         except CampaignCombatConflictError as exc:
             raise CampaignCombatValidationError("That turn value could not be saved.") from exc
 
@@ -244,7 +253,7 @@ class CampaignCombatService:
             raise CampaignCombatValidationError("Current HP cannot exceed max HP.")
 
         try:
-            return self.store.update_combatant(
+            updated_combatant = self.store.update_combatant(
                 campaign_slug,
                 combatant_id,
                 current_hp=normalized_current_hp,
@@ -254,6 +263,8 @@ class CampaignCombatService:
                 movement_remaining=min(combatant.movement_remaining, normalized_movement_total),
                 updated_by_user_id=updated_by_user_id,
             )
+            self.store.bump_tracker_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
+            return updated_combatant
         except CampaignCombatConflictError as exc:
             raise CampaignCombatValidationError("Those NPC vitals could not be saved.") from exc
 
@@ -286,7 +297,7 @@ class CampaignCombatService:
         movement_total = self._parse_movement_total(record.definition.stats.get("speed"))
         max_hp = int(record.definition.stats.get("max_hp") or 0)
         try:
-            return self.store.update_combatant(
+            updated_combatant = self.store.update_combatant(
                 campaign_slug,
                 combatant_id,
                 display_name=record.definition.name,
@@ -298,6 +309,8 @@ class CampaignCombatService:
                 movement_remaining=min(combatant.movement_remaining, movement_total),
                 updated_by_user_id=updated_by_user_id,
             )
+            self.store.bump_tracker_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
+            return updated_combatant
         except CampaignCombatConflictError as exc:
             raise CampaignCombatValidationError("That combat tracker row could not be updated.") from exc
 
@@ -323,7 +336,7 @@ class CampaignCombatService:
             raise CampaignCombatValidationError("Remaining movement cannot exceed total movement.")
 
         try:
-            return self.store.update_combatant(
+            updated_combatant = self.store.update_combatant(
                 campaign_slug,
                 combatant_id,
                 has_action=has_action,
@@ -332,6 +345,8 @@ class CampaignCombatService:
                 movement_remaining=normalized_movement_remaining,
                 updated_by_user_id=updated_by_user_id,
             )
+            self.store.bump_tracker_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
+            return updated_combatant
         except CampaignCombatConflictError as exc:
             raise CampaignCombatValidationError("Those combat resources could not be saved.") from exc
 
@@ -355,12 +370,14 @@ class CampaignCombatService:
         if len(normalized_duration) > 120:
             raise CampaignCombatValidationError("Condition duration text must stay under 120 characters.")
 
-        return self.store.create_condition(
+        condition = self.store.create_condition(
             combatant_id,
             name=normalized_name,
             duration_text=normalized_duration,
             created_by_user_id=created_by_user_id,
         )
+        self.store.bump_tracker_revision(campaign_slug, updated_by_user_id=created_by_user_id)
+        return condition
 
     def delete_condition(
         self,
@@ -370,6 +387,7 @@ class CampaignCombatService:
         condition = self.store.delete_condition(campaign_slug, condition_id)
         if condition is None:
             raise CampaignCombatValidationError("That condition could not be found.")
+        self.store.bump_tracker_revision(campaign_slug)
         return condition
 
     def delete_combatant(
@@ -380,6 +398,7 @@ class CampaignCombatService:
         combatant = self.store.delete_combatant(campaign_slug, combatant_id)
         if combatant is None:
             raise CampaignCombatValidationError("That combatant could not be found.")
+        self.store.bump_tracker_revision(campaign_slug)
         return combatant
 
     def clear_tracker(
@@ -460,6 +479,7 @@ class CampaignCombatService:
 
     def sync_player_character_snapshots(self, campaign_slug: str) -> None:
         combatants = self.store.list_combatants(campaign_slug)
+        any_changed = False
         for combatant in combatants:
             if not combatant.is_player_character or not combatant.character_slug:
                 continue
@@ -467,6 +487,17 @@ class CampaignCombatService:
             if record is None:
                 continue
             snapshot = self._build_player_character_snapshot(record)
+            movement_remaining = min(combatant.movement_remaining, snapshot["movement_total"])
+            if (
+                combatant.display_name == record.definition.name
+                and combatant.initiative_bonus == snapshot["initiative_bonus"]
+                and combatant.current_hp == snapshot["current_hp"]
+                and combatant.max_hp == snapshot["max_hp"]
+                and combatant.temp_hp == snapshot["temp_hp"]
+                and combatant.movement_total == snapshot["movement_total"]
+                and combatant.movement_remaining == movement_remaining
+            ):
+                continue
             try:
                 self.store.update_combatant(
                     campaign_slug,
@@ -477,12 +508,15 @@ class CampaignCombatService:
                     max_hp=snapshot["max_hp"],
                     temp_hp=snapshot["temp_hp"],
                     movement_total=snapshot["movement_total"],
-                    movement_remaining=min(combatant.movement_remaining, snapshot["movement_total"]),
+                    movement_remaining=movement_remaining,
                 )
+                any_changed = True
             except CampaignCombatConflictError as exc:
                 raise CampaignCombatValidationError(
                     f"Unable to refresh combat tracker data for {record.definition.name}."
                 ) from exc
+        if any_changed:
+            self.store.bump_tracker_revision(campaign_slug)
 
     def _refresh_combatant_turn_resources(
         self,

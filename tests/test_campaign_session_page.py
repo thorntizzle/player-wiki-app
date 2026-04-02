@@ -34,6 +34,21 @@ def _async_headers():
     }
 
 
+def _live_poll_headers(revision: int, view_token: str):
+    headers = _async_headers()
+    headers["X-Live-Revision"] = str(revision)
+    headers["X-Live-View-Token"] = view_token
+    return headers
+
+
+def _assert_live_diagnostics_headers(response):
+    assert response.headers["X-Live-Query-Count"]
+    assert response.headers["X-Live-Query-Time-Ms"]
+    assert response.headers["X-Live-Request-Time-Ms"]
+    assert "db;dur=" in response.headers["Server-Timing"]
+    assert "total;dur=" in response.headers["Server-Timing"]
+
+
 def _write_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -965,6 +980,58 @@ def test_session_live_state_endpoint_returns_updated_status_and_chat(client, sig
     assert "No active session is running right now." in closed_payload["status_html"]
     assert "When the DM begins a session" in closed_payload["chat_html"]
     assert "Begin session" in closed_payload["controls_html"]
+
+
+def test_session_live_state_short_circuits_when_revision_and_view_token_match(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    initial_live_state = client.get(
+        "/campaigns/linden-pass/session/live-state",
+        headers=_async_headers(),
+    )
+
+    assert initial_live_state.status_code == 200
+    initial_payload = initial_live_state.get_json()
+    assert initial_payload["changed"] is True
+    assert initial_live_state.headers["X-Live-State-Changed"] == "true"
+    assert initial_live_state.headers["X-Live-Revision"] == str(initial_payload["live_revision"])
+    assert initial_live_state.headers["X-Live-Payload-Bytes"]
+    _assert_live_diagnostics_headers(initial_live_state)
+
+    unchanged_live_state = client.get(
+        "/campaigns/linden-pass/session/live-state",
+        headers=_live_poll_headers(initial_payload["live_revision"], initial_payload["live_view_token"]),
+    )
+
+    assert unchanged_live_state.status_code == 200
+    assert unchanged_live_state.get_json() == {
+        "changed": False,
+        "live_revision": initial_payload["live_revision"],
+        "live_view_token": initial_payload["live_view_token"],
+    }
+    assert unchanged_live_state.headers["X-Live-State-Changed"] == "false"
+    _assert_live_diagnostics_headers(unchanged_live_state)
+
+    client.post(
+        "/campaigns/linden-pass/session/messages",
+        data={"body": "This should advance the session live revision."},
+        follow_redirects=False,
+    )
+
+    refreshed_live_state = client.get(
+        "/campaigns/linden-pass/session/live-state",
+        headers=_live_poll_headers(initial_payload["live_revision"], initial_payload["live_view_token"]),
+    )
+
+    assert refreshed_live_state.status_code == 200
+    refreshed_payload = refreshed_live_state.get_json()
+    assert refreshed_payload["changed"] is True
+    assert refreshed_payload["live_revision"] > initial_payload["live_revision"]
+    assert "This should advance the session live revision." in refreshed_payload["chat_html"]
+    assert refreshed_live_state.headers["X-Live-State-Changed"] == "true"
+    _assert_live_diagnostics_headers(refreshed_live_state)
 
 
 def test_live_session_chat_shows_newest_entries_first_but_saved_log_stays_chronological(client, sign_in, users):

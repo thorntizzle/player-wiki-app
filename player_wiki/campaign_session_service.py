@@ -160,6 +160,17 @@ class CampaignSessionService:
     def __init__(self, store: CampaignSessionStore) -> None:
         self.store = store
 
+    def get_live_revision(self, campaign_slug: str) -> int:
+        return self.store.get_live_revision(campaign_slug)
+
+    def bump_live_state_revision(
+        self,
+        campaign_slug: str,
+        *,
+        updated_by_user_id: int | None = None,
+    ) -> None:
+        self.store.bump_state_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
+
     def get_active_session(self, campaign_slug: str) -> CampaignSessionRecord | None:
         return self.store.get_active_session(campaign_slug)
 
@@ -203,7 +214,9 @@ class CampaignSessionService:
     ) -> CampaignSessionRecord:
         if self.store.get_active_session(campaign_slug) is not None:
             raise CampaignSessionValidationError("A live session is already running for this campaign.")
-        return self.store.create_session(campaign_slug, started_by_user_id=started_by_user_id)
+        session_record = self.store.create_session(campaign_slug, started_by_user_id=started_by_user_id)
+        self.store.bump_state_revision(campaign_slug, updated_by_user_id=started_by_user_id)
+        return session_record
 
     def close_session(
         self,
@@ -214,13 +227,21 @@ class CampaignSessionService:
         active_session = self.store.get_active_session(campaign_slug)
         if active_session is None:
             raise CampaignSessionValidationError("There is no active session to close.")
-        return self.store.close_session(
+        session_record = self.store.close_session(
             campaign_slug,
             active_session.id,
             ended_by_user_id=ended_by_user_id,
         )
+        self.store.bump_state_revision(campaign_slug, updated_by_user_id=ended_by_user_id)
+        return session_record
 
-    def delete_session_log(self, campaign_slug: str, session_id: int) -> None:
+    def delete_session_log(
+        self,
+        campaign_slug: str,
+        session_id: int,
+        *,
+        updated_by_user_id: int | None = None,
+    ) -> None:
         session_record = self.store.get_session(campaign_slug, session_id)
         if session_record is None:
             raise CampaignSessionValidationError("That chat log could not be found.")
@@ -233,6 +254,7 @@ class CampaignSessionService:
             raise CampaignSessionValidationError(
                 "That chat log could not be deleted. Refresh the page and try again."
             ) from exc
+        self.store.bump_state_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
 
     def post_message(
         self,
@@ -252,7 +274,7 @@ class CampaignSessionService:
         if active_session is None:
             raise CampaignSessionValidationError("The chat window opens when the DM begins a session.")
 
-        return self.store.create_message(
+        message = self.store.create_message(
             active_session.id,
             campaign_slug,
             message_type="chat",
@@ -260,6 +282,8 @@ class CampaignSessionService:
             author_display_name=author_display_name,
             author_user_id=author_user_id,
         )
+        self.store.bump_state_revision(campaign_slug, updated_by_user_id=author_user_id)
+        return message
 
     def create_article(
         self,
@@ -284,13 +308,15 @@ class CampaignSessionService:
         if len(normalized_source_page_ref) > 400:
             raise CampaignSessionValidationError("Session article source references must stay under 400 characters.")
 
-        return self.store.create_article(
+        article = self.store.create_article(
             campaign_slug,
             title=normalized_title,
             body_markdown=normalized_body,
             source_page_ref=normalized_source_page_ref,
             created_by_user_id=created_by_user_id,
         )
+        self.store.bump_state_revision(campaign_slug, updated_by_user_id=created_by_user_id)
+        return article
 
     def parse_article_markdown_upload(
         self,
@@ -358,17 +384,25 @@ class CampaignSessionService:
             image_caption=image_caption,
         )
 
-    def delete_article(self, campaign_slug: str, article_id: int) -> SessionArticleRecord:
+    def delete_article(
+        self,
+        campaign_slug: str,
+        article_id: int,
+        *,
+        updated_by_user_id: int | None = None,
+    ) -> SessionArticleRecord:
         article = self.store.get_article(article_id)
         if article is None or article.campaign_slug != campaign_slug:
             raise CampaignSessionValidationError("That session article could not be found.")
 
         try:
-            return self.store.delete_article(campaign_slug, article_id)
+            deleted_article = self.store.delete_article(campaign_slug, article_id)
         except CampaignSessionConflictError as exc:
             raise CampaignSessionValidationError(
                 "That session article could not be deleted. Refresh the page and try again."
             ) from exc
+        self.store.bump_state_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
+        return deleted_article
 
     def attach_article_image(
         self,
@@ -380,6 +414,7 @@ class CampaignSessionService:
         data_blob: bytes,
         alt_text: str = "",
         caption: str = "",
+        updated_by_user_id: int | None = None,
     ) -> SessionArticleImageRecord:
         article = self.store.get_article(article_id)
         if article is None or article.campaign_slug != campaign_slug:
@@ -405,7 +440,7 @@ class CampaignSessionService:
         if len(data_blob) > 8 * 1024 * 1024:
             raise CampaignSessionValidationError("Session article images must stay under 8 MB.")
 
-        return self.store.upsert_article_image(
+        image = self.store.upsert_article_image(
             article_id,
             filename=normalized_filename,
             media_type=normalized_media_type,
@@ -413,6 +448,8 @@ class CampaignSessionService:
             alt_text=(alt_text or "").strip(),
             caption=(caption or "").strip(),
         )
+        self.store.bump_state_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
+        return image
 
     def reveal_article(
         self,
@@ -433,7 +470,7 @@ class CampaignSessionService:
             raise CampaignSessionValidationError("That session article has already been revealed.")
 
         try:
-            return self.store.reveal_article_in_session(
+            article_record, message_record = self.store.reveal_article_in_session(
                 article_id,
                 campaign_slug=campaign_slug,
                 session_id=active_session.id,
@@ -444,3 +481,5 @@ class CampaignSessionService:
             raise CampaignSessionValidationError(
                 "That session article could not be revealed. Refresh the page and try again."
             ) from exc
+        self.store.bump_state_revision(campaign_slug, updated_by_user_id=revealed_by_user_id)
+        return article_record, message_record

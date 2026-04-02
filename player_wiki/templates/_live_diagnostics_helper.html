@@ -1,0 +1,59 @@
+<script>
+  (() => {
+    if (window.__playerWikiLiveDiagnosticsTools) {
+      return;
+    }
+
+    const ensureMetricsStore = () => {
+      if (!(window.__playerWikiLiveMetrics && typeof window.__playerWikiLiveMetrics === "object")) {
+        window.__playerWikiLiveMetrics = {};
+      }
+      const store = window.__playerWikiLiveMetrics;
+      if (typeof store.sequence !== "number") {
+        store.sequence = 0;
+      }
+      if (!(store.latest && typeof store.latest === "object")) {
+        store.latest = {};
+      }
+      if (!(store.history && typeof store.history === "object")) {
+        store.history = {};
+      }
+      return store;
+    };
+
+    const recordMetric = (viewName, metric) => {
+      const store = ensureMetricsStore();
+      store.sequence += 1;
+      const entry = {
+        sequence: store.sequence,
+        recordedAt: new Date().toISOString(),
+        view: viewName,
+        ...metric,
+      };
+      store.latest[viewName] = entry;
+      if (!Array.isArray(store.history[viewName])) {
+        store.history[viewName] = [];
+      }
+      store.history[viewName].push(entry);
+      if (store.history[viewName].length > 25) {
+        store.history[viewName].shift();
+      }
+      return entry;
+    };
+
+    const registerSampler = (viewName, sampler) => {
+      if (!(window.__playerWikiLiveDiagnostics && typeof window.__playerWikiLiveDiagnostics === "object")) {
+        window.__playerWikiLiveDiagnostics = {};
+      }
+      window.__playerWikiLiveDiagnostics[viewName] = {
+        sample: sampler,
+      };
+    };
+
+    window.__playerWikiLiveDiagnosticsTools = {
+      ensureMetricsStore,
+      recordMetric,
+      registerSampler,
+    };
+  })();
+</script>

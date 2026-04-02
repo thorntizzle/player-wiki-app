@@ -20,6 +20,12 @@
     data-session-live-url="{{ url_for('campaign_session_live_state', campaign_slug=campaign.slug) }}"
     data-active-session-id="{{ active_session_id or '' }}"
     data-session-manager-state-token="{{ session_manager_state_token }}"
+    data-live-revision="{{ session_live_revision }}"
+    data-live-view-token="{{ session_live_view_token }}"
+    data-live-active-interval-ms="{{ session_poll_active_interval_ms }}"
+    data-live-idle-interval-ms="{{ session_poll_idle_interval_ms }}"
+    data-live-idle-threshold-ms="{{ session_poll_idle_threshold_ms }}"
+    data-live-diagnostics-enabled="{{ '1' if live_diagnostics_enabled else '0' }}"
   >
     <section class="session-column">
       <article class="card session-status-card" data-session-status-card>
@@ -42,5 +48,6 @@
 {% endblock %}
 
 {% block scripts %}
+  {% include "_live_diagnostics_helper.html" %}
   {% include "_session_live_scripts.html" %}
 {% endblock %}

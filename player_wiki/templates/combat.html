@@ -31,6 +31,12 @@
       data-combat-live-root
       data-combat-live-url="{{ url_for('campaign_combat_live_state', campaign_slug=campaign.slug, combatant=requested_combatant_id) }}"
       data-combat-state-token="{{ combat_live_state_token }}"
+      data-live-revision="{{ combat_live_revision }}"
+      data-live-view-token="{{ combat_live_view_token }}"
+      data-live-active-interval-ms="{{ combat_poll_active_interval_ms }}"
+      data-live-idle-interval-ms="{{ combat_poll_idle_interval_ms }}"
+      data-live-idle-threshold-ms="{{ combat_poll_idle_threshold_ms }}"
+      data-live-diagnostics-enabled="{{ '1' if live_diagnostics_enabled else '0' }}"
     >
       <section class="section-list">
         <div data-combat-summary-root>
@@ -53,5 +59,6 @@
 {% endblock %}
 
 {% block scripts %}
+  {% include "_live_diagnostics_helper.html" %}
   {% include "_combat_live_scripts.html" %}
 {% endblock %}

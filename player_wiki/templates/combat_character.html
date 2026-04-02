@@ -29,6 +29,12 @@
           data-combat-character-live-root
           data-combat-live-url="{{ url_for('campaign_combat_character_live_state', campaign_slug=campaign.slug, combatant=selected_combatant_id) }}"
           data-combat-state-token="{{ combat_character_state_token }}"
+          data-live-revision="{{ combat_live_revision }}"
+          data-live-view-token="{{ combat_live_view_token }}"
+          data-live-active-interval-ms="{{ combat_poll_active_interval_ms }}"
+          data-live-idle-interval-ms="{{ combat_poll_idle_interval_ms }}"
+          data-live-idle-threshold-ms="{{ combat_poll_idle_threshold_ms }}"
+          data-live-diagnostics-enabled="{{ '1' if live_diagnostics_enabled else '0' }}"
         >
           <div data-combat-character-snapshot-root>
             {% include "_combat_character_snapshot.html" %}
@@ -70,6 +76,7 @@
 {% endblock %}
 
 {% block scripts %}
+  {% include "_live_diagnostics_helper.html" %}
   <script>
     (() => {
       const liveRoot = document.querySelector("[data-combat-character-live-root]");
@@ -80,17 +87,133 @@
       const snapshotRoot = document.querySelector("[data-combat-character-snapshot-root]");
       const pollUrl = liveRoot.dataset.combatLiveUrl;
       let combatStateToken = liveRoot.dataset.combatStateToken || "";
+      let liveRevision = Number.parseInt(liveRoot.dataset.liveRevision || "0", 10);
+      if (!Number.isFinite(liveRevision) || liveRevision < 0) {
+        liveRevision = 0;
+      }
+      let liveViewToken = liveRoot.dataset.liveViewToken || "";
+      const activeIntervalMs = Number.parseInt(liveRoot.dataset.liveActiveIntervalMs || "1000", 10) || 1000;
+      const idleIntervalMs = Number.parseInt(liveRoot.dataset.liveIdleIntervalMs || String(activeIntervalMs), 10) || activeIntervalMs;
+      const idleThresholdMs = Number.parseInt(liveRoot.dataset.liveIdleThresholdMs || "30000", 10) || 30000;
+      const diagnosticsEnabled = liveRoot.dataset.liveDiagnosticsEnabled === "1";
+      const diagnosticsTools = diagnosticsEnabled ? window.__playerWikiLiveDiagnosticsTools : null;
+      let pollTimerId = 0;
       let pollInFlight = false;
+      let lastActivityAt = Date.now();
 
-      const refreshLiveState = async () => {
-        if (pollInFlight || document.hidden) {
+      const markActivity = () => {
+        lastActivityAt = Date.now();
+      };
+
+      const getNextPollDelay = () => {
+        if (document.hidden) {
+          return idleIntervalMs;
+        }
+        return Date.now() - lastActivityAt >= idleThresholdMs ? idleIntervalMs : activeIntervalMs;
+      };
+
+      const scheduleNextPoll = (delayMs = getNextPollDelay()) => {
+        window.clearTimeout(pollTimerId);
+        pollTimerId = window.setTimeout(() => {
+          pollTimerId = 0;
+          refreshLiveState();
+        }, delayMs);
+      };
+
+      const syncLiveMetadata = (payload = {}, response = null) => {
+        const payloadRevision = Number.parseInt(
+          typeof payload.live_revision === "number" || typeof payload.live_revision === "string"
+            ? String(payload.live_revision)
+            : "",
+          10,
+        );
+        if (Number.isFinite(payloadRevision) && payloadRevision >= 0) {
+          liveRevision = payloadRevision;
+        } else if (response instanceof Response) {
+          const headerRevision = Number.parseInt(response.headers.get("X-Live-Revision") || "", 10);
+          if (Number.isFinite(headerRevision) && headerRevision >= 0) {
+            liveRevision = headerRevision;
+          }
+        }
+
+        if (typeof payload.live_view_token === "string" && payload.live_view_token) {
+          liveViewToken = payload.live_view_token;
+        }
+
+        liveRoot.dataset.liveRevision = String(liveRevision);
+        liveRoot.dataset.liveViewToken = liveViewToken;
+      };
+
+      const logLiveDiagnostics = (response, payload = null) => {
+        if (!diagnosticsEnabled || !(response instanceof Response) || typeof console === "undefined" || !console.debug) {
+          return;
+        }
+        console.debug("[live:combat-character]", {
+          changed:
+            typeof payload?.changed === "boolean"
+              ? payload.changed
+              : response.headers.get("X-Live-State-Changed"),
+          revision: response.headers.get("X-Live-Revision") || liveRevision,
+          payloadBytes: response.headers.get("X-Live-Payload-Bytes"),
+          serverTiming: response.headers.get("Server-Timing"),
+        });
+      };
+
+      const recordLiveMetric = (metric) => {
+        if (!diagnosticsEnabled || !diagnosticsTools) {
+          return metric;
+        }
+        return diagnosticsTools.recordMetric("combat_character", metric);
+      };
+
+      const buildLiveMetric = (response, payload, *, mode, requestMs = 0, applyMs = 0) => {
+        const headerChanged = response.headers.get("X-Live-State-Changed");
+        const queryCount = Number.parseInt(response.headers.get("X-Live-Query-Count") || "0", 10);
+        const queryTimeMs = Number.parseFloat(response.headers.get("X-Live-Query-Time-Ms") || "0");
+        const requestTimeMs = Number.parseFloat(response.headers.get("X-Live-Request-Time-Ms") || "0");
+        const payloadBytes = Number.parseInt(response.headers.get("X-Live-Payload-Bytes") || "0", 10);
+        return recordLiveMetric({
+          mode,
+          changed: typeof payload?.changed === "boolean" ? payload.changed : headerChanged === "true",
+          requestMs: Number(requestMs.toFixed(2)),
+          applyMs: Number(applyMs.toFixed(2)),
+          liveRevision,
+          liveViewToken,
+          payloadBytes: Number.isFinite(payloadBytes) ? payloadBytes : 0,
+          queryCount: Number.isFinite(queryCount) ? queryCount : 0,
+          queryTimeMs: Number.isFinite(queryTimeMs) ? Number(queryTimeMs.toFixed(2)) : 0,
+          requestTimeMs: Number.isFinite(requestTimeMs) ? Number(requestTimeMs.toFixed(2)) : 0,
+          serverTiming: response.headers.get("Server-Timing") || "",
+        });
+      };
+
+      const refreshLiveState = async ({
+        allowShortCircuit = true,
+        bypassGuards = false,
+        reschedule = true,
+        forceApply = false,
+        mode = allowShortCircuit ? "steady" : "cold",
+      } = {}) => {
+        if (!bypassGuards && (pollInFlight || document.hidden)) {
+          if (reschedule) {
+            scheduleNextPoll();
+          }
           return;
         }
 
         pollInFlight = true;
         try {
+          const requestStartedAt = performance.now();
           const response = await fetch(pollUrl, {
-            headers: { "X-Requested-With": "XMLHttpRequest" },
+            headers: {
+              "X-Requested-With": "XMLHttpRequest",
+              ...(allowShortCircuit
+                ? {
+                    "X-Live-Revision": String(liveRevision),
+                    "X-Live-View-Token": liveViewToken,
+                  }
+                : {}),
+            },
             cache: "no-store",
             credentials: "same-origin",
           });
@@ -99,28 +222,64 @@
           }
 
           const payload = await response.json();
+          syncLiveMetadata(payload, response);
+          logLiveDiagnostics(response, payload);
+          const requestMs = performance.now() - requestStartedAt;
+          if (payload && payload.changed === false) {
+            return buildLiveMetric(response, payload, { mode, requestMs, applyMs: 0 });
+          }
           const nextToken = payload.combat_state_token ? String(payload.combat_state_token) : "";
-          if (nextToken === combatStateToken) {
-            return;
+          const applyStartedAt = performance.now();
+          if (forceApply || nextToken !== combatStateToken) {
+            if (snapshotRoot && typeof payload.snapshot_html === "string") {
+              snapshotRoot.innerHTML = payload.snapshot_html;
+            }
+            combatStateToken = nextToken;
+            liveRoot.dataset.combatStateToken = combatStateToken;
           }
-          if (snapshotRoot && typeof payload.snapshot_html === "string") {
-            snapshotRoot.innerHTML = payload.snapshot_html;
-          }
-          combatStateToken = nextToken;
-          liveRoot.dataset.combatStateToken = combatStateToken;
+          return buildLiveMetric(response, payload, {
+            mode,
+            requestMs,
+            applyMs: performance.now() - applyStartedAt,
+          });
         } catch (_) {
           return;
         } finally {
           pollInFlight = false;
+          if (reschedule) {
+            scheduleNextPoll();
+          }
         }
       };
 
-      window.setInterval(refreshLiveState, 1000);
+      ["pointerdown", "keydown", "focusin"].forEach((eventName) => {
+        liveRoot.addEventListener(eventName, markActivity, true);
+      });
+
       document.addEventListener("visibilitychange", () => {
         if (!document.hidden) {
+          markActivity();
           refreshLiveState();
+          return;
         }
+        scheduleNextPoll(idleIntervalMs);
       });
+
+      if (diagnosticsEnabled && diagnosticsTools) {
+        diagnosticsTools.ensureMetricsStore();
+        diagnosticsTools.registerSampler("combat_character", async (options = {}) => {
+          const requestedMode = options && options.mode === "cold" ? "cold" : "steady";
+          return refreshLiveState({
+            allowShortCircuit: requestedMode !== "cold",
+            bypassGuards: true,
+            reschedule: false,
+            forceApply: Boolean(options.forceApply),
+            mode: requestedMode,
+          });
+        });
+      }
+
+      scheduleNextPoll(activeIntervalMs);
     })();
   </script>
 {% endblock %}

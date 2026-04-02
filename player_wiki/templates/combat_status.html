@@ -27,6 +27,12 @@
       data-combat-status-base-url="{{ url_for('campaign_combat_status_view', campaign_slug=campaign.slug) }}"
       data-combat-state-token="{{ combat_live_state_token }}"
       data-selected-combatant-id="{{ selected_combatant_id or '' }}"
+      data-live-revision="{{ combat_live_revision }}"
+      data-live-view-token="{{ combat_live_view_token }}"
+      data-live-active-interval-ms="{{ combat_poll_active_interval_ms }}"
+      data-live-idle-interval-ms="{{ combat_poll_idle_interval_ms }}"
+      data-live-idle-threshold-ms="{{ combat_poll_idle_threshold_ms }}"
+      data-live-diagnostics-enabled="{{ '1' if live_diagnostics_enabled else '0' }}"
     >
       <aside class="sidebar combat-status-sidebar" data-combat-status-board-root>
         {% include "_combat_status_board.html" %}
@@ -40,5 +46,6 @@
 {% endblock %}
 
 {% block scripts %}
+  {% include "_live_diagnostics_helper.html" %}
   {% include "_combat_status_live_scripts.html" %}
 {% endblock %}

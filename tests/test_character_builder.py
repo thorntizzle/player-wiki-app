@@ -10259,6 +10259,12 @@ def test_character_builder_live_preview_route_returns_fragment(app, client, sign
     assert "data-live-builder-root" in html
     assert "data-live-builder-form" in html
     assert "data-live-refresh-fallback" in html
+    assert response.headers["X-Live-State-Changed"] == "true"
+    assert response.headers["X-Live-Query-Count"]
+    assert response.headers["X-Live-Query-Time-Ms"]
+    assert response.headers["X-Live-Request-Time-Ms"]
+    assert "db;dur=" in response.headers["Server-Timing"]
+    assert "total;dur=" in response.headers["Server-Timing"]
 
 
 def test_character_builder_route_passes_visible_campaign_pages_into_builder(app, client, sign_in, users, monkeypatch):
@@ -10640,6 +10646,12 @@ def test_level_up_live_preview_route_returns_fragment(app, client, sign_in, user
     assert "data-live-builder-root" in html
     assert "data-live-builder-form" in html
     assert "data-live-refresh-fallback" in html
+    assert response.headers["X-Live-State-Changed"] == "true"
+    assert response.headers["X-Live-Query-Count"]
+    assert response.headers["X-Live-Query-Time-Ms"]
+    assert response.headers["X-Live-Request-Time-Ms"]
+    assert "db;dur=" in response.headers["Server-Timing"]
+    assert "total;dur=" in response.headers["Server-Timing"]
 
 
 def test_level_one_builder_applies_fighting_initiate_optionalfeature_choice_to_attacks():

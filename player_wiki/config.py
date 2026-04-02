@@ -33,6 +33,7 @@ class Config:
     APP_ENV = os.getenv("PLAYER_WIKI_ENV", "development").strip().lower()
     DEBUG = APP_ENV == "development"
     TESTING = APP_ENV == "testing"
+    LIVE_DIAGNOSTICS = env_bool("PLAYER_WIKI_LIVE_DIAGNOSTICS", APP_ENV != "production")
 
     BASE_DIR = Path(__file__).resolve().parent.parent
     APP_VERSION = read_app_version(BASE_DIR)

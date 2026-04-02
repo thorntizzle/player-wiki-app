@@ -53,6 +53,14 @@ class CampaignSessionRecord:
 
 
 @dataclass(slots=True)
+class CampaignSessionStateRecord:
+    campaign_slug: str
+    revision: int
+    updated_at: datetime
+    updated_by_user_id: int | None
+
+
+@dataclass(slots=True)
 class SessionArticleRecord:
     id: int
     campaign_slug: str

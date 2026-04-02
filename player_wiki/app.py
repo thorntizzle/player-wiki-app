@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import hashlib
 from io import BytesIO
+import json
 import mimetypes
 from pathlib import Path
+import time
 
-from flask import Flask, abort, flash, jsonify, redirect, render_template, request, send_file, send_from_directory, url_for
+from flask import Flask, abort, flash, g, jsonify, make_response, redirect, render_template, request, send_file, send_from_directory, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .admin import register_admin
@@ -27,6 +30,7 @@ from .auth import (
     get_accessible_campaign_entries,
     get_auth_store,
     get_current_user,
+    get_current_user_preferences,
     get_effective_campaign_visibility,
     get_public_campaign_entries,
     has_session_mode_access,
@@ -84,7 +88,7 @@ from .combat_models import (
     COMBAT_SOURCE_KIND_MANUAL_NPC,
     COMBAT_SOURCE_KIND_SYSTEMS_MONSTER,
 )
-from .db import register_db
+from .db import get_db_query_metrics, register_db, reset_db_query_metrics
 from .models import section_sort_key, subsection_sort_key
 from .session_article_publisher import (
     SessionArticlePublishError,
@@ -266,6 +270,18 @@ def create_app() -> Flask:
 
     if app.config["APP_ENV"] == "production" and app.config["SECRET_KEY"] == "development-only-secret-key":
         app.logger.warning("PLAYER_WIKI_SECRET_KEY is using the default development value.")
+
+    @app.before_request
+    def start_live_request_diagnostics():
+        if not app.config["LIVE_DIAGNOSTICS"]:
+            return None
+        reset_db_query_metrics()
+        g.live_request_started_at = time.perf_counter()
+        return None
+
+    before_request_chain = app.before_request_funcs.setdefault(None, [])
+    if before_request_chain and before_request_chain[-1] is start_live_request_diagnostics:
+        before_request_chain.insert(0, before_request_chain.pop())
 
     def get_repository() -> Repository:
         return repository_store.get()
@@ -613,6 +629,179 @@ def create_app() -> Flask:
     def render_flash_stack_html() -> str:
         return render_template("_flash_stack.html")
 
+    def build_live_hash(*parts: object) -> str:
+        normalized_parts = [str(part) for part in parts]
+        digest = hashlib.sha1("||".join(normalized_parts).encode("utf-8")).hexdigest()
+        return digest[:12]
+
+    def build_combat_live_view_token(campaign_slug: str, combat_subpage: str) -> str:
+        return build_live_hash(
+            "combat",
+            combat_subpage,
+            "1" if can_manage_campaign_combat(campaign_slug) else "0",
+            *sorted(get_owned_character_slugs(campaign_slug)),
+        )
+
+    def build_session_live_view_token(campaign_slug: str) -> str:
+        current_preferences = get_current_user_preferences()
+        return build_live_hash(
+            "session",
+            current_preferences.session_chat_order,
+            "1" if can_manage_campaign_session(campaign_slug) else "0",
+            "1" if can_post_campaign_session_messages(campaign_slug) else "0",
+        )
+
+    def build_combat_poll_settings(combat_subpage: str) -> dict[str, int]:
+        if combat_subpage == "status":
+            return {
+                "active_interval_ms": 1500,
+                "idle_interval_ms": 4000,
+                "idle_threshold_ms": 30000,
+            }
+        return {
+            "active_interval_ms": 1000,
+            "idle_interval_ms": 3000,
+            "idle_threshold_ms": 30000,
+        }
+
+    def build_session_poll_settings(session_subpage: str) -> dict[str, int]:
+        if session_subpage == "dm":
+            return {
+                "active_interval_ms": 2000,
+                "idle_interval_ms": 5000,
+                "idle_threshold_ms": 30000,
+            }
+        return {
+            "active_interval_ms": 3000,
+            "idle_interval_ms": 6000,
+            "idle_threshold_ms": 30000,
+        }
+
+    def parse_live_revision_header() -> int | None:
+        raw_value = request.headers.get("X-Live-Revision", "").strip()
+        if not raw_value:
+            return None
+        try:
+            parsed_value = int(raw_value)
+        except ValueError:
+            return None
+        return parsed_value if parsed_value >= 0 else None
+
+    def parse_live_view_token_header() -> str:
+        return request.headers.get("X-Live-View-Token", "").strip()
+
+    def should_short_circuit_live_response(
+        *,
+        live_revision: int,
+        live_view_token: str,
+    ) -> bool:
+        requested_revision = parse_live_revision_header()
+        requested_view_token = parse_live_view_token_header()
+        if requested_revision is None or not requested_view_token:
+            return False
+        return requested_revision == live_revision and requested_view_token == live_view_token
+
+    def build_unchanged_live_payload(
+        *,
+        live_revision: int,
+        live_view_token: str,
+    ) -> dict[str, object]:
+        return {
+            "changed": False,
+            "live_revision": live_revision,
+            "live_view_token": live_view_token,
+        }
+
+    def attach_live_response_diagnostics(
+        response,
+        *,
+        view_name: str,
+        changed: bool,
+        state_check_ms: float,
+        render_ms: float,
+        live_revision: int | None = None,
+    ):
+        if not app.config["LIVE_DIAGNOSTICS"]:
+            return response
+
+        query_metrics = get_db_query_metrics()
+        query_count = int(query_metrics["query_count"] or 0)
+        query_time_ms = float(query_metrics["query_time_ms"] or 0.0)
+        request_started_at = getattr(g, "live_request_started_at", None)
+        request_time_ms = (
+            (time.perf_counter() - request_started_at) * 1000
+            if isinstance(request_started_at, float)
+            else state_check_ms + render_ms
+        )
+        payload_bytes = len(response.get_data())
+        server_timing_parts = [
+            f"state-check;dur={state_check_ms:.2f}",
+            f"db;dur={query_time_ms:.2f}",
+            f"render;dur={render_ms:.2f}",
+            f"total;dur={request_time_ms:.2f}",
+        ]
+        response.headers["Server-Timing"] = ", ".join(server_timing_parts)
+        response.headers["X-Live-State-Changed"] = "true" if changed else "false"
+        if live_revision is not None:
+            response.headers["X-Live-Revision"] = str(live_revision)
+        response.headers["X-Live-Payload-Bytes"] = str(payload_bytes)
+        response.headers["X-Live-Query-Count"] = str(query_count)
+        response.headers["X-Live-Query-Time-Ms"] = f"{query_time_ms:.2f}"
+        response.headers["X-Live-Request-Time-Ms"] = f"{request_time_ms:.2f}"
+        response.headers["X-Live-View"] = view_name
+        app.logger.info(
+            "live_response %s",
+            json.dumps(
+                {
+                    "view": view_name,
+                    "changed": changed,
+                    "live_revision": live_revision,
+                    "query_count": query_count,
+                    "query_time_ms": round(query_time_ms, 2),
+                    "request_time_ms": round(request_time_ms, 2),
+                    "state_check_ms": round(state_check_ms, 2),
+                    "render_ms": round(render_ms, 2),
+                    "payload_bytes": payload_bytes,
+                },
+                sort_keys=True,
+            ),
+        )
+        return response
+
+    def build_live_json_response(
+        payload: dict[str, object],
+        *,
+        view_name: str,
+        changed: bool,
+        live_revision: int | None,
+        state_check_ms: float,
+        render_ms: float,
+    ):
+        response = jsonify(payload)
+        return attach_live_response_diagnostics(
+            response,
+            view_name=view_name,
+            changed=changed,
+            live_revision=live_revision,
+            state_check_ms=state_check_ms,
+            render_ms=render_ms,
+        )
+
+    def build_combat_live_metadata(campaign_slug: str, combat_subpage: str) -> dict[str, object]:
+        combat_service = get_campaign_combat_service()
+        combat_service.sync_player_character_snapshots(campaign_slug)
+        return {
+            "live_revision": combat_service.get_live_revision(campaign_slug),
+            "live_view_token": build_combat_live_view_token(campaign_slug, combat_subpage),
+        }
+
+    def build_session_live_metadata(campaign_slug: str) -> dict[str, object]:
+        session_service = get_campaign_session_service()
+        return {
+            "live_revision": session_service.get_live_revision(campaign_slug),
+            "live_view_token": build_session_live_view_token(campaign_slug),
+        }
+
     def build_session_manager_state_token(
         *,
         active_session_id: int | None,
@@ -943,16 +1132,29 @@ def create_app() -> Flask:
             if request.method == "GET" and request.args.get("_live_preview") == "1"
             else "character_create.html"
         )
-        return (
+        render_started_at = time.perf_counter()
+        response = make_response(
             render_template(
                 template_name,
                 campaign=campaign,
                 builder=builder_context,
                 builder_ready=builder_ready,
                 active_nav="characters",
+                live_diagnostics_enabled=app.config["LIVE_DIAGNOSTICS"],
             ),
             status_code,
         )
+        render_ms = (time.perf_counter() - render_started_at) * 1000
+        if request.method == "GET" and request.args.get("_live_preview") == "1":
+            return attach_live_response_diagnostics(
+                response,
+                view_name="builder-create",
+                changed=True,
+                live_revision=None,
+                state_check_ms=0.0,
+                render_ms=render_ms,
+            )
+        return response
 
     def render_character_edit_page(
         campaign_slug: str,
@@ -991,16 +1193,29 @@ def create_app() -> Flask:
             if request.method == "GET" and request.args.get("_live_preview") == "1"
             else "character_level_up.html"
         )
-        return (
+        render_started_at = time.perf_counter()
+        response = make_response(
             render_template(
                 template_name,
                 campaign=campaign,
                 character_slug=character_slug,
                 level_up=level_up_context,
                 active_nav="characters",
+                live_diagnostics_enabled=app.config["LIVE_DIAGNOSTICS"],
             ),
             status_code,
         )
+        render_ms = (time.perf_counter() - render_started_at) * 1000
+        if request.method == "GET" and request.args.get("_live_preview") == "1":
+            return attach_live_response_diagnostics(
+                response,
+                view_name="builder-level-up",
+                changed=True,
+                live_revision=None,
+                state_check_ms=0.0,
+                render_ms=render_ms,
+            )
+        return response
 
     def render_character_progression_repair_page(
         campaign_slug: str,
@@ -1155,6 +1370,9 @@ def create_app() -> Flask:
             session_logs = present_session_log_summaries(
                 session_service.list_session_logs(campaign_slug, limit=12)
             )
+        session_poll_settings = build_session_poll_settings(session_subpage)
+        session_live_revision = session_service.get_live_revision(campaign_slug)
+        session_live_view_token = build_session_live_view_token(campaign_slug)
 
         return {
             "campaign": campaign,
@@ -1174,6 +1392,12 @@ def create_app() -> Flask:
                 revealed_articles=revealed_articles,
                 session_logs=session_logs,
             ),
+            "session_live_revision": session_live_revision,
+            "session_live_view_token": session_live_view_token,
+            "live_diagnostics_enabled": app.config["LIVE_DIAGNOSTICS"],
+            "session_poll_active_interval_ms": session_poll_settings["active_interval_ms"],
+            "session_poll_idle_interval_ms": session_poll_settings["idle_interval_ms"],
+            "session_poll_idle_threshold_ms": session_poll_settings["idle_threshold_ms"],
             "session_subpage": session_subpage,
             "active_nav": "session",
         }
@@ -1244,8 +1468,8 @@ def create_app() -> Flask:
         if combat_system_supported:
             combat_service = get_campaign_combat_service()
             dm_content_service = get_campaign_dm_content_service()
-            tracker = combat_service.get_tracker(campaign_slug)
             combatants = combat_service.list_combatants(campaign_slug)
+            tracker = combat_service.get_tracker(campaign_slug)
             for combatant in combatants:
                 if not combatant.character_slug:
                     continue
@@ -1300,6 +1524,9 @@ def create_app() -> Flask:
                 explicit_combatant_id=requested_combatant_id,
                 strict_explicit=False,
             )
+        combat_poll_settings = build_combat_poll_settings(combat_subpage)
+        combat_live_revision = tracker.revision if combat_system_supported else 0
+        combat_live_view_token = build_combat_live_view_token(campaign_slug, combat_subpage)
 
         selected_combatant_id = (
             selected_combatant_record.id if selected_combatant_record is not None else None
@@ -1346,6 +1573,12 @@ def create_app() -> Flask:
             "can_access_dm_content": can_access_dm_content,
             "can_access_systems": can_access_systems,
             "combat_live_state_token": build_combat_live_state_token(tracker_view),
+            "combat_live_revision": combat_live_revision,
+            "combat_live_view_token": combat_live_view_token,
+            "live_diagnostics_enabled": app.config["LIVE_DIAGNOSTICS"],
+            "combat_poll_active_interval_ms": combat_poll_settings["active_interval_ms"],
+            "combat_poll_idle_interval_ms": combat_poll_settings["idle_interval_ms"],
+            "combat_poll_idle_threshold_ms": combat_poll_settings["idle_threshold_ms"],
             "combat_subpage": combat_subpage,
             "combat_subpages": build_combat_subpages(
                 campaign_slug,
@@ -2027,9 +2260,18 @@ def create_app() -> Flask:
         include_flash: bool = False,
         mutation_succeeded: bool | None = None,
         anchor: str | None = None,
+        live_revision: int | None = None,
+        live_view_token: str | None = None,
     ) -> dict[str, object]:
         context = build_campaign_session_page_context(campaign_slug)
+        if live_revision is None:
+            live_revision = int(context["session_live_revision"] or 0)
+        if live_view_token is None:
+            live_view_token = str(context["session_live_view_token"] or "")
         payload = {
+            "changed": True,
+            "live_revision": live_revision,
+            "live_view_token": live_view_token,
             "active_session_id": context["active_session_id"],
             "manager_state_token": context["session_manager_state_token"],
             "status_html": render_template("_session_status_card.html", **context),
@@ -2055,13 +2297,22 @@ def create_app() -> Flask:
         mutation_succeeded: bool | None = None,
         anchor: str | None = None,
         selected_combatant_id: int | None = None,
+        live_revision: int | None = None,
+        live_view_token: str | None = None,
     ) -> dict[str, object]:
         context = build_campaign_combat_page_context(
             campaign_slug,
             combat_subpage="combat",
             selected_combatant_id=selected_combatant_id,
         )
+        if live_revision is None:
+            live_revision = int(context["combat_live_revision"] or 0)
+        if live_view_token is None:
+            live_view_token = str(context["combat_live_view_token"] or "")
         payload = {
+            "changed": True,
+            "live_revision": live_revision,
+            "live_view_token": live_view_token,
             "combat_state_token": context["combat_live_state_token"],
             "summary_html": render_template("_combat_summary_card.html", **context),
             "tracker_html": render_template("_combat_tracker_section.html", **context),
@@ -2083,6 +2334,8 @@ def create_app() -> Flask:
         mutation_succeeded: bool | None = None,
         anchor: str | None = None,
         selected_combatant_id: int | None = None,
+        live_revision: int | None = None,
+        live_view_token: str | None = None,
     ) -> dict[str, object]:
         context = build_campaign_combat_page_context(
             campaign_slug,
@@ -2090,7 +2343,14 @@ def create_app() -> Flask:
             combat_subpage="dm",
             selected_combatant_id=selected_combatant_id,
         )
+        if live_revision is None:
+            live_revision = int(context["combat_live_revision"] or 0)
+        if live_view_token is None:
+            live_view_token = str(context["combat_live_view_token"] or "")
         payload = {
+            "changed": True,
+            "live_revision": live_revision,
+            "live_view_token": live_view_token,
             "combat_state_token": context["combat_live_state_token"],
             "summary_html": render_template("_combat_summary_card.html", **context),
             "tracker_html": render_template("_combat_tracker_section.html", **context),
@@ -2108,9 +2368,19 @@ def create_app() -> Flask:
 
     def build_campaign_combat_character_live_state(
         campaign_slug: str,
+        *,
+        live_revision: int | None = None,
+        live_view_token: str | None = None,
     ) -> dict[str, object]:
         context = build_campaign_combat_character_context(campaign_slug)
+        if live_revision is None:
+            live_revision = int(context["combat_live_revision"] or 0)
+        if live_view_token is None:
+            live_view_token = str(context["combat_live_view_token"] or "")
         return {
+            "changed": True,
+            "live_revision": live_revision,
+            "live_view_token": live_view_token,
             "combat_state_token": context["combat_character_state_token"],
             "snapshot_html": render_template("_combat_character_snapshot.html", **context),
         }
@@ -2120,9 +2390,18 @@ def create_app() -> Flask:
         *,
         include_flash: bool = False,
         mutation_succeeded: bool | None = None,
+        live_revision: int | None = None,
+        live_view_token: str | None = None,
     ) -> dict[str, object]:
         context = build_campaign_combat_status_context(campaign_slug)
+        if live_revision is None:
+            live_revision = int(context["combat_live_revision"] or 0)
+        if live_view_token is None:
+            live_view_token = str(context["combat_live_view_token"] or "")
         payload = {
+            "changed": True,
+            "live_revision": live_revision,
+            "live_view_token": live_view_token,
             "combat_state_token": context["combat_live_state_token"],
             "board_html": render_template("_combat_status_board.html", **context),
             "detail_html": render_template("_combat_status_detail.html", **context),
@@ -2778,7 +3057,40 @@ def create_app() -> Flask:
     @app.get("/campaigns/<campaign_slug>/combat/live-state")
     @campaign_scope_access_required("combat")
     def campaign_combat_live_state(campaign_slug: str):
-        return jsonify(build_campaign_combat_live_state(campaign_slug))
+        state_check_started_at = time.perf_counter()
+        live_metadata = build_combat_live_metadata(campaign_slug, "combat")
+        state_check_ms = (time.perf_counter() - state_check_started_at) * 1000
+        if should_short_circuit_live_response(
+            live_revision=int(live_metadata["live_revision"] or 0),
+            live_view_token=str(live_metadata["live_view_token"] or ""),
+        ):
+            return build_live_json_response(
+                build_unchanged_live_payload(
+                    live_revision=int(live_metadata["live_revision"] or 0),
+                    live_view_token=str(live_metadata["live_view_token"] or ""),
+                ),
+                view_name="combat",
+                changed=False,
+                live_revision=int(live_metadata["live_revision"] or 0),
+                state_check_ms=state_check_ms,
+                render_ms=0.0,
+            )
+
+        render_started_at = time.perf_counter()
+        payload = build_campaign_combat_live_state(
+            campaign_slug,
+            live_revision=int(live_metadata["live_revision"] or 0),
+            live_view_token=str(live_metadata["live_view_token"] or ""),
+        )
+        render_ms = (time.perf_counter() - render_started_at) * 1000
+        return build_live_json_response(
+            payload,
+            view_name="combat",
+            changed=True,
+            live_revision=int(live_metadata["live_revision"] or 0),
+            state_check_ms=state_check_ms,
+            render_ms=render_ms,
+        )
 
     @app.get("/campaigns/<campaign_slug>/combat/dm")
     @campaign_scope_access_required("combat")
@@ -2797,7 +3109,40 @@ def create_app() -> Flask:
     def campaign_combat_dm_live_state(campaign_slug: str):
         if not can_manage_campaign_combat(campaign_slug):
             abort(403)
-        return jsonify(build_campaign_combat_dm_live_state(campaign_slug))
+        state_check_started_at = time.perf_counter()
+        live_metadata = build_combat_live_metadata(campaign_slug, "dm")
+        state_check_ms = (time.perf_counter() - state_check_started_at) * 1000
+        if should_short_circuit_live_response(
+            live_revision=int(live_metadata["live_revision"] or 0),
+            live_view_token=str(live_metadata["live_view_token"] or ""),
+        ):
+            return build_live_json_response(
+                build_unchanged_live_payload(
+                    live_revision=int(live_metadata["live_revision"] or 0),
+                    live_view_token=str(live_metadata["live_view_token"] or ""),
+                ),
+                view_name="combat-dm",
+                changed=False,
+                live_revision=int(live_metadata["live_revision"] or 0),
+                state_check_ms=state_check_ms,
+                render_ms=0.0,
+            )
+
+        render_started_at = time.perf_counter()
+        payload = build_campaign_combat_dm_live_state(
+            campaign_slug,
+            live_revision=int(live_metadata["live_revision"] or 0),
+            live_view_token=str(live_metadata["live_view_token"] or ""),
+        )
+        render_ms = (time.perf_counter() - render_started_at) * 1000
+        return build_live_json_response(
+            payload,
+            view_name="combat-dm",
+            changed=True,
+            live_revision=int(live_metadata["live_revision"] or 0),
+            state_check_ms=state_check_ms,
+            render_ms=render_ms,
+        )
 
     @app.get("/campaigns/<campaign_slug>/combat/status")
     @campaign_scope_access_required("combat")
@@ -2808,7 +3153,40 @@ def create_app() -> Flask:
     @app.get("/campaigns/<campaign_slug>/combat/status/live-state")
     @campaign_scope_access_required("combat")
     def campaign_combat_status_live_state(campaign_slug: str):
-        return jsonify(build_campaign_combat_status_live_state(campaign_slug))
+        state_check_started_at = time.perf_counter()
+        live_metadata = build_combat_live_metadata(campaign_slug, "status")
+        state_check_ms = (time.perf_counter() - state_check_started_at) * 1000
+        if should_short_circuit_live_response(
+            live_revision=int(live_metadata["live_revision"] or 0),
+            live_view_token=str(live_metadata["live_view_token"] or ""),
+        ):
+            return build_live_json_response(
+                build_unchanged_live_payload(
+                    live_revision=int(live_metadata["live_revision"] or 0),
+                    live_view_token=str(live_metadata["live_view_token"] or ""),
+                ),
+                view_name="combat-status",
+                changed=False,
+                live_revision=int(live_metadata["live_revision"] or 0),
+                state_check_ms=state_check_ms,
+                render_ms=0.0,
+            )
+
+        render_started_at = time.perf_counter()
+        payload = build_campaign_combat_status_live_state(
+            campaign_slug,
+            live_revision=int(live_metadata["live_revision"] or 0),
+            live_view_token=str(live_metadata["live_view_token"] or ""),
+        )
+        render_ms = (time.perf_counter() - render_started_at) * 1000
+        return build_live_json_response(
+            payload,
+            view_name="combat-status",
+            changed=True,
+            live_revision=int(live_metadata["live_revision"] or 0),
+            state_check_ms=state_check_ms,
+            render_ms=render_ms,
+        )
 
     @app.get("/campaigns/<campaign_slug>/combat/character")
     @campaign_scope_access_required("combat")
@@ -2819,7 +3197,40 @@ def create_app() -> Flask:
     @app.get("/campaigns/<campaign_slug>/combat/character/live-state")
     @campaign_scope_access_required("combat")
     def campaign_combat_character_live_state(campaign_slug: str):
-        return jsonify(build_campaign_combat_character_live_state(campaign_slug))
+        state_check_started_at = time.perf_counter()
+        live_metadata = build_combat_live_metadata(campaign_slug, "character")
+        state_check_ms = (time.perf_counter() - state_check_started_at) * 1000
+        if should_short_circuit_live_response(
+            live_revision=int(live_metadata["live_revision"] or 0),
+            live_view_token=str(live_metadata["live_view_token"] or ""),
+        ):
+            return build_live_json_response(
+                build_unchanged_live_payload(
+                    live_revision=int(live_metadata["live_revision"] or 0),
+                    live_view_token=str(live_metadata["live_view_token"] or ""),
+                ),
+                view_name="combat-character",
+                changed=False,
+                live_revision=int(live_metadata["live_revision"] or 0),
+                state_check_ms=state_check_ms,
+                render_ms=0.0,
+            )
+
+        render_started_at = time.perf_counter()
+        payload = build_campaign_combat_character_live_state(
+            campaign_slug,
+            live_revision=int(live_metadata["live_revision"] or 0),
+            live_view_token=str(live_metadata["live_view_token"] or ""),
+        )
+        render_ms = (time.perf_counter() - render_started_at) * 1000
+        return build_live_json_response(
+            payload,
+            view_name="combat-character",
+            changed=True,
+            live_revision=int(live_metadata["live_revision"] or 0),
+            state_check_ms=state_check_ms,
+            render_ms=render_ms,
+        )
 
     @app.get("/campaigns/<campaign_slug>/combat/systems-monsters/search")
     @campaign_scope_access_required("combat")
@@ -3444,7 +3855,40 @@ def create_app() -> Flask:
     @app.get("/campaigns/<campaign_slug>/session/live-state")
     @campaign_scope_access_required("session")
     def campaign_session_live_state(campaign_slug: str):
-        return jsonify(build_campaign_session_live_state(campaign_slug))
+        state_check_started_at = time.perf_counter()
+        live_metadata = build_session_live_metadata(campaign_slug)
+        state_check_ms = (time.perf_counter() - state_check_started_at) * 1000
+        if should_short_circuit_live_response(
+            live_revision=int(live_metadata["live_revision"] or 0),
+            live_view_token=str(live_metadata["live_view_token"] or ""),
+        ):
+            return build_live_json_response(
+                build_unchanged_live_payload(
+                    live_revision=int(live_metadata["live_revision"] or 0),
+                    live_view_token=str(live_metadata["live_view_token"] or ""),
+                ),
+                view_name="session",
+                changed=False,
+                live_revision=int(live_metadata["live_revision"] or 0),
+                state_check_ms=state_check_ms,
+                render_ms=0.0,
+            )
+
+        render_started_at = time.perf_counter()
+        payload = build_campaign_session_live_state(
+            campaign_slug,
+            live_revision=int(live_metadata["live_revision"] or 0),
+            live_view_token=str(live_metadata["live_view_token"] or ""),
+        )
+        render_ms = (time.perf_counter() - render_started_at) * 1000
+        return build_live_json_response(
+            payload,
+            view_name="session",
+            changed=True,
+            live_revision=int(live_metadata["live_revision"] or 0),
+            state_check_ms=state_check_ms,
+            render_ms=render_ms,
+        )
 
     @app.get("/campaigns/<campaign_slug>/session/article-sources/search")
     @campaign_scope_access_required("session")
@@ -3673,6 +4117,7 @@ def create_app() -> Flask:
                         data_blob=referenced_image_file.read(),
                         alt_text=markdown_upload.image_alt,
                         caption=markdown_upload.image_caption,
+                        updated_by_user_id=user.id,
                     )
             elif article_mode == "wiki":
                 campaign = load_campaign_context(campaign_slug)
@@ -3737,6 +4182,7 @@ def create_app() -> Flask:
                                 data_blob=image_path.read_bytes(),
                                 alt_text=page_record.page.image_alt,
                                 caption=page_record.page.image_caption,
+                                updated_by_user_id=user.id,
                             )
             else:
                 article = session_service.create_article(
@@ -3755,11 +4201,12 @@ def create_app() -> Flask:
                         data_blob=image_file.read(),
                         alt_text=request.form.get("image_alt", ""),
                         caption=request.form.get("image_caption", ""),
+                        updated_by_user_id=user.id,
                     )
         except CampaignSessionValidationError as exc:
             if article is not None:
                 try:
-                    session_service.delete_article(campaign_slug, article.id)
+                    session_service.delete_article(campaign_slug, article.id, updated_by_user_id=user.id)
                 except CampaignSessionValidationError:
                     pass
             flash(str(exc), "error")
@@ -3799,6 +4246,10 @@ def create_app() -> Flask:
         if not can_manage_campaign_session(campaign_slug):
             abort(403)
 
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
         campaign = load_campaign_context(campaign_slug)
         session_service = get_campaign_session_service()
         article = session_service.get_article(campaign_slug, article_id)
@@ -3835,6 +4286,7 @@ def create_app() -> Flask:
             return render_template("session_article_convert.html", **context), 400
 
         repository_store.refresh()
+        session_service.bump_live_state_revision(campaign_slug, updated_by_user_id=user.id)
         if options.reveal_after_session <= campaign.current_session:
             flash("Session article converted into published wiki content.", "success")
             return redirect(
@@ -3894,8 +4346,16 @@ def create_app() -> Flask:
         if not can_manage_campaign_session(campaign_slug):
             abort(403)
 
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
         try:
-            deleted_article = get_campaign_session_service().delete_article(campaign_slug, article_id)
+            deleted_article = get_campaign_session_service().delete_article(
+                campaign_slug,
+                article_id,
+                updated_by_user_id=user.id,
+            )
         except CampaignSessionValidationError as exc:
             flash(str(exc), "error")
             return respond_to_campaign_session_mutation(
@@ -3990,8 +4450,16 @@ def create_app() -> Flask:
         if not can_manage_campaign_session(campaign_slug):
             abort(403)
 
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
         try:
-            get_campaign_session_service().delete_session_log(campaign_slug, session_id)
+            get_campaign_session_service().delete_session_log(
+                campaign_slug,
+                session_id,
+                updated_by_user_id=user.id,
+            )
         except CampaignSessionValidationError as exc:
             flash(str(exc), "error")
         else:

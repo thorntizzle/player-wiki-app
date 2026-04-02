@@ -44,10 +44,11 @@ class CampaignCombatStore:
                 campaign_slug,
                 round_number,
                 current_combatant_id,
+                revision,
                 updated_at,
                 updated_by_user_id
             )
-            VALUES (?, 1, NULL, ?, ?)
+            VALUES (?, 1, NULL, 1, ?, ?)
             """,
             (campaign_slug, isoformat(utcnow()), updated_by_user_id),
         )
@@ -72,6 +73,7 @@ class CampaignCombatStore:
             UPDATE campaign_combat_trackers
             SET round_number = ?,
                 current_combatant_id = ?,
+                revision = revision + 1,
                 updated_at = ?,
                 updated_by_user_id = ?
             WHERE campaign_slug = ?
@@ -91,6 +93,37 @@ class CampaignCombatStore:
         tracker = self.get_tracker(campaign_slug)
         if tracker is None:
             raise RuntimeError("Campaign combat tracker disappeared after update.")
+        return tracker
+
+    def bump_tracker_revision(
+        self,
+        campaign_slug: str,
+        *,
+        updated_by_user_id: int | None = None,
+    ) -> CampaignCombatTrackerRecord:
+        self.ensure_tracker(campaign_slug, updated_by_user_id=updated_by_user_id)
+        connection = get_db()
+        cursor = connection.execute(
+            """
+            UPDATE campaign_combat_trackers
+            SET revision = revision + 1,
+                updated_at = ?,
+                updated_by_user_id = ?
+            WHERE campaign_slug = ?
+            """,
+            (
+                isoformat(utcnow()),
+                updated_by_user_id,
+                campaign_slug,
+            ),
+        )
+        connection.commit()
+        if cursor.rowcount != 1:
+            raise CampaignCombatConflictError(f"Unable to bump combat tracker revision for {campaign_slug}.")
+
+        tracker = self.get_tracker(campaign_slug)
+        if tracker is None:
+            raise RuntimeError("Campaign combat tracker disappeared after revision bump.")
         return tracker
 
     def get_combatant(
@@ -320,6 +353,7 @@ class CampaignCombatStore:
             UPDATE campaign_combat_trackers
             SET round_number = 1,
                 current_combatant_id = NULL,
+                revision = revision + 1,
                 updated_at = ?,
                 updated_by_user_id = ?
             WHERE campaign_slug = ?
@@ -474,6 +508,7 @@ class CampaignCombatStore:
             campaign_slug=str(row["campaign_slug"]),
             round_number=int(row["round_number"] or 1),
             current_combatant_id=int(row["current_combatant_id"]) if row["current_combatant_id"] is not None else None,
+            revision=max(1, int(row["revision"] or 1)),
             updated_at=updated_at,
             updated_by_user_id=int(row["updated_by_user_id"]) if row["updated_by_user_id"] is not None else None,
         )

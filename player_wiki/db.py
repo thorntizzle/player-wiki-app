@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+import time
 
-from flask import Flask, current_app, g
+from flask import Flask, current_app, g, has_app_context
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -147,6 +148,14 @@ CREATE TABLE IF NOT EXISTS campaign_sessions (
     FOREIGN KEY (ended_by_user_id) REFERENCES users(id)
 );
 
+CREATE TABLE IF NOT EXISTS campaign_session_states (
+    campaign_slug TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL,
+    updated_by_user_id INTEGER,
+    FOREIGN KEY (updated_by_user_id) REFERENCES users(id)
+);
+
 CREATE TABLE IF NOT EXISTS campaign_session_articles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     campaign_slug TEXT NOT NULL,
@@ -274,6 +283,7 @@ CREATE TABLE IF NOT EXISTS campaign_combat_trackers (
     campaign_slug TEXT PRIMARY KEY,
     round_number INTEGER NOT NULL DEFAULT 1,
     current_combatant_id INTEGER,
+    revision INTEGER NOT NULL DEFAULT 1,
     updated_at TEXT NOT NULL,
     updated_by_user_id INTEGER,
     FOREIGN KEY (current_combatant_id) REFERENCES campaign_combatants(id) ON DELETE SET NULL,
@@ -462,11 +472,94 @@ CREATE TABLE IF NOT EXISTS campaign_page_sync_state (
 """
 
 
+class _InstrumentedCursor:
+    def __init__(self, cursor: sqlite3.Cursor) -> None:
+        self._cursor = cursor
+
+    def __getattr__(self, name: str):
+        return getattr(self._cursor, name)
+
+    def execute(self, sql: str, parameters=()):
+        started_at = time.perf_counter()
+        try:
+            self._cursor.execute(sql, parameters)
+            return self
+        finally:
+            _record_db_query((time.perf_counter() - started_at) * 1000)
+
+    def executemany(self, sql: str, seq_of_parameters):
+        started_at = time.perf_counter()
+        try:
+            self._cursor.executemany(sql, seq_of_parameters)
+            return self
+        finally:
+            _record_db_query((time.perf_counter() - started_at) * 1000)
+
+    def executescript(self, sql_script: str):
+        started_at = time.perf_counter()
+        try:
+            self._cursor.executescript(sql_script)
+            return self
+        finally:
+            _record_db_query((time.perf_counter() - started_at) * 1000)
+
+
+class _InstrumentedConnection:
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self._connection = connection
+
+    def __getattr__(self, name: str):
+        return getattr(self._connection, name)
+
+    def cursor(self, *args, **kwargs) -> _InstrumentedCursor:
+        return _InstrumentedCursor(self._connection.cursor(*args, **kwargs))
+
+    def execute(self, sql: str, parameters=()):
+        return self.cursor().execute(sql, parameters)
+
+    def executemany(self, sql: str, seq_of_parameters):
+        return self.cursor().executemany(sql, seq_of_parameters)
+
+    def executescript(self, sql_script: str):
+        return self.cursor().executescript(sql_script)
+
+    def close(self) -> None:
+        self._connection.close()
+
+
+def reset_db_query_metrics() -> None:
+    if not has_app_context():
+        return
+    g.db_query_metrics = {"query_count": 0, "query_time_ms": 0.0}
+
+
+def get_db_query_metrics() -> dict[str, float | int]:
+    if not has_app_context():
+        return {"query_count": 0, "query_time_ms": 0.0}
+    metrics = getattr(g, "db_query_metrics", None)
+    if not isinstance(metrics, dict):
+        reset_db_query_metrics()
+        metrics = getattr(g, "db_query_metrics", {})
+    return {
+        "query_count": int(metrics.get("query_count", 0) or 0),
+        "query_time_ms": float(metrics.get("query_time_ms", 0.0) or 0.0),
+    }
+
+
+def _record_db_query(duration_ms: float) -> None:
+    if not has_app_context():
+        return
+    metrics = get_db_query_metrics()
+    metrics["query_count"] = int(metrics["query_count"]) + 1
+    metrics["query_time_ms"] = float(metrics["query_time_ms"]) + max(0.0, duration_ms)
+    g.db_query_metrics = metrics
+
+
 def register_db(app: Flask) -> None:
     app.teardown_appcontext(close_db)
 
 
-def get_db() -> sqlite3.Connection:
+def get_db() -> sqlite3.Connection | _InstrumentedConnection:
     if "db_connection" not in g:
         db_path = Path(current_app.config["DB_PATH"])
         db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -476,7 +569,7 @@ def get_db() -> sqlite3.Connection:
         connection.execute("PRAGMA journal_mode = WAL")
         connection.execute("PRAGMA synchronous = NORMAL")
         connection.execute("PRAGMA foreign_keys = ON")
-        g.db_connection = connection
+        g.db_connection = _InstrumentedConnection(connection)
 
     return g.db_connection
 
@@ -492,6 +585,8 @@ def init_database() -> None:
     connection.executescript(SCHEMA)
     _migrate_user_preferences_for_session_chat_order(connection)
     _migrate_campaign_visibility_settings_for_additional_scopes(connection)
+    _migrate_campaign_combat_trackers_for_revision(connection)
+    _migrate_campaign_session_states(connection)
     _migrate_campaign_session_articles_for_source_page_ref(connection)
     _migrate_campaign_combatants_for_source_identity(connection)
     connection.commit()
@@ -574,6 +669,48 @@ def _migrate_campaign_session_articles_for_source_page_ref(connection: sqlite3.C
         """
         ALTER TABLE campaign_session_articles
         ADD COLUMN source_page_ref TEXT NOT NULL DEFAULT ''
+        """
+    )
+
+
+def _migrate_campaign_session_states(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS campaign_session_states (
+            campaign_slug TEXT PRIMARY KEY,
+            revision INTEGER NOT NULL DEFAULT 1,
+            updated_at TEXT NOT NULL,
+            updated_by_user_id INTEGER,
+            FOREIGN KEY (updated_by_user_id) REFERENCES users(id)
+        )
+        """
+    )
+
+
+def _migrate_campaign_combat_trackers_for_revision(connection: sqlite3.Connection) -> None:
+    columns = {
+        str(row["name"] or "")
+        for row in connection.execute("PRAGMA table_info(campaign_combat_trackers)").fetchall()
+    }
+    if not columns:
+        return
+
+    if "revision" not in columns:
+        connection.execute(
+            """
+            ALTER TABLE campaign_combat_trackers
+            ADD COLUMN revision INTEGER NOT NULL DEFAULT 1
+            """
+        )
+
+    connection.execute(
+        """
+        UPDATE campaign_combat_trackers
+        SET revision = CASE
+            WHEN revision IS NULL OR revision < 1
+                THEN 1
+            ELSE revision
+        END
         """
     )
 

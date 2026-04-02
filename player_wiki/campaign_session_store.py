@@ -6,6 +6,7 @@ from .auth_store import isoformat, parse_timestamp, utcnow
 from .db import get_db
 from .session_models import (
     CampaignSessionRecord,
+    CampaignSessionStateRecord,
     CampaignSessionSummary,
     SessionArticleRecord,
     SessionArticleImageRecord,
@@ -18,6 +19,85 @@ class CampaignSessionConflictError(RuntimeError):
 
 
 class CampaignSessionStore:
+    def get_state(self, campaign_slug: str) -> CampaignSessionStateRecord | None:
+        row = get_db().execute(
+            """
+            SELECT *
+            FROM campaign_session_states
+            WHERE campaign_slug = ?
+            """,
+            (campaign_slug,),
+        ).fetchone()
+        return self._map_state(row)
+
+    def get_live_revision(self, campaign_slug: str) -> int:
+        state = self.get_state(campaign_slug)
+        return state.revision if state is not None else 0
+
+    def ensure_state(
+        self,
+        campaign_slug: str,
+        *,
+        updated_by_user_id: int | None = None,
+    ) -> CampaignSessionStateRecord:
+        state = self.get_state(campaign_slug)
+        if state is not None:
+            return state
+
+        connection = get_db()
+        connection.execute(
+            """
+            INSERT INTO campaign_session_states (
+                campaign_slug,
+                revision,
+                updated_at,
+                updated_by_user_id
+            )
+            VALUES (?, 1, ?, ?)
+            """,
+            (campaign_slug, isoformat(utcnow()), updated_by_user_id),
+        )
+        connection.commit()
+
+        state = self.get_state(campaign_slug)
+        if state is None:
+            raise RuntimeError("Failed to persist campaign session state.")
+        return state
+
+    def bump_state_revision(
+        self,
+        campaign_slug: str,
+        *,
+        updated_by_user_id: int | None = None,
+    ) -> CampaignSessionStateRecord:
+        state = self.get_state(campaign_slug)
+        if state is None:
+            return self.ensure_state(campaign_slug, updated_by_user_id=updated_by_user_id)
+
+        connection = get_db()
+        cursor = connection.execute(
+            """
+            UPDATE campaign_session_states
+            SET revision = revision + 1,
+                updated_at = ?,
+                updated_by_user_id = ?
+            WHERE campaign_slug = ?
+            """,
+            (
+                isoformat(utcnow()),
+                updated_by_user_id,
+                campaign_slug,
+            ),
+        )
+        connection.commit()
+        if cursor.rowcount != 1:
+            raise CampaignSessionConflictError(f"Unable to bump session state for {campaign_slug}.")
+
+        refreshed = self.get_state(campaign_slug)
+        if refreshed is None:
+            raise RuntimeError("Campaign session state disappeared after revision bump.")
+        return refreshed
+
     def get_active_session(self, campaign_slug: str) -> CampaignSessionRecord | None:
         row = get_db().execute(
             """
@@ -513,6 +593,16 @@ class CampaignSessionStore:
             started_by_user_id=int(row["started_by_user_id"]) if row["started_by_user_id"] is not None else None,
             ended_at=parse_timestamp(row["ended_at"]),
             ended_by_user_id=int(row["ended_by_user_id"]) if row["ended_by_user_id"] is not None else None,
+        )
+
+    def _map_state(self, row: sqlite3.Row | None) -> CampaignSessionStateRecord | None:
+        if row is None:
+            return None
+        return CampaignSessionStateRecord(
+            campaign_slug=str(row["campaign_slug"]),
+            revision=max(1, int(row["revision"] or 1)),
+            updated_at=parse_timestamp(row["updated_at"]) or utcnow(),
+            updated_by_user_id=int(row["updated_by_user_id"]) if row["updated_by_user_id"] is not None else None,
         )
 
     def _map_article(self, row: sqlite3.Row | None) -> SessionArticleRecord | None:

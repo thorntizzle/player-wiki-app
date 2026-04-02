@@ -20,6 +20,7 @@ class CampaignCombatTrackerRecord:
     campaign_slug: str
     round_number: int
     current_combatant_id: int | None
+    revision: int
     updated_at: datetime
     updated_by_user_id: int | None
 
