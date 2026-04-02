@@ -125,7 +125,7 @@
           liveRoot = nextRoot;
           restoreFocus(liveRoot, focusState);
           initLiveBuilder(liveRoot);
-          recordLiveMetric({
+          return recordLiveMetric({
             mode: "preview",
             bypassDebounce,
             changed: true,

@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import statistics
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urlencode, urljoin
 
 
 DEFAULT_SAMPLE_COUNTS = {
@@ -355,6 +355,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--campaign", required=True, help="Campaign slug to measure")
     parser.add_argument("--mode", required=True, choices=("local", "fly"), help="Measurement profile to use")
     parser.add_argument("--output-dir", required=True, help="Directory for raw JSON and markdown summary output")
+    parser.add_argument(
+        "--combat-character-slug",
+        default="",
+        help="Optional character slug to target for the combat character surface, for example zigzag-blackscar",
+    )
     return parser.parse_args()
 
 
@@ -363,6 +368,14 @@ def require_env(name: str) -> str:
     if value:
         return value
     raise RuntimeError(f"Missing required environment variable: {name}")
+
+
+def build_surface_path(spec: SurfaceSpec, campaign_slug: str, combat_character_slug: str = "") -> str:
+    page_path = spec.page_path_template.format(campaign=campaign_slug)
+    if spec.name == "combat_character" and combat_character_slug.strip():
+        query = urlencode({"character": combat_character_slug.strip()})
+        return f"{page_path}?{query}"
+    return page_path
 
 
 def collect_dataset(page, selector: str) -> dict[str, str]:
@@ -453,7 +466,7 @@ def wait_for_sampler(page, metric_view: str) -> None:
             window.__playerWikiLiveDiagnostics[metricView] &&
             typeof window.__playerWikiLiveDiagnostics[metricView].sample === "function"
         )""",
-        metric_view,
+        arg=metric_view,
         timeout=10000,
     )
 
@@ -487,8 +500,16 @@ def run_surface_samples(page, metric_view: str, scenario: str, count: int, *, fo
     return samples
 
 
-def collect_surface_report(page, base_url: str, campaign_slug: str, spec: SurfaceSpec, sample_counts: dict[str, int]) -> dict[str, Any] | None:
-    page_path = spec.page_path_template.format(campaign=campaign_slug)
+def collect_surface_report(
+    page,
+    base_url: str,
+    campaign_slug: str,
+    spec: SurfaceSpec,
+    sample_counts: dict[str, int],
+    *,
+    combat_character_slug: str = "",
+) -> dict[str, Any] | None:
+    page_path = build_surface_path(spec, campaign_slug, combat_character_slug)
     page.goto(urljoin(base_url, page_path), wait_until="domcontentloaded")
     try:
         page.wait_for_selector(spec.root_selector, timeout=10000)
@@ -544,7 +565,15 @@ def collect_surface_report(page, base_url: str, campaign_slug: str, spec: Surfac
     }
 
 
-def collect_measurements(base_url: str, campaign_slug: str, mode: str, email: str, password: str) -> dict[str, Any]:
+def collect_measurements(
+    base_url: str,
+    campaign_slug: str,
+    mode: str,
+    email: str,
+    password: str,
+    *,
+    combat_character_slug: str = "",
+) -> dict[str, Any]:
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as exc:
@@ -560,7 +589,14 @@ def collect_measurements(base_url: str, campaign_slug: str, mode: str, email: st
         sign_in(page, base_url, email, password)
 
         for spec in SURFACE_SPECS:
-            surface_report = collect_surface_report(page, base_url, campaign_slug, spec, sample_counts)
+            surface_report = collect_surface_report(
+                page,
+                base_url,
+                campaign_slug,
+                spec,
+                sample_counts,
+                combat_character_slug=combat_character_slug,
+            )
             if surface_report is None:
                 notes.append(f"Skipped optional surface `{spec.name}` because its live root was not available.")
                 continue
@@ -591,6 +627,7 @@ def main() -> int:
         mode=args.mode,
         email=email,
         password=password,
+        combat_character_slug=args.combat_character_slug,
     )
     json_path, markdown_path = write_artifacts(Path(args.output_dir), report)
     print(f"Wrote raw samples to {json_path}")

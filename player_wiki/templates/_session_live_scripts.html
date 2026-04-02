@@ -108,7 +108,7 @@
       return diagnosticsTools.recordMetric("session", metric);
     };
 
-    const buildLiveMetric = (response, payload, *, mode, requestMs = 0, applyMs = 0) => {
+    const buildLiveMetric = (response, payload, { mode, requestMs = 0, applyMs = 0 } = {}) => {
       const headerChanged = response.headers.get("X-Live-State-Changed");
       const queryCount = Number.parseInt(response.headers.get("X-Live-Query-Count") || "0", 10);
       const queryTimeMs = Number.parseFloat(response.headers.get("X-Live-Query-Time-Ms") || "0");
