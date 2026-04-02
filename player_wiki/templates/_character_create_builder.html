@@ -1,6 +1,7 @@
 <div
   class="page-layout character-builder-layout"
   data-live-builder-root
+  data-live-builder-default-regions="{{ builder.live_regions_csv }}"
   data-live-diagnostics-enabled="{{ '1' if live_diagnostics_enabled else '0' }}"
 >
   <section class="section-list">
@@ -30,19 +31,46 @@
           <div class="builder-field-grid">
             <label class="field">
               <span>Character Name</span>
-              <input type="text" name="name" value="{{ builder.values.name }}" placeholder="Zigzag Blackscar">
+              <input
+                type="text"
+                name="name"
+                value="{{ builder.values.name }}"
+                placeholder="Zigzag Blackscar"
+                data-live-preview-trigger="blur"
+                data-live-preview-regions=""
+              >
             </label>
             <label class="field">
               <span>Character Slug</span>
-              <input type="text" name="character_slug" value="{{ builder.values.character_slug }}" placeholder="Auto-generated from the name if left blank">
+              <input
+                type="text"
+                name="character_slug"
+                value="{{ builder.values.character_slug }}"
+                placeholder="Auto-generated from the name if left blank"
+                data-live-preview-trigger="blur"
+                data-live-preview-regions=""
+              >
             </label>
             <label class="field">
               <span>Alignment</span>
-              <input type="text" name="alignment" value="{{ builder.values.alignment }}" placeholder="Neutral Good">
+              <input
+                type="text"
+                name="alignment"
+                value="{{ builder.values.alignment }}"
+                placeholder="Neutral Good"
+                data-live-preview-trigger="blur"
+                data-live-preview-regions=""
+              >
             </label>
             <label class="field">
               <span>Experience Model</span>
-              <input type="text" name="experience_model" value="{{ builder.values.experience_model }}">
+              <input
+                type="text"
+                name="experience_model"
+                value="{{ builder.values.experience_model }}"
+                data-live-preview-trigger="blur"
+                data-live-preview-regions=""
+              >
             </label>
           </div>
         </section>
@@ -52,7 +80,12 @@
           <div class="builder-field-grid">
             <label class="field">
               <span>Class</span>
-              <select name="class_slug">
+              <select
+                name="class_slug"
+                data-live-preview-trigger="change"
+                data-live-preview-regions="{{ builder.live_regions_csv }}"
+                data-live-preview-debounce-ms="120"
+              >
                 <option value="" {% if not builder.selected_class %}selected{% endif %}>Choose a class</option>
                 {% for option in builder.class_options %}
                   <option value="{{ option.value or option.slug }}" {% if builder.selected_class and builder.selected_class.slug == option.slug %}selected{% endif %}>
@@ -65,7 +98,12 @@
             {% if builder.subclass_options or builder.requires_subclass %}
               <label class="field">
                 <span>Subclass</span>
-                <select name="subclass_slug">
+                <select
+                  name="subclass_slug"
+                  data-live-preview-trigger="change"
+                  data-live-preview-regions="{{ builder.live_regions_csv }}"
+                  data-live-preview-debounce-ms="120"
+                >
                   <option value="" {% if not builder.selected_subclass %}selected{% endif %}>
                     {% if builder.requires_subclass %}Choose a subclass{% else %}No subclass{% endif %}
                   </option>
@@ -80,7 +118,12 @@
 
             <label class="field">
               <span>Species</span>
-              <select name="species_slug">
+              <select
+                name="species_slug"
+                data-live-preview-trigger="change"
+                data-live-preview-regions="{{ builder.live_regions_csv }}"
+                data-live-preview-debounce-ms="120"
+              >
                 <option value="" {% if not builder.selected_species %}selected{% endif %}>Choose a species</option>
                 {% for option in builder.species_options %}
                   <option value="{{ option.value or option.slug }}" {% if builder.selected_species and builder.selected_species.slug == option.slug %}selected{% endif %}>
@@ -92,7 +135,12 @@
 
             <label class="field">
               <span>Background</span>
-              <select name="background_slug">
+              <select
+                name="background_slug"
+                data-live-preview-trigger="change"
+                data-live-preview-regions="{{ builder.live_regions_csv }}"
+                data-live-preview-debounce-ms="120"
+              >
                 <option value="" {% if not builder.selected_background %}selected{% endif %}>Choose a background</option>
                 {% for option in builder.background_options %}
                   <option value="{{ option.value or option.slug }}" {% if builder.selected_background and builder.selected_background.slug == option.slug %}selected{% endif %}>
@@ -118,35 +166,51 @@
             }.items() %}
               <label class="field">
                 <span>{{ label }}</span>
-                <input type="number" name="{{ ability_key }}" min="1" max="30" value="{{ builder.values[ability_key] }}">
+                <input
+                  type="number"
+                  name="{{ ability_key }}"
+                  min="1"
+                  max="30"
+                  value="{{ builder.values[ability_key] }}"
+                  data-live-preview-trigger="input"
+                  data-live-preview-regions="{{ builder.preview_regions_csv }}"
+                  data-live-preview-debounce-ms="350"
+                >
               </label>
             {% endfor %}
           </div>
         </section>
 
-        {% for section in builder.choice_sections %}
-          <section class="builder-section">
-            <h3>{{ section.title }}</h3>
-            <div class="builder-field-grid">
-              {% for field in section.fields %}
-                <label class="field">
-                  <span>{{ field.label }}</span>
-                  <select name="{{ field.name }}">
-                    <option value="" {% if not field.selected %}selected{% endif %}>Choose an option</option>
-                    {% for option in field.options %}
-                      <option value="{{ option.value }}" {% if field.selected == option.value %}selected{% endif %}>
-                        {{ option.label }}
-                      </option>
-                    {% endfor %}
-                  </select>
-                  {% if field.help_text %}
-                    <small>{{ field.help_text }}</small>
-                  {% endif %}
-                </label>
-              {% endfor %}
-            </div>
-          </section>
-        {% endfor %}
+        <div data-live-builder-region="choice-sections">
+          {% for section in builder.choice_sections %}
+            <section class="builder-section">
+              <h3>{{ section.title }}</h3>
+              <div class="builder-field-grid">
+                {% for field in section.fields %}
+                  <label class="field">
+                    <span>{{ field.label }}</span>
+                    <select
+                      name="{{ field.name }}"
+                      data-live-preview-trigger="{{ field.live_preview_trigger }}"
+                      data-live-preview-regions="{{ field.live_preview_regions }}"
+                      data-live-preview-debounce-ms="{{ field.live_preview_debounce_ms }}"
+                    >
+                      <option value="" {% if not field.selected %}selected{% endif %}>Choose an option</option>
+                      {% for option in field.options %}
+                        <option value="{{ option.value }}" {% if field.selected == option.value %}selected{% endif %}>
+                          {{ option.label }}
+                        </option>
+                      {% endfor %}
+                    </select>
+                    {% if field.help_text %}
+                      <small>{{ field.help_text }}</small>
+                    {% endif %}
+                  </label>
+                {% endfor %}
+              </div>
+            </section>
+          {% endfor %}
+        </div>
 
         <div class="builder-actions">
           <button class="ghost-button" type="submit" data-live-refresh-fallback>Refresh options</button>
@@ -157,7 +221,7 @@
   </section>
 
   <aside class="sidebar">
-    <section class="card sidebar-card">
+    <section class="card sidebar-card" data-live-builder-region="preview-summary">
       <h2>Preview</h2>
       <div class="builder-preview-list">
         <div>
@@ -205,7 +269,7 @@
       </div>
     </section>
 
-    <section class="card sidebar-card">
+    <section class="card sidebar-card" data-live-builder-region="preview-features">
       <h2>Expected Features</h2>
       {% if builder.preview.features %}
         <ul class="plain-list builder-feature-list">
@@ -218,7 +282,7 @@
       {% endif %}
     </section>
 
-    <section class="card sidebar-card">
+    <section class="card sidebar-card" data-live-builder-region="preview-resources">
       <h2>Resource Preview</h2>
       {% if builder.preview.resources %}
         <ul class="plain-list builder-feature-list">
@@ -231,7 +295,7 @@
       {% endif %}
     </section>
 
-    <section class="card sidebar-card">
+    <section class="card sidebar-card" data-live-builder-region="preview-equipment">
       <h2>Starting Equipment</h2>
       {% if builder.preview.equipment %}
         <ul class="plain-list builder-feature-list">
@@ -244,7 +308,7 @@
       {% endif %}
     </section>
 
-    <section class="card sidebar-card">
+    <section class="card sidebar-card" data-live-builder-region="preview-attacks">
       <h2>Attack Preview</h2>
       {% if builder.preview.attacks %}
         <ul class="plain-list builder-feature-list">
@@ -257,7 +321,7 @@
       {% endif %}
     </section>
 
-    <section class="card sidebar-card">
+    <section class="card sidebar-card" data-live-builder-region="preview-spells">
       <h2>Spell Preview</h2>
       {% if builder.preview.spells %}
         <ul class="plain-list builder-feature-list">
@@ -270,7 +334,7 @@
       {% endif %}
     </section>
 
-    <section class="card sidebar-card">
+    <section class="card sidebar-card" data-live-builder-region="preview-scope">
       <h2>Current Scope</h2>
       <ul class="plain-list builder-feature-list">
         {% for limitation in builder.limitations %}

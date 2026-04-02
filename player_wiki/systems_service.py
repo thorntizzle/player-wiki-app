@@ -6,6 +6,8 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
+from flask import g, has_request_context
+
 from .auth_store import isoformat, utcnow
 from .character_campaign_progression import build_campaign_page_progression_entries
 from .campaign_visibility import (
@@ -43,6 +45,26 @@ ATTACK_TAG_LABELS = {
     "rs": "Ranged Spell Attack:",
     "ms,rs": "Melee or Ranged Spell Attack:",
 }
+
+
+def _systems_service_request_cache() -> dict[tuple[object, ...], object] | None:
+    if not has_request_context():
+        return None
+    cache = getattr(g, "_systems_service_request_cache", None)
+    if isinstance(cache, dict):
+        return cache
+    cache = {}
+    g._systems_service_request_cache = cache
+    return cache
+
+
+def _systems_service_cache_get(cache_key: tuple[object, ...], build_value):
+    cache = _systems_service_request_cache()
+    if cache is None:
+        return build_value()
+    if cache_key not in cache:
+        cache[cache_key] = build_value()
+    return cache[cache_key]
 
 ABILITY_NAME_LABELS = {
     "str": "Strength",
@@ -299,6 +321,52 @@ class SystemsService:
             limit=limit,
         )
 
+    def list_enabled_entries_for_campaign(
+        self,
+        campaign_slug: str,
+        *,
+        entry_type: str | None = None,
+        query: str = "",
+        limit: int | None = None,
+    ) -> list[SystemsEntryRecord]:
+        library = self.get_campaign_library(campaign_slug)
+        if library is None:
+            return []
+
+        normalized_query = str(query or "").strip()
+
+        def _load_entries() -> list[SystemsEntryRecord]:
+            enabled_source_ids = [
+                str(row.source.source_id or "").strip()
+                for row in self.list_campaign_source_states(campaign_slug)
+                if row.is_enabled and str(row.source.source_id or "").strip()
+            ]
+            if not enabled_source_ids:
+                return []
+            return self.store.list_entries_for_campaign(
+                campaign_slug,
+                library.library_slug,
+                enabled_source_ids,
+                entry_type=entry_type,
+                query=normalized_query,
+                limit=limit,
+            )
+
+        return list(
+            _systems_service_cache_get(
+                (
+                    "enabled-entries",
+                    campaign_slug,
+                    library.library_slug,
+                    entry_type or "",
+                    normalized_query,
+                    limit,
+                ),
+                _load_entries,
+            )
+            or []
+        )
+
     def count_entries_for_source(
         self,
         campaign_slug: str,
@@ -323,27 +391,16 @@ class SystemsService:
     ) -> list[dict[str, object]]:
         if entry.entry_type != "class":
             return []
-        enabled_source_ids = [
-            row.source.source_id
-            for row in self.list_campaign_source_states(campaign_slug)
-            if row.is_enabled
-        ]
-        if not enabled_source_ids:
-            return []
-
-        matching_entries: list[SystemsEntryRecord] = []
-        for source_id in enabled_source_ids:
-            for candidate in self.list_entries_for_campaign_source(
+        matching_entries = [
+            candidate
+            for candidate in self.list_enabled_entries_for_campaign(
                 campaign_slug,
-                source_id,
                 entry_type="classfeature",
                 limit=None,
-            ):
-                if str(candidate.metadata.get("class_name", "") or "").strip() != entry.title:
-                    continue
-                if str(candidate.metadata.get("class_source", "") or "").strip().upper() != entry.source_id:
-                    continue
-                matching_entries.append(candidate)
+            )
+            if str(candidate.metadata.get("class_name", "") or "").strip() == entry.title
+            and str(candidate.metadata.get("class_source", "") or "").strip().upper() == entry.source_id
+        ]
 
         progression_rows = entry.body.get("feature_progression")
         matching_entries.extend(
@@ -362,33 +419,20 @@ class SystemsService:
     ) -> list[dict[str, object]]:
         if entry.entry_type != "subclass":
             return []
-        enabled_source_ids = [
-            row.source.source_id
-            for row in self.list_campaign_source_states(campaign_slug)
-            if row.is_enabled
-        ]
-        if not enabled_source_ids:
-            return []
-
         class_name = str(entry.metadata.get("class_name", "") or "").strip()
         class_source = str(entry.metadata.get("class_source", "") or "").strip().upper()
-        matching_entries: list[SystemsEntryRecord] = []
-        for source_id in enabled_source_ids:
-            for candidate in self.list_entries_for_campaign_source(
+        matching_entries = [
+            candidate
+            for candidate in self.list_enabled_entries_for_campaign(
                 campaign_slug,
-                source_id,
                 entry_type="subclassfeature",
                 limit=None,
-            ):
-                if str(candidate.metadata.get("class_name", "") or "").strip() != class_name:
-                    continue
-                if str(candidate.metadata.get("class_source", "") or "").strip().upper() != class_source:
-                    continue
-                if not self._subclass_entry_matches_feature(entry, candidate):
-                    continue
-                if str(candidate.metadata.get("subclass_source", "") or "").strip().upper() != entry.source_id:
-                    continue
-                matching_entries.append(candidate)
+            )
+            if str(candidate.metadata.get("class_name", "") or "").strip() == class_name
+            and str(candidate.metadata.get("class_source", "") or "").strip().upper() == class_source
+            and self._subclass_entry_matches_feature(entry, candidate)
+            and str(candidate.metadata.get("subclass_source", "") or "").strip().upper() == entry.source_id
+        ]
 
         progression_rows = entry.body.get("feature_progression")
         matching_entries.extend(

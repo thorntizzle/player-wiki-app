@@ -7,6 +7,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from flask import g, has_request_context
+
 from .auth_store import isoformat, utcnow
 from .character_adjustments import apply_manual_stat_adjustments, apply_stat_adjustments, strip_manual_stat_adjustments
 from .character_campaign_options import (
@@ -35,6 +37,34 @@ CAMPAIGN_SESSIONS_SECTION = "Sessions"
 CAMPAIGN_PAGE_OPTION_PREFIX = "page:"
 SYSTEMS_OPTION_PREFIX = "systems:"
 CAMPAIGN_PAGE_SOURCE_ID = "Campaign"
+CHOICE_SECTIONS_REGION_ID = "choice-sections"
+PREVIEW_SUMMARY_REGION_ID = "preview-summary"
+PREVIEW_FEATURES_REGION_ID = "preview-features"
+PREVIEW_RESOURCES_REGION_ID = "preview-resources"
+PREVIEW_SPELLS_REGION_ID = "preview-spells"
+PREVIEW_SCOPE_REGION_ID = "preview-scope"
+PREVIEW_EQUIPMENT_REGION_ID = "preview-equipment"
+PREVIEW_ATTACKS_REGION_ID = "preview-attacks"
+PREVIEW_SPELL_SLOTS_REGION_ID = "preview-spell-slots"
+LEVEL_ONE_PREVIEW_REGION_IDS = (
+    PREVIEW_SUMMARY_REGION_ID,
+    PREVIEW_FEATURES_REGION_ID,
+    PREVIEW_RESOURCES_REGION_ID,
+    PREVIEW_SPELLS_REGION_ID,
+    PREVIEW_SCOPE_REGION_ID,
+    PREVIEW_EQUIPMENT_REGION_ID,
+    PREVIEW_ATTACKS_REGION_ID,
+)
+LEVEL_ONE_LIVE_REGION_IDS = (CHOICE_SECTIONS_REGION_ID, *LEVEL_ONE_PREVIEW_REGION_IDS)
+LEVEL_UP_PREVIEW_REGION_IDS = (
+    PREVIEW_SUMMARY_REGION_ID,
+    PREVIEW_FEATURES_REGION_ID,
+    PREVIEW_RESOURCES_REGION_ID,
+    PREVIEW_SPELLS_REGION_ID,
+    PREVIEW_SCOPE_REGION_ID,
+    PREVIEW_SPELL_SLOTS_REGION_ID,
+)
+LEVEL_UP_LIVE_REGION_IDS = (CHOICE_SECTIONS_REGION_ID, *LEVEL_UP_PREVIEW_REGION_IDS)
 CAMPAIGN_MIXED_SOURCE_SUBSECTIONS_BY_KIND = {
     "species": {"species"},
     "background": {"background", "backgrounds"},
@@ -397,36 +427,21 @@ def build_level_one_builder_context(
     campaign_page_records: list[Any] | None = None,
 ) -> dict[str, Any]:
     preview_values = _normalize_preview_values(form_values or {})
-    class_options = _list_supported_class_entries(systems_service, campaign_slug)
-    species_options = _build_mixed_character_options(
-        _list_campaign_enabled_entries(systems_service, campaign_slug, "race"),
-        campaign_page_records or [],
-        kind="species",
+    static_bundle = _build_common_builder_static_bundle(
+        systems_service,
+        campaign_slug,
+        campaign_page_records=campaign_page_records,
     )
-    background_options = _build_mixed_character_options(
-        _list_campaign_enabled_entries(systems_service, campaign_slug, "background"),
-        campaign_page_records or [],
-        kind="background",
-    )
-    feat_options = _build_mixed_character_options(
-        _list_campaign_enabled_entries(systems_service, campaign_slug, "feat"),
-        campaign_page_records or [],
-        kind="feat",
-    )
-    feat_catalog = _build_feat_catalog(feat_options)
-    optionalfeature_catalog = _build_entry_slug_catalog(
-        _list_campaign_enabled_entries(systems_service, campaign_slug, "optionalfeature")
-    )
-    item_catalog = _build_item_catalog(_list_campaign_enabled_entries(systems_service, campaign_slug, "item"))
-    spell_catalog = _build_spell_catalog(_list_campaign_enabled_entries(systems_service, campaign_slug, "spell"))
-    campaign_feature_options = _build_campaign_page_choice_options(
-        campaign_page_records or [],
-        include_items=False,
-    )
-    campaign_item_options = _build_campaign_page_choice_options(
-        campaign_page_records or [],
-        include_items=True,
-    )
+    class_options = list(static_bundle.get("supported_class_entries") or [])
+    species_options = list(static_bundle.get("species_options") or [])
+    background_options = list(static_bundle.get("background_options") or [])
+    feat_options = list(static_bundle.get("feat_options") or [])
+    feat_catalog = dict(static_bundle.get("feat_catalog") or {})
+    optionalfeature_catalog = dict(static_bundle.get("optionalfeature_catalog") or {})
+    item_catalog = dict(static_bundle.get("item_catalog") or {})
+    spell_catalog = dict(static_bundle.get("spell_catalog") or {})
+    campaign_feature_options = list(static_bundle.get("campaign_feature_options") or [])
+    campaign_item_options = list(static_bundle.get("campaign_item_options") or [])
 
     preview_values["class_slug"] = _sanitize_entry_selection_value(preview_values.get("class_slug"), class_options)
     preview_values["species_slug"] = _sanitize_entry_selection_value(preview_values.get("species_slug"), species_options)
@@ -438,23 +453,20 @@ def build_level_one_builder_context(
     selected_species = _resolve_selected_entry(species_options, preview_values.get("species_slug", ""))
     selected_background = _resolve_selected_entry(background_options, preview_values.get("background_slug", ""))
 
-    subclass_options = _list_subclass_options(systems_service, campaign_slug, selected_class)
+    subclass_options = _list_subclass_options(
+        systems_service,
+        campaign_slug,
+        selected_class,
+        subclass_entries=list(static_bundle.get("subclass_entries") or []),
+    )
     preview_values["subclass_slug"] = _sanitize_entry_selection_value(
         preview_values.get("subclass_slug"),
         subclass_options,
     )
     selected_subclass = _resolve_selected_entry(subclass_options, preview_values.get("subclass_slug", ""))
 
-    class_progression = (
-        systems_service.build_class_feature_progression_for_class_entry(campaign_slug, selected_class)
-        if selected_class is not None
-        else []
-    )
-    subclass_progression = (
-        systems_service.build_subclass_feature_progression_for_subclass_entry(campaign_slug, selected_subclass)
-        if selected_subclass is not None
-        else []
-    )
+    class_progression = _class_progression_for_builder(systems_service, campaign_slug, selected_class)
+    subclass_progression = _subclass_progression_for_builder(systems_service, campaign_slug, selected_subclass)
     requires_subclass = _class_requires_subclass_at_level_one(selected_class, class_progression)
 
     equipment_groups = _build_equipment_groups(
@@ -484,6 +496,10 @@ def build_level_one_builder_context(
             spell_catalog=spell_catalog,
             values=current_values,
         ),
+    )
+    choice_sections = _annotate_builder_choice_sections(
+        choice_sections,
+        preview_region_ids=LEVEL_ONE_PREVIEW_REGION_IDS,
     )
 
     preview = _build_level_one_preview(
@@ -530,6 +546,10 @@ def build_level_one_builder_context(
             "Gold-alternative loadouts, non-structured campaign spell access, and a few remaining feat/spell edge cases still need manual follow-up.",
         ],
         "preview": preview,
+        "preview_region_ids": list(LEVEL_ONE_PREVIEW_REGION_IDS),
+        "preview_regions_csv": ",".join(LEVEL_ONE_PREVIEW_REGION_IDS),
+        "live_region_ids": list(LEVEL_ONE_LIVE_REGION_IDS),
+        "live_regions_csv": ",".join(LEVEL_ONE_LIVE_REGION_IDS),
     }
 
 
@@ -1068,28 +1088,19 @@ def build_native_level_up_context(
     values = _normalize_level_up_values(definition, form_values or {})
     current_level = _resolve_native_character_level(definition)
     next_level = current_level + 1
-    class_options = _list_supported_class_entries(systems_service, campaign_slug)
-    species_options = _build_mixed_character_options(
-        _list_campaign_enabled_entries(systems_service, campaign_slug, "race"),
-        campaign_page_records or [],
-        kind="species",
+    static_bundle = _build_common_builder_static_bundle(
+        systems_service,
+        campaign_slug,
+        campaign_page_records=campaign_page_records,
     )
-    background_options = _build_mixed_character_options(
-        _list_campaign_enabled_entries(systems_service, campaign_slug, "background"),
-        campaign_page_records or [],
-        kind="background",
-    )
-    feat_options = _build_mixed_character_options(
-        _list_campaign_enabled_entries(systems_service, campaign_slug, "feat"),
-        campaign_page_records or [],
-        kind="feat",
-    )
-    feat_catalog = _build_feat_catalog(feat_options)
-    optionalfeature_catalog = _build_entry_slug_catalog(
-        _list_campaign_enabled_entries(systems_service, campaign_slug, "optionalfeature")
-    )
-    item_catalog = _build_item_catalog(_list_campaign_enabled_entries(systems_service, campaign_slug, "item"))
-    spell_catalog = _build_spell_catalog(_list_campaign_enabled_entries(systems_service, campaign_slug, "spell"))
+    class_options = list(static_bundle.get("supported_class_entries") or [])
+    species_options = list(static_bundle.get("species_options") or [])
+    background_options = list(static_bundle.get("background_options") or [])
+    feat_options = list(static_bundle.get("feat_options") or [])
+    feat_catalog = dict(static_bundle.get("feat_catalog") or {})
+    optionalfeature_catalog = dict(static_bundle.get("optionalfeature_catalog") or {})
+    item_catalog = dict(static_bundle.get("item_catalog") or {})
+    spell_catalog = dict(static_bundle.get("spell_catalog") or {})
 
     selected_class = _resolve_profile_entry(
         class_options,
@@ -1113,23 +1124,24 @@ def build_native_level_up_context(
     if not _supports_native_class_entry(selected_class):
         raise CharacterBuildError("This native character's base class does not yet expose the progression metadata needed for native level-up.")
 
-    subclass_options = _list_subclass_options(systems_service, campaign_slug, selected_class)
+    subclass_options = _list_subclass_options(
+        systems_service,
+        campaign_slug,
+        selected_class,
+        subclass_entries=list(static_bundle.get("subclass_entries") or []),
+    )
     existing_subclass_slug = _systems_ref_slug(definition.profile.get("subclass_ref"))
     if existing_subclass_slug and not str(values.get("subclass_slug") or "").strip():
         values["subclass_slug"] = existing_subclass_slug
     values["subclass_slug"] = _sanitize_entry_selection_value(values.get("subclass_slug"), subclass_options)
     selected_subclass = _resolve_selected_entry(subclass_options, values.get("subclass_slug", ""))
 
-    class_progression = systems_service.build_class_feature_progression_for_class_entry(campaign_slug, selected_class)
+    class_progression = _class_progression_for_builder(systems_service, campaign_slug, selected_class)
     requires_subclass = (
         _class_requires_subclass_at_level(selected_class, class_progression, next_level)
         and selected_subclass is None
     )
-    subclass_progression = (
-        systems_service.build_subclass_feature_progression_for_subclass_entry(campaign_slug, selected_subclass)
-        if selected_subclass is not None
-        else []
-    )
+    subclass_progression = _subclass_progression_for_builder(systems_service, campaign_slug, selected_subclass)
     ability_scores = _ability_scores_from_definition(definition)
     values, choice_sections = _stabilize_choice_section_values(
         values,
@@ -1151,6 +1163,10 @@ def build_native_level_up_context(
             current_ability_scores=ability_scores,
             values=current_values,
         ),
+    )
+    choice_sections = _annotate_builder_choice_sections(
+        choice_sections,
+        preview_region_ids=LEVEL_UP_PREVIEW_REGION_IDS,
     )
     preview = _build_native_level_up_preview(
         definition=definition,
@@ -1191,6 +1207,10 @@ def build_native_level_up_context(
         "spell_catalog": spell_catalog,
         "limitations": list(NATIVE_LEVEL_UP_LIMITATIONS),
         "preview": preview,
+        "preview_region_ids": list(LEVEL_UP_PREVIEW_REGION_IDS),
+        "preview_regions_csv": ",".join(LEVEL_UP_PREVIEW_REGION_IDS),
+        "live_region_ids": list(LEVEL_UP_LIVE_REGION_IDS),
+        "live_regions_csv": ",".join(LEVEL_UP_LIVE_REGION_IDS),
     }
 
 
@@ -1738,15 +1758,163 @@ def _list_phb_entries(
     ]
 
 
+def _builder_request_cache() -> dict[tuple[Any, ...], Any] | None:
+    if not has_request_context():
+        return None
+    cache = getattr(g, "_character_builder_request_cache", None)
+    if isinstance(cache, dict):
+        return cache
+    cache = {}
+    g._character_builder_request_cache = cache
+    return cache
+
+
+def _builder_cache_get(cache_key: tuple[Any, ...], build_value):
+    cache = _builder_request_cache()
+    if cache is None:
+        return build_value()
+    if cache_key not in cache:
+        cache[cache_key] = build_value()
+    return cache[cache_key]
+
+
+def _builder_request_page_key(campaign_page_records: list[Any] | None) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {
+                page_ref
+                for page_ref in (
+                    _extract_campaign_page_ref(record)
+                    for record in list(campaign_page_records or [])
+                )
+                if page_ref
+            }
+        )
+    )
+
+
+def _sort_entries_for_builder(entries: list[SystemsEntryRecord]) -> list[SystemsEntryRecord]:
+    deduped_entries: list[SystemsEntryRecord] = []
+    seen_entry_keys: set[str] = set()
+    for entry in list(entries or []):
+        entry_key = str(entry.entry_key or "").strip()
+        if entry_key and entry_key in seen_entry_keys:
+            continue
+        if entry_key:
+            seen_entry_keys.add(entry_key)
+        deduped_entries.append(entry)
+    return sorted(
+        deduped_entries,
+        key=lambda entry: (
+            normalize_lookup(entry.title),
+            str(entry.source_id or "").strip().upper(),
+            str(entry.slug or "").strip(),
+        ),
+    )
+
+
+def _build_common_builder_static_bundle(
+    systems_service: Any,
+    campaign_slug: str,
+    *,
+    campaign_page_records: list[Any] | None = None,
+) -> dict[str, Any]:
+    page_key = _builder_request_page_key(campaign_page_records)
+
+    def _build_bundle() -> dict[str, Any]:
+        page_records = list(campaign_page_records or [])
+        class_entries = _list_campaign_enabled_entries(systems_service, campaign_slug, "class")
+        subclass_entries = _list_campaign_enabled_entries(systems_service, campaign_slug, "subclass")
+        race_entries = _list_campaign_enabled_entries(systems_service, campaign_slug, "race")
+        background_entries = _list_campaign_enabled_entries(systems_service, campaign_slug, "background")
+        feat_entries = _list_campaign_enabled_entries(systems_service, campaign_slug, "feat")
+        optionalfeature_entries = _list_campaign_enabled_entries(systems_service, campaign_slug, "optionalfeature")
+        item_entries = _list_campaign_enabled_entries(systems_service, campaign_slug, "item")
+        spell_entries = _list_campaign_enabled_entries(systems_service, campaign_slug, "spell")
+        species_options = _build_mixed_character_options(
+            race_entries,
+            page_records,
+            kind="species",
+        )
+        background_options = _build_mixed_character_options(
+            background_entries,
+            page_records,
+            kind="background",
+        )
+        feat_options = _build_mixed_character_options(
+            feat_entries,
+            page_records,
+            kind="feat",
+        )
+        return {
+            "class_entries": class_entries,
+            "supported_class_entries": [
+                entry for entry in class_entries if _supports_native_class_entry(entry)
+            ],
+            "subclass_entries": subclass_entries,
+            "species_options": species_options,
+            "background_options": background_options,
+            "feat_options": feat_options,
+            "feat_catalog": _build_feat_catalog(feat_options),
+            "optionalfeature_catalog": _build_entry_slug_catalog(optionalfeature_entries),
+            "item_catalog": _build_item_catalog(item_entries),
+            "spell_catalog": _build_spell_catalog(spell_entries),
+            "campaign_feature_options": _build_campaign_page_choice_options(
+                page_records,
+                include_items=False,
+            ),
+            "campaign_item_options": _build_campaign_page_choice_options(
+                page_records,
+                include_items=True,
+            ),
+        }
+
+    return dict(
+        _builder_cache_get(
+            ("builder-static-bundle", campaign_slug, page_key),
+            _build_bundle,
+        )
+    )
+
+
+def _class_progression_for_builder(
+    systems_service: Any,
+    campaign_slug: str,
+    selected_class: SystemsEntryRecord | None,
+) -> list[dict[str, Any]]:
+    if selected_class is None:
+        return []
+    return list(
+        _builder_cache_get(
+            ("class-progression", campaign_slug, str(selected_class.entry_key or "").strip()),
+            lambda: systems_service.build_class_feature_progression_for_class_entry(campaign_slug, selected_class),
+        )
+        or []
+    )
+
+
+def _subclass_progression_for_builder(
+    systems_service: Any,
+    campaign_slug: str,
+    selected_subclass: SystemsEntryRecord | None,
+) -> list[dict[str, Any]]:
+    if selected_subclass is None:
+        return []
+    return list(
+        _builder_cache_get(
+            ("subclass-progression", campaign_slug, str(selected_subclass.entry_key or "").strip()),
+            lambda: systems_service.build_subclass_feature_progression_for_subclass_entry(campaign_slug, selected_subclass),
+        )
+        or []
+    )
+
+
 def _list_supported_class_entries(
     systems_service: Any,
     campaign_slug: str,
 ) -> list[SystemsEntryRecord]:
-    return [
-        entry
-        for entry in _list_campaign_enabled_entries(systems_service, campaign_slug, "class")
-        if _supports_native_class_entry(entry)
-    ]
+    static_bundle = _build_common_builder_static_bundle(systems_service, campaign_slug)
+    return list(static_bundle.get("supported_class_entries") or [])
 
 
 def _supports_native_class_entry(entry: SystemsEntryRecord | None) -> bool:
@@ -1778,39 +1946,53 @@ def _list_campaign_enabled_entries(
     campaign_slug: str,
     entry_type: str,
 ) -> list[SystemsEntryRecord]:
-    library = systems_service.get_campaign_library(campaign_slug)
-    if library is None:
-        return []
-    enabled_source_ids = [
-        str(row.source.source_id or "").strip()
-        for row in list(systems_service.list_campaign_source_states(campaign_slug) or [])
-        if getattr(row, "is_enabled", False) and str(getattr(row.source, "source_id", "") or "").strip()
-    ]
-    if not enabled_source_ids:
-        return []
+    def _load_entries() -> list[SystemsEntryRecord]:
+        list_enabled_entries = getattr(systems_service, "list_enabled_entries_for_campaign", None)
+        if callable(list_enabled_entries):
+            return _sort_entries_for_builder(
+                list_enabled_entries(
+                    campaign_slug,
+                    entry_type=entry_type,
+                    limit=None,
+                )
+            )
 
-    entries: list[SystemsEntryRecord] = []
-    seen_entry_keys: set[str] = set()
-    for source_id in enabled_source_ids:
-        for entry in systems_service.list_entries_for_campaign_source(
-            campaign_slug,
-            source_id,
-            entry_type=entry_type,
-            limit=None,
-        ):
-            if not systems_service.is_entry_enabled_for_campaign(campaign_slug, entry):
-                continue
-            if entry.entry_key in seen_entry_keys:
-                continue
-            seen_entry_keys.add(entry.entry_key)
-            entries.append(entry)
-    return sorted(
-        entries,
-        key=lambda entry: (
-            normalize_lookup(entry.title),
-            str(entry.source_id or "").strip().upper(),
-            str(entry.slug or "").strip(),
-        ),
+        library = systems_service.get_campaign_library(campaign_slug)
+        if library is None:
+            return []
+        enabled_source_ids = [
+            str(row.source.source_id or "").strip()
+            for row in list(systems_service.list_campaign_source_states(campaign_slug) or [])
+            if getattr(row, "is_enabled", False) and str(getattr(row.source, "source_id", "") or "").strip()
+        ]
+        if not enabled_source_ids:
+            return []
+
+        entries: list[SystemsEntryRecord] = []
+        for source_id in enabled_source_ids:
+            entries.extend(
+                systems_service.list_entries_for_campaign_source(
+                    campaign_slug,
+                    source_id,
+                    entry_type=entry_type,
+                    limit=None,
+                )
+            )
+        is_entry_enabled = getattr(systems_service, "is_entry_enabled_for_campaign", None)
+        if callable(is_entry_enabled):
+            entries = [
+                entry
+                for entry in entries
+                if is_entry_enabled(campaign_slug, entry)
+            ]
+        return _sort_entries_for_builder(entries)
+
+    return list(
+        _builder_cache_get(
+            ("enabled-entries", campaign_slug, entry_type),
+            _load_entries,
+        )
+        or []
     )
 
 
@@ -1818,10 +2000,12 @@ def _list_subclass_options(
     systems_service: Any,
     campaign_slug: str,
     selected_class: SystemsEntryRecord | None,
+    *,
+    subclass_entries: list[SystemsEntryRecord] | None = None,
 ) -> list[SystemsEntryRecord]:
     if selected_class is None:
         return []
-    options = _list_campaign_enabled_entries(systems_service, campaign_slug, "subclass")
+    options = list(subclass_entries or _list_campaign_enabled_entries(systems_service, campaign_slug, "subclass"))
     return [
         entry
         for entry in options
@@ -2219,6 +2403,81 @@ def _sanitize_choice_section_values(
     return sanitized
 
 
+def _field_live_preview_region_ids(
+    field: dict[str, Any],
+    *,
+    preview_region_ids: tuple[str, ...],
+) -> tuple[str, ...]:
+    field_name = str(field.get("name") or "").strip()
+    kind = str(field.get("kind") or "").strip()
+    preview_set = set(preview_region_ids)
+
+    def _matching_region_ids(*region_ids: str) -> tuple[str, ...]:
+        return tuple(region_id for region_id in region_ids if region_id in preview_set)
+
+    if field_name == "hp_gain":
+        return _matching_region_ids(PREVIEW_SUMMARY_REGION_ID)
+    if kind in {"spell", "spell_support_replace_from", "spell_support_replace_to"} or field_name.startswith(
+        (
+            "spell_",
+            "wizard_",
+            "bonus_spell_known_",
+            "levelup_spell_",
+            "levelup_wizard_",
+            "levelup_prepared_",
+            "levelup_bonus_spell_known_",
+            "levelup_spell_support_",
+        )
+    ):
+        return _matching_region_ids(PREVIEW_SPELLS_REGION_ID)
+    if kind == "campaign_page_item":
+        return _matching_region_ids(
+            PREVIEW_SUMMARY_REGION_ID,
+            PREVIEW_EQUIPMENT_REGION_ID,
+            PREVIEW_ATTACKS_REGION_ID,
+        )
+    if kind == "campaign_page_feature":
+        return _matching_region_ids(
+            PREVIEW_FEATURES_REGION_ID,
+            PREVIEW_RESOURCES_REGION_ID,
+            PREVIEW_SPELLS_REGION_ID,
+        )
+    if kind in {"subclass", "feat", "optionalfeature", "asi_mode", "feat_spell_source"} or field_name.startswith(
+        (
+            "class_option_",
+            "levelup_class_option_",
+            "levelup_subclass_option_",
+            "species_feat_",
+            "levelup_feat_",
+        )
+    ):
+        return (CHOICE_SECTIONS_REGION_ID, *preview_region_ids)
+    return tuple(preview_region_ids)
+
+
+def _annotate_builder_choice_sections(
+    choice_sections: list[dict[str, Any]],
+    *,
+    preview_region_ids: tuple[str, ...],
+) -> list[dict[str, Any]]:
+    annotated_sections: list[dict[str, Any]] = []
+    for section in list(choice_sections or []):
+        section_copy = dict(section)
+        section_copy["fields"] = []
+        for raw_field in list(section.get("fields") or []):
+            field = dict(raw_field)
+            region_ids = _field_live_preview_region_ids(
+                field,
+                preview_region_ids=preview_region_ids,
+            )
+            field["live_preview_trigger"] = "change"
+            field["live_preview_regions"] = ",".join(region_ids)
+            field["live_preview_debounce_ms"] = 120
+            section_copy["fields"].append(field)
+        annotated_sections.append(section_copy)
+    return annotated_sections
+
+
 def _stabilize_choice_section_values(
     values: dict[str, str],
     *,
@@ -2226,7 +2485,15 @@ def _stabilize_choice_section_values(
     build_sections,
 ) -> tuple[dict[str, str], list[dict[str, Any]]]:
     current_values = {key: str(value) for key, value in dict(values or {}).items()}
-    choice_sections = list(build_sections(current_values) or [])
+    section_cache: dict[tuple[tuple[str, str], ...], list[dict[str, Any]]] = {}
+
+    def _build_sections(current_snapshot: dict[str, str]) -> list[dict[str, Any]]:
+        cache_key = tuple(sorted((str(key), str(value)) for key, value in current_snapshot.items()))
+        if cache_key not in section_cache:
+            section_cache[cache_key] = list(build_sections(current_snapshot) or [])
+        return section_cache[cache_key]
+
+    choice_sections = _build_sections(current_values)
     for _ in range(4):
         sanitized_values = _sanitize_choice_section_values(
             current_values,
@@ -2236,7 +2503,7 @@ def _stabilize_choice_section_values(
         if sanitized_values == current_values:
             break
         current_values = sanitized_values
-        choice_sections = list(build_sections(current_values) or [])
+        choice_sections = _build_sections(current_values)
     return current_values, choice_sections
 
 

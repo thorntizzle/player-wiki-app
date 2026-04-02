@@ -449,6 +449,61 @@ class SystemsStore:
         ).fetchall()
         return [self._map_entry(row) for row in rows]
 
+    def list_entries_for_campaign(
+        self,
+        campaign_slug: str,
+        library_slug: str,
+        source_ids: list[str],
+        *,
+        entry_type: str | None = None,
+        query: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[SystemsEntryRecord]:
+        normalized_source_ids = [
+            str(source_id or "").strip()
+            for source_id in list(source_ids or [])
+            if str(source_id or "").strip()
+        ]
+        if not normalized_source_ids:
+            return []
+
+        placeholders = ", ".join("?" for _ in normalized_source_ids)
+        normalized_query = query.strip().lower()
+        parameters: list[Any] = [campaign_slug, library_slug, *normalized_source_ids]
+        entry_type_clause = ""
+        if entry_type:
+            entry_type_clause = " AND systems_entries.entry_type = ?"
+            parameters.append(entry_type)
+        query_clause = ""
+        if normalized_query:
+            query_clause, query_parameters = self._build_entry_search_clause(
+                normalized_query,
+                include_source_id=False,
+            )
+            parameters.extend(query_parameters)
+        limit_clause = ""
+        if limit is not None:
+            limit_clause = " LIMIT ? OFFSET ?"
+            parameters.extend([limit, offset])
+        rows = get_db().execute(
+            f"""
+            SELECT systems_entries.*
+            FROM systems_entries
+            LEFT JOIN campaign_entry_overrides
+              ON campaign_entry_overrides.campaign_slug = ?
+             AND campaign_entry_overrides.library_slug = systems_entries.library_slug
+             AND campaign_entry_overrides.entry_key = systems_entries.entry_key
+            WHERE systems_entries.library_slug = ?
+              AND systems_entries.source_id IN ({placeholders}){entry_type_clause}{query_clause}
+              AND COALESCE(campaign_entry_overrides.is_enabled_override, 1) != 0
+            ORDER BY systems_entries.title ASC, systems_entries.id ASC
+            {limit_clause}
+            """,
+            tuple(parameters),
+        ).fetchall()
+        return [self._map_entry(row) for row in rows]
+
     def list_entries(
         self,
         library_slug: str,

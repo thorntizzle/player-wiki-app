@@ -39,6 +39,8 @@ from .auth import (
     role_satisfies_visibility,
 )
 from .character_builder import (
+    CAMPAIGN_ITEMS_SECTION,
+    CAMPAIGN_MECHANICS_SECTION,
     _build_spell_catalog,
     _list_campaign_enabled_entries,
     CharacterBuildError,
@@ -138,6 +140,12 @@ COMBAT_SOURCE_LABELS = {
     COMBAT_SOURCE_KIND_DM_STATBLOCK: "DM Content",
     COMBAT_SOURCE_KIND_SYSTEMS_MONSTER: "Systems",
 }
+BUILDER_RELEVANT_CAMPAIGN_SECTIONS = frozenset(
+    {
+        CAMPAIGN_MECHANICS_SECTION,
+        CAMPAIGN_ITEMS_SECTION,
+    }
+)
 SUPPORTED_COMBAT_SYSTEM = "DND-5E"
 SYSTEMS_ENTRY_TYPE_LABELS = {
     "action": "Actions",
@@ -288,6 +296,14 @@ def create_app() -> Flask:
 
     def get_campaign_page_store() -> CampaignPageStore:
         return campaign_page_store
+
+    def list_builder_campaign_page_records(campaign_slug: str, campaign) -> list[object]:
+        return [
+            page_record
+            for page_record in get_campaign_page_store().list_page_records(campaign_slug)
+            if campaign.is_page_visible(page_record.page)
+            and str(page_record.page.section or "").strip() in BUILDER_RELEVANT_CAMPAIGN_SECTIONS
+        ]
 
     def get_character_repository() -> CharacterRepository:
         return character_repository
@@ -1121,15 +1137,33 @@ def create_app() -> Flask:
         *,
         status_code: int = 200,
     ):
+        def _parse_live_builder_regions() -> list[str]:
+            raw_regions = str(request.args.get("regions") or "").strip()
+            if not raw_regions:
+                return []
+            regions: list[str] = []
+            seen_regions: set[str] = set()
+            for region_id in raw_regions.split(","):
+                normalized_region_id = str(region_id or "").strip()
+                if not normalized_region_id or normalized_region_id in seen_regions:
+                    continue
+                seen_regions.add(normalized_region_id)
+                regions.append(normalized_region_id)
+            return regions
+
         campaign = load_campaign_context(campaign_slug)
         builder_ready = bool(
             builder_context.get("class_options")
             and builder_context.get("species_options")
             and builder_context.get("background_options")
         )
+        is_live_preview = request.method == "GET" and request.args.get("_live_preview") == "1"
+        requested_regions = _parse_live_builder_regions() if is_live_preview else []
         template_name = (
-            "_character_create_builder.html"
-            if request.method == "GET" and request.args.get("_live_preview") == "1"
+            "_character_create_builder_regions.html"
+            if requested_regions
+            else "_character_create_builder.html"
+            if is_live_preview
             else "character_create.html"
         )
         render_started_at = time.perf_counter()
@@ -1141,11 +1175,12 @@ def create_app() -> Flask:
                 builder_ready=builder_ready,
                 active_nav="characters",
                 live_diagnostics_enabled=app.config["LIVE_DIAGNOSTICS"],
+                requested_regions=requested_regions,
             ),
             status_code,
         )
         render_ms = (time.perf_counter() - render_started_at) * 1000
-        if request.method == "GET" and request.args.get("_live_preview") == "1":
+        if is_live_preview:
             return attach_live_response_diagnostics(
                 response,
                 view_name="builder-create",
@@ -1187,10 +1222,28 @@ def create_app() -> Flask:
         *,
         status_code: int = 200,
     ):
+        def _parse_live_builder_regions() -> list[str]:
+            raw_regions = str(request.args.get("regions") or "").strip()
+            if not raw_regions:
+                return []
+            regions: list[str] = []
+            seen_regions: set[str] = set()
+            for region_id in raw_regions.split(","):
+                normalized_region_id = str(region_id or "").strip()
+                if not normalized_region_id or normalized_region_id in seen_regions:
+                    continue
+                seen_regions.add(normalized_region_id)
+                regions.append(normalized_region_id)
+            return regions
+
         campaign = load_campaign_context(campaign_slug)
+        is_live_preview = request.method == "GET" and request.args.get("_live_preview") == "1"
+        requested_regions = _parse_live_builder_regions() if is_live_preview else []
         template_name = (
-            "_character_level_up_builder.html"
-            if request.method == "GET" and request.args.get("_live_preview") == "1"
+            "_character_level_up_builder_regions.html"
+            if requested_regions
+            else "_character_level_up_builder.html"
+            if is_live_preview
             else "character_level_up.html"
         )
         render_started_at = time.perf_counter()
@@ -1202,11 +1255,12 @@ def create_app() -> Flask:
                 level_up=level_up_context,
                 active_nav="characters",
                 live_diagnostics_enabled=app.config["LIVE_DIAGNOSTICS"],
+                requested_regions=requested_regions,
             ),
             status_code,
         )
         render_ms = (time.perf_counter() - render_started_at) * 1000
-        if request.method == "GET" and request.args.get("_live_preview") == "1":
+        if is_live_preview:
             return attach_live_response_diagnostics(
                 response,
                 view_name="builder-level-up",
@@ -4502,12 +4556,7 @@ def create_app() -> Flask:
             abort(403)
 
         campaign = load_campaign_context(campaign_slug)
-        campaign_page_records = [
-            page_record
-            for page_record in get_campaign_page_store().list_page_records(campaign_slug)
-            if campaign.is_page_visible(page_record.page)
-            and str(page_record.page.section or "").strip() != "Sessions"
-        ]
+        campaign_page_records = list_builder_campaign_page_records(campaign_slug, campaign)
         form_values = dict(request.form if request.method == "POST" else request.args)
         builder_context = build_level_one_builder_context(
             get_systems_service(),
@@ -4570,12 +4619,7 @@ def create_app() -> Flask:
             abort(403)
 
         campaign, record = load_character_context(campaign_slug, character_slug)
-        campaign_page_records = [
-            page_record
-            for page_record in get_campaign_page_store().list_page_records(campaign_slug)
-            if campaign.is_page_visible(page_record.page)
-            and str(page_record.page.section or "").strip() != "Sessions"
-        ]
+        campaign_page_records = list_builder_campaign_page_records(campaign_slug, campaign)
         readiness = native_level_up_readiness(
             get_systems_service(),
             campaign_slug,
@@ -4675,12 +4719,7 @@ def create_app() -> Flask:
             abort(403)
 
         campaign, record = load_character_context(campaign_slug, character_slug)
-        campaign_page_records = [
-            page_record
-            for page_record in get_campaign_page_store().list_page_records(campaign_slug)
-            if campaign.is_page_visible(page_record.page)
-            and str(page_record.page.section or "").strip() != "Sessions"
-        ]
+        campaign_page_records = list_builder_campaign_page_records(campaign_slug, campaign)
         readiness = native_level_up_readiness(
             get_systems_service(),
             campaign_slug,

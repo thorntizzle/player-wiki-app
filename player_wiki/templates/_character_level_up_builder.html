@@ -1,6 +1,7 @@
 <div
   class="page-layout character-builder-layout"
   data-live-builder-root
+  data-live-builder-default-regions="{{ level_up.live_regions_csv }}"
   data-live-diagnostics-enabled="{{ '1' if live_diagnostics_enabled else '0' }}"
 >
   <section class="section-list">
@@ -34,35 +35,51 @@
             {% endif %}
             <label class="field">
               <span>Hit Point Gain</span>
-              <input type="number" name="hp_gain" min="1" value="{{ level_up.values.hp_gain }}" placeholder="6">
+              <input
+                type="number"
+                name="hp_gain"
+                min="1"
+                value="{{ level_up.values.hp_gain }}"
+                placeholder="6"
+                data-live-preview-trigger="input"
+                data-live-preview-regions="preview-summary"
+                data-live-preview-debounce-ms="350"
+              >
               <small>Enter the HP increase for this level based on your table's method.</small>
             </label>
           </div>
         </section>
 
-        {% for section in level_up.choice_sections %}
-          <section class="builder-section">
-            <h3>{{ section.title }}</h3>
-            <div class="builder-field-grid">
-              {% for field in section.fields %}
-                <label class="field">
-                  <span>{{ field.label }}</span>
-                  <select name="{{ field.name }}">
-                    <option value="" {% if not field.selected %}selected{% endif %}>Choose an option</option>
-                    {% for option in field.options %}
-                      <option value="{{ option.value }}" {% if field.selected == option.value %}selected{% endif %}>
-                        {{ option.label }}
-                      </option>
-                    {% endfor %}
-                  </select>
-                  {% if field.help_text %}
-                    <small>{{ field.help_text }}</small>
-                  {% endif %}
-                </label>
-              {% endfor %}
-            </div>
-          </section>
-        {% endfor %}
+        <div data-live-builder-region="choice-sections">
+          {% for section in level_up.choice_sections %}
+            <section class="builder-section">
+              <h3>{{ section.title }}</h3>
+              <div class="builder-field-grid">
+                {% for field in section.fields %}
+                  <label class="field">
+                    <span>{{ field.label }}</span>
+                    <select
+                      name="{{ field.name }}"
+                      data-live-preview-trigger="{{ field.live_preview_trigger }}"
+                      data-live-preview-regions="{{ field.live_preview_regions }}"
+                      data-live-preview-debounce-ms="{{ field.live_preview_debounce_ms }}"
+                    >
+                      <option value="" {% if not field.selected %}selected{% endif %}>Choose an option</option>
+                      {% for option in field.options %}
+                        <option value="{{ option.value }}" {% if field.selected == option.value %}selected{% endif %}>
+                          {{ option.label }}
+                        </option>
+                      {% endfor %}
+                    </select>
+                    {% if field.help_text %}
+                      <small>{{ field.help_text }}</small>
+                    {% endif %}
+                  </label>
+                {% endfor %}
+              </div>
+            </section>
+          {% endfor %}
+        </div>
 
         <div class="builder-actions">
           <button class="ghost-button" type="submit" data-live-refresh-fallback>Refresh preview</button>
@@ -75,7 +92,7 @@
   </section>
 
   <aside class="sidebar">
-    <section class="card sidebar-card">
+    <section class="card sidebar-card" data-live-builder-region="preview-summary">
       <h2>Preview</h2>
       <div class="builder-preview-list">
         <div>
@@ -93,7 +110,7 @@
       </div>
     </section>
 
-    <section class="card sidebar-card">
+    <section class="card sidebar-card" data-live-builder-region="preview-features">
       <h2>Features Gained</h2>
       {% if level_up.preview.gained_features %}
         <ul class="plain-list builder-feature-list">
@@ -106,7 +123,7 @@
       {% endif %}
     </section>
 
-    <section class="card sidebar-card">
+    <section class="card sidebar-card" data-live-builder-region="preview-resources">
       <h2>Resources After Level Up</h2>
       {% if level_up.preview.resources %}
         <ul class="plain-list builder-feature-list">
@@ -119,7 +136,7 @@
       {% endif %}
     </section>
 
-    <section class="card sidebar-card">
+    <section class="card sidebar-card" data-live-builder-region="preview-spell-slots">
       <h2>Spell Slots</h2>
       {% if level_up.preview.spell_slots %}
         <ul class="plain-list builder-feature-list">
@@ -132,7 +149,7 @@
       {% endif %}
     </section>
 
-    <section class="card sidebar-card">
+    <section class="card sidebar-card" data-live-builder-region="preview-spells">
       <h2>Spell Additions</h2>
       {% if level_up.preview.new_spells %}
         <ul class="plain-list builder-feature-list">
@@ -145,7 +162,7 @@
       {% endif %}
     </section>
 
-    <section class="card sidebar-card">
+    <section class="card sidebar-card" data-live-builder-region="preview-scope">
       <h2>Current Scope</h2>
       <ul class="plain-list builder-feature-list">
         {% for limitation in level_up.limitations %}

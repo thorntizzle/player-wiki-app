@@ -1,10 +1,40 @@
 <script>
   (() => {
     const rootSelector = "[data-live-builder-root]";
+    const regionSelector = "[data-live-builder-region]";
     const formSelector = "[data-live-builder-form]";
-    const textInputSelector = "input[type='text'], input[type='number'], textarea";
     const fieldSelector = "input:not([type='hidden']):not([type='submit']):not([type='button']):not([disabled]), select:not([disabled]), textarea:not([disabled])";
     const diagnosticsTools = window.__playerWikiLiveDiagnosticsTools || null;
+
+    function parseRegionIds(rawValue) {
+      if (typeof rawValue !== "string" || !rawValue.trim()) {
+        return [];
+      }
+      const regionIds = [];
+      const seenRegionIds = new Set();
+      rawValue.split(",").forEach((regionId) => {
+        const normalizedRegionId = regionId.trim();
+        if (!normalizedRegionId || seenRegionIds.has(normalizedRegionId)) {
+          return;
+        }
+        seenRegionIds.add(normalizedRegionId);
+        regionIds.push(normalizedRegionId);
+      });
+      return regionIds;
+    }
+
+    function mergeRegionIds(currentRegionIds, nextRegionIds) {
+      const merged = [];
+      const seen = new Set();
+      [...currentRegionIds, ...nextRegionIds].forEach((regionId) => {
+        if (!regionId || seen.has(regionId)) {
+          return;
+        }
+        seen.add(regionId);
+        merged.push(regionId);
+      });
+      return merged;
+    }
 
     function captureFocus(root) {
       const active = document.activeElement;
@@ -33,21 +63,25 @@
       }
     }
 
-    function buildPreviewUrl(form) {
+    function defaultRegionIds(root) {
+      return parseRegionIds(root?.dataset?.liveBuilderDefaultRegions || "");
+    }
+
+    function buildPreviewUrl(form, regionIds) {
       const action = form.getAttribute("action") || window.location.pathname;
       const url = new URL(action, window.location.origin);
       const params = new URLSearchParams();
       const formData = new FormData(form);
       for (const [name, rawValue] of formData.entries()) {
-        if (typeof rawValue !== "string") {
-          continue;
-        }
-        if (!rawValue) {
+        if (typeof rawValue !== "string" || !rawValue) {
           continue;
         }
         params.append(name, rawValue);
       }
       params.set("_live_preview", "1");
+      if (Array.isArray(regionIds) && regionIds.length > 0) {
+        params.set("regions", regionIds.join(","));
+      }
       url.search = params.toString();
       return url.toString();
     }
@@ -56,6 +90,16 @@
       root.querySelectorAll("[data-live-refresh-fallback]").forEach((button) => {
         button.hidden = true;
       });
+    }
+
+    function fieldConfig(field) {
+      const trigger = (field.dataset.livePreviewTrigger || "").trim().toLowerCase();
+      const debounceMs = Number.parseInt(field.dataset.livePreviewDebounceMs || "", 10);
+      return {
+        trigger,
+        regionIds: parseRegionIds(field.dataset.livePreviewRegions || ""),
+        debounceMs: Number.isFinite(debounceMs) ? debounceMs : 0,
+      };
     }
 
     function initLiveBuilder(root) {
@@ -70,6 +114,7 @@
       hideFallbackButtons(root);
 
       let refreshTimer = null;
+      let pendingRegionIds = [];
       let activeRequestId = 0;
       let activeController = null;
       let liveRoot = root;
@@ -84,11 +129,31 @@
         return diagnosticsTools.recordMetric(normalizedAction, metric);
       };
 
+      function scheduleRefresh(regionIds, delayMs) {
+        if (!Array.isArray(regionIds) || regionIds.length === 0) {
+          return;
+        }
+        pendingRegionIds = mergeRegionIds(pendingRegionIds, regionIds);
+        window.clearTimeout(refreshTimer);
+        refreshTimer = window.setTimeout(() => {
+          const nextRegionIds = pendingRegionIds.slice();
+          pendingRegionIds = [];
+          refreshPreview({regionIds: nextRegionIds});
+        }, delayMs);
+      }
+
       async function refreshPreview({
         bypassDebounce = false,
         queryOverride = null,
-        reschedule = true,
+        regionIds = null,
       } = {}) {
+        const requestedRegionIds = Array.isArray(regionIds)
+          ? regionIds.slice()
+          : defaultRegionIds(liveRoot);
+        if (!queryOverride && requestedRegionIds.length === 0) {
+          return null;
+        }
+
         const focusState = captureFocus(liveRoot);
         activeRequestId += 1;
         const requestId = activeRequestId;
@@ -100,7 +165,7 @@
         try {
           const previewUrl = typeof queryOverride === "string" && queryOverride
             ? queryOverride
-            : buildPreviewUrl(form);
+            : buildPreviewUrl(form, requestedRegionIds);
           const requestStartedAt = performance.now();
           const response = await fetch(previewUrl, {
             credentials: "same-origin",
@@ -108,23 +173,42 @@
             signal: activeController.signal,
           });
           if (!response.ok || requestId !== activeRequestId) {
-            return;
+            return null;
           }
           const requestTimeMs = Number.parseFloat(response.headers.get("X-Live-Request-Time-Ms") || "0");
           const queryCount = Number.parseInt(response.headers.get("X-Live-Query-Count") || "0", 10);
           const queryTimeMs = Number.parseFloat(response.headers.get("X-Live-Query-Time-Ms") || "0");
           const payloadBytes = Number.parseInt(response.headers.get("X-Live-Payload-Bytes") || "0", 10);
+          const responseText = await response.text();
           const applyStartedAt = performance.now();
           const wrapper = document.createElement("div");
-          wrapper.innerHTML = await response.text();
+          wrapper.innerHTML = responseText;
           const nextRoot = wrapper.querySelector(rootSelector);
-          if (!nextRoot) {
-            return;
+          if (nextRoot) {
+            liveRoot.replaceWith(nextRoot);
+            liveRoot = nextRoot;
+            restoreFocus(liveRoot, focusState);
+            initLiveBuilder(liveRoot);
+          } else {
+            const nextRegions = Array.from(wrapper.querySelectorAll(regionSelector));
+            if (nextRegions.length === 0) {
+              return null;
+            }
+            nextRegions.forEach((nextRegion) => {
+              const regionId = nextRegion.getAttribute("data-live-builder-region");
+              if (!regionId) {
+                return;
+              }
+              const currentRegion = liveRoot.querySelector(
+                `[data-live-builder-region="${CSS.escape(regionId)}"]`
+              );
+              if (!currentRegion) {
+                return;
+              }
+              currentRegion.replaceWith(nextRegion);
+            });
+            restoreFocus(liveRoot, focusState);
           }
-          liveRoot.replaceWith(nextRoot);
-          liveRoot = nextRoot;
-          restoreFocus(liveRoot, focusState);
-          initLiveBuilder(liveRoot);
           return recordLiveMetric({
             mode: "preview",
             bypassDebounce,
@@ -136,11 +220,13 @@
             queryTimeMs: Number.isFinite(queryTimeMs) ? Number(queryTimeMs.toFixed(2)) : 0,
             requestTimeMs: Number.isFinite(requestTimeMs) ? Number(requestTimeMs.toFixed(2)) : 0,
             serverTiming: response.headers.get("Server-Timing") || "",
+            regionIds: requestedRegionIds,
           });
         } catch (error) {
           if (error?.name !== "AbortError") {
             console.error("Character builder live preview failed.", error);
           }
+          return null;
         } finally {
           if (liveRoot.isConnected) {
             liveRoot.removeAttribute("aria-busy");
@@ -148,33 +234,54 @@
         }
       }
 
-      function scheduleRefresh(delayMs) {
-        window.clearTimeout(refreshTimer);
-        refreshTimer = window.setTimeout(refreshPreview, delayMs);
-      }
-
       form.addEventListener("change", (event) => {
-        if (event.target instanceof HTMLElement && event.target.matches(fieldSelector)) {
-          scheduleRefresh(120);
+        if (!(event.target instanceof HTMLElement) || !event.target.matches(fieldSelector)) {
+          return;
         }
+        const config = fieldConfig(event.target);
+        if (config.trigger !== "change" || config.regionIds.length === 0) {
+          return;
+        }
+        scheduleRefresh(config.regionIds, config.debounceMs || 120);
       });
 
       form.addEventListener("input", (event) => {
-        if (event.target instanceof HTMLElement && event.target.matches(textInputSelector)) {
-          scheduleRefresh(250);
+        if (!(event.target instanceof HTMLElement) || !event.target.matches(fieldSelector)) {
+          return;
         }
+        const config = fieldConfig(event.target);
+        if (config.trigger !== "input" || config.regionIds.length === 0) {
+          return;
+        }
+        scheduleRefresh(config.regionIds, config.debounceMs || 350);
       });
+
+      form.addEventListener(
+        "blur",
+        (event) => {
+          if (!(event.target instanceof HTMLElement) || !event.target.matches(fieldSelector)) {
+            return;
+          }
+          const config = fieldConfig(event.target);
+          if (config.trigger !== "blur" || config.regionIds.length === 0) {
+            return;
+          }
+          refreshPreview({
+            bypassDebounce: true,
+            regionIds: config.regionIds,
+          });
+        },
+        true,
+      );
 
       if (diagnosticsEnabled && diagnosticsTools) {
         diagnosticsTools.ensureMetricsStore();
         const formAction = form.getAttribute("action") || window.location.pathname;
         const normalizedAction = formAction.includes("/level-up") ? "builder_level_up" : "builder_create";
-        diagnosticsTools.registerSampler(normalizedAction, async (options = {}) => {
-          const previewUrl = buildPreviewUrl(form);
+        diagnosticsTools.registerSampler(normalizedAction, async () => {
           return refreshPreview({
             bypassDebounce: true,
-            queryOverride: previewUrl,
-            reschedule: false,
+            regionIds: defaultRegionIds(liveRoot),
           });
         });
       }

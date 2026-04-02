@@ -9,6 +9,7 @@ import yaml
 from player_wiki.character_campaign_progression import build_campaign_page_progression_entries
 from player_wiki.character_builder import (
     CHARACTER_BUILDER_VERSION,
+    _list_campaign_enabled_entries,
     _resolve_builder_choices,
     apply_imported_progression_repairs,
     build_native_level_up_character_definition,
@@ -87,6 +88,7 @@ class _FakeSystemsService:
         class_progression: list[dict],
         subclass_progression: list[dict] | None = None,
         enabled_source_ids: list[str] | None = None,
+        disabled_entry_keys: list[str] | None = None,
     ):
         self.store = _FakeSystemsStore(entries_by_type)
         self._class_progression = list(class_progression)
@@ -105,6 +107,14 @@ class _FakeSystemsService:
             )
             if str(source_id or "").strip()
         }
+        self._disabled_entry_keys = {
+            str(entry_key or "").strip()
+            for entry_key in list(disabled_entry_keys or [])
+            if str(entry_key or "").strip()
+        }
+        self.list_enabled_entries_calls: list[tuple[str, str | None, str, int | None]] = []
+        self.list_entries_for_campaign_source_calls = 0
+        self.is_entry_enabled_calls = 0
 
     def get_campaign_library(self, campaign_slug: str):
         del campaign_slug
@@ -112,7 +122,11 @@ class _FakeSystemsService:
 
     def is_entry_enabled_for_campaign(self, campaign_slug: str, entry: SystemsEntryRecord) -> bool:
         del campaign_slug
-        return str(entry.source_id or "").strip().upper() in self._enabled_source_ids
+        self.is_entry_enabled_calls += 1
+        return (
+            str(entry.source_id or "").strip().upper() in self._enabled_source_ids
+            and str(entry.entry_key or "").strip() not in self._disabled_entry_keys
+        )
 
     def list_campaign_source_states(self, campaign_slug: str):
         del campaign_slug
@@ -134,6 +148,7 @@ class _FakeSystemsService:
         limit: int | None = None,
     ) -> list[SystemsEntryRecord]:
         del query
+        self.list_entries_for_campaign_source_calls += 1
         return self.store.list_entries_for_campaign_source(
             campaign_slug,
             "DND-5E",
@@ -141,6 +156,29 @@ class _FakeSystemsService:
             entry_type=entry_type,
             limit=limit,
         )
+
+    def list_enabled_entries_for_campaign(
+        self,
+        campaign_slug: str,
+        *,
+        entry_type: str | None = None,
+        query: str = "",
+        limit: int | None = None,
+    ) -> list[SystemsEntryRecord]:
+        normalized_query = query.strip().lower()
+        self.list_enabled_entries_calls.append((campaign_slug, entry_type, normalized_query, limit))
+        entries = [
+            entry
+            for entry in self.store._entries_by_type.get(str(entry_type or ""), [])
+            if str(entry.source_id or "").strip().upper() in self._enabled_source_ids
+            and str(entry.entry_key or "").strip() not in self._disabled_entry_keys
+            and (
+                not normalized_query
+                or normalized_query in str(entry.title or "").lower()
+                or normalized_query in str(entry.search_text or "").lower()
+            )
+        ]
+        return list(entries if limit is None else entries[:limit])
 
     def build_class_feature_progression_for_class_entry(
         self,
@@ -340,6 +378,7 @@ def _builder_context_fixture() -> dict[str, object]:
             "saving_throws": ["Strength Save", "Constitution Save"],
             "languages": ["Common"],
             "features": ["Second Wind"],
+            "resources": [],
             "equipment": [],
             "attacks": [],
             "starting_currency": "",
@@ -347,6 +386,27 @@ def _builder_context_fixture() -> dict[str, object]:
             "background": "Acolyte",
             "subclass": "",
         },
+        "preview_region_ids": [
+            "preview-summary",
+            "preview-features",
+            "preview-resources",
+            "preview-spells",
+            "preview-scope",
+            "preview-equipment",
+            "preview-attacks",
+        ],
+        "preview_regions_csv": "preview-summary,preview-features,preview-resources,preview-spells,preview-scope,preview-equipment,preview-attacks",
+        "live_region_ids": [
+            "choice-sections",
+            "preview-summary",
+            "preview-features",
+            "preview-resources",
+            "preview-spells",
+            "preview-scope",
+            "preview-equipment",
+            "preview-attacks",
+        ],
+        "live_regions_csv": "choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-scope,preview-equipment,preview-attacks",
     }
 
 
@@ -10246,6 +10306,89 @@ def test_dm_can_open_character_builder_page_without_systems_data(client, sign_in
     assert "The builder needs a supported base class plus enabled Systems species and backgrounds" in html
 
 
+def test_builder_enabled_entries_use_bulk_helper_and_request_cache(app):
+    fighter = _systems_entry("feat", "fighting-initiate", "Fighting Initiate")
+    disabled_feat = _systems_entry("feat", "shadow-touched", "Shadow Touched")
+    systems_service = _FakeSystemsService(
+        {"feat": [fighter, disabled_feat]},
+        class_progression=[],
+        disabled_entry_keys=[disabled_feat.entry_key],
+    )
+
+    with app.test_request_context("/campaigns/linden-pass/characters/new"):
+        entries = _list_campaign_enabled_entries(systems_service, "linden-pass", "feat")
+        repeated_entries = _list_campaign_enabled_entries(systems_service, "linden-pass", "feat")
+
+    assert [entry.slug for entry in entries] == ["fighting-initiate"]
+    assert [entry.slug for entry in repeated_entries] == ["fighting-initiate"]
+    assert systems_service.list_enabled_entries_calls == [("linden-pass", "feat", "", None)]
+    assert systems_service.list_entries_for_campaign_source_calls == 0
+    assert systems_service.is_entry_enabled_calls == 0
+
+
+def test_build_level_one_builder_context_marks_choice_fields_with_live_preview_regions():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}},
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"feats": [{"any": 1}]},
+    )
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    archery = _systems_entry("feat", "phb-feat-archery", "Archery")
+    defense = _systems_entry("feat", "phb-feat-defense", "Defense")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [archery, defense],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "feature_rows": [
+                    {
+                        "label": "Fighting Style",
+                        "embedded_card": {
+                            "option_groups": [
+                                {
+                                    "options": [
+                                        {"label": "Archery", "slug": archery.slug},
+                                        {"label": "Defense", "slug": defense.slug},
+                                    ]
+                                }
+                            ]
+                        },
+                    }
+                ],
+            }
+        ],
+    )
+
+    builder_context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        {
+            "class_slug": fighter.slug,
+            "species_slug": human.slug,
+            "background_slug": acolyte.slug,
+        },
+    )
+
+    class_option_field = _find_builder_field(builder_context, "class_option_1")
+    species_feat_field = _find_builder_field(builder_context, "species_feat_1")
+
+    assert class_option_field["live_preview_trigger"] == "change"
+    assert class_option_field["live_preview_regions"].startswith("choice-sections,")
+    assert species_feat_field["live_preview_regions"].startswith("choice-sections,")
+
+
 def test_character_builder_live_preview_route_returns_fragment(app, client, sign_in, users, monkeypatch):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
@@ -10267,7 +10410,45 @@ def test_character_builder_live_preview_route_returns_fragment(app, client, sign
     assert "total;dur=" in response.headers["Server-Timing"]
 
 
-def test_character_builder_route_passes_visible_campaign_pages_into_builder(app, client, sign_in, users, monkeypatch):
+def test_character_builder_live_preview_route_returns_requested_regions_only(app, client, sign_in, users, monkeypatch):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    monkeypatch.setattr(app_module, "build_level_one_builder_context", lambda *args, **kwargs: _builder_context_fixture())
+
+    response = client.get(
+        "/campaigns/linden-pass/characters/new?_live_preview=1&regions=choice-sections,preview-summary&class_slug=phb-class-fighter"
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "data-live-builder-root" not in html
+    assert 'data-live-builder-region="choice-sections"' in html
+    assert 'data-live-builder-region="preview-summary"' in html
+    assert 'data-live-builder-region="preview-features"' not in html
+
+
+def test_character_builder_page_renders_top_level_live_preview_metadata(app, client, sign_in, users, monkeypatch):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    monkeypatch.setattr(app_module, "build_level_one_builder_context", lambda *args, **kwargs: _builder_context_fixture())
+
+    response = client.get("/campaigns/linden-pass/characters/new")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'name="name"' in html
+    assert 'data-live-preview-trigger="blur"' in html
+    assert 'data-live-preview-regions=""' in html
+    assert 'name="class_slug"' in html
+    assert 'data-live-preview-regions="choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-scope,preview-equipment,preview-attacks"' in html
+    assert 'name="str"' in html
+    assert 'data-live-preview-trigger="input"' in html
+    assert 'data-live-preview-debounce-ms="350"' in html
+
+
+def test_character_builder_route_passes_only_builder_relevant_campaign_pages_into_builder(
+    app, client, sign_in, users, monkeypatch
+):
     sign_in(users["dm"]["email"], users["dm"]["password"])
     captured_page_refs: list[str] = []
 
@@ -10286,7 +10467,73 @@ def test_character_builder_route_passes_visible_campaign_pages_into_builder(app,
     assert response.status_code == 200
     assert "items/stormglass-compass" in captured_page_refs
     assert "mechanics/arcane-overload" in captured_page_refs
-    assert all(not page_ref.startswith("sessions/") for page_ref in captured_page_refs if page_ref)
+    assert all(
+        page_ref.startswith("mechanics/") or page_ref.startswith("items/")
+        for page_ref in captured_page_refs
+        if page_ref
+    )
+
+
+def test_level_up_route_passes_only_builder_relevant_campaign_pages_into_builder(
+    app, client, sign_in, users, monkeypatch
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    captured_page_refs: list[str] = []
+
+    character_dir = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "characters" / "leveler"
+    character_dir.mkdir(parents=True, exist_ok=True)
+    definition = _minimal_character_definition("leveler", "Leveler")
+    import_metadata = _minimal_import_metadata("leveler")
+    (character_dir / "definition.yaml").write_text(yaml.safe_dump(definition.to_dict(), sort_keys=False), encoding="utf-8")
+    (character_dir / "import.yaml").write_text(yaml.safe_dump(import_metadata.to_dict(), sort_keys=False), encoding="utf-8")
+
+    def _capture_page_refs(_systems_service, _campaign_slug, _definition, *, campaign_page_records=None, **_kwargs):
+        captured_page_refs.extend(
+            str(getattr(record, "page_ref", "") or "").strip()
+            for record in list(campaign_page_records or [])
+        )
+        return {"status": "ready", "message": "", "reasons": []}
+
+    monkeypatch.setattr(app_module, "native_level_up_readiness", _capture_page_refs)
+    monkeypatch.setattr(
+        app_module,
+        "build_native_level_up_context",
+        lambda *args, **kwargs: {
+            "values": {"hp_gain": "8"},
+            "character_name": "Leveler",
+            "current_level": 1,
+            "next_level": 2,
+            "selected_class": SimpleNamespace(title="Fighter"),
+            "selected_species": SimpleNamespace(title="Human"),
+            "selected_background": SimpleNamespace(title="Acolyte"),
+            "selected_subclass": None,
+            "subclass_options": [],
+            "requires_subclass": False,
+            "choice_sections": [],
+            "class_progression": [],
+            "subclass_progression": [],
+            "spell_catalog": {},
+            "limitations": [],
+            "preview": {
+                "class_level_text": "Fighter 2",
+                "max_hp": 20,
+                "gained_features": ["Action Surge"],
+                "spell_slots": [],
+                "new_spells": [],
+            },
+        },
+    )
+
+    response = client.get("/campaigns/linden-pass/characters/leveler/level-up")
+
+    assert response.status_code == 200
+    assert "items/stormglass-compass" in captured_page_refs
+    assert "mechanics/arcane-overload" in captured_page_refs
+    assert all(
+        page_ref.startswith("mechanics/") or page_ref.startswith("items/")
+        for page_ref in captured_page_refs
+        if page_ref
+    )
 
 
 def test_non_manager_cannot_open_character_builder_page(client, sign_in, users, set_campaign_visibility):
@@ -10631,10 +10878,30 @@ def test_level_up_live_preview_route_returns_fragment(app, client, sign_in, user
                 "class_level_text": "Fighter 2",
                 "max_hp": 20,
                 "gained_features": ["Action Surge"],
+                "resources": [],
                 "spell_slots": [],
                 "new_spells": [],
             },
             "state_revision": 1,
+            "preview_region_ids": [
+                "preview-summary",
+                "preview-features",
+                "preview-resources",
+                "preview-spells",
+                "preview-scope",
+                "preview-spell-slots",
+            ],
+            "preview_regions_csv": "preview-summary,preview-features,preview-resources,preview-spells,preview-scope,preview-spell-slots",
+            "live_region_ids": [
+                "choice-sections",
+                "preview-summary",
+                "preview-features",
+                "preview-resources",
+                "preview-spells",
+                "preview-scope",
+                "preview-spell-slots",
+            ],
+            "live_regions_csv": "choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-scope,preview-spell-slots",
         },
     )
 
@@ -10652,6 +10919,158 @@ def test_level_up_live_preview_route_returns_fragment(app, client, sign_in, user
     assert response.headers["X-Live-Request-Time-Ms"]
     assert "db;dur=" in response.headers["Server-Timing"]
     assert "total;dur=" in response.headers["Server-Timing"]
+
+
+def test_level_up_live_preview_route_returns_requested_regions_only(app, client, sign_in, users, monkeypatch):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    character_dir = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "characters" / "leveler"
+    character_dir.mkdir(parents=True, exist_ok=True)
+    definition = _minimal_character_definition("leveler", "Leveler")
+    import_metadata = _minimal_import_metadata("leveler")
+    (character_dir / "definition.yaml").write_text(yaml.safe_dump(definition.to_dict(), sort_keys=False), encoding="utf-8")
+    (character_dir / "import.yaml").write_text(yaml.safe_dump(import_metadata.to_dict(), sort_keys=False), encoding="utf-8")
+
+    monkeypatch.setattr(
+        app_module,
+        "native_level_up_readiness",
+        lambda *args, **kwargs: {"status": "ready", "message": "", "reasons": []},
+    )
+    monkeypatch.setattr(
+        app_module,
+        "build_native_level_up_context",
+        lambda *args, **kwargs: {
+            "values": {"hp_gain": "8"},
+            "character_name": "Leveler",
+            "current_level": 1,
+            "next_level": 2,
+            "selected_class": SimpleNamespace(title="Fighter"),
+            "selected_species": SimpleNamespace(title="Human"),
+            "selected_background": SimpleNamespace(title="Acolyte"),
+            "selected_subclass": None,
+            "subclass_options": [],
+            "requires_subclass": False,
+            "choice_sections": [],
+            "class_progression": [],
+            "subclass_progression": [],
+            "spell_catalog": {},
+            "limitations": [],
+            "preview": {
+                "class_level_text": "Fighter 2",
+                "max_hp": 20,
+                "gained_features": ["Action Surge"],
+                "resources": [],
+                "spell_slots": [],
+                "new_spells": [],
+            },
+            "state_revision": 1,
+            "preview_region_ids": [
+                "preview-summary",
+                "preview-features",
+                "preview-resources",
+                "preview-spells",
+                "preview-scope",
+                "preview-spell-slots",
+            ],
+            "preview_regions_csv": "preview-summary,preview-features,preview-resources,preview-spells,preview-scope,preview-spell-slots",
+            "live_region_ids": [
+                "choice-sections",
+                "preview-summary",
+                "preview-features",
+                "preview-resources",
+                "preview-spells",
+                "preview-scope",
+                "preview-spell-slots",
+            ],
+            "live_regions_csv": "choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-scope,preview-spell-slots",
+        },
+    )
+
+    response = client.get(
+        "/campaigns/linden-pass/characters/leveler/level-up?_live_preview=1&regions=preview-summary,preview-spell-slots&hp_gain=8"
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "data-live-builder-root" not in html
+    assert 'data-live-builder-region="preview-summary"' in html
+    assert 'data-live-builder-region="preview-spell-slots"' in html
+    assert 'data-live-builder-region="preview-features"' not in html
+
+
+def test_level_up_page_renders_hp_gain_as_summary_only_live_preview(app, client, sign_in, users, monkeypatch):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    character_dir = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "characters" / "leveler"
+    character_dir.mkdir(parents=True, exist_ok=True)
+    definition = _minimal_character_definition("leveler", "Leveler")
+    import_metadata = _minimal_import_metadata("leveler")
+    (character_dir / "definition.yaml").write_text(yaml.safe_dump(definition.to_dict(), sort_keys=False), encoding="utf-8")
+    (character_dir / "import.yaml").write_text(yaml.safe_dump(import_metadata.to_dict(), sort_keys=False), encoding="utf-8")
+
+    monkeypatch.setattr(
+        app_module,
+        "native_level_up_readiness",
+        lambda *args, **kwargs: {"status": "ready", "message": "", "reasons": []},
+    )
+    monkeypatch.setattr(
+        app_module,
+        "build_native_level_up_context",
+        lambda *args, **kwargs: {
+            "values": {"hp_gain": "8"},
+            "character_name": "Leveler",
+            "current_level": 1,
+            "next_level": 2,
+            "selected_class": SimpleNamespace(title="Fighter"),
+            "selected_species": SimpleNamespace(title="Human"),
+            "selected_background": SimpleNamespace(title="Acolyte"),
+            "selected_subclass": None,
+            "subclass_options": [],
+            "requires_subclass": False,
+            "choice_sections": [],
+            "class_progression": [],
+            "subclass_progression": [],
+            "spell_catalog": {},
+            "limitations": [],
+            "preview": {
+                "class_level_text": "Fighter 2",
+                "max_hp": 20,
+                "gained_features": ["Action Surge"],
+                "resources": [],
+                "spell_slots": [],
+                "new_spells": [],
+            },
+            "state_revision": 1,
+            "preview_region_ids": [
+                "preview-summary",
+                "preview-features",
+                "preview-resources",
+                "preview-spells",
+                "preview-scope",
+                "preview-spell-slots",
+            ],
+            "preview_regions_csv": "preview-summary,preview-features,preview-resources,preview-spells,preview-scope,preview-spell-slots",
+            "live_region_ids": [
+                "choice-sections",
+                "preview-summary",
+                "preview-features",
+                "preview-resources",
+                "preview-spells",
+                "preview-scope",
+                "preview-spell-slots",
+            ],
+            "live_regions_csv": "choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-scope,preview-spell-slots",
+        },
+    )
+
+    response = client.get("/campaigns/linden-pass/characters/leveler/level-up")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'name="hp_gain"' in html
+    assert 'data-live-preview-trigger="input"' in html
+    assert 'data-live-preview-regions="preview-summary"' in html
+    assert 'data-live-preview-debounce-ms="350"' in html
 
 
 def test_level_one_builder_applies_fighting_initiate_optionalfeature_choice_to_attacks():
