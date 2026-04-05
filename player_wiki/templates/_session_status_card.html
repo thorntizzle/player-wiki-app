@@ -3,10 +3,18 @@
   <p class="meta">{% if active_session %}Chat open{% else %}Chat closed{% endif %}</p>
 </div>
 {% if active_session %}
-  <p>The session is live for players and the DM.</p>
+  {% if session_subpage == 'dm' %}
+    <p>The session is live. Players can use the Session page chat while this page stays focused on controls, staged handouts, and logs.</p>
+  {% else %}
+    <p>The session is live for players and the DM.</p>
+  {% endif %}
   <p class="meta">Started {{ active_session.started_at_label }}</p>
   <p class="meta">{{ active_session.message_count }} chat entr{% if active_session.message_count != 1 %}ies{% else %}y{% endif %}</p>
 {% else %}
   <p>No active session is running right now.</p>
-  <p class="meta">The chat window activates when the DM begins a session.</p>
+  {% if session_subpage == 'dm' %}
+    <p class="meta">Start the session here to open chat on the player Session page.</p>
+  {% else %}
+    <p class="meta">The chat window activates when the DM begins a session.</p>
+  {% endif %}
 {% endif %}

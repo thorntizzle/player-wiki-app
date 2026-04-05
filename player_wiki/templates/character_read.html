@@ -334,7 +334,7 @@
         </section>
       {% endif %}
 
-      {% if show_equipment_sections and (character.inventory or character.currency or character.other_currency) and not is_session_mode %}
+      {% if show_equipment_sections and not is_session_mode %}
         <section class="read-section">
           <div class="section-heading">
             <h2>Equipment and currency</h2>
@@ -388,6 +388,192 @@
               </article>
             {% endif %}
           </div>
+          {% if not character.inventory and (not equipment_manager or not equipment_manager.supplemental_items) %}
+            <article class="detail-card">
+              <p class="meta">No equipment is listed on this sheet yet.</p>
+            </article>
+          {% endif %}
+
+          {% if can_use_session_mode and equipment_manager %}
+            <div class="detail-grid" id="character-equipment-manager">
+              <article class="detail-card session-card">
+                <div class="section-heading">
+                  <h3>Add Systems item</h3>
+                </div>
+                <p class="meta">Search enabled Systems items and add one as supplemental equipment on this sheet.</p>
+                <form
+                  class="stack-form"
+                  method="post"
+                  action="{{ url_for('character_equipment_add_systems', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+                  data-character-systems-item-search-form
+                  data-character-systems-item-search-url="{{ equipment_manager.search_url }}"
+                >
+                  <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                  <input type="hidden" name="mode" value="read">
+                  <input type="hidden" name="page" value="{{ character_subpage }}">
+                  <label class="field">
+                    <span>Search Systems items</span>
+                    <input type="search" placeholder="Type at least 2 letters" data-character-systems-item-query>
+                  </label>
+                  <label class="field">
+                    <span>Matching items</span>
+                    <select name="entry_slug" data-character-systems-item-results disabled>
+                      <option value="">Search to load matching items</option>
+                    </select>
+                  </label>
+                  <p class="meta" data-character-systems-item-status>Type at least 2 letters to search enabled Systems items.</p>
+                  <div class="detail-grid">
+                    <label class="field">
+                      <span>Quantity</span>
+                      <input type="number" name="quantity" value="1" min="0">
+                    </label>
+                    <label class="field">
+                      <span>Notes</span>
+                      <textarea name="notes" rows="3" placeholder="Optional note for this copy of the item."></textarea>
+                    </label>
+                  </div>
+                  <button type="submit">Add Systems item</button>
+                </form>
+              </article>
+
+              <article class="detail-card session-card">
+                <div class="section-heading">
+                  <h3>Add custom item</h3>
+                </div>
+                <p class="meta">Use this for campaign-granted gear, oddities, or other items that do not come straight from the builder.</p>
+                <form
+                  class="stack-form"
+                  method="post"
+                  action="{{ url_for('character_equipment_add_manual', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+                >
+                  <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                  <input type="hidden" name="mode" value="read">
+                  <input type="hidden" name="page" value="{{ character_subpage }}">
+                  <div class="detail-grid">
+                    <label class="field">
+                      <span>Name</span>
+                      <input type="text" name="name">
+                    </label>
+                    <label class="field">
+                      <span>Quantity</span>
+                      <input type="number" name="quantity" value="1" min="0">
+                    </label>
+                    <label class="field">
+                      <span>Weight</span>
+                      <input type="text" name="weight" placeholder="Optional">
+                    </label>
+                  </div>
+                  <label class="field">
+                    <span>Linked page</span>
+                    <select name="page_ref">
+                      <option value="" selected>No linked page</option>
+                      {% for option in equipment_manager.page_options %}
+                        <option value="{{ option.value }}">{{ option.label }}</option>
+                      {% endfor %}
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Notes</span>
+                    <textarea name="notes" rows="4"></textarea>
+                  </label>
+                  <button type="submit">Add custom item</button>
+                </form>
+              </article>
+            </div>
+
+            <article class="detail-card session-card">
+              <div class="section-heading">
+                <h3>Supplemental equipment</h3>
+              </div>
+              <p class="meta">Built-in builder or import equipment stays read-only here. Use the advanced editor only for broader sheet adjustments.</p>
+              {% if native_character_tools_supported %}
+                <p class="meta">
+                  <a href="{{ url_for('character_edit_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">Open the advanced character editor</a>
+                </p>
+              {% endif %}
+              {% if equipment_manager.supplemental_items %}
+                <div class="character-edit-stack">
+                  {% for item in equipment_manager.supplemental_items %}
+                    <article class="detail-card character-edit-row">
+                      <div class="section-heading">
+                        <h4>
+                          {% if item.href %}
+                            <a href="{{ item.href }}">{{ item.name }}</a>
+                          {% else %}
+                            {{ item.name }}
+                          {% endif %}
+                        </h4>
+                        <span class="meta">{{ item.source_label }}</span>
+                      </div>
+                      <form
+                        class="stack-form"
+                        method="post"
+                        action="{{ url_for('character_equipment_update', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
+                      >
+                        <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                        <input type="hidden" name="mode" value="read">
+                        <input type="hidden" name="page" value="{{ character_subpage }}">
+                        {% if item.is_systems_item %}
+                          <div class="detail-grid">
+                            <label class="field">
+                              <span>Quantity</span>
+                              <input type="number" name="quantity" value="{{ item.quantity }}" min="0">
+                            </label>
+                            <label class="field">
+                              <span>Weight</span>
+                              <input type="text" value="{{ item.weight }}" disabled>
+                            </label>
+                          </div>
+                        {% else %}
+                          <div class="detail-grid">
+                            <label class="field">
+                              <span>Name</span>
+                              <input type="text" name="name" value="{{ item.name }}">
+                            </label>
+                            <label class="field">
+                              <span>Quantity</span>
+                              <input type="number" name="quantity" value="{{ item.quantity }}" min="0">
+                            </label>
+                            <label class="field">
+                              <span>Weight</span>
+                              <input type="text" name="weight" value="{{ item.weight }}">
+                            </label>
+                          </div>
+                          <label class="field">
+                            <span>Linked page</span>
+                            <select name="page_ref">
+                              <option value="" {% if not item.page_ref %}selected{% endif %}>No linked page</option>
+                              {% for option in equipment_manager.page_options %}
+                                <option value="{{ option.value }}"{% if option.value == item.page_ref %} selected{% endif %}>{{ option.label }}</option>
+                              {% endfor %}
+                            </select>
+                          </label>
+                        {% endif %}
+                        <label class="field">
+                          <span>Notes</span>
+                          <textarea name="notes" rows="3">{{ item.notes }}</textarea>
+                        </label>
+                        <div class="hero-actions">
+                          <button type="submit">Save changes</button>
+                        </div>
+                      </form>
+                      <form
+                        method="post"
+                        action="{{ url_for('character_equipment_remove', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
+                      >
+                        <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                        <input type="hidden" name="mode" value="read">
+                        <input type="hidden" name="page" value="{{ character_subpage }}">
+                        <button type="submit" class="ghost-button">Remove item</button>
+                      </form>
+                    </article>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <p class="meta">No supplemental equipment has been added yet.</p>
+              {% endif %}
+            </article>
+          {% endif %}
         </section>
       {% endif %}
 
@@ -397,6 +583,16 @@
             <h2>Personal</h2>
           </div>
           <div class="reference-stack">
+            {% if character.portrait %}
+              <article class="detail-card" id="character-personal-portrait">
+                <figure>
+                  <img class="article-image" src="{{ character.portrait.url }}" alt="{{ character.portrait.alt }}">
+                  {% if character.portrait.caption %}
+                    <figcaption class="meta article-image__caption">{{ character.portrait.caption }}</figcaption>
+                  {% endif %}
+                </figure>
+              </article>
+            {% endif %}
             {% if character.physical_description_html %}
               <article class="detail-card">
                 <h3>Physical Description</h3>
@@ -409,13 +605,54 @@
                 <div class="article-body article-body--compact">{{ character.personal_background_html | safe }}</div>
               </article>
             {% endif %}
-            {% if not character.physical_description_html and not character.personal_background_html and not is_session_mode %}
+            {% if not character.portrait and not character.physical_description_html and not character.personal_background_html and not is_session_mode %}
               <article class="detail-card">
                 <p class="meta">No personal details yet.</p>
               </article>
             {% endif %}
           </div>
           {% if can_use_session_mode and not is_session_mode %}
+            <article class="detail-card session-card" id="character-personal-portrait-manager">
+              <div class="section-heading">
+                <h3>Portrait</h3>
+              </div>
+              <form
+                class="stack-form"
+                method="post"
+                action="{{ url_for('character_personal_portrait', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+                enctype="multipart/form-data"
+              >
+                <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                <input type="hidden" name="mode" value="read">
+                <input type="hidden" name="page" value="{{ character_subpage }}">
+                <label class="field">
+                  <span>Portrait image</span>
+                  <input type="file" name="portrait_file" accept=".png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp">
+                </label>
+                <label class="field">
+                  <span>Alt text</span>
+                  <input type="text" name="portrait_alt" maxlength="200" value="{{ character.portrait.alt if character.portrait else '' }}">
+                </label>
+                <label class="field">
+                  <span>Caption</span>
+                  <input type="text" name="portrait_caption" maxlength="300" value="{{ character.portrait.caption if character.portrait else '' }}">
+                </label>
+                <div class="hero-actions">
+                  <button type="submit">Save portrait</button>
+                </div>
+              </form>
+              {% if character.portrait %}
+                <form
+                  method="post"
+                  action="{{ url_for('character_personal_portrait_remove', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+                >
+                  <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                  <input type="hidden" name="mode" value="read">
+                  <input type="hidden" name="page" value="{{ character_subpage }}">
+                  <button type="submit" class="ghost-button">Remove portrait</button>
+                </form>
+              {% endif %}
+            </article>
             <article class="detail-card session-card">
               <form
                 class="stack-form"
@@ -490,4 +727,112 @@
       {% endif %}
     </article>
   </div>
+{% endblock %}
+
+{% block scripts %}
+  {% if character_subpage == 'equipment' and equipment_manager and can_use_session_mode and not is_session_mode %}
+    <script>
+      (() => {
+        const forms = Array.from(document.querySelectorAll("[data-character-systems-item-search-form]"));
+        for (const form of forms) {
+          if (!(form instanceof HTMLFormElement)) {
+            continue;
+          }
+          const searchInput = form.querySelector("[data-character-systems-item-query]");
+          const resultsSelect = form.querySelector("[data-character-systems-item-results]");
+          const status = form.querySelector("[data-character-systems-item-status]");
+          const searchUrl = form.dataset.characterSystemsItemSearchUrl || "";
+          if (
+            !(searchInput instanceof HTMLInputElement)
+            || !(resultsSelect instanceof HTMLSelectElement)
+            || !(status instanceof HTMLElement)
+            || !searchUrl
+          ) {
+            continue;
+          }
+
+          let searchAbortController = null;
+          let searchTimerId = 0;
+
+          const resetResults = (message) => {
+            resultsSelect.innerHTML = "";
+            const option = document.createElement("option");
+            option.value = "";
+            option.textContent = "Search to load matching items";
+            resultsSelect.append(option);
+            resultsSelect.disabled = true;
+            status.textContent = message;
+          };
+
+          const renderResults = (results, message) => {
+            if (!Array.isArray(results) || !results.length) {
+              resetResults(message || "No enabled Systems items matched that search.");
+              return;
+            }
+            resultsSelect.innerHTML = "";
+            for (const result of results) {
+              const option = document.createElement("option");
+              option.value = String(result.entry_slug || "");
+              option.textContent = String(result.select_label || result.title || "");
+              resultsSelect.append(option);
+            }
+            resultsSelect.disabled = false;
+            resultsSelect.selectedIndex = 0;
+            status.textContent = message || `Found ${results.length} matching Systems items.`;
+          };
+
+          const runSearch = async () => {
+            const query = searchInput.value.trim();
+            if (searchAbortController) {
+              searchAbortController.abort();
+            }
+            if (query.length < 2) {
+              resetResults("Type at least 2 letters to search enabled Systems items.");
+              return;
+            }
+
+            searchAbortController = new AbortController();
+            status.textContent = "Searching Systems items...";
+            try {
+              const response = await fetch(`${searchUrl}?q=${encodeURIComponent(query)}`, {
+                headers: {
+                  "X-Requested-With": "XMLHttpRequest",
+                  "Accept": "application/json",
+                },
+                cache: "no-store",
+                credentials: "same-origin",
+                signal: searchAbortController.signal,
+              });
+              if (!response.ok) {
+                resetResults("Could not search Systems items right now.");
+                return;
+              }
+
+              const payload = await response.json();
+              renderResults(payload.results, typeof payload.message === "string" ? payload.message : "");
+            } catch (error) {
+              if (error instanceof DOMException && error.name === "AbortError") {
+                return;
+              }
+              resetResults("Could not search Systems items right now.");
+            } finally {
+              searchAbortController = null;
+            }
+          };
+
+          searchInput.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+            }
+          });
+          searchInput.addEventListener("input", () => {
+            window.clearTimeout(searchTimerId);
+            searchTimerId = window.setTimeout(runSearch, 250);
+          });
+
+          resetResults("Type at least 2 letters to search enabled Systems items.");
+        }
+      })();
+    </script>
+  {% endif %}
 {% endblock %}

@@ -27,6 +27,7 @@
       <section class="section-list">
         <div
           data-combat-character-live-root
+          data-loading="0"
           data-combat-live-url="{{ url_for('campaign_combat_character_live_state', campaign_slug=campaign.slug, combatant=selected_combatant_id) }}"
           data-combat-state-token="{{ combat_character_state_token }}"
           data-live-revision="{{ combat_live_revision }}"
@@ -77,6 +78,7 @@
 
 {% block scripts %}
   {% include "_live_diagnostics_helper.html" %}
+  {% include "_live_ui_helper.html" %}
   <script>
     (() => {
       const liveRoot = document.querySelector("[data-combat-character-live-root]");
@@ -85,6 +87,7 @@
       }
 
       const snapshotRoot = document.querySelector("[data-combat-character-snapshot-root]");
+      const uiStateTools = window.__playerWikiLiveUiTools || null;
       const pollUrl = liveRoot.dataset.combatLiveUrl;
       let combatStateToken = liveRoot.dataset.combatStateToken || "";
       let liveRevision = Number.parseInt(liveRoot.dataset.liveRevision || "0", 10);
@@ -202,6 +205,7 @@
         }
 
         pollInFlight = true;
+        liveRoot.dataset.loading = "1";
         try {
           const requestStartedAt = performance.now();
           const response = await fetch(pollUrl, {
@@ -231,11 +235,17 @@
           const nextToken = payload.combat_state_token ? String(payload.combat_state_token) : "";
           const applyStartedAt = performance.now();
           if (forceApply || nextToken !== combatStateToken) {
+            const focusState = uiStateTools ? uiStateTools.captureFocus(liveRoot) : null;
+            const viewportAnchor = uiStateTools ? uiStateTools.captureViewportAnchor(liveRoot) : null;
             if (snapshotRoot && typeof payload.snapshot_html === "string") {
               snapshotRoot.innerHTML = payload.snapshot_html;
             }
             combatStateToken = nextToken;
             liveRoot.dataset.combatStateToken = combatStateToken;
+            if (uiStateTools) {
+              uiStateTools.restoreFocus(liveRoot, focusState);
+              uiStateTools.restoreViewportAnchor(liveRoot, viewportAnchor);
+            }
           }
           return buildLiveMetric(response, payload, {
             mode,
@@ -246,6 +256,7 @@
           return;
         } finally {
           pollInFlight = false;
+          liveRoot.dataset.loading = "0";
           if (reschedule) {
             scheduleNextPoll();
           }

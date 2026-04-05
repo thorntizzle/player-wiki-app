@@ -10436,6 +10436,10 @@ def test_character_builder_page_renders_top_level_live_preview_metadata(app, cli
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
+    assert 'data-live-builder-root' in html
+    assert 'data-loading="0"' in html
+    assert "window.__playerWikiLiveUiTools" in html
+    assert "uiStateTools.captureViewportAnchor(liveRoot)" in html
     assert 'name="name"' in html
     assert 'data-live-preview-trigger="blur"' in html
     assert 'data-live-preview-regions=""' in html
@@ -11067,6 +11071,10 @@ def test_level_up_page_renders_hp_gain_as_summary_only_live_preview(app, client,
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
+    assert 'data-live-builder-root' in html
+    assert 'data-loading="0"' in html
+    assert "window.__playerWikiLiveUiTools" in html
+    assert 'liveRoot.dataset.loading = "1";' in html
     assert 'name="hp_gain"' in html
     assert 'data-live-preview-trigger="input"' in html
     assert 'data-live-preview-regions="preview-summary"' in html

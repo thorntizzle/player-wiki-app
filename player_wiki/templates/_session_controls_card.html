@@ -2,12 +2,20 @@
   <h2>Session controls</h2>
   {% if can_manage_session %}
     {% if active_session %}
-      <p>You can reveal staged articles or close the session when the table is done.</p>
+      {% if session_subpage == 'dm' %}
+        <p>You can reveal staged articles here or close the session when the table is done. Live chat remains on the player Session page, and finished history lives in session logs.</p>
+      {% else %}
+        <p>You can reveal staged articles or close the session when the table is done.</p>
+      {% endif %}
       <form method="post" action="{{ url_for('campaign_session_close', campaign_slug=campaign.slug) }}">
         <button type="submit">Close session</button>
       </form>
     {% else %}
-      <p>Start a session to open the chat window and reveal staged handouts.</p>
+      {% if session_subpage == 'dm' %}
+        <p>Start a session here to open chat on the player Session page and reveal staged handouts.</p>
+      {% else %}
+        <p>Start a session to open the chat window and reveal staged handouts.</p>
+      {% endif %}
       <form
         method="post"
         action="{{ url_for('campaign_session_start', campaign_slug=campaign.slug) }}"

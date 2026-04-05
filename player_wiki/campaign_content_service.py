@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import mimetypes
 from pathlib import Path, PurePosixPath
+import shutil
 from typing import Any
 
 import yaml
@@ -78,6 +79,7 @@ class DeletedCharacterContent:
     deleted_files: bool
     deleted_state: bool
     deleted_assignment: bool
+    deleted_assets: bool
 
 
 def _timestamp_from_path(path: Path) -> str:
@@ -527,10 +529,16 @@ def delete_campaign_character_file(
     if character_dir.exists() and not any(character_dir.iterdir()):
         character_dir.rmdir()
 
+    portrait_assets_dir = config.campaign_dir / "assets" / "characters" / character_slug
+    deleted_assets = False
+    if portrait_assets_dir.exists() and portrait_assets_dir.is_dir():
+        shutil.rmtree(portrait_assets_dir)
+        deleted_assets = True
+
     deleted_state = state_store.delete_state(campaign_slug, character_slug) is not None
     deleted_assignment = auth_store.delete_character_assignment(campaign_slug, character_slug) is not None
 
-    if not deleted_files and not deleted_state and not deleted_assignment:
+    if not deleted_files and not deleted_state and not deleted_assignment and not deleted_assets:
         return None
 
     return DeletedCharacterContent(
@@ -538,6 +546,7 @@ def delete_campaign_character_file(
         deleted_files=deleted_files,
         deleted_state=deleted_state,
         deleted_assignment=deleted_assignment,
+        deleted_assets=deleted_assets,
     )
 
 

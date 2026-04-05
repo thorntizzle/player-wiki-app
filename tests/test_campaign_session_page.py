@@ -248,7 +248,12 @@ def test_player_session_page_preserves_lookup_preview_during_article_load(client
 
     assert session_page.status_code == 200
     session_html = session_page.get_data(as_text=True)
+    assert 'data-session-live-root' in session_html
+    assert 'data-loading="0"' in session_html
+    assert "window.__playerWikiLiveUiTools" in session_html
+    assert "uiStateTools.captureViewportAnchor(liveRoot)" in session_html
     assert 'const preserveExistingPreview = previewRoot.querySelector(".session-wiki-lookup-result") !== null;' in session_html
+    assert 'liveRoot.dataset.loading = "1";' in session_html
     assert 'previewRoot.dataset.loading = isBusy ? "1" : "0";' in session_html
     assert 'previewRoot.setAttribute("aria-busy", isBusy ? "true" : "false");' in session_html
 
@@ -305,8 +310,8 @@ def test_dm_can_start_session_and_player_can_post_messages(client, sign_in, user
 
     assert start.status_code == 200
     start_html = start.get_data(as_text=True)
-    assert "Session started. The chat window is now live." in start_html
-    assert "The session is live for players and the DM." in start_html
+    assert "Session started. Players can now use the Session page chat." in start_html
+    assert "Players can use the Session page chat" in start_html
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["party"]["email"], users["party"]["password"])
@@ -336,9 +341,9 @@ def test_session_start_and_message_support_async_partial_updates(client, sign_in
     start_payload = start.get_json()
     assert start_payload["ok"] is True
     assert start_payload["active_session_id"] == 1
-    assert "Session started. The chat window is now live." in start_payload["flash_html"]
-    assert "The session is live for players and the DM." in start_payload["status_html"]
-    assert "Post to chat" in start_payload["composer_html"]
+    assert "Session started. Players can now use the Session page chat." in start_payload["flash_html"]
+    assert "Players can use the Session page chat" in start_payload["status_html"]
+    assert "composer_html" not in start_payload
     assert "Close session" in start_payload["controls_html"]
 
     post_message = client.post(
@@ -387,7 +392,7 @@ def test_session_articles_stay_out_of_wiki_until_revealed_and_appear_in_chat(cli
     )
     assert reveal.status_code == 200
     reveal_html = reveal.get_data(as_text=True)
-    assert "Session article revealed in the chat window." in reveal_html
+    assert "Session article revealed on the player Session page and saved to the chat history." in reveal_html
     assert "Sealed Orders" in reveal_html
     assert "Deliver the crate to the eastern gate before moonrise." in reveal_html
 
@@ -649,7 +654,7 @@ def test_pulled_wiki_page_can_be_revealed_in_session_chat(client, sign_in, users
 
     assert reveal.status_code == 200
     reveal_html = reveal.get_data(as_text=True)
-    assert "Session article revealed in the chat window." in reveal_html
+    assert "Session article revealed on the player Session page and saved to the chat history." in reveal_html
     assert "Operations Brief" in reveal_html
     assert "All crew members are expected to keep a low profile" in reveal_html
 
@@ -684,7 +689,7 @@ def test_pulled_systems_entry_can_be_revealed_in_session_chat(client, sign_in, u
 
     assert reveal.status_code == 200
     reveal_html = reveal.get_data(as_text=True)
-    assert "Session article revealed in the chat window." in reveal_html
+    assert "Session article revealed on the player Session page and saved to the chat history." in reveal_html
     assert "Goblin" in reveal_html
     assert "Scimitar" in reveal_html
 
@@ -953,7 +958,7 @@ def test_session_articles_support_images_with_dm_only_staging_access(client, sig
     assert outsider_image.status_code == 404
 
 
-def test_session_live_state_endpoint_returns_updated_status_and_chat(client, sign_in, users):
+def test_player_session_live_state_endpoint_returns_updated_status_and_chat(client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
     client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
@@ -979,7 +984,28 @@ def test_session_live_state_endpoint_returns_updated_status_and_chat(client, sig
     assert closed_payload["active_session_id"] is None
     assert "No active session is running right now." in closed_payload["status_html"]
     assert "When the DM begins a session" in closed_payload["chat_html"]
-    assert "Begin session" in closed_payload["controls_html"]
+    assert "controls_html" not in closed_payload
+
+
+def test_dm_session_live_state_endpoint_returns_manager_payload_without_chat_or_composer(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+    client.post(
+        "/campaigns/linden-pass/session/messages",
+        data={"body": "Check the courier's seal before opening the satchel."},
+        follow_redirects=False,
+    )
+
+    live_state = client.get("/campaigns/linden-pass/session/live-state?view=dm")
+
+    assert live_state.status_code == 200
+    payload = live_state.get_json()
+    assert payload["active_session_id"] == 1
+    assert "Players can use the Session page chat" in payload["status_html"]
+    assert "Close session" in payload["controls_html"]
+    assert "chat_html" not in payload
+    assert "composer_html" not in payload
 
 
 def test_session_live_state_short_circuits_when_revision_and_view_token_match(client, sign_in, users):
@@ -988,7 +1014,7 @@ def test_session_live_state_short_circuits_when_revision_and_view_token_match(cl
     client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
 
     initial_live_state = client.get(
-        "/campaigns/linden-pass/session/live-state",
+        "/campaigns/linden-pass/session/live-state?view=dm",
         headers=_async_headers(),
     )
 
@@ -1001,7 +1027,7 @@ def test_session_live_state_short_circuits_when_revision_and_view_token_match(cl
     _assert_live_diagnostics_headers(initial_live_state)
 
     unchanged_live_state = client.get(
-        "/campaigns/linden-pass/session/live-state",
+        "/campaigns/linden-pass/session/live-state?view=dm",
         headers=_live_poll_headers(initial_payload["live_revision"], initial_payload["live_view_token"]),
     )
 
@@ -1021,7 +1047,7 @@ def test_session_live_state_short_circuits_when_revision_and_view_token_match(cl
     )
 
     refreshed_live_state = client.get(
-        "/campaigns/linden-pass/session/live-state",
+        "/campaigns/linden-pass/session/live-state?view=dm",
         headers=_live_poll_headers(initial_payload["live_revision"], initial_payload["live_view_token"]),
     )
 
@@ -1029,7 +1055,7 @@ def test_session_live_state_short_circuits_when_revision_and_view_token_match(cl
     refreshed_payload = refreshed_live_state.get_json()
     assert refreshed_payload["changed"] is True
     assert refreshed_payload["live_revision"] > initial_payload["live_revision"]
-    assert "This should advance the session live revision." in refreshed_payload["chat_html"]
+    assert "controls_html" in refreshed_payload
     assert refreshed_live_state.headers["X-Live-State-Changed"] == "true"
     _assert_live_diagnostics_headers(refreshed_live_state)
 
@@ -1166,7 +1192,7 @@ def test_session_articles_remain_visible_after_navigation_with_live_session(clie
     assert "Gate Pass" in returned_html
     assert "Reveal this while the table is still in session." in returned_html
 
-    live_state = client.get("/campaigns/linden-pass/session/live-state")
+    live_state = client.get("/campaigns/linden-pass/session/live-state?view=dm")
     payload = live_state.get_json()
 
     assert live_state.status_code == 200
@@ -1213,7 +1239,7 @@ def test_session_articles_remain_visible_after_navigation_without_live_session(c
     assert "Read Aloud Notice" in returned_html
     assert "This should stay listed as revealed after the session ends." in returned_html
 
-    closed_state = client.get("/campaigns/linden-pass/session/live-state")
+    closed_state = client.get("/campaigns/linden-pass/session/live-state?view=dm")
     payload = closed_state.get_json()
 
     assert closed_state.status_code == 200

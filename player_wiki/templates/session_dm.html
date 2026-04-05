@@ -17,7 +17,8 @@
   <div
     class="page-layout session-layout"
     data-session-live-root
-    data-session-live-url="{{ url_for('campaign_session_live_state', campaign_slug=campaign.slug) }}"
+    data-loading="0"
+    data-session-live-url="{{ url_for('campaign_session_live_state', campaign_slug=campaign.slug, view='dm') }}"
     data-active-session-id="{{ active_session_id or '' }}"
     data-session-manager-state-token="{{ session_manager_state_token }}"
     data-live-revision="{{ session_live_revision }}"
@@ -57,5 +58,6 @@
 
 {% block scripts %}
   {% include "_live_diagnostics_helper.html" %}
+  {% include "_live_ui_helper.html" %}
   {% include "_session_live_scripts.html" %}
 {% endblock %}

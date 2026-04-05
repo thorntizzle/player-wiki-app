@@ -23,6 +23,7 @@
     <div
       class="page-layout combat-status-layout"
       data-combat-status-live-root
+      data-loading="0"
       data-combat-live-url="{{ url_for('campaign_combat_status_live_state', campaign_slug=campaign.slug) }}"
       data-combat-status-base-url="{{ url_for('campaign_combat_status_view', campaign_slug=campaign.slug) }}"
       data-combat-state-token="{{ combat_live_state_token }}"
@@ -47,5 +48,6 @@
 
 {% block scripts %}
   {% include "_live_diagnostics_helper.html" %}
+  {% include "_live_ui_helper.html" %}
   {% include "_combat_status_live_scripts.html" %}
 {% endblock %}

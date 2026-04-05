@@ -69,6 +69,174 @@ class CharacterEditValidationError(ValueError):
     pass
 
 
+def build_managed_character_import_metadata(
+    campaign_slug: str,
+    character_slug: str,
+    current_import_metadata: CharacterImportMetadata,
+    *,
+    parser_version: str = CHARACTER_EDITOR_VERSION,
+) -> CharacterImportMetadata:
+    return CharacterImportMetadata(
+        campaign_slug=campaign_slug,
+        character_slug=character_slug,
+        source_path=str(
+            current_import_metadata.source_path or f"managed://{campaign_slug}/{character_slug}"
+        ),
+        imported_at_utc=isoformat(utcnow()),
+        parser_version=parser_version,
+        import_status="managed",
+        warnings=[],
+    )
+
+
+def normalize_custom_equipment_entry(
+    *,
+    name: str,
+    quantity: str | int,
+    weight: str = "",
+    notes: str = "",
+    existing_item: dict[str, Any] | None = None,
+    raw_id: str = "",
+    used_item_ids: set[str] | None = None,
+    page_ref: str = "",
+    campaign_option: dict[str, Any] | None = None,
+    systems_ref: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], int]:
+    clean_name = str(name or "").strip()
+    if not clean_name:
+        raise CharacterEditValidationError("Each custom equipment row needs an item name.")
+
+    parsed_quantity = _parse_manual_item_quantity(str(quantity or "").strip())
+    normalized_page_ref = str(page_ref or "").strip()
+    normalized_campaign_option = dict(campaign_option or {})
+    normalized_systems_ref = {
+        key: value
+        for key, value in dict(systems_ref or {}).items()
+        if str(key or "").strip() and value not in (None, "", [], {})
+    }
+
+    existing = deepcopy(existing_item or {})
+    existing.pop("campaign_option", None)
+    existing.pop("systems_ref", None)
+    existing.pop("page_ref", None)
+
+    reserved_ids = set(used_item_ids or set())
+    preserved_id = str(raw_id or existing.get("id") or "").strip()
+    if preserved_id:
+        reserved_ids.discard(preserved_id)
+    item_id = preserved_id or _build_unique_manual_id("manual-item", clean_name, reserved_ids)
+    reserved_ids.add(item_id)
+
+    existing.update(
+        {
+            "id": item_id,
+            "name": clean_name,
+            "default_quantity": parsed_quantity,
+            "weight": str(weight or "").strip(),
+            "notes": str(notes or "").strip(),
+            "source_kind": CUSTOM_EQUIPMENT_SOURCE_KIND,
+            "campaign_option": normalized_campaign_option or None,
+        }
+    )
+    if normalized_page_ref:
+        existing["page_ref"] = normalized_page_ref
+    if normalized_systems_ref:
+        existing["systems_ref"] = normalized_systems_ref
+    return existing, parsed_quantity
+
+
+def apply_equipment_catalog_edit(
+    campaign_slug: str,
+    current_definition: CharacterDefinition,
+    current_import_metadata: CharacterImportMetadata,
+    *,
+    campaign_page_records: list[Any] | None = None,
+    target_item_id: str | None = None,
+    remove_item_id: str | None = None,
+    name: str = "",
+    quantity: str | int = "",
+    weight: str = "",
+    notes: str = "",
+    page_ref: str = "",
+    systems_ref: dict[str, Any] | None = None,
+) -> tuple[CharacterDefinition, CharacterImportMetadata, dict[str, int]]:
+    campaign_page_lookup = _build_campaign_page_lookup(campaign_page_records or [])
+    manual_items = _manual_equipment_entries(current_definition)
+    manual_item_lookup = {
+        str(item.get("id") or "").strip(): dict(item)
+        for item in manual_items
+        if str(item.get("id") or "").strip()
+    }
+
+    normalized_remove_item_id = str(remove_item_id or "").strip()
+    if normalized_remove_item_id:
+        if normalized_remove_item_id not in manual_item_lookup:
+            raise CharacterEditValidationError("Choose a valid supplemental equipment entry to remove.")
+        next_manual_items = [
+            dict(item)
+            for item in manual_items
+            if str(item.get("id") or "").strip() != normalized_remove_item_id
+        ]
+        quantity_overrides: dict[str, int] = {}
+    else:
+        normalized_target_item_id = str(target_item_id or "").strip()
+        existing_item = manual_item_lookup.get(normalized_target_item_id) if normalized_target_item_id else None
+        if normalized_target_item_id and existing_item is None:
+            raise CharacterEditValidationError("Choose a valid supplemental equipment entry to update.")
+
+        normalized_page_ref = _normalize_selected_campaign_page_ref(page_ref, campaign_page_lookup)
+        campaign_option = _editable_campaign_option_for_page_ref(
+            normalized_page_ref,
+            campaign_page_lookup,
+            default_kind="item",
+        )
+        used_item_ids = set(manual_item_lookup.keys())
+        if normalized_target_item_id:
+            used_item_ids.discard(normalized_target_item_id)
+        next_item, parsed_quantity = normalize_custom_equipment_entry(
+            name=name,
+            quantity=quantity,
+            weight=weight,
+            notes=notes,
+            existing_item=existing_item,
+            raw_id=normalized_target_item_id,
+            used_item_ids=used_item_ids,
+            page_ref=normalized_page_ref,
+            campaign_option=campaign_option,
+            systems_ref=systems_ref,
+        )
+        next_manual_items = [
+            dict(item)
+            for item in manual_items
+            if str(item.get("id") or "").strip() != str(next_item.get("id") or "").strip()
+        ]
+        next_manual_items.append(next_item)
+        quantity_overrides = {str(next_item.get("id") or "").strip(): parsed_quantity}
+
+    payload = deepcopy(current_definition.to_dict())
+    payload["campaign_slug"] = campaign_slug
+    payload["character_slug"] = current_definition.character_slug
+    payload["equipment_catalog"] = [
+        dict(item)
+        for item in list(current_definition.equipment_catalog or [])
+        if str(item.get("source_kind") or "") != CUSTOM_EQUIPMENT_SOURCE_KIND
+    ] + next_manual_items
+
+    definition = CharacterDefinition.from_dict(payload)
+    source_type = str((current_definition.source or {}).get("source_type") or "").strip()
+    if source_type and source_type != "native_character_builder":
+        definition = converge_imported_definition(
+            definition,
+            existing_definition=current_definition,
+        )
+    import_metadata = build_managed_character_import_metadata(
+        campaign_slug,
+        current_definition.character_slug,
+        current_import_metadata,
+    )
+    return definition, import_metadata, quantity_overrides
+
+
 def build_native_character_edit_context(
     definition: CharacterDefinition,
     *,
@@ -493,31 +661,20 @@ def apply_native_character_edits(
         has_content = bool(name or page_ref or quantity_text or weight or notes.strip())
         if not has_content:
             continue
-        if not name:
-            raise CharacterEditValidationError("Each custom equipment row needs an item name.")
-        quantity = _parse_manual_item_quantity(quantity_text)
-
-        existing = deepcopy(manual_item_lookup.get(raw_id) or {})
-        existing.pop("campaign_option", None)
-        existing.pop("systems_ref", None)
-        existing.pop("page_ref", None)
-        item_id = raw_id or _build_unique_manual_id("manual-item", name, used_item_ids)
-        used_item_ids.add(item_id)
-        existing.update(
-            {
-                "id": item_id,
-                "name": name,
-                "default_quantity": quantity,
-                "weight": weight,
-                "notes": notes.strip(),
-                "source_kind": CUSTOM_EQUIPMENT_SOURCE_KIND,
-                "campaign_option": dict(campaign_option or {}) or None,
-            }
+        next_item, quantity = normalize_custom_equipment_entry(
+            name=name,
+            quantity=quantity_text,
+            weight=weight,
+            notes=notes,
+            existing_item=manual_item_lookup.get(raw_id),
+            raw_id=raw_id,
+            used_item_ids=used_item_ids,
+            page_ref=page_ref,
+            campaign_option=campaign_option,
         )
-        if page_ref:
-            existing["page_ref"] = page_ref
-        manual_items.append(existing)
-        inventory_quantity_overrides[item_id] = quantity
+        used_item_ids.add(str(next_item.get("id") or "").strip())
+        manual_items.append(next_item)
+        inventory_quantity_overrides[str(next_item.get("id") or "").strip()] = quantity
 
     selected_campaign_option_payloads = _campaign_option_payloads_from_entries(
         manual_features,
@@ -572,14 +729,10 @@ def apply_native_character_edits(
             definition,
             existing_definition=current_definition,
         )
-    import_metadata = CharacterImportMetadata(
-        campaign_slug=campaign_slug,
-        character_slug=current_definition.character_slug,
-        source_path=str(current_import_metadata.source_path or f"managed://{campaign_slug}/{current_definition.character_slug}"),
-        imported_at_utc=isoformat(utcnow()),
-        parser_version=CHARACTER_EDITOR_VERSION,
-        import_status="managed",
-        warnings=[],
+    import_metadata = build_managed_character_import_metadata(
+        campaign_slug,
+        current_definition.character_slug,
+        current_import_metadata,
     )
     return definition, import_metadata, inventory_quantity_overrides
 

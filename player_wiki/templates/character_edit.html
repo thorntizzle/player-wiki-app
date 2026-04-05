@@ -7,7 +7,7 @@
     <p class="eyebrow">Character editor</p>
     <h1>Edit {{ character.name }}</h1>
     <p class="lede">
-      Manage campaign-time adjustments that are outside the native level-up flow. This slice covers proficiencies, persistent reference text, controlled sheet-math adjustments, custom features with optional trackers, manual equipment additions, campaign-page links for custom sheet content, and supported structured spell replacements tied to linked campaign features.
+      Manage broader DND-5E campaign-time adjustments that are outside the native level-up flow. Use the character sheet subpages for everyday equipment and personal updates, and keep this editor for proficiencies, persistent reference text, controlled sheet-math adjustments, custom features with optional trackers, deeper campaign-page links, and supported structured spell replacements tied to linked campaign features.
     </p>
     <div class="hero-actions">
       <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">Back to sheet</a>
@@ -151,7 +151,7 @@
         <div class="section-heading">
           <h2>Manual Equipment</h2>
         </div>
-        <p class="meta">Add gear that was granted in play or needs to exist on the sheet outside the builder and import flows.</p>
+        <p class="meta">Use this advanced section when the Equipment subpage is not enough and you need broader manual control over supplemental gear.</p>
         {% if edit_context.existing_managed_equipment %}
           <article class="detail-card">
             <h3>Existing built-in equipment</h3>

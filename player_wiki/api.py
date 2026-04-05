@@ -1496,6 +1496,7 @@ def register_api(app) -> None:
                     "deleted_files": deleted.deleted_files,
                     "deleted_state": deleted.deleted_state,
                     "deleted_assignment": deleted.deleted_assignment,
+                    "deleted_assets": deleted.deleted_assets,
                 },
             }
         )

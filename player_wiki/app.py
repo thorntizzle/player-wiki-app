@@ -56,21 +56,36 @@ from .character_builder import (
 )
 from .character_editor import (
     CharacterEditValidationError,
+    apply_equipment_catalog_edit,
     apply_native_character_edits,
+    build_managed_character_import_metadata,
     build_native_character_edit_context,
 )
 from .character_importer import write_yaml
 from .character_service import CharacterStateValidationError, build_initial_state, merge_state_with_definition
 from .combat_presenter import DND_5E_CONDITION_OPTIONS, present_combat_tracker
-from .character_presenter import present_character_detail, present_character_roster, render_campaign_markdown
+from .character_presenter import (
+    build_character_entry_href,
+    present_character_detail,
+    present_character_roster,
+    render_campaign_markdown,
+)
 from .auth_store import AuthStore
 from .campaign_combat_service import CampaignCombatService, CampaignCombatValidationError
 from .campaign_combat_store import CampaignCombatStore
-from .campaign_content_service import delete_campaign_character_file
+from .campaign_content_service import (
+    delete_campaign_asset_file,
+    delete_campaign_character_file,
+    write_campaign_asset_file,
+)
 from .campaign_dm_content_service import CampaignDMContentService, CampaignDMContentValidationError
 from .campaign_dm_content_store import CampaignDMContentStore
 from .campaign_page_store import CampaignPageStore
-from .campaign_session_service import CampaignSessionService, CampaignSessionValidationError
+from .campaign_session_service import (
+    ALLOWED_SESSION_ARTICLE_IMAGE_EXTENSIONS,
+    CampaignSessionService,
+    CampaignSessionValidationError,
+)
 from .campaign_session_store import CampaignSessionStore
 from .character_repository import CharacterRepository, load_campaign_character_config
 from .character_state_service import CharacterStateService
@@ -156,6 +171,9 @@ SUPPORTED_NATIVE_CHARACTER_SYSTEM = "DND-5E"
 NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE = (
     "Native character tools are currently only supported for DND-5E campaigns."
 )
+CHARACTER_PORTRAIT_ALT_MAX_LENGTH = 200
+CHARACTER_PORTRAIT_CAPTION_MAX_LENGTH = 300
+CHARACTER_PORTRAIT_MAX_BYTES = 8 * 1024 * 1024
 SYSTEMS_ENTRY_TYPE_LABELS = {
     "action": "Actions",
     "background": "Backgrounds",
@@ -600,6 +618,181 @@ def create_app() -> Flask:
             "player_choices": player_choices,
         }
 
+    def normalize_character_page_ref(value: object) -> str:
+        if isinstance(value, dict):
+            slug = str(value.get("slug") or value.get("page_slug") or "").strip()
+            if slug:
+                return slug
+        return str(value or "").strip()
+
+    def build_character_page_link_options(campaign_page_records: list[object]) -> list[dict[str, str]]:
+        options: list[dict[str, str]] = []
+        for page_record in list(campaign_page_records or []):
+            page_ref = str(getattr(page_record, "page_ref", "") or "").strip()
+            page = getattr(page_record, "page", None)
+            if not page_ref or page is None:
+                continue
+            context_parts = [
+                str(getattr(page, "section", "") or "").strip(),
+                str(getattr(page, "subsection", "") or "").strip(),
+            ]
+            context_label = " / ".join(part for part in context_parts if part)
+            title = str(getattr(page, "title", "") or page_ref).strip()
+            options.append(
+                {
+                    "value": page_ref,
+                    "label": f"{title} - {context_label}" if context_label else title,
+                }
+            )
+        return options
+
+    def list_visible_character_page_records(campaign_slug: str, campaign) -> list[object]:
+        return [
+            page_record
+            for page_record in get_campaign_page_store().list_page_records(campaign_slug)
+            if campaign.is_page_visible(page_record.page)
+            and str(page_record.page.section or "").strip() != "Sessions"
+        ]
+
+    def format_character_systems_item_weight(value: object) -> str:
+        if value in (None, ""):
+            return ""
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            return str(value).strip()
+        if numeric_value <= 0:
+            return ""
+        if numeric_value.is_integer():
+            return f"{int(numeric_value)} lb."
+        return f"{numeric_value:g} lb."
+
+    def build_character_systems_ref(entry) -> dict[str, str]:
+        return {
+            "entry_key": str(entry.entry_key or "").strip(),
+            "entry_type": str(entry.entry_type or "").strip(),
+            "title": str(entry.title or "").strip(),
+            "slug": str(entry.slug or "").strip(),
+            "source_id": str(entry.source_id or "").strip(),
+        }
+
+    def build_character_equipment_manager_context(
+        campaign_slug: str,
+        campaign,
+        record,
+        *,
+        campaign_page_records: list[object],
+    ) -> dict[str, object]:
+        inventory_by_ref = {
+            str(item.get("catalog_ref") or item.get("id") or "").strip(): dict(item)
+            for item in list((record.state_record.state or {}).get("inventory") or [])
+            if str(item.get("catalog_ref") or item.get("id") or "").strip()
+        }
+        supplemental_items: list[dict[str, object]] = []
+        for item in list(record.definition.equipment_catalog or []):
+            if str(item.get("source_kind") or "").strip() != "manual_edit":
+                continue
+            item_id = str(item.get("id") or "").strip()
+            if not item_id:
+                continue
+            inventory_item = inventory_by_ref.get(item_id, {})
+            systems_ref = dict(item.get("systems_ref") or {})
+            page_ref = normalize_character_page_ref(item.get("page_ref"))
+            quantity_value = inventory_item.get("quantity")
+            default_quantity = item.get("default_quantity")
+            supplemental_items.append(
+                {
+                    "id": item_id,
+                    "name": str(item.get("name") or "Item").strip(),
+                    "quantity": int(quantity_value if quantity_value is not None else default_quantity or 0),
+                    "weight": str(item.get("weight") or "").strip(),
+                    "notes": str(item.get("notes") or "").strip(),
+                    "page_ref": page_ref,
+                    "href": build_character_entry_href(
+                        campaign.slug,
+                        systems_ref=systems_ref,
+                        page_ref=item.get("page_ref"),
+                    ),
+                    "is_systems_item": bool(systems_ref),
+                    "source_label": (
+                        f"Systems item ({systems_ref.get('source_id') or 'Unknown source'})"
+                        if systems_ref
+                        else "Custom item"
+                    ),
+                }
+            )
+        return {
+            "search_url": url_for(
+                "character_equipment_systems_item_search",
+                campaign_slug=campaign_slug,
+                character_slug=record.definition.character_slug,
+            ),
+            "page_options": build_character_page_link_options(campaign_page_records),
+            "supplemental_items": sorted(
+                supplemental_items,
+                key=lambda item: (str(item["name"]).lower(), str(item["id"]).lower()),
+            ),
+        }
+
+    def build_character_portrait_asset_ref(character_slug: str, filename: str) -> str:
+        extension = Path(filename).suffix.lower()
+        return f"characters/{character_slug}/portrait{extension}"
+
+    def validate_character_portrait_upload(upload) -> tuple[str, bytes]:
+        filename = Path(str(getattr(upload, "filename", "") or "").strip()).name
+        if not filename:
+            raise ValueError("Choose an image file before saving the portrait.")
+        extension = Path(filename).suffix.lower()
+        if extension not in ALLOWED_SESSION_ARTICLE_IMAGE_EXTENSIONS:
+            raise ValueError("Character portraits must be PNG, JPG, GIF, or WEBP files.")
+        data_blob = upload.read() if upload is not None else b""
+        if not data_blob:
+            raise ValueError("Uploaded portrait files cannot be empty.")
+        if len(data_blob) > CHARACTER_PORTRAIT_MAX_BYTES:
+            raise ValueError("Character portraits must stay under 8 MB.")
+        return filename, data_blob
+
+    def build_character_portrait_context(campaign, definition) -> dict[str, str] | None:
+        profile = dict(definition.profile or {})
+        asset_ref = str(profile.get("portrait_asset_ref") or "").strip()
+        if not asset_ref:
+            return None
+        if get_campaign_asset_file(campaign, asset_ref) is None:
+            return None
+        return {
+            "asset_ref": asset_ref,
+            "url": url_for(
+                "character_portrait_asset",
+                campaign_slug=campaign.slug,
+                character_slug=definition.character_slug,
+            ),
+            "alt": str(profile.get("portrait_alt") or definition.name).strip() or definition.name,
+            "caption": str(profile.get("portrait_caption") or "").strip(),
+        }
+
+    def update_character_portrait_profile(
+        definition,
+        *,
+        asset_ref: str = "",
+        alt_text: str = "",
+        caption: str = "",
+    ):
+        payload = definition.to_dict()
+        profile = dict(payload.get("profile") or {})
+        clean_asset_ref = str(asset_ref or "").strip()
+        clean_alt_text = str(alt_text or "").strip()
+        clean_caption = str(caption or "").strip()
+        if clean_asset_ref:
+            profile["portrait_asset_ref"] = clean_asset_ref
+            profile["portrait_alt"] = clean_alt_text
+            profile["portrait_caption"] = clean_caption
+        else:
+            profile.pop("portrait_asset_ref", None)
+            profile.pop("portrait_alt", None)
+            profile.pop("portrait_caption", None)
+        payload["profile"] = profile
+        return definition.__class__.from_dict(payload)
+
     def redirect_to_character_mode(campaign_slug: str, character_slug: str, *, anchor: str | None = None):
         read_subpage = normalize_character_read_subpage(
             request.values.get("page", ""),
@@ -742,10 +935,18 @@ def create_app() -> Flask:
             *sorted(get_owned_character_slugs(campaign_slug)),
         )
 
-    def build_session_live_view_token(campaign_slug: str) -> str:
+    def normalize_session_subpage(value: str) -> str:
+        normalized = str(value or "").strip().lower()
+        if normalized == "dm":
+            return "dm"
+        return "session"
+
+    def build_session_live_view_token(campaign_slug: str, session_subpage: str) -> str:
+        normalized_subpage = normalize_session_subpage(session_subpage)
         current_preferences = get_current_user_preferences()
         return build_live_hash(
             "session",
+            normalized_subpage,
             current_preferences.session_chat_order,
             "1" if can_manage_campaign_session(campaign_slug) else "0",
             "1" if can_post_campaign_session_messages(campaign_slug) else "0",
@@ -895,11 +1096,11 @@ def create_app() -> Flask:
             "live_view_token": build_combat_live_view_token(campaign_slug, combat_subpage),
         }
 
-    def build_session_live_metadata(campaign_slug: str) -> dict[str, object]:
+    def build_session_live_metadata(campaign_slug: str, session_subpage: str) -> dict[str, object]:
         session_service = get_campaign_session_service()
         return {
             "live_revision": session_service.get_live_revision(campaign_slug),
-            "live_view_token": build_session_live_view_token(campaign_slug),
+            "live_view_token": build_session_live_view_token(campaign_slug, session_subpage),
         }
 
     def build_session_manager_state_token(
@@ -1166,12 +1367,7 @@ def create_app() -> Flask:
         native_character_tools_supported = campaign_supports_native_character_tools(campaign)
         can_use_session_mode = has_session_mode_access(campaign_slug, character_slug)
         can_manage_character = can_manage_campaign_session(campaign_slug)
-        campaign_page_records = [
-            page_record
-            for page_record in get_campaign_page_store().list_page_records(campaign_slug)
-            if campaign.is_page_visible(page_record.page)
-            and str(page_record.page.section or "").strip() != "Sessions"
-        ]
+        campaign_page_records = list_visible_character_page_records(campaign_slug, campaign)
         level_up_readiness = (
             native_level_up_readiness(
                 get_systems_service(),
@@ -1209,10 +1405,21 @@ def create_app() -> Flask:
             character["physical_description_markdown"] = physical_description_draft
         if background_draft is not None:
             character["personal_background_markdown"] = background_draft
+        character["portrait"] = build_character_portrait_context(campaign, record.definition)
 
         character_controls = (
             build_character_controls_context(campaign_slug, character_slug)
             if include_controls_subpage
+            else None
+        )
+        equipment_manager = (
+            build_character_equipment_manager_context(
+                campaign_slug,
+                campaign,
+                record,
+                campaign_page_records=campaign_page_records,
+            )
+            if can_use_session_mode
             else None
         )
         character_subpages = [
@@ -1246,9 +1453,53 @@ def create_app() -> Flask:
                 is_session_mode=is_session_mode,
                 rest_preview=rest_preview,
                 character_controls=character_controls,
+                equipment_manager=equipment_manager,
             ),
             status_code,
         )
+
+    def run_character_definition_mutation(
+        campaign_slug: str,
+        character_slug: str,
+        *,
+        anchor: str,
+        success_message: str,
+        action,
+    ):
+        _, record = load_character_context(campaign_slug, character_slug)
+        if not has_session_mode_access(campaign_slug, character_slug):
+            abort(403)
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        try:
+            expected_revision = parse_expected_revision()
+            definition, import_metadata, inventory_quantity_overrides = action(record)
+            merged_state = merge_state_with_definition(
+                definition,
+                record.state_record.state,
+                inventory_quantity_overrides=inventory_quantity_overrides,
+            )
+            character_state_store.replace_state(
+                definition,
+                merged_state,
+                expected_revision=expected_revision,
+                updated_by_user_id=user.id,
+            )
+            config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
+            character_dir = config.characters_dir / character_slug
+            write_yaml(character_dir / "definition.yaml", definition.to_dict())
+            write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
+        except CharacterStateConflictError:
+            flash("This sheet changed in another session. Refresh the page and try again.", "error")
+        except (CharacterEditValidationError, CharacterStateValidationError, ValueError) as exc:
+            flash(str(exc), "error")
+        else:
+            flash(success_message, "success")
+
+        return redirect_to_character_mode(campaign_slug, character_slug, anchor=anchor)
 
     def render_character_builder_page(
         campaign_slug: str,
@@ -1543,9 +1794,10 @@ def create_app() -> Flask:
             session_logs = present_session_log_summaries(
                 session_service.list_session_logs(campaign_slug, limit=12)
             )
-        session_poll_settings = build_session_poll_settings(session_subpage)
+        normalized_session_subpage = normalize_session_subpage(session_subpage)
+        session_poll_settings = build_session_poll_settings(normalized_session_subpage)
         session_live_revision = session_service.get_live_revision(campaign_slug)
-        session_live_view_token = build_session_live_view_token(campaign_slug)
+        session_live_view_token = build_session_live_view_token(campaign_slug, normalized_session_subpage)
 
         return {
             "campaign": campaign,
@@ -1571,7 +1823,7 @@ def create_app() -> Flask:
             "session_poll_active_interval_ms": session_poll_settings["active_interval_ms"],
             "session_poll_idle_interval_ms": session_poll_settings["idle_interval_ms"],
             "session_poll_idle_threshold_ms": session_poll_settings["idle_threshold_ms"],
-            "session_subpage": session_subpage,
+            "session_subpage": normalized_session_subpage,
             "active_nav": "session",
         }
 
@@ -2430,13 +2682,18 @@ def create_app() -> Flask:
     def build_campaign_session_live_state(
         campaign_slug: str,
         *,
+        session_subpage: str = "session",
         include_flash: bool = False,
         mutation_succeeded: bool | None = None,
         anchor: str | None = None,
         live_revision: int | None = None,
         live_view_token: str | None = None,
     ) -> dict[str, object]:
-        context = build_campaign_session_page_context(campaign_slug)
+        normalized_session_subpage = normalize_session_subpage(session_subpage)
+        context = build_campaign_session_page_context(
+            campaign_slug,
+            session_subpage=normalized_session_subpage,
+        )
         if live_revision is None:
             live_revision = int(context["session_live_revision"] or 0)
         if live_view_token is None:
@@ -2448,13 +2705,23 @@ def create_app() -> Flask:
             "active_session_id": context["active_session_id"],
             "manager_state_token": context["session_manager_state_token"],
             "status_html": render_template("_session_status_card.html", **context),
-            "chat_html": render_template("_session_chat_card.html", **context),
-            "composer_html": render_template("_session_composer_card.html", **context),
-            "controls_html": render_template("_session_controls_card.html", **context),
-            "staged_articles_html": render_template("_session_staged_articles_card.html", **context),
-            "revealed_articles_html": render_template("_session_revealed_articles_card.html", **context),
-            "logs_html": render_template("_session_logs_card.html", **context),
         }
+        if normalized_session_subpage == "dm":
+            payload.update(
+                {
+                    "controls_html": render_template("_session_controls_card.html", **context),
+                    "staged_articles_html": render_template("_session_staged_articles_card.html", **context),
+                    "revealed_articles_html": render_template("_session_revealed_articles_card.html", **context),
+                    "logs_html": render_template("_session_logs_card.html", **context),
+                }
+            )
+        else:
+            payload.update(
+                {
+                    "chat_html": render_template("_session_chat_card.html", **context),
+                    "composer_html": render_template("_session_composer_card.html", **context),
+                }
+            )
         if include_flash:
             payload["flash_html"] = render_flash_stack_html()
         if mutation_succeeded is not None:
@@ -2594,10 +2861,12 @@ def create_app() -> Flask:
         article_mode: str | None = None,
         redirect_to_dm: bool = False,
     ):
+        session_subpage = "dm" if redirect_to_dm else "session"
         if is_async_request():
             return jsonify(
                 build_campaign_session_live_state(
                     campaign_slug,
+                    session_subpage=session_subpage,
                     include_flash=True,
                     mutation_succeeded=mutation_succeeded,
                     anchor=anchor,
@@ -4028,8 +4297,11 @@ def create_app() -> Flask:
     @app.get("/campaigns/<campaign_slug>/session/live-state")
     @campaign_scope_access_required("session")
     def campaign_session_live_state(campaign_slug: str):
+        session_subpage = normalize_session_subpage(request.args.get("view", "session"))
+        if session_subpage == "dm" and not can_manage_campaign_session(campaign_slug):
+            abort(403)
         state_check_started_at = time.perf_counter()
-        live_metadata = build_session_live_metadata(campaign_slug)
+        live_metadata = build_session_live_metadata(campaign_slug, session_subpage)
         state_check_ms = (time.perf_counter() - state_check_started_at) * 1000
         if should_short_circuit_live_response(
             live_revision=int(live_metadata["live_revision"] or 0),
@@ -4050,13 +4322,14 @@ def create_app() -> Flask:
         render_started_at = time.perf_counter()
         payload = build_campaign_session_live_state(
             campaign_slug,
+            session_subpage=session_subpage,
             live_revision=int(live_metadata["live_revision"] or 0),
             live_view_token=str(live_metadata["live_view_token"] or ""),
         )
         render_ms = (time.perf_counter() - render_started_at) * 1000
         return build_live_json_response(
             payload,
-            view_name="session",
+            view_name=f"session-{session_subpage}",
             changed=True,
             live_revision=int(live_metadata["live_revision"] or 0),
             state_check_ms=state_check_ms,
@@ -4204,7 +4477,7 @@ def create_app() -> Flask:
         except CampaignSessionValidationError as exc:
             flash(str(exc), "error")
         else:
-            flash("Session started. The chat window is now live.", "success")
+            flash("Session started. Players can now use the Session page chat.", "success")
             mutation_succeeded = True
 
         return respond_to_campaign_session_mutation(
@@ -4503,7 +4776,7 @@ def create_app() -> Flask:
         except CampaignSessionValidationError as exc:
             flash(str(exc), "error")
         else:
-            flash("Session article revealed in the chat window.", "success")
+            flash("Session article revealed on the player Session page and saved to the chat history.", "success")
             mutation_succeeded = True
 
         return respond_to_campaign_session_mutation(
@@ -5178,11 +5451,303 @@ def create_app() -> Flask:
                 "deleted_files": deleted.deleted_files,
                 "deleted_state": deleted.deleted_state,
                 "deleted_assignment": deleted.deleted_assignment,
+                "deleted_assets": deleted.deleted_assets,
                 "source": "character_controls",
             },
         )
         flash(f"Deleted character {record.definition.name}.", "success")
         return redirect(url_for("character_roster_view", campaign_slug=campaign.slug))
+
+    @app.get("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/systems-items/search")
+    @campaign_scope_access_required("characters")
+    def character_equipment_systems_item_search(campaign_slug: str, character_slug: str):
+        load_character_context(campaign_slug, character_slug)
+        if not has_session_mode_access(campaign_slug, character_slug):
+            abort(403)
+
+        query = request.args.get("q", "").strip()
+        if len(query) < 2:
+            return jsonify(
+                {
+                    "results": [],
+                    "message": "Type at least 2 letters to search enabled Systems items.",
+                }
+            )
+
+        results = []
+        for entry in get_systems_service().search_entries_for_campaign(
+            campaign_slug,
+            query=query,
+            entry_type="item",
+            limit=20,
+        ):
+            subtitle_parts = [str(entry.source_id or "").strip()]
+            weight_label = format_character_systems_item_weight((entry.metadata or {}).get("weight"))
+            if weight_label:
+                subtitle_parts.append(weight_label)
+            subtitle = " - ".join(part for part in subtitle_parts if part)
+            select_label = f"{entry.title} - {subtitle}" if subtitle else entry.title
+            results.append(
+                {
+                    "entry_slug": entry.slug,
+                    "title": entry.title,
+                    "source_id": entry.source_id,
+                    "subtitle": subtitle,
+                    "select_label": select_label,
+                }
+            )
+
+        return jsonify(
+            {
+                "results": results,
+                "message": (
+                    f"Found {len(results)} matching Systems items."
+                    if results
+                    else "No enabled Systems items matched that search."
+                ),
+            }
+        )
+
+    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/add-systems")
+    @campaign_scope_access_required("characters")
+    def character_equipment_add_systems(campaign_slug: str, character_slug: str):
+        def _action(record):
+            entry_slug = request.form.get("entry_slug", "").strip()
+            if not entry_slug:
+                raise CharacterEditValidationError("Choose a Systems item to add.")
+            entry = get_systems_service().get_entry_by_slug_for_campaign(campaign_slug, entry_slug)
+            if entry is None or str(entry.entry_type or "").strip() != "item":
+                raise CharacterEditValidationError("Choose a valid enabled Systems item to add.")
+            existing_manual_entries = [
+                dict(item)
+                for item in list(record.definition.equipment_catalog or [])
+                if str(item.get("source_kind") or "").strip() == "manual_edit"
+            ]
+            if any(str((item.get("systems_ref") or {}).get("slug") or "").strip() == entry.slug for item in existing_manual_entries):
+                raise CharacterEditValidationError(
+                    "That Systems item is already listed in supplemental equipment. Update the existing row instead."
+                )
+            return apply_equipment_catalog_edit(
+                campaign_slug,
+                record.definition,
+                record.import_metadata,
+                name=entry.title,
+                quantity=request.form.get("quantity", "1"),
+                weight=format_character_systems_item_weight((entry.metadata or {}).get("weight")),
+                notes=request.form.get("notes", ""),
+                systems_ref=build_character_systems_ref(entry),
+            )
+
+        return run_character_definition_mutation(
+            campaign_slug,
+            character_slug,
+            anchor="character-equipment-manager",
+            success_message="Systems item added to supplemental equipment.",
+            action=_action,
+        )
+
+    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/add-manual")
+    @campaign_scope_access_required("characters")
+    def character_equipment_add_manual(campaign_slug: str, character_slug: str):
+        campaign = load_campaign_context(campaign_slug)
+        campaign_page_records = list_visible_character_page_records(campaign_slug, campaign)
+        return run_character_definition_mutation(
+            campaign_slug,
+            character_slug,
+            anchor="character-equipment-manager",
+            success_message="Custom item added to supplemental equipment.",
+            action=lambda record: apply_equipment_catalog_edit(
+                campaign_slug,
+                record.definition,
+                record.import_metadata,
+                campaign_page_records=campaign_page_records,
+                name=request.form.get("name", ""),
+                quantity=request.form.get("quantity", "1"),
+                weight=request.form.get("weight", ""),
+                notes=request.form.get("notes", ""),
+                page_ref=request.form.get("page_ref", ""),
+            ),
+        )
+
+    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/<item_id>/update")
+    @campaign_scope_access_required("characters")
+    def character_equipment_update(campaign_slug: str, character_slug: str, item_id: str):
+        campaign = load_campaign_context(campaign_slug)
+        campaign_page_records = list_visible_character_page_records(campaign_slug, campaign)
+        def _action(record):
+            manual_entry = next(
+                (
+                    dict(item)
+                    for item in list(record.definition.equipment_catalog or [])
+                    if str(item.get("source_kind") or "").strip() == "manual_edit"
+                    and str(item.get("id") or "").strip() == item_id
+                ),
+                None,
+            )
+            if manual_entry is None:
+                raise CharacterEditValidationError("Choose a valid supplemental equipment entry to update.")
+            systems_ref = dict(manual_entry.get("systems_ref") or {})
+            return apply_equipment_catalog_edit(
+                campaign_slug,
+                record.definition,
+                record.import_metadata,
+                campaign_page_records=campaign_page_records,
+                target_item_id=item_id,
+                name=request.form.get("name", "") if not systems_ref else str(manual_entry.get("name") or ""),
+                quantity=request.form.get("quantity", ""),
+                weight=request.form.get("weight", "") if not systems_ref else str(manual_entry.get("weight") or ""),
+                notes=request.form.get("notes", ""),
+                page_ref=request.form.get("page_ref", "") if not systems_ref else "",
+                systems_ref=systems_ref or None,
+            )
+
+        return run_character_definition_mutation(
+            campaign_slug,
+            character_slug,
+            anchor="character-equipment-manager",
+            success_message="Supplemental equipment updated.",
+            action=_action,
+        )
+
+    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/<item_id>/remove")
+    @campaign_scope_access_required("characters")
+    def character_equipment_remove(campaign_slug: str, character_slug: str, item_id: str):
+        return run_character_definition_mutation(
+            campaign_slug,
+            character_slug,
+            anchor="character-equipment-manager",
+            success_message="Supplemental equipment removed.",
+            action=lambda record: apply_equipment_catalog_edit(
+                campaign_slug,
+                record.definition,
+                record.import_metadata,
+                remove_item_id=item_id,
+            ),
+        )
+
+    @app.get("/campaigns/<campaign_slug>/characters/<character_slug>/portrait")
+    @campaign_scope_access_required("characters")
+    def character_portrait_asset(campaign_slug: str, character_slug: str):
+        campaign, record = load_character_context(campaign_slug, character_slug)
+        portrait = build_character_portrait_context(campaign, record.definition)
+        if portrait is None:
+            abort(404)
+        asset_file = get_campaign_asset_file(campaign, portrait["asset_ref"])
+        if asset_file is None:
+            abort(404)
+        media_type, _ = mimetypes.guess_type(asset_file.name)
+        return send_file(
+            BytesIO(asset_file.read_bytes()),
+            mimetype=media_type,
+            download_name=asset_file.name,
+        )
+
+    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/personal/portrait")
+    @campaign_scope_access_required("characters")
+    def character_personal_portrait(campaign_slug: str, character_slug: str):
+        campaign, record = load_character_context(campaign_slug, character_slug)
+        if not has_session_mode_access(campaign_slug, character_slug):
+            abort(403)
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        portrait_upload = request.files.get("portrait_file")
+        try:
+            expected_revision = parse_expected_revision()
+            filename, data_blob = validate_character_portrait_upload(portrait_upload)
+            alt_text = request.form.get("portrait_alt", "").strip()
+            caption = request.form.get("portrait_caption", "").strip()
+            if len(alt_text) > CHARACTER_PORTRAIT_ALT_MAX_LENGTH:
+                raise ValueError(
+                    f"Portrait alt text must stay under {CHARACTER_PORTRAIT_ALT_MAX_LENGTH} characters."
+                )
+            if len(caption) > CHARACTER_PORTRAIT_CAPTION_MAX_LENGTH:
+                raise ValueError(
+                    f"Portrait captions must stay under {CHARACTER_PORTRAIT_CAPTION_MAX_LENGTH} characters."
+                )
+
+            existing_asset_ref = str((record.definition.profile or {}).get("portrait_asset_ref") or "").strip()
+            next_asset_ref = build_character_portrait_asset_ref(character_slug, filename)
+            definition = update_character_portrait_profile(
+                record.definition,
+                asset_ref=next_asset_ref,
+                alt_text=alt_text,
+                caption=caption,
+            )
+            import_metadata = build_managed_character_import_metadata(
+                campaign_slug,
+                record.definition.character_slug,
+                record.import_metadata,
+            )
+            merged_state = merge_state_with_definition(definition, record.state_record.state)
+            character_state_store.replace_state(
+                definition,
+                merged_state,
+                expected_revision=expected_revision,
+                updated_by_user_id=user.id,
+            )
+            config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
+            character_dir = config.characters_dir / character_slug
+            write_yaml(character_dir / "definition.yaml", definition.to_dict())
+            write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
+            write_campaign_asset_file(campaign, next_asset_ref, data_blob=data_blob)
+            if existing_asset_ref and existing_asset_ref != next_asset_ref:
+                delete_campaign_asset_file(campaign, existing_asset_ref)
+        except CharacterStateConflictError:
+            flash("This sheet changed in another session. Refresh the page and try again.", "error")
+        except (CharacterStateValidationError, ValueError) as exc:
+            flash(str(exc), "error")
+        else:
+            flash("Portrait saved.", "success")
+
+        return redirect_to_character_mode(campaign_slug, character_slug, anchor="character-personal-portrait")
+
+    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/personal/portrait/remove")
+    @campaign_scope_access_required("characters")
+    def character_personal_portrait_remove(campaign_slug: str, character_slug: str):
+        campaign, record = load_character_context(campaign_slug, character_slug)
+        if not has_session_mode_access(campaign_slug, character_slug):
+            abort(403)
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        existing_asset_ref = str((record.definition.profile or {}).get("portrait_asset_ref") or "").strip()
+        if not existing_asset_ref:
+            flash("That character does not currently have a portrait.", "error")
+            return redirect_to_character_mode(campaign_slug, character_slug, anchor="character-personal-portrait")
+
+        try:
+            expected_revision = parse_expected_revision()
+            definition = update_character_portrait_profile(record.definition)
+            import_metadata = build_managed_character_import_metadata(
+                campaign_slug,
+                record.definition.character_slug,
+                record.import_metadata,
+            )
+            merged_state = merge_state_with_definition(definition, record.state_record.state)
+            character_state_store.replace_state(
+                definition,
+                merged_state,
+                expected_revision=expected_revision,
+                updated_by_user_id=user.id,
+            )
+            config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
+            character_dir = config.characters_dir / character_slug
+            write_yaml(character_dir / "definition.yaml", definition.to_dict())
+            write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
+            delete_campaign_asset_file(campaign, existing_asset_ref)
+        except CharacterStateConflictError:
+            flash("This sheet changed in another session. Refresh the page and try again.", "error")
+        except (CharacterStateValidationError, ValueError) as exc:
+            flash(str(exc), "error")
+        else:
+            flash("Portrait removed.", "success")
+
+        return redirect_to_character_mode(campaign_slug, character_slug, anchor="character-personal-portrait")
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/vitals")
     @campaign_scope_access_required("characters")

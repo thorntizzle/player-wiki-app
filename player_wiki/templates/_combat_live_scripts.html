@@ -11,6 +11,7 @@
     const contextRoot = document.querySelector("[data-combat-context-root]");
     const controlsRoot = document.querySelector("[data-combat-controls-root]");
     const pollUrl = liveRoot.dataset.combatLiveUrl;
+    const uiStateTools = window.__playerWikiLiveUiTools || null;
     let combatStateToken = liveRoot.dataset.combatStateToken || "";
     let liveRevision = Number.parseInt(liveRoot.dataset.liveRevision || "0", 10);
     if (!Number.isFinite(liveRevision) || liveRevision < 0) {
@@ -28,6 +29,104 @@
     let pollInFlight = false;
     let requestInFlight = false;
     let lastActivityAt = Date.now();
+
+    const buildFormStateKey = (form, index) => {
+      const method = String(form.getAttribute("method") || "get").toLowerCase();
+      const action = String(form.getAttribute("action") || "");
+      return `${method}:${action}:${index}`;
+    };
+
+    const captureControlsFormState = () => {
+      if (!(controlsRoot instanceof HTMLElement)) {
+        return new Map();
+      }
+      const states = new Map();
+      Array.from(controlsRoot.querySelectorAll("form")).forEach((form, index) => {
+        if (!(form instanceof HTMLFormElement)) {
+          return;
+        }
+        const values = {};
+        for (const element of Array.from(form.elements)) {
+          if (
+            !(element instanceof HTMLInputElement)
+            && !(element instanceof HTMLSelectElement)
+            && !(element instanceof HTMLTextAreaElement)
+          ) {
+            continue;
+          }
+          if (!element.name || element.type === "file" || element.type === "submit" || element.type === "button") {
+            continue;
+          }
+          if (element instanceof HTMLInputElement && (element.type === "checkbox" || element.type === "radio")) {
+            if (!element.checked) {
+              continue;
+            }
+          }
+          values[element.name] = element.value;
+        }
+        states.set(buildFormStateKey(form, index), values);
+      });
+      return states;
+    };
+
+    const restoreControlsFormState = (states) => {
+      if (!(controlsRoot instanceof HTMLElement) || !(states instanceof Map) || !states.size) {
+        return;
+      }
+      Array.from(controlsRoot.querySelectorAll("form")).forEach((form, index) => {
+        if (!(form instanceof HTMLFormElement)) {
+          return;
+        }
+        const values = states.get(buildFormStateKey(form, index));
+        if (!values) {
+          return;
+        }
+        for (const [name, value] of Object.entries(values)) {
+          const field = form.elements.namedItem(name);
+          if (field instanceof RadioNodeList) {
+            field.value = String(value);
+            continue;
+          }
+          if (
+            field instanceof HTMLInputElement
+            || field instanceof HTMLSelectElement
+            || field instanceof HTMLTextAreaElement
+          ) {
+            field.value = String(value);
+          }
+        }
+      });
+    };
+
+    const captureSystemsMonsterSearchState = () => {
+      if (!(controlsRoot instanceof HTMLElement)) {
+        return null;
+      }
+      const form = controlsRoot.querySelector("[data-systems-monster-search-form]");
+      if (!(form instanceof HTMLFormElement)) {
+        return null;
+      }
+      const searchInput = form.querySelector("[data-systems-monster-query]");
+      const resultsSelect = form.querySelector("[data-systems-monster-results]");
+      const status = form.querySelector("[data-systems-monster-status]");
+      if (
+        !(searchInput instanceof HTMLInputElement)
+        || !(resultsSelect instanceof HTMLSelectElement)
+        || !(status instanceof HTMLElement)
+      ) {
+        return null;
+      }
+      return {
+        query: searchInput.value,
+        selectedValue: resultsSelect.value,
+        disabled: resultsSelect.disabled,
+        statusText: status.textContent || "",
+        options: Array.from(resultsSelect.options).map((option) => ({
+          value: option.value,
+          text: option.text,
+        })),
+      };
+    };
 
     const markActivity = () => {
       lastActivityAt = Date.now();
@@ -146,7 +245,7 @@
       }
     };
 
-    const initializeSystemsMonsterSearch = () => {
+    const initializeSystemsMonsterSearch = (savedState = null) => {
       if (!controlsRoot) {
         return;
       }
@@ -191,6 +290,41 @@
         resultsSelect.disabled = true;
         setStatus(message);
         syncSubmitState();
+      };
+
+      const restoreSavedState = () => {
+        if (!savedState || typeof savedState !== "object") {
+          return false;
+        }
+        const savedQuery = typeof savedState.query === "string" ? savedState.query : "";
+        const savedOptions = Array.isArray(savedState.options) ? savedState.options : [];
+        if (!savedQuery && !savedOptions.length) {
+          return false;
+        }
+        searchInput.value = savedQuery;
+        resultsSelect.innerHTML = "";
+        for (const optionState of savedOptions) {
+          const option = document.createElement("option");
+          option.value = String(optionState.value || "");
+          option.textContent = String(optionState.text || "");
+          resultsSelect.append(option);
+        }
+        if (!resultsSelect.options.length) {
+          resetResults("Type at least 2 letters to search the Systems monster list.");
+          return true;
+        }
+        resultsSelect.disabled = Boolean(savedState.disabled);
+        resultsSelect.value = String(savedState.selectedValue || "");
+        if (!resultsSelect.value && resultsSelect.options.length > 0) {
+          resultsSelect.selectedIndex = 0;
+        }
+        setStatus(
+          typeof savedState.statusText === "string" && savedState.statusText
+            ? savedState.statusText
+            : "Type at least 2 letters to search the Systems monster list."
+        );
+        syncSubmitState();
+        return true;
       };
 
       const renderResults = (results, message) => {
@@ -262,11 +396,17 @@
         monsterSearchTimerId = window.setTimeout(runSearch, 250);
       });
 
-      resetResults("Type at least 2 letters to search the Systems monster list.");
+      if (!restoreSavedState()) {
+        resetResults("Type at least 2 letters to search the Systems monster list.");
+      }
     };
 
     const renderPayload = (payload, { force = false, forceFlash = false } = {}) => {
       const nextToken = payload.combat_state_token ? String(payload.combat_state_token) : "";
+      const focusState = uiStateTools ? uiStateTools.captureFocus(liveRoot) : null;
+      const viewportAnchor = uiStateTools ? uiStateTools.captureViewportAnchor(liveRoot) : null;
+      const controlsFormState = captureControlsFormState();
+      const systemsMonsterSearchState = captureSystemsMonsterSearchState();
       if (!force && nextToken === combatStateToken) {
         if (forceFlash && flashRoot && typeof payload.flash_html === "string") {
           flashRoot.innerHTML = payload.flash_html;
@@ -290,7 +430,8 @@
         }
         window.clearTimeout(monsterSearchTimerId);
         controlsRoot.innerHTML = payload.controls_html;
-        initializeSystemsMonsterSearch();
+        initializeSystemsMonsterSearch(systemsMonsterSearchState);
+        restoreControlsFormState(controlsFormState);
       }
       if (forceFlash && flashRoot && typeof payload.flash_html === "string") {
         flashRoot.innerHTML = payload.flash_html;
@@ -298,6 +439,10 @@
 
       combatStateToken = nextToken;
       liveRoot.dataset.combatStateToken = combatStateToken;
+      if (uiStateTools) {
+        uiStateTools.restoreFocus(liveRoot, focusState);
+        uiStateTools.restoreViewportAnchor(liveRoot, viewportAnchor);
+      }
       scrollToAnchor(payload.anchor || "");
     };
 
@@ -317,6 +462,7 @@
       }
 
       pollInFlight = true;
+      liveRoot.dataset.loading = "1";
       try {
         const requestStartedAt = performance.now();
         const response = await fetch(pollUrl, {
@@ -346,6 +492,7 @@
         return;
       } finally {
         pollInFlight = false;
+        liveRoot.dataset.loading = "0";
         if (reschedule) {
           scheduleNextPoll();
         }

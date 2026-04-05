@@ -5,6 +5,7 @@
     const formSelector = "[data-live-builder-form]";
     const fieldSelector = "input:not([type='hidden']):not([type='submit']):not([type='button']):not([disabled]), select:not([disabled]), textarea:not([disabled])";
     const diagnosticsTools = window.__playerWikiLiveDiagnosticsTools || null;
+    const uiStateTools = window.__playerWikiLiveUiTools || null;
 
     function parseRegionIds(rawValue) {
       if (typeof rawValue !== "string" || !rawValue.trim()) {
@@ -34,33 +35,6 @@
         merged.push(regionId);
       });
       return merged;
-    }
-
-    function captureFocus(root) {
-      const active = document.activeElement;
-      if (!active || !root.contains(active) || !active.name) {
-        return null;
-      }
-      const focusState = {name: active.name};
-      if (typeof active.selectionStart === "number" && typeof active.selectionEnd === "number") {
-        focusState.selectionStart = active.selectionStart;
-        focusState.selectionEnd = active.selectionEnd;
-      }
-      return focusState;
-    }
-
-    function restoreFocus(root, focusState) {
-      if (!focusState || !focusState.name) {
-        return;
-      }
-      const field = root.querySelector(`[name="${CSS.escape(focusState.name)}"]`);
-      if (!field) {
-        return;
-      }
-      field.focus({preventScroll: true});
-      if (typeof focusState.selectionStart === "number" && typeof field.setSelectionRange === "function") {
-        field.setSelectionRange(focusState.selectionStart, focusState.selectionEnd ?? focusState.selectionStart);
-      }
     }
 
     function defaultRegionIds(root) {
@@ -154,7 +128,8 @@
           return null;
         }
 
-        const focusState = captureFocus(liveRoot);
+        const focusState = uiStateTools ? uiStateTools.captureFocus(liveRoot) : null;
+        const viewportAnchor = uiStateTools ? uiStateTools.captureViewportAnchor(liveRoot) : null;
         activeRequestId += 1;
         const requestId = activeRequestId;
         if (activeController) {
@@ -162,6 +137,7 @@
         }
         activeController = new AbortController();
         liveRoot.setAttribute("aria-busy", "true");
+        liveRoot.dataset.loading = "1";
         try {
           const previewUrl = typeof queryOverride === "string" && queryOverride
             ? queryOverride
@@ -187,7 +163,10 @@
           if (nextRoot) {
             liveRoot.replaceWith(nextRoot);
             liveRoot = nextRoot;
-            restoreFocus(liveRoot, focusState);
+            if (uiStateTools) {
+              uiStateTools.restoreFocus(liveRoot, focusState);
+              uiStateTools.restoreViewportAnchor(liveRoot, viewportAnchor);
+            }
             initLiveBuilder(liveRoot);
           } else {
             const nextRegions = Array.from(wrapper.querySelectorAll(regionSelector));
@@ -207,7 +186,10 @@
               }
               currentRegion.replaceWith(nextRegion);
             });
-            restoreFocus(liveRoot, focusState);
+            if (uiStateTools) {
+              uiStateTools.restoreFocus(liveRoot, focusState);
+              uiStateTools.restoreViewportAnchor(liveRoot, viewportAnchor);
+            }
           }
           return recordLiveMetric({
             mode: "preview",
@@ -230,6 +212,7 @@
         } finally {
           if (liveRoot.isConnected) {
             liveRoot.removeAttribute("aria-busy");
+            liveRoot.dataset.loading = "0";
           }
         }
       }

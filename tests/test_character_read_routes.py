@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from copy import deepcopy
+from io import BytesIO
 import yaml
 from datetime import datetime, timezone
 
@@ -8,6 +9,25 @@ import player_wiki.app as app_module
 import pytest
 from player_wiki.auth_store import AuthStore
 from player_wiki.systems_models import SystemsEntryRecord
+
+
+TEST_PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n"
+    b"\x00\x00\x00\rIHDR"
+    b"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00"
+    b"\x90wS\xde"
+    b"\x00\x00\x00\x0cIDAT\x08\xd7c\xf8\xff\xff?\x00\x05\xfe\x02\xfeA\xd9\x8f\x9b"
+    b"\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+TEST_JPG_BYTES = (
+    b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+    b"\xff\xdb\x00C\x00"
+    + (b"\x08" * 64)
+    + b"\xff\xc0\x00\x11\x08\x00\x01\x00\x01\x03\x01\x11\x00\x02\x11\x01\x03\x11\x01"
+    b"\xff\xc4\x00\x14\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+    b"\xff\xc4\x00\x14\x10\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+    b"\xff\xda\x00\x0c\x03\x01\x00\x02\x11\x03\x11\x00?\x00\x00\xff\xd9"
+)
 
 
 def _write_campaign_config(app, mutator) -> None:
@@ -43,6 +63,44 @@ def _write_character_state(app, character_slug: str, mutator) -> None:
             payload,
             expected_revision=record.state_record.revision,
         )
+
+
+def _seed_systems_item_entry(app, *, slug: str = "phb-item-rope", title: str = "Rope"):
+    with app.app_context():
+        systems_store = app.extensions["systems_store"]
+        systems_store.upsert_library("DND-5E", title="DND 5E", system_code="DND-5E")
+        systems_store.upsert_source(
+            "DND-5E",
+            "PHB",
+            title="Player's Handbook",
+            license_class="srd_cc",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        systems_store.replace_entries_for_source(
+            "DND-5E",
+            "PHB",
+            entry_types=["item"],
+            entries=[
+                {
+                    "entry_key": f"dnd-5e|item|phb|{slug}",
+                    "entry_type": "item",
+                    "slug": slug,
+                    "title": title,
+                    "source_page": "150",
+                    "source_path": "data/items-base.json",
+                    "search_text": f"{title.lower()} rope gear",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"weight": 10},
+                    "body": {},
+                    "rendered_html": f"<p>{title}.</p>",
+                }
+            ],
+        )
+        entry = app.extensions["systems_service"].get_entry_by_slug_for_campaign("linden-pass", slug)
+        assert entry is not None
+        return entry
 
 
 def test_dm_can_open_character_roster_and_read_sheet(client, sign_in, users):
@@ -376,7 +434,28 @@ def test_dm_can_delete_character_from_controls(app, client, sign_in, users):
         / "arden-march"
         / "definition.yaml"
     )
+    portrait_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "assets"
+        / "characters"
+        / "arden-march"
+        / "portrait.png"
+    )
     assert definition_path.exists()
+    portrait_path.parent.mkdir(parents=True, exist_ok=True)
+    portrait_path.write_bytes(TEST_PNG_BYTES)
+    _write_character_definition(
+        app,
+        "arden-march",
+        lambda payload: payload.setdefault("profile", {}).update(
+            {
+                "portrait_asset_ref": "characters/arden-march/portrait.png",
+                "portrait_alt": "Arden portrait",
+                "portrait_caption": "Shown on the personal page.",
+            }
+        ),
+    )
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
@@ -406,6 +485,337 @@ def test_dm_can_delete_character_from_controls(app, client, sign_in, users):
         assert state_store.get_state("linden-pass", "arden-march") is None
 
     assert not definition_path.exists()
+    assert not portrait_path.exists()
+    assert not portrait_path.parent.exists()
+
+
+def test_equipment_manager_is_visible_to_editable_users_and_hidden_from_read_only_players(
+    client, sign_in, users, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    owner_response = client.get("/campaigns/linden-pass/characters/arden-march?page=equipment")
+    owner_html = owner_response.get_data(as_text=True)
+
+    assert owner_response.status_code == 200
+    assert "Add Systems item" in owner_html
+    assert "Add custom item" in owner_html
+    assert "Supplemental equipment" in owner_html
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["party"]["email"], users["party"]["password"])
+    read_only_response = client.get("/campaigns/linden-pass/characters/arden-march?page=equipment")
+    read_only_html = read_only_response.get_data(as_text=True)
+
+    assert read_only_response.status_code == 200
+    assert "Add Systems item" not in read_only_html
+    assert "Add custom item" not in read_only_html
+    assert "Supplemental equipment" not in read_only_html
+
+
+def test_imported_character_equipment_controls_can_search_and_add_systems_items_without_resetting_other_quantities(
+    app, client, sign_in, users
+):
+    entry = _seed_systems_item_entry(app)
+
+    _write_character_state(
+        app,
+        "selene-brook",
+        lambda payload: payload.__setitem__(
+            "inventory",
+            [
+                {
+                    **dict(item),
+                    "quantity": 11 if str(item.get("catalog_ref") or item.get("id") or "") == "arrows-2" else item.get("quantity"),
+                }
+                for item in list(payload.get("inventory") or [])
+            ],
+        ),
+    )
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    search_response = client.get(
+        "/campaigns/linden-pass/characters/selene-brook/equipment/systems-items/search?q=rope",
+        headers={"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"},
+    )
+
+    assert search_response.status_code == 200
+    search_payload = search_response.get_json()
+    assert search_payload["results"]
+    assert search_payload["results"][0]["entry_slug"] == entry.slug
+    assert search_payload["results"][0]["title"] == "Rope"
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "selene-brook")
+        assert record is not None
+        revision = record.state_record.revision
+
+    add_response = client.post(
+        "/campaigns/linden-pass/characters/selene-brook/equipment/add-systems",
+        data={
+            "expected_revision": revision,
+            "mode": "read",
+            "page": "equipment",
+            "entry_slug": entry.slug,
+            "quantity": "2",
+            "notes": "Emergency climbing bundle.",
+        },
+        follow_redirects=False,
+    )
+
+    assert add_response.status_code == 302
+    assert add_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/selene-brook?page=equipment#character-equipment-manager"
+    )
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "selene-brook")
+        assert record is not None
+        supplemental = [
+            item
+            for item in list(record.definition.equipment_catalog or [])
+            if str(item.get("source_kind") or "").strip() == "manual_edit"
+        ]
+        assert len(supplemental) == 1
+        added_item = supplemental[0]
+        assert added_item["name"] == "Rope"
+        assert added_item["default_quantity"] == 2
+        assert added_item["notes"] == "Emergency climbing bundle."
+        assert added_item["systems_ref"]["slug"] == entry.slug
+
+        inventory_by_ref = {
+            str(item.get("catalog_ref") or item.get("id") or ""): dict(item)
+            for item in list(record.state_record.state.get("inventory") or [])
+        }
+        assert inventory_by_ref[added_item["id"]]["quantity"] == 2
+        assert inventory_by_ref["arrows-2"]["quantity"] == 11
+
+    landing = client.get(add_response.headers["Location"])
+    html = landing.get_data(as_text=True)
+    assert "Rope" in html
+    assert "Emergency climbing bundle." in html
+    assert "Remove item" in html
+
+
+def test_native_character_equipment_controls_can_add_update_and_remove_manual_items(
+    app, client, sign_in, users, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    _write_character_definition(
+        app,
+        "arden-march",
+        lambda payload: payload.__setitem__(
+            "source",
+            {"source_type": "native_character_builder", "source_path": "builder://arden-march"},
+        ),
+    )
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert record is not None
+        revision = record.state_record.revision
+
+    add_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/equipment/add-manual",
+        data={
+            "expected_revision": revision,
+            "mode": "read",
+            "page": "equipment",
+            "name": "Harbor Pass",
+            "quantity": "1",
+            "weight": "",
+            "page_ref": "notes/operations-brief",
+            "notes": "Issued by the harbor office.",
+        },
+        follow_redirects=False,
+    )
+
+    assert add_response.status_code == 302
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert record is not None
+        manual_items = [
+            item
+            for item in list(record.definition.equipment_catalog or [])
+            if str(item.get("source_kind") or "").strip() == "manual_edit"
+        ]
+        assert len(manual_items) == 1
+        manual_item = manual_items[0]
+        assert manual_item["page_ref"] == "notes/operations-brief"
+
+        revision = record.state_record.revision
+
+    update_response = client.post(
+        f"/campaigns/linden-pass/characters/arden-march/equipment/{manual_item['id']}/update",
+        data={
+            "expected_revision": revision,
+            "mode": "read",
+            "page": "equipment",
+            "name": "Harbor Pass",
+            "quantity": "3",
+            "weight": "",
+            "page_ref": "notes/operations-brief",
+            "notes": "Stamped for repeat entry.",
+        },
+        follow_redirects=False,
+    )
+
+    assert update_response.status_code == 302
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert record is not None
+        manual_item = next(
+            item
+            for item in list(record.definition.equipment_catalog or [])
+            if str(item.get("source_kind") or "").strip() == "manual_edit"
+        )
+        assert manual_item["default_quantity"] == 3
+        assert manual_item["notes"] == "Stamped for repeat entry."
+        revision = record.state_record.revision
+
+    remove_response = client.post(
+        f"/campaigns/linden-pass/characters/arden-march/equipment/{manual_item['id']}/remove",
+        data={
+            "expected_revision": revision,
+            "mode": "read",
+            "page": "equipment",
+        },
+        follow_redirects=False,
+    )
+
+    assert remove_response.status_code == 302
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert record is not None
+        assert [
+            item
+            for item in list(record.definition.equipment_catalog or [])
+            if str(item.get("source_kind") or "").strip() == "manual_edit"
+        ] == []
+
+
+def test_character_personal_portrait_can_be_uploaded_replaced_rendered_and_removed(
+    app, client, sign_in, users, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert record is not None
+        revision = record.state_record.revision
+
+    upload_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/personal/portrait",
+        data={
+            "expected_revision": revision,
+            "mode": "read",
+            "page": "personal",
+            "portrait_alt": "Arden leaning over the harbor rail.",
+            "portrait_caption": "Used on the personal page.",
+            "portrait_file": (BytesIO(TEST_PNG_BYTES), "arden-portrait.png"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=False,
+    )
+
+    assert upload_response.status_code == 302
+
+    portrait_png = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "assets"
+        / "characters"
+        / "arden-march"
+        / "portrait.png"
+    )
+    assert portrait_png.exists()
+
+    read_personal = client.get("/campaigns/linden-pass/characters/arden-march?page=personal")
+    read_html = read_personal.get_data(as_text=True)
+    assert read_personal.status_code == 200
+    assert "/campaigns/linden-pass/characters/arden-march/portrait" in read_html
+    assert "Arden leaning over the harbor rail." in read_html
+    assert "Remove portrait" in read_html
+
+    session_personal = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=personal")
+    session_html = session_personal.get_data(as_text=True)
+    assert session_personal.status_code == 200
+    assert "/campaigns/linden-pass/characters/arden-march/portrait" in session_html
+    assert "Remove portrait" not in session_html
+    assert "Save portrait" not in session_html
+
+    portrait_response = client.get("/campaigns/linden-pass/characters/arden-march/portrait")
+    assert portrait_response.status_code == 200
+    assert portrait_response.mimetype == "image/png"
+    assert portrait_response.data == TEST_PNG_BYTES
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["party"]["email"], users["party"]["password"])
+    read_only_personal = client.get("/campaigns/linden-pass/characters/arden-march?page=personal")
+    read_only_html = read_only_personal.get_data(as_text=True)
+    assert read_only_personal.status_code == 200
+    assert "/campaigns/linden-pass/characters/arden-march/portrait" in read_only_html
+    assert "Save portrait" not in read_only_html
+    assert "Remove portrait" not in read_only_html
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert record is not None
+        revision = record.state_record.revision
+
+    replace_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/personal/portrait",
+        data={
+            "expected_revision": revision,
+            "mode": "read",
+            "page": "personal",
+            "portrait_alt": "Arden in a second portrait.",
+            "portrait_caption": "Updated portrait caption.",
+            "portrait_file": (BytesIO(TEST_JPG_BYTES), "arden-portrait.jpg"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=False,
+    )
+
+    assert replace_response.status_code == 302
+    portrait_jpg = portrait_png.with_suffix(".jpg")
+    assert portrait_jpg.exists()
+    assert not portrait_png.exists()
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert record is not None
+        revision = record.state_record.revision
+
+    remove_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/personal/portrait/remove",
+        data={
+            "expected_revision": revision,
+            "mode": "read",
+            "page": "personal",
+        },
+        follow_redirects=False,
+    )
+
+    assert remove_response.status_code == 302
+    assert not portrait_jpg.exists()
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert record is not None
+        profile = dict(record.definition.profile or {})
+        assert profile.get("portrait_asset_ref") in (None, "")
 
 
 def test_character_sheet_personal_and_notes_subpages_render_markdown_fields_and_hide_legacy_action_sections(

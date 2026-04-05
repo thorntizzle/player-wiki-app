@@ -148,6 +148,10 @@ def test_campaign_member_can_open_combat_page_and_campaign_links_to_it(client, s
     assert "Turn order" in combat_html
     assert "Current limits" in combat_html
     assert "Character" in combat_html
+    assert 'data-combat-live-root' in combat_html
+    assert 'data-loading="0"' in combat_html
+    assert "window.__playerWikiLiveUiTools" in combat_html
+    assert "uiStateTools.captureViewportAnchor(liveRoot)" in combat_html
     assert "DM page" not in combat_html
     assert "/campaigns/linden-pass/combat/status" not in combat_html
     assert "Add player character" not in combat_html
@@ -172,6 +176,9 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
     assert "Add player character" in dm_html
     assert "Add NPC from Systems" in dm_html
     assert "Add custom NPC combatant" in dm_html
+    assert 'data-loading="0"' in dm_html
+    assert "captureSystemsMonsterSearchState" in dm_html
+    assert 'liveRoot.dataset.loading = "1";' in dm_html
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["party"]["email"], users["party"]["password"])
@@ -186,7 +193,12 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
 
     admin_status_page = client.get("/campaigns/linden-pass/combat/status")
     assert admin_status_page.status_code == 200
-    assert "/campaigns/linden-pass/combat/status" in admin_status_page.get_data(as_text=True)
+    status_html = admin_status_page.get_data(as_text=True)
+    assert "/campaigns/linden-pass/combat/status" in status_html
+    assert 'data-combat-status-live-root' in status_html
+    assert 'data-loading="0"' in status_html
+    assert "window.__playerWikiLiveUiTools" in status_html
+    assert "uiStateTools.captureViewportAnchor(liveRoot)" in status_html
 
 
 def test_combat_live_state_and_async_updates_return_partials(app, client, sign_in, users):
@@ -586,6 +598,9 @@ def test_dm_can_open_combat_character_page_for_any_tracked_pc(app, client, sign_
     assert "Arden March" in body
     assert "Combat snapshot" in body
     assert "Open full sheet" in body
+    assert 'data-combat-character-live-root' in body
+    assert 'data-loading="0"' in body
+    assert "window.__playerWikiLiveUiTools" in body
 
 
 def test_player_without_owned_tracked_pc_gets_combat_character_empty_state(app, client, sign_in, users):

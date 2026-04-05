@@ -395,6 +395,8 @@ Native in-app character authoring is currently DND-5E-only. The roster and sheet
 The detail route renders the structured character definition plus live SQLite-backed state in read mode:
 
 - subpage navigation for `Quick Reference`, `Features`, `Equipment`, `Personal`, and `Notes`
+- a read-mode `Equipment` manager for editable users so they can add Systems-linked or custom supplemental gear without opening the advanced editor
+- a portrait slot on `Personal`, stored as a campaign asset and shown in both read mode and session mode
 - a permissioned `Controls` subpage for editable users, with room for current admin/DM controls and future player-owned controls
 - current HP and temp HP
 - resource trackers

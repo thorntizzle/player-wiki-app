@@ -1,0 +1,149 @@
+<script>
+  (() => {
+    if (window.__playerWikiLiveUiTools) {
+      return;
+    }
+
+    const anchorSelector = [
+      "[id]",
+      "[data-live-builder-region]",
+      "[data-session-article-id]",
+      "[data-combatant-id]",
+    ].join(", ");
+
+    const escapeSelectorValue = (value) => {
+      const text = String(value || "");
+      if (window.CSS && typeof window.CSS.escape === "function") {
+        return window.CSS.escape(text);
+      }
+      return text.replace(/["\\]/g, "\\$&");
+    };
+
+    const findAnchorNode = (root, descriptor) => {
+      if (!(root instanceof HTMLElement) || !descriptor || !descriptor.kind || !descriptor.value) {
+        return null;
+      }
+      if (descriptor.kind === "id") {
+        return root.querySelector(`#${escapeSelectorValue(descriptor.value)}`);
+      }
+      if (descriptor.kind === "attr" && descriptor.attribute) {
+        return root.querySelector(`[${descriptor.attribute}="${escapeSelectorValue(descriptor.value)}"]`);
+      }
+      return null;
+    };
+
+    const describeAnchorNode = (node) => {
+      if (!(node instanceof HTMLElement)) {
+        return null;
+      }
+      if (node.id) {
+        return { kind: "id", value: node.id };
+      }
+      for (const attribute of [
+        "data-live-builder-region",
+        "data-session-article-id",
+        "data-combatant-id",
+      ]) {
+        const value = node.getAttribute(attribute);
+        if (value) {
+          return { kind: "attr", attribute, value };
+        }
+      }
+      return null;
+    };
+
+    const captureFocus = (root) => {
+      const active = document.activeElement;
+      if (!(root instanceof HTMLElement) || !active || !root.contains(active) || !active.name) {
+        return null;
+      }
+      const focusState = { name: active.name };
+      if (typeof active.selectionStart === "number" && typeof active.selectionEnd === "number") {
+        focusState.selectionStart = active.selectionStart;
+        focusState.selectionEnd = active.selectionEnd;
+      }
+      return focusState;
+    };
+
+    const restoreFocus = (root, focusState) => {
+      if (!(root instanceof HTMLElement) || !focusState || !focusState.name) {
+        return;
+      }
+      const field = root.querySelector(`[name="${escapeSelectorValue(focusState.name)}"]`);
+      if (!(field instanceof HTMLElement)) {
+        return;
+      }
+      if (typeof field.focus === "function") {
+        field.focus({ preventScroll: true });
+      }
+      if (
+        typeof focusState.selectionStart === "number"
+        && typeof field.setSelectionRange === "function"
+      ) {
+        field.setSelectionRange(
+          focusState.selectionStart,
+          focusState.selectionEnd ?? focusState.selectionStart,
+        );
+      }
+    };
+
+    const captureViewportAnchor = (root) => {
+      if (!(root instanceof HTMLElement)) {
+        return {
+          descriptor: null,
+          top: 0,
+          scrollY: window.scrollY,
+        };
+      }
+      const viewportTop = 84;
+      const viewportBottom = Math.max(viewportTop + 1, window.innerHeight);
+      for (const candidate of root.querySelectorAll(anchorSelector)) {
+        const descriptor = describeAnchorNode(candidate);
+        if (!descriptor) {
+          continue;
+        }
+        const rect = candidate.getBoundingClientRect();
+        if (rect.bottom <= viewportTop || rect.top >= viewportBottom) {
+          continue;
+        }
+        return {
+          descriptor,
+          top: rect.top,
+          scrollY: window.scrollY,
+        };
+      }
+      return {
+        descriptor: null,
+        top: 0,
+        scrollY: window.scrollY,
+      };
+    };
+
+    const restoreViewportAnchor = (root, anchorState) => {
+      if (!anchorState) {
+        return;
+      }
+      if (anchorState.descriptor && root instanceof HTMLElement) {
+        const target = findAnchorNode(root, anchorState.descriptor);
+        if (target instanceof HTMLElement) {
+          const delta = target.getBoundingClientRect().top - Number(anchorState.top || 0);
+          if (Number.isFinite(delta) && Math.abs(delta) > 1) {
+            window.scrollTo(window.scrollX, Math.max(0, window.scrollY + delta));
+          }
+          return;
+        }
+      }
+      const scrollY = Number(anchorState.scrollY || 0);
+      if (Number.isFinite(scrollY)) {
+        window.scrollTo(window.scrollX, Math.max(0, scrollY));
+      }
+    };
+
+    window.__playerWikiLiveUiTools = {
+      captureFocus,
+      restoreFocus,
+      captureViewportAnchor,
+      restoreViewportAnchor,
+    };
+  })();
+</script>

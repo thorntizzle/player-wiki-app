@@ -1,6 +1,7 @@
 <div
   class="page-layout character-builder-layout"
   data-live-builder-root
+  data-loading="0"
   data-live-builder-default-regions="{{ level_up.live_regions_csv }}"
   data-live-diagnostics-enabled="{{ '1' if live_diagnostics_enabled else '0' }}"
 >
@@ -9,7 +10,7 @@
       <div class="section-heading">
         <div>
           <h2>Native Level {{ level_up.next_level }} Advancement</h2>
-          <p class="meta">Review the new class features, choose any new subclass or spell options from enabled Systems entries, and enter the hit point gain your table is using.</p>
+          <p class="meta">Review the new DND-5E class features, choose any new subclass or spell options from enabled Systems entries, and enter the hit point gain your table is using.</p>
         </div>
         <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character_slug) }}">Back to sheet</a>
       </div>
