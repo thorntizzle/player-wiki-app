@@ -490,6 +490,10 @@ class AuthStore:
                 (user_id,),
             )
             connection.execute(
+                "UPDATE campaign_session_states SET updated_by_user_id = NULL WHERE updated_by_user_id = ?",
+                (user_id,),
+            )
+            connection.execute(
                 "UPDATE campaign_session_articles SET created_by_user_id = NULL WHERE created_by_user_id = ?",
                 (user_id,),
             )

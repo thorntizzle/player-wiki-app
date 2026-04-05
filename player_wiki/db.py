@@ -511,6 +511,13 @@ class _InstrumentedConnection:
     def __getattr__(self, name: str):
         return getattr(self._connection, name)
 
+    def __enter__(self):
+        self._connection.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return self._connection.__exit__(exc_type, exc, tb)
+
     def cursor(self, *args, **kwargs) -> _InstrumentedCursor:
         return _InstrumentedCursor(self._connection.cursor(*args, **kwargs))
 

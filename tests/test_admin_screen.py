@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from player_wiki.auth_store import AuthStore
+from player_wiki.db import get_db
 
 
 def test_admin_can_open_dashboard_and_user_detail(app, client, sign_in, users):
@@ -189,6 +190,26 @@ def test_admin_can_delete_user_and_clear_direct_account_records(app, client, sig
     )
     assert assignment_response.status_code == 302
 
+    with app.app_context():
+        connection = get_db()
+        connection.execute(
+            """
+            INSERT INTO campaign_session_states (
+                campaign_slug,
+                revision,
+                updated_at,
+                updated_by_user_id
+            )
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(campaign_slug) DO UPDATE SET
+                revision = excluded.revision,
+                updated_at = excluded.updated_at,
+                updated_by_user_id = excluded.updated_by_user_id
+            """,
+            ("linden-pass", 7, "2026-04-05T21:00:00+00:00", users["outsider"]["id"]),
+        )
+        connection.commit()
+
     delete_response = client.post(
         f"/admin/users/{users['outsider']['id']}/delete",
         follow_redirects=True,
@@ -203,15 +224,22 @@ def test_admin_can_delete_user_and_clear_direct_account_records(app, client, sig
 
     with app.app_context():
         store = AuthStore()
+        connection = get_db()
         user = store.get_user_by_id(users["outsider"]["id"])
         membership = store.get_membership(users["outsider"]["id"], "linden-pass", statuses=None)
         assignment = store.get_character_assignment("linden-pass", "selene-brook")
         events = store.list_recent_audit_events(limit=10)
+        session_state = connection.execute(
+            "SELECT updated_by_user_id FROM campaign_session_states WHERE campaign_slug = ?",
+            ("linden-pass",),
+        ).fetchone()
 
         assert user is None
         assert membership is None
         assert assignment is None
         assert any(event.event_type == "user_deleted" for event in events)
+        assert session_state is not None
+        assert session_state["updated_by_user_id"] is None
 
 
 def test_admin_can_reenable_disabled_invited_user_back_to_invited_status(app, client, sign_in, users):
