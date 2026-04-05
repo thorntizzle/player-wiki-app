@@ -1,0 +1,106 @@
+<section class="read-section">
+  <div class="section-heading">
+    <h2>Controls</h2>
+  </div>
+
+  <div class="detail-grid character-controls-grid">
+    <article class="detail-card">
+      <h3>Player controls</h3>
+      {% if character_controls.current_user_is_owner %}
+        <p>
+          This page is where future self-service player controls for {{ character.name }} can live.
+          Current owner edits still happen through session mode plus the Personal and Notes subpages.
+        </p>
+      {% else %}
+        <p>
+          This page now holds character management controls, and it is also reserved for future player-owned actions.
+          Current player-facing edits still live on the Quick Reference, Personal, and Notes subpages.
+        </p>
+      {% endif %}
+    </article>
+
+    <article class="detail-card">
+      <h3>Current owner</h3>
+      {% if character_controls.assignment %}
+        <p>
+          <strong>{{ character_controls.assignment.display_name }}</strong>
+          {% if character_controls.assignment.email %}
+            <span class="meta"> | {{ character_controls.assignment.email }}</span>
+          {% endif %}
+        </p>
+        <p class="meta">Assignment: {{ character_controls.assignment.assignment_type | title }}</p>
+        {% if character_controls.assignment.admin_href %}
+          <a class="ghost-button" href="{{ character_controls.assignment.admin_href }}">Open user record</a>
+        {% endif %}
+      {% else %}
+        <p class="meta">No player owner assigned yet.</p>
+      {% endif %}
+    </article>
+  </div>
+
+  {% if character_controls.can_assign_owner %}
+    <div class="detail-grid character-controls-grid">
+      <article class="detail-card">
+        <h3>Assignment controls</h3>
+        <p class="meta">Assignments require an active player membership in this campaign.</p>
+        {% if character_controls.player_choices %}
+          <form
+            class="stack-form"
+            method="post"
+            action="{{ url_for('character_controls_assignment', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+          >
+            <input type="hidden" name="mode" value="{{ 'session' if is_session_mode else 'read' }}">
+            <label class="field">
+              <span>Assign owner</span>
+              <select name="user_id" required>
+                {% for player_choice in character_controls.player_choices %}
+                  <option value="{{ player_choice.user_id }}" {% if player_choice.is_current %}selected{% endif %}>
+                    {{ player_choice.label }}
+                  </option>
+                {% endfor %}
+              </select>
+            </label>
+            <button type="submit">Save assignment</button>
+          </form>
+        {% else %}
+          <p class="meta">No active player memberships are available for assignment in this campaign.</p>
+        {% endif %}
+
+        {% if character_controls.assignment %}
+          <form
+            class="stack-form"
+            method="post"
+            action="{{ url_for('character_controls_assignment_remove', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+          >
+            <input type="hidden" name="mode" value="{{ 'session' if is_session_mode else 'read' }}">
+            <button type="submit">Clear assignment</button>
+          </form>
+        {% endif %}
+      </article>
+    </div>
+  {% endif %}
+
+  {% if character_controls.can_delete_character %}
+    <div class="detail-grid character-controls-grid">
+      <article class="detail-card character-controls-card--danger">
+        <h3>Delete character</h3>
+        <p>
+          Deleting a character removes the file-backed definition/import metadata, the live character state, and any
+          current assignment for this character slug.
+        </p>
+        <form
+          class="stack-form"
+          method="post"
+          action="{{ url_for('character_controls_delete', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+        >
+          <input type="hidden" name="mode" value="{{ 'session' if is_session_mode else 'read' }}">
+          <label class="field">
+            <span>Type <code>{{ character.slug }}</code> to confirm</span>
+            <input type="text" name="confirm_character_slug" autocomplete="off" spellcheck="false">
+          </label>
+          <button type="submit">Delete character</button>
+        </form>
+      </article>
+    </div>
+  {% endif %}
+</section>

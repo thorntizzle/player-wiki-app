@@ -392,6 +392,8 @@ The roster route is campaign-scoped and read-only. It includes a lightweight sea
 
 The detail route renders the structured character definition plus live SQLite-backed state in read mode:
 
+- subpage navigation for `Quick Reference`, `Features`, `Equipment`, `Personal`, and `Notes`
+- a permissioned `Controls` subpage for editable users, with room for current admin/DM controls and future player-owned controls
 - current HP and temp HP
 - resource trackers
 - spell slots

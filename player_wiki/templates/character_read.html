@@ -102,6 +102,7 @@
       {% set show_equipment_sections = character_subpage == 'equipment' %}
       {% set show_personal_sections = character_subpage == 'personal' %}
       {% set show_note_sections = character_subpage == 'notes' %}
+      {% set show_control_sections = character_subpage == 'controls' %}
 
       {% if show_quick_sections %}
         {% if is_session_mode %}
@@ -480,6 +481,10 @@
             </article>
           {% endif %}
         </section>
+      {% endif %}
+
+      {% if show_control_sections and character_controls %}
+        {% include "_character_controls_panel.html" %}
       {% endif %}
     </article>
   </div>

@@ -4,6 +4,7 @@ from copy import deepcopy
 import yaml
 from datetime import datetime, timezone
 
+from player_wiki.auth_store import AuthStore
 from player_wiki.systems_models import SystemsEntryRecord
 
 
@@ -168,6 +169,58 @@ def test_character_sheet_subpages_show_requested_sections(app, client, sign_in, 
     assert "mode=session&amp;page=features" in html
 
 
+def test_dm_controls_subpage_shows_management_controls(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get("/campaigns/linden-pass/characters/arden-march?page=controls")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Controls" in html
+    assert "?page=controls" in html
+    assert "Player controls" in html
+    assert "Current owner" in html
+    assert "Owner Player" in html
+    assert "Delete character" in html
+    assert "Assignment controls" not in html
+    assert "At a glance" not in html
+
+
+def test_owner_player_controls_subpage_holds_future_player_controls_without_admin_tools(
+    client, sign_in, users, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get("/campaigns/linden-pass/characters/arden-march?page=controls")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Controls" in html
+    assert "Player controls" in html
+    assert "?page=controls" in html
+    assert "Delete character" not in html
+    assert "Assignment controls" not in html
+    assert "Owner Player" in html
+    assert "At a glance" not in html
+
+
+def test_read_only_player_controls_request_falls_back_to_quick_reference(
+    client, sign_in, users, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    response = client.get("/campaigns/linden-pass/characters/arden-march?page=controls")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "At a glance" in html
+    assert "Delete character" not in html
+    assert "Assignment controls" not in html
+    assert "?page=controls" not in html
+
+
 def test_character_sheet_invalid_subpage_defaults_to_quick_reference(client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
@@ -180,6 +233,83 @@ def test_character_sheet_invalid_subpage_defaults_to_quick_reference(client, sig
     assert "Features and traits" not in html
     assert "Equipment and currency" not in html
     assert "No notes yet." not in html
+
+
+def test_admin_can_reassign_and_clear_owner_from_character_controls(app, client, sign_in, users):
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+
+    assign_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/controls/assignment",
+        data={"user_id": users["party"]["id"]},
+        follow_redirects=False,
+    )
+
+    assert assign_response.status_code == 302
+    assert assign_response.headers["Location"].endswith("/campaigns/linden-pass/characters/arden-march?page=controls")
+
+    with app.app_context():
+        store = AuthStore()
+        assignment = store.get_character_assignment("linden-pass", "arden-march")
+        assert assignment is not None
+        assert assignment.user_id == users["party"]["id"]
+
+    assigned_page = client.get(assign_response.headers["Location"])
+    assigned_html = assigned_page.get_data(as_text=True)
+    assert "Party Player" in assigned_html
+    assert "Save assignment" in assigned_html
+
+    clear_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/controls/assignment/remove",
+        data={},
+        follow_redirects=False,
+    )
+
+    assert clear_response.status_code == 302
+    assert clear_response.headers["Location"].endswith("/campaigns/linden-pass/characters/arden-march?page=controls")
+
+    with app.app_context():
+        store = AuthStore()
+        assert store.get_character_assignment("linden-pass", "arden-march") is None
+
+
+def test_dm_can_delete_character_from_controls(app, client, sign_in, users):
+    definition_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "characters"
+        / "arden-march"
+        / "definition.yaml"
+    )
+    assert definition_path.exists()
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    invalid_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/controls/delete",
+        data={"confirm_character_slug": "not-arden-march"},
+        follow_redirects=False,
+    )
+
+    assert invalid_response.status_code == 302
+    assert invalid_response.headers["Location"].endswith("/campaigns/linden-pass/characters/arden-march?page=controls")
+    assert definition_path.exists()
+
+    delete_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/controls/delete",
+        data={"confirm_character_slug": "arden-march"},
+        follow_redirects=False,
+    )
+
+    assert delete_response.status_code == 302
+    assert delete_response.headers["Location"].endswith("/campaigns/linden-pass/characters")
+
+    with app.app_context():
+        store = AuthStore()
+        state_store = app.extensions["character_state_store"]
+        assert store.get_character_assignment("linden-pass", "arden-march") is None
+        assert state_store.get_state("linden-pass", "arden-march") is None
+
+    assert not definition_path.exists()
 
 
 def test_character_sheet_personal_and_notes_subpages_render_markdown_fields_and_hide_legacy_action_sections(

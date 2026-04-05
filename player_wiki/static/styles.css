@@ -1316,6 +1316,15 @@ button {
   gap: 0.75rem;
 }
 
+.character-controls-grid {
+  align-items: start;
+}
+
+.character-controls-card--danger {
+  border-color: var(--danger);
+  background: var(--surface-raised);
+}
+
 .character-builder-layout {
   grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.8fr);
 }

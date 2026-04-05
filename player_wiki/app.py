@@ -18,6 +18,7 @@ from .auth import (
     can_access_campaign_systems_entry,
     can_access_campaign_systems_source,
     can_manage_campaign_combat,
+    can_manage_campaign_content,
     can_manage_campaign_dm_content,
     can_manage_campaign_systems,
     can_manage_campaign_visibility,
@@ -65,6 +66,7 @@ from .character_presenter import present_character_detail, present_character_ros
 from .auth_store import AuthStore
 from .campaign_combat_service import CampaignCombatService, CampaignCombatValidationError
 from .campaign_combat_store import CampaignCombatStore
+from .campaign_content_service import delete_campaign_character_file
 from .campaign_dm_content_service import CampaignDMContentService, CampaignDMContentValidationError
 from .campaign_dm_content_store import CampaignDMContentStore
 from .campaign_page_store import CampaignPageStore
@@ -127,6 +129,9 @@ CHARACTER_READ_SUBPAGE_LABELS = {
     "equipment": "Equipment",
     "personal": "Personal",
     "notes": "Notes",
+}
+CHARACTER_CONTROLS_SUBPAGE_LABELS = {
+    "controls": "Controls",
 }
 COMBAT_SUBPAGE_LABELS = {
     "combat": "Combat",
@@ -204,9 +209,15 @@ def normalize_session_article_form_mode(value: str) -> str:
     return "manual"
 
 
-def normalize_character_read_subpage(value: str) -> str:
+def get_character_read_subpage_labels(*, include_controls: bool = False) -> dict[str, str]:
+    if not include_controls:
+        return CHARACTER_READ_SUBPAGE_LABELS
+    return {**CHARACTER_READ_SUBPAGE_LABELS, **CHARACTER_CONTROLS_SUBPAGE_LABELS}
+
+
+def normalize_character_read_subpage(value: str, *, include_controls: bool = False) -> str:
     normalized = (value or "").strip().lower()
-    if normalized in CHARACTER_READ_SUBPAGE_LABELS:
+    if normalized in get_character_read_subpage_labels(include_controls=include_controls):
         return normalized
     return "quick"
 
@@ -536,8 +547,60 @@ def create_app() -> Flask:
             abort(404)
         return campaign
 
+    def build_character_controls_context(campaign_slug: str, character_slug: str):
+        store = get_auth_store()
+        user = get_current_user()
+        assignment = store.get_character_assignment(campaign_slug, character_slug)
+        assigned_user = store.get_user_by_id(assignment.user_id) if assignment is not None else None
+        can_assign_owner = bool(user and user.is_admin)
+        can_delete_character = can_manage_campaign_content(campaign_slug)
+
+        player_choices: list[dict[str, object]] = []
+        if can_assign_owner:
+            for candidate in sorted(
+                store.list_users(),
+                key=lambda item: ((item.display_name or "").lower(), item.email.lower()),
+            ):
+                if not candidate.is_active:
+                    continue
+                membership = store.get_membership(candidate.id, campaign_slug, statuses=("active",))
+                if membership is None or membership.role != "player":
+                    continue
+                player_choices.append(
+                    {
+                        "user_id": candidate.id,
+                        "label": f"{candidate.display_name} ({candidate.email})",
+                        "is_current": bool(assignment and assignment.user_id == candidate.id),
+                    }
+                )
+
+        return {
+            "assignment": (
+                {
+                    "user_id": assignment.user_id,
+                    "assignment_type": assignment.assignment_type,
+                    "display_name": assigned_user.display_name if assigned_user is not None else "Unknown user",
+                    "email": assigned_user.email if assigned_user is not None else None,
+                    "admin_href": (
+                        url_for("admin_user_detail", user_id=assigned_user.id)
+                        if can_assign_owner and assigned_user is not None
+                        else None
+                    ),
+                }
+                if assignment is not None
+                else None
+            ),
+            "can_assign_owner": can_assign_owner,
+            "can_delete_character": can_delete_character,
+            "current_user_is_owner": bool(user and assignment and assignment.user_id == user.id),
+            "player_choices": player_choices,
+        }
+
     def redirect_to_character_mode(campaign_slug: str, character_slug: str, *, anchor: str | None = None):
-        read_subpage = normalize_character_read_subpage(request.values.get("page", ""))
+        read_subpage = normalize_character_read_subpage(
+            request.values.get("page", ""),
+            include_controls=has_session_mode_access(campaign_slug, character_slug),
+        )
         mode = request.values.get("mode", "").strip().lower()
         route_values = {
             "campaign_slug": campaign_slug,
@@ -550,6 +613,23 @@ def create_app() -> Flask:
         return redirect(
             url_for("character_read_view", **route_values)
         )
+
+    def redirect_to_character_controls(
+        campaign_slug: str,
+        character_slug: str,
+        *,
+        anchor: str | None = None,
+    ):
+        route_values = {
+            "campaign_slug": campaign_slug,
+            "character_slug": character_slug,
+            "page": "controls",
+            "_anchor": anchor,
+        }
+        requested_mode = request.values.get("mode", "").strip().lower()
+        if requested_mode == "session" and has_session_mode_access(campaign_slug, character_slug):
+            route_values["mode"] = requested_mode
+        return redirect(url_for("character_read_view", **route_values))
 
     def redirect_to_campaign_session(
         campaign_slug: str,
@@ -1076,7 +1156,12 @@ def create_app() -> Flask:
             else None
         )
         can_level_up = bool(level_up_readiness and level_up_readiness.get("status") == "ready")
-        character_subpage = normalize_character_read_subpage(request.args.get("page", ""))
+        include_controls_subpage = can_use_session_mode
+        available_character_subpages = get_character_read_subpage_labels(include_controls=include_controls_subpage)
+        character_subpage = normalize_character_read_subpage(
+            request.args.get("page", ""),
+            include_controls=include_controls_subpage,
+        )
         requested_mode = request.args.get("mode", "").strip().lower()
         is_session_mode = force_session_mode or (requested_mode == "session" and can_use_session_mode)
 
@@ -1098,6 +1183,11 @@ def create_app() -> Flask:
         if background_draft is not None:
             character["personal_background_markdown"] = background_draft
 
+        character_controls = (
+            build_character_controls_context(campaign_slug, character_slug)
+            if include_controls_subpage
+            else None
+        )
         character_subpages = [
             {
                 "slug": slug,
@@ -1111,7 +1201,7 @@ def create_app() -> Flask:
                 ),
                 "is_active": slug == character_subpage,
             }
-            for slug, label in CHARACTER_READ_SUBPAGE_LABELS.items()
+            for slug, label in available_character_subpages.items()
         ]
 
         return (
@@ -1127,6 +1217,7 @@ def create_app() -> Flask:
                 level_up_readiness=level_up_readiness,
                 is_session_mode=is_session_mode,
                 rest_preview=rest_preview,
+                character_controls=character_controls,
             ),
             status_code,
         )
@@ -4925,6 +5016,124 @@ def create_app() -> Flask:
     @campaign_scope_access_required("characters")
     def character_read_view(campaign_slug: str, character_slug: str):
         return render_character_page(campaign_slug, character_slug)
+
+    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment")
+    @campaign_scope_access_required("characters")
+    def character_controls_assignment(campaign_slug: str, character_slug: str):
+        load_character_context(campaign_slug, character_slug)
+        actor = get_current_user()
+        if actor is None or not actor.is_admin:
+            abort(403)
+
+        raw_user_id = request.form.get("user_id", "").strip()
+        try:
+            target_user_id = int(raw_user_id)
+        except ValueError:
+            flash("Choose a valid player to assign.", "error")
+            return redirect_to_character_controls(campaign_slug, character_slug)
+
+        store = get_auth_store()
+        target_user = store.get_user_by_id(target_user_id)
+        if target_user is None or not target_user.is_active:
+            flash("Choose an active player account to assign.", "error")
+            return redirect_to_character_controls(campaign_slug, character_slug)
+
+        membership = store.get_membership(target_user.id, campaign_slug, statuses=("active",))
+        if membership is None or membership.role != "player":
+            flash("Character owners must have an active player membership in that campaign.", "error")
+            return redirect_to_character_controls(campaign_slug, character_slug)
+
+        previous = store.get_character_assignment(campaign_slug, character_slug)
+        assignment = store.upsert_character_assignment(target_user.id, campaign_slug, character_slug)
+        store.write_audit_event(
+            event_type="character_assignment_created",
+            actor_user_id=actor.id,
+            target_user_id=target_user.id,
+            campaign_slug=campaign_slug,
+            character_slug=character_slug,
+            metadata={
+                "previous_user_id": previous.user_id if previous is not None else None,
+                "assignment_type": assignment.assignment_type,
+                "source": "character_controls",
+            },
+        )
+        flash(f"Assigned {character_slug} to {target_user.email}.", "success")
+        return redirect_to_character_controls(campaign_slug, character_slug)
+
+    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment/remove")
+    @campaign_scope_access_required("characters")
+    def character_controls_assignment_remove(campaign_slug: str, character_slug: str):
+        load_character_context(campaign_slug, character_slug)
+        actor = get_current_user()
+        if actor is None or not actor.is_admin:
+            abort(403)
+
+        store = get_auth_store()
+        assignment = store.get_character_assignment(campaign_slug, character_slug)
+        if assignment is None:
+            flash("That character does not currently have an assigned player.", "error")
+            return redirect_to_character_controls(campaign_slug, character_slug)
+
+        removed_assignment = store.delete_character_assignment(campaign_slug, character_slug)
+        if removed_assignment is None:
+            flash("That character assignment no longer exists.", "error")
+            return redirect_to_character_controls(campaign_slug, character_slug)
+
+        store.write_audit_event(
+            event_type="character_assignment_removed",
+            actor_user_id=actor.id,
+            target_user_id=removed_assignment.user_id,
+            campaign_slug=campaign_slug,
+            character_slug=character_slug,
+            metadata={
+                "assignment_type": removed_assignment.assignment_type,
+                "source": "character_controls",
+            },
+        )
+        flash(f"Cleared assignment for {character_slug}.", "success")
+        return redirect_to_character_controls(campaign_slug, character_slug)
+
+    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/controls/delete")
+    @campaign_scope_access_required("characters")
+    def character_controls_delete(campaign_slug: str, character_slug: str):
+        campaign, record = load_character_context(campaign_slug, character_slug)
+        if not can_manage_campaign_content(campaign_slug):
+            abort(403)
+
+        confirmation = request.form.get("confirm_character_slug", "").strip()
+        if confirmation != character_slug:
+            flash(f"Type {character_slug} to confirm deletion.", "error")
+            return redirect_to_character_controls(campaign_slug, character_slug)
+
+        store = get_auth_store()
+        actor = get_current_user()
+        previous_assignment = store.get_character_assignment(campaign_slug, character_slug)
+        deleted = delete_campaign_character_file(
+            app.config["CAMPAIGNS_DIR"],
+            campaign_slug,
+            character_slug,
+            state_store=app.extensions["character_state_store"],
+            auth_store=store,
+        )
+        if deleted is None:
+            flash("That character no longer exists.", "error")
+            return redirect(url_for("character_roster_view", campaign_slug=campaign.slug))
+
+        store.write_audit_event(
+            event_type="character_deleted",
+            actor_user_id=actor.id if actor is not None else None,
+            target_user_id=previous_assignment.user_id if previous_assignment is not None else None,
+            campaign_slug=campaign_slug,
+            character_slug=character_slug,
+            metadata={
+                "deleted_files": deleted.deleted_files,
+                "deleted_state": deleted.deleted_state,
+                "deleted_assignment": deleted.deleted_assignment,
+                "source": "character_controls",
+            },
+        )
+        flash(f"Deleted character {record.definition.name}.", "success")
+        return redirect(url_for("character_roster_view", campaign_slug=campaign.slug))
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/vitals")
     @campaign_scope_access_required("characters")

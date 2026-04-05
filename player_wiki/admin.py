@@ -23,6 +23,7 @@ EVENT_TITLES = {
     "membership_removed": "Membership removed",
     "character_assignment_created": "Character assigned",
     "character_assignment_removed": "Character assignment removed",
+    "character_deleted": "Character deleted",
     "password_reset_issued": "Password reset issued",
     "password_reset_completed": "Password reset completed",
     "api_token_issued": "API token issued",
@@ -41,6 +42,7 @@ SOURCE_LABELS = {
     "reset_token": "reset link",
     "campaign_control_panel": "campaign control panel",
     "campaign_systems_control_panel": "systems control panel",
+    "character_controls": "character controls",
 }
 
 AUDIT_PAGE_SIZE = 10
