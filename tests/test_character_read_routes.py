@@ -4,8 +4,17 @@ from copy import deepcopy
 import yaml
 from datetime import datetime, timezone
 
+import player_wiki.app as app_module
+import pytest
 from player_wiki.auth_store import AuthStore
 from player_wiki.systems_models import SystemsEntryRecord
+
+
+def _write_campaign_config(app, mutator) -> None:
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    mutator(payload)
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
 def _write_character_definition(app, character_slug: str, mutator) -> None:
@@ -60,6 +69,93 @@ def test_dm_can_open_character_roster_and_read_sheet(client, sign_in, users):
     assert "Context" not in sheet_html
     assert "Back to character roster" not in sheet_html
     assert "Open campaign wiki" not in sheet_html
+
+
+def test_non_5e_roster_hides_native_character_builder_affordances(app, client, sign_in, users):
+    _write_campaign_config(app, lambda payload: payload.__setitem__("system", "Pathfinder 2E"))
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get("/campaigns/linden-pass/characters")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Create character" not in html
+    assert "/campaigns/linden-pass/characters/new" not in html
+    assert "PHB level 1 character" not in html
+    assert "Native character creation and progression stay hidden here" in html
+
+
+def test_non_5e_read_sheet_hides_native_authoring_affordances_and_skips_readiness(
+    app, client, sign_in, users, monkeypatch
+):
+    _write_campaign_config(app, lambda payload: payload.__setitem__("system", "Pathfinder 2E"))
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("native level-up readiness should stay disabled for non-5E character sheets")
+
+    monkeypatch.setattr(app_module, "native_level_up_readiness", _fail_if_called)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get("/campaigns/linden-pass/characters/arden-march")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Enter session mode" in html
+    assert "Edit character" not in html
+    assert "Level up" not in html
+    assert "Prepare for level-up" not in html
+
+
+def test_non_5e_session_mode_still_works_for_owner_player(
+    app, client, sign_in, users, set_campaign_visibility
+):
+    _write_campaign_config(app, lambda payload: payload.__setitem__("system", "Pathfinder 2E"))
+    set_campaign_visibility("linden-pass", characters="players")
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=quick")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Active session" in html
+    assert "Back to read mode" in html
+    assert "Edit character" not in html
+
+
+def test_non_5e_builder_route_redirects_to_roster_with_error(app, client, sign_in, users):
+    _write_campaign_config(app, lambda payload: payload.__setitem__("system", "Pathfinder 2E"))
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get("/campaigns/linden-pass/characters/new", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/campaigns/linden-pass/characters")
+
+    landing = client.get(response.headers["Location"])
+    html = landing.get_data(as_text=True)
+    assert app_module.NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE in html
+    assert "Create character" not in html
+
+
+@pytest.mark.parametrize("route_suffix", ["edit", "level-up", "progression-repair"])
+def test_non_5e_native_character_routes_redirect_to_sheet_with_error(
+    app, client, sign_in, users, route_suffix: str
+):
+    _write_campaign_config(app, lambda payload: payload.__setitem__("system", "Pathfinder 2E"))
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get(
+        f"/campaigns/linden-pass/characters/arden-march/{route_suffix}",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/campaigns/linden-pass/characters/arden-march")
+
+    landing = client.get(response.headers["Location"])
+    html = landing.get_data(as_text=True)
+    assert app_module.NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE in html
+    assert "Arden March" in html
 
 
 def test_character_read_sheet_links_species_and_background_to_campaign_pages_when_present(

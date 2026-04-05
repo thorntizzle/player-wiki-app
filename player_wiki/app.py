@@ -152,6 +152,10 @@ BUILDER_RELEVANT_CAMPAIGN_SECTIONS = frozenset(
     }
 )
 SUPPORTED_COMBAT_SYSTEM = "DND-5E"
+SUPPORTED_NATIVE_CHARACTER_SYSTEM = "DND-5E"
+NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE = (
+    "Native character tools are currently only supported for DND-5E campaigns."
+)
 SYSTEMS_ENTRY_TYPE_LABELS = {
     "action": "Actions",
     "background": "Backgrounds",
@@ -1114,6 +1118,28 @@ def create_app() -> Flask:
             return None
         return campaign
 
+    def campaign_supports_native_character_tools(campaign) -> bool:
+        return (
+            str(getattr(campaign, "system", "") or "").strip().upper()
+            == SUPPORTED_NATIVE_CHARACTER_SYSTEM
+        )
+
+    def redirect_unsupported_native_character_tools(
+        campaign_slug: str,
+        *,
+        character_slug: str | None = None,
+    ):
+        flash(NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE, "error")
+        if character_slug is None:
+            return redirect(url_for("character_roster_view", campaign_slug=campaign_slug))
+        return redirect(
+            url_for(
+                "character_read_view",
+                campaign_slug=campaign_slug,
+                character_slug=character_slug,
+            )
+        )
+
     def merge_condition_options(*option_sets: list[str] | tuple[str, ...]) -> list[str]:
         merged: list[str] = []
         seen: set[str] = set()
@@ -1137,6 +1163,7 @@ def create_app() -> Flask:
         status_code: int = 200,
     ):
         campaign, record = load_character_context(campaign_slug, character_slug)
+        native_character_tools_supported = campaign_supports_native_character_tools(campaign)
         can_use_session_mode = has_session_mode_access(campaign_slug, character_slug)
         can_manage_character = can_manage_campaign_session(campaign_slug)
         campaign_page_records = [
@@ -1152,7 +1179,7 @@ def create_app() -> Flask:
                 record.definition,
                 campaign_page_records=campaign_page_records,
             )
-            if can_manage_character
+            if can_manage_character and native_character_tools_supported
             else None
         )
         can_level_up = bool(level_up_readiness and level_up_readiness.get("status") == "ready")
@@ -1213,6 +1240,7 @@ def create_app() -> Flask:
                 character_subpages=character_subpages,
                 active_nav="characters",
                 can_use_session_mode=can_use_session_mode,
+                native_character_tools_supported=native_character_tools_supported,
                 can_level_up=can_level_up,
                 level_up_readiness=level_up_readiness,
                 is_session_mode=is_session_mode,
@@ -4619,6 +4647,7 @@ def create_app() -> Flask:
         campaign = repository.get_campaign(campaign_slug)
         if not campaign:
             abort(404)
+        native_character_tools_supported = campaign_supports_native_character_tools(campaign)
 
         query = request.args.get("q", "").strip()
         character_cards = present_character_roster(
@@ -4636,7 +4665,10 @@ def create_app() -> Flask:
             character_cards=character_cards,
             query=query,
             result_count=len(character_cards),
-            can_create_characters=can_manage_campaign_session(campaign_slug),
+            can_create_characters=(
+                can_manage_campaign_session(campaign_slug) and native_character_tools_supported
+            ),
+            native_character_tools_supported=native_character_tools_supported,
             active_nav="characters",
         )
 
@@ -4647,6 +4679,8 @@ def create_app() -> Flask:
             abort(403)
 
         campaign = load_campaign_context(campaign_slug)
+        if not campaign_supports_native_character_tools(campaign):
+            return redirect_unsupported_native_character_tools(campaign_slug)
         campaign_page_records = list_builder_campaign_page_records(campaign_slug, campaign)
         form_values = dict(request.form if request.method == "POST" else request.args)
         builder_context = build_level_one_builder_context(
@@ -4710,6 +4744,11 @@ def create_app() -> Flask:
             abort(403)
 
         campaign, record = load_character_context(campaign_slug, character_slug)
+        if not campaign_supports_native_character_tools(campaign):
+            return redirect_unsupported_native_character_tools(
+                campaign_slug,
+                character_slug=character_slug,
+            )
         campaign_page_records = list_builder_campaign_page_records(campaign_slug, campaign)
         readiness = native_level_up_readiness(
             get_systems_service(),
@@ -4810,6 +4849,11 @@ def create_app() -> Flask:
             abort(403)
 
         campaign, record = load_character_context(campaign_slug, character_slug)
+        if not campaign_supports_native_character_tools(campaign):
+            return redirect_unsupported_native_character_tools(
+                campaign_slug,
+                character_slug=character_slug,
+            )
         campaign_page_records = list_builder_campaign_page_records(campaign_slug, campaign)
         readiness = native_level_up_readiness(
             get_systems_service(),
@@ -4926,6 +4970,11 @@ def create_app() -> Flask:
             abort(403)
 
         campaign, record = load_character_context(campaign_slug, character_slug)
+        if not campaign_supports_native_character_tools(campaign):
+            return redirect_unsupported_native_character_tools(
+                campaign_slug,
+                character_slug=character_slug,
+            )
         campaign_page_records = [
             page_record
             for page_record in get_campaign_page_store().list_page_records(campaign_slug)

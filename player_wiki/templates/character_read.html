@@ -42,17 +42,19 @@
         {% endif %}
         {% if can_use_session_mode %}
           <div class="hero-actions">
-            <a class="ghost-button" href="{{ url_for('character_edit_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
-              Edit character
-            </a>
-            {% if can_level_up %}
-              <a class="ghost-button" href="{{ url_for('character_level_up_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
-                Level up
+            {% if native_character_tools_supported %}
+              <a class="ghost-button" href="{{ url_for('character_edit_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
+                Edit character
               </a>
-            {% elif level_up_readiness and level_up_readiness.status == 'repairable' %}
-              <a class="ghost-button" href="{{ url_for('character_progression_repair_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
-                Prepare for level-up
-              </a>
+              {% if can_level_up %}
+                <a class="ghost-button" href="{{ url_for('character_level_up_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
+                  Level up
+                </a>
+              {% elif level_up_readiness and level_up_readiness.status == 'repairable' %}
+                <a class="ghost-button" href="{{ url_for('character_progression_repair_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
+                  Prepare for level-up
+                </a>
+              {% endif %}
             {% endif %}
             {% if is_session_mode %}
               <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='read', page=character_subpage) }}">
@@ -64,23 +66,23 @@
               </a>
             {% endif %}
           </div>
-        {% elif can_level_up %}
+        {% elif native_character_tools_supported and can_level_up %}
           <div class="hero-actions">
             <a class="ghost-button" href="{{ url_for('character_level_up_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
               Level up
             </a>
           </div>
-        {% elif level_up_readiness and level_up_readiness.status == 'repairable' %}
+        {% elif native_character_tools_supported and level_up_readiness and level_up_readiness.status == 'repairable' %}
           <div class="hero-actions">
             <a class="ghost-button" href="{{ url_for('character_progression_repair_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
               Prepare for level-up
             </a>
           </div>
         {% endif %}
-        {% if level_up_readiness and level_up_readiness.status != 'ready' and level_up_readiness.message %}
+        {% if native_character_tools_supported and level_up_readiness and level_up_readiness.status != 'ready' and level_up_readiness.message %}
           <p class="meta">{{ level_up_readiness.message }}</p>
         {% endif %}
-        {% if level_up_readiness and level_up_readiness.reasons %}
+        {% if native_character_tools_supported and level_up_readiness and level_up_readiness.reasons %}
           <ul class="plain-list builder-feature-list">
             {% for reason in level_up_readiness.reasons %}
               <li>{{ reason }}</li>

@@ -390,6 +390,8 @@ Imported characters now have dedicated player-facing routes:
 
 The roster route is campaign-scoped and read-only. It includes a lightweight search over the imported character set.
 
+Native in-app character authoring is currently DND-5E-only. The roster and sheet routes still work for other campaign systems, but the native builder, native edit flow, native level-up flow, and imported progression-repair flow stay hidden and redirect back to the roster or sheet with a friendly error if someone hits those URLs directly.
+
 The detail route renders the structured character definition plus live SQLite-backed state in read mode:
 
 - subpage navigation for `Quick Reference`, `Features`, `Equipment`, `Personal`, and `Notes`
