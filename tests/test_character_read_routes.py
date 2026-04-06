@@ -65,6 +65,25 @@ def _write_character_state(app, character_slug: str, mutator) -> None:
         )
 
 
+def _read_character_definition(app, character_slug: str) -> dict:
+    definition_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "characters"
+        / character_slug
+        / "definition.yaml"
+    )
+    return yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
+
+
+def _character_state_revision(app, character_slug: str) -> int:
+    with app.app_context():
+        repository = app.extensions["character_repository"]
+        record = repository.get_character("linden-pass", character_slug)
+        assert record is not None
+        return int(record.state_record.revision)
+
+
 def _seed_systems_item_entry(app, *, slug: str = "phb-item-rope", title: str = "Rope"):
     with app.app_context():
         systems_store = app.extensions["systems_store"]
@@ -101,6 +120,89 @@ def _seed_systems_item_entry(app, *, slug: str = "phb-item-rope", title: str = "
         entry = app.extensions["systems_service"].get_entry_by_slug_for_campaign("linden-pass", slug)
         assert entry is not None
         return entry
+
+
+def _seed_systems_spell_entries(app, entries: list[dict[str, object]]) -> dict[str, SystemsEntryRecord]:
+    with app.app_context():
+        systems_store = app.extensions["systems_store"]
+        systems_store.upsert_library("DND-5E", title="DND 5E", system_code="DND-5E")
+        systems_store.upsert_source(
+            "DND-5E",
+            "PHB",
+            title="Player's Handbook",
+            license_class="srd_cc",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        systems_store.replace_entries_for_source(
+            "DND-5E",
+            "PHB",
+            entry_types=["spell"],
+            entries=[
+                {
+                    "entry_key": f"dnd-5e|spell|phb|{str(entry['slug'])}",
+                    "entry_type": "spell",
+                    "slug": str(entry["slug"]),
+                    "title": str(entry["title"]),
+                    "source_page": str(entry.get("source_page") or "200"),
+                    "source_path": "data/spells/spells-phb.json",
+                    "search_text": str(entry.get("search_text") or f"{entry['title']} spell"),
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {
+                        "level": int(entry.get("level") or 0),
+                        "class_lists": dict(entry.get("class_lists") or {"PHB": []}),
+                        "casting_time": list(entry.get("casting_time") or [{"number": 1, "unit": "action"}]),
+                        "range": dict(entry.get("range") or {"type": "point", "distance": {"type": "feet", "amount": 60}}),
+                        "duration": list(entry.get("duration") or [{"type": "timed", "duration": {"type": "round", "amount": 1}}]),
+                        "components": dict(entry.get("components") or {"v": True}),
+                    },
+                    "body": {},
+                    "rendered_html": f"<p>{entry['title']}.</p>",
+                }
+                for entry in entries
+            ],
+        )
+        systems_service = app.extensions["systems_service"]
+        return {
+            str(entry["slug"]): systems_service.get_entry_by_slug_for_campaign("linden-pass", str(entry["slug"]))
+            for entry in entries
+        }
+
+
+def _systems_ref(entry: SystemsEntryRecord) -> dict[str, str]:
+    return {
+        "entry_key": str(entry.entry_key or "").strip(),
+        "entry_type": str(entry.entry_type or "").strip(),
+        "title": str(entry.title or "").strip(),
+        "slug": str(entry.slug or "").strip(),
+        "source_id": str(entry.source_id or "").strip(),
+    }
+
+
+def _spell_payload(
+    entry: SystemsEntryRecord,
+    *,
+    source: str,
+    mark: str = "",
+    is_always_prepared: bool = False,
+    is_bonus_known: bool = False,
+) -> dict[str, object]:
+    metadata = dict(entry.metadata or {})
+    return {
+        "name": str(entry.title or "").strip(),
+        "casting_time": "1 action",
+        "range": "60 feet" if int(metadata.get("level") or 0) > 0 else "Self",
+        "duration": "Instantaneous" if int(metadata.get("level") or 0) > 0 else "1 round",
+        "components": "V",
+        "save_or_hit": "",
+        "source": source,
+        "reference": f"p. {entry.source_page or '200'}",
+        "mark": mark,
+        "is_always_prepared": is_always_prepared,
+        "is_bonus_known": is_bonus_known,
+        "systems_ref": _systems_ref(entry),
+    }
 
 
 def test_dm_can_open_character_roster_and_read_sheet(client, sign_in, users):
@@ -343,11 +445,281 @@ def test_spellcasting_subpage_is_only_shown_for_casters_and_holds_spell_list(cli
     caster_spellcasting_html = caster_spellcasting.get_data(as_text=True)
     assert "Spellcasting" in caster_spellcasting_html
     assert "Message" in caster_spellcasting_html
-    assert "1 action | 120 feet | 1 round | V, S, M" in caster_spellcasting_html
+    assert "1 action" in caster_spellcasting_html
+    assert "120 feet" in caster_spellcasting_html
+    assert "1 round" in caster_spellcasting_html
+    assert "V, S, M" in caster_spellcasting_html
 
     assert noncaster_quick.status_code == 200
     noncaster_quick_html = noncaster_quick.get_data(as_text=True)
     assert "?page=spellcasting" not in noncaster_quick_html
+
+
+def test_spellcasting_subpage_can_search_add_and_remove_known_spells(app, client, sign_in, users):
+    spell_entries = _seed_systems_spell_entries(
+        app,
+        [
+            {"slug": "phb-spell-message", "title": "Message", "level": 0, "class_lists": {"PHB": ["Sorcerer"]}},
+            {"slug": "phb-spell-magic-missile", "title": "Magic Missile", "level": 1, "class_lists": {"PHB": ["Sorcerer"]}},
+            {"slug": "phb-spell-shield", "title": "Shield", "level": 1, "class_lists": {"PHB": ["Sorcerer"]}},
+            {"slug": "phb-spell-find-familiar", "title": "Find Familiar", "level": 1, "class_lists": {"PHB": ["Wizard"]}},
+        ],
+    )
+
+    def _mutate(payload: dict) -> None:
+        profile = dict(payload.get("profile") or {})
+        profile["class_level_text"] = "Sorcerer 5"
+        profile["classes"] = [{"class_name": "Sorcerer", "level": 5}]
+        payload["profile"] = profile
+        payload["spellcasting"] = {
+            "spellcasting_class": "Sorcerer",
+            "spellcasting_ability": "Charisma",
+            "spell_save_dc": 15,
+            "spell_attack_bonus": 7,
+            "slot_progression": [
+                {"level": 1, "max_slots": 4},
+                {"level": 2, "max_slots": 3},
+            ],
+            "spells": [
+                _spell_payload(spell_entries["phb-spell-message"], source="Sorcerer"),
+                _spell_payload(spell_entries["phb-spell-magic-missile"], source="Sorcerer"),
+            ],
+        }
+
+    _write_character_definition(app, "arden-march", _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    page_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=spellcasting")
+    assert page_response.status_code == 200
+    page_html = page_response.get_data(as_text=True)
+    assert "Known spells" in page_html
+    assert "Add known spell" in page_html
+
+    search_response = client.get(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/spells/search?kind=spell&q=find"
+    )
+    assert search_response.status_code == 200
+    search_payload = search_response.get_json()
+    assert search_payload == {
+        "results": [],
+        "message": "No eligible class spells matched that search.",
+    }
+
+    add_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/add",
+        data={
+            "expected_revision": str(_character_state_revision(app, "arden-march")),
+            "mode": "read",
+            "page": "spellcasting",
+            "kind": "spell",
+            "selected_value": "phb-spell-shield",
+        },
+        follow_redirects=False,
+    )
+    assert add_response.status_code == 302
+
+    updated_definition = _read_character_definition(app, "arden-march")
+    updated_spells = list((updated_definition.get("spellcasting") or {}).get("spells") or [])
+    shield_spell = next(spell for spell in updated_spells if spell.get("name") == "Shield")
+    assert shield_spell["mark"] == "Known"
+
+    remove_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/remove",
+        data={
+            "expected_revision": str(_character_state_revision(app, "arden-march")),
+            "mode": "read",
+            "page": "spellcasting",
+            "spell_key": "phb-spell-shield",
+        },
+        follow_redirects=False,
+    )
+    assert remove_response.status_code == 302
+
+    final_definition = _read_character_definition(app, "arden-march")
+    final_spell_names = [str(spell.get("name") or "") for spell in list((final_definition.get("spellcasting") or {}).get("spells") or [])]
+    assert "Shield" not in final_spell_names
+
+
+def test_spellcasting_subpage_can_prepare_spells_and_protect_always_prepared_entries(
+    app, client, sign_in, users
+):
+    spell_entries = _seed_systems_spell_entries(
+        app,
+        [
+            {"slug": "phb-spell-guidance", "title": "Guidance", "level": 0, "class_lists": {"PHB": ["Cleric"]}},
+            {"slug": "phb-spell-cure-wounds", "title": "Cure Wounds", "level": 1, "class_lists": {"PHB": ["Cleric"]}},
+            {"slug": "phb-spell-detect-magic", "title": "Detect Magic", "level": 1, "class_lists": {"PHB": ["Cleric"]}},
+            {"slug": "phb-spell-bless", "title": "Bless", "level": 1, "class_lists": {"PHB": ["Cleric"]}},
+        ],
+    )
+
+    def _mutate(payload: dict) -> None:
+        profile = dict(payload.get("profile") or {})
+        profile["class_level_text"] = "Cleric 5"
+        profile["classes"] = [{"class_name": "Cleric", "level": 5}]
+        payload["profile"] = profile
+        payload["spellcasting"] = {
+            "spellcasting_class": "Cleric",
+            "spellcasting_ability": "Wisdom",
+            "spell_save_dc": 14,
+            "spell_attack_bonus": 6,
+            "slot_progression": [
+                {"level": 1, "max_slots": 4},
+                {"level": 2, "max_slots": 3},
+                {"level": 3, "max_slots": 2},
+            ],
+            "spells": [
+                _spell_payload(spell_entries["phb-spell-guidance"], source="Cleric"),
+                _spell_payload(spell_entries["phb-spell-cure-wounds"], source="Cleric"),
+                _spell_payload(spell_entries["phb-spell-bless"], source="Cleric (Always Prepared)", mark="P"),
+            ],
+        }
+
+    _write_character_definition(app, "arden-march", _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    page_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=spellcasting")
+    assert page_response.status_code == 200
+    page_html = page_response.get_data(as_text=True)
+    assert "Prepared spells" in page_html
+    assert "Prepare spell" in page_html
+    assert "Always prepared" in page_html
+
+    add_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/add",
+        data={
+            "expected_revision": str(_character_state_revision(app, "arden-march")),
+            "mode": "read",
+            "page": "spellcasting",
+            "kind": "spell",
+            "selected_value": "phb-spell-detect-magic",
+        },
+        follow_redirects=False,
+    )
+    assert add_response.status_code == 302
+
+    updated_definition = _read_character_definition(app, "arden-march")
+    updated_spells = list((updated_definition.get("spellcasting") or {}).get("spells") or [])
+    detect_magic = next(spell for spell in updated_spells if spell.get("name") == "Detect Magic")
+    assert detect_magic["mark"] == "Prepared"
+
+    protected_remove = client.post(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/remove",
+        data={
+            "expected_revision": str(_character_state_revision(app, "arden-march")),
+            "mode": "read",
+            "page": "spellcasting",
+            "spell_key": "phb-spell-bless",
+        },
+        follow_redirects=True,
+    )
+    assert protected_remove.status_code == 200
+    protected_html = protected_remove.get_data(as_text=True)
+    assert "cannot be removed here" in protected_html
+
+    protected_definition = _read_character_definition(app, "arden-march")
+    protected_spell_names = [str(spell.get("name") or "") for spell in list((protected_definition.get("spellcasting") or {}).get("spells") or [])]
+    assert "Bless" in protected_spell_names
+
+    remove_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/remove",
+        data={
+            "expected_revision": str(_character_state_revision(app, "arden-march")),
+            "mode": "read",
+            "page": "spellcasting",
+            "spell_key": "phb-spell-detect-magic",
+        },
+        follow_redirects=False,
+    )
+    assert remove_response.status_code == 302
+
+    final_definition = _read_character_definition(app, "arden-march")
+    final_spell_names = [str(spell.get("name") or "") for spell in list((final_definition.get("spellcasting") or {}).get("spells") or [])]
+    assert "Detect Magic" not in final_spell_names
+
+
+def test_spellcasting_subpage_can_manage_wizard_spellbooks_and_prepare_spells(
+    app, client, sign_in, users
+):
+    spell_entries = _seed_systems_spell_entries(
+        app,
+        [
+            {"slug": "phb-spell-message", "title": "Message", "level": 0, "class_lists": {"PHB": ["Wizard"]}},
+            {"slug": "phb-spell-magic-missile", "title": "Magic Missile", "level": 1, "class_lists": {"PHB": ["Wizard"]}},
+            {"slug": "phb-spell-shield", "title": "Shield", "level": 1, "class_lists": {"PHB": ["Wizard"]}},
+        ],
+    )
+
+    def _mutate(payload: dict) -> None:
+        profile = dict(payload.get("profile") or {})
+        profile["class_level_text"] = "Wizard 5"
+        profile["classes"] = [{"class_name": "Wizard", "level": 5}]
+        payload["profile"] = profile
+        payload["spellcasting"] = {
+            "spellcasting_class": "Wizard",
+            "spellcasting_ability": "Intelligence",
+            "spell_save_dc": 14,
+            "spell_attack_bonus": 6,
+            "slot_progression": [
+                {"level": 1, "max_slots": 4},
+                {"level": 2, "max_slots": 3},
+                {"level": 3, "max_slots": 2},
+            ],
+            "spells": [
+                _spell_payload(spell_entries["phb-spell-message"], source="Wizard", mark="O"),
+                _spell_payload(spell_entries["phb-spell-magic-missile"], source="Wizard", mark="O"),
+            ],
+        }
+
+    _write_character_definition(app, "arden-march", _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    page_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=spellcasting")
+    assert page_response.status_code == 200
+    page_html = page_response.get_data(as_text=True)
+    assert "Wizard spellbook" in page_html
+    assert "Add spellbook spell" in page_html
+
+    add_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/add",
+        data={
+            "expected_revision": str(_character_state_revision(app, "arden-march")),
+            "mode": "read",
+            "page": "spellcasting",
+            "kind": "spellbook",
+            "selected_value": "phb-spell-shield",
+        },
+        follow_redirects=False,
+    )
+    assert add_response.status_code == 302
+
+    updated_definition = _read_character_definition(app, "arden-march")
+    updated_spells = list((updated_definition.get("spellcasting") or {}).get("spells") or [])
+    magic_missile = next(spell for spell in updated_spells if spell.get("name") == "Magic Missile")
+    shield_spell = next(spell for spell in updated_spells if spell.get("name") == "Shield")
+    assert magic_missile["mark"] == "Prepared + Spellbook"
+    assert shield_spell["mark"] == "Spellbook"
+
+    update_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/update",
+        data={
+            "expected_revision": str(_character_state_revision(app, "arden-march")),
+            "mode": "read",
+            "page": "spellcasting",
+            "spell_key": "phb-spell-shield",
+            "prepared_value": "1",
+        },
+        follow_redirects=False,
+    )
+    assert update_response.status_code == 302
+
+    final_definition = _read_character_definition(app, "arden-march")
+    final_spells = list((final_definition.get("spellcasting") or {}).get("spells") or [])
+    final_shield = next(spell for spell in final_spells if spell.get("name") == "Shield")
+    assert final_shield["mark"] == "Prepared + Spellbook"
 
 
 def test_dm_controls_subpage_shows_management_controls(client, sign_in, users):

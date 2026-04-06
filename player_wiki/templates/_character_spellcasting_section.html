@@ -30,10 +30,153 @@
     {% endif %}
   </div>
 
+  {% if show_spell_list and spell_manager %}
+    <div class="detail-grid" id="character-spell-manager">
+      <article class="detail-card session-card">
+        <div class="section-heading">
+          <h3>{{ spell_manager.mode_label }}</h3>
+        </div>
+        {% if spell_manager.rules_note %}
+          <p class="meta">{{ spell_manager.rules_note }}</p>
+        {% endif %}
+        {% if spell_manager.counts %}
+          <ul class="plain-list slot-list">
+            {% for count in spell_manager.counts %}
+              <li>
+                <span>{{ count.label }}</span>
+                <strong>{{ count.value }}</strong>
+              </li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+        {% if spell_manager.unavailable_message %}
+          <p class="meta">{{ spell_manager.unavailable_message }}</p>
+        {% endif %}
+      </article>
+
+      {% if can_use_session_mode and not is_session_mode and spell_manager.can_manage and spell_manager.show_cantrip_form %}
+        <article class="detail-card session-card">
+          <div class="section-heading">
+            <h3>Add cantrip</h3>
+          </div>
+          <p class="meta">
+            {% if spell_manager.can_add_cantrip %}
+              Search enabled Systems spells and add a cantrip to this durable sheet list.
+            {% else %}
+              This sheet is already at its current cantrip count.
+            {% endif %}
+          </p>
+          <form
+            class="stack-form"
+            method="post"
+            action="{{ spell_manager.add_url }}"
+            data-character-spell-search-form
+            data-character-spell-search-url="{{ spell_manager.search_url }}"
+            data-character-spell-search-kind="cantrip"
+            data-character-spell-search-empty-label="Search to load matching cantrips"
+            data-character-spell-search-prompt="Type at least 2 letters to search eligible class cantrips."
+          >
+            <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+            <input type="hidden" name="mode" value="read">
+            <input type="hidden" name="page" value="{{ character_subpage }}">
+            <input type="hidden" name="kind" value="cantrip">
+            <label class="field">
+              <span>Search cantrips</span>
+              <input
+                type="search"
+                placeholder="Type at least 2 letters"
+                data-character-spell-query
+                {% if not spell_manager.can_add_cantrip %}disabled{% endif %}
+              >
+            </label>
+            <label class="field">
+              <span>Matching cantrips</span>
+              <select
+                name="selected_value"
+                data-character-spell-results
+                {% if not spell_manager.can_add_cantrip %}disabled{% endif %}
+              >
+                <option value="">Search to load matching cantrips</option>
+              </select>
+            </label>
+            <p class="meta" data-character-spell-status>
+              {% if spell_manager.can_add_cantrip %}
+                Type at least 2 letters to search eligible class cantrips.
+              {% else %}
+                This sheet is already at its current cantrip count.
+              {% endif %}
+            </p>
+            <button type="submit" {% if not spell_manager.can_add_cantrip %}disabled{% endif %}>Add cantrip</button>
+          </form>
+        </article>
+      {% endif %}
+
+      {% if can_use_session_mode and not is_session_mode and spell_manager.can_manage and spell_manager.show_spell_form %}
+        <article class="detail-card session-card">
+          <div class="section-heading">
+            <h3>{{ spell_manager.spell_add_label }}</h3>
+          </div>
+          <p class="meta">
+            {% if spell_manager.can_add_spell %}
+              Search enabled Systems spells from this class list and add them to the sheet.
+            {% elif spell_manager.mode == 'wizard' %}
+              Search enabled Systems spells from this class list and add them to the spellbook.
+            {% else %}
+              This sheet is already at its current spell count. Remove or unprepare one first.
+            {% endif %}
+          </p>
+          <form
+            class="stack-form"
+            method="post"
+            action="{{ spell_manager.add_url }}"
+            data-character-spell-search-form
+            data-character-spell-search-url="{{ spell_manager.search_url }}"
+            data-character-spell-search-kind="{{ spell_manager.spell_add_kind }}"
+            data-character-spell-search-empty-label="Search to load matching spells"
+            data-character-spell-search-prompt="Type at least 2 letters to search eligible class spells."
+          >
+            <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+            <input type="hidden" name="mode" value="read">
+            <input type="hidden" name="page" value="{{ character_subpage }}">
+            <input type="hidden" name="kind" value="{{ spell_manager.spell_add_kind }}">
+            <label class="field">
+              <span>Search spells</span>
+              <input
+                type="search"
+                placeholder="Type at least 2 letters"
+                data-character-spell-query
+                {% if not spell_manager.can_add_spell %}disabled{% endif %}
+              >
+            </label>
+            <label class="field">
+              <span>Matching spells</span>
+              <select
+                name="selected_value"
+                data-character-spell-results
+                {% if not spell_manager.can_add_spell %}disabled{% endif %}
+              >
+                <option value="">Search to load matching spells</option>
+              </select>
+            </label>
+            <p class="meta" data-character-spell-status>
+              {% if spell_manager.can_add_spell %}
+                Type at least 2 letters to search eligible class spells.
+              {% else %}
+                This sheet is already at its current spell count. Remove or unprepare one first.
+              {% endif %}
+            </p>
+            <button type="submit" {% if not spell_manager.can_add_spell %}disabled{% endif %}>{{ spell_manager.spell_add_label }}</button>
+          </form>
+        </article>
+      {% endif %}
+    </div>
+  {% endif %}
+
   {% if show_spell_list %}
-    {% if character.spellcasting.spells %}
+    {% set spell_rows = spell_manager.rows if spell_manager else [] %}
+    {% if spell_rows %}
       <div class="spell-list">
-        {% for spell in character.spellcasting.spells %}
+        {% for spell in spell_rows %}
           <article class="spell-row">
             <div class="spell-row__header">
               <h3>
@@ -52,7 +195,11 @@
               {% endif %}
             </div>
             <p class="meta">
-              {{ spell.casting_time }} | {{ spell.range }} | {{ spell.duration }} | {{ spell.components }}
+              {{ spell.level_label }}
+              {% if spell.casting_time %} | {{ spell.casting_time }}{% endif %}
+              {% if spell.range %} | {{ spell.range }}{% endif %}
+              {% if spell.duration %} | {{ spell.duration }}{% endif %}
+              {% if spell.components %} | {{ spell.components }}{% endif %}
               {% if spell.save_or_hit and spell.save_or_hit != '--' %}
                 | {{ spell.save_or_hit }}
               {% endif %}
@@ -63,6 +210,32 @@
                 {% if spell.source and spell.reference %} | {% endif %}
                 {% if spell.reference %}{{ spell.reference }}{% endif %}
               </p>
+            {% endif %}
+            {% if spell.management_note %}
+              <p class="meta">{{ spell.management_note }}</p>
+            {% endif %}
+            {% if spell_manager and can_use_session_mode and not is_session_mode and spell_manager.can_manage and (spell.can_toggle_prepared or spell.can_remove) %}
+              <div class="hero-actions">
+                {% if spell.can_toggle_prepared %}
+                  <form method="post" action="{{ spell_manager.update_url }}">
+                    <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                    <input type="hidden" name="mode" value="read">
+                    <input type="hidden" name="page" value="{{ character_subpage }}">
+                    <input type="hidden" name="spell_key" value="{{ spell.spell_key }}">
+                    <input type="hidden" name="prepared_value" value="{{ 0 if spell.is_prepared else 1 }}">
+                    <button type="submit" class="ghost-button">{{ "Unprepare" if spell.is_prepared else "Prepare" }}</button>
+                  </form>
+                {% endif %}
+                {% if spell.can_remove %}
+                  <form method="post" action="{{ spell_manager.remove_url }}">
+                    <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                    <input type="hidden" name="mode" value="read">
+                    <input type="hidden" name="page" value="{{ character_subpage }}">
+                    <input type="hidden" name="spell_key" value="{{ spell.spell_key }}">
+                    <button type="submit" class="ghost-button">{{ spell.remove_label }}</button>
+                  </form>
+                {% endif %}
+              </div>
             {% endif %}
           </article>
         {% endfor %}

@@ -668,6 +668,117 @@
 {% endblock %}
 
 {% block scripts %}
+  {% if character_subpage == 'spellcasting' and spell_manager and can_use_session_mode and not is_session_mode %}
+    <script>
+      (() => {
+        const forms = Array.from(document.querySelectorAll("[data-character-spell-search-form]"));
+        for (const form of forms) {
+          if (!(form instanceof HTMLFormElement)) {
+            continue;
+          }
+          const searchInput = form.querySelector("[data-character-spell-query]");
+          const resultsSelect = form.querySelector("[data-character-spell-results]");
+          const status = form.querySelector("[data-character-spell-status]");
+          const searchUrl = form.dataset.characterSpellSearchUrl || "";
+          const searchKind = form.dataset.characterSpellSearchKind || "spell";
+          const emptyLabel = form.dataset.characterSpellSearchEmptyLabel || "Search to load matching spells";
+          const promptMessage = form.dataset.characterSpellSearchPrompt || "Type at least 2 letters to search eligible class spells.";
+          if (
+            !(searchInput instanceof HTMLInputElement)
+            || !(resultsSelect instanceof HTMLSelectElement)
+            || !(status instanceof HTMLElement)
+            || !searchUrl
+          ) {
+            continue;
+          }
+
+          let searchAbortController = null;
+          let searchTimerId = 0;
+
+          const resetResults = (message) => {
+            resultsSelect.innerHTML = "";
+            const option = document.createElement("option");
+            option.value = "";
+            option.textContent = emptyLabel;
+            resultsSelect.append(option);
+            resultsSelect.disabled = true;
+            status.textContent = message || promptMessage;
+          };
+
+          const renderResults = (results, message) => {
+            if (!Array.isArray(results) || !results.length) {
+              resetResults(message || "No eligible class spells matched that search.");
+              return;
+            }
+            resultsSelect.innerHTML = "";
+            for (const result of results) {
+              const option = document.createElement("option");
+              option.value = String(result.entry_slug || "");
+              option.textContent = String(result.select_label || result.title || "");
+              resultsSelect.append(option);
+            }
+            resultsSelect.disabled = false;
+            resultsSelect.selectedIndex = 0;
+            status.textContent = message || `Found ${results.length} matching spells.`;
+          };
+
+          const runSearch = async () => {
+            const query = searchInput.value.trim();
+            if (searchAbortController) {
+              searchAbortController.abort();
+            }
+            if (query.length < 2) {
+              resetResults(promptMessage);
+              return;
+            }
+
+            searchAbortController = new AbortController();
+            status.textContent = "Searching spells...";
+            try {
+              const response = await fetch(
+                `${searchUrl}?kind=${encodeURIComponent(searchKind)}&q=${encodeURIComponent(query)}`,
+                {
+                  headers: {
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Accept": "application/json",
+                  },
+                  cache: "no-store",
+                  credentials: "same-origin",
+                  signal: searchAbortController.signal,
+                },
+              );
+              if (!response.ok) {
+                resetResults("Could not search spells right now.");
+                return;
+              }
+
+              const payload = await response.json();
+              renderResults(payload.results, typeof payload.message === "string" ? payload.message : "");
+            } catch (error) {
+              if (error instanceof DOMException && error.name === "AbortError") {
+                return;
+              }
+              resetResults("Could not search spells right now.");
+            } finally {
+              searchAbortController = null;
+            }
+          };
+
+          searchInput.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+            }
+          });
+          searchInput.addEventListener("input", () => {
+            window.clearTimeout(searchTimerId);
+            searchTimerId = window.setTimeout(runSearch, 250);
+          });
+
+          resetResults(status.textContent || promptMessage);
+        }
+      })();
+    </script>
+  {% endif %}
   {% if character_subpage == 'equipment' and equipment_manager and can_use_session_mode and not is_session_mode %}
     <script>
       (() => {

@@ -56,10 +56,13 @@ from .character_builder import (
 )
 from .character_editor import (
     CharacterEditValidationError,
+    apply_character_spell_management_edit,
     apply_equipment_catalog_edit,
+    build_character_spell_management_context,
     apply_native_character_edits,
     build_managed_character_import_metadata,
     build_native_character_edit_context,
+    search_character_spell_management_options,
 )
 from .character_importer import write_yaml
 from .character_service import CharacterStateValidationError, build_initial_state, merge_state_with_definition
@@ -757,6 +760,97 @@ def create_app() -> Flask:
             "supplemental_items": sorted(
                 supplemental_items,
                 key=lambda item: (str(item["name"]).lower(), str(item["id"]).lower()),
+            ),
+        }
+
+    def resolve_character_spellcasting_class_entry(campaign_slug: str, definition):
+        profile = dict(definition.profile or {})
+        candidate_refs = [profile.get("class_ref")]
+        candidate_refs.extend(
+            dict(row or {}).get("systems_ref")
+            for row in list(profile.get("classes") or [])
+            if isinstance(row, dict)
+        )
+        for raw_ref in candidate_refs:
+            systems_ref = dict(raw_ref or {})
+            if str(systems_ref.get("entry_type") or "").strip() != "class":
+                continue
+            entry_slug = str(systems_ref.get("slug") or "").strip()
+            if not entry_slug:
+                continue
+            entry = get_systems_service().get_entry_by_slug_for_campaign(campaign_slug, entry_slug)
+            if entry is not None and str(entry.entry_type or "").strip() == "class":
+                return entry
+        return None
+
+    def load_character_spell_management_support(campaign_slug: str, definition) -> tuple[dict[str, object], object | None]:
+        spell_catalog = _build_spell_catalog(
+            _list_campaign_enabled_entries(
+                get_systems_service(),
+                campaign_slug,
+                "spell",
+            )
+        )
+        selected_class = resolve_character_spellcasting_class_entry(campaign_slug, definition)
+        return spell_catalog, selected_class
+
+    def build_character_spell_manager_context(
+        campaign_slug: str,
+        campaign,
+        record,
+    ) -> dict[str, object] | None:
+        spell_catalog, selected_class = load_character_spell_management_support(campaign_slug, record.definition)
+        manager = build_character_spell_management_context(
+            record.definition,
+            spell_catalog=spell_catalog,
+            selected_class=selected_class,
+        )
+        if manager is None:
+            return None
+
+        rows: list[dict[str, object]] = []
+        for row in list(manager.get("rows") or []):
+            payload = dict(row.get("payload") or {})
+            rows.append(
+                {
+                    **dict(row),
+                    "href": build_character_entry_href(
+                        campaign.slug,
+                        systems_ref=payload.get("systems_ref"),
+                        page_ref=payload.get("page_ref"),
+                    ),
+                    "casting_time": str(payload.get("casting_time") or "").strip(),
+                    "range": str(payload.get("range") or "").strip(),
+                    "duration": str(payload.get("duration") or "").strip(),
+                    "components": str(payload.get("components") or "").strip(),
+                    "save_or_hit": str(payload.get("save_or_hit") or "").strip(),
+                    "source": str(payload.get("source") or "").strip(),
+                    "reference": str(payload.get("reference") or "").strip(),
+                }
+            )
+
+        return {
+            **manager,
+            "rows": rows,
+            "search_url": url_for(
+                "character_spell_search",
+                campaign_slug=campaign_slug,
+                character_slug=record.definition.character_slug,
+            ),
+            "add_url": url_for(
+                "character_spell_add",
+                campaign_slug=campaign_slug,
+                character_slug=record.definition.character_slug,
+            ),
+            "update_url": url_for(
+                "character_spell_update",
+                campaign_slug=campaign_slug,
+                character_slug=record.definition.character_slug,
+            ),
+            "remove_url": url_for(
+                "character_spell_remove",
+                campaign_slug=campaign_slug,
+                character_slug=record.definition.character_slug,
             ),
         }
 
@@ -1530,6 +1624,7 @@ def create_app() -> Flask:
             if can_use_session_mode
             else None
         )
+        spell_manager = build_character_spell_manager_context(campaign_slug, campaign, record)
         character_subpages = [
             {
                 "slug": slug,
@@ -1562,6 +1657,7 @@ def create_app() -> Flask:
                 rest_preview=rest_preview,
                 character_controls=character_controls,
                 equipment_manager=equipment_manager,
+                spell_manager=spell_manager,
             ),
             status_code,
         )
@@ -5795,6 +5891,111 @@ def create_app() -> Flask:
                     else "No enabled Systems items matched that search."
                 ),
             }
+        )
+
+    @app.get("/campaigns/<campaign_slug>/characters/<character_slug>/spellcasting/spells/search")
+    @campaign_scope_access_required("characters")
+    def character_spell_search(campaign_slug: str, character_slug: str):
+        _, record = load_character_context(campaign_slug, character_slug)
+        if not has_session_mode_access(campaign_slug, character_slug):
+            abort(403)
+
+        spell_catalog, selected_class = load_character_spell_management_support(
+            campaign_slug,
+            record.definition,
+        )
+        results, message = search_character_spell_management_options(
+            record.definition,
+            spell_catalog=spell_catalog,
+            selected_class=selected_class,
+            query=request.args.get("q", ""),
+            kind=request.args.get("kind", ""),
+        )
+        return jsonify(
+            {
+                "results": results,
+                "message": message,
+            }
+        )
+
+    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/spellcasting/add")
+    @campaign_scope_access_required("characters")
+    def character_spell_add(campaign_slug: str, character_slug: str):
+        def _action(record):
+            spell_catalog, selected_class = load_character_spell_management_support(
+                campaign_slug,
+                record.definition,
+            )
+            return apply_character_spell_management_edit(
+                campaign_slug,
+                record.definition,
+                record.import_metadata,
+                spell_catalog=spell_catalog,
+                selected_class=selected_class,
+                operation="add",
+                kind=request.form.get("kind", ""),
+                selected_value=request.form.get("selected_value", ""),
+            )
+
+        return run_character_definition_mutation(
+            campaign_slug,
+            character_slug,
+            anchor="character-spell-manager",
+            success_message="Spell list updated.",
+            action=_action,
+        )
+
+    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/spellcasting/update")
+    @campaign_scope_access_required("characters")
+    def character_spell_update(campaign_slug: str, character_slug: str):
+        def _action(record):
+            spell_catalog, selected_class = load_character_spell_management_support(
+                campaign_slug,
+                record.definition,
+            )
+            return apply_character_spell_management_edit(
+                campaign_slug,
+                record.definition,
+                record.import_metadata,
+                spell_catalog=spell_catalog,
+                selected_class=selected_class,
+                operation="update",
+                spell_key=request.form.get("spell_key", ""),
+                prepared_value=request.form.get("prepared_value", ""),
+            )
+
+        return run_character_definition_mutation(
+            campaign_slug,
+            character_slug,
+            anchor="character-spell-manager",
+            success_message="Prepared spell selection updated.",
+            action=_action,
+        )
+
+    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/spellcasting/remove")
+    @campaign_scope_access_required("characters")
+    def character_spell_remove(campaign_slug: str, character_slug: str):
+        def _action(record):
+            spell_catalog, selected_class = load_character_spell_management_support(
+                campaign_slug,
+                record.definition,
+            )
+            return apply_character_spell_management_edit(
+                campaign_slug,
+                record.definition,
+                record.import_metadata,
+                spell_catalog=spell_catalog,
+                selected_class=selected_class,
+                operation="remove",
+                spell_key=request.form.get("spell_key", ""),
+            )
+
+        return run_character_definition_mutation(
+            campaign_slug,
+            character_slug,
+            anchor="character-spell-manager",
+            success_message="Spell list updated.",
+            action=_action,
         )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/add-systems")
