@@ -1986,6 +1986,10 @@ def create_app() -> Flask:
         conditions_by_combatant: dict[int, list[object]] = {}
         selected_combatant_record = None
         selected_combatant = None
+        combat_tracker_display_combatants: list[dict[str, object]] = []
+        combat_tracker_section_title = "Turn order"
+        combat_tracker_section_meta = "Highest turn value acts first. The current-turn badge marks the active combatant."
+        dm_focus_combatant_choices: list[dict[str, object]] = []
 
         if combat_system_supported:
             combat_service = get_campaign_combat_service()
@@ -2046,6 +2050,7 @@ def create_app() -> Flask:
                 explicit_combatant_id=requested_combatant_id,
                 strict_explicit=False,
             )
+            combat_tracker_display_combatants = list(tracker_view.get("combatants") or [])
         combat_poll_settings = build_combat_poll_settings(combat_subpage)
         combat_live_revision = tracker.revision if combat_system_supported else 0
         combat_live_view_token = build_combat_live_view_token(campaign_slug, combat_subpage)
@@ -2053,6 +2058,30 @@ def create_app() -> Flask:
         selected_combatant_id = (
             selected_combatant_record.id if selected_combatant_record is not None else None
         )
+        if combat_subpage == "dm":
+            requested_combatant_id = selected_combatant_id
+            dm_focus_combatant_choices = [
+                {
+                    "id": combatant.get("id"),
+                    "label": " - ".join(
+                        part
+                        for part in [
+                            str(combatant.get("name") or "").strip(),
+                            str(combatant.get("type_label") or "").strip(),
+                            f"Turn {combatant.get('turn_value')}",
+                            "Current turn" if combatant.get("is_current_turn") else "",
+                        ]
+                        if part
+                    ),
+                }
+                for combatant in list(tracker_view.get("combatants") or [])
+                if combatant.get("id") is not None
+            ]
+            combat_tracker_display_combatants = [selected_combatant] if selected_combatant is not None else []
+            combat_tracker_section_title = "Selected combatant"
+            combat_tracker_section_meta = (
+                "Choose a combatant from the focus picker above to inspect and edit one participant at a time."
+            )
         accessible_combat_character_rows = list_accessible_combat_character_rows(
             combatants,
             tracker_view,
@@ -2140,6 +2169,10 @@ def create_app() -> Flask:
             "selected_combatant": selected_combatant,
             "selected_combatant_id": selected_combatant_id,
             "requested_combatant_id": requested_combatant_id,
+            "combat_tracker_display_combatants": combat_tracker_display_combatants,
+            "combat_tracker_section_title": combat_tracker_section_title,
+            "combat_tracker_section_meta": combat_tracker_section_meta,
+            "dm_focus_combatant_choices": dm_focus_combatant_choices,
             "selected_combatant_source_label": (
                 str(selected_combatant.get("source_label") or "").strip()
                 if isinstance(selected_combatant, dict)
@@ -2895,7 +2928,6 @@ def create_app() -> Flask:
             "combat_state_token": context["combat_live_state_token"],
             "summary_html": render_template("_combat_summary_card.html", **context),
             "tracker_html": render_template("_combat_tracker_section.html", **context),
-            "context_html": render_template("_combat_context_panel.html", **context),
             "controls_html": render_template("_combat_dm_controls.html", **context),
             "selected_combatant_id": context["selected_combatant_id"],
         }

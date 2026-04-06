@@ -611,6 +611,22 @@
       if (!(target instanceof HTMLElement)) {
         return;
       }
+      if (target.matches("[data-combat-navigation-select]")) {
+        const form = target.closest("[data-combat-navigation-form]");
+        if (!(form instanceof HTMLFormElement)) {
+          return;
+        }
+        const action = form.getAttribute("action") || window.location.pathname;
+        const params = new URLSearchParams();
+        for (const [name, value] of new FormData(form).entries()) {
+          if (typeof value === "string" && value) {
+            params.append(name, value);
+          }
+        }
+        const nextUrl = params.toString() ? `${action}?${params.toString()}` : action;
+        window.location.assign(nextUrl);
+        return;
+      }
       const form = target.closest("[data-combat-inline-autosubmit]");
       if (!(form instanceof HTMLFormElement)) {
         return;

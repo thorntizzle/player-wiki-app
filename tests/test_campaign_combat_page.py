@@ -1143,7 +1143,7 @@ def test_init_db_backfills_legacy_combatant_source_identity(tmp_path, monkeypatc
     ]
 
 
-def test_combat_and_dm_pages_render_context_panel_for_current_or_selected_combatant(
+def test_combat_page_renders_context_panel_and_dm_page_focuses_selected_combatant(
     app, client, sign_in, users
 ):
     sign_in(users["dm"]["email"], users["dm"]["password"])
@@ -1184,9 +1184,50 @@ def test_combat_and_dm_pages_render_context_panel_for_current_or_selected_combat
     dm_html = dm_page.get_data(as_text=True)
     assert "Encounter context" in combat_html
     assert "Arden March" in combat_html
-    assert "Encounter context" in dm_html
-    assert "Clockwork Hound" in dm_html
-    assert "Manual NPC" in dm_html
+    assert "Focus combatant" in dm_html
+    assert "Clockwork Hound - NPC - Turn 12" in dm_html
+    assert "Arden March - Player character - Turn 18 - Current turn" in dm_html
+    assert f'id="combatant-{hound.id}"' in dm_html
+    assert f'id="combatant-{arden.id}"' not in dm_html
+    assert dm_html.count('class="card combatant-card') == 1
+
+
+def test_dm_live_state_renders_only_selected_combatant_card(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    hound = _find_combatant(app, name="Clockwork Hound")
+    assert arden is not None
+    assert hound is not None
+
+    response = client.get(
+        f"/campaigns/linden-pass/combat/dm/live-state?combatant={hound.id}",
+        headers=_async_headers(),
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["selected_combatant_id"] == hound.id
+    assert "Focus combatant" in payload["summary_html"]
+    assert f'id="combatant-{hound.id}"' in payload["tracker_html"]
+    assert f'id="combatant-{arden.id}"' not in payload["tracker_html"]
 
 
 def test_non_async_combat_mutations_preserve_explicit_combatant_focus_in_redirects(

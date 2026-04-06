@@ -20,6 +20,30 @@
       <h2>{{ combat_tracker.combatant_count }}</h2>
     </div>
   </div>
+  {% if combat_subpage == "dm" %}
+    <div class="combat-focus-picker">
+      <p class="card-kicker">Focus combatant</p>
+      {% if dm_focus_combatant_choices %}
+        <form
+          method="get"
+          action="{{ url_for('campaign_combat_dm_view', campaign_slug=campaign.slug) }}"
+          class="combat-focus-picker-form"
+          data-combat-navigation-form
+        >
+          <label class="field">
+            <span>Combat participant</span>
+            <select name="combatant" data-combat-navigation-select aria-label="Focus combatant on the DM page">
+              {% for choice in dm_focus_combatant_choices %}
+                <option value="{{ choice.id }}" {% if choice.id == selected_combatant_id %}selected{% endif %}>{{ choice.label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+        </form>
+      {% else %}
+        <p class="meta">Add a player character or NPC to start focusing one combatant at a time here.</p>
+      {% endif %}
+    </div>
+  {% endif %}
   {% if can_manage_combat %}
     <div class="hero-actions">
       <form

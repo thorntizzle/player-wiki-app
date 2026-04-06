@@ -1821,6 +1821,15 @@ button {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
+.combat-focus-picker {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.combat-focus-picker-form {
+  max-width: 28rem;
+}
+
 .combat-summary-grid--snapshot {
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 }

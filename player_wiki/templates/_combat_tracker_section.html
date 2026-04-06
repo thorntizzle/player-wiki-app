@@ -12,13 +12,14 @@
 <section class="section-block" id="combat-tracker">
   {% set return_to_dm = combat_return_view == 'dm' %}
   <div class="section-heading">
-    <h2>Turn order</h2>
-    <p class="meta">Highest turn value acts first. The current-turn badge marks the active combatant.</p>
+    <h2>{{ combat_tracker_section_title }}</h2>
+    <p class="meta">{{ combat_tracker_section_meta }}</p>
   </div>
 
-  {% if combat_tracker.combatants %}
+  {% set visible_combatants = combat_tracker_display_combatants if combat_tracker_display_combatants is defined else combat_tracker.combatants %}
+  {% if visible_combatants %}
     <div class="combatant-stack">
-      {% for combatant in combat_tracker.combatants %}
+      {% for combatant in visible_combatants %}
         <article class="card combatant-card{% if combatant.is_current_turn %} combatant-card--current{% endif %}" id="combatant-{{ combatant.id }}">
           <div class="combatant-card__header">
             <div>
@@ -371,8 +372,13 @@
     </div>
   {% else %}
     <article class="card">
-      <h3>No combatants in the tracker yet</h3>
-      <p>Once the DM adds player characters or NPCs, the turn order and encounter resources will appear here.</p>
+      {% if combat_subpage == "dm" %}
+        <h3>No selected combatant yet</h3>
+        <p>Add combatants to the tracker, then choose one from the focus picker above to inspect and edit it here.</p>
+      {% else %}
+        <h3>No combatants in the tracker yet</h3>
+        <p>Once the DM adds player characters or NPCs, the turn order and encounter resources will appear here.</p>
+      {% endif %}
     </article>
   {% endif %}
 </section>
