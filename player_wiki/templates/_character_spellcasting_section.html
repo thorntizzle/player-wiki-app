@@ -1,0 +1,74 @@
+<section class="read-section">
+  <div class="section-heading">
+    <h2>Spellcasting</h2>
+  </div>
+  <div class="detail-grid">
+    <article class="detail-card">
+      <h3>{{ character.spellcasting.spellcasting_class or "Spellcasting" }}</h3>
+      <p>
+        {{ character.spellcasting.spellcasting_ability }} spellcasting
+        {% if character.spellcasting.spell_save_dc %}
+          | Save DC {{ character.spellcasting.spell_save_dc }}
+        {% endif %}
+        {% if character.spellcasting.spell_attack_bonus %}
+          | Attack {{ character.spellcasting.spell_attack_bonus }}
+        {% endif %}
+      </p>
+    </article>
+    {% if character.spellcasting.slots %}
+      <article class="detail-card">
+        <h3>Spell slots</h3>
+        <ul class="plain-list slot-list">
+          {% for slot in character.spellcasting.slots %}
+            <li>
+              <span>{{ slot.label }}</span>
+              <strong>{{ slot.available }} available / {{ slot.max }}</strong>
+            </li>
+          {% endfor %}
+        </ul>
+      </article>
+    {% endif %}
+  </div>
+
+  {% if show_spell_list %}
+    {% if character.spellcasting.spells %}
+      <div class="spell-list">
+        {% for spell in character.spellcasting.spells %}
+          <article class="spell-row">
+            <div class="spell-row__header">
+              <h3>
+                {% if spell.href %}
+                  <a href="{{ spell.href }}">{{ spell.name }}</a>
+                {% else %}
+                  {{ spell.name }}
+                {% endif %}
+              </h3>
+              {% if spell.badges %}
+                <div class="badge-list">
+                  {% for badge in spell.badges %}
+                    <span class="meta-badge">{{ badge }}</span>
+                  {% endfor %}
+                </div>
+              {% endif %}
+            </div>
+            <p class="meta">
+              {{ spell.casting_time }} | {{ spell.range }} | {{ spell.duration }} | {{ spell.components }}
+              {% if spell.save_or_hit and spell.save_or_hit != '--' %}
+                | {{ spell.save_or_hit }}
+              {% endif %}
+            </p>
+            {% if spell.source or spell.reference %}
+              <p class="meta">
+                {% if spell.source %}{{ spell.source }}{% endif %}
+                {% if spell.source and spell.reference %} | {% endif %}
+                {% if spell.reference %}{{ spell.reference }}{% endif %}
+              </p>
+            {% endif %}
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="meta">No spells recorded yet.</p>
+    {% endif %}
+  {% endif %}
+</section>

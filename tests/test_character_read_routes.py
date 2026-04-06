@@ -307,11 +307,13 @@ def test_character_sheet_subpages_show_requested_sections(app, client, sign_in, 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert "Quick Reference" in html
+    assert "Spellcasting" in html
     assert "Features" in html
     assert "Equipment" in html
     assert "Personal" in html
     assert "Notes" in html
     assert "?page=quick" in html
+    assert "?page=spellcasting" in html
     assert "?page=features" in html
     assert "?page=equipment" in html
     assert "?page=personal" in html
@@ -321,6 +323,31 @@ def test_character_sheet_subpages_show_requested_sections(app, client, sign_in, 
     assert "Equipment and currency" not in html
     assert "Keep an eye on the harbor." not in html
     assert "mode=session&amp;page=features" in html
+
+
+def test_spellcasting_subpage_is_only_shown_for_casters_and_holds_spell_list(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    caster_quick = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=quick")
+    caster_spellcasting = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=spellcasting")
+    noncaster_quick = client.get("/campaigns/linden-pass/characters/tobin-slate?mode=read&page=quick")
+
+    assert caster_quick.status_code == 200
+    caster_quick_html = caster_quick.get_data(as_text=True)
+    assert "?page=spellcasting" in caster_quick_html
+    assert "Sorcerer" in caster_quick_html
+    assert "Spell slots" in caster_quick_html
+    assert "Message" not in caster_quick_html
+
+    assert caster_spellcasting.status_code == 200
+    caster_spellcasting_html = caster_spellcasting.get_data(as_text=True)
+    assert "Spellcasting" in caster_spellcasting_html
+    assert "Message" in caster_spellcasting_html
+    assert "1 action | 120 feet | 1 round | V, S, M" in caster_spellcasting_html
+
+    assert noncaster_quick.status_code == 200
+    noncaster_quick_html = noncaster_quick.get_data(as_text=True)
+    assert "?page=spellcasting" not in noncaster_quick_html
 
 
 def test_dm_controls_subpage_shows_management_controls(client, sign_in, users):
@@ -901,6 +928,7 @@ def test_session_mode_uses_same_subpage_ui_as_read_mode(client, sign_in, users, 
     html = response.get_data(as_text=True)
     assert "Active session" not in html
     assert "?mode=session&amp;page=quick" in html
+    assert "?mode=session&amp;page=spellcasting" in html
     assert "?mode=session&amp;page=personal" in html
     assert "?mode=session&amp;page=notes" in html
     assert "Save personal details" in html
@@ -1031,14 +1059,17 @@ def test_character_sheet_renders_systems_links_when_present(app, client, sign_in
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
     quick_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=quick")
+    spellcasting_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=spellcasting")
     features_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=features")
     equipment_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=equipment")
 
     assert quick_response.status_code == 200
+    assert spellcasting_response.status_code == 200
     assert features_response.status_code == 200
     assert equipment_response.status_code == 200
 
     quick_html = quick_response.get_data(as_text=True)
+    spellcasting_html = spellcasting_response.get_data(as_text=True)
     features_html = features_response.get_data(as_text=True)
     equipment_html = equipment_response.get_data(as_text=True)
 
@@ -1047,10 +1078,12 @@ def test_character_sheet_renders_systems_links_when_present(app, client, sign_in
     assert '/campaigns/linden-pass/systems/entries/phb-race-human' in quick_html
     assert '/campaigns/linden-pass/systems/entries/phb-background-noble' in quick_html
     assert '/campaigns/linden-pass/systems/entries/phb-item-crossbow-light' in quick_html
-    assert '/campaigns/linden-pass/systems/entries/phb-spell-message' in quick_html
+    assert '/campaigns/linden-pass/systems/entries/phb-spell-message' not in quick_html
+    assert '/campaigns/linden-pass/systems/entries/phb-spell-message' in spellcasting_html
     assert '/campaigns/linden-pass/systems/entries/phb-classfeature-spellcasting' in features_html
     assert '/campaigns/linden-pass/systems/entries/phb-item-backpack' in equipment_html
     assert 'View source entry' not in quick_html
+    assert 'View source entry' not in spellcasting_html
     assert 'View source entry' not in features_html
     assert 'View source entry' not in equipment_html
 

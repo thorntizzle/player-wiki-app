@@ -140,6 +140,7 @@ from .version import build_app_metadata
 SESSION_ARTICLE_FORM_MODES = {"manual", "upload", "wiki"}
 CHARACTER_READ_SUBPAGE_LABELS = {
     "quick": "Quick Reference",
+    "spellcasting": "Spellcasting",
     "features": "Features",
     "equipment": "Equipment",
     "personal": "Personal",
@@ -231,15 +232,40 @@ def normalize_session_article_form_mode(value: str) -> str:
     return "manual"
 
 
-def get_character_read_subpage_labels(*, include_controls: bool = False) -> dict[str, str]:
-    if not include_controls:
-        return CHARACTER_READ_SUBPAGE_LABELS
-    return {**CHARACTER_READ_SUBPAGE_LABELS, **CHARACTER_CONTROLS_SUBPAGE_LABELS}
+def get_character_read_subpage_labels(
+    *,
+    include_spellcasting: bool = False,
+    include_controls: bool = False,
+) -> dict[str, str]:
+    labels = {
+        "quick": CHARACTER_READ_SUBPAGE_LABELS["quick"],
+    }
+    if include_spellcasting:
+        labels["spellcasting"] = CHARACTER_READ_SUBPAGE_LABELS["spellcasting"]
+    labels.update(
+        {
+            "features": CHARACTER_READ_SUBPAGE_LABELS["features"],
+            "equipment": CHARACTER_READ_SUBPAGE_LABELS["equipment"],
+            "personal": CHARACTER_READ_SUBPAGE_LABELS["personal"],
+            "notes": CHARACTER_READ_SUBPAGE_LABELS["notes"],
+        }
+    )
+    if include_controls:
+        labels.update(CHARACTER_CONTROLS_SUBPAGE_LABELS)
+    return labels
 
 
-def normalize_character_read_subpage(value: str, *, include_controls: bool = False) -> str:
+def normalize_character_read_subpage(
+    value: str,
+    *,
+    include_spellcasting: bool = False,
+    include_controls: bool = False,
+) -> str:
     normalized = (value or "").strip().lower()
-    if normalized in get_character_read_subpage_labels(include_controls=include_controls):
+    if normalized in get_character_read_subpage_labels(
+        include_spellcasting=include_spellcasting,
+        include_controls=include_controls,
+    ):
         return normalized
     return "quick"
 
@@ -794,8 +820,11 @@ def create_app() -> Flask:
         return definition.__class__.from_dict(payload)
 
     def redirect_to_character_mode(campaign_slug: str, character_slug: str, *, anchor: str | None = None):
+        _, record = load_character_context(campaign_slug, character_slug)
+        spellcasting_payload = dict(record.definition.spellcasting or {})
         read_subpage = normalize_character_read_subpage(
             request.values.get("page", ""),
+            include_spellcasting=bool(spellcasting_payload.get("spells") or spellcasting_payload.get("slot_progression")),
             include_controls=has_session_mode_access(campaign_slug, character_slug),
         )
         mode = request.values.get("mode", "").strip().lower()
@@ -1454,11 +1483,6 @@ def create_app() -> Flask:
         )
         can_level_up = bool(level_up_readiness and level_up_readiness.get("status") == "ready")
         include_controls_subpage = can_use_session_mode
-        available_character_subpages = get_character_read_subpage_labels(include_controls=include_controls_subpage)
-        character_subpage = normalize_character_read_subpage(
-            request.args.get("page", ""),
-            include_controls=include_controls_subpage,
-        )
         requested_mode = request.args.get("mode", "").strip().lower()
         is_session_mode = force_session_mode or (requested_mode == "session" and can_use_session_mode)
 
@@ -1480,6 +1504,16 @@ def create_app() -> Flask:
         if background_draft is not None:
             character["personal_background_markdown"] = background_draft
         character["portrait"] = build_character_portrait_context(campaign, record.definition)
+        include_spellcasting_subpage = bool(character.get("spellcasting"))
+        available_character_subpages = get_character_read_subpage_labels(
+            include_spellcasting=include_spellcasting_subpage,
+            include_controls=include_controls_subpage,
+        )
+        character_subpage = normalize_character_read_subpage(
+            request.args.get("page", ""),
+            include_spellcasting=include_spellcasting_subpage,
+            include_controls=include_controls_subpage,
+        )
 
         character_controls = (
             build_character_controls_context(campaign_slug, character_slug)
