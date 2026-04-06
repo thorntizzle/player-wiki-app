@@ -23,7 +23,7 @@ from .repository import normalize_lookup
 from .systems_models import SystemsEntryRecord
 from .systems_service import SystemsService
 
-PDF_PARSER_VERSION = "2026-03-30.1"
+PDF_PARSER_VERSION = "2026-04-06.1"
 BULLET_CHAR = "\u2022"
 EN_DASH_CHAR = "\u2013"
 

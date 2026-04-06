@@ -28,7 +28,7 @@ from .character_store import CharacterStateStore, CharacterStateWriteResult
 from .db import init_database
 from .repository import slugify
 
-PARSER_VERSION = "2026-03-30.2"
+PARSER_VERSION = "2026-04-06.1"
 REST_TRACKER_PATTERN = re.compile(
     r"^(?P<label>.+?)\s*[-:]\s*(?P<value>\d+)\s*/\s*(?P<reset>Long Rest|Short Rest|Daily|Other|Manual|Never)\b",
     re.IGNORECASE,
@@ -493,11 +493,18 @@ def extract_trackers_from_text(
             label = progress_match.group("label").strip()
             if len(label) < 3:
                 continue
+            current_value = int(progress_match.group("current"))
+            max_value = int(progress_match.group("max"))
+            if current_value > max_value:
+                warnings.append(
+                    f"Skipped suspicious progress tracker line '{line}' because current exceeded max."
+                )
+                continue
             trackers.append(
                 build_tracker_template(
                     label,
-                    current=int(progress_match.group("current")),
-                    max_value=int(progress_match.group("max")),
+                    current=current_value,
+                    max_value=max_value,
                     reset_token="manual",
                     category="custom_progress",
                     display_order=display_order,

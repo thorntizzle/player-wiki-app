@@ -8,7 +8,12 @@ import yaml
 
 from player_wiki.app import create_app
 from player_wiki.character_builder import supports_native_level_up
-from player_wiki.character_importer import converge_imported_definition, import_character, parse_character_sheet_text
+from player_wiki.character_importer import (
+    converge_imported_definition,
+    extract_trackers_from_text,
+    import_character,
+    parse_character_sheet_text,
+)
 from player_wiki.character_models import CharacterDefinition
 from player_wiki.character_pdf_importer import (
     apply_systems_links_to_definition,
@@ -594,6 +599,24 @@ Attack
     assert lucky["tracker_ref"] == "lucky"
     assert resources_by_id["lucky"]["max"] == 3
     assert resources_by_id["lucky"]["reset_on"] == "long_rest"
+
+
+def test_extract_trackers_from_text_skips_invalid_progress_lines_that_look_like_dates():
+    warnings: list[str] = []
+
+    trackers = extract_trackers_from_text(
+        "2 Favors from downtime 3/1\nRenown 3/5",
+        category="custom_progress",
+        display_start=0,
+        warnings=warnings,
+    )
+
+    assert [tracker["label"] for tracker in trackers] == ["Renown"]
+    assert trackers[0]["initial_current"] == 3
+    assert trackers[0]["max"] == 5
+    assert warnings == [
+        "Skipped suspicious progress tracker line '2 Favors from downtime 3/1' because current exceeded max."
+    ]
 
 
 def test_parse_character_sheet_text_normalizes_duplicate_attack_and_equipment_rows():
