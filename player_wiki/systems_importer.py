@@ -92,7 +92,7 @@ SUBRACE_PREFIX_RACE_NAMES = {
     "tiefling",
 }
 
-PLAYER_SAFE_SOURCE_IDS = {"PHB", "XGE", "TCE", "EGW"}
+PLAYER_SAFE_SOURCE_IDS = {"PHB", "SCAG", "XGE", "TCE", "EGW"}
 PLAYER_SAFE_ENTRY_TYPES = {
     "action",
     "background",

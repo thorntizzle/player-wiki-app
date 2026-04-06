@@ -542,6 +542,45 @@ def build_test_data_root(root: Path) -> Path:
     return root
 
 
+def build_scag_background_data_root(root: Path) -> Path:
+    write_json(
+        root / "data/backgrounds.json",
+        {
+            "background": [
+                {
+                    "name": "Clan Crafter",
+                    "source": "SCAG",
+                    "page": 145,
+                    "skillProficiencies": [{"history": True, "insight": True}],
+                    "languageProficiencies": [{"dwarvish": True}, {"anyStandard": 1}],
+                    "toolProficiencies": [{"anyArtisansTool": 1}],
+                    "startingEquipment": [
+                        {
+                            "_": [
+                                {"equipmentType": "toolArtisan"},
+                                {"special": "maker's mark chisel"},
+                                "traveler's clothes|phb",
+                                {"item": "pouch|phb", "containsValue": 1500},
+                            ]
+                        }
+                    ],
+                    "entries": [
+                        {
+                            "name": "Feature: Respect of the Stout Folk",
+                            "type": "entries",
+                            "entries": [
+                                "Dwarves offer you hospitality and assistance in their settlements."
+                            ],
+                            "data": {"isFeature": True},
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    return root
+
+
 def build_additional_spell_metadata_data_root(root: Path) -> Path:
     write_json(root / "data/class/index.json", {"cleric": "class-cleric.json"})
     write_json(
@@ -1179,7 +1218,7 @@ def build_unsupported_cross_source_subclassfeature_data_root(root: Path) -> Path
                     "className": "Cleric",
                     "classSource": "PHB",
                     "subclassShortName": "Arcana",
-                    "subclassSource": "SCAG",
+                    "subclassSource": "EFA",
                     "level": 8,
                     "page": 31,
                     "entries": ["Unsupported subclass source."],
@@ -1466,6 +1505,31 @@ def test_importer_imports_mechanics_only_and_strips_media_fields(app, tmp_path):
         assert "altArt" not in raw_monster_text
         assert "Melee Weapon Attack:" in monster.rendered_html
         assert "+4" in monster.rendered_html
+
+
+def test_importer_supports_scag_backgrounds(app, tmp_path):
+    data_root = build_scag_background_data_root(tmp_path / "dnd5e-source-scag-backgrounds")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        result = importer.import_source("SCAG", entry_types=["background"])
+        store = app.extensions["systems_store"]
+        clan_crafter = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "SCAG", entry_type="background", limit=10)
+            if entry.title == "Clan Crafter"
+        )
+
+    assert result.imported_count == 1
+    assert result.imported_by_type == {"background": 1}
+    assert clan_crafter.metadata["skill_proficiencies"] == [{"history": True, "insight": True}]
+    assert clan_crafter.metadata["language_proficiencies"] == [{"dwarvish": True}, {"anyStandard": 1}]
+    assert clan_crafter.metadata["tool_proficiencies"] == [{"anyArtisansTool": 1}]
+    assert "Respect of the Stout Folk" in clan_crafter.rendered_html
 
 
 def test_importer_preserves_additional_spell_metadata_on_class_entries(app, tmp_path):

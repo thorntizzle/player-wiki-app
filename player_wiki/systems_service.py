@@ -109,6 +109,14 @@ DND_5E_SOURCE_CATALOG = (
         "default_visibility": VISIBILITY_DM,
     },
     {
+        "source_id": "SCAG",
+        "title": "Sword Coast Adventurer's Guide",
+        "license_class": "proprietary_private",
+        "public_visibility_allowed": False,
+        "requires_unofficial_notice": True,
+        "default_visibility": VISIBILITY_PLAYERS,
+    },
+    {
         "source_id": "XGE",
         "title": "Xanathar's Guide to Everything",
         "license_class": "proprietary_private",
