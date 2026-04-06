@@ -1,0 +1,233 @@
+{
+  "Padded": {
+    "type": "LA",
+    "armor_category": "light",
+    "base_ac": 11,
+    "uses_dex": true,
+    "dex_cap": null,
+    "is_shield": false,
+    "bonus_ac": 0,
+    "minimum_strength": null,
+    "stealth_disadvantage": true
+  },
+  "Padded Armor": {
+    "type": "LA",
+    "armor_category": "light",
+    "base_ac": 11,
+    "uses_dex": true,
+    "dex_cap": null,
+    "is_shield": false,
+    "bonus_ac": 0,
+    "minimum_strength": null,
+    "stealth_disadvantage": true
+  },
+  "Leather": {
+    "type": "LA",
+    "armor_category": "light",
+    "base_ac": 11,
+    "uses_dex": true,
+    "dex_cap": null,
+    "is_shield": false,
+    "bonus_ac": 0,
+    "minimum_strength": null,
+    "stealth_disadvantage": false
+  },
+  "Leather Armor": {
+    "type": "LA",
+    "armor_category": "light",
+    "base_ac": 11,
+    "uses_dex": true,
+    "dex_cap": null,
+    "is_shield": false,
+    "bonus_ac": 0,
+    "minimum_strength": null,
+    "stealth_disadvantage": false
+  },
+  "Studded Leather": {
+    "type": "LA",
+    "armor_category": "light",
+    "base_ac": 12,
+    "uses_dex": true,
+    "dex_cap": null,
+    "is_shield": false,
+    "bonus_ac": 0,
+    "minimum_strength": null,
+    "stealth_disadvantage": false
+  },
+  "Studded Leather Armor": {
+    "type": "LA",
+    "armor_category": "light",
+    "base_ac": 12,
+    "uses_dex": true,
+    "dex_cap": null,
+    "is_shield": false,
+    "bonus_ac": 0,
+    "minimum_strength": null,
+    "stealth_disadvantage": false
+  },
+  "Hide": {
+    "type": "MA",
+    "armor_category": "medium",
+    "base_ac": 12,
+    "uses_dex": true,
+    "dex_cap": 2,
+    "is_shield": false,
+    "bonus_ac": 0,
+    "minimum_strength": null,
+    "stealth_disadvantage": false
+  },
+  "Hide Armor": {
+    "type": "MA",
+    "armor_category": "medium",
+    "base_ac": 12,
+    "uses_dex": true,
+    "dex_cap": 2,
+    "is_shield": false,
+    "bonus_ac": 0,
+    "minimum_strength": null,
+    "stealth_disadvantage": false
+  },
+  "Chain Shirt": {
+    "type": "MA",
+    "armor_category": "medium",
+    "base_ac": 13,
+    "uses_dex": true,
+    "dex_cap": 2,
+    "is_shield": false,
+    "bonus_ac": 0,
+    "minimum_strength": null,
+    "stealth_disadvantage": false
+  },
+  "Scale Mail": {
+    "type": "MA",
+    "armor_category": "medium",
+    "base_ac": 14,
+    "uses_dex": true,
+    "dex_cap": 2,
+    "is_shield": false,
+    "bonus_ac": 0,
+    "minimum_strength": null,
+    "stealth_disadvantage": true
+  },
+  "Breastplate": {
+    "type": "MA",
+    "armor_category": "medium",
+    "base_ac": 14,
+    "uses_dex": true,
+    "dex_cap": 2,
+    "is_shield": false,
+    "bonus_ac": 0,
+    "minimum_strength": null,
+    "stealth_disadvantage": false
+  },
+  "Half Plate": {
+    "type": "MA",
+    "armor_category": "medium",
+    "base_ac": 15,
+    "uses_dex": true,
+    "dex_cap": 2,
+    "is_shield": false,
+    "bonus_ac": 0,
+    "minimum_strength": null,
+    "stealth_disadvantage": true
+  },
+  "Half Plate Armor": {
+    "type": "MA",
+    "armor_category": "medium",
+    "base_ac": 15,
+    "uses_dex": true,
+    "dex_cap": 2,
+    "is_shield": false,
+    "bonus_ac": 0,
+    "minimum_strength": null,
+    "stealth_disadvantage": true
+  },
+  "Ring Mail": {
+    "type": "HA",
+    "armor_category": "heavy",
+    "base_ac": 14,
+    "uses_dex": false,
+    "dex_cap": null,
+    "is_shield": false,
+    "bonus_ac": 0,
+    "minimum_strength": null,
+    "stealth_disadvantage": true
+  },
+  "Chain Mail": {
+    "type": "HA",
+    "armor_category": "heavy",
+    "base_ac": 16,
+    "uses_dex": false,
+    "dex_cap": null,
+    "is_shield": false,
+    "bonus_ac": 0,
+    "minimum_strength": 13,
+    "stealth_disadvantage": true
+  },
+  "Chain Mail Armor": {
+    "type": "HA",
+    "armor_category": "heavy",
+    "base_ac": 16,
+    "uses_dex": false,
+    "dex_cap": null,
+    "is_shield": false,
+    "bonus_ac": 0,
+    "minimum_strength": 13,
+    "stealth_disadvantage": true
+  },
+  "Splint": {
+    "type": "HA",
+    "armor_category": "heavy",
+    "base_ac": 17,
+    "uses_dex": false,
+    "dex_cap": null,
+    "is_shield": false,
+    "bonus_ac": 0,
+    "minimum_strength": 15,
+    "stealth_disadvantage": true
+  },
+  "Splint Armor": {
+    "type": "HA",
+    "armor_category": "heavy",
+    "base_ac": 17,
+    "uses_dex": false,
+    "dex_cap": null,
+    "is_shield": false,
+    "bonus_ac": 0,
+    "minimum_strength": 15,
+    "stealth_disadvantage": true
+  },
+  "Plate": {
+    "type": "HA",
+    "armor_category": "heavy",
+    "base_ac": 18,
+    "uses_dex": false,
+    "dex_cap": null,
+    "is_shield": false,
+    "bonus_ac": 0,
+    "minimum_strength": 15,
+    "stealth_disadvantage": true
+  },
+  "Plate Armor": {
+    "type": "HA",
+    "armor_category": "heavy",
+    "base_ac": 18,
+    "uses_dex": false,
+    "dex_cap": null,
+    "is_shield": false,
+    "bonus_ac": 0,
+    "minimum_strength": 15,
+    "stealth_disadvantage": true
+  },
+  "Shield": {
+    "type": "S",
+    "armor_category": "shield",
+    "base_ac": 2,
+    "uses_dex": false,
+    "dex_cap": null,
+    "is_shield": true,
+    "bonus_ac": 0,
+    "minimum_strength": null,
+    "stealth_disadvantage": false
+  }
+}

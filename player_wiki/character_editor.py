@@ -27,6 +27,7 @@ from .character_builder import (
     _spell_progression_value,
     _spell_selection_values_by_mark,
     _spellcasting_mode_for_class,
+    normalize_definition_to_native_model,
 )
 from .character_campaign_options import (
     FEATURE_LIKE_CAMPAIGN_OPTION_KINDS,
@@ -40,7 +41,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup
 from .repository import slugify
 
-CHARACTER_EDITOR_VERSION = "2026-03-31.01"
+CHARACTER_EDITOR_VERSION = "2026-04-06.01"
 CUSTOM_FEATURE_CATEGORY = "custom_feature"
 CUSTOM_EQUIPMENT_SOURCE_KIND = "manual_edit"
 CUSTOM_FEATURE_TRACKER_PREFIX = "manual-feature-tracker"
@@ -460,6 +461,8 @@ def apply_character_spell_management_edit(
             definition,
             existing_definition=current_definition,
         )
+    else:
+        definition = normalize_definition_to_native_model(definition)
     import_metadata = build_managed_character_import_metadata(
         campaign_slug,
         current_definition.character_slug,
@@ -928,6 +931,8 @@ def apply_equipment_catalog_edit(
             definition,
             existing_definition=current_definition,
         )
+    else:
+        definition = normalize_definition_to_native_model(definition)
     import_metadata = build_managed_character_import_metadata(
         campaign_slug,
         current_definition.character_slug,

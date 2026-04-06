@@ -207,6 +207,9 @@ def build_test_data_root(root: Path) -> Path:
                     "page": 145,
                     "type": "HA",
                     "armor": True,
+                    "ac": 16,
+                    "strength": "13",
+                    "stealth": True,
                     "weight": 55,
                     "entries": ["Heavy armor made of interlocking metal rings."]
                 },
@@ -1491,6 +1494,10 @@ def test_importer_imports_mechanics_only_and_strips_media_fields(app, tmp_path):
         assert "Cantrip (Conjuration)" in spell.rendered_html
         assert "30 feet" in spell.rendered_html
         assert "Heavy armor made of interlocking metal rings." in phb_entries["Chain Mail"].rendered_html
+        assert phb_entries["Chain Mail"].metadata["ac"] == 16
+        assert phb_entries["Chain Mail"].metadata["type"] == "HA"
+        assert phb_entries["Chain Mail"].metadata["strength"] == "13"
+        assert phb_entries["Chain Mail"].metadata["stealth_disadvantage"] is True
         assert "martial ranged weapon" in phb_entries["Light Crossbow"].rendered_html
         assert "twenty crossbow bolts" in phb_entries["Crossbow Bolts (20)"].rendered_html
         fighter = phb_entries["Fighter"]
@@ -1583,6 +1590,9 @@ def test_importer_expands_safe_classic_magic_armor_variants(app, tmp_path):
     assert "+1 Chain Mail" in dmg_entries
     assert "You have a +1 bonus to AC while wearing this armor." in dmg_entries["+1 Chain Mail"].rendered_html
     assert "Heavy armor made of interlocking metal rings." in dmg_entries["+1 Chain Mail"].rendered_html
+    assert dmg_entries["+1 Chain Mail"].metadata["ac"] == 16
+    assert dmg_entries["+1 Chain Mail"].metadata["bonus_ac"] == "+1"
+    assert dmg_entries["+1 Chain Mail"].metadata["base_item"] == "Chain Mail|PHB"
 
 
 def test_importer_preserves_additional_spell_metadata_on_class_entries(app, tmp_path):

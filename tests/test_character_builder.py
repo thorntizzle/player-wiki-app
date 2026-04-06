@@ -2933,6 +2933,129 @@ def test_normalize_definition_to_native_model_merges_linked_duplicate_equipment_
     assert normalized.equipment_catalog[0]["systems_ref"]["slug"] == "phb-item-longsword"
 
 
+def test_normalize_definition_to_native_model_derives_imported_armor_class_from_equipped_armor_and_shield():
+    definition = _minimal_imported_character_definition("mira-salt", "Mira Salt")
+    definition.stats["armor_class"] = 12
+    definition.equipment_catalog = [
+        {
+            "id": "chain-mail-1",
+            "name": "Chain Mail",
+            "default_quantity": 1,
+            "weight": "55 lb.",
+            "notes": "",
+            "is_equipped": True,
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-chain-mail",
+                "title": "Chain Mail",
+                "source_id": "PHB",
+            },
+        },
+        {
+            "id": "shield-1",
+            "name": "Shield",
+            "default_quantity": 1,
+            "weight": "6 lb.",
+            "notes": "",
+            "is_equipped": True,
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-shield",
+                "title": "Shield",
+                "source_id": "PHB",
+            },
+        },
+        {
+            "id": "plate-1",
+            "name": "Plate Armor",
+            "default_quantity": 1,
+            "weight": "65 lb.",
+            "notes": "",
+            "is_equipped": False,
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-plate",
+                "title": "Plate Armor",
+                "source_id": "PHB",
+            },
+        },
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+    equipment_by_name = {item["name"]: item for item in normalized.equipment_catalog}
+
+    assert normalized.stats["armor_class"] == 18
+    assert equipment_by_name["Chain Mail"]["is_equipped"] is True
+    assert equipment_by_name["Shield"]["is_equipped"] is True
+
+
+def test_normalize_definition_to_native_model_preserves_imported_armor_class_when_only_shield_is_known():
+    definition = _minimal_imported_character_definition("tobin-slate", "Tobin Slate")
+    definition.stats["armor_class"] = 17
+    definition.equipment_catalog = [
+        {
+            "id": "shield-1",
+            "name": "Shield",
+            "default_quantity": 1,
+            "weight": "6 lb.",
+            "notes": "",
+            "is_equipped": True,
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-shield",
+                "title": "Shield",
+                "source_id": "PHB",
+            },
+        }
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+
+    assert normalized.stats["armor_class"] == 17
+
+
+def test_normalize_definition_to_native_model_derives_barbarian_unarmored_defense_for_imported_character():
+    definition = _minimal_imported_character_definition("bryn-coal", "Bryn Coal")
+    definition.profile["class_level_text"] = "Barbarian 3"
+    definition.profile["classes"] = [
+        {
+            "class_name": "Barbarian",
+            "subclass_name": "",
+            "level": 3,
+        }
+    ]
+    definition.profile["class_ref"] = {
+        "entry_key": "dnd-5e|class|phb|barbarian",
+        "entry_type": "class",
+        "title": "Barbarian",
+        "slug": "phb-class-barbarian",
+        "source_id": "PHB",
+    }
+    definition.stats["armor_class"] = 10
+    definition.stats["ability_scores"]["dex"]["score"] = 14
+    definition.stats["ability_scores"]["con"]["score"] = 14
+    definition.equipment_catalog = [
+        {
+            "id": "shield-1",
+            "name": "Shield",
+            "default_quantity": 1,
+            "weight": "6 lb.",
+            "notes": "",
+            "is_equipped": True,
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-shield",
+                "title": "Shield",
+                "source_id": "PHB",
+            },
+        }
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+
+    assert normalized.stats["armor_class"] == 16
+
+
 def test_normalize_definition_to_native_model_adds_proficiency_bonus_feat_trackers():
     definition = _minimal_character_definition("mira-salt", "Mira Salt")
     definition.profile["class_level_text"] = "Fighter 5"
@@ -4006,6 +4129,87 @@ def test_level_one_builder_generates_attack_rows_from_starting_weapons():
     assert attacks_by_name["Light Crossbow"]["damage"] == "1d8+1 piercing"
     assert attacks_by_name["Light Crossbow"]["notes"] == "Ammunition, loading, range 80/320."
     assert attacks_by_name["Light Crossbow"]["systems_ref"]["slug"] == "phb-item-light-crossbow"
+
+
+def test_level_one_builder_derives_armor_class_from_starting_armor_and_shield():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+            "starting_equipment": {
+                "defaultData": [
+                    {"_": ["chain mail|phb", "shield|phb"]},
+                ]
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    chain_mail = _systems_entry(
+        "item",
+        "phb-item-chain-mail",
+        "Chain Mail",
+        metadata={"type": "HA", "ac": 16, "armor": True, "strength": "13", "stealth_disadvantage": True},
+    )
+    shield = _systems_entry(
+        "item",
+        "phb-item-shield",
+        "Shield",
+        metadata={"type": "S", "ac": 2},
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "optionalfeature": [],
+            "item": [chain_mail, shield],
+            "spell": [],
+        },
+        class_progression=[],
+    )
+    form_values = {
+        "name": "Ser Rowan",
+        "character_slug": "ser-rowan",
+        "alignment": "Lawful Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+
+    assert definition.stats["armor_class"] == 18
 
 
 def test_level_one_builder_applies_dueling_damage_bonus_to_one_handed_melee_weapon():

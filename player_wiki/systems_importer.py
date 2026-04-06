@@ -1169,6 +1169,11 @@ class Dnd5eSystemsImporter:
                 "attunement": self._clean_data(raw_entry.get("reqAttune")),
                 "weight": raw_entry.get("weight"),
                 "base_item": self._clean_data(raw_entry.get("baseItem")),
+                "ac": raw_entry.get("ac"),
+                "armor": bool(raw_entry.get("armor")),
+                "strength": self._clean_data(raw_entry.get("strength")),
+                "stealth_disadvantage": bool(raw_entry.get("stealth")) if raw_entry.get("stealth") is not None else False,
+                "bonus_ac": self._clean_data(raw_entry.get("bonusAc")),
             }
             metadata_pairs = [
                 ("Item Type", self._format_compact_value(raw_entry.get("type"))),

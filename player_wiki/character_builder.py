@@ -21,7 +21,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-03-31.01"
+CHARACTER_BUILDER_VERSION = "2026-04-06.01"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -665,6 +665,7 @@ def build_level_one_character_definition(
 
     stats = _build_level_one_stats(
         selected_class=selected_class,
+        selected_subclass=selected_subclass,
         selected_species=selected_species,
         ability_scores=ability_scores,
         skills=skills,
@@ -673,6 +674,9 @@ def build_level_one_character_definition(
         choice_sections=choice_sections,
         selected_choices=selected_choices,
         current_level=1,
+        equipment_catalog=equipment_catalog,
+        features=features,
+        item_catalog=item_catalog,
         campaign_option_payloads=selected_campaign_option_payloads,
     )
     profile = _build_level_one_profile(
@@ -1338,6 +1342,7 @@ def build_native_level_up_character_definition(
         selected_choices,
     )
     item_catalog = _build_item_catalog([])
+    item_catalog = dict(level_up_context.get("item_catalog") or item_catalog)
     attacks = _build_level_one_attacks(
         equipment_catalog=list(current_definition.equipment_catalog or []),
         item_catalog=item_catalog,
@@ -1368,6 +1373,7 @@ def build_native_level_up_character_definition(
         stats=_build_leveled_stats(
             current_definition=current_definition,
             selected_class=selected_class,
+            selected_subclass=selected_subclass,
             ability_scores=ability_scores,
             skills=skills,
             proficiency_bonus=proficiency_bonus,
@@ -1375,6 +1381,9 @@ def build_native_level_up_character_definition(
             feat_selections=feat_selections,
             selected_choices=selected_choices,
             current_level=target_level,
+            equipment_catalog=list(current_definition.equipment_catalog or []),
+            features=merged_features,
+            item_catalog=item_catalog,
             selected_campaign_option_payloads=selected_campaign_option_payloads,
         ),
         skills=skills,
@@ -3617,16 +3626,51 @@ def _load_phb_weapon_profiles() -> dict[str, dict[str, Any]]:
     return normalized
 
 
+@lru_cache(maxsize=1)
+def _load_phb_armor_profiles() -> dict[str, dict[str, Any]]:
+    reference_path = Path(__file__).resolve().parent / "data" / "phb_armor_profiles.json"
+    if not reference_path.exists():
+        return {}
+    payload = json.loads(reference_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return {}
+    normalized: dict[str, dict[str, Any]] = {}
+    for title, profile in payload.items():
+        if not isinstance(profile, dict):
+            continue
+        dex_cap = profile.get("dex_cap")
+        minimum_strength = profile.get("minimum_strength")
+        normalized[normalize_lookup(title)] = {
+            "title": str(title).strip(),
+            "type": str(profile.get("type") or "").strip().upper(),
+            "armor_category": str(profile.get("armor_category") or "").strip().lower(),
+            "base_ac": int(profile.get("base_ac") or 0),
+            "uses_dex": bool(profile.get("uses_dex")),
+            "dex_cap": None if dex_cap in (None, "", False) else int(dex_cap),
+            "is_shield": bool(profile.get("is_shield")),
+            "bonus_ac": int(profile.get("bonus_ac") or 0),
+            "minimum_strength": None if minimum_strength in (None, "", False) else int(minimum_strength),
+            "stealth_disadvantage": bool(profile.get("stealth_disadvantage")),
+        }
+    return normalized
+
+
 def _build_item_catalog(item_entries: list[SystemsEntryRecord]) -> dict[str, Any]:
     by_title: dict[str, SystemsEntryRecord] = {}
+    by_slug: dict[str, SystemsEntryRecord] = {}
     for entry in item_entries:
         normalized_title = normalize_lookup(entry.title)
         if normalized_title and normalized_title not in by_title:
             by_title[normalized_title] = entry
+        slug = str(entry.slug or "").strip()
+        if slug and slug not in by_slug:
+            by_slug[slug] = entry
     return {
         "entries": list(item_entries),
         "by_title": by_title,
+        "by_slug": by_slug,
         "phb_weapon_profiles": _load_phb_weapon_profiles(),
+        "phb_armor_profiles": _load_phb_armor_profiles(),
     }
 
 
@@ -4959,6 +5003,325 @@ def _resolve_weapon_profile(
         if profile is not None:
             return dict(profile)
     return None
+
+
+def _resolve_item_entry(
+    item: Any,
+    item_catalog: dict[str, Any] | None,
+) -> SystemsEntryRecord | None:
+    if not item_catalog:
+        return None
+    by_title = dict(item_catalog.get("by_title") or {})
+    by_slug = dict(item_catalog.get("by_slug") or {})
+    candidate_titles: list[str] = []
+    if isinstance(item, dict):
+        systems_ref = dict(item.get("systems_ref") or {})
+        slug = str(systems_ref.get("slug") or "").strip()
+        if slug:
+            entry = by_slug.get(slug)
+            if isinstance(entry, SystemsEntryRecord):
+                return entry
+        candidate_titles.extend(
+            [
+                str(systems_ref.get("title") or "").strip(),
+                str(item.get("name") or "").strip(),
+            ]
+        )
+    else:
+        raw_reference = str(item or "").strip()
+        if raw_reference:
+            candidate_titles.extend(
+                [
+                    raw_reference.split("|", 1)[0].strip(),
+                    _humanize_item_reference(raw_reference),
+                ]
+            )
+    for title in candidate_titles:
+        if not title:
+            continue
+        entry = by_title.get(normalize_lookup(title))
+        if isinstance(entry, SystemsEntryRecord):
+            return entry
+    return None
+
+
+def _parse_optional_int_value(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return int(value)
+    match = re.search(r"[-+]?\d+", str(value))
+    if match is None:
+        return None
+    return int(match.group(0))
+
+
+def _build_armor_profile(
+    *,
+    title: str,
+    type_code: str,
+    base_ac: int,
+    bonus_ac: int = 0,
+    minimum_strength: int | None = None,
+    stealth_disadvantage: bool = False,
+) -> dict[str, Any] | None:
+    normalized_type = str(type_code or "").split("|", 1)[0].strip().upper()
+    if normalized_type not in {"LA", "MA", "HA", "S"}:
+        return None
+    armor_category = {
+        "LA": "light",
+        "MA": "medium",
+        "HA": "heavy",
+        "S": "shield",
+    }[normalized_type]
+    return {
+        "title": str(title or "").strip(),
+        "type": normalized_type,
+        "armor_category": armor_category,
+        "base_ac": int(base_ac),
+        "uses_dex": normalized_type in {"LA", "MA"},
+        "dex_cap": 2 if normalized_type == "MA" else None,
+        "is_shield": normalized_type == "S",
+        "bonus_ac": int(bonus_ac or 0),
+        "minimum_strength": minimum_strength,
+        "stealth_disadvantage": bool(stealth_disadvantage),
+    }
+
+
+def _armor_profile_from_entry(entry: SystemsEntryRecord | None) -> dict[str, Any] | None:
+    if not isinstance(entry, SystemsEntryRecord):
+        return None
+    metadata = dict(entry.metadata or {})
+    type_code = str(metadata.get("type") or "").split("|", 1)[0].strip().upper()
+    base_ac = _parse_optional_int_value(metadata.get("ac"))
+    if base_ac is None:
+        return None
+    return _build_armor_profile(
+        title=entry.title,
+        type_code=type_code,
+        base_ac=base_ac,
+        bonus_ac=_parse_optional_int_value(metadata.get("bonus_ac")) or 0,
+        minimum_strength=_parse_optional_int_value(metadata.get("strength")),
+        stealth_disadvantage=bool(metadata.get("stealth_disadvantage")),
+    )
+
+
+def _split_magic_armor_name(raw_name: Any) -> tuple[str, int]:
+    cleaned = str(raw_name or "").strip()
+    if not cleaned:
+        return "", 0
+    prefix_match = re.match(r"^\+(\d+)\s+(.+)$", cleaned)
+    if prefix_match is not None:
+        return prefix_match.group(2).strip(), int(prefix_match.group(1))
+    suffix_match = re.match(r"^(.+?),\s*\+(\d+)$", cleaned)
+    if suffix_match is not None:
+        return suffix_match.group(1).strip(), int(suffix_match.group(2))
+    return cleaned, 0
+
+
+def _resolve_armor_profile(
+    item: dict[str, Any],
+    item_catalog: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    entry = _resolve_item_entry(item, item_catalog)
+    entry_profile = _armor_profile_from_entry(entry)
+    if entry_profile is not None:
+        return entry_profile
+
+    armor_profiles = dict((item_catalog or {}).get("phb_armor_profiles") or _load_phb_armor_profiles())
+    metadata = dict((entry.metadata if isinstance(entry, SystemsEntryRecord) else {}) or {})
+    bonus_ac = _parse_optional_int_value(metadata.get("bonus_ac")) or 0
+    candidate_titles = []
+    base_item = str(metadata.get("base_item") or "").split("|", 1)[0].strip()
+    if base_item:
+        candidate_titles.append(base_item)
+    systems_ref = dict(item.get("systems_ref") or {})
+    candidate_titles.extend(
+        [
+            str(systems_ref.get("title") or "").strip(),
+            str(item.get("name") or "").strip(),
+        ]
+    )
+    seen_candidates: set[str] = set()
+    for raw_title in candidate_titles:
+        base_title, parsed_bonus = _split_magic_armor_name(raw_title)
+        effective_bonus = bonus_ac or parsed_bonus
+        for candidate in _merge_name_candidates(base_title):
+            if candidate in seen_candidates:
+                continue
+            seen_candidates.add(candidate)
+            profile = armor_profiles.get(candidate)
+            if profile is None:
+                continue
+            resolved_profile = dict(profile)
+            resolved_profile["bonus_ac"] = int(resolved_profile.get("bonus_ac") or 0) + int(effective_bonus or 0)
+            return resolved_profile
+    return None
+
+
+def _character_profile_class_names(
+    definition: CharacterDefinition,
+    *,
+    fallback_class_name: str = "",
+) -> list[str]:
+    classes = []
+    for class_payload in list((definition.profile or {}).get("classes") or []):
+        class_name = str(dict(class_payload or {}).get("class_name") or "").strip()
+        if class_name:
+            classes.append(class_name)
+    class_ref = dict((definition.profile or {}).get("class_ref") or {})
+    fallback = str(
+        fallback_class_name
+        or class_ref.get("title")
+        or (definition.profile or {}).get("class_name")
+        or ""
+    ).strip()
+    if fallback and fallback not in classes:
+        classes.append(fallback)
+    return classes
+
+
+def _character_profile_subclass_names(
+    definition: CharacterDefinition,
+    *,
+    fallback_subclass_name: str = "",
+) -> list[str]:
+    subclasses = []
+    for class_payload in list((definition.profile or {}).get("classes") or []):
+        subclass_name = str(dict(class_payload or {}).get("subclass_name") or "").strip()
+        if subclass_name:
+            subclasses.append(subclass_name)
+    fallback = str(fallback_subclass_name or _native_character_subclass_name(definition) or "").strip()
+    if fallback and fallback not in subclasses:
+        subclasses.append(fallback)
+    return subclasses
+
+
+def _character_has_named_feature(features: list[dict[str, Any]] | None, *feature_values: str) -> bool:
+    normalized_targets = {normalize_lookup(value) for value in feature_values if str(value or "").strip()}
+    for feature in list(features or []):
+        systems_ref = dict(feature.get("systems_ref") or {})
+        candidates = (
+            str(feature.get("name") or "").strip(),
+            str(systems_ref.get("title") or "").strip(),
+            str(systems_ref.get("slug") or "").strip(),
+        )
+        if any(normalize_lookup(candidate) in normalized_targets for candidate in candidates if candidate):
+            return True
+    return False
+
+
+def _derive_armor_class_from_character_inputs(
+    *,
+    ability_scores: dict[str, int],
+    equipment_catalog: list[dict[str, Any]],
+    features: list[dict[str, Any]] | None,
+    class_names: list[str] | None,
+    subclass_names: list[str] | None,
+    item_catalog: dict[str, Any] | None = None,
+    allow_plain_unarmored_base: bool,
+) -> int | None:
+    dex_modifier = _ability_modifier(int(ability_scores.get("dex", DEFAULT_ABILITY_SCORE) or DEFAULT_ABILITY_SCORE))
+    con_modifier = _ability_modifier(int(ability_scores.get("con", DEFAULT_ABILITY_SCORE) or DEFAULT_ABILITY_SCORE))
+    wis_modifier = _ability_modifier(int(ability_scores.get("wis", DEFAULT_ABILITY_SCORE) or DEFAULT_ABILITY_SCORE))
+    normalized_classes = {normalize_lookup(name) for name in list(class_names or []) if str(name or "").strip()}
+    normalized_subclasses = {normalize_lookup(name) for name in list(subclass_names or []) if str(name or "").strip()}
+
+    all_items = [dict(item or {}) for item in list(equipment_catalog or [])]
+    equipped_items = [item for item in all_items if bool(item.get("is_equipped"))]
+    equipped_armor_profiles = [
+        (item, profile)
+        for item in equipped_items
+        if (profile := _resolve_armor_profile(item, item_catalog)) is not None
+    ]
+    armor_items = equipped_items if any(not bool(profile.get("is_shield")) for _, profile in equipped_armor_profiles) else all_items
+    resolved_profiles = [
+        (item, profile)
+        for item in armor_items
+        if (profile := _resolve_armor_profile(item, item_catalog)) is not None
+    ]
+
+    shield_bonus = max(
+        (
+            int(profile.get("base_ac") or 0) + int(profile.get("bonus_ac") or 0)
+            for _, profile in resolved_profiles
+            if bool(profile.get("is_shield"))
+        ),
+        default=0,
+    )
+    armor_profiles = [profile for _, profile in resolved_profiles if not bool(profile.get("is_shield"))]
+    has_armor = bool(armor_profiles)
+    has_shield = shield_bonus > 0
+
+    has_barbarian_unarmored_defense = normalize_lookup("Barbarian") in normalized_classes
+    has_monk_unarmored_defense = normalize_lookup("Monk") in normalized_classes
+    has_draconic_resilience = normalize_lookup("Draconic Bloodline") in normalized_subclasses or _character_has_named_feature(
+        features,
+        "Draconic Resilience",
+    )
+    has_defense_fighting_style = _character_has_named_feature(features, "Defense", "phb-optionalfeature-defense")
+
+    candidate_values: list[int] = []
+    for profile in armor_profiles:
+        base_ac = int(profile.get("base_ac") or 0)
+        bonus_ac = int(profile.get("bonus_ac") or 0)
+        armor_category = str(profile.get("armor_category") or "").strip().lower()
+        total = base_ac + bonus_ac
+        if armor_category == "light":
+            total += dex_modifier
+        elif armor_category == "medium":
+            dex_cap = profile.get("dex_cap")
+            total += min(dex_modifier, int(dex_cap if dex_cap is not None else 2))
+        if has_defense_fighting_style:
+            total += 1
+        total += shield_bonus
+        candidate_values.append(total)
+
+    if not has_armor:
+        if allow_plain_unarmored_base:
+            candidate_values.append(10 + dex_modifier + shield_bonus)
+        if has_barbarian_unarmored_defense:
+            candidate_values.append(10 + dex_modifier + con_modifier + shield_bonus)
+        if has_draconic_resilience:
+            candidate_values.append(13 + dex_modifier + shield_bonus)
+        if has_monk_unarmored_defense and not has_shield:
+            candidate_values.append(10 + dex_modifier + wis_modifier)
+
+    if not candidate_values:
+        return None
+    return max(candidate_values)
+
+
+def _recalculate_definition_armor_class(
+    definition: CharacterDefinition,
+    *,
+    item_catalog: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    stats, manual_adjustments = strip_manual_stat_adjustments(dict(definition.stats or {}))
+    campaign_option_adjustments = collect_campaign_option_stat_adjustments(
+        _campaign_option_payloads_from_definition(definition)
+    )
+    if campaign_option_adjustments:
+        stats = apply_stat_adjustments(
+            stats,
+            {key: -int(value) for key, value in campaign_option_adjustments.items()},
+        )
+    derived_armor_class = _derive_armor_class_from_character_inputs(
+        ability_scores=_ability_scores_from_definition(definition),
+        equipment_catalog=list(definition.equipment_catalog or []),
+        features=list(definition.features or []),
+        class_names=_character_profile_class_names(definition),
+        subclass_names=_character_profile_subclass_names(definition),
+        item_catalog=item_catalog or {},
+        allow_plain_unarmored_base=_character_source_type(definition) == "native_character_builder",
+    )
+    if derived_armor_class is None:
+        return dict(definition.stats or {})
+    stats["armor_class"] = derived_armor_class
+    stats = apply_stat_adjustments(stats, campaign_option_adjustments)
+    return apply_manual_stat_adjustments(stats, manual_adjustments)
 
 
 def _weapon_attack_ability_key(
@@ -6436,9 +6799,15 @@ def _build_level_one_preview(
         if selected_class is not None
         else {"spells": []}
     )
+    feature_payloads, resource_templates = _build_feature_payloads(
+        feature_entries,
+        ability_scores=ability_scores,
+        current_level=1,
+    )
     stats = (
         _build_level_one_stats(
             selected_class=selected_class,
+            selected_subclass=selected_subclass,
             selected_species=selected_species,
             ability_scores=ability_scores,
             skills=skills,
@@ -6447,15 +6816,13 @@ def _build_level_one_preview(
             choice_sections=choice_sections,
             selected_choices=selected_choices,
             current_level=1,
+            equipment_catalog=equipment_catalog,
+            features=feature_payloads,
+            item_catalog=item_catalog,
             campaign_option_payloads=selected_campaign_option_payloads,
         )
         if selected_class is not None and selected_species is not None
         else {}
-    )
-    feature_payloads, resource_templates = _build_feature_payloads(
-        feature_entries,
-        ability_scores=ability_scores,
-        current_level=1,
     )
     attacks = _build_level_one_attacks(
         equipment_catalog=equipment_catalog,
@@ -7478,6 +7845,7 @@ def _build_feature_payload(
 def _build_level_one_stats(
     *,
     selected_class: SystemsEntryRecord,
+    selected_subclass: SystemsEntryRecord | None,
     selected_species: SystemsEntryRecord,
     ability_scores: dict[str, int],
     skills: list[dict[str, Any]],
@@ -7486,6 +7854,9 @@ def _build_level_one_stats(
     choice_sections: list[dict[str, Any]],
     selected_choices: dict[str, list[str]],
     current_level: int,
+    equipment_catalog: list[dict[str, Any]] | None = None,
+    features: list[dict[str, Any]] | None = None,
+    item_catalog: dict[str, Any] | None = None,
     campaign_option_payloads: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     class_metadata = dict(selected_class.metadata or {})
@@ -7500,11 +7871,20 @@ def _build_level_one_stats(
         + _extract_feat_saving_throw_proficiencies(feat_selections, selected_choices)
     )
     base_speed = _extract_speed_label(selected_species)
+    armor_class = _derive_armor_class_from_character_inputs(
+        ability_scores=ability_scores,
+        equipment_catalog=equipment_catalog or [],
+        features=features or [],
+        class_names=[selected_class.title],
+        subclass_names=[selected_subclass.title] if selected_subclass is not None else [],
+        item_catalog=item_catalog or {},
+        allow_plain_unarmored_base=True,
+    )
 
     stats = {
         "max_hp": max(hit_die_faces + con_modifier, 1)
         + _feat_hit_point_bonus(feat_selections, current_level=current_level),
-        "armor_class": 10 + _ability_modifier(ability_scores["dex"]),
+        "armor_class": armor_class,
         "initiative_bonus": _ability_modifier(ability_scores["dex"])
         + _feat_initiative_bonus(feat_selections),
         "speed": _apply_speed_bonus_to_label(base_speed, _feat_speed_bonus(feat_selections)),
@@ -7610,6 +7990,7 @@ def _build_leveled_stats(
     *,
     current_definition: CharacterDefinition,
     selected_class: SystemsEntryRecord,
+    selected_subclass: SystemsEntryRecord | None,
     ability_scores: dict[str, int],
     skills: list[dict[str, Any]],
     proficiency_bonus: int,
@@ -7617,6 +7998,9 @@ def _build_leveled_stats(
     feat_selections: list[dict[str, Any]],
     selected_choices: dict[str, list[str]],
     current_level: int,
+    equipment_catalog: list[dict[str, Any]] | None = None,
+    features: list[dict[str, Any]] | None = None,
+    item_catalog: dict[str, Any] | None = None,
     selected_campaign_option_payloads: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     stats, manual_adjustments = strip_manual_stat_adjustments(dict(current_definition.stats or {}))
@@ -7645,6 +8029,18 @@ def _build_leveled_stats(
     stats["passive_investigation"] = 10 + int(
         (skill_lookup.get("investigation") or {}).get("bonus") or _ability_modifier(ability_scores["int"])
     ) + _feat_passive_bonus(feat_selections, skill_name="Investigation")
+    stats["armor_class"] = _derive_armor_class_from_character_inputs(
+        ability_scores=ability_scores,
+        equipment_catalog=equipment_catalog or list(current_definition.equipment_catalog or []),
+        features=features or list(current_definition.features or []),
+        class_names=_character_profile_class_names(current_definition, fallback_class_name=selected_class.title),
+        subclass_names=_character_profile_subclass_names(
+            current_definition,
+            fallback_subclass_name=selected_subclass.title if selected_subclass is not None else "",
+        ),
+        item_catalog=item_catalog or {},
+        allow_plain_unarmored_base=True,
+    )
     stats["initiative_bonus"] = _ability_modifier(ability_scores["dex"]) + _feat_initiative_bonus(feat_selections)
     stats["speed"] = _apply_speed_bonus_to_label(str(stats.get("speed") or ""), _feat_speed_bonus(feat_selections))
     stats["ability_scores"] = {
@@ -10757,6 +11153,11 @@ def _normalize_equipment_payloads(
         payload["weight"] = str(payload.get("weight") or "").strip()
         payload["notes"] = str(payload.get("notes") or "").strip()
         payload["source_kind"] = str(payload.get("source_kind") or "").strip()
+        payload["is_equipped"] = bool(payload.get("is_equipped", False))
+        payload["is_attuned"] = bool(payload.get("is_attuned", False))
+        payload["charges_current"] = payload.get("charges_current")
+        payload["charges_max"] = payload.get("charges_max")
+        payload["tags"] = [str(tag).strip() for tag in list(payload.get("tags") or []) if str(tag).strip()]
         systems_ref = dict(payload.get("systems_ref") or {})
         if systems_ref:
             payload["systems_ref"] = systems_ref
@@ -10828,6 +11229,19 @@ def _normalize_equipment_payloads(
             existing_payload["source_kind"] = str(payload.get("source_kind") or "").strip()
         if not existing_payload.get("campaign_option") and payload.get("campaign_option"):
             existing_payload["campaign_option"] = dict(payload.get("campaign_option") or {})
+        existing_payload["is_equipped"] = bool(existing_payload.get("is_equipped", False)) or bool(
+            payload.get("is_equipped", False)
+        )
+        existing_payload["is_attuned"] = bool(existing_payload.get("is_attuned", False)) or bool(
+            payload.get("is_attuned", False)
+        )
+        if existing_payload.get("charges_current") in ("", None) and payload.get("charges_current") not in ("", None):
+            existing_payload["charges_current"] = payload.get("charges_current")
+        if existing_payload.get("charges_max") in ("", None) and payload.get("charges_max") not in ("", None):
+            existing_payload["charges_max"] = payload.get("charges_max")
+        existing_payload["tags"] = _dedupe_preserve_order(
+            list(existing_payload.get("tags") or []) + list(payload.get("tags") or [])
+        )
         updated_explicit_identity = _normalize_explicit_link_identity(
             systems_ref=dict(existing_payload.get("systems_ref") or {}),
             page_ref=existing_payload.get("page_ref"),
@@ -10903,7 +11317,11 @@ def _dedupe_campaign_spell_sources(sources: list[Any]) -> list[dict[str, Any]]:
     return deduped
 
 
-def normalize_definition_to_native_model(definition: CharacterDefinition) -> CharacterDefinition:
+def normalize_definition_to_native_model(
+    definition: CharacterDefinition,
+    *,
+    item_catalog: dict[str, Any] | None = None,
+) -> CharacterDefinition:
     payload = deepcopy(definition.to_dict())
     ability_scores = _ability_scores_from_definition(definition)
     current_level = max(_resolve_native_character_level(definition), 1)
@@ -10919,6 +11337,7 @@ def normalize_definition_to_native_model(definition: CharacterDefinition) -> Cha
     ))
     payload["attacks"] = _normalize_attack_payloads(list(definition.attacks or []))
     payload["equipment_catalog"] = _normalize_equipment_payloads(list(definition.equipment_catalog or []))
+    payload["stats"] = _recalculate_definition_armor_class(definition, item_catalog=item_catalog)
     spellcasting = dict(definition.spellcasting or {})
     spellcasting["spells"] = _normalize_spell_payloads(list(spellcasting.get("spells") or []))
     payload["spellcasting"] = spellcasting
