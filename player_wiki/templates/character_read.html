@@ -376,9 +376,49 @@
 
               <article class="detail-card session-card">
                 <div class="section-heading">
+                  <h3>Add campaign item</h3>
+                </div>
+                <p class="meta">Use this for published campaign wiki gear. The picker is limited to player-visible pages from the Items section.</p>
+                <form
+                  class="stack-form"
+                  method="post"
+                  action="{{ url_for('character_equipment_add_campaign_item', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+                >
+                  <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                  <input type="hidden" name="mode" value="read">
+                  <input type="hidden" name="page" value="{{ character_subpage }}">
+                  <label class="field">
+                    <span>Item article</span>
+                    <select name="page_ref">
+                      <option value="" selected>Choose an item article</option>
+                      {% for option in equipment_manager.campaign_item_page_options %}
+                        <option value="{{ option.value }}">{{ option.label }}</option>
+                      {% endfor %}
+                    </select>
+                  </label>
+                  <div class="detail-grid">
+                    <label class="field">
+                      <span>Quantity</span>
+                      <input type="number" name="quantity" value="1" min="0">
+                    </label>
+                    <label class="field">
+                      <span>Weight</span>
+                      <input type="text" name="weight" placeholder="Optional override">
+                    </label>
+                  </div>
+                  <label class="field">
+                    <span>Notes</span>
+                    <textarea name="notes" rows="4"></textarea>
+                  </label>
+                  <button type="submit">Add campaign item</button>
+                </form>
+              </article>
+
+              <article class="detail-card session-card">
+                <div class="section-heading">
                   <h3>Add custom item</h3>
                 </div>
-                <p class="meta">Use this for campaign-granted gear, oddities, or other items that do not come straight from the builder.</p>
+                <p class="meta">Use this for gear that does not come from Systems or a published campaign item page.</p>
                 <form
                   class="stack-form"
                   method="post"
@@ -401,15 +441,6 @@
                       <input type="text" name="weight" placeholder="Optional">
                     </label>
                   </div>
-                  <label class="field">
-                    <span>Linked page</span>
-                    <select name="page_ref">
-                      <option value="" selected>No linked page</option>
-                      {% for option in equipment_manager.page_options %}
-                        <option value="{{ option.value }}">{{ option.label }}</option>
-                      {% endfor %}
-                    </select>
-                  </label>
                   <label class="field">
                     <span>Notes</span>
                     <textarea name="notes" rows="4"></textarea>
@@ -477,15 +508,17 @@
                               <input type="text" name="weight" value="{{ item.weight }}">
                             </label>
                           </div>
-                          <label class="field">
-                            <span>Linked page</span>
-                            <select name="page_ref">
-                              <option value="" {% if not item.page_ref %}selected{% endif %}>No linked page</option>
-                              {% for option in equipment_manager.page_options %}
-                                <option value="{{ option.value }}"{% if option.value == item.page_ref %} selected{% endif %}>{{ option.label }}</option>
-                              {% endfor %}
-                            </select>
-                          </label>
+                          {% if item.is_campaign_item %}
+                            <label class="field">
+                              <span>Item article</span>
+                              <select name="page_ref">
+                                <option value="" {% if not item.page_ref %}selected{% endif %}>No linked page</option>
+                                {% for option in item.page_options %}
+                                  <option value="{{ option.value }}"{% if option.value == item.page_ref %} selected{% endif %}>{{ option.label }}</option>
+                                {% endfor %}
+                              </select>
+                            </label>
+                          {% endif %}
                         {% endif %}
                         <label class="field">
                           <span>Notes</span>

@@ -654,9 +654,45 @@ def create_app() -> Flask:
                 return slug
         return str(value or "").strip()
 
-    def build_character_page_link_options(campaign_page_records: list[object]) -> list[dict[str, str]]:
-        options: list[dict[str, str]] = []
+    CHARACTER_ITEMS_SECTION = "Items"
+
+    def filter_character_page_records(
+        campaign_page_records: list[object],
+        *,
+        section: str | None = None,
+        include_page_refs: set[str] | None = None,
+    ) -> list[object]:
+        normalized_section = str(section or "").strip()
+        normalized_include_page_refs = {
+            normalize_character_page_ref(value)
+            for value in set(include_page_refs or set())
+            if normalize_character_page_ref(value)
+        }
+        filtered_records: list[object] = []
         for page_record in list(campaign_page_records or []):
+            page_ref = str(getattr(page_record, "page_ref", "") or "").strip()
+            page = getattr(page_record, "page", None)
+            if not page_ref or page is None:
+                continue
+            if normalized_section:
+                page_section = str(getattr(page, "section", "") or "").strip()
+                if page_section != normalized_section and page_ref not in normalized_include_page_refs:
+                    continue
+            filtered_records.append(page_record)
+        return filtered_records
+
+    def build_character_page_link_options(
+        campaign_page_records: list[object],
+        *,
+        section: str | None = None,
+        include_page_refs: set[str] | None = None,
+    ) -> list[dict[str, str]]:
+        options: list[dict[str, str]] = []
+        for page_record in filter_character_page_records(
+            campaign_page_records,
+            section=section,
+            include_page_refs=include_page_refs,
+        ):
             page_ref = str(getattr(page_record, "page_ref", "") or "").strip()
             page = getattr(page_record, "page", None)
             if not page_ref or page is None:
@@ -682,6 +718,18 @@ def create_app() -> Flask:
             if campaign.is_page_visible(page_record.page)
             and str(page_record.page.section or "").strip() != "Sessions"
         ]
+
+    def list_visible_character_item_page_records(
+        campaign_slug: str,
+        campaign,
+        *,
+        include_page_refs: set[str] | None = None,
+    ) -> list[object]:
+        return filter_character_page_records(
+            list_visible_character_page_records(campaign_slug, campaign),
+            section=CHARACTER_ITEMS_SECTION,
+            include_page_refs=include_page_refs,
+        )
 
     def format_character_systems_item_weight(value: object) -> str:
         if value in (None, ""):
@@ -712,6 +760,10 @@ def create_app() -> Flask:
         *,
         campaign_page_records: list[object],
     ) -> dict[str, object]:
+        campaign_item_page_options = build_character_page_link_options(
+            campaign_page_records,
+            section=CHARACTER_ITEMS_SECTION,
+        )
         inventory_by_ref = {
             str(item.get("catalog_ref") or item.get("id") or "").strip(): dict(item)
             for item in list((record.state_record.state or {}).get("inventory") or [])
@@ -727,6 +779,11 @@ def create_app() -> Flask:
             inventory_item = inventory_by_ref.get(item_id, {})
             systems_ref = dict(item.get("systems_ref") or {})
             page_ref = normalize_character_page_ref(item.get("page_ref"))
+            item_page_options = build_character_page_link_options(
+                campaign_page_records,
+                section=CHARACTER_ITEMS_SECTION,
+                include_page_refs={page_ref} if page_ref else None,
+            )
             quantity_value = inventory_item.get("quantity")
             default_quantity = item.get("default_quantity")
             supplemental_items.append(
@@ -743,9 +800,13 @@ def create_app() -> Flask:
                         page_ref=item.get("page_ref"),
                     ),
                     "is_systems_item": bool(systems_ref),
+                    "is_campaign_item": bool(page_ref and not systems_ref),
+                    "page_options": item_page_options,
                     "source_label": (
                         f"Systems item ({systems_ref.get('source_id') or 'Unknown source'})"
                         if systems_ref
+                        else "Campaign item"
+                        if page_ref
                         else "Custom item"
                     ),
                 }
@@ -756,7 +817,7 @@ def create_app() -> Flask:
                 campaign_slug=campaign_slug,
                 character_slug=record.definition.character_slug,
             ),
-            "page_options": build_character_page_link_options(campaign_page_records),
+            "campaign_item_page_options": campaign_item_page_options,
             "supplemental_items": sorted(
                 supplemental_items,
                 key=lambda item: (str(item["name"]).lower(), str(item["id"]).lower()),
@@ -6039,8 +6100,6 @@ def create_app() -> Flask:
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/add-manual")
     @campaign_scope_access_required("characters")
     def character_equipment_add_manual(campaign_slug: str, character_slug: str):
-        campaign = load_campaign_context(campaign_slug)
-        campaign_page_records = list_visible_character_page_records(campaign_slug, campaign)
         return run_character_definition_mutation(
             campaign_slug,
             character_slug,
@@ -6050,20 +6109,46 @@ def create_app() -> Flask:
                 campaign_slug,
                 record.definition,
                 record.import_metadata,
+                name=request.form.get("name", ""),
+                quantity=request.form.get("quantity", "1"),
+                weight=request.form.get("weight", ""),
+                notes=request.form.get("notes", ""),
+            ),
+        )
+
+    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/add-campaign-item")
+    @campaign_scope_access_required("characters")
+    def character_equipment_add_campaign_item(campaign_slug: str, character_slug: str):
+        campaign = load_campaign_context(campaign_slug)
+        campaign_page_records = list_visible_character_item_page_records(campaign_slug, campaign)
+        def _action(record):
+            selected_page_ref = request.form.get("page_ref", "")
+            if not str(selected_page_ref or "").strip():
+                raise CharacterEditValidationError("Choose a valid item article to add.")
+            return apply_equipment_catalog_edit(
+                campaign_slug,
+                record.definition,
+                record.import_metadata,
                 campaign_page_records=campaign_page_records,
                 name=request.form.get("name", ""),
                 quantity=request.form.get("quantity", "1"),
                 weight=request.form.get("weight", ""),
                 notes=request.form.get("notes", ""),
-                page_ref=request.form.get("page_ref", ""),
-            ),
+                page_ref=selected_page_ref,
+            )
+        return run_character_definition_mutation(
+            campaign_slug,
+            character_slug,
+            anchor="character-equipment-manager",
+            success_message="Campaign item added to supplemental equipment.",
+            action=_action,
         )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/<item_id>/update")
     @campaign_scope_access_required("characters")
     def character_equipment_update(campaign_slug: str, character_slug: str, item_id: str):
         campaign = load_campaign_context(campaign_slug)
-        campaign_page_records = list_visible_character_page_records(campaign_slug, campaign)
+        all_campaign_page_records = list_visible_character_page_records(campaign_slug, campaign)
         def _action(record):
             manual_entry = next(
                 (
@@ -6077,6 +6162,14 @@ def create_app() -> Flask:
             if manual_entry is None:
                 raise CharacterEditValidationError("Choose a valid supplemental equipment entry to update.")
             systems_ref = dict(manual_entry.get("systems_ref") or {})
+            include_page_refs = {
+                normalize_character_page_ref(manual_entry.get("page_ref"))
+            } if normalize_character_page_ref(manual_entry.get("page_ref")) else None
+            campaign_page_records = filter_character_page_records(
+                all_campaign_page_records,
+                section=CHARACTER_ITEMS_SECTION,
+                include_page_refs=include_page_refs,
+            )
             return apply_equipment_catalog_edit(
                 campaign_slug,
                 record.definition,

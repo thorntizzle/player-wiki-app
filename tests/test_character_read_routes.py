@@ -1006,6 +1006,7 @@ def test_equipment_manager_is_visible_to_editable_users_and_hidden_from_read_onl
 
     assert owner_response.status_code == 200
     assert "Add Systems item" in owner_html
+    assert "Add campaign item" in owner_html
     assert "Add custom item" in owner_html
     assert "Supplemental equipment" in owner_html
 
@@ -1016,8 +1017,24 @@ def test_equipment_manager_is_visible_to_editable_users_and_hidden_from_read_onl
 
     assert read_only_response.status_code == 200
     assert "Add Systems item" not in read_only_html
+    assert "Add campaign item" not in read_only_html
     assert "Add custom item" not in read_only_html
     assert "Supplemental equipment" not in read_only_html
+
+
+def test_equipment_manager_campaign_item_picker_only_lists_item_pages(
+    client, sign_in, users, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get("/campaigns/linden-pass/characters/arden-march?page=equipment")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Stormglass Compass - Items" in html
+    assert "Operations Brief - Notes" not in html
+    assert "Captain Lyra Vale - NPCs" not in html
 
 
 def test_imported_character_equipment_controls_can_search_and_add_systems_items_without_resetting_other_quantities(
@@ -1105,6 +1122,87 @@ def test_imported_character_equipment_controls_can_search_and_add_systems_items_
     assert "Remove item" in html
 
 
+def test_native_character_equipment_controls_can_add_campaign_items_from_item_pages(
+    app, client, sign_in, users, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    _write_character_definition(
+        app,
+        "arden-march",
+        lambda payload: payload.__setitem__(
+            "source",
+            {"source_type": "native_character_builder", "source_path": "builder://arden-march"},
+        ),
+    )
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert record is not None
+        revision = record.state_record.revision
+
+    add_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/equipment/add-campaign-item",
+        data={
+            "expected_revision": revision,
+            "mode": "read",
+            "page": "equipment",
+            "page_ref": "items/stormglass-compass",
+            "quantity": "1",
+            "weight": "",
+            "notes": "Issued from the brass vault.",
+        },
+        follow_redirects=False,
+    )
+
+    assert add_response.status_code == 302
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert record is not None
+        manual_item = next(
+            item
+            for item in list(record.definition.equipment_catalog or [])
+            if str(item.get("source_kind") or "").strip() == "manual_edit"
+        )
+        assert manual_item["name"] == "Stormglass Compass"
+        assert manual_item["page_ref"] == "items/stormglass-compass"
+        assert manual_item["notes"] == "Issued from the brass vault."
+        revision = record.state_record.revision
+
+    update_response = client.post(
+        f"/campaigns/linden-pass/characters/arden-march/equipment/{manual_item['id']}/update",
+        data={
+            "expected_revision": revision,
+            "mode": "read",
+            "page": "equipment",
+            "name": "",
+            "quantity": "2",
+            "weight": "1 lb.",
+            "page_ref": "items/stormglass-compass",
+            "notes": "Retuned to the harbor beacons.",
+        },
+        follow_redirects=False,
+    )
+
+    assert update_response.status_code == 302
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert record is not None
+        manual_item = next(
+            item
+            for item in list(record.definition.equipment_catalog or [])
+            if str(item.get("source_kind") or "").strip() == "manual_edit"
+        )
+        assert manual_item["name"] == "Stormglass Compass"
+        assert manual_item["default_quantity"] == 2
+        assert manual_item["weight"] == "1 lb."
+        assert manual_item["page_ref"] == "items/stormglass-compass"
+        assert manual_item["notes"] == "Retuned to the harbor beacons."
+
+
 def test_native_character_equipment_controls_can_add_update_and_remove_manual_items(
     app, client, sign_in, users, set_campaign_visibility
 ):
@@ -1134,7 +1232,6 @@ def test_native_character_equipment_controls_can_add_update_and_remove_manual_it
             "name": "Harbor Pass",
             "quantity": "1",
             "weight": "",
-            "page_ref": "notes/operations-brief",
             "notes": "Issued by the harbor office.",
         },
         follow_redirects=False,
@@ -1152,7 +1249,7 @@ def test_native_character_equipment_controls_can_add_update_and_remove_manual_it
         ]
         assert len(manual_items) == 1
         manual_item = manual_items[0]
-        assert manual_item["page_ref"] == "notes/operations-brief"
+        assert not manual_item.get("page_ref")
 
         revision = record.state_record.revision
 
@@ -1165,7 +1262,6 @@ def test_native_character_equipment_controls_can_add_update_and_remove_manual_it
             "name": "Harbor Pass",
             "quantity": "3",
             "weight": "",
-            "page_ref": "notes/operations-brief",
             "notes": "Stamped for repeat entry.",
         },
         follow_redirects=False,

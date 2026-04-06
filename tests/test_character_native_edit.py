@@ -646,6 +646,36 @@ def test_owner_player_can_open_native_character_edit_page(
     assert "Arcane Overload | Mechanics / Class Modifications" in html
 
 
+def test_native_character_edit_manual_equipment_rejects_non_item_linked_pages(
+    client, sign_in, users, get_character, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    record = get_character("arden-march")
+    assert record is not None
+
+    response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "manual_item_name_1": "",
+            "manual_item_page_ref_1": "notes/operations-brief",
+            "manual_item_quantity_1": "1",
+            "manual_item_weight_1": "",
+            "manual_item_notes_1": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    assert "Choose a valid linked campaign page." in response.get_data(as_text=True)
+
+    record = get_character("arden-march")
+    assert record is not None
+    assert all(item.get("source_kind") != "manual_edit" for item in record.definition.equipment_catalog)
+
+
 def test_owner_player_can_save_native_character_edits_and_reconcile_inventory_state(
     client, sign_in, users, get_character, set_campaign_visibility
 ):

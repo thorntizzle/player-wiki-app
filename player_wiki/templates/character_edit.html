@@ -188,7 +188,7 @@
                 <span>Linked Page</span>
                 <select name="manual_item_page_ref_{{ row.index }}">
                   <option value="" {% if not row.page_ref %}selected{% endif %}>No linked page</option>
-                  {% for option in edit_context.campaign_page_options %}
+                  {% for option in edit_context.equipment_page_options %}
                     <option value="{{ option.value }}"{% if option.value == row.page_ref %} selected{% endif %}>{{ option.label }}</option>
                   {% endfor %}
                 </select>
