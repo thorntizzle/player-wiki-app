@@ -619,6 +619,90 @@ def test_extract_trackers_from_text_skips_invalid_progress_lines_that_look_like_
     ]
 
 
+def test_parse_character_sheet_text_keeps_additional_notes_out_of_resource_trackers():
+    markdown = """
+## Sheet Summary
+| Field | Value |
+| --- | --- |
+| Sheet Name | Flair Sparkmantle |
+| Class & Level | Artificer 5 |
+| Species | Human |
+| Background | Sage |
+
+## Defenses And Core Stats
+| Metric | Value |
+| --- | --- |
+| Armor Class | 16 |
+| Initiative | +2 |
+| Speed | 30 ft. |
+| Max HP | 40 |
+| Proficiency Bonus | +3 |
+
+## Ability Scores
+| Ability | Score | Modifier | Save |
+| --- | --- | --- | --- |
+| Strength | 10 | +0 | +0 |
+| Dexterity | 14 | +2 | +2 |
+| Constitution | 14 | +2 | +2 |
+| Intelligence | 18 | +4 | +7 |
+| Wisdom | 12 | +1 | +1 |
+| Charisma | 8 | -1 | -1 |
+
+## Skills
+| Skill | Bonus | Proficiency |
+| --- | --- | --- |
+| Arcana | +7 | Proficient |
+
+## Proficiencies And Languages
+- Languages: Common
+
+## Features And Traits
+### Artificer Features
+
+- Infuse Item - TCoE 12
+You can imbue mundane objects with certain magical infusions.
+
+## Actions
+### Actions
+Attack
+
+## Personality And Story
+### Additional Notes
+Progress on resonance research 40/40
+29/50 on making gauntlets paid 400/2000
+
+## Spellcasting
+| Field | Value |
+| --- | --- |
+| Spellcasting Class | Artificer |
+| Spellcasting Ability | Intelligence |
+| Spell Save DC | 15 |
+| Spell Attack Bonus | +7 |
+
+## Equipment
+| Item | Qty | Weight |
+| --- | --- | --- |
+| Backpack | 1 | 5 lb. |
+""".strip()
+
+    definition, import_metadata = parse_character_sheet_text(
+        "linden-pass",
+        markdown,
+        source_path="Flair.pdf",
+        source_type="pdf_character_sheet_annotations",
+        imported_from="Flair.pdf",
+        parser_version="test",
+    )
+
+    resource_labels = {resource["label"] for resource in definition.resource_templates}
+
+    assert "Progress on resonance research" not in resource_labels
+    assert "29/50 on making gauntlets paid" not in resource_labels
+    assert "Progress on resonance research 40/40" in definition.reference_notes["additional_notes_markdown"]
+    assert "29/50 on making gauntlets paid 400/2000" in definition.reference_notes["additional_notes_markdown"]
+    assert import_metadata.warnings == []
+
+
 def test_parse_character_sheet_text_normalizes_duplicate_attack_and_equipment_rows():
     markdown = """
 ## Sheet Summary

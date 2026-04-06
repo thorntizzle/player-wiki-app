@@ -28,7 +28,7 @@ from .character_store import CharacterStateStore, CharacterStateWriteResult
 from .db import init_database
 from .repository import slugify
 
-PARSER_VERSION = "2026-04-06.1"
+PARSER_VERSION = "2026-04-06.2"
 REST_TRACKER_PATTERN = re.compile(
     r"^(?P<label>.+?)\s*[-:]\s*(?P<value>\d+)\s*/\s*(?P<reset>Long Rest|Short Rest|Daily|Other|Manual|Never)\b",
     re.IGNORECASE,
@@ -812,12 +812,6 @@ def parse_personality_and_story(section_text: str, warnings: list[str]) -> tuple
         for title, body in subsections.items()
         if body.strip()
     ]
-    trackers = extract_trackers_from_text(
-        additional_notes,
-        category="custom_progress",
-        display_start=0,
-        warnings=warnings,
-    )
     return (
         {
             "additional_notes_markdown": additional_notes,
@@ -825,7 +819,7 @@ def parse_personality_and_story(section_text: str, warnings: list[str]) -> tuple
             "custom_sections": custom_sections,
             "personality_markdown": build_personality_markdown(subsections),
         },
-        trackers,
+        [],
     )
 
 
