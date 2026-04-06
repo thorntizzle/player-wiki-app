@@ -23,7 +23,7 @@ from .repository import normalize_lookup
 from .systems_models import SystemsEntryRecord
 from .systems_service import SystemsService
 
-PDF_PARSER_VERSION = "2026-04-06.3"
+PDF_PARSER_VERSION = "2026-04-06.4"
 BULLET_CHAR = "\u2022"
 EN_DASH_CHAR = "\u2013"
 
@@ -335,31 +335,42 @@ def _build_spellcasting_section(field_values: dict[str, str]) -> str:
     summary_table = _render_markdown_table(
         ["Field", "Value"],
         [
-            ["Spellcasting Class", field_values.get("spellCastingClass0", "")],
-            ["Spellcasting Ability", field_values.get("spellCastingAbility0", "")],
-            ["Spell Save DC", field_values.get("spellSaveDC0", "")],
-            ["Spell Attack Bonus", field_values.get("spellAtkBonus0", "")],
+            ["Spellcasting Class", _lookup_field(field_values, "spellCastingClass0", "SpellCastingClass0")],
+            ["Spellcasting Ability", _lookup_field(field_values, "spellCastingAbility0", "SpellCastingAbility0")],
+            ["Spell Save DC", _lookup_field(field_values, "spellSaveDC0", "SpellSaveDC0")],
+            ["Spell Attack Bonus", _lookup_field(field_values, "spellAtkBonus0", "SpellAtkBonus0")],
         ],
     )
+    slot_lines: list[str] = []
+    for index in range(10):
+        slot_header = _lookup_field(field_values, f"spellSlotHeader{index}", f"SpellSlotHeader{index}")
+        if not slot_header:
+            continue
+        match = re.search(r"(?P<count>\d+)\s+Slots?\b", slot_header, re.IGNORECASE)
+        if match:
+            slot_lines.append(f"{match.group('count')} Slots")
     spell_rows: list[list[str]] = []
     for index in range(50):
-        name = field_values.get(f"SpellName{index}", "")
+        name = _lookup_field(field_values, f"spellName{index}", f"SpellName{index}")
         if not name:
             continue
         spell_rows.append(
             [
                 name,
-                field_values.get(f"Prepared{index}", ""),
-                field_values.get(f"SaveHit{index}", ""),
-                field_values.get(f"CastingTime{index}", ""),
-                field_values.get(f"Range{index}", ""),
-                field_values.get(f"Duration{index}", ""),
-                field_values.get(f"Components{index}", ""),
-                field_values.get(f"Source{index}", ""),
-                field_values.get(f"SpellSource{index}", ""),
+                _lookup_field(field_values, f"spellPrepared{index}", f"Prepared{index}"),
+                _lookup_field(field_values, f"spellSaveHit{index}", f"SaveHit{index}"),
+                _lookup_field(field_values, f"spellCastingTime{index}", f"CastingTime{index}"),
+                _lookup_field(field_values, f"spellRange{index}", f"Range{index}"),
+                _lookup_field(field_values, f"spellDuration{index}", f"Duration{index}"),
+                _lookup_field(field_values, f"spellComponents{index}", f"Components{index}"),
+                _lookup_field(field_values, f"spellSource{index}", f"SpellSource{index}", f"Source{index}"),
+                _lookup_field(field_values, f"spellReference{index}", f"SpellReference{index}"),
             ]
         )
-    parts = [summary_table, "", "### Slots", "", "### Spells"]
+    parts = [summary_table, "", "### Slots"]
+    if slot_lines:
+        parts.extend(slot_lines)
+    parts.extend(["", "### Spells"])
     if spell_rows:
         parts.append(
             _render_markdown_table(

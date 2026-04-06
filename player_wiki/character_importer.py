@@ -28,7 +28,7 @@ from .character_store import CharacterStateStore, CharacterStateWriteResult
 from .db import init_database
 from .repository import slugify
 
-PARSER_VERSION = "2026-04-06.3"
+PARSER_VERSION = "2026-04-06.4"
 REST_TRACKER_PATTERN = re.compile(
     r"^(?P<label>.+?)\s*[-:]\s*(?P<value>\d+)\s*/\s*(?P<reset>Long Rest|Short Rest|Daily|Other|Manual|Never)\b",
     re.IGNORECASE,
@@ -37,8 +37,8 @@ PROGRESS_PATTERN = re.compile(
     r"^(?P<label>.+?)\s+(?P<current>\d+)\s*/\s*(?P<max>\d+)\b",
     re.IGNORECASE,
 )
-SOURCE_REF_PATTERN = re.compile(
-    r"^(?P<name>.+?)\s+-\s+(?P<source>(?:PHB|TCoE|BR|EE|XGtE|UA|DMG|MM)\b.*)$"
+SOURCE_ID_PATTERN = re.compile(
+    r"^(?P<source_id>(?=[A-Za-z0-9']*[A-Z].*[A-Z])[A-Za-z][A-Za-z0-9']{1,9})(?:\s+(?P<page>\d+(?:-\d+)?))?$"
 )
 ANONYMOUS_ACTION_COST_PATTERN = re.compile(
     r"^(?P<value>\d+)\s*/\s*(?P<reset>Long Rest|Short Rest|Daily|Other|Manual|Never)\s*-\s*"
@@ -61,6 +61,14 @@ DETACHED_METADATA_VALUE_PATTERN = re.compile(
     r"^(?:bonus action|reaction|special|\d+\s+(?:action|actions|minute|minutes|hour|hours|day|days))$",
     re.IGNORECASE,
 )
+ABILITY_CHOICE_FEATURE_NAMES = {
+    "strength",
+    "dexterity",
+    "constitution",
+    "intelligence",
+    "wisdom",
+    "charisma",
+}
 
 
 class CharacterImportError(Exception):
@@ -224,6 +232,21 @@ def merge_feature_metadata(
         feature["tracker_ref"] = tracker_ref
 
 
+def split_feature_source_reference(header: str) -> dict[str, str] | None:
+    stripped = str(header or "").strip()
+    if " - " not in stripped:
+        return None
+    name, suffix = (part.strip() for part in stripped.rsplit(" - ", 1))
+    if not name or not suffix:
+        return None
+    if not SOURCE_ID_PATTERN.fullmatch(suffix):
+        return None
+    return {
+        "name": name,
+        "source": suffix,
+    }
+
+
 def is_generic_followup_feature(name: str, previous_name: str) -> bool:
     normalized_name = normalize_feature_text(name)
     normalized_previous = normalize_feature_text(previous_name)
@@ -294,6 +317,46 @@ def find_feature_alias_target(
             ):
                 return feature
     return None
+
+
+def is_ability_choice_followup_feature(
+    name: str,
+    *,
+    category: str,
+    previous_feature: dict[str, Any] | None,
+    description: str,
+    source_value: str,
+) -> bool:
+    if category != "feat" or previous_feature is None:
+        return False
+    if source_value.strip() or not description.strip():
+        return False
+    normalized_name = normalize_feature_text(name.replace("•", " ").replace("â€¢", " "))
+    if normalized_name not in ABILITY_CHOICE_FEATURE_NAMES:
+        return False
+    return str(previous_feature.get("category") or "").strip() == "feat"
+
+
+def merge_ability_choice_followup_feature(
+    feature: dict[str, Any],
+    *,
+    name: str,
+    description: str,
+    activation_type: str,
+    tracker_ref: str | None = None,
+) -> None:
+    label = str(name or "").replace("•", "").replace("â€¢", "").strip()
+    addition = description.strip()
+    if label:
+        addition = f"Chosen ability: {label}.\n{addition}" if addition else f"Chosen ability: {label}."
+    existing_description = str(feature.get("description_markdown") or "").strip()
+    if addition:
+        feature["description_markdown"] = f"{existing_description}\n\n{addition}".strip() if existing_description else addition
+    merge_feature_metadata(
+        feature,
+        activation_type=activation_type,
+        tracker_ref=tracker_ref,
+    )
 
 
 def find_action_feature_merge_target(
@@ -758,9 +821,9 @@ def parse_feature_groups(section_text: str, warnings: list[str]) -> tuple[list[d
             lines = item.splitlines()
             header = lines[0].strip()
             description = "\n".join(line for line in lines[1:] if line.strip()).strip()
-            source_match = SOURCE_REF_PATTERN.match(header)
-            header_name = source_match.group("name").strip() if source_match else header
-            source_value = source_match.group("source").strip() if source_match else ""
+            source_match = split_feature_source_reference(header)
+            header_name = source_match["name"].strip() if source_match else header
+            source_value = source_match["source"].strip() if source_match else ""
             activation_type = build_activation_type(header)
             tracker_matches = extract_trackers_from_text(
                 header,
@@ -829,6 +892,21 @@ def parse_feature_groups(section_text: str, warnings: list[str]) -> tuple[list[d
                         tracker_ref=tracker_ref,
                     )
                     continue
+            if is_ability_choice_followup_feature(
+                normalized_header_name,
+                category=feature_category,
+                previous_feature=features[-1] if features else None,
+                description=description,
+                source_value=source_value,
+            ):
+                merge_ability_choice_followup_feature(
+                    features[-1],
+                    name=normalized_header_name,
+                    description=description,
+                    activation_type=activation_type,
+                    tracker_ref=tracker_ref,
+                )
+                continue
             if (
                 not description
                 and not source_value

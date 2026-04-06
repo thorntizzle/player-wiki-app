@@ -874,6 +874,151 @@ When you cast a spell that has a casting time of 1 action, you can spend 2 sorce
     assert quickened_spell["activation_type"] == "special"
 
 
+def test_parse_character_sheet_text_merges_source_suffixed_duplicates_and_feat_choice_followups():
+    markdown = """
+## Sheet Summary
+| Field | Value |
+| --- | --- |
+| Sheet Name | Olin Itador |
+| Class & Level | Wizard 5 |
+| Species | Variant Human |
+| Background | Sage |
+
+## Defenses And Core Stats
+| Metric | Value |
+| --- | --- |
+| Armor Class | 14 |
+| Initiative | +1 |
+| Speed | 30 ft. |
+| Max HP | 32 |
+| Proficiency Bonus | +3 |
+
+## Ability Scores
+| Ability | Score | Modifier | Save |
+| --- | --- | --- | --- |
+| Strength | 9 | -1 | -1 |
+| Dexterity | 13 | +1 | +1 |
+| Constitution | 17 | +3 | +6 |
+| Intelligence | 20 | +5 | +8 |
+| Wisdom | 14 | +2 | +5 |
+| Charisma | 11 | +0 | +0 |
+
+## Skills
+| Skill | Bonus | Proficiency |
+| --- | --- | --- |
+| Arcana | +8 | Proficient |
+
+## Proficiencies And Languages
+- Languages: Common
+
+## Features And Traits
+### Wizard Features
+- Chronal Shift - EGtW 184
+As a reaction, after you or a creature you can see within 30 ft. of you makes an attack roll, an ability check, or a saving throw, you can force the creature to reroll.
+
+You can use this ability twice, and you regain any expended uses when you finish a long rest.
+
+- 2 / Long Rest - 1 Reaction
+
+### Feats
+- Resilient - PHB 168
+Increase the chosen ability score by 1 and you gain proficiency in saving throws using the chosen ability.
+
+- Constitution •
+Increase your CON score by 1 and you gain proficiency in CON saving throws.
+
+## Actions
+### Reactions
+Chronal Shift - 2 / Long Rest
+As a reaction, after you or a creature you can see within 30 ft. of you makes an attack roll, an ability check, or a saving throw, you can force the creature to reroll.
+
+You can use this ability twice, and you regain any expended uses when you finish a long rest.
+
+## Personality And Story
+
+## Spellcasting
+| Field | Value |
+| --- | --- |
+| Spellcasting Class | Wizard |
+| Spellcasting Ability | INT |
+| Spell Save DC | 16 |
+| Spell Attack Bonus | +8 |
+
+## Equipment
+| Item | Qty | Weight |
+| --- | --- | --- |
+| Quarterstaff | 1 | 4 lb. |
+""".strip()
+
+    definition, _ = parse_character_sheet_text(
+        "linden-pass",
+        markdown,
+        source_path="Olin.pdf",
+        source_type="pdf_character_sheet_annotations",
+        imported_from="Olin.pdf",
+        parser_version="test",
+    )
+
+    feature_names = [feature["name"] for feature in definition.features]
+    chronal_shift = next(feature for feature in definition.features if feature["name"] == "Chronal Shift")
+    resilient = next(feature for feature in definition.features if feature["name"] == "Resilient")
+
+    assert "Chronal Shift - EGtW 184" not in feature_names
+    assert feature_names.count("Chronal Shift") == 1
+    assert chronal_shift["source"] == "EGtW 184"
+    assert chronal_shift["activation_type"] == "reaction"
+    assert chronal_shift["tracker_ref"] == "chronal-shift"
+    assert "Constitution •" not in feature_names
+    assert "Chosen ability: Constitution." in resilient["description_markdown"]
+    assert "Increase your CON score by 1" in resilient["description_markdown"]
+
+
+def test_build_pdf_character_markdown_supports_lowercase_spell_fields_and_slot_headers():
+    field_values = {
+        "CharacterName": "Olin Itador",
+        "CLASS  LEVEL": "Wizard 5",
+        "RACE": "Variant Human",
+        "BACKGROUND": "Sage",
+        "spellCastingClass0": "Wizard",
+        "spellCastingAbility0": "INT",
+        "spellSaveDC0": "16",
+        "spellAtkBonus0": "+8",
+        "spellSlotHeader0": "(At Will)",
+        "spellSlotHeader1": "4 Slots OOOO",
+        "spellPrepared0": "O",
+        "spellName0": "Mage Hand",
+        "spellSource0": "Wizard",
+        "spellSaveHit0": "--",
+        "spellCastingTime0": "1A",
+        "spellRange0": "30 ft.",
+        "spellComponents0": "V,S",
+        "spellDuration0": "1 minute",
+        "spellPrepared1": "O",
+        "spellName1": "Shield",
+        "spellSource1": "Wizard",
+        "spellSaveHit1": "--",
+        "spellCastingTime1": "1R",
+        "spellRange1": "Self",
+        "spellComponents1": "V,S",
+        "spellDuration1": "1 round",
+    }
+
+    markdown = build_pdf_character_markdown(field_values)
+    definition, _ = parse_character_sheet_text(
+        "linden-pass",
+        markdown,
+        source_path="Olin.pdf",
+        source_type="pdf_character_sheet_annotations",
+        imported_from="Olin.pdf",
+        parser_version="test",
+    )
+
+    assert definition.spellcasting["slot_progression"] == [{"level": 1, "max_slots": 4}]
+    assert [spell["name"] for spell in definition.spellcasting["spells"]] == ["Mage Hand", "Shield"]
+    assert definition.spellcasting["spells"][0]["source"] == "Wizard"
+    assert definition.spellcasting["spells"][1]["casting_time"] == "1R"
+
+
 def test_parse_character_sheet_text_normalizes_duplicate_attack_and_equipment_rows():
     markdown = """
 ## Sheet Summary
