@@ -28,7 +28,7 @@ from .character_store import CharacterStateStore, CharacterStateWriteResult
 from .db import init_database
 from .repository import slugify
 
-PARSER_VERSION = "2026-04-06.2"
+PARSER_VERSION = "2026-04-06.3"
 REST_TRACKER_PATTERN = re.compile(
     r"^(?P<label>.+?)\s*[-:]\s*(?P<value>\d+)\s*/\s*(?P<reset>Long Rest|Short Rest|Daily|Other|Manual|Never)\b",
     re.IGNORECASE,
@@ -57,6 +57,10 @@ ACTION_SECTION_ACTIVATION_HINTS = {
 GENERIC_ACTION_BLOCK_TITLES = {"standard actions"}
 GENERIC_FOLLOWUP_SUFFIXES = {"attack", "action", "bonus action", "reaction", "special"}
 STANDALONE_METADATA_TITLES = {"action", "bonus action", "reaction", "special"}
+DETACHED_METADATA_VALUE_PATTERN = re.compile(
+    r"^(?:bonus action|reaction|special|\d+\s+(?:action|actions|minute|minutes|hour|hours|day|days))$",
+    re.IGNORECASE,
+)
 
 
 class CharacterImportError(Exception):
@@ -229,6 +233,94 @@ def is_generic_followup_feature(name: str, previous_name: str) -> bool:
     return suffix in GENERIC_FOLLOWUP_SUFFIXES
 
 
+def feature_name_aliases(name: str) -> list[str]:
+    stripped = str(name or "").strip()
+    aliases: list[str] = []
+    for separator in (":", " - "):
+        if separator not in stripped:
+            continue
+        left, right = (part.strip() for part in stripped.split(separator, 1))
+        for alias in (right, left):
+            if alias and alias not in aliases:
+                aliases.append(alias)
+    return aliases
+
+
+def is_standalone_metadata_feature(name: str) -> bool:
+    normalized_name = normalize_feature_text(name)
+    if normalized_name in STANDALONE_METADATA_TITLES:
+        return True
+    return bool(DETACHED_METADATA_VALUE_PATTERN.fullmatch(normalized_name))
+
+
+def should_merge_tracker_only_followup_feature(
+    name: str,
+    previous_feature: dict[str, Any],
+) -> bool:
+    previous_name = str(previous_feature.get("name") or "")
+    if normalize_feature_text(name) == normalize_feature_text(previous_name):
+        return True
+    previous_description = str(previous_feature.get("description_markdown") or "").strip()
+    previous_source = str(previous_feature.get("source") or "").strip()
+    previous_tracker_ref = str(previous_feature.get("tracker_ref") or "").strip()
+    return (
+        not previous_description
+        and not previous_source
+        and not previous_tracker_ref
+        and ":" not in previous_name
+    )
+
+
+def find_feature_alias_target(
+    name: str,
+    features: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if not features:
+        return None
+    if " - " not in str(name or ""):
+        return None
+    for alias in feature_name_aliases(name):
+        normalized_alias = normalize_feature_text(alias)
+        if not normalized_alias:
+            continue
+        for feature in reversed(features):
+            if normalize_feature_text(str(feature.get("name") or "")) != normalized_alias:
+                continue
+            if (
+                str(feature.get("description_markdown") or "").strip()
+                or str(feature.get("source") or "").strip()
+                or feature.get("systems_ref")
+                or feature.get("page_ref")
+            ):
+                return feature
+    return None
+
+
+def find_action_feature_merge_target(
+    feature: dict[str, Any],
+    name_lookup: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    if " - " not in str(feature.get("name") or ""):
+        return None
+    description_key = normalize_feature_text(str(feature.get("description_markdown") or ""))
+    if not description_key:
+        return None
+    for alias in feature_name_aliases(str(feature.get("name") or "")):
+        existing = name_lookup.get(normalize_feature_text(alias))
+        if existing is None:
+            continue
+        existing_description_key = normalize_feature_text(str(existing.get("description_markdown") or ""))
+        if existing_description_key != description_key:
+            continue
+        if (
+            str(existing.get("source") or "").strip()
+            or existing.get("systems_ref")
+            or existing.get("page_ref")
+        ):
+            return existing
+    return None
+
+
 def looks_like_action_feature_header(value: str) -> bool:
     stripped = value.strip()
     if not stripped:
@@ -308,6 +400,8 @@ def merge_action_features_into_features(
     for feature in action_features:
         normalized_name = normalize_feature_text(str(feature.get("name") or ""))
         existing = name_lookup.get(normalized_name)
+        if existing is None:
+            existing = find_action_feature_merge_target(feature, name_lookup)
         if existing is not None:
             merge_feature_record(existing, feature)
             continue
@@ -704,9 +798,37 @@ def parse_feature_groups(section_text: str, warnings: list[str]) -> tuple[list[d
             if (
                 not description
                 and not source_value
-                and normalize_feature_text(normalized_header_name) in STANDALONE_METADATA_TITLES
+                and is_standalone_metadata_feature(normalized_header_name)
             ):
+                if features:
+                    merge_feature_metadata(
+                        features[-1],
+                        activation_type=activation_type,
+                        tracker_ref=tracker_ref,
+                    )
                 continue
+            if (
+                not description
+                and not source_value
+                and tracker_ref
+                and features
+                and should_merge_tracker_only_followup_feature(normalized_header_name, features[-1])
+            ):
+                merge_feature_metadata(
+                    features[-1],
+                    activation_type=activation_type,
+                    tracker_ref=tracker_ref,
+                )
+                continue
+            if not description and not source_value:
+                alias_target = find_feature_alias_target(normalized_header_name, features)
+                if alias_target is not None:
+                    merge_feature_metadata(
+                        alias_target,
+                        activation_type=activation_type,
+                        tracker_ref=tracker_ref,
+                    )
+                    continue
             if (
                 not description
                 and not source_value

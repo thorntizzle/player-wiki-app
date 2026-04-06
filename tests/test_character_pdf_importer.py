@@ -18,6 +18,7 @@ from player_wiki.character_models import CharacterDefinition
 from player_wiki.character_pdf_importer import (
     apply_systems_links_to_definition,
     build_pdf_character_markdown,
+    resolve_definition_campaign_page_links,
     resolve_definition_systems_links,
 )
 from player_wiki.config import Config
@@ -703,6 +704,176 @@ Progress on resonance research 40/40
     assert import_metadata.warnings == []
 
 
+def test_parse_character_sheet_text_merges_detached_feat_helper_rows_into_their_parent_feature():
+    markdown = """
+## Sheet Summary
+| Field | Value |
+| --- | --- |
+| Sheet Name | Glenn Hakewood |
+| Class & Level | Sorcerer 5 |
+| Species | Human |
+| Background | Entertainer |
+
+## Defenses And Core Stats
+| Metric | Value |
+| --- | --- |
+| Armor Class | 14 |
+| Initiative | +2 |
+| Speed | 30 ft. |
+| Max HP | 32 |
+| Proficiency Bonus | +3 |
+
+## Ability Scores
+| Ability | Score | Modifier | Save |
+| --- | --- | --- | --- |
+| Strength | 8 | -1 | -1 |
+| Dexterity | 14 | +2 | +2 |
+| Constitution | 14 | +2 | +2 |
+| Intelligence | 10 | +0 | +0 |
+| Wisdom | 12 | +1 | +1 |
+| Charisma | 18 | +4 | +7 |
+
+## Skills
+| Skill | Bonus | Proficiency |
+| --- | --- | --- |
+| Arcana | +3 | Proficient |
+
+## Proficiencies And Languages
+- Languages: Common
+
+## Features And Traits
+### Feats
+- Inspiring Leader - PHB 167
+You can spend 10 minutes inspiring your companions. Choose up to 6 allies (including yourself) that can see or hear and can understand you within 30 ft. Each creature gains 9 temp HP once per short rest.
+
+- 10 Minutes
+
+- Wild Magic Mod •
+
+- Wild Die: 3 / Long Rest
+
+## Actions
+### Actions
+Attack
+
+## Personality And Story
+
+## Spellcasting
+| Field | Value |
+| --- | --- |
+| Spellcasting Class | Sorcerer |
+| Spellcasting Ability | Charisma |
+| Spell Save DC | 15 |
+| Spell Attack Bonus | +7 |
+
+## Equipment
+| Item | Qty | Weight |
+| --- | --- | --- |
+| Component Pouch | 1 | 2 lb. |
+""".strip()
+
+    definition, _ = parse_character_sheet_text(
+        "linden-pass",
+        markdown,
+        source_path="Glenn.pdf",
+        source_type="pdf_character_sheet_annotations",
+        imported_from="Glenn.pdf",
+        parser_version="test",
+    )
+
+    feature_names = [feature["name"] for feature in definition.features]
+    inspiring_leader = next(feature for feature in definition.features if feature["name"] == "Inspiring Leader")
+    wild_magic = next(feature for feature in definition.features if feature["name"] == "Wild Magic Mod •")
+
+    assert "10 Minutes" not in feature_names
+    assert "Wild Die" not in feature_names
+    assert inspiring_leader["activation_type"] == "special"
+    assert wild_magic["tracker_ref"] == "wild-die"
+    assert next(template for template in definition.resource_templates if template["id"] == "wild-die")["label"] == "Wild Die"
+
+
+def test_parse_character_sheet_text_prefers_sourced_feature_row_over_detached_action_alias():
+    markdown = """
+## Sheet Summary
+| Field | Value |
+| --- | --- |
+| Sheet Name | Glenn Hakewood |
+| Class & Level | Sorcerer 5 |
+| Species | Human |
+| Background | Entertainer |
+
+## Defenses And Core Stats
+| Metric | Value |
+| --- | --- |
+| Armor Class | 14 |
+| Initiative | +2 |
+| Speed | 30 ft. |
+| Max HP | 32 |
+| Proficiency Bonus | +3 |
+
+## Ability Scores
+| Ability | Score | Modifier | Save |
+| --- | --- | --- | --- |
+| Strength | 8 | -1 | -1 |
+| Dexterity | 14 | +2 | +2 |
+| Constitution | 14 | +2 | +2 |
+| Intelligence | 10 | +0 | +0 |
+| Wisdom | 12 | +1 | +1 |
+| Charisma | 18 | +4 | +7 |
+
+## Skills
+| Skill | Bonus | Proficiency |
+| --- | --- | --- |
+| Arcana | +3 | Proficient |
+
+## Proficiencies And Languages
+- Languages: Common
+
+## Features And Traits
+### Sorcerer Features
+- Quickened Spell - PHB
+When you cast a spell that has a casting time of 1 action, you can spend 2 sorcery points to change the casting time to 1 bonus action for this casting.
+
+- Metamagic - Quickened Spell: Special
+
+## Actions
+### Special
+Metamagic - Quickened Spell
+When you cast a spell that has a casting time of 1 action, you can spend 2 sorcery points to change the casting time to 1 bonus action for this casting.
+
+## Personality And Story
+
+## Spellcasting
+| Field | Value |
+| --- | --- |
+| Spellcasting Class | Sorcerer |
+| Spellcasting Ability | Charisma |
+| Spell Save DC | 15 |
+| Spell Attack Bonus | +7 |
+
+## Equipment
+| Item | Qty | Weight |
+| --- | --- | --- |
+| Component Pouch | 1 | 2 lb. |
+""".strip()
+
+    definition, _ = parse_character_sheet_text(
+        "linden-pass",
+        markdown,
+        source_path="Glenn.pdf",
+        source_type="pdf_character_sheet_annotations",
+        imported_from="Glenn.pdf",
+        parser_version="test",
+    )
+
+    feature_names = [feature["name"] for feature in definition.features]
+    quickened_spell = next(feature for feature in definition.features if feature["name"] == "Quickened Spell")
+
+    assert feature_names.count("Quickened Spell") == 1
+    assert "Metamagic - Quickened Spell" not in feature_names
+    assert quickened_spell["activation_type"] == "special"
+
+
 def test_parse_character_sheet_text_normalizes_duplicate_attack_and_equipment_rows():
     markdown = """
 ## Sheet Summary
@@ -1025,6 +1196,80 @@ def test_import_character_preserves_existing_campaign_page_overrides(tmp_path, m
     assert item["name"] == "Consecrated Huran Blade"
     assert item["page_ref"]["slug"] == "items/consecrated-huran-blade"
     assert "systems_ref" not in item
+
+
+def test_resolve_definition_campaign_page_links_matches_homebrew_feature_shorthand(tmp_path, monkeypatch):
+    campaigns_dir = build_test_campaigns_dir(tmp_path)
+    db_path = tmp_path / "player_wiki.sqlite3"
+    mechanics_dir = campaigns_dir / "linden-pass" / "content" / "mechanics"
+    mechanics_dir.mkdir(parents=True, exist_ok=True)
+    (mechanics_dir / "wild-magic-modification.md").write_text(
+        (
+            "---\n"
+            "title: Wild Magic Modification\n"
+            "section: Mechanics\n"
+            "type: mechanic\n"
+            "---\n\n"
+            "You gain a number of Wild Die equal to half your level.\n"
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(Config, "CAMPAIGNS_DIR", campaigns_dir)
+    monkeypatch.setattr(Config, "DB_PATH", db_path)
+
+    definition = _minimal_imported_definition(
+        features=[
+            {
+                "id": "wild-magic-mod",
+                "name": "Wild Magic Mod •",
+                "category": "feat",
+                "source": "",
+                "description_markdown": "",
+                "activation_type": "passive",
+                "tracker_ref": "wild-die",
+            }
+        ],
+        resource_templates=[
+            {
+                "id": "wild-die",
+                "label": "Wild Die",
+                "category": "feat",
+                "initial_current": 3,
+                "max": 3,
+                "reset_on": "long_rest",
+                "reset_to": "max",
+                "rest_behavior": "confirm_before_reset",
+                "notes": "Wild Die: 3 / Long Rest",
+                "display_order": 0,
+            }
+        ],
+    )
+
+    app = create_app()
+    with app.app_context():
+        init_database()
+        page_links = resolve_definition_campaign_page_links(
+            app.extensions["repository_store"],
+            app.extensions["campaign_page_store"],
+            "linden-pass",
+            definition,
+        )
+        linked_definition = apply_systems_links_to_definition(
+            definition,
+            {
+                "profile": {},
+                "features": [{"match": {"status": "unresolved"}}],
+                "attacks": [],
+                "equipment": [],
+                "spells": [],
+            },
+            campaign_page_links=page_links,
+        )
+
+    assert page_links["features"][0]["match"]["page_ref"] == "mechanics/wild-magic-modification"
+    assert linked_definition.features[0]["page_ref"]["slug"] == "mechanics/wild-magic-modification"
+    assert linked_definition.features[0]["page_ref"]["title"] == "Wild Magic Modification"
 
 
 def test_resolve_definition_systems_links_falls_back_to_parent_feature_for_nested_rows():

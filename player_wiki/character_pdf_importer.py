@@ -23,7 +23,7 @@ from .repository import normalize_lookup
 from .systems_models import SystemsEntryRecord
 from .systems_service import SystemsService
 
-PDF_PARSER_VERSION = "2026-04-06.2"
+PDF_PARSER_VERSION = "2026-04-06.3"
 BULLET_CHAR = "\u2022"
 EN_DASH_CHAR = "\u2013"
 
@@ -608,13 +608,145 @@ def _resolve_named_entry(
 
 def _feature_name_aliases(name: str) -> list[str]:
     aliases: list[str] = []
-    if ":" in name:
-        prefix = name.split(":", 1)[0].strip()
-        suffix = name.rsplit(":", 1)[1].strip()
+    stripped = str(name or "").strip()
+    for separator in (":", " - "):
+        if separator not in stripped:
+            continue
+        prefix, suffix = (part.strip() for part in stripped.split(separator, 1))
         for alias in (suffix, prefix):
             if alias and alias not in aliases:
                 aliases.append(alias)
     return aliases
+
+
+def _feature_campaign_page_aliases(name: str) -> list[str]:
+    cleaned = _normalize_source_header(str(name or "")).replace(BULLET_CHAR, " ").strip()
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -")
+    aliases = [cleaned] if cleaned else []
+    for alias in _feature_name_aliases(cleaned):
+        if alias not in aliases:
+            aliases.append(alias)
+    return aliases
+
+
+def _campaign_page_match_score(
+    *,
+    page_title: str,
+    page_ref: str,
+    candidates: list[str],
+) -> tuple[int, str]:
+    page_title_normalized = normalize_lookup(page_title)
+    page_ref_normalized = normalize_lookup(page_ref)
+    best_score = 0
+    best_query = ""
+    for candidate in candidates:
+        normalized_candidate = normalize_lookup(candidate)
+        if not normalized_candidate:
+            continue
+        score = 0
+        if normalized_candidate == page_title_normalized:
+            score = 100
+        elif normalized_candidate == page_ref_normalized:
+            score = 96
+        elif page_title_normalized.startswith(normalized_candidate):
+            score = 82
+        elif normalized_candidate.startswith(page_title_normalized):
+            score = 76
+        elif normalized_candidate in page_title_normalized or normalized_candidate in page_ref_normalized:
+            score = 68
+        if score > best_score:
+            best_score = score
+            best_query = candidate
+    return best_score, best_query
+
+
+def resolve_definition_campaign_page_links(
+    repository_store: Any,
+    campaign_page_store: Any,
+    campaign_slug: str,
+    definition: CharacterDefinition,
+) -> dict[str, Any]:
+    repository = repository_store.get()
+    campaign = repository.get_campaign(campaign_slug)
+    if campaign is None:
+        return {"features": []}
+
+    page_records = campaign_page_store.list_page_records(
+        campaign_slug,
+        content_dir=Path(campaign.player_content_dir),
+        include_body=False,
+    )
+    mechanics_pages = [
+        record
+        for record in page_records
+        if getattr(record, "page", None) is not None
+        and campaign.is_page_visible(record.page)
+        and str(getattr(record.page, "section", "") or "").strip() == "Mechanics"
+    ]
+
+    feature_links: list[dict[str, Any]] = []
+    for feature in list(definition.features or []):
+        feature_payload = dict(feature or {})
+        if feature_payload.get("systems_ref") or feature_payload.get("page_ref"):
+            feature_links.append(
+                {
+                    "name": str(feature_payload.get("name") or ""),
+                    "match": {"status": "unresolved", "reason": "already-linked"},
+                }
+            )
+            continue
+        candidates = _feature_campaign_page_aliases(str(feature_payload.get("name") or ""))
+        ranked: list[tuple[int, str, Any]] = []
+        for record in mechanics_pages:
+            page = getattr(record, "page", None)
+            page_title = str(getattr(page, "title", "") or record.page_ref).strip()
+            score, query = _campaign_page_match_score(
+                page_title=page_title,
+                page_ref=str(record.page_ref or "").strip(),
+                candidates=candidates,
+            )
+            if score > 0:
+                ranked.append((score, query, record))
+        ranked.sort(
+            key=lambda item: (
+                -item[0],
+                str(getattr(getattr(item[2], "page", None), "title", "") or getattr(item[2], "page_ref", "")).lower(),
+                str(getattr(item[2], "page_ref", "")).lower(),
+            )
+        )
+        if not ranked or ranked[0][0] < 80:
+            feature_links.append(
+                {
+                    "name": str(feature_payload.get("name") or ""),
+                    "match": {"status": "unresolved", "query": candidates[0] if candidates else ""},
+                }
+            )
+            continue
+        top_score = ranked[0][0]
+        top_matches = [item for item in ranked if item[0] == top_score]
+        if len(top_matches) != 1:
+            feature_links.append(
+                {
+                    "name": str(feature_payload.get("name") or ""),
+                    "match": {"status": "unresolved", "query": top_matches[0][1]},
+                }
+            )
+            continue
+        _, query, record = top_matches[0]
+        page = getattr(record, "page", None)
+        feature_links.append(
+            {
+                "name": str(feature_payload.get("name") or ""),
+                "match": {
+                    "status": "matched",
+                    "strategy": "campaign-page",
+                    "query": query,
+                    "page_ref": str(record.page_ref or "").strip(),
+                    "title": str(getattr(page, "title", "") or record.page_ref).strip(),
+                },
+            }
+        )
+    return {"features": feature_links}
 
 
 def _infer_subclass_name(
@@ -885,11 +1017,25 @@ def _systems_ref_from_match(match: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def _page_ref_from_match(match: dict[str, Any]) -> dict[str, Any] | None:
+    if str(match.get("status") or "") != "matched":
+        return None
+    page_ref = str(match.get("page_ref") or "").strip()
+    if not page_ref:
+        return None
+    title = str(match.get("title") or page_ref).strip() or page_ref
+    return {
+        "slug": page_ref,
+        "title": title,
+    }
+
+
 def apply_systems_links_to_definition(
     definition: CharacterDefinition,
     systems_links: dict[str, Any],
     *,
     existing_definition: CharacterDefinition | None = None,
+    campaign_page_links: dict[str, Any] | None = None,
 ) -> CharacterDefinition:
     linked_definition = CharacterDefinition.from_dict(copy.deepcopy(definition.to_dict()))
     profile_links = dict(systems_links.get("profile") or {})
@@ -923,12 +1069,19 @@ def apply_systems_links_to_definition(
     linked_definition.profile = profile
 
     feature_links = list(systems_links.get("features") or [])
+    feature_page_links = list((campaign_page_links or {}).get("features") or [])
     linked_features: list[dict[str, Any]] = []
-    for feature, link in zip(list(linked_definition.features or []), feature_links):
+    for index, feature in enumerate(list(linked_definition.features or [])):
+        link = dict(feature_links[index] or {}) if index < len(feature_links) else {}
+        page_link = dict(feature_page_links[index] or {}) if index < len(feature_page_links) else {}
         feature_payload = dict(feature or {})
         systems_ref = _systems_ref_from_match(dict(link.get("match") or {}))
         if systems_ref is not None:
             feature_payload["systems_ref"] = systems_ref
+        elif not feature_payload.get("page_ref"):
+            page_ref = _page_ref_from_match(dict(page_link.get("match") or {}))
+            if page_ref is not None:
+                feature_payload["page_ref"] = page_ref
         linked_features.append(feature_payload)
     if len(linked_features) == len(linked_definition.features):
         linked_definition.features = linked_features
@@ -1003,7 +1156,17 @@ def build_pdf_character_artifacts(
         )
         systems_service: SystemsService = app.extensions["systems_service"]
         systems_links = resolve_definition_systems_links(systems_service, campaign_slug, definition)
-        linked_definition = apply_systems_links_to_definition(definition, systems_links)
+        campaign_page_links = resolve_definition_campaign_page_links(
+            app.extensions["repository_store"],
+            app.extensions["campaign_page_store"],
+            campaign_slug,
+            definition,
+        )
+        linked_definition = apply_systems_links_to_definition(
+            definition,
+            systems_links,
+            campaign_page_links=campaign_page_links,
+        )
 
     return CharacterPdfArtifacts(
         field_values=field_values,
