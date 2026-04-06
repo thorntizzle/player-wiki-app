@@ -1925,8 +1925,9 @@ def _supports_native_class_entry(entry: SystemsEntryRecord | None) -> bool:
         return False
     if str(entry.source_id or "").strip().upper() == PHB_SOURCE_ID:
         return True
+    progression = _class_spell_progression(str(entry.title or "").strip(), selected_class=entry)
     return any(
-        metadata.get(key)
+        progression.get(key)
         for key in (
             "spellcasting_ability",
             "caster_progression",

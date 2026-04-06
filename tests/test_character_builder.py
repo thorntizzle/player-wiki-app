@@ -553,6 +553,121 @@ def test_imported_character_with_unsupported_enabled_class_is_blocked():
     assert "progression metadata" in readiness["message"].lower()
 
 
+def test_imported_artificer_with_stale_enabled_class_metadata_uses_reference_progression():
+    artificer = _systems_entry(
+        "class",
+        "tce-class-artificer",
+        "Artificer",
+        source_id="TCE",
+        metadata={
+            "hit_die": {"faces": 8},
+            "proficiency": ["con", "int"],
+            "subclass_title": "Artificer Specialist",
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "shield"],
+                "weapons": ["simple"],
+                "tools": ["thieves' tools", "tinker's tools"],
+                "skills": [{"choose": {"count": 2, "from": ["arcana", "history", "investigation", "medicine"]}}],
+            },
+        },
+    )
+    armorer = _systems_entry(
+        "subclass",
+        "tce-subclass-armorer-artificer-tce",
+        "Armorer",
+        source_id="TCE",
+        metadata={"class_name": "Artificer", "class_source": "TCE"},
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    sage = _systems_entry("background", "phb-background-sage", "Sage")
+    cure_wounds = _systems_entry(
+        "spell",
+        "phb-spell-cure-wounds",
+        "Cure Wounds",
+        metadata={"level": 1, "class_lists": {"TCE": ["Artificer"]}},
+    )
+    faerie_fire = _systems_entry(
+        "spell",
+        "phb-spell-faerie-fire",
+        "Faerie Fire",
+        metadata={"level": 1, "class_lists": {"TCE": ["Artificer"]}},
+    )
+    web = _systems_entry(
+        "spell",
+        "phb-spell-web",
+        "Web",
+        metadata={"level": 2, "class_lists": {"TCE": ["Artificer"]}},
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [artificer],
+            "subclass": [armorer],
+            "race": [human],
+            "background": [sage],
+            "spell": [cure_wounds, faerie_fire, web],
+        },
+        class_progression=[{"level": 3, "feature_rows": [{"label": "Artificer Specialist"}]}],
+        enabled_source_ids=["PHB", "TCE"],
+    )
+    definition = _minimal_imported_character_definition("artificer-import", "Artificer Import")
+    definition.profile["class_level_text"] = "Artificer 5"
+    definition.profile["classes"][0] = {
+        "class_name": "Artificer",
+        "subclass_name": "Armorer",
+        "level": 5,
+        "systems_ref": {
+            "entry_key": "dnd-5e|class|tce|artificer",
+            "entry_type": "class",
+            "title": "Artificer",
+            "slug": artificer.slug,
+            "source_id": "TCE",
+        },
+        "subclass_ref": {
+            "entry_key": "dnd-5e|subclass|tce|armorer-artificer-tce",
+            "entry_type": "subclass",
+            "title": "Armorer",
+            "slug": armorer.slug,
+            "source_id": "TCE",
+        },
+    }
+    definition.profile["class_ref"] = dict(definition.profile["classes"][0]["systems_ref"])
+    definition.profile["subclass_ref"] = dict(definition.profile["classes"][0]["subclass_ref"])
+    definition.profile["species"] = "Human"
+    definition.profile["species_ref"] = {
+        "entry_key": "dnd-5e|race|phb|human",
+        "entry_type": "race",
+        "title": "Human",
+        "slug": human.slug,
+        "source_id": "PHB",
+    }
+    definition.profile["background"] = "Sage"
+    definition.profile["background_ref"] = {
+        "entry_key": "dnd-5e|background|phb|sage",
+        "entry_type": "background",
+        "title": "Sage",
+        "slug": sage.slug,
+        "source_id": "PHB",
+    }
+    definition.stats["ability_scores"]["int"] = {"score": 16, "modifier": 3, "save_bonus": 3}
+
+    readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
+    level_up_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        definition,
+        {"hp_gain": "5"},
+    )
+
+    assert readiness["status"] == "ready"
+    assert readiness["selected_class"].slug == artificer.slug
+    assert readiness["selected_subclass"].slug == armorer.slug
+    assert any(
+        field["name"] == "levelup_prepared_spell_1"
+        for section in level_up_context["choice_sections"]
+        for field in section["fields"]
+    )
+
+
 def test_imported_progression_repair_can_restore_refs_and_add_prior_feature_links():
     fighter = _systems_entry(
         "class",
@@ -2653,7 +2768,8 @@ def test_level_one_builder_supports_enabled_non_phb_species_background_feat_and_
 
     species_feat_field = _find_builder_field(context, "species_feat_1")
 
-    assert [option["slug"] for option in context["class_options"]] == [fighter.slug]
+    assert [option["slug"] for option in context["class_options"]] == [artificer.slug, fighter.slug]
+    assert context["selected_class"].slug == fighter.slug
     assert any(
         option["slug"] == custom_lineage.slug and option["label"] == "Custom Lineage (TCE)"
         for option in context["species_options"]
