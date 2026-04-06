@@ -126,14 +126,22 @@ def _seed_systems_spell_entries(app, entries: list[dict[str, object]]) -> dict[s
     with app.app_context():
         systems_store = app.extensions["systems_store"]
         systems_store.upsert_library("DND-5E", title="DND 5E", system_code="DND-5E")
-        systems_store.upsert_source(
-            "DND-5E",
-            "PHB",
-            title="Player's Handbook",
-            license_class="srd_cc",
-            public_visibility_allowed=True,
-            requires_unofficial_notice=False,
-        )
+        source_titles = {
+            "PHB": "Player's Handbook",
+            "TCE": "Tasha's Cauldron of Everything",
+            "XGE": "Xanathar's Guide to Everything",
+        }
+        for source_id in sorted({str(entry.get("source_id") or "PHB").strip().upper() for entry in entries}):
+            if not source_id:
+                continue
+            systems_store.upsert_source(
+                "DND-5E",
+                source_id,
+                title=source_titles.get(source_id, source_id),
+                license_class="srd_cc",
+                public_visibility_allowed=True,
+                requires_unofficial_notice=False,
+            )
         systems_store.replace_entries_for_source(
             "DND-5E",
             "PHB",
@@ -145,7 +153,7 @@ def _seed_systems_spell_entries(app, entries: list[dict[str, object]]) -> dict[s
                     "slug": str(entry["slug"]),
                     "title": str(entry["title"]),
                     "source_page": str(entry.get("source_page") or "200"),
-                    "source_path": "data/spells/spells-phb.json",
+                    "source_path": f"data/spells/spells-{str(entry.get('source_id') or 'PHB').strip().lower()}.json",
                     "search_text": str(entry.get("search_text") or f"{entry['title']} spell"),
                     "player_safe_default": True,
                     "dm_heavy": False,
@@ -161,8 +169,40 @@ def _seed_systems_spell_entries(app, entries: list[dict[str, object]]) -> dict[s
                     "rendered_html": f"<p>{entry['title']}.</p>",
                 }
                 for entry in entries
+                if str(entry.get("source_id") or "PHB").strip().upper() == "PHB"
             ],
         )
+        for source_id in sorted({str(entry.get("source_id") or "PHB").strip().upper() for entry in entries if str(entry.get("source_id") or "PHB").strip().upper() != "PHB"}):
+            systems_store.replace_entries_for_source(
+                "DND-5E",
+                source_id,
+                entry_types=["spell"],
+                entries=[
+                    {
+                        "entry_key": f"dnd-5e|spell|{source_id.lower()}|{str(entry['slug'])}",
+                        "entry_type": "spell",
+                        "slug": str(entry["slug"]),
+                        "title": str(entry["title"]),
+                        "source_page": str(entry.get("source_page") or "200"),
+                        "source_path": f"data/spells/spells-{source_id.lower()}.json",
+                        "search_text": str(entry.get("search_text") or f"{entry['title']} spell"),
+                        "player_safe_default": True,
+                        "dm_heavy": False,
+                        "metadata": {
+                            "level": int(entry.get("level") or 0),
+                            "class_lists": dict(entry.get("class_lists") or {"PHB": []}),
+                            "casting_time": list(entry.get("casting_time") or [{"number": 1, "unit": "action"}]),
+                            "range": dict(entry.get("range") or {"type": "point", "distance": {"type": "feet", "amount": 60}}),
+                            "duration": list(entry.get("duration") or [{"type": "timed", "duration": {"type": "round", "amount": 1}}]),
+                            "components": dict(entry.get("components") or {"v": True}),
+                        },
+                        "body": {},
+                        "rendered_html": f"<p>{entry['title']}.</p>",
+                    }
+                    for entry in entries
+                    if str(entry.get("source_id") or "PHB").strip().upper() == source_id
+                ],
+            )
         systems_service = app.extensions["systems_service"]
         return {
             str(entry["slug"]): systems_service.get_entry_by_slug_for_campaign("linden-pass", str(entry["slug"]))
@@ -539,6 +579,73 @@ def test_spellcasting_subpage_can_search_add_and_remove_known_spells(app, client
     final_definition = _read_character_definition(app, "arden-march")
     final_spell_names = [str(spell.get("name") or "") for spell in list((final_definition.get("spellcasting") or {}).get("spells") or [])]
     assert "Shield" not in final_spell_names
+
+
+def test_spellcasting_search_uses_enabled_systems_sources_only(app, client, sign_in, users):
+    def _disable_tce(payload: dict) -> None:
+        systems_sources = list(payload.get("systems_sources") or [])
+        for index, source in enumerate(systems_sources):
+            source_payload = dict(source or {})
+            if str(source_payload.get("source_id") or "").strip().upper() != "TCE":
+                continue
+            source_payload["enabled"] = False
+            systems_sources[index] = source_payload
+        payload["systems_sources"] = systems_sources
+
+    _write_campaign_config(app, _disable_tce)
+    _seed_systems_spell_entries(
+        app,
+        [
+            {"slug": "phb-spell-shield", "title": "Shield", "level": 1, "class_lists": {"PHB": ["Sorcerer"]}, "source_id": "PHB"},
+            {"slug": "tce-spell-tashascausticbrew", "title": "Tasha's Caustic Brew", "level": 1, "class_lists": {"TCE": ["Sorcerer"]}, "source_id": "TCE"},
+        ],
+    )
+
+    def _mutate(payload: dict) -> None:
+        profile = dict(payload.get("profile") or {})
+        profile["class_level_text"] = "Sorcerer 5"
+        profile["classes"] = [{"class_name": "Sorcerer", "level": 5}]
+        payload["profile"] = profile
+        payload["spellcasting"] = {
+            "spellcasting_class": "Sorcerer",
+            "spellcasting_ability": "Charisma",
+            "spell_save_dc": 15,
+            "spell_attack_bonus": 7,
+            "slot_progression": [
+                {"level": 1, "max_slots": 4},
+                {"level": 2, "max_slots": 3},
+            ],
+            "spells": [],
+        }
+
+    _write_character_definition(app, "arden-march", _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    hidden_source_response = client.get(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/spells/search?kind=spell&q=tasha"
+    )
+    assert hidden_source_response.status_code == 200
+    assert hidden_source_response.get_json() == {
+        "results": [],
+        "message": "No eligible class spells matched that search.",
+    }
+
+    visible_source_response = client.get(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/spells/search?kind=spell&q=shield"
+    )
+    assert visible_source_response.status_code == 200
+    visible_payload = visible_source_response.get_json()
+    assert visible_payload["message"] == "Found 1 matching spells."
+    assert visible_payload["results"] == [
+        {
+            "entry_slug": "phb-spell-shield",
+            "title": "Shield",
+            "level_label": "1st-level",
+            "source_id": "PHB",
+            "select_label": "Shield - 1st-level - PHB",
+        }
+    ]
 
 
 def test_spellcasting_subpage_can_prepare_spells_and_protect_always_prepared_entries(
