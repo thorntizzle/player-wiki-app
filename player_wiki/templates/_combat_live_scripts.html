@@ -10,7 +10,7 @@
     const trackerRoot = document.querySelector("[data-combat-tracker-root]");
     const contextRoot = document.querySelector("[data-combat-context-root]");
     const controlsRoot = document.querySelector("[data-combat-controls-root]");
-    const pollUrl = liveRoot.dataset.combatLiveUrl;
+    let pollUrl = liveRoot.dataset.combatLiveUrl || "";
     const uiStateTools = window.__playerWikiLiveUiTools || null;
     let combatStateToken = liveRoot.dataset.combatStateToken || "";
     let liveRevision = Number.parseInt(liveRoot.dataset.liveRevision || "0", 10);
@@ -606,25 +606,76 @@
       true,
     );
 
-    liveRoot.addEventListener("change", (event) => {
+    liveRoot.addEventListener("change", async (event) => {
       const target = event.target;
       if (!(target instanceof HTMLElement)) {
         return;
       }
       if (target.matches("[data-combat-navigation-select]")) {
         const form = target.closest("[data-combat-navigation-form]");
-        if (!(form instanceof HTMLFormElement)) {
+        if (!(form instanceof HTMLFormElement) || requestInFlight) {
           return;
         }
         const action = form.getAttribute("action") || window.location.pathname;
+        const nextPage = new URL(action, window.location.origin);
         const params = new URLSearchParams();
         for (const [name, value] of new FormData(form).entries()) {
           if (typeof value === "string" && value) {
             params.append(name, value);
           }
         }
-        const nextUrl = params.toString() ? `${action}?${params.toString()}` : action;
-        window.location.assign(nextUrl);
+        nextPage.search = params.toString();
+        const nextPageUrl = `${nextPage.pathname}${nextPage.search}${nextPage.hash}`;
+        if (!pollUrl) {
+          window.location.assign(nextPageUrl);
+          return;
+        }
+
+        const nextPoll = new URL(pollUrl, window.location.origin);
+        nextPoll.search = params.toString();
+        const nextPollUrl = `${nextPoll.pathname}${nextPoll.search}${nextPoll.hash}`;
+        const fields = Array.from(form.elements).filter(
+          (field) =>
+            field instanceof HTMLInputElement
+            || field instanceof HTMLSelectElement
+            || field instanceof HTMLTextAreaElement
+            || field instanceof HTMLButtonElement,
+        );
+
+        requestInFlight = true;
+        liveRoot.dataset.loading = "1";
+        for (const field of fields) {
+          field.disabled = true;
+        }
+        markActivity();
+        try {
+          const response = await fetch(nextPollUrl, {
+            headers: buildLiveHeaders({ allowShortCircuit: false }),
+            cache: "no-store",
+            credentials: "same-origin",
+          });
+          if (!response.ok) {
+            window.location.assign(nextPageUrl);
+            return;
+          }
+
+          const payload = await response.json();
+          syncLiveMetadata(payload, response);
+          logLiveDiagnostics("combat-navigation", response, payload);
+          pollUrl = nextPollUrl;
+          liveRoot.dataset.combatLiveUrl = pollUrl;
+          renderPayload(payload, { force: true });
+          window.history.replaceState(null, "", nextPageUrl);
+        } catch (_) {
+          window.location.assign(nextPageUrl);
+        } finally {
+          requestInFlight = false;
+          liveRoot.dataset.loading = "0";
+          for (const field of fields) {
+            field.disabled = false;
+          }
+          scheduleNextPoll(activeIntervalMs);
+        }
         return;
       }
       const form = target.closest("[data-combat-inline-autosubmit]");

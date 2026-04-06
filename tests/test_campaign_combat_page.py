@@ -182,6 +182,9 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
     assert "const findMatchingForm = (root, descriptor) =>" in dm_html
     assert 'focusState.form = describeForm(root, form);' in dm_html
     assert "const fieldRoot = findMatchingForm(root, focusState.form) || root;" in dm_html
+    assert "window.history.replaceState(null, \"\", nextPageUrl);" in dm_html
+    assert "buildLiveHeaders({ allowShortCircuit: false })" in dm_html
+    assert "window.location.assign(nextUrl);" not in dm_html
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["party"]["email"], users["party"]["password"])
@@ -1231,6 +1234,55 @@ def test_dm_live_state_renders_only_selected_combatant_card(app, client, sign_in
     assert "Focus combatant" in payload["summary_html"]
     assert f'id="combatant-{hound.id}"' in payload["tracker_html"]
     assert f'id="combatant-{arden.id}"' not in payload["tracker_html"]
+
+
+def test_dm_live_state_does_not_short_circuit_when_focus_changes(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    hound = _find_combatant(app, name="Clockwork Hound")
+    assert arden is not None
+    assert hound is not None
+
+    initial_live_state = client.get(
+        f"/campaigns/linden-pass/combat/dm/live-state?combatant={arden.id}",
+        headers=_async_headers(),
+    )
+
+    assert initial_live_state.status_code == 200
+    initial_payload = initial_live_state.get_json()
+    assert initial_payload["changed"] is True
+    assert initial_payload["selected_combatant_id"] == arden.id
+
+    changed_focus_live_state = client.get(
+        f"/campaigns/linden-pass/combat/dm/live-state?combatant={hound.id}",
+        headers=_live_poll_headers(initial_payload["live_revision"], initial_payload["live_view_token"]),
+    )
+
+    assert changed_focus_live_state.status_code == 200
+    changed_focus_payload = changed_focus_live_state.get_json()
+    assert changed_focus_payload["changed"] is True
+    assert changed_focus_payload["selected_combatant_id"] == hound.id
+    assert changed_focus_payload["live_view_token"] != initial_payload["live_view_token"]
+    assert f'id="combatant-{hound.id}"' in changed_focus_payload["tracker_html"]
+    assert f'id="combatant-{arden.id}"' not in changed_focus_payload["tracker_html"]
 
 
 def test_non_async_combat_mutations_preserve_explicit_combatant_focus_in_redirects(

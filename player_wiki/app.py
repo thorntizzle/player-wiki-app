@@ -942,11 +942,17 @@ def create_app() -> Flask:
         digest = hashlib.sha1("||".join(normalized_parts).encode("utf-8")).hexdigest()
         return digest[:12]
 
-    def build_combat_live_view_token(campaign_slug: str, combat_subpage: str) -> str:
+    def build_combat_live_view_token(
+        campaign_slug: str,
+        combat_subpage: str,
+        *,
+        selected_combatant_id: int | None = None,
+    ) -> str:
         return build_live_hash(
             "combat",
             combat_subpage,
             "1" if can_manage_campaign_combat(campaign_slug) else "0",
+            str(selected_combatant_id or ""),
             *sorted(get_owned_character_slugs(campaign_slug)),
         )
 
@@ -1103,12 +1109,23 @@ def create_app() -> Flask:
             render_ms=render_ms,
         )
 
-    def build_combat_live_metadata(campaign_slug: str, combat_subpage: str) -> dict[str, object]:
+    def build_combat_live_metadata(
+        campaign_slug: str,
+        combat_subpage: str,
+        *,
+        selected_combatant_id: int | None = None,
+    ) -> dict[str, object]:
         combat_service = get_campaign_combat_service()
         combat_service.sync_player_character_snapshots(campaign_slug)
+        if selected_combatant_id is None:
+            selected_combatant_id = parse_requested_combatant_id()
         return {
             "live_revision": combat_service.get_live_revision(campaign_slug),
-            "live_view_token": build_combat_live_view_token(campaign_slug, combat_subpage),
+            "live_view_token": build_combat_live_view_token(
+                campaign_slug,
+                combat_subpage,
+                selected_combatant_id=selected_combatant_id,
+            ),
         }
 
     def build_session_live_metadata(campaign_slug: str, session_subpage: str) -> dict[str, object]:
@@ -2053,7 +2070,6 @@ def create_app() -> Flask:
             combat_tracker_display_combatants = list(tracker_view.get("combatants") or [])
         combat_poll_settings = build_combat_poll_settings(combat_subpage)
         combat_live_revision = tracker.revision if combat_system_supported else 0
-        combat_live_view_token = build_combat_live_view_token(campaign_slug, combat_subpage)
 
         selected_combatant_id = (
             selected_combatant_record.id if selected_combatant_record is not None else None
@@ -2082,6 +2098,11 @@ def create_app() -> Flask:
             combat_tracker_section_meta = (
                 "Choose a combatant from the focus picker above to inspect and edit one participant at a time."
             )
+        combat_live_view_token = build_combat_live_view_token(
+            campaign_slug,
+            combat_subpage,
+            selected_combatant_id=requested_combatant_id,
+        )
         accessible_combat_character_rows = list_accessible_combat_character_rows(
             combatants,
             tracker_view,
@@ -3684,8 +3705,13 @@ def create_app() -> Flask:
     def campaign_combat_dm_live_state(campaign_slug: str):
         if not can_manage_campaign_combat(campaign_slug):
             abort(403)
+        selected_combatant_id = parse_requested_combatant_id()
         state_check_started_at = time.perf_counter()
-        live_metadata = build_combat_live_metadata(campaign_slug, "dm")
+        live_metadata = build_combat_live_metadata(
+            campaign_slug,
+            "dm",
+            selected_combatant_id=selected_combatant_id,
+        )
         state_check_ms = (time.perf_counter() - state_check_started_at) * 1000
         if should_short_circuit_live_response(
             live_revision=int(live_metadata["live_revision"] or 0),
@@ -3706,6 +3732,7 @@ def create_app() -> Flask:
         render_started_at = time.perf_counter()
         payload = build_campaign_combat_dm_live_state(
             campaign_slug,
+            selected_combatant_id=selected_combatant_id,
             live_revision=int(live_metadata["live_revision"] or 0),
             live_view_token=str(live_metadata["live_view_token"] or ""),
         )
