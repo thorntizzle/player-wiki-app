@@ -52,12 +52,70 @@
       return null;
     };
 
+    const describeForm = (root, form) => {
+      if (!(root instanceof HTMLElement) || !(form instanceof HTMLFormElement)) {
+        return null;
+      }
+      const descriptor = {
+        method: String(form.getAttribute("method") || "get").toLowerCase(),
+        action: String(form.getAttribute("action") || ""),
+      };
+      if (form.id) {
+        descriptor.id = form.id;
+        return descriptor;
+      }
+      const matchingForms = Array.from(root.querySelectorAll("form")).filter((candidate) => {
+        if (!(candidate instanceof HTMLFormElement)) {
+          return false;
+        }
+        return (
+          String(candidate.getAttribute("method") || "get").toLowerCase() === descriptor.method
+          && String(candidate.getAttribute("action") || "") === descriptor.action
+        );
+      });
+      const index = matchingForms.indexOf(form);
+      if (index >= 0) {
+        descriptor.index = index;
+      }
+      return descriptor;
+    };
+
+    const findMatchingForm = (root, descriptor) => {
+      if (!(root instanceof HTMLElement) || !descriptor || typeof descriptor !== "object") {
+        return null;
+      }
+      if (descriptor.id) {
+        const target = root.querySelector(`#${escapeSelectorValue(descriptor.id)}`);
+        if (target instanceof HTMLFormElement) {
+          return target;
+        }
+      }
+      const matchingForms = Array.from(root.querySelectorAll("form")).filter((candidate) => {
+        if (!(candidate instanceof HTMLFormElement)) {
+          return false;
+        }
+        return (
+          String(candidate.getAttribute("method") || "get").toLowerCase() === String(descriptor.method || "get").toLowerCase()
+          && String(candidate.getAttribute("action") || "") === String(descriptor.action || "")
+        );
+      });
+      if (!matchingForms.length) {
+        return null;
+      }
+      const index = Number.isInteger(descriptor.index) ? descriptor.index : 0;
+      return matchingForms[Math.min(Math.max(index, 0), matchingForms.length - 1)] || null;
+    };
+
     const captureFocus = (root) => {
       const active = document.activeElement;
       if (!(root instanceof HTMLElement) || !active || !root.contains(active) || !active.name) {
         return null;
       }
       const focusState = { name: active.name };
+      const form = active.closest("form");
+      if (form instanceof HTMLFormElement) {
+        focusState.form = describeForm(root, form);
+      }
       if (typeof active.selectionStart === "number" && typeof active.selectionEnd === "number") {
         focusState.selectionStart = active.selectionStart;
         focusState.selectionEnd = active.selectionEnd;
@@ -69,7 +127,8 @@
       if (!(root instanceof HTMLElement) || !focusState || !focusState.name) {
         return;
       }
-      const field = root.querySelector(`[name="${escapeSelectorValue(focusState.name)}"]`);
+      const fieldRoot = findMatchingForm(root, focusState.form) || root;
+      const field = fieldRoot.querySelector(`[name="${escapeSelectorValue(focusState.name)}"]`);
       if (!(field instanceof HTMLElement)) {
         return;
       }

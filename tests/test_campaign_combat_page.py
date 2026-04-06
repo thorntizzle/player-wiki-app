@@ -179,6 +179,9 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
     assert 'data-loading="0"' in dm_html
     assert "captureSystemsMonsterSearchState" in dm_html
     assert 'liveRoot.dataset.loading = "1";' in dm_html
+    assert "const findMatchingForm = (root, descriptor) =>" in dm_html
+    assert 'focusState.form = describeForm(root, form);' in dm_html
+    assert "const fieldRoot = findMatchingForm(root, focusState.form) || root;" in dm_html
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["party"]["email"], users["party"]["password"])
