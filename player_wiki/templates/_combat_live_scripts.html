@@ -401,6 +401,43 @@
       }
     };
 
+    const buildInlineFormState = (form) => {
+      if (!(form instanceof HTMLFormElement)) {
+        return "";
+      }
+      const params = new URLSearchParams();
+      for (const [name, value] of new FormData(form).entries()) {
+        params.append(name, typeof value === "string" ? value : "");
+      }
+      return params.toString();
+    };
+
+    const markInlineFormState = (root = liveRoot) => {
+      if (!(root instanceof HTMLElement)) {
+        return;
+      }
+      root.querySelectorAll("[data-combat-inline-autosubmit]").forEach((form) => {
+        if (!(form instanceof HTMLFormElement)) {
+          return;
+        }
+        form.dataset.combatInlineState = buildInlineFormState(form);
+      });
+    };
+
+    const queueInlineSubmit = (form) => {
+      if (!(form instanceof HTMLFormElement) || requestInFlight) {
+        return;
+      }
+      if (buildInlineFormState(form) === String(form.dataset.combatInlineState || "")) {
+        return;
+      }
+      if (typeof form.requestSubmit === "function") {
+        form.requestSubmit();
+        return;
+      }
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    };
+
     const renderPayload = (payload, { force = false, forceFlash = false } = {}) => {
       const nextToken = payload.combat_state_token ? String(payload.combat_state_token) : "";
       const focusState = uiStateTools ? uiStateTools.captureFocus(liveRoot) : null;
@@ -437,6 +474,7 @@
         flashRoot.innerHTML = payload.flash_html;
       }
 
+      markInlineFormState(liveRoot);
       combatStateToken = nextToken;
       liveRoot.dataset.combatStateToken = combatStateToken;
       if (uiStateTools) {
@@ -548,6 +586,40 @@
       }
     });
 
+    liveRoot.addEventListener(
+      "focusout",
+      (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) {
+          return;
+        }
+        const form = target.closest("[data-combat-inline-autosubmit]");
+        if (!(form instanceof HTMLFormElement)) {
+          return;
+        }
+        const nextFocused = event.relatedTarget;
+        if (nextFocused instanceof HTMLElement && form.contains(nextFocused)) {
+          return;
+        }
+        queueInlineSubmit(form);
+      },
+      true,
+    );
+
+    liveRoot.addEventListener("change", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      const form = target.closest("[data-combat-inline-autosubmit]");
+      if (!(form instanceof HTMLFormElement)) {
+        return;
+      }
+      if (form.dataset.combatInlineSubmitOnChange === "1") {
+        queueInlineSubmit(form);
+      }
+    });
+
     ["pointerdown", "keydown", "input", "focusin"].forEach((eventName) => {
       liveRoot.addEventListener(eventName, markActivity, true);
     });
@@ -562,6 +634,7 @@
     });
 
     initializeSystemsMonsterSearch();
+    markInlineFormState(liveRoot);
     if (diagnosticsEnabled && diagnosticsTools) {
       diagnosticsTools.ensureMetricsStore();
       diagnosticsTools.registerSampler("combat", async (options = {}) => {

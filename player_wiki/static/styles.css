@@ -1856,6 +1856,11 @@ button {
   align-items: flex-start;
 }
 
+.combat-inline-badge-form,
+.combat-inline-resource-form {
+  display: inline-flex;
+}
+
 .combat-badge,
 .combat-resource {
   display: inline-flex;
@@ -1882,6 +1887,46 @@ button {
   color: var(--accent-deep);
 }
 
+.combat-badge--editable,
+.combat-badge--button {
+  gap: 0.35rem;
+}
+
+.combat-badge--button {
+  cursor: pointer;
+  font: inherit;
+}
+
+.combat-inline-label {
+  color: inherit;
+}
+
+.combat-badge-input,
+.combat-stat-input {
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 0.15rem 0.35rem;
+}
+
+.combat-badge-input {
+  width: 3.5rem;
+  text-align: right;
+}
+
+.combat-badge-input:focus,
+.combat-stat-input:focus {
+  outline: none;
+  border-color: var(--border-accent);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-soft);
+}
+
 .combat-stat-grid {
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
 }
@@ -1901,6 +1946,39 @@ button {
 
 .combat-stat strong {
   font-size: 1.05rem;
+}
+
+.combat-stat--editable {
+  align-content: start;
+}
+
+.combat-inline-value {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.combat-inline-value--single {
+  align-items: center;
+}
+
+.combat-inline-divider,
+.combat-inline-suffix {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.combat-stat-input {
+  font-size: 1.05rem;
+}
+
+.combat-stat-input--number {
+  width: 4.5rem;
+}
+
+.combat-stat-input--single {
+  width: 100%;
 }
 
 .combat-form {
@@ -1928,6 +2006,37 @@ button {
 .combat-checkbox-row input {
   width: 1rem;
   height: 1rem;
+}
+
+.combat-inline-resource-form {
+  align-items: center;
+}
+
+.combat-inline-resource-form .combat-resource {
+  cursor: pointer;
+  user-select: none;
+}
+
+.combat-resource-toggle {
+  position: relative;
+  display: inline-flex;
+}
+
+.combat-resource-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.combat-resource-toggle input:checked + .combat-resource {
+  border-color: var(--border-accent);
+  background: var(--overlay-accent);
+  color: var(--accent-deep);
+}
+
+.combat-resource-toggle input:focus + .combat-resource {
+  border-color: var(--border-accent);
+  box-shadow: var(--shadow-soft);
 }
 
 .combat-condition-item {

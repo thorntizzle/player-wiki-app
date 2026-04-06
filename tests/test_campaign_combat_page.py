@@ -411,6 +411,39 @@ def test_dm_page_async_mutations_return_controls_partial_and_non_async_redirects
     assert redirect_response.headers["Location"].endswith("/campaigns/linden-pass/combat/dm#combat-tracker")
 
 
+def test_dm_combat_tracker_cards_use_inline_edit_controls(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+
+    response = client.get("/campaigns/linden-pass/combat/dm")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "combat-badge--editable" in body
+    assert 'data-combat-inline-autosubmit' in body
+    assert 'data-combat-inline-submit-on-change="1"' in body
+    assert "Save vitals" not in body
+    assert "Save resources" not in body
+    assert "Save turn" not in body
+
+
 def test_dm_can_add_player_character_and_npc_combatants_and_turn_order_sorts_high_to_low(
     app, client, sign_in, users
 ):
@@ -559,6 +592,29 @@ def test_owner_player_can_update_own_pc_vitals_from_combat_tracker(
     assert updated_combatant is not None
     assert updated_combatant.current_hp == 35
     assert updated_combatant.temp_hp == 4
+
+
+def test_owner_player_sees_inline_edit_controls_on_owned_tracked_pc(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get("/campaigns/linden-pass/combat")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert 'data-combat-inline-autosubmit' in body
+    assert 'aria-label="Current HP for Arden March"' in body
+    assert 'aria-label="Temp HP for Arden March"' in body
+    assert 'aria-label="Remaining movement for Arden March"' in body
+    assert "Save vitals" not in body
+    assert "Save resources" not in body
 
 
 def test_owner_player_can_open_combat_character_page_for_assigned_tracked_pc(app, client, sign_in, users):

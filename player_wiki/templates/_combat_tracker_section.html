@@ -1,3 +1,14 @@
+{% macro combat_tracker_context_fields(return_to_dm, requested_combatant_id, state_revision=None) -%}
+  {% if return_to_dm %}
+    <input type="hidden" name="combat_view" value="dm">
+  {% endif %}
+  {% if requested_combatant_id %}
+    <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
+  {% endif %}
+  {% if state_revision is not none %}
+    <input type="hidden" name="expected_revision" value="{{ state_revision }}">
+  {% endif %}
+{%- endmacro %}
 <section class="section-block" id="combat-tracker">
   {% set return_to_dm = combat_return_view == 'dm' %}
   <div class="section-heading">
@@ -26,11 +37,52 @@
               {% endif %}
             </div>
             <div class="combatant-badges">
-              <span class="combat-badge">Turn {{ combatant.turn_value }}</span>
+              {% if combatant.can_manage_combat %}
+                <form
+                  method="post"
+                  action="{{ url_for('campaign_combat_update_turn_value', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
+                  class="combat-inline-badge-form"
+                  data-combat-async
+                  data-combat-inline-autosubmit
+                >
+                  {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id) }}
+                  <label class="combat-badge combat-badge--editable">
+                    <span class="combat-inline-label">Turn</span>
+                    <input
+                      class="combat-badge-input"
+                      type="number"
+                      name="turn_value"
+                      value="{{ combatant.turn_value }}"
+                      aria-label="Turn value for {{ combatant.name }}"
+                    >
+                  </label>
+                </form>
+              {% else %}
+                <span class="combat-badge">Turn {{ combatant.turn_value }}</span>
+              {% endif %}
               {% if combatant.initiative_bonus_label and combatant.initiative_bonus_label != "0" %}
                 <span class="combat-badge combat-badge--muted">Init {{ combatant.initiative_bonus_label }}</span>
               {% endif %}
-              {% if combatant.is_current_turn %}
+              {% if combatant.can_manage_combat %}
+                <form
+                  method="post"
+                  action="{{ url_for('campaign_combat_set_current_turn', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
+                  class="combat-inline-badge-form"
+                  data-combat-async
+                >
+                  {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id) }}
+                  <button
+                    class="combat-badge combat-badge--button{% if combatant.is_current_turn %} combat-badge--active{% endif %}"
+                    type="submit"
+                  >
+                    {% if combatant.is_current_turn %}
+                      Current turn
+                    {% else %}
+                      Set current
+                    {% endif %}
+                  </button>
+                </form>
+              {% elif combatant.is_current_turn %}
                 <span class="combat-badge combat-badge--active">Current turn</span>
               {% endif %}
             </div>
@@ -38,143 +90,172 @@
 
           {% if combatant.show_detail %}
             <div class="combat-stat-grid">
-              <div class="combat-stat">
-                <span class="meta">HP</span>
-                <strong>{{ combatant.current_hp }} / {{ combatant.max_hp }}</strong>
-              </div>
-              <div class="combat-stat">
-                <span class="meta">Temp HP</span>
-                <strong>{{ combatant.temp_hp }}</strong>
-              </div>
-              <div class="combat-stat">
-                <span class="meta">Movement</span>
-                <strong>{{ combatant.movement_remaining }} / {{ combatant.movement_total }}</strong>
-              </div>
-              <div class="combat-stat">
-                <span class="meta">Speed</span>
-                <strong>{{ combatant.speed_label }}</strong>
-              </div>
+              {% if combatant.can_edit_vitals %}
+                <form
+                  method="post"
+                  action="{{ url_for('campaign_combat_update_vitals', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
+                  class="combat-stat combat-stat--editable"
+                  data-combat-async
+                  data-combat-inline-autosubmit
+                >
+                  {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id, combatant.state_revision) }}
+                  <input type="hidden" name="temp_hp" value="{{ combatant.temp_hp }}">
+                  {% if combatant.can_manage_combat and not combatant.character_slug %}
+                    <input type="hidden" name="movement_total" value="{{ combatant.movement_total }}">
+                  {% endif %}
+                  <span class="meta">HP</span>
+                  <div class="combat-inline-value">
+                    <input
+                      class="combat-stat-input combat-stat-input--number"
+                      type="number"
+                      name="current_hp"
+                      value="{{ combatant.current_hp }}"
+                      aria-label="Current HP for {{ combatant.name }}"
+                    >
+                    <span class="combat-inline-divider">/</span>
+                    {% if combatant.can_manage_combat and not combatant.character_slug %}
+                      <input
+                        class="combat-stat-input combat-stat-input--number"
+                        type="number"
+                        name="max_hp"
+                        value="{{ combatant.max_hp }}"
+                        aria-label="Max HP for {{ combatant.name }}"
+                      >
+                    {% else %}
+                      <strong>{{ combatant.max_hp }}</strong>
+                    {% endif %}
+                  </div>
+                </form>
+                <form
+                  method="post"
+                  action="{{ url_for('campaign_combat_update_vitals', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
+                  class="combat-stat combat-stat--editable"
+                  data-combat-async
+                  data-combat-inline-autosubmit
+                >
+                  {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id, combatant.state_revision) }}
+                  <input type="hidden" name="current_hp" value="{{ combatant.current_hp }}">
+                  {% if combatant.can_manage_combat and not combatant.character_slug %}
+                    <input type="hidden" name="max_hp" value="{{ combatant.max_hp }}">
+                    <input type="hidden" name="movement_total" value="{{ combatant.movement_total }}">
+                  {% endif %}
+                  <span class="meta">Temp HP</span>
+                  <input
+                    class="combat-stat-input combat-stat-input--single"
+                    type="number"
+                    name="temp_hp"
+                    value="{{ combatant.temp_hp }}"
+                    aria-label="Temp HP for {{ combatant.name }}"
+                  >
+                </form>
+              {% else %}
+                <div class="combat-stat">
+                  <span class="meta">HP</span>
+                  <strong>{{ combatant.current_hp }} / {{ combatant.max_hp }}</strong>
+                </div>
+                <div class="combat-stat">
+                  <span class="meta">Temp HP</span>
+                  <strong>{{ combatant.temp_hp }}</strong>
+                </div>
+              {% endif %}
+
+              {% if combatant.can_edit_resources %}
+                <form
+                  method="post"
+                  action="{{ url_for('campaign_combat_update_resources', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
+                  class="combat-stat combat-stat--editable"
+                  data-combat-async
+                  data-combat-inline-autosubmit
+                >
+                  {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id) }}
+                  <input type="hidden" name="has_action" value="{{ '1' if combatant.has_action else '0' }}">
+                  <input type="hidden" name="has_bonus_action" value="{{ '1' if combatant.has_bonus_action else '0' }}">
+                  <input type="hidden" name="has_reaction" value="{{ '1' if combatant.has_reaction else '0' }}">
+                  <span class="meta">Movement</span>
+                  <div class="combat-inline-value">
+                    <input
+                      class="combat-stat-input combat-stat-input--number"
+                      type="number"
+                      name="movement_remaining"
+                      value="{{ combatant.movement_remaining or 0 }}"
+                      aria-label="Remaining movement for {{ combatant.name }}"
+                    >
+                    <span class="combat-inline-divider">/</span>
+                    <strong>{{ combatant.movement_total }}</strong>
+                  </div>
+                </form>
+              {% else %}
+                <div class="combat-stat">
+                  <span class="meta">Movement</span>
+                  <strong>{{ combatant.movement_remaining }} / {{ combatant.movement_total }}</strong>
+                </div>
+              {% endif %}
+
+              {% if combatant.can_manage_combat and not combatant.character_slug %}
+                <form
+                  method="post"
+                  action="{{ url_for('campaign_combat_update_vitals', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
+                  class="combat-stat combat-stat--editable"
+                  data-combat-async
+                  data-combat-inline-autosubmit
+                >
+                  {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id) }}
+                  <input type="hidden" name="current_hp" value="{{ combatant.current_hp }}">
+                  <input type="hidden" name="max_hp" value="{{ combatant.max_hp }}">
+                  <input type="hidden" name="temp_hp" value="{{ combatant.temp_hp }}">
+                  <span class="meta">Speed</span>
+                  <div class="combat-inline-value combat-inline-value--single">
+                    <input
+                      class="combat-stat-input combat-stat-input--number"
+                      type="number"
+                      name="movement_total"
+                      value="{{ combatant.movement_total }}"
+                      aria-label="Speed for {{ combatant.name }}"
+                    >
+                    <span class="combat-inline-suffix">ft.</span>
+                  </div>
+                </form>
+              {% else %}
+                <div class="combat-stat">
+                  <span class="meta">Speed</span>
+                  <strong>{{ combatant.speed_label }}</strong>
+                </div>
+              {% endif %}
             </div>
 
-            <div class="combat-resource-strip">
-              <span class="combat-resource{% if combatant.has_action %} combat-resource--ready{% endif %}">Action</span>
-              <span class="combat-resource{% if combatant.has_bonus_action %} combat-resource--ready{% endif %}">Bonus Action</span>
-              <span class="combat-resource{% if combatant.has_reaction %} combat-resource--ready{% endif %}">Reaction</span>
-              <span class="combat-resource combat-resource--movement">Movement {{ combatant.movement_remaining }}/{{ combatant.movement_total }}</span>
-            </div>
+            {% if combatant.can_edit_resources %}
+              <form
+                method="post"
+                action="{{ url_for('campaign_combat_update_resources', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
+                class="combat-resource-strip combat-inline-resource-form"
+                data-combat-async
+                data-combat-inline-autosubmit
+                data-combat-inline-submit-on-change="1"
+              >
+                {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id) }}
+                <input type="hidden" name="movement_remaining" value="{{ combatant.movement_remaining or 0 }}">
+                <label class="combat-resource-toggle">
+                  <input type="checkbox" name="has_action" value="1" {% if combatant.has_action %}checked{% endif %}>
+                  <span class="combat-resource">Action</span>
+                </label>
+                <label class="combat-resource-toggle">
+                  <input type="checkbox" name="has_bonus_action" value="1" {% if combatant.has_bonus_action %}checked{% endif %}>
+                  <span class="combat-resource">Bonus Action</span>
+                </label>
+                <label class="combat-resource-toggle">
+                  <input type="checkbox" name="has_reaction" value="1" {% if combatant.has_reaction %}checked{% endif %}>
+                  <span class="combat-resource">Reaction</span>
+                </label>
+              </form>
+            {% else %}
+              <div class="combat-resource-strip">
+                <span class="combat-resource{% if combatant.has_action %} combat-resource--ready{% endif %}">Action</span>
+                <span class="combat-resource{% if combatant.has_bonus_action %} combat-resource--ready{% endif %}">Bonus Action</span>
+                <span class="combat-resource{% if combatant.has_reaction %} combat-resource--ready{% endif %}">Reaction</span>
+              </div>
+            {% endif %}
           {% else %}
             <p class="meta">Detailed NPC vitals and action economy are hidden from player view.</p>
-          {% endif %}
-
-          {% if combatant.can_edit_vitals %}
-            <form
-              method="post"
-              action="{{ url_for('campaign_combat_update_vitals', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
-              class="stack-form combat-form"
-              data-combat-async
-            >
-              {% if return_to_dm %}
-                <input type="hidden" name="combat_view" value="dm">
-              {% endif %}
-              {% if requested_combatant_id %}
-                <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
-              {% endif %}
-              {% if combatant.state_revision is not none %}
-                <input type="hidden" name="expected_revision" value="{{ combatant.state_revision }}">
-              {% endif %}
-              <div class="combat-form-grid">
-                <label class="field">
-                  <span>Current HP</span>
-                  <input type="number" name="current_hp" value="{{ combatant.current_hp }}">
-                </label>
-                <label class="field">
-                  <span>Temp HP</span>
-                  <input type="number" name="temp_hp" value="{{ combatant.temp_hp }}">
-                </label>
-                {% if combatant.can_manage_combat and not combatant.character_slug %}
-                  <label class="field">
-                    <span>Max HP</span>
-                    <input type="number" name="max_hp" value="{{ combatant.max_hp }}">
-                  </label>
-                  <label class="field">
-                    <span>Movement</span>
-                    <input type="number" name="movement_total" value="{{ combatant.movement_total }}">
-                  </label>
-                {% endif %}
-              </div>
-              <div class="combat-form-actions">
-                <button type="submit">Save vitals</button>
-              </div>
-            </form>
-          {% endif %}
-
-          {% if combatant.can_edit_resources %}
-            <form
-              method="post"
-              action="{{ url_for('campaign_combat_update_resources', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
-              class="stack-form combat-form"
-              data-combat-async
-            >
-              {% if return_to_dm %}
-                <input type="hidden" name="combat_view" value="dm">
-              {% endif %}
-              {% if requested_combatant_id %}
-                <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
-              {% endif %}
-              <div class="combat-checkbox-row">
-                <label><input type="checkbox" name="has_action" value="1" {% if combatant.has_action %}checked{% endif %}> Action ready</label>
-                <label><input type="checkbox" name="has_bonus_action" value="1" {% if combatant.has_bonus_action %}checked{% endif %}> Bonus action ready</label>
-                <label><input type="checkbox" name="has_reaction" value="1" {% if combatant.has_reaction %}checked{% endif %}> Reaction ready</label>
-              </div>
-              <label class="field">
-                <span>Remaining movement</span>
-                <input type="number" name="movement_remaining" value="{{ combatant.movement_remaining or 0 }}">
-              </label>
-              <button type="submit">Save resources</button>
-            </form>
-          {% endif %}
-
-          {% if combatant.can_manage_combat %}
-            <div class="combat-manager-grid">
-              <form
-                method="post"
-                action="{{ url_for('campaign_combat_update_turn_value', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
-                class="stack-form combat-form combat-form--compact"
-                data-combat-async
-              >
-                {% if return_to_dm %}
-                  <input type="hidden" name="combat_view" value="dm">
-                {% endif %}
-                {% if requested_combatant_id %}
-                  <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
-                {% endif %}
-                <label class="field">
-                  <span>Turn value</span>
-                  <input type="number" name="turn_value" value="{{ combatant.turn_value }}">
-                </label>
-                <button type="submit">Save turn</button>
-              </form>
-
-              <form
-                method="post"
-                action="{{ url_for('campaign_combat_set_current_turn', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
-                class="stack-form combat-form combat-form--compact"
-                data-combat-async
-              >
-                {% if return_to_dm %}
-                  <input type="hidden" name="combat_view" value="dm">
-                {% endif %}
-                {% if requested_combatant_id %}
-                  <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
-                {% endif %}
-                <p class="meta">Refreshes action, bonus action, reaction, and movement at the start of this turn.</p>
-                <button type="submit">Set current turn</button>
-              </form>
-
-              <article class="combat-form combat-form--compact">
-                <p class="meta">Combat resource edits now live in the shared resource form above so tracked player owners can use the same controls.</p>
-              </article>
-            </div>
           {% endif %}
 
           {% if return_to_dm and combatant.can_toggle_player_detail_visibility %}
