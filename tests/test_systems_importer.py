@@ -206,6 +206,7 @@ def build_test_data_root(root: Path) -> Path:
                     "source": "PHB",
                     "page": 145,
                     "type": "HA",
+                    "armor": True,
                     "weight": 55,
                     "entries": ["Heavy armor made of interlocking metal rings."]
                 },
@@ -214,6 +215,7 @@ def build_test_data_root(root: Path) -> Path:
                     "source": "PHB",
                     "page": 149,
                     "type": "R",
+                    "weapon": True,
                     "weight": 5,
                     "entries": ["A martial ranged weapon with loading and two-handed properties."]
                 },
@@ -222,6 +224,7 @@ def build_test_data_root(root: Path) -> Path:
                     "source": "PHB",
                     "page": 150,
                     "type": "A",
+                    "ammo": True,
                     "weight": 1.5,
                     "entries": ["A case of twenty crossbow bolts."]
                 },
@@ -540,6 +543,32 @@ def build_test_data_root(root: Path) -> Path:
         },
     )
     return root
+
+
+def build_magicvariant_data_root(root: Path) -> Path:
+    data_root = build_test_data_root(root)
+    write_json(
+        root / "data/magicvariants.json",
+        {
+            "magicvariant": [
+                {
+                    "name": "+1 Armor",
+                    "edition": "classic",
+                    "type": "GV|DMG",
+                    "requires": [{"armor": True}],
+                    "inherits": {
+                        "namePrefix": "+1 ",
+                        "source": "DMG",
+                        "page": 152,
+                        "rarity": "rare",
+                        "bonusAc": "+1",
+                        "entries": ["You have a {=bonusAc} bonus to AC while wearing this armor."],
+                    },
+                }
+            ]
+        },
+    )
+    return data_root
 
 
 def build_scag_background_data_root(root: Path) -> Path:
@@ -1530,6 +1559,30 @@ def test_importer_supports_scag_backgrounds(app, tmp_path):
     assert clan_crafter.metadata["language_proficiencies"] == [{"dwarvish": True}, {"anyStandard": 1}]
     assert clan_crafter.metadata["tool_proficiencies"] == [{"anyArtisansTool": 1}]
     assert "Respect of the Stout Folk" in clan_crafter.rendered_html
+
+
+def test_importer_expands_safe_classic_magic_armor_variants(app, tmp_path):
+    data_root = build_magicvariant_data_root(tmp_path / "dnd5e-source-magicvariants")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("PHB", entry_types=["item"])
+        result = importer.import_source("DMG", entry_types=["item"])
+        store = app.extensions["systems_store"]
+        dmg_entries = {
+            entry.title: entry
+            for entry in store.list_entries_for_source("DND-5E", "DMG", entry_type="item", limit=20)
+        }
+
+    assert result.imported_count == 1
+    assert result.imported_by_type == {"item": 1}
+    assert "+1 Chain Mail" in dmg_entries
+    assert "You have a +1 bonus to AC while wearing this armor." in dmg_entries["+1 Chain Mail"].rendered_html
+    assert "Heavy armor made of interlocking metal rings." in dmg_entries["+1 Chain Mail"].rendered_html
 
 
 def test_importer_preserves_additional_spell_metadata_on_class_entries(app, tmp_path):

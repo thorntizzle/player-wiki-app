@@ -14,6 +14,7 @@ from .systems_service import SystemsService
 from .systems_store import SystemsStore
 
 INLINE_TAG_PATTERN = re.compile(r"\{@([^{}]+)\}")
+MAGIC_VARIANT_PLACEHOLDER_PATTERN = re.compile(r"\{=([^{}]+)\}")
 
 SPELL_SCHOOL_LABELS = {
     "A": "Abjuration",
@@ -137,6 +138,17 @@ SUPPORTED_ENTRY_TYPES = (
 # unsupported parent class sources should not import into the shared library.
 UNSUPPORTED_CLASS_VARIANT_SOURCE_IDS = {"XPHB", "EFA"}
 SUPPORTED_SUBCLASS_SOURCE_IDS = PLAYER_SAFE_SOURCE_IDS | {"DMG", "MM", "MTF", "VGM"}
+SAFE_GENERIC_MAGIC_VARIANT_NAMES = {
+    normalize_lookup("+1 Armor"),
+    normalize_lookup("+2 Armor"),
+    normalize_lookup("+3 Armor"),
+    normalize_lookup("+1 Shield (*)"),
+    normalize_lookup("+2 Shield (*)"),
+    normalize_lookup("+3 Shield (*)"),
+    normalize_lookup("+1 Weapon"),
+    normalize_lookup("+2 Weapon"),
+    normalize_lookup("+3 Weapon"),
+}
 
 EXCLUDED_MEDIA_KEYS = {
     "altArt",
@@ -187,6 +199,7 @@ DATASETS = (
     DatasetDefinition("feat", "data/feats.json", "feat"),
     DatasetDefinition("item", "data/items-base.json", "baseitem"),
     DatasetDefinition("item", "data/items.json", "item"),
+    DatasetDefinition("item", "data/magicvariants.json", "magicvariant"),
     DatasetDefinition("optionalfeature", "data/optionalfeatures.json", "optionalfeature"),
     DatasetDefinition("race", "data/races.json", "race"),
     DatasetDefinition("sense", "data/senses.json", "sense"),
@@ -216,6 +229,7 @@ class Dnd5eSystemsImporter:
         self.data_root = Path(data_root)
         self.library_slug = library_slug
         self._spell_source_lookup_cache: dict[str, Any] | None = None
+        self._base_item_rows_cache: list[dict[str, Any]] | None = None
 
     def import_sources(
         self,
@@ -376,10 +390,200 @@ class Dnd5eSystemsImporter:
         dataset: DatasetDefinition,
         source_id: str,
     ) -> list[dict[str, Any]]:
+        if dataset.entry_type == "item" and dataset.json_key == "magicvariant":
+            raw_entries = payload.get(dataset.json_key, [])
+            if not isinstance(raw_entries, list):
+                return []
+            return self._build_magicvariant_raw_entries(raw_entries, source_id)
         if dataset.entry_type != "race":
             raw_entries = payload.get(dataset.json_key, [])
             return raw_entries if isinstance(raw_entries, list) else []
         return self._build_race_raw_entries(payload, source_id)
+
+    def _build_magicvariant_raw_entries(
+        self,
+        raw_entries: list[dict[str, Any]],
+        source_id: str,
+    ) -> list[dict[str, Any]]:
+        base_items = self._load_base_item_rows()
+        if not base_items:
+            return []
+
+        expanded_entries: list[dict[str, Any]] = []
+        for raw_entry in raw_entries:
+            if not isinstance(raw_entry, dict):
+                continue
+            if not self._should_expand_magicvariant(raw_entry, source_id):
+                continue
+            for base_item in base_items:
+                if not self._magicvariant_matches_base_item(raw_entry, base_item):
+                    continue
+                expanded = self._expand_magicvariant_entry(
+                    raw_entry,
+                    base_item=base_item,
+                    source_id=source_id,
+                )
+                if expanded is not None:
+                    expanded_entries.append(expanded)
+        return expanded_entries
+
+    def _load_base_item_rows(self) -> list[dict[str, Any]]:
+        if self._base_item_rows_cache is not None:
+            return self._base_item_rows_cache
+        path = self.data_root / "data/items-base.json"
+        if not path.exists():
+            self._base_item_rows_cache = []
+            return self._base_item_rows_cache
+        with path.open(encoding="utf-8") as handle:
+            payload = json.load(handle)
+        raw_entries = payload.get("baseitem", [])
+        if not isinstance(raw_entries, list):
+            self._base_item_rows_cache = []
+            return self._base_item_rows_cache
+        self._base_item_rows_cache = [
+            copy.deepcopy(row)
+            for row in raw_entries
+            if isinstance(row, dict) and str(row.get("name", "") or "").strip()
+        ]
+        return self._base_item_rows_cache
+
+    def _should_expand_magicvariant(self, raw_entry: dict[str, Any], source_id: str) -> bool:
+        variant_name = normalize_lookup(str(raw_entry.get("name", "") or ""))
+        if variant_name not in SAFE_GENERIC_MAGIC_VARIANT_NAMES:
+            return False
+        edition = str(raw_entry.get("edition", "") or "").strip().lower()
+        if edition and edition != "classic":
+            return False
+        inherits = dict(raw_entry.get("inherits") or {})
+        variant_source = str(inherits.get("source") or raw_entry.get("source") or "").strip().upper()
+        return bool(variant_source) and variant_source == source_id
+
+    def _magicvariant_matches_base_item(
+        self,
+        raw_entry: dict[str, Any],
+        base_item: dict[str, Any],
+    ) -> bool:
+        edition = str(base_item.get("edition", "") or "").strip().lower()
+        if edition and edition != "classic":
+            return False
+
+        requires = raw_entry.get("requires")
+        if isinstance(requires, list) and requires:
+            if not any(self._magicvariant_rule_matches_base_item(base_item, rule) for rule in requires):
+                return False
+
+        excludes = raw_entry.get("excludes")
+        if isinstance(excludes, list) and excludes:
+            if any(self._magicvariant_rule_matches_base_item(base_item, rule) for rule in excludes):
+                return False
+
+        return True
+
+    def _magicvariant_rule_matches_base_item(
+        self,
+        base_item: dict[str, Any],
+        rule: Any,
+    ) -> bool:
+        if not isinstance(rule, dict):
+            return False
+        supported_keys = {"armor", "weapon", "ammo", "type"}
+        if any(key not in supported_keys for key in rule.keys()):
+            return False
+
+        if "armor" in rule and bool(base_item.get("armor")) != bool(rule.get("armor")):
+            return False
+        if "weapon" in rule and bool(base_item.get("weapon")) != bool(rule.get("weapon")):
+            return False
+        if "ammo" in rule:
+            base_is_ammo = bool(base_item.get("ammo")) or self._item_type_matches(base_item.get("type"), "A") or self._item_type_matches(base_item.get("type"), "AF")
+            if base_is_ammo != bool(rule.get("ammo")):
+                return False
+        if "type" in rule and not self._item_type_matches(base_item.get("type"), rule.get("type")):
+            return False
+        return True
+
+    def _item_type_matches(self, value: Any, expected: Any) -> bool:
+        normalized_value = str(value or "").split("|", 1)[0].strip().upper()
+        normalized_expected = str(expected or "").split("|", 1)[0].strip().upper()
+        return bool(normalized_value) and bool(normalized_expected) and normalized_value == normalized_expected
+
+    def _expand_magicvariant_entry(
+        self,
+        raw_entry: dict[str, Any],
+        *,
+        base_item: dict[str, Any],
+        source_id: str,
+    ) -> dict[str, Any] | None:
+        base_name = str(base_item.get("name", "") or "").strip()
+        if not base_name:
+            return None
+
+        inherits = dict(raw_entry.get("inherits") or {})
+        expanded_entry = copy.deepcopy(base_item)
+        for key, value in inherits.items():
+            if key in {"namePrefix", "nameRemove", "nameSuffix"}:
+                continue
+            expanded_entry[key] = copy.deepcopy(value)
+
+        expanded_entry["name"] = self._build_magicvariant_item_name(base_name, inherits=inherits)
+        expanded_entry["source"] = source_id
+        expanded_entry["page"] = inherits.get("page") or raw_entry.get("page") or base_item.get("page")
+        expanded_entry["baseItem"] = f"{base_name}|{str(base_item.get('source') or '').strip().upper()}"
+        expanded_entry["entries"] = self._build_magicvariant_entries(
+            base_item=base_item,
+            inherits=inherits,
+            expanded_entry=expanded_entry,
+        )
+        return expanded_entry
+
+    def _build_magicvariant_item_name(self, base_name: str, *, inherits: dict[str, Any]) -> str:
+        resolved_name = str(base_name or "").strip()
+        remove_text = str(inherits.get("nameRemove", "") or "").strip()
+        if remove_text:
+            resolved_name = resolved_name.replace(remove_text, "").strip()
+        prefix = str(inherits.get("namePrefix", "") or "")
+        suffix = str(inherits.get("nameSuffix", "") or "")
+        return re.sub(r"\s+", " ", f"{prefix}{resolved_name}{suffix}").strip()
+
+    def _build_magicvariant_entries(
+        self,
+        *,
+        base_item: dict[str, Any],
+        inherits: dict[str, Any],
+        expanded_entry: dict[str, Any],
+    ) -> list[Any]:
+        variant_entries = self._apply_magicvariant_placeholders(
+            copy.deepcopy(inherits.get("entries") or []),
+            context=expanded_entry,
+        )
+        base_entries = copy.deepcopy(base_item.get("entries") or [])
+
+        resolved_entries: list[Any] = []
+        if isinstance(variant_entries, list):
+            resolved_entries.extend(variant_entries)
+        elif variant_entries not in (None, "", []):
+            resolved_entries.append(variant_entries)
+
+        if isinstance(base_entries, list):
+            resolved_entries.extend(base_entries)
+        elif base_entries not in (None, "", []):
+            resolved_entries.append(base_entries)
+        return resolved_entries
+
+    def _apply_magicvariant_placeholders(self, value: Any, *, context: dict[str, Any]) -> Any:
+        if isinstance(value, str):
+            return MAGIC_VARIANT_PLACEHOLDER_PATTERN.sub(
+                lambda match: str(context.get(match.group(1), match.group(0))),
+                value,
+            )
+        if isinstance(value, list):
+            return [self._apply_magicvariant_placeholders(item, context=context) for item in value]
+        if isinstance(value, dict):
+            return {
+                key: self._apply_magicvariant_placeholders(item, context=context)
+                for key, item in value.items()
+            }
+        return copy.deepcopy(value)
 
     def _build_race_raw_entries(self, payload: dict[str, Any], source_id: str) -> list[dict[str, Any]]:
         race_rows = payload.get("race", [])

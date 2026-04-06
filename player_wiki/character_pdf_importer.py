@@ -425,6 +425,11 @@ def _preferred_item_aliases(name: str) -> list[str]:
         parts = [part.strip() for part in name.split(",", 1)]
         if len(parts) == 2 and all(parts):
             aliases.append(f"{parts[1]} {parts[0]}")
+    bonus_suffix_match = re.match(r"^(?P<base>.+?),\s*(?P<bonus>\+\d+)$", str(name or "").strip())
+    if bonus_suffix_match:
+        bonus_alias = f"{bonus_suffix_match.group('bonus')} {bonus_suffix_match.group('base').strip()}"
+        if bonus_alias not in aliases:
+            aliases.append(bonus_alias)
     alias_map = {
         "Chain Mail": "Chain Mail Armor",
         "Crossbow, Light": "Light Crossbow",

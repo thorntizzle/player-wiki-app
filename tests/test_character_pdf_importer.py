@@ -1628,6 +1628,37 @@ def test_resolve_definition_systems_links_prefers_contextual_matches():
     assert equipment_by_name["Crossbow Bolts"]["match"]["title"] == "Crossbow Bolts (20)"
 
 
+def test_resolve_definition_systems_links_matches_bonus_suffix_equipment_aliases():
+    definition = _minimal_imported_definition(
+        equipment_catalog=[
+            {
+                "id": "chain-mail-plus-one",
+                "name": "Chain Mail, +1",
+                "default_quantity": 1,
+                "weight": "55 lb.",
+                "notes": "",
+            }
+        ]
+    )
+    systems_service = _FakeSystemsService(
+        [
+            _sample_system_entry(
+                entry_key="item-plus-one-chain-mail",
+                entry_type="item",
+                title="+1 Chain Mail",
+                source_id="DMG",
+            )
+        ]
+    )
+
+    links = resolve_definition_systems_links(systems_service, "linden-pass", definition)
+    equipment_by_name = {entry["name"]: entry for entry in links["equipment"]}
+
+    assert equipment_by_name["Chain Mail, +1"]["match"]["status"] == "matched"
+    assert equipment_by_name["Chain Mail, +1"]["match"]["title"] == "+1 Chain Mail"
+    assert equipment_by_name["Chain Mail, +1"]["match"]["strategy"] == "alias"
+
+
 def test_converge_imported_definition_preserves_existing_spell_links_when_duplicates_collapse():
     existing_definition = _minimal_imported_definition(
         spellcasting={
