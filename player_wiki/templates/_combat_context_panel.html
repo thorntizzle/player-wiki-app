@@ -25,24 +25,34 @@
       </div>
     </div>
 
-    <div class="combat-stat-grid combat-stat-grid--compact">
-      <div class="combat-stat">
-        <span class="meta">HP</span>
-        <strong>{{ selected_combatant.current_hp }} / {{ selected_combatant.max_hp }}</strong>
+    {% if selected_combatant.show_detail %}
+      <div class="combat-stat-grid combat-stat-grid--compact">
+        <div class="combat-stat">
+          <span class="meta">HP</span>
+          <strong>{{ selected_combatant.current_hp }} / {{ selected_combatant.max_hp }}</strong>
+        </div>
+        <div class="combat-stat">
+          <span class="meta">Temp HP</span>
+          <strong>{{ selected_combatant.temp_hp }}</strong>
+        </div>
+        <div class="combat-stat">
+          <span class="meta">Movement</span>
+          <strong>{{ selected_combatant.movement_remaining }} / {{ selected_combatant.movement_total }}</strong>
+        </div>
+        <div class="combat-stat">
+          <span class="meta">Conditions</span>
+          <strong>{{ selected_combatant.conditions | length }}</strong>
+        </div>
       </div>
-      <div class="combat-stat">
-        <span class="meta">Temp HP</span>
-        <strong>{{ selected_combatant.temp_hp }}</strong>
+    {% else %}
+      <p class="meta">Detailed NPC vitals and action economy are currently hidden from player view.</p>
+      <div class="combat-stat-grid combat-stat-grid--compact">
+        <div class="combat-stat">
+          <span class="meta">Conditions</span>
+          <strong>{{ selected_combatant.conditions | length }}</strong>
+        </div>
       </div>
-      <div class="combat-stat">
-        <span class="meta">Movement</span>
-        <strong>{{ selected_combatant.movement_remaining }} / {{ selected_combatant.movement_total }}</strong>
-      </div>
-      <div class="combat-stat">
-        <span class="meta">Conditions</span>
-        <strong>{{ selected_combatant.conditions | length }}</strong>
-      </div>
-    </div>
+    {% endif %}
 
     <div class="hero-actions">
       {% if selected_combatant_character_url %}

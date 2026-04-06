@@ -15,6 +15,8 @@
               <h3>
                 {% if combatant.can_open_character_page %}
                   <a href="{{ url_for('campaign_combat_character_view', campaign_slug=campaign.slug, combatant=combatant.id) }}">{{ combatant.name }}</a>
+                {% elif combatant.can_open_status_page %}
+                  <a href="{{ url_for('campaign_combat_status_view', campaign_slug=campaign.slug, combatant=combatant.id) }}">{{ combatant.name }}</a>
                 {% else %}
                   {{ combatant.name }}
                 {% endif %}
@@ -25,7 +27,7 @@
             </div>
             <div class="combatant-badges">
               <span class="combat-badge">Turn {{ combatant.turn_value }}</span>
-              {% if combatant.initiative_bonus_label != "0" %}
+              {% if combatant.initiative_bonus_label and combatant.initiative_bonus_label != "0" %}
                 <span class="combat-badge combat-badge--muted">Init {{ combatant.initiative_bonus_label }}</span>
               {% endif %}
               {% if combatant.is_current_turn %}
@@ -34,31 +36,35 @@
             </div>
           </div>
 
-          <div class="combat-stat-grid">
-            <div class="combat-stat">
-              <span class="meta">HP</span>
-              <strong>{{ combatant.current_hp }} / {{ combatant.max_hp }}</strong>
+          {% if combatant.show_detail %}
+            <div class="combat-stat-grid">
+              <div class="combat-stat">
+                <span class="meta">HP</span>
+                <strong>{{ combatant.current_hp }} / {{ combatant.max_hp }}</strong>
+              </div>
+              <div class="combat-stat">
+                <span class="meta">Temp HP</span>
+                <strong>{{ combatant.temp_hp }}</strong>
+              </div>
+              <div class="combat-stat">
+                <span class="meta">Movement</span>
+                <strong>{{ combatant.movement_remaining }} / {{ combatant.movement_total }}</strong>
+              </div>
+              <div class="combat-stat">
+                <span class="meta">Speed</span>
+                <strong>{{ combatant.speed_label }}</strong>
+              </div>
             </div>
-            <div class="combat-stat">
-              <span class="meta">Temp HP</span>
-              <strong>{{ combatant.temp_hp }}</strong>
-            </div>
-            <div class="combat-stat">
-              <span class="meta">Movement</span>
-              <strong>{{ combatant.movement_remaining }} / {{ combatant.movement_total }}</strong>
-            </div>
-            <div class="combat-stat">
-              <span class="meta">Speed</span>
-              <strong>{{ combatant.speed_label }}</strong>
-            </div>
-          </div>
 
-          <div class="combat-resource-strip">
-            <span class="combat-resource{% if combatant.has_action %} combat-resource--ready{% endif %}">Action</span>
-            <span class="combat-resource{% if combatant.has_bonus_action %} combat-resource--ready{% endif %}">Bonus Action</span>
-            <span class="combat-resource{% if combatant.has_reaction %} combat-resource--ready{% endif %}">Reaction</span>
-            <span class="combat-resource combat-resource--movement">Movement {{ combatant.movement_remaining }}/{{ combatant.movement_total }}</span>
-          </div>
+            <div class="combat-resource-strip">
+              <span class="combat-resource{% if combatant.has_action %} combat-resource--ready{% endif %}">Action</span>
+              <span class="combat-resource{% if combatant.has_bonus_action %} combat-resource--ready{% endif %}">Bonus Action</span>
+              <span class="combat-resource{% if combatant.has_reaction %} combat-resource--ready{% endif %}">Reaction</span>
+              <span class="combat-resource combat-resource--movement">Movement {{ combatant.movement_remaining }}/{{ combatant.movement_total }}</span>
+            </div>
+          {% else %}
+            <p class="meta">Detailed NPC vitals and action economy are hidden from player view.</p>
+          {% endif %}
 
           {% if combatant.can_edit_vitals %}
             <form
@@ -102,6 +108,32 @@
             </form>
           {% endif %}
 
+          {% if combatant.can_edit_resources %}
+            <form
+              method="post"
+              action="{{ url_for('campaign_combat_update_resources', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
+              class="stack-form combat-form"
+              data-combat-async
+            >
+              {% if return_to_dm %}
+                <input type="hidden" name="combat_view" value="dm">
+              {% endif %}
+              {% if requested_combatant_id %}
+                <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
+              {% endif %}
+              <div class="combat-checkbox-row">
+                <label><input type="checkbox" name="has_action" value="1" {% if combatant.has_action %}checked{% endif %}> Action ready</label>
+                <label><input type="checkbox" name="has_bonus_action" value="1" {% if combatant.has_bonus_action %}checked{% endif %}> Bonus action ready</label>
+                <label><input type="checkbox" name="has_reaction" value="1" {% if combatant.has_reaction %}checked{% endif %}> Reaction ready</label>
+              </div>
+              <label class="field">
+                <span>Remaining movement</span>
+                <input type="number" name="movement_remaining" value="{{ combatant.movement_remaining or 0 }}">
+              </label>
+              <button type="submit">Save resources</button>
+            </form>
+          {% endif %}
+
           {% if combatant.can_manage_combat %}
             <div class="combat-manager-grid">
               <form
@@ -139,30 +171,39 @@
                 <button type="submit">Set current turn</button>
               </form>
 
-              <form
-                method="post"
-                action="{{ url_for('campaign_combat_update_resources', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
-                class="stack-form combat-form"
-                data-combat-async
-              >
-                {% if return_to_dm %}
-                  <input type="hidden" name="combat_view" value="dm">
-                {% endif %}
-                {% if requested_combatant_id %}
-                  <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
-                {% endif %}
-                <div class="combat-checkbox-row">
-                  <label><input type="checkbox" name="has_action" value="1" {% if combatant.has_action %}checked{% endif %}> Action ready</label>
-                  <label><input type="checkbox" name="has_bonus_action" value="1" {% if combatant.has_bonus_action %}checked{% endif %}> Bonus action ready</label>
-                  <label><input type="checkbox" name="has_reaction" value="1" {% if combatant.has_reaction %}checked{% endif %}> Reaction ready</label>
-                </div>
-                <label class="field">
-                  <span>Remaining movement</span>
-                  <input type="number" name="movement_remaining" value="{{ combatant.movement_remaining }}">
-                </label>
-                <button type="submit">Save resources</button>
-              </form>
+              <article class="combat-form combat-form--compact">
+                <p class="meta">Combat resource edits now live in the shared resource form above so tracked player owners can use the same controls.</p>
+              </article>
             </div>
+          {% endif %}
+
+          {% if return_to_dm and combatant.can_toggle_player_detail_visibility %}
+            <form
+              method="post"
+              action="{{ url_for('campaign_combat_update_player_detail_visibility', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
+              class="stack-form combat-form combat-form--compact"
+              data-combat-async
+            >
+              <input type="hidden" name="combat_view" value="dm">
+              {% if requested_combatant_id %}
+                <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
+              {% endif %}
+              <input type="hidden" name="player_detail_visible" value="{{ '0' if combatant.player_detail_visible else '1' }}">
+              <p class="meta">
+                {% if combatant.player_detail_visible %}
+                  Players can currently see this NPC's vitals and action economy.
+                {% else %}
+                  Players currently see only this NPC's name, turn information, and conditions.
+                {% endif %}
+              </p>
+              <button type="submit">
+                {% if combatant.player_detail_visible %}
+                  Hide NPC detail from players
+                {% else %}
+                  Show NPC detail to players
+                {% endif %}
+              </button>
+            </form>
           {% endif %}
 
           <section class="combat-conditions">

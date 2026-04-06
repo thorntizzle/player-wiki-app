@@ -147,12 +147,12 @@ def test_campaign_member_can_open_combat_page_and_campaign_links_to_it(client, s
     assert "Combat tracker" in combat_html
     assert "Turn order" in combat_html
     assert "Current limits" in combat_html
-    assert "Character" in combat_html
+    assert "/campaigns/linden-pass/combat/character" not in combat_html
     assert 'data-combat-live-root' in combat_html
     assert 'data-loading="0"' in combat_html
     assert "window.__playerWikiLiveUiTools" in combat_html
     assert "uiStateTools.captureViewportAnchor(liveRoot)" in combat_html
-    assert "DM page" not in combat_html
+    assert "/campaigns/linden-pass/combat/dm" not in combat_html
     assert "/campaigns/linden-pass/combat/status" not in combat_html
     assert "Add player character" not in combat_html
     assert "Add NPC from Systems" not in combat_html
@@ -170,7 +170,7 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
     dm_html = dm_page.get_data(as_text=True)
     assert "Combat DM" in dm_html
     assert "Combat" in dm_html
-    assert "Character" in dm_html
+    assert "/campaigns/linden-pass/combat/character" not in dm_html
     assert "Status" in dm_html
     assert "DM page" in dm_html
     assert "Add player character" in dm_html
@@ -568,14 +568,20 @@ def test_owner_player_can_open_combat_character_page_for_assigned_tracked_pc(app
         data={"character_slug": "arden-march", "turn_value": 18},
         follow_redirects=False,
     )
+    combatant = _find_combatant(app, character_slug="arden-march")
+    assert combatant is not None
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["owner"]["email"], users["owner"]["password"])
 
+    combat_page = client.get("/campaigns/linden-pass/combat")
     response = client.get("/campaigns/linden-pass/combat/character")
 
+    assert combat_page.status_code == 200
     assert response.status_code == 200
+    combat_html = combat_page.get_data(as_text=True)
     body = response.get_data(as_text=True)
+    assert f"/campaigns/linden-pass/combat/character?combatant={combatant.id}" in combat_html
     assert "Combat Character" in body
     assert "Arden March" in body
     assert "Combat snapshot" in body
@@ -583,24 +589,25 @@ def test_owner_player_can_open_combat_character_page_for_assigned_tracked_pc(app
     assert "Open full sheet" not in body
 
 
-def test_dm_can_open_combat_character_page_for_any_tracked_pc(app, client, sign_in, users):
+def test_dm_combat_character_route_redirects_to_status_for_selected_target(app, client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
     client.post(
         "/campaigns/linden-pass/combat/player-combatants",
         data={"character_slug": "arden-march", "turn_value": 18},
         follow_redirects=False,
     )
+    combatant = _find_combatant(app, character_slug="arden-march")
+    assert combatant is not None
 
-    response = client.get("/campaigns/linden-pass/combat/character?character=arden-march")
+    response = client.get(
+        f"/campaigns/linden-pass/combat/character?combatant={combatant.id}",
+        follow_redirects=False,
+    )
 
-    assert response.status_code == 200
-    body = response.get_data(as_text=True)
-    assert "Arden March" in body
-    assert "Combat snapshot" in body
-    assert "Open full sheet" in body
-    assert 'data-combat-character-live-root' in body
-    assert 'data-loading="0"' in body
-    assert "window.__playerWikiLiveUiTools" in body
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith(
+        f"/campaigns/linden-pass/combat/status?combatant={combatant.id}"
+    )
 
 
 def test_player_without_owned_tracked_pc_gets_combat_character_empty_state(app, client, sign_in, users):
@@ -614,9 +621,12 @@ def test_player_without_owned_tracked_pc_gets_combat_character_empty_state(app, 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["party"]["email"], users["party"]["password"])
 
+    combat_page = client.get("/campaigns/linden-pass/combat")
     response = client.get("/campaigns/linden-pass/combat/character")
 
+    assert combat_page.status_code == 200
     assert response.status_code == 200
+    assert "/campaigns/linden-pass/combat/character" not in combat_page.get_data(as_text=True)
     body = response.get_data(as_text=True)
     assert "No tracked player character available" in body
 
@@ -664,6 +674,99 @@ def test_unassigned_player_cannot_update_other_pc_combat_vitals(app, client, sig
     )
 
     assert response.status_code == 403
+
+
+def test_owner_player_can_update_own_pc_resources_from_combat_views(
+    app, client, sign_in, users, get_character
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    combatant = _find_combatant(app, character_slug="arden-march")
+    assert combatant is not None
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    tracker_resources = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{combatant.id}/resources",
+        data={"movement_remaining": 5},
+        follow_redirects=False,
+    )
+
+    assert tracker_resources.status_code == 302
+    updated_combatant = _find_combatant(app, character_slug="arden-march")
+    assert updated_combatant is not None
+    assert updated_combatant.has_action is False
+    assert updated_combatant.has_bonus_action is False
+    assert updated_combatant.has_reaction is False
+    assert updated_combatant.movement_remaining == 5
+
+    record = get_character("arden-march")
+    resource_response = client.post(
+        f"/campaigns/linden-pass/combat/character/combatants/{combatant.id}/resources/sorcery-points",
+        data={"expected_revision": record.state_record.revision, "current": 3},
+        follow_redirects=False,
+    )
+
+    assert resource_response.status_code == 302
+    record = get_character("arden-march")
+    resources = {item["id"]: item for item in record.state_record.state["resources"]}
+    assert resources["sorcery-points"]["current"] == 3
+
+    spell_response = client.post(
+        f"/campaigns/linden-pass/combat/character/combatants/{combatant.id}/spell-slots/2",
+        data={"expected_revision": record.state_record.revision, "used": 2},
+        follow_redirects=False,
+    )
+
+    assert spell_response.status_code == 302
+    record = get_character("arden-march")
+    spell_slots = {item["level"]: item for item in record.state_record.state["spell_slots"]}
+    assert spell_slots[2]["used"] == 2
+
+
+def test_unassigned_player_cannot_update_other_pc_combat_resources_or_spell_slots(
+    app, client, sign_in, users, get_character
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    combatant = _find_combatant(app, character_slug="arden-march")
+    record = get_character("arden-march")
+    assert combatant is not None
+    assert record is not None
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    tracker_resources = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{combatant.id}/resources",
+        data={"movement_remaining": 5},
+        follow_redirects=False,
+    )
+    resource_response = client.post(
+        f"/campaigns/linden-pass/combat/character/combatants/{combatant.id}/resources/sorcery-points",
+        data={"expected_revision": record.state_record.revision, "current": 3},
+        follow_redirects=False,
+    )
+    spell_response = client.post(
+        f"/campaigns/linden-pass/combat/character/combatants/{combatant.id}/spell-slots/2",
+        data={"expected_revision": record.state_record.revision, "used": 2},
+        follow_redirects=False,
+    )
+
+    assert tracker_resources.status_code == 403
+    assert resource_response.status_code == 403
+    assert spell_response.status_code == 403
 
 
 def test_dm_can_manage_npc_vitals_resources_and_conditions(app, client, sign_in, users):
@@ -726,6 +829,105 @@ def test_dm_can_manage_npc_vitals_resources_and_conditions(app, client, sign_in,
     )
     assert delete_condition.status_code == 302
     assert _list_conditions(app, combatant.id) == []
+
+
+def test_npc_detail_is_hidden_from_players_by_default_and_dm_can_reveal_per_npc(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Brass Sentry",
+            "turn_value": 8,
+            "current_hp": 18,
+            "max_hp": 18,
+            "temp_hp": 0,
+            "movement_total": 30,
+        },
+        follow_redirects=False,
+    )
+
+    hound = _find_combatant(app, name="Clockwork Hound")
+    sentry = _find_combatant(app, name="Brass Sentry")
+    assert hound is not None
+    assert sentry is not None
+    assert hound.player_detail_visible is False
+    assert sentry.player_detail_visible is False
+
+    toggle = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{hound.id}/player-detail-visibility",
+        data={"player_detail_visible": "1", "combat_view": "dm"},
+        follow_redirects=False,
+    )
+
+    assert toggle.status_code == 302
+    updated_hound = _find_combatant(app, name="Clockwork Hound")
+    updated_sentry = _find_combatant(app, name="Brass Sentry")
+    assert updated_hound is not None
+    assert updated_sentry is not None
+    assert updated_hound.player_detail_visible is True
+    assert updated_sentry.player_detail_visible is False
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    response = client.get("/campaigns/linden-pass/combat")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "Clockwork Hound" in body
+    assert "Brass Sentry" in body
+    assert "22 / 22" in body
+    assert "40 / 40" in body
+    assert "18 / 18" not in body
+    assert "30 / 30" not in body
+    assert "Detailed NPC vitals and action economy are hidden from player view." in body
+
+
+def test_player_cannot_toggle_npc_player_detail_visibility(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+    combatant = _find_combatant(app, name="Clockwork Hound")
+    assert combatant is not None
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    response = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{combatant.id}/player-detail-visibility",
+        data={"player_detail_visible": "1", "combat_view": "dm"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 403
+    refreshed = _find_combatant(app, name="Clockwork Hound")
+    assert refreshed is not None
+    assert refreshed.player_detail_visible is False
 
 
 def test_dm_can_clear_combat_tracker(app, client, sign_in, users):
@@ -1193,4 +1395,12 @@ def test_status_live_state_short_circuits_for_unchanged_selected_target(
     assert unchanged_live_state.headers["X-Live-State-Changed"] == "false"
     _assert_live_diagnostics_headers(initial_live_state)
     _assert_live_diagnostics_headers(unchanged_live_state)
+
+
+def test_combat_loading_styles_do_not_dim_live_combat_surfaces():
+    css = Path("player_wiki/static/styles.css").read_text(encoding="utf-8")
+
+    assert "combat-live-root][data-loading" not in css
+    assert "combat-status-live-root][data-loading" not in css
+    assert "combat-character-live-root][data-loading" not in css
 

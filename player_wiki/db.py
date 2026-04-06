@@ -255,6 +255,7 @@ CREATE TABLE IF NOT EXISTS campaign_combatants (
     campaign_slug TEXT NOT NULL,
     combatant_type TEXT NOT NULL CHECK (combatant_type IN ('player_character', 'npc')),
     character_slug TEXT,
+    player_detail_visible INTEGER NOT NULL DEFAULT 0,
     source_kind TEXT NOT NULL DEFAULT 'manual_npc' CHECK (source_kind IN ('character', 'manual_npc', 'dm_statblock', 'systems_monster')),
     source_ref TEXT NOT NULL DEFAULT '',
     display_name TEXT NOT NULL,
@@ -744,6 +745,13 @@ def _migrate_campaign_combatants_for_source_identity(connection: sqlite3.Connect
             ADD COLUMN source_ref TEXT NOT NULL DEFAULT ''
             """
         )
+    if "player_detail_visible" not in columns:
+        connection.execute(
+            """
+            ALTER TABLE campaign_combatants
+            ADD COLUMN player_detail_visible INTEGER NOT NULL DEFAULT 0
+            """
+        )
 
     connection.execute(
         """
@@ -767,6 +775,16 @@ def _migrate_campaign_combatants_for_source_identity(connection: sqlite3.Connect
             WHEN source_ref IS NULL
                 THEN ''
             ELSE source_ref
+        END
+        """
+    )
+    connection.execute(
+        """
+        UPDATE campaign_combatants
+        SET player_detail_visible = CASE
+            WHEN combatant_type = 'player_character' THEN 1
+            WHEN COALESCE(player_detail_visible, 0) NOT IN (0, 1) THEN 0
+            ELSE COALESCE(player_detail_visible, 0)
         END
         """
     )

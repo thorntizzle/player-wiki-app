@@ -1994,11 +1994,6 @@ button {
 }
 
 [data-live-builder-root][data-loading='1'] [data-live-builder-region],
-[data-combat-live-root][data-loading='1'] [data-combat-summary-root],
-[data-combat-live-root][data-loading='1'] [data-combat-tracker-root],
-[data-combat-live-root][data-loading='1'] [data-combat-context-root],
-[data-combat-live-root][data-loading='1'] [data-combat-controls-root],
-[data-combat-character-live-root][data-loading='1'] [data-combat-character-snapshot-root],
 [data-session-live-root][data-loading='1'] [data-session-status-card],
 [data-session-live-root][data-loading='1'] [data-session-chat-card],
 [data-session-live-root][data-loading='1'] [data-session-controls-root],
@@ -2007,10 +2002,6 @@ button {
 [data-session-live-root][data-loading='1'] [data-session-logs-root] {
   opacity: 0.82;
   transition: opacity 120ms ease;
-}
-
-[data-combat-status-detail-root][data-loading='1'] {
-  opacity: 0.7;
 }
 
 .combat-conditions--compact {

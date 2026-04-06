@@ -101,6 +101,7 @@ class CampaignCombatService:
                 campaign_slug,
                 combatant_type="player_character",
                 character_slug=record.definition.character_slug,
+                player_detail_visible=True,
                 source_kind=COMBAT_SOURCE_KIND_CHARACTER,
                 source_ref=record.definition.character_slug,
                 display_name=record.definition.name,
@@ -173,6 +174,7 @@ class CampaignCombatService:
         combatant = self.store.create_combatant(
             campaign_slug,
             combatant_type="npc",
+            player_detail_visible=False,
             source_kind=normalized_source_kind,
             source_ref=normalized_source_ref,
             display_name=normalized_name,
@@ -349,6 +351,30 @@ class CampaignCombatService:
             return updated_combatant
         except CampaignCombatConflictError as exc:
             raise CampaignCombatValidationError("Those combat resources could not be saved.") from exc
+
+    def update_player_detail_visibility(
+        self,
+        campaign_slug: str,
+        combatant_id: int,
+        *,
+        player_detail_visible: bool,
+        updated_by_user_id: int | None = None,
+    ) -> CampaignCombatantRecord:
+        combatant = self._require_combatant(campaign_slug, combatant_id)
+        if not combatant.is_npc:
+            raise CampaignCombatValidationError("Only NPC combatants can toggle player-facing detail visibility.")
+
+        try:
+            updated_combatant = self.store.update_combatant(
+                campaign_slug,
+                combatant_id,
+                player_detail_visible=player_detail_visible,
+                updated_by_user_id=updated_by_user_id,
+            )
+            self.store.bump_tracker_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
+            return updated_combatant
+        except CampaignCombatConflictError as exc:
+            raise CampaignCombatValidationError("That NPC visibility setting could not be saved.") from exc
 
     def add_condition(
         self,

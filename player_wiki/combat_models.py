@@ -31,6 +31,7 @@ class CampaignCombatantRecord:
     campaign_slug: str
     combatant_type: str
     character_slug: str | None
+    player_detail_visible: bool
     source_kind: str
     source_ref: str
     display_name: str

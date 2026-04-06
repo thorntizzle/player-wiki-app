@@ -903,6 +903,21 @@ def create_app() -> Flask:
             )
         )
 
+    def redirect_to_campaign_combat_character(
+        campaign_slug: str,
+        *,
+        anchor: str | None = None,
+        combatant_id: int | None = None,
+    ):
+        return redirect(
+            url_for(
+                "campaign_combat_character_view",
+                campaign_slug=campaign_slug,
+                combatant=combatant_id,
+                _anchor=anchor,
+            )
+        )
+
     def redirect_to_campaign_dm_content(
         campaign_slug: str,
         *,
@@ -1254,10 +1269,49 @@ def create_app() -> Flask:
 
         return None, None
 
+    def list_accessible_combat_character_rows(
+        combatants: list[object],
+        tracker_view: dict[str, object],
+        character_records_by_slug: dict[str, object],
+        *,
+        campaign_slug: str,
+        can_manage_combat: bool,
+        owned_character_slugs: set[str] | None = None,
+    ) -> list[dict[str, object]]:
+        if can_manage_combat:
+            return []
+        owned_character_slugs = owned_character_slugs if owned_character_slugs is not None else get_owned_character_slugs(
+            campaign_slug
+        )
+        presented_combatants_by_id = {
+            int(combatant["id"]): combatant
+            for combatant in list(tracker_view.get("combatants") or [])
+            if combatant.get("id") is not None
+        }
+        rows = []
+        for combatant in combatants:
+            if not combatant.is_player_character or not combatant.character_slug:
+                continue
+            if combatant.character_slug not in owned_character_slugs:
+                continue
+            record = character_records_by_slug.get(combatant.character_slug)
+            presented_combatant = presented_combatants_by_id.get(combatant.id)
+            if record is None or presented_combatant is None:
+                continue
+            rows.append(
+                {
+                    "combatant_record": combatant,
+                    "combatant": presented_combatant,
+                    "record": record,
+                }
+            )
+        return rows
+
     def build_combat_subpages(
         campaign_slug: str,
         *,
         current_subpage: str,
+        include_character_subpage: bool = True,
         selected_combatant_id: int | None = None,
         selected_character_combatant_id: int | None = None,
         selected_character_slug: str | None = None,
@@ -1283,13 +1337,16 @@ def create_app() -> Flask:
                 "href": url_for("campaign_combat_view", **focused_route_values),
                 "is_active": current_subpage == "combat",
             },
-            {
-                "slug": "character",
-                "label": COMBAT_SUBPAGE_LABELS["character"],
-                "href": url_for("campaign_combat_character_view", **character_route_values),
-                "is_active": current_subpage == "character",
-            },
         ]
+        if include_character_subpage:
+            subpages.append(
+                {
+                    "slug": "character",
+                    "label": COMBAT_SUBPAGE_LABELS["character"],
+                    "href": url_for("campaign_combat_character_view", **character_route_values),
+                    "is_active": current_subpage == "character",
+                }
+            )
         if can_manage_campaign_combat(campaign_slug):
             subpages.append(
                 {
@@ -1688,6 +1745,46 @@ def create_app() -> Flask:
 
         return redirect_to_character_mode(campaign_slug, character_slug, anchor=anchor)
 
+    def run_combat_character_mutation(
+        campaign_slug: str,
+        combatant_id: int,
+        *,
+        anchor: str,
+        success_message: str,
+        action,
+    ):
+        combatant = get_campaign_combat_service().get_combatant(campaign_slug, combatant_id)
+        if combatant is None:
+            abort(404)
+        if not combatant.is_player_character or not combatant.character_slug:
+            abort(404)
+        if combatant.character_slug not in get_owned_character_slugs(campaign_slug):
+            abort(403)
+
+        record = get_character_repository().get_visible_character(campaign_slug, combatant.character_slug)
+        if record is None:
+            abort(404)
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        try:
+            expected_revision = parse_expected_revision()
+            action(record, expected_revision, user.id)
+        except CharacterStateConflictError:
+            flash("This sheet changed in another session. Refresh the page and try again.", "error")
+        except (CharacterStateValidationError, ValueError) as exc:
+            flash(str(exc), "error")
+        else:
+            flash(success_message, "success")
+
+        return redirect_to_campaign_combat_character(
+            campaign_slug,
+            combatant_id=combatant_id,
+            anchor=anchor,
+        )
+
     def build_campaign_session_page_context(
         campaign_slug: str,
         *,
@@ -1956,25 +2053,50 @@ def create_app() -> Flask:
         selected_combatant_id = (
             selected_combatant_record.id if selected_combatant_record is not None else None
         )
+        accessible_combat_character_rows = list_accessible_combat_character_rows(
+            combatants,
+            tracker_view,
+            character_records_by_slug,
+            campaign_slug=campaign_slug,
+            can_manage_combat=can_manage_combat,
+        )
+        selected_combat_character_row = next(
+            (
+                row
+                for row in accessible_combat_character_rows
+                if row["combatant_record"].id == selected_combatant_id
+            ),
+            None,
+        )
+        combat_character_entry_row = selected_combat_character_row
+        if combat_character_entry_row is None and accessible_combat_character_rows:
+            combat_character_entry_row = accessible_combat_character_rows[0]
         selected_character_combatant_id = (
-            selected_combatant_id
-            if isinstance(selected_combatant, dict) and selected_combatant.get("can_open_character_page")
+            combat_character_entry_row["combatant_record"].id
+            if combat_character_entry_row is not None
             else None
         )
         selected_character_slug = (
-            selected_combatant.get("character_slug", "")
-            if isinstance(selected_combatant, dict) and selected_combatant.get("can_open_character_page")
+            combat_character_entry_row["record"].definition.character_slug
+            if combat_character_entry_row is not None
             else ""
         )
         selected_combatant_character_url = (
             url_for(
                 "campaign_combat_character_view",
                 campaign_slug=campaign.slug,
-                combatant=selected_combatant_id,
+                combatant=selected_combat_character_row["combatant_record"].id,
             )
-            if selected_combatant_id is not None
-            and isinstance(selected_combatant, dict)
-            and selected_combatant.get("can_open_character_page")
+            if selected_combat_character_row is not None
+            else ""
+        )
+        combat_character_entry_url = (
+            url_for(
+                "campaign_combat_character_view",
+                campaign_slug=campaign.slug,
+                combatant=selected_character_combatant_id,
+            )
+            if selected_character_combatant_id is not None
             else ""
         )
         selected_combatant_status_url = (
@@ -2008,6 +2130,7 @@ def create_app() -> Flask:
             "combat_subpages": build_combat_subpages(
                 campaign_slug,
                 current_subpage=combat_subpage,
+                include_character_subpage=bool(accessible_combat_character_rows),
                 selected_combatant_id=selected_combatant_id,
                 selected_character_combatant_id=selected_character_combatant_id,
                 selected_character_slug=selected_character_slug or None,
@@ -2022,6 +2145,7 @@ def create_app() -> Flask:
                 if isinstance(selected_combatant, dict)
                 else ""
             ),
+            "combat_character_entry_url": combat_character_entry_url,
             "selected_combatant_character_url": selected_combatant_character_url,
             "selected_combatant_status_url": selected_combatant_status_url,
             "active_nav": "combat",
@@ -2042,31 +2166,14 @@ def create_app() -> Flask:
         character_records_by_slug = dict(context["_combat_character_records_by_slug"] or {})
         can_manage_combat = bool(context["can_manage_combat"])
         owned_character_slugs = get_owned_character_slugs(campaign_slug)
-        presented_combatants_by_id = {
-            int(combatant["id"]): combatant
-            for combatant in list(tracker_view.get("combatants") or [])
-            if combatant.get("id") is not None
-        }
-
-        target_rows = []
-        for combatant in combatants:
-            if not combatant.is_player_character or not combatant.character_slug:
-                continue
-            record = character_records_by_slug.get(combatant.character_slug)
-            presented_combatant = presented_combatants_by_id.get(combatant.id)
-            if record is None or presented_combatant is None:
-                continue
-            is_allowed = can_manage_combat or combatant.character_slug in owned_character_slugs
-            target_rows.append(
-                {
-                    "combatant_record": combatant,
-                    "combatant": presented_combatant,
-                    "record": record,
-                    "is_allowed": is_allowed,
-                }
-            )
-
-        allowed_target_rows = [row for row in target_rows if row["is_allowed"]]
+        allowed_target_rows = list_accessible_combat_character_rows(
+            combatants,
+            tracker_view,
+            character_records_by_slug,
+            campaign_slug=campaign_slug,
+            can_manage_combat=can_manage_combat,
+            owned_character_slugs=owned_character_slugs,
+        )
         selected_target = None
         explicit_combatant_id_raw = request.args.get("combatant", "").strip()
         explicit_character_slug = request.args.get("character", "").strip()
@@ -2075,27 +2182,23 @@ def create_app() -> Flask:
             try:
                 explicit_combatant_id = int(explicit_combatant_id_raw)
             except ValueError:
-                abort(404 if can_manage_combat else 403)
+                abort(403)
             selected_target = next(
-                (row for row in target_rows if row["combatant_record"].id == explicit_combatant_id),
+                (row for row in allowed_target_rows if row["combatant_record"].id == explicit_combatant_id),
                 None,
             )
             if selected_target is None:
-                abort(404 if can_manage_combat else 403)
-            if not selected_target["is_allowed"]:
                 abort(403)
         elif explicit_character_slug:
             selected_target = next(
                 (
                     row
-                    for row in target_rows
+                    for row in allowed_target_rows
                     if row["record"].definition.character_slug == explicit_character_slug
                 ),
                 None,
             )
             if selected_target is None:
-                abort(404 if can_manage_combat else 403)
-            if not selected_target["is_allowed"]:
                 abort(403)
         else:
             current_turn_id = next(
@@ -2159,6 +2262,7 @@ def create_app() -> Flask:
                 "combat_subpages": build_combat_subpages(
                     campaign_slug,
                     current_subpage="character",
+                    include_character_subpage=bool(allowed_target_rows),
                     selected_combatant_id=selected_combatant_id,
                     selected_character_combatant_id=selected_combatant_id,
                     selected_character_slug=selected_character_slug,
@@ -2166,6 +2270,7 @@ def create_app() -> Flask:
                 "selected_combatant": selected_combatant,
                 "selected_combatant_id": selected_combatant_id,
                 "combat_character_targets": accessible_targets,
+                "can_edit_combat_character_state": selected_target is not None,
                 "combat_character_state_token": build_selected_combatant_state_token(
                     tracker_view,
                     selected_combatant,
@@ -2214,11 +2319,6 @@ def create_app() -> Flask:
                     "The linked character record is no longer available."
                 )
                 return source_context
-            source_context["combat_status_character_url"] = url_for(
-                "campaign_combat_character_view",
-                campaign_slug=campaign.slug,
-                combatant=combatant_record.id,
-            )
             source_context.update(
                 build_combat_character_detail_context(
                     campaign_slug,
@@ -2336,6 +2436,7 @@ def create_app() -> Flask:
                 "combat_subpages": build_combat_subpages(
                     campaign_slug,
                     current_subpage="status",
+                    include_character_subpage=False,
                     selected_combatant_id=selected_combatant_id,
                     selected_character_combatant_id=(
                         selected_combatant_id
@@ -3633,6 +3734,12 @@ def create_app() -> Flask:
     @app.get("/campaigns/<campaign_slug>/combat/character")
     @campaign_scope_access_required("combat")
     def campaign_combat_character_view(campaign_slug: str):
+        requested_combatant_id = parse_requested_combatant_id()
+        if can_manage_campaign_combat(campaign_slug):
+            return redirect_to_campaign_combat_status(
+                campaign_slug,
+                combatant_id=requested_combatant_id,
+            )
         context = build_campaign_combat_character_context(campaign_slug)
         return render_template("combat_character.html", **context)
 
@@ -3672,6 +3779,50 @@ def create_app() -> Flask:
             live_revision=int(live_metadata["live_revision"] or 0),
             state_check_ms=state_check_ms,
             render_ms=render_ms,
+        )
+
+    @app.post("/campaigns/<campaign_slug>/combat/character/combatants/<int:combatant_id>/resources/<resource_id>")
+    @campaign_scope_access_required("combat")
+    def campaign_combat_character_resource(
+        campaign_slug: str,
+        combatant_id: int,
+        resource_id: str,
+    ):
+        return run_combat_character_mutation(
+            campaign_slug,
+            combatant_id,
+            anchor="combat-character-resources",
+            success_message="Resource updated.",
+            action=lambda record, expected_revision, user_id: get_character_state_service().update_resource(
+                record,
+                resource_id,
+                expected_revision=expected_revision,
+                current=request.form.get("current"),
+                delta=request.form.get("delta"),
+                updated_by_user_id=user_id,
+            ),
+        )
+
+    @app.post("/campaigns/<campaign_slug>/combat/character/combatants/<int:combatant_id>/spell-slots/<int:level>")
+    @campaign_scope_access_required("combat")
+    def campaign_combat_character_spell_slots(
+        campaign_slug: str,
+        combatant_id: int,
+        level: int,
+    ):
+        return run_combat_character_mutation(
+            campaign_slug,
+            combatant_id,
+            anchor="combat-character-spell-slots",
+            success_message="Spell slot usage updated.",
+            action=lambda record, expected_revision, user_id: get_character_state_service().update_spell_slots(
+                record,
+                level,
+                expected_revision=expected_revision,
+                used=request.form.get("used"),
+                delta_used=request.form.get("delta_used"),
+                updated_by_user_id=user_id,
+            ),
         )
 
     @app.get("/campaigns/<campaign_slug>/combat/systems-monsters/search")
@@ -4150,6 +4301,54 @@ def create_app() -> Flask:
     @app.post("/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/resources")
     @campaign_scope_access_required("combat")
     def campaign_combat_update_resources(campaign_slug: str, combatant_id: int):
+        if require_supported_combat_system(campaign_slug) is None:
+            return respond_to_campaign_combat_mutation(
+                campaign_slug,
+                mutation_succeeded=False,
+                anchor=f"combatant-{combatant_id}",
+            )
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+        combat_service = get_campaign_combat_service()
+        combatant = combat_service.get_combatant(campaign_slug, combatant_id)
+        if combatant is None:
+            abort(404)
+        if combatant.is_player_character and combatant.character_slug:
+            if not can_manage_campaign_combat(campaign_slug) and combatant.character_slug not in get_owned_character_slugs(
+                campaign_slug
+            ):
+                abort(403)
+        elif not can_manage_campaign_combat(campaign_slug):
+            abort(403)
+
+        mutation_succeeded = False
+        try:
+            combat_service.update_resources(
+                campaign_slug,
+                combatant_id,
+                has_action=request.form.get("has_action") == "1",
+                has_bonus_action=request.form.get("has_bonus_action") == "1",
+                has_reaction=request.form.get("has_reaction") == "1",
+                movement_remaining=request.form.get("movement_remaining"),
+                updated_by_user_id=user.id,
+            )
+        except CampaignCombatValidationError as exc:
+            flash(str(exc), "error")
+        else:
+            flash("Combat resources updated.", "success")
+            mutation_succeeded = True
+
+        return respond_to_campaign_combat_mutation(
+            campaign_slug,
+            mutation_succeeded=mutation_succeeded,
+            anchor=f"combatant-{combatant_id}",
+        )
+
+    @app.post("/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/player-detail-visibility")
+    @campaign_scope_access_required("combat")
+    def campaign_combat_update_player_detail_visibility(campaign_slug: str, combatant_id: int):
         if not can_manage_campaign_combat(campaign_slug):
             abort(403)
         if require_supported_combat_system(campaign_slug) is None:
@@ -4165,19 +4364,16 @@ def create_app() -> Flask:
 
         mutation_succeeded = False
         try:
-            get_campaign_combat_service().update_resources(
+            get_campaign_combat_service().update_player_detail_visibility(
                 campaign_slug,
                 combatant_id,
-                has_action=request.form.get("has_action") == "1",
-                has_bonus_action=request.form.get("has_bonus_action") == "1",
-                has_reaction=request.form.get("has_reaction") == "1",
-                movement_remaining=request.form.get("movement_remaining"),
+                player_detail_visible=request.form.get("player_detail_visible") == "1",
                 updated_by_user_id=user.id,
             )
         except CampaignCombatValidationError as exc:
             flash(str(exc), "error")
         else:
-            flash("Combat resources updated.", "success")
+            flash("Player-facing NPC detail updated.", "success")
             mutation_succeeded = True
 
         return respond_to_campaign_combat_mutation(

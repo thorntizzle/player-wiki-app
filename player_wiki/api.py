@@ -2590,9 +2590,6 @@ def register_api(app) -> None:
     @api_campaign_scope_access_required("combat")
     @api_login_required
     def combat_resources_update(campaign_slug: str, combatant_id: int):
-        if not can_manage_campaign_combat(campaign_slug):
-            return json_error("You do not have permission to manage combat.", 403, code="forbidden")
-
         user = get_current_user()
         if user is None:
             return json_error("Authentication required.", 401, code="auth_required")
@@ -2601,6 +2598,13 @@ def register_api(app) -> None:
         combatant = combat_service.get_combatant(campaign_slug, combatant_id)
         if combatant is None:
             abort(404)
+        if combatant.is_player_character and combatant.character_slug:
+            if not can_manage_campaign_combat(campaign_slug) and combatant.character_slug not in get_owned_character_slugs(
+                campaign_slug
+            ):
+                return json_error("You do not have permission to edit this combatant.", 403, code="forbidden")
+        elif not can_manage_campaign_combat(campaign_slug):
+            return json_error("You do not have permission to manage combat.", 403, code="forbidden")
 
         try:
             payload = load_json_object()

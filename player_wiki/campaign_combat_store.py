@@ -160,6 +160,7 @@ class CampaignCombatStore:
         combatant_type: str,
         display_name: str,
         character_slug: str | None = None,
+        player_detail_visible: bool = False,
         source_kind: str = "manual_npc",
         source_ref: str = "",
         turn_value: int = 0,
@@ -183,6 +184,7 @@ class CampaignCombatStore:
                     campaign_slug,
                     combatant_type,
                     character_slug,
+                    player_detail_visible,
                     source_kind,
                     source_ref,
                     display_name,
@@ -201,12 +203,13 @@ class CampaignCombatStore:
                     created_by_user_id,
                     updated_by_user_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     campaign_slug,
                     combatant_type,
                     character_slug,
+                    1 if player_detail_visible else 0,
                     source_kind,
                     source_ref,
                     display_name,
@@ -243,6 +246,7 @@ class CampaignCombatStore:
         combatant_id: int,
         *,
         display_name: str | None = None,
+        player_detail_visible: bool | None = None,
         source_kind: str | None = None,
         source_ref: str | None = None,
         turn_value: int | None = None,
@@ -260,6 +264,8 @@ class CampaignCombatStore:
         assignments: list[tuple[str, object]] = []
         if display_name is not None:
             assignments.append(("display_name", display_name))
+        if player_detail_visible is not None:
+            assignments.append(("player_detail_visible", 1 if player_detail_visible else 0))
         if source_kind is not None:
             assignments.append(("source_kind", source_kind))
         if source_ref is not None:
@@ -525,6 +531,7 @@ class CampaignCombatStore:
             campaign_slug=str(row["campaign_slug"]),
             combatant_type=str(row["combatant_type"]),
             character_slug=str(row["character_slug"]) if row["character_slug"] is not None else None,
+            player_detail_visible=bool(row["player_detail_visible"]),
             source_kind=str(row["source_kind"] or ""),
             source_ref=str(row["source_ref"] or ""),
             display_name=str(row["display_name"]),
