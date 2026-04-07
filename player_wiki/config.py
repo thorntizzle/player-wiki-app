@@ -21,6 +21,13 @@ def env_int(name: str, default: int) -> int:
     return int(raw_value)
 
 
+def env_float(name: str, default: float) -> float:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    return float(raw_value)
+
+
 def build_default_base_url(host: str, port: int, scheme: str) -> str:
     visible_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
     default_port = (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
@@ -34,6 +41,10 @@ class Config:
     DEBUG = APP_ENV == "development"
     TESTING = APP_ENV == "testing"
     LIVE_DIAGNOSTICS = env_bool("PLAYER_WIKI_LIVE_DIAGNOSTICS", APP_ENV != "production")
+    LIVE_SLOW_LOG_THRESHOLD_MS = env_float(
+        "PLAYER_WIKI_LIVE_SLOW_LOG_THRESHOLD_MS",
+        250.0 if APP_ENV == "production" else 0.0,
+    )
 
     BASE_DIR = Path(__file__).resolve().parent.parent
     APP_VERSION = read_app_version(BASE_DIR)

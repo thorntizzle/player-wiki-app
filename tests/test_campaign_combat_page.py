@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from pathlib import Path
 
@@ -1555,4 +1556,45 @@ def test_combat_loading_styles_do_not_dim_live_combat_surfaces():
     assert "combat-live-root][data-loading" not in css
     assert "combat-status-live-root][data-loading" not in css
     assert "combat-character-live-root][data-loading" not in css
+
+
+def test_live_state_logs_slow_response_warning_without_live_diagnostics(
+    app,
+    client,
+    sign_in,
+    users,
+    caplog,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    app.config.update(
+        LIVE_DIAGNOSTICS=False,
+        LIVE_SLOW_LOG_THRESHOLD_MS=0.01,
+    )
+
+    caplog.set_level(logging.WARNING)
+
+    response = client.get(
+        "/campaigns/linden-pass/combat/live-state",
+        headers=_async_headers(),
+    )
+
+    assert response.status_code == 200
+
+    slow_records = [
+        record
+        for record in caplog.records
+        if record.message.startswith("slow_live_response ")
+    ]
+    assert slow_records
+
+    slow_payload = json.loads(slow_records[-1].message.split(" ", 1)[1])
+    assert slow_payload["view"] == "combat"
+    assert slow_payload["path"] == "/campaigns/linden-pass/combat/live-state"
+    assert slow_payload["changed"] is True
+    assert slow_payload["request_time_ms"] >= 0.01
 

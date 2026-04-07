@@ -1227,9 +1227,6 @@ def create_app() -> Flask:
         render_ms: float,
         live_revision: int | None = None,
     ):
-        if not app.config["LIVE_DIAGNOSTICS"]:
-            return response
-
         query_metrics = get_db_query_metrics()
         query_count = int(query_metrics["query_count"] or 0)
         query_time_ms = float(query_metrics["query_time_ms"] or 0.0)
@@ -1240,38 +1237,40 @@ def create_app() -> Flask:
             else state_check_ms + render_ms
         )
         payload_bytes = len(response.get_data())
-        server_timing_parts = [
-            f"state-check;dur={state_check_ms:.2f}",
-            f"db;dur={query_time_ms:.2f}",
-            f"render;dur={render_ms:.2f}",
-            f"total;dur={request_time_ms:.2f}",
-        ]
-        response.headers["Server-Timing"] = ", ".join(server_timing_parts)
-        response.headers["X-Live-State-Changed"] = "true" if changed else "false"
-        if live_revision is not None:
-            response.headers["X-Live-Revision"] = str(live_revision)
-        response.headers["X-Live-Payload-Bytes"] = str(payload_bytes)
-        response.headers["X-Live-Query-Count"] = str(query_count)
-        response.headers["X-Live-Query-Time-Ms"] = f"{query_time_ms:.2f}"
-        response.headers["X-Live-Request-Time-Ms"] = f"{request_time_ms:.2f}"
-        response.headers["X-Live-View"] = view_name
-        app.logger.info(
-            "live_response %s",
-            json.dumps(
-                {
-                    "view": view_name,
-                    "changed": changed,
-                    "live_revision": live_revision,
-                    "query_count": query_count,
-                    "query_time_ms": round(query_time_ms, 2),
-                    "request_time_ms": round(request_time_ms, 2),
-                    "state_check_ms": round(state_check_ms, 2),
-                    "render_ms": round(render_ms, 2),
-                    "payload_bytes": payload_bytes,
-                },
-                sort_keys=True,
-            ),
-        )
+        live_response_summary = {
+            "view": view_name,
+            "path": request.full_path.rstrip("?"),
+            "changed": changed,
+            "live_revision": live_revision,
+            "query_count": query_count,
+            "query_time_ms": round(query_time_ms, 2),
+            "request_time_ms": round(request_time_ms, 2),
+            "state_check_ms": round(state_check_ms, 2),
+            "render_ms": round(render_ms, 2),
+            "payload_bytes": payload_bytes,
+        }
+        slow_log_threshold_ms = float(app.config.get("LIVE_SLOW_LOG_THRESHOLD_MS") or 0.0)
+
+        if app.config["LIVE_DIAGNOSTICS"]:
+            server_timing_parts = [
+                f"state-check;dur={state_check_ms:.2f}",
+                f"db;dur={query_time_ms:.2f}",
+                f"render;dur={render_ms:.2f}",
+                f"total;dur={request_time_ms:.2f}",
+            ]
+            response.headers["Server-Timing"] = ", ".join(server_timing_parts)
+            response.headers["X-Live-State-Changed"] = "true" if changed else "false"
+            if live_revision is not None:
+                response.headers["X-Live-Revision"] = str(live_revision)
+            response.headers["X-Live-Payload-Bytes"] = str(payload_bytes)
+            response.headers["X-Live-Query-Count"] = str(query_count)
+            response.headers["X-Live-Query-Time-Ms"] = f"{query_time_ms:.2f}"
+            response.headers["X-Live-Request-Time-Ms"] = f"{request_time_ms:.2f}"
+            response.headers["X-Live-View"] = view_name
+            app.logger.info("live_response %s", json.dumps(live_response_summary, sort_keys=True))
+
+        if slow_log_threshold_ms > 0 and request_time_ms >= slow_log_threshold_ms:
+            app.logger.warning("slow_live_response %s", json.dumps(live_response_summary, sort_keys=True))
         return response
 
     def build_live_json_response(
