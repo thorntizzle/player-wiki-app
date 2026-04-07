@@ -45,6 +45,10 @@ class Config:
         "PLAYER_WIKI_LIVE_SLOW_LOG_THRESHOLD_MS",
         250.0 if APP_ENV == "production" else 0.0,
     )
+    COMBAT_PLAYER_SNAPSHOT_SYNC_INTERVAL_SECONDS = env_float(
+        "PLAYER_WIKI_COMBAT_PLAYER_SNAPSHOT_SYNC_INTERVAL_SECONDS",
+        3.0 if APP_ENV == "production" else 0.0,
+    )
 
     BASE_DIR = Path(__file__).resolve().parent.parent
     APP_VERSION = read_app_version(BASE_DIR)

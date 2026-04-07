@@ -5,6 +5,7 @@ import logging
 import sqlite3
 from pathlib import Path
 
+import player_wiki.campaign_combat_service as campaign_combat_service_module
 from player_wiki.app import create_app
 from player_wiki.config import Config
 from player_wiki.db import init_database
@@ -1597,4 +1598,91 @@ def test_live_state_logs_slow_response_warning_without_live_diagnostics(
     assert slow_payload["path"] == "/campaigns/linden-pass/combat/live-state"
     assert slow_payload["changed"] is True
     assert slow_payload["request_time_ms"] >= 0.01
+
+
+def test_sync_player_character_snapshots_throttles_repeated_refreshes(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    with app.app_context():
+        combat_service = app.extensions["campaign_combat_service"]
+
+    combat_service.player_snapshot_sync_interval_seconds = 5.0
+    current_time = {"value": 100.0}
+    sync_lookup_calls: list[tuple[str, str]] = []
+    original_get_visible_character = combat_service.character_repository.get_visible_character
+
+    def count_lookup(campaign_slug: str, character_slug: str):
+        sync_lookup_calls.append((campaign_slug, character_slug))
+        return original_get_visible_character(campaign_slug, character_slug)
+
+    monkeypatch.setattr(campaign_combat_service_module.time, "monotonic", lambda: current_time["value"])
+    monkeypatch.setattr(combat_service.character_repository, "get_visible_character", count_lookup)
+
+    with app.app_context():
+        combat_service.sync_player_character_snapshots("linden-pass")
+        current_time["value"] = 101.0
+        combat_service.sync_player_character_snapshots("linden-pass")
+        current_time["value"] = 106.0
+        combat_service.sync_player_character_snapshots("linden-pass")
+
+    assert sync_lookup_calls == [
+        ("linden-pass", "arden-march"),
+        ("linden-pass", "arden-march"),
+    ]
+
+
+def test_combat_live_requests_sync_player_snapshots_once_per_request(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    arden = _find_combatant(app, character_slug="arden-march")
+    assert arden is not None
+
+    with app.app_context():
+        combat_service = app.extensions["campaign_combat_service"]
+
+    sync_calls: list[str] = []
+    original_sync = combat_service.sync_player_character_snapshots
+
+    def count_sync(campaign_slug: str):
+        sync_calls.append(campaign_slug)
+        return original_sync(campaign_slug)
+
+    monkeypatch.setattr(combat_service, "sync_player_character_snapshots", count_sync)
+
+    combat_live_state = client.get(
+        "/campaigns/linden-pass/combat/live-state",
+        headers=_async_headers(),
+    )
+    assert combat_live_state.status_code == 200
+    assert sync_calls == ["linden-pass"]
+
+    sync_calls.clear()
+
+    status_live_state = client.get(
+        f"/campaigns/linden-pass/combat/status/live-state?combatant={arden.id}",
+        headers=_async_headers(),
+    )
+    assert status_live_state.status_code == 200
+    assert sync_calls == ["linden-pass"]
 

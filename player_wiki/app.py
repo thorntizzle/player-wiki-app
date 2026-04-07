@@ -304,6 +304,9 @@ def create_app() -> Flask:
         campaign_combat_store,
         character_repository,
         character_state_service,
+        player_snapshot_sync_interval_seconds=app.config[
+            "COMBAT_PLAYER_SNAPSHOT_SYNC_INTERVAL_SECONDS"
+        ],
     )
     campaign_dm_content_service = CampaignDMContentService(campaign_dm_content_store)
     systems_service = SystemsService(systems_store, repository_store)
@@ -2166,6 +2169,7 @@ def create_app() -> Flask:
         include_control_choices: bool = False,
         combat_subpage: str = "combat",
         selected_combatant_id: int | None = None,
+        sync_player_character_snapshots: bool = True,
     ) -> dict[str, object]:
         requested_combatant_id = (
             selected_combatant_id
@@ -2201,7 +2205,10 @@ def create_app() -> Flask:
         if combat_system_supported:
             combat_service = get_campaign_combat_service()
             dm_content_service = get_campaign_dm_content_service()
-            combatants = combat_service.list_combatants(campaign_slug)
+            combatants = combat_service.list_combatants(
+                campaign_slug,
+                sync_player_character_snapshots=sync_player_character_snapshots,
+            )
             tracker = combat_service.get_tracker(campaign_slug)
             for combatant in combatants:
                 if not combatant.character_slug:
@@ -2399,10 +2406,15 @@ def create_app() -> Flask:
             "_selected_combatant_record": selected_combatant_record,
         }
 
-    def build_campaign_combat_character_context(campaign_slug: str) -> dict[str, object]:
+    def build_campaign_combat_character_context(
+        campaign_slug: str,
+        *,
+        sync_player_character_snapshots: bool = True,
+    ) -> dict[str, object]:
         context = build_campaign_combat_page_context(
             campaign_slug,
             combat_subpage="character",
+            sync_player_character_snapshots=sync_player_character_snapshots,
         )
         campaign = context["campaign"]
         tracker_view = dict(context["combat_tracker"] or {})
@@ -2641,7 +2653,11 @@ def create_app() -> Flask:
         )
         return source_context
 
-    def build_campaign_combat_status_context(campaign_slug: str) -> dict[str, object]:
+    def build_campaign_combat_status_context(
+        campaign_slug: str,
+        *,
+        sync_player_character_snapshots: bool = True,
+    ) -> dict[str, object]:
         if not can_manage_campaign_combat(campaign_slug):
             abort(403)
 
@@ -2650,6 +2666,7 @@ def create_app() -> Flask:
             campaign_slug,
             combat_subpage="status",
             selected_combatant_id=explicit_combatant_id,
+            sync_player_character_snapshots=sync_player_character_snapshots,
         )
         campaign = context["campaign"]
         tracker_view = dict(context["combat_tracker"] or {})
@@ -3084,11 +3101,13 @@ def create_app() -> Flask:
         selected_combatant_id: int | None = None,
         live_revision: int | None = None,
         live_view_token: str | None = None,
+        sync_player_character_snapshots: bool = True,
     ) -> dict[str, object]:
         context = build_campaign_combat_page_context(
             campaign_slug,
             combat_subpage="combat",
             selected_combatant_id=selected_combatant_id,
+            sync_player_character_snapshots=sync_player_character_snapshots,
         )
         if live_revision is None:
             live_revision = int(context["combat_live_revision"] or 0)
@@ -3121,12 +3140,14 @@ def create_app() -> Flask:
         selected_combatant_id: int | None = None,
         live_revision: int | None = None,
         live_view_token: str | None = None,
+        sync_player_character_snapshots: bool = True,
     ) -> dict[str, object]:
         context = build_campaign_combat_page_context(
             campaign_slug,
             include_control_choices=True,
             combat_subpage="dm",
             selected_combatant_id=selected_combatant_id,
+            sync_player_character_snapshots=sync_player_character_snapshots,
         )
         if live_revision is None:
             live_revision = int(context["combat_live_revision"] or 0)
@@ -3155,8 +3176,12 @@ def create_app() -> Flask:
         *,
         live_revision: int | None = None,
         live_view_token: str | None = None,
+        sync_player_character_snapshots: bool = True,
     ) -> dict[str, object]:
-        context = build_campaign_combat_character_context(campaign_slug)
+        context = build_campaign_combat_character_context(
+            campaign_slug,
+            sync_player_character_snapshots=sync_player_character_snapshots,
+        )
         if live_revision is None:
             live_revision = int(context["combat_live_revision"] or 0)
         if live_view_token is None:
@@ -3176,8 +3201,12 @@ def create_app() -> Flask:
         mutation_succeeded: bool | None = None,
         live_revision: int | None = None,
         live_view_token: str | None = None,
+        sync_player_character_snapshots: bool = True,
     ) -> dict[str, object]:
-        context = build_campaign_combat_status_context(campaign_slug)
+        context = build_campaign_combat_status_context(
+            campaign_slug,
+            sync_player_character_snapshots=sync_player_character_snapshots,
+        )
         if live_revision is None:
             live_revision = int(context["combat_live_revision"] or 0)
         if live_view_token is None:
@@ -3867,6 +3896,7 @@ def create_app() -> Flask:
             campaign_slug,
             live_revision=int(live_metadata["live_revision"] or 0),
             live_view_token=str(live_metadata["live_view_token"] or ""),
+            sync_player_character_snapshots=False,
         )
         render_ms = (time.perf_counter() - render_started_at) * 1000
         return build_live_json_response(
@@ -3925,6 +3955,7 @@ def create_app() -> Flask:
             selected_combatant_id=selected_combatant_id,
             live_revision=int(live_metadata["live_revision"] or 0),
             live_view_token=str(live_metadata["live_view_token"] or ""),
+            sync_player_character_snapshots=False,
         )
         render_ms = (time.perf_counter() - render_started_at) * 1000
         return build_live_json_response(
@@ -3969,6 +4000,7 @@ def create_app() -> Flask:
             campaign_slug,
             live_revision=int(live_metadata["live_revision"] or 0),
             live_view_token=str(live_metadata["live_view_token"] or ""),
+            sync_player_character_snapshots=False,
         )
         render_ms = (time.perf_counter() - render_started_at) * 1000
         return build_live_json_response(
@@ -4019,6 +4051,7 @@ def create_app() -> Flask:
             campaign_slug,
             live_revision=int(live_metadata["live_revision"] or 0),
             live_view_token=str(live_metadata["live_view_token"] or ""),
+            sync_player_character_snapshots=False,
         )
         render_ms = (time.perf_counter() - render_started_at) * 1000
         return build_live_json_response(

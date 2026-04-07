@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import threading
+import time
 from collections import defaultdict
 from typing import Any
 
@@ -31,10 +33,18 @@ class CampaignCombatService:
         store: CampaignCombatStore,
         character_repository: CharacterRepository,
         character_state_service: CharacterStateService,
+        *,
+        player_snapshot_sync_interval_seconds: float = 0.0,
     ) -> None:
         self.store = store
         self.character_repository = character_repository
         self.character_state_service = character_state_service
+        self.player_snapshot_sync_interval_seconds = max(
+            0.0,
+            float(player_snapshot_sync_interval_seconds),
+        )
+        self._player_snapshot_sync_lock = threading.Lock()
+        self._player_snapshot_sync_completed_at: dict[str, float] = {}
 
     def get_tracker(self, campaign_slug: str) -> CampaignCombatTrackerRecord:
         return self.store.ensure_tracker(campaign_slug)
@@ -42,8 +52,14 @@ class CampaignCombatService:
     def get_live_revision(self, campaign_slug: str) -> int:
         return self.store.ensure_tracker(campaign_slug).revision
 
-    def list_combatants(self, campaign_slug: str) -> list[CampaignCombatantRecord]:
-        self.sync_player_character_snapshots(campaign_slug)
+    def list_combatants(
+        self,
+        campaign_slug: str,
+        *,
+        sync_player_character_snapshots: bool = True,
+    ) -> list[CampaignCombatantRecord]:
+        if sync_player_character_snapshots:
+            self.sync_player_character_snapshots(campaign_slug)
         return self.store.list_combatants(campaign_slug)
 
     def get_combatant(self, campaign_slug: str, combatant_id: int) -> CampaignCombatantRecord | None:
@@ -504,6 +520,20 @@ class CampaignCombatService:
             raise CampaignCombatValidationError("The turn order could not be advanced.") from exc
 
     def sync_player_character_snapshots(self, campaign_slug: str) -> None:
+        sync_interval_seconds = self.player_snapshot_sync_interval_seconds
+        if sync_interval_seconds <= 0:
+            self._sync_player_character_snapshots_now(campaign_slug)
+            return
+
+        with self._player_snapshot_sync_lock:
+            last_synced_at = self._player_snapshot_sync_completed_at.get(campaign_slug)
+            now = time.monotonic()
+            if last_synced_at is not None and (now - last_synced_at) < sync_interval_seconds:
+                return
+            self._sync_player_character_snapshots_now(campaign_slug)
+            self._player_snapshot_sync_completed_at[campaign_slug] = time.monotonic()
+
+    def _sync_player_character_snapshots_now(self, campaign_slug: str) -> None:
         combatants = self.store.list_combatants(campaign_slug)
         any_changed = False
         for combatant in combatants:
