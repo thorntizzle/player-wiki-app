@@ -3056,6 +3056,125 @@ def test_normalize_definition_to_native_model_derives_barbarian_unarmored_defens
     assert normalized.stats["armor_class"] == 16
 
 
+def test_normalize_definition_to_native_model_preserves_imported_expertise_and_updates_passives():
+    definition = _minimal_imported_character_definition("selka-voss", "Selka Voss")
+    definition.profile["class_level_text"] = "Rogue 5"
+    definition.profile["classes"][0]["class_name"] = "Rogue"
+    definition.profile["classes"][0]["level"] = 5
+    definition.stats["proficiency_bonus"] = 2
+    definition.stats["ability_scores"]["wis"] = {"score": 16, "modifier": 3, "save_bonus": 3}
+    definition.skills = [
+        {"name": "Perception", "bonus": 9, "proficiency_level": "expertise"},
+        {"name": "Insight", "bonus": 6, "proficiency_level": "proficient"},
+        {"name": "Investigation", "bonus": 0, "proficiency_level": "none"},
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+    skills_by_name = {skill["name"]: skill for skill in normalized.skills}
+
+    assert normalized.stats["proficiency_bonus"] == 3
+    assert skills_by_name["Perception"]["proficiency_level"] == "expertise"
+    assert skills_by_name["Perception"]["bonus"] == 9
+    assert skills_by_name["Insight"]["proficiency_level"] == "proficient"
+    assert skills_by_name["Insight"]["bonus"] == 6
+    assert normalized.stats["passive_perception"] == 19
+    assert normalized.stats["passive_insight"] == 16
+
+
+def test_normalize_definition_to_native_model_derives_supported_imported_spell_math_from_resolved_class():
+    wizard = _systems_entry(
+        "class",
+        "phb-class-wizard",
+        "Wizard",
+        metadata={
+            "hit_die": {"faces": 6},
+            "proficiency": ["int", "wis"],
+            "spellcasting_ability": "int",
+            "slot_progression": [
+                [{"level": 1, "max_slots": 2}],
+                [{"level": 1, "max_slots": 3}],
+                [{"level": 1, "max_slots": 4}, {"level": 2, "max_slots": 2}],
+                [{"level": 1, "max_slots": 4}, {"level": 2, "max_slots": 3}],
+                [{"level": 1, "max_slots": 4}, {"level": 2, "max_slots": 3}, {"level": 3, "max_slots": 2}],
+            ],
+        },
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    sage = _systems_entry("background", "phb-background-sage", "Sage")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [wizard],
+            "race": [human],
+            "background": [sage],
+        },
+        class_progression=[],
+    )
+    definition = _minimal_imported_character_definition("olin-itador", "Olin Itador")
+    definition.profile["class_level_text"] = "Wizard 5"
+    definition.profile["classes"] = [
+        {
+            "class_name": "Wizard",
+            "subclass_name": "",
+            "level": 5,
+            "systems_ref": {
+                "entry_key": wizard.entry_key,
+                "entry_type": wizard.entry_type,
+                "title": wizard.title,
+                "slug": wizard.slug,
+                "source_id": wizard.source_id,
+            },
+        }
+    ]
+    definition.profile["class_ref"] = {
+        "entry_key": wizard.entry_key,
+        "entry_type": wizard.entry_type,
+        "title": wizard.title,
+        "slug": wizard.slug,
+        "source_id": wizard.source_id,
+    }
+    definition.profile["species"] = "Human"
+    definition.profile["species_ref"] = {
+        "entry_key": human.entry_key,
+        "entry_type": human.entry_type,
+        "title": human.title,
+        "slug": human.slug,
+        "source_id": human.source_id,
+    }
+    definition.profile["background"] = "Sage"
+    definition.profile["background_ref"] = {
+        "entry_key": sage.entry_key,
+        "entry_type": sage.entry_type,
+        "title": sage.title,
+        "slug": sage.slug,
+        "source_id": sage.source_id,
+    }
+    definition.stats["proficiency_bonus"] = 2
+    definition.stats["ability_scores"]["int"] = {"score": 18, "modifier": 4, "save_bonus": 4}
+    definition.spellcasting = {
+        "spellcasting_class": "Wizard",
+        "spellcasting_ability": "Intelligence",
+        "spell_save_dc": 13,
+        "spell_attack_bonus": 5,
+        "slot_progression": [{"level": 1, "max_slots": 4}],
+        "spells": [],
+    }
+
+    normalized = normalize_definition_to_native_model(
+        definition,
+        systems_service=systems_service,
+    )
+
+    assert normalized.stats["proficiency_bonus"] == 3
+    assert normalized.stats["ability_scores"]["int"]["save_bonus"] == 7
+    assert normalized.spellcasting["spell_save_dc"] == 15
+    assert normalized.spellcasting["spell_attack_bonus"] == 7
+    assert normalized.spellcasting["slot_progression"] == [
+        {"level": 1, "max_slots": 4},
+        {"level": 2, "max_slots": 3},
+        {"level": 3, "max_slots": 2},
+    ]
+
+
 def test_normalize_definition_to_native_model_adds_proficiency_bonus_feat_trackers():
     definition = _minimal_character_definition("mira-salt", "Mira Salt")
     definition.profile["class_level_text"] = "Fighter 5"

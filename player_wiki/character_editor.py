@@ -40,6 +40,7 @@ from .character_importer import converge_imported_definition
 from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup
 from .repository import slugify
+from .systems_models import SystemsEntryRecord
 
 CHARACTER_EDITOR_VERSION = "2026-04-06.01"
 CUSTOM_FEATURE_CATEGORY = "custom_feature"
@@ -334,6 +335,7 @@ def apply_character_spell_management_edit(
     *,
     spell_catalog: dict[str, Any] | None = None,
     selected_class: Any | None = None,
+    systems_service: Any | None = None,
     operation: str,
     spell_key: str = "",
     selected_value: str = "",
@@ -460,9 +462,17 @@ def apply_character_spell_management_edit(
         definition = converge_imported_definition(
             definition,
             existing_definition=current_definition,
+            spell_catalog=spell_catalog,
+            systems_service=systems_service,
+            resolved_class=selected_class if isinstance(selected_class, SystemsEntryRecord) else None,
         )
     else:
-        definition = normalize_definition_to_native_model(definition)
+        definition = normalize_definition_to_native_model(
+            definition,
+            spell_catalog=spell_catalog,
+            systems_service=systems_service,
+            resolved_class=selected_class if isinstance(selected_class, SystemsEntryRecord) else None,
+        )
     import_metadata = build_managed_character_import_metadata(
         campaign_slug,
         current_definition.character_slug,
@@ -847,6 +857,7 @@ def apply_equipment_catalog_edit(
     current_import_metadata: CharacterImportMetadata,
     *,
     item_catalog: dict[str, Any] | None = None,
+    systems_service: Any | None = None,
     campaign_page_records: list[Any] | None = None,
     target_item_id: str | None = None,
     remove_item_id: str | None = None,
@@ -931,9 +942,17 @@ def apply_equipment_catalog_edit(
         definition = converge_imported_definition(
             definition,
             existing_definition=current_definition,
+            item_catalog=item_catalog,
+            systems_service=systems_service,
+            campaign_page_records=campaign_page_records,
         )
     else:
-        definition = normalize_definition_to_native_model(definition, item_catalog=item_catalog)
+        definition = normalize_definition_to_native_model(
+            definition,
+            item_catalog=item_catalog,
+            systems_service=systems_service,
+            campaign_page_records=campaign_page_records,
+        )
     import_metadata = build_managed_character_import_metadata(
         campaign_slug,
         current_definition.character_slug,
@@ -948,6 +967,7 @@ def apply_equipment_state_edit(
     current_import_metadata: CharacterImportMetadata,
     *,
     item_catalog: dict[str, Any] | None = None,
+    systems_service: Any | None = None,
     target_item_id: str,
     is_equipped: bool,
     is_attuned: bool,
@@ -980,9 +1000,15 @@ def apply_equipment_state_edit(
         definition = converge_imported_definition(
             definition,
             existing_definition=current_definition,
+            item_catalog=item_catalog,
+            systems_service=systems_service,
         )
     else:
-        definition = normalize_definition_to_native_model(definition, item_catalog=item_catalog)
+        definition = normalize_definition_to_native_model(
+            definition,
+            item_catalog=item_catalog,
+            systems_service=systems_service,
+        )
     import_metadata = build_managed_character_import_metadata(
         campaign_slug,
         current_definition.character_slug,
@@ -1239,6 +1265,7 @@ def apply_native_character_edits(
     campaign_page_records: list[Any] | None = None,
     form_values: dict[str, str] | None = None,
     spell_catalog: dict[str, Any] | None = None,
+    systems_service: Any | None = None,
 ) -> tuple[CharacterDefinition, CharacterImportMetadata, dict[str, int]]:
     values = dict(form_values or {})
     campaign_page_lookup = _build_campaign_page_lookup(campaign_page_records or [])
@@ -1503,6 +1530,16 @@ def apply_native_character_edits(
         definition = converge_imported_definition(
             definition,
             existing_definition=current_definition,
+            spell_catalog=spell_catalog,
+            systems_service=systems_service,
+            campaign_page_records=campaign_page_records,
+        )
+    else:
+        definition = normalize_definition_to_native_model(
+            definition,
+            spell_catalog=spell_catalog,
+            systems_service=systems_service,
+            campaign_page_records=campaign_page_records,
         )
     import_metadata = build_managed_character_import_metadata(
         campaign_slug,

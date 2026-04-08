@@ -1213,11 +1213,18 @@ def import_pdf_character(
     with app.app_context():
         init_database()
         state_store: CharacterStateStore = app.extensions["character_state_store"]
+        systems_service = app.extensions["systems_service"]
+        campaign_page_records = list(app.extensions["campaign_page_store"].list_page_records(campaign_slug))
         campaigns_dir: Path = app.config["CAMPAIGNS_DIR"]
         config = load_campaign_character_config(campaigns_dir, campaign_slug)
         character_dir = config.characters_dir / artifacts.definition.character_slug
         existing_definition = load_existing_character_definition(character_dir)
-        definition = preserve_existing_character_overrides(artifacts.definition, character_dir)
+        definition = preserve_existing_character_overrides(
+            artifacts.definition,
+            character_dir,
+            systems_service=systems_service,
+            campaign_page_records=campaign_page_records,
+        )
         write_yaml(character_dir / "definition.yaml", definition.to_dict())
         write_yaml(character_dir / "import.yaml", artifacts.import_metadata.to_dict())
         state_result = initialize_or_reconcile_imported_state(

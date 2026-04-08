@@ -134,6 +134,11 @@ SKILL_ABILITY_KEYS = {
     "stealth": "dex",
     "survival": "wis",
 }
+SKILL_PROFICIENCY_LEVEL_RANKS = {
+    "none": 0,
+    "proficient": 1,
+    "expertise": 2,
+}
 STANDARD_LANGUAGE_OPTIONS = [
     "Common",
     "Dwarvish",
@@ -735,6 +740,15 @@ def build_level_one_character_definition(
         resource_templates=resource_templates,
         source=source,
     )
+    definition = normalize_definition_to_native_model(
+        definition,
+        item_catalog=item_catalog,
+        spell_catalog=spell_catalog,
+        resolved_class=selected_class,
+        resolved_subclass=selected_subclass,
+        resolved_species=selected_species,
+        resolved_background=selected_background,
+    )
     import_metadata = CharacterImportMetadata(
         campaign_slug=campaign_slug,
         character_slug=character_slug,
@@ -1313,18 +1327,31 @@ def build_native_level_up_character_definition(
         strict=True,
     )
     proficiency_bonus = _proficiency_bonus_for_level(target_level)
-    proficient_skills = [
-        str(skill.get("name") or "").strip()
-        for skill in list(current_definition.skills or [])
-        if str(skill.get("proficiency_level") or "").strip() == "proficient"
-    ]
-    campaign_option_proficiencies = collect_campaign_option_proficiency_grants(selected_campaign_option_payloads)
-    proficient_skills = _dedupe_preserve_order(
-        proficient_skills
-        + _extract_feat_skill_proficiencies(feat_selections, selected_choices)
-        + list(campaign_option_proficiencies.get("skills") or [])
+    existing_skill_proficiency_levels = _skill_proficiency_levels_from_rows(
+        list(current_definition.skills or []),
+        ability_scores=_ability_scores_from_definition(current_definition),
+        proficiency_bonus=int(
+            (current_definition.stats or {}).get("proficiency_bonus")
+            or _proficiency_bonus_for_level(current_level)
+        ),
     )
-    skills = _build_skills_payload(ability_scores, proficient_skills, proficiency_bonus)
+    campaign_option_proficiencies = collect_campaign_option_proficiency_grants(selected_campaign_option_payloads)
+    for skill_name in (
+        _extract_feat_skill_proficiencies(feat_selections, selected_choices)
+        + list(campaign_option_proficiencies.get("skills") or [])
+    ):
+        normalized_skill = normalize_lookup(skill_name)
+        if normalized_skill not in SKILL_LABELS:
+            continue
+        existing_skill_proficiency_levels[normalized_skill] = _max_skill_proficiency_level(
+            existing_skill_proficiency_levels.get(normalized_skill),
+            "proficient",
+        )
+    skills = _build_skills_payload_from_levels(
+        ability_scores,
+        existing_skill_proficiency_levels,
+        proficiency_bonus,
+    )
 
     new_features, _ = _build_feature_payloads(
         new_feature_entries,
@@ -1437,6 +1464,15 @@ def build_native_level_up_character_definition(
             target_level,
             current_level=current_level,
         ),
+    )
+    definition = normalize_definition_to_native_model(
+        definition,
+        item_catalog=item_catalog,
+        spell_catalog=spell_catalog,
+        resolved_class=selected_class,
+        resolved_subclass=selected_subclass,
+        resolved_species=selected_species,
+        resolved_background=selected_background,
     )
     import_metadata = _build_leveled_import_metadata(
         campaign_slug=campaign_slug,
@@ -1595,6 +1631,18 @@ def build_imported_progression_repair_context(
         "subclass_entries": subclass_options,
         "feat_entries": feat_options,
         "optionalfeature_entries": optionalfeature_options,
+        "systems_service": systems_service,
+        "campaign_page_records": list(campaign_page_records or []),
+        "item_catalog": dict(_build_common_builder_static_bundle(
+            systems_service,
+            campaign_slug,
+            campaign_page_records=campaign_page_records,
+        ).get("item_catalog") or {}),
+        "spell_catalog": dict(_build_common_builder_static_bundle(
+            systems_service,
+            campaign_slug,
+            campaign_page_records=campaign_page_records,
+        ).get("spell_catalog") or {}),
     }
 
 
@@ -1739,7 +1787,17 @@ def apply_imported_progression_repairs(
         baseline_repaired=True,
     )
 
-    definition = normalize_definition_to_native_model(CharacterDefinition.from_dict(payload))
+    definition = normalize_definition_to_native_model(
+        CharacterDefinition.from_dict(payload),
+        item_catalog=dict(repair_context.get("item_catalog") or {}),
+        spell_catalog=dict(repair_context.get("spell_catalog") or {}),
+        systems_service=repair_context.get("systems_service"),
+        campaign_page_records=list(repair_context.get("campaign_page_records") or []),
+        resolved_class=selected_class,
+        resolved_subclass=selected_subclass,
+        resolved_species=selected_species,
+        resolved_background=selected_background,
+    )
     import_metadata = CharacterImportMetadata(
         campaign_slug=campaign_slug,
         character_slug=current_definition.character_slug,
@@ -2297,6 +2355,392 @@ def _resolve_profile_entry(
     if not normalized_title:
         return None
     return next((entry for entry in options if normalize_lookup(entry.title) == normalized_title), None)
+
+
+def _resolve_definition_sheet_entries(
+    definition: CharacterDefinition,
+    *,
+    systems_service: Any | None = None,
+    campaign_page_records: list[Any] | None = None,
+    resolved_class: SystemsEntryRecord | None = None,
+    resolved_subclass: SystemsEntryRecord | None = None,
+    resolved_species: SystemsEntryRecord | None = None,
+    resolved_background: SystemsEntryRecord | None = None,
+) -> dict[str, SystemsEntryRecord | None]:
+    selected_class = resolved_class if isinstance(resolved_class, SystemsEntryRecord) else None
+    selected_subclass = resolved_subclass if isinstance(resolved_subclass, SystemsEntryRecord) else None
+    selected_species = resolved_species if isinstance(resolved_species, SystemsEntryRecord) else None
+    selected_background = resolved_background if isinstance(resolved_background, SystemsEntryRecord) else None
+    if systems_service is None:
+        return {
+            "selected_class": selected_class,
+            "selected_subclass": selected_subclass,
+            "selected_species": selected_species,
+            "selected_background": selected_background,
+        }
+
+    static_bundle = _build_common_builder_static_bundle(
+        systems_service,
+        definition.campaign_slug,
+        campaign_page_records=campaign_page_records,
+    )
+    classes = [dict(row or {}) for row in list((definition.profile or {}).get("classes") or [])]
+    class_payload = dict(classes[0] or {}) if classes else {}
+    if selected_class is None:
+        selected_class = _resolve_profile_entry(
+            list(static_bundle.get("supported_class_entries") or []),
+            (definition.profile or {}).get("class_ref") or class_payload.get("systems_ref"),
+            fallback_title=_native_character_class_name(definition),
+        )
+    if selected_species is None:
+        selected_species = _resolve_profile_entry(
+            list(static_bundle.get("species_options") or []),
+            (definition.profile or {}).get("species_ref"),
+            page_ref=(definition.profile or {}).get("species_page_ref"),
+            fallback_title=str((definition.profile or {}).get("species") or "").strip(),
+        )
+    if selected_background is None:
+        selected_background = _resolve_profile_entry(
+            list(static_bundle.get("background_options") or []),
+            (definition.profile or {}).get("background_ref"),
+            page_ref=(definition.profile or {}).get("background_page_ref"),
+            fallback_title=str((definition.profile or {}).get("background") or "").strip(),
+        )
+    if selected_subclass is None and selected_class is not None:
+        subclass_options = _list_subclass_options(
+            systems_service,
+            definition.campaign_slug,
+            selected_class,
+            subclass_entries=list(static_bundle.get("subclass_entries") or []),
+        )
+        selected_subclass = _resolve_profile_entry(
+            subclass_options,
+            (definition.profile or {}).get("subclass_ref") or class_payload.get("subclass_ref"),
+            fallback_title=_native_character_subclass_name(definition),
+        )
+    return {
+        "selected_class": selected_class,
+        "selected_subclass": selected_subclass,
+        "selected_species": selected_species,
+        "selected_background": selected_background,
+    }
+
+
+def _effective_item_catalog_for_definition(
+    definition: CharacterDefinition,
+    *,
+    item_catalog: dict[str, Any] | None = None,
+    systems_service: Any | None = None,
+    campaign_page_records: list[Any] | None = None,
+) -> dict[str, Any]:
+    if item_catalog:
+        return dict(item_catalog)
+    if systems_service is not None:
+        static_bundle = _build_common_builder_static_bundle(
+            systems_service,
+            definition.campaign_slug,
+            campaign_page_records=campaign_page_records,
+        )
+        resolved_catalog = dict(static_bundle.get("item_catalog") or {})
+        if resolved_catalog:
+            return resolved_catalog
+    return _build_item_catalog([])
+
+
+def _effective_spell_catalog_for_definition(
+    definition: CharacterDefinition,
+    *,
+    spell_catalog: dict[str, Any] | None = None,
+    systems_service: Any | None = None,
+    campaign_page_records: list[Any] | None = None,
+) -> dict[str, Any]:
+    if spell_catalog:
+        return dict(spell_catalog)
+    if systems_service is not None:
+        static_bundle = _build_common_builder_static_bundle(
+            systems_service,
+            definition.campaign_slug,
+            campaign_page_records=campaign_page_records,
+        )
+        resolved_catalog = dict(static_bundle.get("spell_catalog") or {})
+        if resolved_catalog:
+            return resolved_catalog
+    return _build_spell_catalog([])
+
+
+def _definition_spellcasting_class_name(definition: CharacterDefinition) -> str:
+    spellcasting_class = str((definition.spellcasting or {}).get("spellcasting_class") or "").strip()
+    if spellcasting_class:
+        return spellcasting_class
+    class_name = _native_character_class_name(definition)
+    if class_name:
+        return class_name
+    class_level_text = str((definition.profile or {}).get("class_level_text") or "").strip()
+    match = re.match(r"([A-Za-z][A-Za-z' -]+)", class_level_text)
+    return str(match.group(1) or "").strip() if match is not None else ""
+
+
+def _infer_definition_save_proficiencies(
+    definition: CharacterDefinition,
+    *,
+    ability_scores: dict[str, int],
+    proficiency_bonus: int,
+    selected_class: SystemsEntryRecord | None = None,
+) -> set[str]:
+    save_proficiencies = set(_class_save_proficiencies(selected_class))
+    if proficiency_bonus <= 0:
+        return save_proficiencies
+    ability_payloads = dict((definition.stats or {}).get("ability_scores") or {})
+    for ability_key in ABILITY_KEYS:
+        try:
+            save_bonus = int(
+                dict(
+                    ability_payloads.get(ability_key)
+                    or ability_payloads.get(str(ABILITY_LABELS.get(ability_key, "")).lower())
+                    or {}
+                ).get("save_bonus")
+            )
+        except (TypeError, ValueError):
+            continue
+        if save_bonus - _ability_modifier(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE)) >= proficiency_bonus:
+            save_proficiencies.add(ability_key)
+    return save_proficiencies
+
+
+def _derive_definition_skills(
+    definition: CharacterDefinition,
+    *,
+    ability_scores: dict[str, int],
+    proficiency_bonus: int,
+) -> list[dict[str, Any]]:
+    existing_rows = [dict(row or {}) for row in list(definition.skills or [])]
+    if not existing_rows:
+        return []
+    proficiency_levels = _skill_proficiency_levels_from_rows(
+        existing_rows,
+        ability_scores=ability_scores,
+        proficiency_bonus=proficiency_bonus,
+    )
+    campaign_option_proficiencies = collect_campaign_option_proficiency_grants(
+        _campaign_option_payloads_from_definition(definition)
+    )
+    for skill_name in list(campaign_option_proficiencies.get("skills") or []):
+        normalized_skill = normalize_lookup(skill_name)
+        if normalized_skill not in SKILL_LABELS:
+            continue
+        proficiency_levels[normalized_skill] = _max_skill_proficiency_level(
+            proficiency_levels.get(normalized_skill),
+            "proficient",
+        )
+    return _build_skills_payload_from_levels(
+        ability_scores,
+        proficiency_levels,
+        proficiency_bonus,
+    )
+
+
+def _derive_definition_stats(
+    definition: CharacterDefinition,
+    *,
+    ability_scores: dict[str, int],
+    proficiency_bonus: int,
+    skills: list[dict[str, Any]],
+    features: list[dict[str, Any]],
+    item_catalog: dict[str, Any],
+    selected_class: SystemsEntryRecord | None = None,
+) -> dict[str, Any]:
+    stats, manual_adjustments = strip_manual_stat_adjustments(dict(definition.stats or {}))
+    existing_ability_scores = dict(stats.get("ability_scores") or {})
+    campaign_option_adjustments = collect_campaign_option_stat_adjustments(
+        _campaign_option_payloads_from_definition(definition)
+    )
+    if campaign_option_adjustments:
+        stats = apply_stat_adjustments(
+            stats,
+            {key: -int(value) for key, value in campaign_option_adjustments.items()},
+        )
+    save_proficiencies = _infer_definition_save_proficiencies(
+        definition,
+        ability_scores=ability_scores,
+        proficiency_bonus=proficiency_bonus,
+        selected_class=selected_class,
+    )
+    skill_lookup = {normalize_lookup(skill.get("name")): dict(skill) for skill in list(skills or [])}
+    if skill_lookup:
+        stats["passive_perception"] = 10 + int(
+            (skill_lookup.get("perception") or {}).get("bonus") or _ability_modifier(ability_scores["wis"])
+        )
+        stats["passive_insight"] = 10 + int(
+            (skill_lookup.get("insight") or {}).get("bonus") or _ability_modifier(ability_scores["wis"])
+        )
+        stats["passive_investigation"] = 10 + int(
+            (skill_lookup.get("investigation") or {}).get("bonus") or _ability_modifier(ability_scores["int"])
+        )
+    stats["proficiency_bonus"] = proficiency_bonus
+    normalized_ability_scores = {
+        ability_key: {
+            "score": score,
+            "modifier": _ability_modifier(score),
+            "save_bonus": _ability_modifier(score) + (proficiency_bonus if ability_key in save_proficiencies else 0),
+        }
+        for ability_key, score in ability_scores.items()
+    }
+    stats["ability_scores"] = {}
+    for ability_key, payload in normalized_ability_scores.items():
+        if ability_key in existing_ability_scores or str(ABILITY_LABELS.get(ability_key, "")).lower() not in existing_ability_scores:
+            stats["ability_scores"][ability_key] = dict(payload)
+        alias_key = str(ABILITY_LABELS.get(ability_key, "")).lower()
+        if alias_key in existing_ability_scores:
+            stats["ability_scores"][alias_key] = dict(payload)
+    derived_armor_class = _derive_armor_class_from_character_inputs(
+        ability_scores=ability_scores,
+        equipment_catalog=list(definition.equipment_catalog or []),
+        features=features,
+        class_names=_character_profile_class_names(definition),
+        subclass_names=_character_profile_subclass_names(definition),
+        item_catalog=item_catalog,
+        allow_plain_unarmored_base=_character_source_type(definition) == "native_character_builder",
+    )
+    if derived_armor_class is not None:
+        stats["armor_class"] = derived_armor_class
+    stats = apply_stat_adjustments(stats, campaign_option_adjustments)
+    return apply_manual_stat_adjustments(stats, manual_adjustments)
+
+
+def _derive_definition_spellcasting(
+    definition: CharacterDefinition,
+    *,
+    ability_scores: dict[str, int],
+    proficiency_bonus: int,
+    current_level: int,
+    selected_class: SystemsEntryRecord | None = None,
+) -> dict[str, Any]:
+    spellcasting = dict(definition.spellcasting or {})
+    spellcasting["spells"] = _normalize_spell_payloads(list(spellcasting.get("spells") or []))
+    class_name = _definition_spellcasting_class_name(definition)
+    existing_class_name = str(spellcasting.get("spellcasting_class") or "").strip()
+    progression = _class_spell_progression(class_name, selected_class=selected_class) if class_name and selected_class is not None else {}
+    ability_name = (
+        _spellcasting_ability_name_for_class(class_name, selected_class=selected_class)
+        if class_name and selected_class is not None
+        else ""
+    )
+    existing_ability_name = str(spellcasting.get("spellcasting_ability") or "").strip()
+    if not ability_name and existing_ability_name in set(ABILITY_LABELS.values()):
+        ability_name = existing_ability_name
+    slot_progression = (
+        _spell_slot_progression_for_class_level(
+            class_name,
+            current_level,
+            selected_class=selected_class,
+        )
+        if selected_class is not None
+        else list(spellcasting.get("slot_progression") or [])
+    )
+    if class_name and (ability_name or slot_progression or existing_class_name):
+        spellcasting["spellcasting_class"] = class_name
+    elif not ability_name and not slot_progression and not existing_class_name:
+        spellcasting["spellcasting_class"] = ""
+    if ability_name:
+        ability_key = next((key for key, label in ABILITY_LABELS.items() if label == ability_name), "")
+        if ability_key:
+            modifier = _ability_modifier(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE))
+            spellcasting["spellcasting_ability"] = ability_name
+            spellcasting["spell_save_dc"] = 8 + proficiency_bonus + modifier
+            spellcasting["spell_attack_bonus"] = proficiency_bonus + modifier
+    elif not existing_ability_name:
+        spellcasting["spellcasting_ability"] = ""
+    if progression or selected_class is not None or existing_class_name:
+        spellcasting["slot_progression"] = slot_progression
+    return spellcasting
+
+
+def _derive_definition_core_sheet_payloads(
+    definition: CharacterDefinition,
+    *,
+    item_catalog: dict[str, Any] | None = None,
+    spell_catalog: dict[str, Any] | None = None,
+    systems_service: Any | None = None,
+    campaign_page_records: list[Any] | None = None,
+    resolved_class: SystemsEntryRecord | None = None,
+    resolved_subclass: SystemsEntryRecord | None = None,
+    resolved_species: SystemsEntryRecord | None = None,
+    resolved_background: SystemsEntryRecord | None = None,
+) -> dict[str, Any]:
+    del spell_catalog
+    resolved_entries = _resolve_definition_sheet_entries(
+        definition,
+        systems_service=systems_service,
+        campaign_page_records=campaign_page_records,
+        resolved_class=resolved_class,
+        resolved_subclass=resolved_subclass,
+        resolved_species=resolved_species,
+        resolved_background=resolved_background,
+    )
+    effective_item_catalog = _effective_item_catalog_for_definition(
+        definition,
+        item_catalog=item_catalog,
+        systems_service=systems_service,
+        campaign_page_records=campaign_page_records,
+    )
+    ability_scores = _ability_scores_from_definition(definition)
+    current_level = _resolve_native_character_level(definition)
+    proficiency_bonus = (
+        _proficiency_bonus_for_level(current_level)
+        if current_level > 0
+        else int((definition.stats or {}).get("proficiency_bonus") or 2)
+    )
+    normalized_features, derived_resource_templates = _apply_tracker_templates_to_feature_payloads(
+        _normalize_feature_payloads(list(definition.features or [])),
+        ability_scores=ability_scores,
+        current_level=max(current_level, 1),
+    )
+    normalized_equipment = _normalize_equipment_payloads(list(definition.equipment_catalog or []))
+    normalized_payload = deepcopy(definition.to_dict())
+    normalized_payload["features"] = normalized_features
+    normalized_payload["equipment_catalog"] = normalized_equipment
+    normalized_definition = CharacterDefinition.from_dict(normalized_payload)
+    skills = _derive_definition_skills(
+        normalized_definition,
+        ability_scores=ability_scores,
+        proficiency_bonus=proficiency_bonus,
+    )
+    stats = _derive_definition_stats(
+        normalized_definition,
+        ability_scores=ability_scores,
+        proficiency_bonus=proficiency_bonus,
+        skills=skills,
+        features=normalized_features,
+        item_catalog=effective_item_catalog,
+        selected_class=resolved_entries.get("selected_class"),
+    )
+    derived_payload = deepcopy(normalized_payload)
+    derived_payload["skills"] = skills
+    derived_payload["stats"] = stats
+    derived_definition = CharacterDefinition.from_dict(derived_payload)
+    return {
+        "features": normalized_features,
+        "equipment_catalog": normalized_equipment,
+        "skills": skills,
+        "stats": stats,
+        "attacks": _recalculate_definition_attacks(
+            derived_definition,
+            item_catalog=effective_item_catalog,
+        ),
+        "spellcasting": _derive_definition_spellcasting(
+            derived_definition,
+            ability_scores=ability_scores,
+            proficiency_bonus=proficiency_bonus,
+            current_level=max(current_level, 1),
+            selected_class=resolved_entries.get("selected_class"),
+        ),
+        "resource_templates": _normalize_resource_template_payloads(
+            _merge_resource_templates(
+                list(definition.resource_templates or []),
+                derived_resource_templates,
+            )
+        ),
+    }
 
 
 def _resolve_native_character_level(definition: CharacterDefinition) -> int:
@@ -5041,7 +5485,7 @@ def _resolve_weapon_profile(
         str(item.get("name") or "").strip(),
         str(metadata.get("base_item") or "").split("|", 1)[0].strip(),
     ]
-    profiles = dict(item_catalog.get("phb_weapon_profiles") or {})
+    profiles = dict(item_catalog.get("phb_weapon_profiles") or _load_phb_weapon_profiles())
     resolved_requires_attunement = _metadata_requires_attunement(metadata.get("attunement"))
     for title in candidate_titles:
         base_title, parsed_bonus = _split_magic_item_name(title)
@@ -5425,11 +5869,22 @@ def _recalculate_definition_attacks(
     *,
     item_catalog: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    if _character_source_type(definition) != "native_character_builder" or not list(definition.equipment_catalog or []):
+    effective_item_catalog = dict(item_catalog or _build_item_catalog([]))
+    equipment_catalog = list(definition.equipment_catalog or [])
+    if not equipment_catalog:
+        return _normalize_attack_payloads(list(definition.attacks or []))
+    has_structured_equipment = any(
+        bool(dict(item.get("systems_ref") or {}))
+        or bool(_normalize_page_ref_payload(item.get("page_ref")))
+        or bool(item.get("is_equipped", False))
+        or bool(item.get("is_attuned", False))
+        for item in equipment_catalog
+    )
+    if not has_structured_equipment:
         return _normalize_attack_payloads(list(definition.attacks or []))
     recalculated_attacks = _build_level_one_attacks(
-        equipment_catalog=list(definition.equipment_catalog or []),
-        item_catalog=item_catalog or {},
+        equipment_catalog=equipment_catalog,
+        item_catalog=effective_item_catalog,
         ability_scores=_ability_scores_from_definition(definition),
         proficiency_bonus=int(
             (definition.stats or {}).get("proficiency_bonus")
@@ -7477,25 +7932,130 @@ def _build_level_one_proficiencies(
     }
 
 
+def _normalize_skill_proficiency_level(value: Any) -> str:
+    if value in (None, "", False):
+        return "none"
+    normalized = normalize_lookup(str(value))
+    if normalized == "expertise":
+        return "expertise"
+    if normalized in {"proficient", "proficiency"}:
+        return "proficient"
+    return "none"
+
+
+def _skill_proficiency_level_rank(value: Any) -> int:
+    return int(SKILL_PROFICIENCY_LEVEL_RANKS.get(_normalize_skill_proficiency_level(value), 0))
+
+
+def _max_skill_proficiency_level(*levels: Any) -> str:
+    best_level = "none"
+    best_rank = -1
+    for level in levels:
+        normalized = _normalize_skill_proficiency_level(level)
+        rank = _skill_proficiency_level_rank(normalized)
+        if rank > best_rank:
+            best_level = normalized
+            best_rank = rank
+    return best_level
+
+
+def _skill_proficiency_level_from_bonus(
+    skill_name: Any,
+    *,
+    bonus: Any,
+    ability_scores: dict[str, int],
+    proficiency_bonus: int,
+) -> str:
+    normalized_skill = normalize_lookup(skill_name)
+    ability_key = SKILL_ABILITY_KEYS.get(normalized_skill)
+    if ability_key is None:
+        return "none"
+    try:
+        clean_bonus = int(bonus)
+    except (TypeError, ValueError):
+        return "none"
+    modifier = _ability_modifier(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE))
+    delta = clean_bonus - modifier
+    if proficiency_bonus > 0 and delta >= proficiency_bonus * 2:
+        return "expertise"
+    if proficiency_bonus > 0 and delta >= proficiency_bonus:
+        return "proficient"
+    return "none"
+
+
+def _skill_proficiency_levels_from_rows(
+    skills: list[dict[str, Any]],
+    *,
+    ability_scores: dict[str, int],
+    proficiency_bonus: int,
+) -> dict[str, str]:
+    levels: dict[str, str] = {}
+    for row in list(skills or []):
+        skill_name = str(row.get("name") or "").strip()
+        normalized_skill = normalize_lookup(skill_name)
+        if normalized_skill not in SKILL_LABELS:
+            continue
+        explicit_level = _normalize_skill_proficiency_level(row.get("proficiency_level"))
+        inferred_level = _skill_proficiency_level_from_bonus(
+            skill_name,
+            bonus=row.get("bonus"),
+            ability_scores=ability_scores,
+            proficiency_bonus=proficiency_bonus,
+        )
+        levels[normalized_skill] = _max_skill_proficiency_level(
+            levels.get(normalized_skill),
+            explicit_level,
+            inferred_level,
+        )
+    return levels
+
+
+def _skill_proficiency_levels_from_names(
+    proficient_skills: list[str],
+) -> dict[str, str]:
+    levels: dict[str, str] = {}
+    for skill in list(proficient_skills or []):
+        normalized_skill = normalize_lookup(skill)
+        if normalized_skill not in SKILL_LABELS:
+            continue
+        levels[normalized_skill] = _max_skill_proficiency_level(
+            levels.get(normalized_skill),
+            "proficient",
+        )
+    return levels
+
+
+def _build_skills_payload_from_levels(
+    ability_scores: dict[str, int],
+    proficiency_levels: dict[str, str],
+    proficiency_bonus: int,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for normalized_skill, label in SKILL_LABELS.items():
+        ability_key = SKILL_ABILITY_KEYS[normalized_skill]
+        modifier = _ability_modifier(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE))
+        proficiency_level = _normalize_skill_proficiency_level(proficiency_levels.get(normalized_skill))
+        rank = _skill_proficiency_level_rank(proficiency_level)
+        rows.append(
+            {
+                "name": label,
+                "bonus": modifier + (proficiency_bonus * rank),
+                "proficiency_level": proficiency_level,
+            }
+        )
+    return rows
+
+
 def _build_skills_payload(
     ability_scores: dict[str, int],
     proficient_skills: list[str],
     proficiency_bonus: int,
 ) -> list[dict[str, Any]]:
-    proficient_lookup = {normalize_lookup(skill) for skill in proficient_skills}
-    rows: list[dict[str, Any]] = []
-    for normalized_skill, label in SKILL_LABELS.items():
-        ability_key = SKILL_ABILITY_KEYS[normalized_skill]
-        modifier = _ability_modifier(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE))
-        is_proficient = normalized_skill in proficient_lookup
-        rows.append(
-            {
-                "name": label,
-                "bonus": modifier + (proficiency_bonus if is_proficient else 0),
-                "proficiency_level": "proficient" if is_proficient else "none",
-            }
-        )
-    return rows
+    return _build_skills_payload_from_levels(
+        ability_scores,
+        _skill_proficiency_levels_from_names(proficient_skills),
+        proficiency_bonus,
+    )
 
 
 def _collect_level_one_feature_entries(
@@ -11522,27 +12082,28 @@ def normalize_definition_to_native_model(
     definition: CharacterDefinition,
     *,
     item_catalog: dict[str, Any] | None = None,
+    spell_catalog: dict[str, Any] | None = None,
+    systems_service: Any | None = None,
+    campaign_page_records: list[Any] | None = None,
+    resolved_class: SystemsEntryRecord | None = None,
+    resolved_subclass: SystemsEntryRecord | None = None,
+    resolved_species: SystemsEntryRecord | None = None,
+    resolved_background: SystemsEntryRecord | None = None,
 ) -> CharacterDefinition:
     payload = deepcopy(definition.to_dict())
-    ability_scores = _ability_scores_from_definition(definition)
-    current_level = max(_resolve_native_character_level(definition), 1)
-    normalized_features, derived_resource_templates = _apply_tracker_templates_to_feature_payloads(
-        _normalize_feature_payloads(list(definition.features or [])),
-        ability_scores=ability_scores,
-        current_level=current_level,
+    payload.update(
+        _derive_definition_core_sheet_payloads(
+            definition,
+            item_catalog=item_catalog,
+            spell_catalog=spell_catalog,
+            systems_service=systems_service,
+            campaign_page_records=campaign_page_records,
+            resolved_class=resolved_class,
+            resolved_subclass=resolved_subclass,
+            resolved_species=resolved_species,
+            resolved_background=resolved_background,
+        )
     )
-    payload["features"] = normalized_features
-    payload["equipment_catalog"] = _normalize_equipment_payloads(list(definition.equipment_catalog or []))
-    normalized_definition = CharacterDefinition.from_dict(payload)
-    payload["attacks"] = _recalculate_definition_attacks(normalized_definition, item_catalog=item_catalog)
-    payload["resource_templates"] = _normalize_resource_template_payloads(_merge_resource_templates(
-        list(definition.resource_templates or []),
-        derived_resource_templates,
-    ))
-    payload["stats"] = _recalculate_definition_armor_class(normalized_definition, item_catalog=item_catalog)
-    spellcasting = dict(definition.spellcasting or {})
-    spellcasting["spells"] = _normalize_spell_payloads(list(spellcasting.get("spells") or []))
-    payload["spellcasting"] = spellcasting
     return CharacterDefinition.from_dict(payload)
 
 

@@ -1571,14 +1571,38 @@ def converge_imported_definition(
     definition: CharacterDefinition,
     *,
     existing_definition: CharacterDefinition | None = None,
+    item_catalog: dict[str, Any] | None = None,
+    spell_catalog: dict[str, Any] | None = None,
+    systems_service: Any | None = None,
+    campaign_page_records: list[Any] | None = None,
+    resolved_class: Any | None = None,
+    resolved_subclass: Any | None = None,
+    resolved_species: Any | None = None,
+    resolved_background: Any | None = None,
 ) -> CharacterDefinition:
-    normalized_definition = normalize_definition_to_native_model(definition)
+    normalized_definition = normalize_definition_to_native_model(
+        definition,
+        item_catalog=item_catalog,
+        spell_catalog=spell_catalog,
+        systems_service=systems_service,
+        campaign_page_records=campaign_page_records,
+        resolved_class=resolved_class,
+        resolved_subclass=resolved_subclass,
+        resolved_species=resolved_species,
+        resolved_background=resolved_background,
+    )
     if existing_definition is None:
         return CharacterDefinition.from_dict(
             _assign_missing_imported_ids(normalized_definition.to_dict())
         )
 
-    normalized_existing = normalize_definition_to_native_model(existing_definition)
+    normalized_existing = normalize_definition_to_native_model(
+        existing_definition,
+        item_catalog=item_catalog,
+        spell_catalog=spell_catalog,
+        systems_service=systems_service,
+        campaign_page_records=campaign_page_records,
+    )
     payload = normalized_definition.to_dict()
     existing_payload = normalized_existing.to_dict()
 
@@ -1642,9 +1666,21 @@ def converge_imported_definition(
 def preserve_existing_character_overrides(
     definition: CharacterDefinition,
     character_dir: Path,
+    *,
+    item_catalog: dict[str, Any] | None = None,
+    spell_catalog: dict[str, Any] | None = None,
+    systems_service: Any | None = None,
+    campaign_page_records: list[Any] | None = None,
 ) -> CharacterDefinition:
     existing_definition = _load_existing_character_definition(character_dir)
-    return converge_imported_definition(definition, existing_definition=existing_definition)
+    return converge_imported_definition(
+        definition,
+        existing_definition=existing_definition,
+        item_catalog=item_catalog,
+        spell_catalog=spell_catalog,
+        systems_service=systems_service,
+        campaign_page_records=campaign_page_records,
+    )
 
 
 def initialize_or_reconcile_imported_state(
@@ -1699,6 +1735,8 @@ def import_character(
     with app.app_context():
         init_database()
         state_store: CharacterStateStore = app.extensions["character_state_store"]
+        systems_service = app.extensions["systems_service"]
+        campaign_page_records = list(app.extensions["campaign_page_store"].list_page_records(campaign_slug))
         campaigns_dir: Path = app.config["CAMPAIGNS_DIR"]
         config = load_campaign_character_config(campaigns_dir, campaign_slug)
         source_path = resolve_source_path(config, source_arg)
@@ -1709,7 +1747,12 @@ def import_character(
         )
         character_dir = config.characters_dir / definition.character_slug
         existing_definition = load_existing_character_definition(character_dir)
-        definition = preserve_existing_character_overrides(definition, character_dir)
+        definition = preserve_existing_character_overrides(
+            definition,
+            character_dir,
+            systems_service=systems_service,
+            campaign_page_records=campaign_page_records,
+        )
         write_yaml(character_dir / "definition.yaml", definition.to_dict())
         write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
         state_result = initialize_or_reconcile_imported_state(
