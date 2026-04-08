@@ -652,6 +652,7 @@ def build_level_one_character_definition(
         equipment_groups,
         choice_sections=choice_sections,
         selected_choices=selected_choices,
+        item_catalog=item_catalog,
     )
     attacks = _build_level_one_attacks(
         equipment_catalog=equipment_catalog,
@@ -4173,6 +4174,7 @@ def _build_level_one_equipment_catalog(
     *,
     choice_sections: list[dict[str, Any]] | None = None,
     selected_choices: dict[str, list[str]] | None = None,
+    item_catalog: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     selected_specs: list[dict[str, Any]] = []
     for group in equipment_groups:
@@ -4228,6 +4230,7 @@ def _build_level_one_equipment_catalog(
                 "is_currency_only": is_currency_only,
                 "source_kind": str(spec.get("source_kind") or "").strip(),
                 "campaign_option": dict(spec.get("campaign_option") or {}) or None,
+                "is_equipped": _default_equipment_item_equipped(spec, item_catalog=item_catalog),
             }
             merged_index_by_key[merge_key] = len(merged_catalog)
             merged_catalog.append(row)
@@ -4243,6 +4246,20 @@ def _build_level_one_equipment_catalog(
             dict(spec.get("currency") or {}),
         )
     return merged_catalog
+
+
+def _default_equipment_item_equipped(
+    item: dict[str, Any],
+    *,
+    item_catalog: dict[str, Any] | None = None,
+) -> bool:
+    if bool(item.get("is_currency_only")):
+        return False
+    if _resolve_weapon_profile(item, item_catalog or {}) is not None:
+        return True
+    if _resolve_armor_profile(item, item_catalog or {}) is not None:
+        return True
+    return False
 
 
 def _build_level_one_attacks(
@@ -4262,17 +4279,33 @@ def _build_level_one_attacks(
         ability_scores=ability_scores,
         weapon_proficiencies=weapon_proficiencies,
     )
-    has_archery = _has_fighting_style(selected_choices, "phb-optionalfeature-archery", "Archery")
-    has_dueling = _has_fighting_style(selected_choices, "phb-optionalfeature-dueling", "Dueling")
+    has_archery = _has_fighting_style(selected_choices, "phb-optionalfeature-archery", "Archery") or _character_has_named_feature(
+        features,
+        "Archery",
+        "phb-optionalfeature-archery",
+    )
+    has_dueling = _has_fighting_style(selected_choices, "phb-optionalfeature-dueling", "Dueling") or _character_has_named_feature(
+        features,
+        "Dueling",
+        "phb-optionalfeature-dueling",
+    )
     has_great_weapon_fighting = _has_fighting_style(
         selected_choices,
         "phb-optionalfeature-great-weapon-fighting",
         "Great Weapon Fighting",
+    ) or _character_has_named_feature(
+        features,
+        "Great Weapon Fighting",
+        "phb-optionalfeature-great-weapon-fighting",
     )
     has_two_weapon_fighting = _has_fighting_style(
         selected_choices,
         "phb-optionalfeature-two-weapon-fighting",
         "Two-Weapon Fighting",
+    ) or _character_has_named_feature(
+        features,
+        "Two-Weapon Fighting",
+        "phb-optionalfeature-two-weapon-fighting",
     )
     active_feat_effects = {
         normalize_lookup(name)
@@ -4308,9 +4341,11 @@ def _build_level_one_attacks(
         attack_bonus = int(context["ability_modifier"] or 0)
         if bool(context["is_proficient"]):
             attack_bonus += proficiency_bonus
+        attack_bonus += int(context.get("item_attack_bonus") or 0)
         if has_archery and str(profile.get("type") or "").strip().upper() == "R":
             attack_bonus += 2
         damage_bonus = int(context["ability_modifier"] or 0)
+        damage_bonus += int(context.get("item_damage_bonus") or 0)
         if has_dueling and _qualifies_for_dueling(context, off_hand_context=off_hand_context):
             damage_bonus += 2
         ignore_loading = (
@@ -4934,6 +4969,8 @@ def _build_weapon_attack_contexts(
                 "ability_modifier": _ability_modifier(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE)),
                 "is_proficient": _is_proficient_with_weapon(profile, weapon_proficiencies, attack_name),
                 "quantity": max(int(item.get("default_quantity") or 1), 1),
+                "item_attack_bonus": _active_weapon_profile_bonus(item, profile, key="item_attack_bonus"),
+                "item_damage_bonus": _active_weapon_profile_bonus(item, profile, key="item_damage_bonus"),
             }
         )
     return contexts
@@ -4954,6 +4991,7 @@ def _build_weapon_attack_payload(
     profile = dict(profile_override or context["profile"] or {})
     attack_name = f"{str(context.get('attack_name') or '').strip()}{name_suffix}"
     equipment_ref = str(dict(context.get("item") or {}).get("id") or "").strip()
+    raw_page_ref = dict(context.get("item") or {}).get("page_ref")
     return {
         "id": f"{slugify(attack_name)}-{index}",
         "name": attack_name,
@@ -4963,6 +5001,7 @@ def _build_weapon_attack_payload(
         "damage_type": DAMAGE_TYPE_LABELS.get(str(profile.get("damage_type") or "").strip().upper(), ""),
         "notes": notes,
         "systems_ref": dict(dict(context.get("item") or {}).get("systems_ref") or {}) or None,
+        "page_ref": dict(raw_page_ref) if isinstance(raw_page_ref, dict) else raw_page_ref or None,
         "equipment_refs": [equipment_ref] if equipment_ref else [],
     }
 
@@ -4994,17 +5033,39 @@ def _resolve_weapon_profile(
     item: dict[str, Any],
     item_catalog: dict[str, Any],
 ) -> dict[str, Any] | None:
+    entry = _resolve_item_entry(item, item_catalog)
+    metadata = dict((entry.metadata if isinstance(entry, SystemsEntryRecord) else {}) or {})
     systems_ref = dict(item.get("systems_ref") or {})
     candidate_titles = [
         str(systems_ref.get("title") or "").strip(),
         str(item.get("name") or "").strip(),
+        str(metadata.get("base_item") or "").split("|", 1)[0].strip(),
     ]
     profiles = dict(item_catalog.get("phb_weapon_profiles") or {})
+    resolved_requires_attunement = _metadata_requires_attunement(metadata.get("attunement"))
     for title in candidate_titles:
-        profile = profiles.get(normalize_lookup(title))
-        if profile is not None:
-            return dict(profile)
+        base_title, parsed_bonus = _split_magic_item_name(title)
+        profile = profiles.get(normalize_lookup(base_title))
+        if profile is None:
+            continue
+        attack_bonus, damage_bonus = _resolve_weapon_bonus_from_metadata(
+            metadata,
+            fallback_bonus=parsed_bonus,
+        )
+        resolved_profile = dict(profile)
+        resolved_profile["item_attack_bonus"] = attack_bonus
+        resolved_profile["item_damage_bonus"] = damage_bonus
+        resolved_profile["requires_attunement"] = resolved_requires_attunement
+        return resolved_profile
     return None
+
+
+def _active_weapon_profile_bonus(item: dict[str, Any], profile: dict[str, Any], *, key: str) -> int:
+    if not bool(item.get("is_equipped", False)):
+        return 0
+    if bool(profile.get("requires_attunement")) and not bool(item.get("is_attuned", False)):
+        return 0
+    return int(profile.get(key) or 0)
 
 
 def _resolve_item_entry(
@@ -5110,7 +5171,7 @@ def _armor_profile_from_entry(entry: SystemsEntryRecord | None) -> dict[str, Any
     )
 
 
-def _split_magic_armor_name(raw_name: Any) -> tuple[str, int]:
+def _split_magic_item_name(raw_name: Any) -> tuple[str, int]:
     cleaned = str(raw_name or "").strip()
     if not cleaned:
         return "", 0
@@ -5121,6 +5182,39 @@ def _split_magic_armor_name(raw_name: Any) -> tuple[str, int]:
     if suffix_match is not None:
         return suffix_match.group(1).strip(), int(suffix_match.group(2))
     return cleaned, 0
+
+
+def _metadata_requires_attunement(value: Any) -> bool:
+    if value in (None, "", False, [], {}):
+        return False
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if not normalized or normalized in {"false", "none", "no", "not required"}:
+            return False
+    return True
+
+
+def _resolve_weapon_bonus_from_metadata(
+    metadata: dict[str, Any],
+    *,
+    fallback_bonus: int = 0,
+) -> tuple[int, int]:
+    shared_bonus = (
+        _parse_optional_int_value(metadata.get("bonus_weapon"))
+        or _parse_optional_int_value(metadata.get("bonus"))
+        or fallback_bonus
+    )
+    attack_bonus = (
+        _parse_optional_int_value(metadata.get("bonus_weapon_attack"))
+        or _parse_optional_int_value(metadata.get("bonus_attack_rolls"))
+        or shared_bonus
+    )
+    damage_bonus = (
+        _parse_optional_int_value(metadata.get("bonus_weapon_damage"))
+        or _parse_optional_int_value(metadata.get("bonus_damage_rolls"))
+        or shared_bonus
+    )
+    return int(attack_bonus or 0), int(damage_bonus or 0)
 
 
 def _resolve_armor_profile(
@@ -5148,7 +5242,7 @@ def _resolve_armor_profile(
     )
     seen_candidates: set[str] = set()
     for raw_title in candidate_titles:
-        base_title, parsed_bonus = _split_magic_armor_name(raw_title)
+        base_title, parsed_bonus = _split_magic_item_name(raw_title)
         effective_bonus = bonus_ac or parsed_bonus
         for candidate in _merge_name_candidates(base_title):
             if candidate in seen_candidates:
@@ -5326,6 +5420,36 @@ def _recalculate_definition_armor_class(
     return apply_manual_stat_adjustments(stats, manual_adjustments)
 
 
+def _recalculate_definition_attacks(
+    definition: CharacterDefinition,
+    *,
+    item_catalog: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    if _character_source_type(definition) != "native_character_builder" or not list(definition.equipment_catalog or []):
+        return _normalize_attack_payloads(list(definition.attacks or []))
+    recalculated_attacks = _build_level_one_attacks(
+        equipment_catalog=list(definition.equipment_catalog or []),
+        item_catalog=item_catalog or {},
+        ability_scores=_ability_scores_from_definition(definition),
+        proficiency_bonus=int(
+            (definition.stats or {}).get("proficiency_bonus")
+            or _proficiency_bonus_for_level(_resolve_native_character_level(definition))
+        ),
+        weapon_proficiencies=[
+            str(value).strip()
+            for value in list((definition.proficiencies or {}).get("weapons") or [])
+            if str(value).strip()
+        ],
+        selected_choices={},
+        features=list(definition.features or []),
+    )
+    if not recalculated_attacks and list(definition.attacks or []):
+        return _normalize_attack_payloads(list(definition.attacks or []))
+    return _normalize_attack_payloads(
+        recalculated_attacks
+    )
+
+
 def _weapon_attack_ability_key(
     profile: dict[str, Any],
     ability_scores: dict[str, int],
@@ -5344,10 +5468,13 @@ def _is_proficient_with_weapon(
     weapon_proficiencies: list[str],
     attack_name: str,
 ) -> bool:
-    normalized_proficiencies = {normalize_lookup(value) for value in weapon_proficiencies if str(value or "").strip()}
-    normalized_name = normalize_lookup(attack_name)
+    normalized_proficiencies: set[str] = set()
+    for value in weapon_proficiencies:
+        normalized_proficiencies.update(_weapon_proficiency_name_candidates(value))
+    normalized_attack_names = _weapon_proficiency_name_candidates(attack_name)
+    normalized_attack_names.update(_weapon_proficiency_name_candidates(profile.get("title")))
     weapon_category = str(profile.get("weapon_category") or "").strip().lower()
-    if normalized_name in normalized_proficiencies:
+    if normalized_attack_names & normalized_proficiencies:
         return True
     if weapon_category == "simple" and normalize_lookup("Simple Weapons") in normalized_proficiencies:
         return True
@@ -5356,6 +5483,35 @@ def _is_proficient_with_weapon(
     if _weapon_uses_firearm_proficiency(profile, attack_name=attack_name):
         return normalize_lookup("Firearms") in normalized_proficiencies
     return False
+
+
+def _weapon_proficiency_name_candidates(value: Any) -> set[str]:
+    base_name, _parsed_bonus = _split_magic_item_name(value)
+    candidates: set[str] = set()
+    for raw_candidate in (value, base_name):
+        for candidate in _merge_name_candidates(raw_candidate):
+            if candidate:
+                candidates.add(candidate)
+            candidates.update(_singularize_lookup_variants(candidate))
+    return candidates
+
+
+def _singularize_lookup_variants(value: Any) -> set[str]:
+    normalized = normalize_lookup(value)
+    if not normalized:
+        return set()
+    variants = {normalized}
+    if normalized.endswith("ves") and len(normalized) > 3:
+        stem = normalized[:-3]
+        variants.add(f"{stem}f")
+        variants.add(f"{stem}fe")
+    if normalized.endswith("ies") and len(normalized) > 3:
+        variants.add(f"{normalized[:-3]}y")
+    if normalized.endswith("es") and len(normalized) > 2:
+        variants.add(normalized[:-2])
+    if normalized.endswith("s") and len(normalized) > 1:
+        variants.add(normalized[:-1])
+    return {candidate for candidate in variants if candidate}
 
 
 def _weapon_uses_firearm_proficiency(profile: dict[str, Any], *, attack_name: str) -> bool:
@@ -6784,6 +6940,7 @@ def _build_level_one_preview(
         equipment_groups,
         choice_sections=choice_sections,
         selected_choices=selected_choices,
+        item_catalog=item_catalog,
     )
     spellcasting = (
         _build_level_one_spellcasting(
@@ -11375,13 +11532,14 @@ def normalize_definition_to_native_model(
         current_level=current_level,
     )
     payload["features"] = normalized_features
+    payload["equipment_catalog"] = _normalize_equipment_payloads(list(definition.equipment_catalog or []))
+    normalized_definition = CharacterDefinition.from_dict(payload)
+    payload["attacks"] = _recalculate_definition_attacks(normalized_definition, item_catalog=item_catalog)
     payload["resource_templates"] = _normalize_resource_template_payloads(_merge_resource_templates(
         list(definition.resource_templates or []),
         derived_resource_templates,
     ))
-    payload["attacks"] = _normalize_attack_payloads(list(definition.attacks or []))
-    payload["equipment_catalog"] = _normalize_equipment_payloads(list(definition.equipment_catalog or []))
-    payload["stats"] = _recalculate_definition_armor_class(definition, item_catalog=item_catalog)
+    payload["stats"] = _recalculate_definition_armor_class(normalized_definition, item_catalog=item_catalog)
     spellcasting = dict(definition.spellcasting or {})
     spellcasting["spells"] = _normalize_spell_payloads(list(spellcasting.get("spells") or []))
     payload["spellcasting"] = spellcasting

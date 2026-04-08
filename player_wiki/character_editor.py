@@ -846,6 +846,7 @@ def apply_equipment_catalog_edit(
     current_definition: CharacterDefinition,
     current_import_metadata: CharacterImportMetadata,
     *,
+    item_catalog: dict[str, Any] | None = None,
     campaign_page_records: list[Any] | None = None,
     target_item_id: str | None = None,
     remove_item_id: str | None = None,
@@ -932,7 +933,7 @@ def apply_equipment_catalog_edit(
             existing_definition=current_definition,
         )
     else:
-        definition = normalize_definition_to_native_model(definition)
+        definition = normalize_definition_to_native_model(definition, item_catalog=item_catalog)
     import_metadata = build_managed_character_import_metadata(
         campaign_slug,
         current_definition.character_slug,
@@ -946,6 +947,7 @@ def apply_equipment_state_edit(
     current_definition: CharacterDefinition,
     current_import_metadata: CharacterImportMetadata,
     *,
+    item_catalog: dict[str, Any] | None = None,
     target_item_id: str,
     is_equipped: bool,
     is_attuned: bool,
@@ -980,7 +982,7 @@ def apply_equipment_state_edit(
             existing_definition=current_definition,
         )
     else:
-        definition = normalize_definition_to_native_model(definition)
+        definition = normalize_definition_to_native_model(definition, item_catalog=item_catalog)
     import_metadata = build_managed_character_import_metadata(
         campaign_slug,
         current_definition.character_slug,

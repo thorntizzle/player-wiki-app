@@ -4134,6 +4134,89 @@ def test_level_one_builder_generates_attack_rows_from_starting_weapons():
     assert attacks_by_name["Light Crossbow"]["equipment_refs"] == [equipment_ids_by_name["Light Crossbow"]]
 
 
+def test_level_one_builder_applies_magic_weapon_variant_bonus_from_item_title():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+            "starting_equipment": {
+                "defaultData": [
+                    {"_": ["+1 light crossbow|dmg"]},
+                ]
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    magic_crossbow = _systems_entry(
+        "item",
+        "dmg-item-plus-one-light-crossbow",
+        "+1 Light Crossbow",
+        source_id="DMG",
+        metadata={"weight": 5, "base_item": "Light Crossbow|PHB"},
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "optionalfeature": [],
+            "item": [magic_crossbow],
+            "spell": [],
+        },
+        class_progression=[],
+    )
+    form_values = {
+        "name": "Hale Rowan",
+        "character_slug": "hale-rowan",
+        "alignment": "Lawful Good",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+
+    attacks_by_name = {attack["name"]: attack for attack in definition.attacks}
+    equipment_by_name = {item["name"]: item for item in definition.equipment_catalog}
+
+    assert context["preview"]["attacks"] == ["+1 Light Crossbow (+4, 1d8+2 piercing)"]
+    assert attacks_by_name["+1 Light Crossbow"]["attack_bonus"] == 4
+    assert attacks_by_name["+1 Light Crossbow"]["damage"] == "1d8+2 piercing"
+    assert attacks_by_name["+1 Light Crossbow"]["systems_ref"]["slug"] == "dmg-item-plus-one-light-crossbow"
+    assert equipment_by_name["+1 Light Crossbow"]["is_equipped"] is True
+
+
 def test_level_one_builder_derives_armor_class_from_starting_armor_and_shield():
     fighter = _systems_entry(
         "class",

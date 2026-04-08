@@ -42,6 +42,7 @@ from .auth import (
 from .character_builder import (
     CAMPAIGN_ITEMS_SECTION,
     CAMPAIGN_MECHANICS_SECTION,
+    _build_item_catalog,
     _build_spell_catalog,
     _list_campaign_enabled_entries,
     CharacterBuildError,
@@ -773,6 +774,15 @@ def create_app() -> Flask:
             if not normalized or normalized in {"false", "none", "no", "not required"}:
                 return False
         return True
+
+    def build_character_item_catalog(campaign_slug: str) -> dict[str, object]:
+        return _build_item_catalog(
+            _list_campaign_enabled_entries(
+                get_systems_service(),
+                campaign_slug,
+                "item",
+            )
+        )
 
     def build_character_inventory_manager_context(
         campaign_slug: str,
@@ -6200,6 +6210,7 @@ def create_app() -> Flask:
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/add-systems")
     @campaign_scope_access_required("characters")
     def character_equipment_add_systems(campaign_slug: str, character_slug: str):
+        item_catalog = build_character_item_catalog(campaign_slug)
         def _action(record):
             entry_slug = request.form.get("entry_slug", "").strip()
             if not entry_slug:
@@ -6220,6 +6231,7 @@ def create_app() -> Flask:
                 campaign_slug,
                 record.definition,
                 record.import_metadata,
+                item_catalog=item_catalog,
                 name=entry.title,
                 quantity=request.form.get("quantity", "1"),
                 weight=format_character_systems_item_weight((entry.metadata or {}).get("weight")),
@@ -6238,6 +6250,7 @@ def create_app() -> Flask:
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/add-manual")
     @campaign_scope_access_required("characters")
     def character_equipment_add_manual(campaign_slug: str, character_slug: str):
+        item_catalog = build_character_item_catalog(campaign_slug)
         return run_character_definition_mutation(
             campaign_slug,
             character_slug,
@@ -6247,6 +6260,7 @@ def create_app() -> Flask:
                 campaign_slug,
                 record.definition,
                 record.import_metadata,
+                item_catalog=item_catalog,
                 name=request.form.get("name", ""),
                 quantity=request.form.get("quantity", "1"),
                 weight=request.form.get("weight", ""),
@@ -6259,6 +6273,7 @@ def create_app() -> Flask:
     def character_equipment_add_campaign_item(campaign_slug: str, character_slug: str):
         campaign = load_campaign_context(campaign_slug)
         campaign_page_records = list_visible_character_item_page_records(campaign_slug, campaign)
+        item_catalog = build_character_item_catalog(campaign_slug)
         def _action(record):
             selected_page_ref = request.form.get("page_ref", "")
             if not str(selected_page_ref or "").strip():
@@ -6267,6 +6282,7 @@ def create_app() -> Flask:
                 campaign_slug,
                 record.definition,
                 record.import_metadata,
+                item_catalog=item_catalog,
                 campaign_page_records=campaign_page_records,
                 name=request.form.get("name", ""),
                 quantity=request.form.get("quantity", "1"),
@@ -6287,6 +6303,7 @@ def create_app() -> Flask:
     def character_equipment_update(campaign_slug: str, character_slug: str, item_id: str):
         campaign = load_campaign_context(campaign_slug)
         all_campaign_page_records = list_visible_character_page_records(campaign_slug, campaign)
+        item_catalog = build_character_item_catalog(campaign_slug)
         def _action(record):
             manual_entry = next(
                 (
@@ -6312,6 +6329,7 @@ def create_app() -> Flask:
                 campaign_slug,
                 record.definition,
                 record.import_metadata,
+                item_catalog=item_catalog,
                 campaign_page_records=campaign_page_records,
                 target_item_id=item_id,
                 name=request.form.get("name", "") if not systems_ref else str(manual_entry.get("name") or ""),
@@ -6333,6 +6351,7 @@ def create_app() -> Flask:
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/<item_id>/state")
     @campaign_scope_access_required("characters")
     def character_equipment_state_update(campaign_slug: str, character_slug: str, item_id: str):
+        item_catalog = build_character_item_catalog(campaign_slug)
         def _action(record):
             inventory_by_ref = {
                 build_character_inventory_item_ref(item): dict(item)
@@ -6362,6 +6381,7 @@ def create_app() -> Flask:
                 campaign_slug,
                 record.definition,
                 record.import_metadata,
+                item_catalog=item_catalog,
                 target_item_id=item_id,
                 is_equipped=is_equipped,
                 is_attuned=is_attuned,
@@ -6389,6 +6409,7 @@ def create_app() -> Flask:
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/<item_id>/remove")
     @campaign_scope_access_required("characters")
     def character_equipment_remove(campaign_slug: str, character_slug: str, item_id: str):
+        item_catalog = build_character_item_catalog(campaign_slug)
         return run_character_definition_mutation(
             campaign_slug,
             character_slug,
@@ -6398,6 +6419,7 @@ def create_app() -> Flask:
                 campaign_slug,
                 record.definition,
                 record.import_metadata,
+                item_catalog=item_catalog,
                 remove_item_id=item_id,
             ),
         )

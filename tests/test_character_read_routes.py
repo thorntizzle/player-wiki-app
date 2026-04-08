@@ -1144,6 +1144,107 @@ def test_equipment_subpage_can_update_equipped_and_attuned_state(app, client, si
         assert record.state_record.state["attunement"]["attuned_item_refs"] == ["backpack-5"]
 
 
+def test_native_equipment_state_update_recalculates_attunement_gated_magic_weapon_attacks(
+    app, client, sign_in, users
+):
+    entry = _seed_systems_item_entry(
+        app,
+        slug="phb-item-plus-one-light-crossbow",
+        title="+1 Light Crossbow",
+        metadata={"weight": 5, "base_item": "Light Crossbow|PHB", "attunement": "requires attunement"},
+    )
+
+    def _mutate_definition(payload: dict) -> None:
+        source = dict(payload.get("source") or {})
+        source["source_type"] = "native_character_builder"
+        source["source_path"] = "builder://arden-march"
+        source["imported_from"] = "In-app Native Level 5 Builder"
+        payload["source"] = source
+
+        equipment_catalog = list(payload.get("equipment_catalog") or [])
+        equipment_catalog[0] = {
+            **dict(equipment_catalog[0]),
+            "name": "+1 Light Crossbow",
+            "weight": "5 lb.",
+            "systems_ref": _systems_ref(entry),
+            "is_equipped": False,
+            "is_attuned": False,
+        }
+        payload["equipment_catalog"] = equipment_catalog
+
+    def _mutate_state(payload: dict) -> None:
+        inventory = list(payload.get("inventory") or [])
+        inventory[0] = {
+            **dict(inventory[0]),
+            "name": "+1 Light Crossbow",
+            "weight": "5 lb.",
+            "is_equipped": False,
+            "is_attuned": False,
+        }
+        payload["inventory"] = inventory
+        payload["attunement"] = {"max_attuned_items": 3, "attuned_item_refs": []}
+
+    _write_character_definition(app, "arden-march", _mutate_definition)
+    _write_character_state(app, "arden-march", _mutate_state)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    equip_only_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/equipment/light-crossbow-1/state",
+        data={
+            "expected_revision": _character_state_revision(app, "arden-march"),
+            "mode": "read",
+            "page": "equipment",
+            "is_equipped": "1",
+        },
+        follow_redirects=False,
+    )
+
+    assert equip_only_response.status_code == 302
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert record is not None
+        attacks_by_name = {
+            attack["name"]: attack
+            for attack in list(record.definition.attacks or [])
+        }
+        assert attacks_by_name["+1 Light Crossbow"]["attack_bonus"] == 5
+        assert attacks_by_name["+1 Light Crossbow"]["damage"] == "1d8+2 piercing"
+
+    fully_active_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/equipment/light-crossbow-1/state",
+        data={
+            "expected_revision": _character_state_revision(app, "arden-march"),
+            "mode": "read",
+            "page": "equipment",
+            "is_equipped": "1",
+            "is_attuned": "1",
+        },
+        follow_redirects=False,
+    )
+
+    assert fully_active_response.status_code == 302
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert record is not None
+        attacks_by_name = {
+            attack["name"]: attack
+            for attack in list(record.definition.attacks or [])
+        }
+        definition_item = next(
+            item
+            for item in list(record.definition.equipment_catalog or [])
+            if str(item.get("id") or "") == "light-crossbow-1"
+        )
+        assert attacks_by_name["+1 Light Crossbow"]["attack_bonus"] == 6
+        assert attacks_by_name["+1 Light Crossbow"]["damage"] == "1d8+3 piercing"
+        assert definition_item["is_equipped"] is True
+        assert definition_item["is_attuned"] is True
+        assert record.state_record.state["attunement"]["attuned_item_refs"] == ["light-crossbow-1"]
+
+
 def test_imported_character_equipment_controls_can_search_and_add_systems_items_without_resetting_other_quantities(
     app, client, sign_in, users
 ):
