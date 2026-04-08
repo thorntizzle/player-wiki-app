@@ -46,6 +46,29 @@ def build_inventory_state(item: dict[str, Any], *, quantity: int | None = None) 
     }
 
 
+def _inventory_item_ref(item: dict[str, Any]) -> str:
+    return str(item.get("catalog_ref") or item.get("id") or "").strip()
+
+
+def _normalize_attunement_state(
+    attunement: dict[str, Any] | None,
+    inventory: list[dict[str, Any]],
+) -> dict[str, Any]:
+    max_attuned_items = int((attunement or {}).get("max_attuned_items") or 3)
+    attuned_item_refs: list[str] = []
+    seen_refs: set[str] = set()
+    for item in list(inventory or []):
+        item_ref = _inventory_item_ref(item)
+        if not item_ref or not bool(item.get("is_attuned", False)) or item_ref in seen_refs:
+            continue
+        seen_refs.add(item_ref)
+        attuned_item_refs.append(item_ref)
+    return {
+        "max_attuned_items": max(0, max_attuned_items),
+        "attuned_item_refs": attuned_item_refs,
+    }
+
+
 def build_initial_state(definition: CharacterDefinition) -> dict[str, Any]:
     max_hp = int(definition.stats.get("max_hp") or 0)
     spell_slots = [
@@ -80,7 +103,7 @@ def build_initial_state(definition: CharacterDefinition) -> dict[str, Any]:
         "inventory": inventory,
         "currency": currency,
         "spell_slots": spell_slots,
-        "attunement": {"max_attuned_items": 3, "attuned_item_refs": []},
+        "attunement": _normalize_attunement_state({"max_attuned_items": 3}, inventory),
         "notes": {
             "player_notes_markdown": "",
             "physical_description_markdown": "",
@@ -96,6 +119,7 @@ def merge_state_with_definition(
     *,
     hp_delta: int = 0,
     inventory_quantity_overrides: dict[str, int] | None = None,
+    inventory_state_overrides: dict[str, dict[str, Any]] | None = None,
     removed_resource_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     payload = deepcopy(state)
@@ -178,11 +202,16 @@ def merge_state_with_definition(
         for key, value in dict(inventory_quantity_overrides or {}).items()
         if str(key).strip()
     }
+    state_overrides = {
+        str(key).strip(): dict(value)
+        for key, value in dict(inventory_state_overrides or {}).items()
+        if str(key).strip()
+    }
     existing_inventory = list(payload.get("inventory") or [])
     existing_inventory_by_ref = {
-        str(item.get("catalog_ref") or item.get("id") or "").strip(): dict(item)
+        _inventory_item_ref(item): dict(item)
         for item in existing_inventory
-        if str(item.get("catalog_ref") or item.get("id") or "").strip()
+        if _inventory_item_ref(item)
     }
     tracked_inventory_refs: set[str] = set()
     merged_inventory: list[dict[str, Any]] = []
@@ -201,16 +230,23 @@ def merge_state_with_definition(
             merged_item["is_attuned"] = bool(existing_item.get("is_attuned", merged_item.get("is_attuned", False)))
             merged_item["charges_current"] = existing_item.get("charges_current", merged_item.get("charges_current"))
             merged_item["charges_max"] = existing_item.get("charges_max", merged_item.get("charges_max"))
+        item_state_override = state_overrides.get(catalog_ref)
+        if item_state_override:
+            if "is_equipped" in item_state_override:
+                merged_item["is_equipped"] = bool(item_state_override.get("is_equipped"))
+            if "is_attuned" in item_state_override:
+                merged_item["is_attuned"] = bool(item_state_override.get("is_attuned"))
         merged_inventory.append(merged_item)
 
     for item in existing_inventory:
-        catalog_ref = str(item.get("catalog_ref") or item.get("id") or "").strip()
+        catalog_ref = _inventory_item_ref(item)
         if catalog_ref and catalog_ref in tracked_inventory_refs:
             continue
         if catalog_ref:
             continue
         merged_inventory.append(deepcopy(item))
     payload["inventory"] = merged_inventory
+    payload["attunement"] = _normalize_attunement_state(payload.get("attunement"), merged_inventory)
 
     vitals = dict(payload.get("vitals") or {})
     current_hp = int(vitals.get("current_hp") or 0)
@@ -326,10 +362,7 @@ def validate_state(definition: CharacterDefinition, state: dict[str, Any]) -> di
             raise CharacterStateValidationError(f"currency '{key}' cannot be negative")
     payload["currency"] = normalized_currency
 
-    payload["attunement"] = {
-        "max_attuned_items": int((payload.get("attunement") or {}).get("max_attuned_items") or 3),
-        "attuned_item_refs": list((payload.get("attunement") or {}).get("attuned_item_refs") or []),
-    }
+    payload["attunement"] = _normalize_attunement_state(payload.get("attunement"), normalized_inventory)
     payload["notes"] = {
         "player_notes_markdown": str((payload.get("notes") or {}).get("player_notes_markdown") or ""),
         "physical_description_markdown": str(

@@ -84,7 +84,13 @@ def _character_state_revision(app, character_slug: str) -> int:
         return int(record.state_record.revision)
 
 
-def _seed_systems_item_entry(app, *, slug: str = "phb-item-rope", title: str = "Rope"):
+def _seed_systems_item_entry(
+    app,
+    *,
+    slug: str = "phb-item-rope",
+    title: str = "Rope",
+    metadata: dict[str, object] | None = None,
+):
     with app.app_context():
         systems_store = app.extensions["systems_store"]
         systems_store.upsert_library("DND-5E", title="DND 5E", system_code="DND-5E")
@@ -111,7 +117,10 @@ def _seed_systems_item_entry(app, *, slug: str = "phb-item-rope", title: str = "
                     "search_text": f"{title.lower()} rope gear",
                     "player_safe_default": True,
                     "dm_heavy": False,
-                    "metadata": {"weight": 10},
+                    "metadata": {
+                        "weight": 10,
+                        **dict(metadata or {}),
+                    },
                     "body": {},
                     "rendered_html": f"<p>{title}.</p>",
                 }
@@ -452,17 +461,19 @@ def test_character_sheet_subpages_show_requested_sections(app, client, sign_in, 
     assert "Spellcasting" in html
     assert "Features" in html
     assert "Equipment" in html
+    assert "Inventory" in html
     assert "Personal" in html
     assert "Notes" in html
     assert "?page=quick" in html
     assert "?page=spellcasting" in html
     assert "?page=features" in html
     assert "?page=equipment" in html
+    assert "?page=inventory" in html
     assert "?page=personal" in html
     assert "?page=notes" in html
     assert "Features and traits" in html
     assert "At a glance" not in html
-    assert "Equipment and currency" not in html
+    assert "Inventory and currency" not in html
     assert "Keep an eye on the harbor." not in html
     assert "mode=session&amp;page=features" in html
 
@@ -891,7 +902,7 @@ def test_character_sheet_invalid_subpage_defaults_to_quick_reference(client, sig
     assert "At a glance" in html
     assert "Abilities and skills" in html
     assert "Features and traits" not in html
-    assert "Equipment and currency" not in html
+    assert "Inventory and currency" not in html
     assert "No notes yet." not in html
 
 
@@ -1001,7 +1012,7 @@ def test_equipment_manager_is_visible_to_editable_users_and_hidden_from_read_onl
     set_campaign_visibility("linden-pass", characters="players")
 
     sign_in(users["owner"]["email"], users["owner"]["password"])
-    owner_response = client.get("/campaigns/linden-pass/characters/arden-march?page=equipment")
+    owner_response = client.get("/campaigns/linden-pass/characters/arden-march?page=inventory")
     owner_html = owner_response.get_data(as_text=True)
 
     assert owner_response.status_code == 200
@@ -1012,7 +1023,7 @@ def test_equipment_manager_is_visible_to_editable_users_and_hidden_from_read_onl
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["party"]["email"], users["party"]["password"])
-    read_only_response = client.get("/campaigns/linden-pass/characters/arden-march?page=equipment")
+    read_only_response = client.get("/campaigns/linden-pass/characters/arden-march?page=inventory")
     read_only_html = read_only_response.get_data(as_text=True)
 
     assert read_only_response.status_code == 200
@@ -1028,13 +1039,109 @@ def test_equipment_manager_campaign_item_picker_only_lists_item_pages(
     set_campaign_visibility("linden-pass", characters="players")
     sign_in(users["owner"]["email"], users["owner"]["password"])
 
-    response = client.get("/campaigns/linden-pass/characters/arden-march?page=equipment")
+    response = client.get("/campaigns/linden-pass/characters/arden-march?page=inventory")
     html = response.get_data(as_text=True)
 
     assert response.status_code == 200
     assert "Stormglass Compass - Items" in html
     assert "Operations Brief - Notes" not in html
     assert "Captain Lyra Vale - NPCs" not in html
+
+
+def test_equipment_subpage_is_separate_from_inventory_manager(
+    client, sign_in, users, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get("/campaigns/linden-pass/characters/arden-march?page=equipment")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Attuned items" in html
+    assert "Equipped items" in html
+    assert "Save equipment state" in html
+    assert "Add Systems item" not in html
+    assert "Supplemental equipment" not in html
+    assert "Inventory and currency" not in html
+
+
+def test_equipment_subpage_can_update_equipped_and_attuned_state(app, client, sign_in, users):
+    entry = _seed_systems_item_entry(
+        app,
+        slug="phb-item-stormglass-compass",
+        title="Stormglass Compass",
+        metadata={"weight": 1, "attunement": "requires attunement"},
+    )
+
+    def _mutate_definition(payload: dict) -> None:
+        equipment_catalog = list(payload.get("equipment_catalog") or [])
+        equipment_catalog[4] = {
+            **dict(equipment_catalog[4]),
+            "name": "Stormglass Compass",
+            "weight": "1 lb.",
+            "systems_ref": _systems_ref(entry),
+            "is_equipped": False,
+            "is_attuned": False,
+        }
+        payload["equipment_catalog"] = equipment_catalog
+
+    def _mutate_state(payload: dict) -> None:
+        inventory = list(payload.get("inventory") or [])
+        inventory[4] = {
+            **dict(inventory[4]),
+            "name": "Stormglass Compass",
+            "weight": "1 lb.",
+            "is_equipped": False,
+            "is_attuned": False,
+        }
+        payload["inventory"] = inventory
+        payload["attunement"] = {"max_attuned_items": 3, "attuned_item_refs": []}
+
+    _write_character_definition(app, "arden-march", _mutate_definition)
+    _write_character_state(app, "arden-march", _mutate_state)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    page_response = client.get("/campaigns/linden-pass/characters/arden-march?page=equipment")
+    assert page_response.status_code == 200
+    assert "Requires attunement" in page_response.get_data(as_text=True)
+
+    update_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/equipment/backpack-5/state",
+        data={
+            "expected_revision": _character_state_revision(app, "arden-march"),
+            "mode": "read",
+            "page": "equipment",
+            "is_equipped": "1",
+            "is_attuned": "1",
+        },
+        follow_redirects=False,
+    )
+
+    assert update_response.status_code == 302
+    assert update_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/arden-march?page=equipment#character-equipment-state"
+    )
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert record is not None
+        definition_item = next(
+            item
+            for item in list(record.definition.equipment_catalog or [])
+            if str(item.get("id") or "") == "backpack-5"
+        )
+        state_item = next(
+            item
+            for item in list(record.state_record.state.get("inventory") or [])
+            if str(item.get("catalog_ref") or item.get("id") or "") == "backpack-5"
+        )
+        assert definition_item["is_equipped"] is True
+        assert definition_item["is_attuned"] is True
+        assert state_item["is_equipped"] is True
+        assert state_item["is_attuned"] is True
+        assert record.state_record.state["attunement"]["attuned_item_refs"] == ["backpack-5"]
 
 
 def test_imported_character_equipment_controls_can_search_and_add_systems_items_without_resetting_other_quantities(
@@ -1080,7 +1187,7 @@ def test_imported_character_equipment_controls_can_search_and_add_systems_items_
         data={
             "expected_revision": revision,
             "mode": "read",
-            "page": "equipment",
+            "page": "inventory",
             "entry_slug": entry.slug,
             "quantity": "2",
             "notes": "Emergency climbing bundle.",
@@ -1090,7 +1197,7 @@ def test_imported_character_equipment_controls_can_search_and_add_systems_items_
 
     assert add_response.status_code == 302
     assert add_response.headers["Location"].endswith(
-        "/campaigns/linden-pass/characters/selene-brook?page=equipment#character-equipment-manager"
+        "/campaigns/linden-pass/characters/selene-brook?page=inventory#character-inventory-manager"
     )
 
     with app.app_context():
@@ -1147,7 +1254,7 @@ def test_native_character_equipment_controls_can_add_campaign_items_from_item_pa
         data={
             "expected_revision": revision,
             "mode": "read",
-            "page": "equipment",
+            "page": "inventory",
             "page_ref": "items/stormglass-compass",
             "quantity": "1",
             "weight": "",
@@ -1176,7 +1283,7 @@ def test_native_character_equipment_controls_can_add_campaign_items_from_item_pa
         data={
             "expected_revision": revision,
             "mode": "read",
-            "page": "equipment",
+            "page": "inventory",
             "name": "",
             "quantity": "2",
             "weight": "1 lb.",
@@ -1228,7 +1335,7 @@ def test_native_character_equipment_controls_can_add_update_and_remove_manual_it
         data={
             "expected_revision": revision,
             "mode": "read",
-            "page": "equipment",
+            "page": "inventory",
             "name": "Harbor Pass",
             "quantity": "1",
             "weight": "",
@@ -1258,7 +1365,7 @@ def test_native_character_equipment_controls_can_add_update_and_remove_manual_it
         data={
             "expected_revision": revision,
             "mode": "read",
-            "page": "equipment",
+            "page": "inventory",
             "name": "Harbor Pass",
             "quantity": "3",
             "weight": "",
@@ -1286,7 +1393,7 @@ def test_native_character_equipment_controls_can_add_update_and_remove_manual_it
         data={
             "expected_revision": revision,
             "mode": "read",
-            "page": "equipment",
+            "page": "inventory",
         },
         follow_redirects=False,
     )
@@ -1504,6 +1611,8 @@ def test_session_mode_uses_same_subpage_ui_as_read_mode(client, sign_in, users, 
     assert "Active session" not in html
     assert "?mode=session&amp;page=quick" in html
     assert "?mode=session&amp;page=spellcasting" in html
+    assert "?mode=session&amp;page=equipment" in html
+    assert "?mode=session&amp;page=inventory" in html
     assert "?mode=session&amp;page=personal" in html
     assert "?mode=session&amp;page=notes" in html
     assert "Save personal details" in html
@@ -1893,7 +2002,7 @@ def test_session_currency_editor_renders_plain_fields_without_adjuster_buttons(
     set_campaign_visibility("linden-pass", characters="players")
     sign_in(users["owner"]["email"], users["owner"]["password"])
 
-    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=equipment")
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=inventory")
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)

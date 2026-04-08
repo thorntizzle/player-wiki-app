@@ -58,6 +58,7 @@ from .character_editor import (
     CharacterEditValidationError,
     apply_character_spell_management_edit,
     apply_equipment_catalog_edit,
+    apply_equipment_state_edit,
     build_character_spell_management_context,
     apply_native_character_edits,
     build_managed_character_import_metadata,
@@ -146,6 +147,7 @@ CHARACTER_READ_SUBPAGE_LABELS = {
     "spellcasting": "Spellcasting",
     "features": "Features",
     "equipment": "Equipment",
+    "inventory": "Inventory",
     "personal": "Personal",
     "notes": "Notes",
 }
@@ -251,6 +253,7 @@ def get_character_read_subpage_labels(
         {
             "features": CHARACTER_READ_SUBPAGE_LABELS["features"],
             "equipment": CHARACTER_READ_SUBPAGE_LABELS["equipment"],
+            "inventory": CHARACTER_READ_SUBPAGE_LABELS["inventory"],
             "personal": CHARACTER_READ_SUBPAGE_LABELS["personal"],
             "notes": CHARACTER_READ_SUBPAGE_LABELS["notes"],
         }
@@ -758,7 +761,20 @@ def create_app() -> Flask:
             "source_id": str(entry.source_id or "").strip(),
         }
 
-    def build_character_equipment_manager_context(
+    def build_character_inventory_item_ref(item: object) -> str:
+        payload = dict(item or {}) if isinstance(item, dict) else {}
+        return str(payload.get("catalog_ref") or payload.get("id") or "").strip()
+
+    def systems_item_requires_attunement(value: object) -> bool:
+        if value in (None, "", False, [], {}):
+            return False
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if not normalized or normalized in {"false", "none", "no", "not required"}:
+                return False
+        return True
+
+    def build_character_inventory_manager_context(
         campaign_slug: str,
         campaign,
         record,
@@ -770,9 +786,9 @@ def create_app() -> Flask:
             section=CHARACTER_ITEMS_SECTION,
         )
         inventory_by_ref = {
-            str(item.get("catalog_ref") or item.get("id") or "").strip(): dict(item)
+            build_character_inventory_item_ref(item): dict(item)
             for item in list((record.state_record.state or {}).get("inventory") or [])
-            if str(item.get("catalog_ref") or item.get("id") or "").strip()
+            if build_character_inventory_item_ref(item)
         }
         supplemental_items: list[dict[str, object]] = []
         for item in list(record.definition.equipment_catalog or []):
@@ -827,6 +843,82 @@ def create_app() -> Flask:
                 supplemental_items,
                 key=lambda item: (str(item["name"]).lower(), str(item["id"]).lower()),
             ),
+        }
+
+    def build_character_equipment_state_context(
+        campaign_slug: str,
+        campaign,
+        record,
+    ) -> dict[str, object]:
+        systems_service = get_systems_service()
+        definition_item_lookup = {
+            str(item.get("id") or "").strip(): dict(item)
+            for item in list(record.definition.equipment_catalog or [])
+            if str(item.get("id") or "").strip()
+        }
+        equipment_items: list[dict[str, object]] = []
+        for inventory_item in list((record.state_record.state or {}).get("inventory") or []):
+            item_ref = build_character_inventory_item_ref(inventory_item)
+            if not item_ref:
+                continue
+            definition_item = definition_item_lookup.get(item_ref, {})
+            systems_ref = dict(definition_item.get("systems_ref") or {})
+            page_ref = normalize_character_page_ref(definition_item.get("page_ref"))
+            systems_entry = None
+            entry_slug = str(systems_ref.get("slug") or "").strip()
+            if entry_slug and str(systems_ref.get("entry_type") or "").strip() == "item":
+                systems_entry = systems_service.get_entry_by_slug_for_campaign(campaign_slug, entry_slug)
+            requires_attunement = systems_item_requires_attunement(
+                ((systems_entry.metadata or {}).get("attunement") if systems_entry is not None else None)
+            )
+            equipment_items.append(
+                {
+                    "id": item_ref,
+                    "name": str(inventory_item.get("name") or definition_item.get("name") or "Item").strip(),
+                    "quantity": int(inventory_item.get("quantity") or definition_item.get("default_quantity") or 0),
+                    "weight": str(inventory_item.get("weight") or definition_item.get("weight") or "").strip(),
+                    "notes": str(inventory_item.get("notes") or definition_item.get("notes") or "").strip(),
+                    "tags": [
+                        str(tag).strip()
+                        for tag in list(inventory_item.get("tags") or definition_item.get("tags") or [])
+                        if str(tag).strip()
+                    ],
+                    "href": build_character_entry_href(
+                        campaign.slug,
+                        systems_ref=systems_ref,
+                        page_ref=definition_item.get("page_ref"),
+                    ),
+                    "is_equipped": bool(inventory_item.get("is_equipped", False)),
+                    "is_attuned": bool(inventory_item.get("is_attuned", False)),
+                    "requires_attunement": requires_attunement,
+                    "attunement_hint": (
+                        "Requires attunement"
+                        if requires_attunement
+                        else "Use attunement only when the item's rules call for it."
+                    ),
+                    "source_label": (
+                        f"Systems item ({systems_ref.get('source_id') or 'Unknown source'})"
+                        if systems_ref
+                        else "Campaign item"
+                        if page_ref
+                        else "Custom item"
+                        if str(definition_item.get("source_kind") or "").strip() == "manual_edit"
+                        else "Sheet item"
+                    ),
+                }
+            )
+        max_attuned_items = int(
+            ((record.state_record.state or {}).get("attunement") or {}).get("max_attuned_items") or 3
+        )
+        attuned_count = sum(1 for item in equipment_items if bool(item.get("is_attuned")))
+        equipped_count = sum(1 for item in equipment_items if bool(item.get("is_equipped")))
+        return {
+            "rows": equipment_items,
+            "attuned_count": attuned_count,
+            "equipped_count": equipped_count,
+            "max_attuned_items": max_attuned_items,
+            "at_attunement_limit": attuned_count >= max_attuned_items if max_attuned_items > 0 else True,
+            "over_attunement_limit": attuned_count > max_attuned_items,
         }
 
     def resolve_character_spellcasting_class_entry(campaign_slug: str, definition):
@@ -1679,8 +1771,8 @@ def create_app() -> Flask:
             if include_controls_subpage
             else None
         )
-        equipment_manager = (
-            build_character_equipment_manager_context(
+        inventory_manager = (
+            build_character_inventory_manager_context(
                 campaign_slug,
                 campaign,
                 record,
@@ -1688,6 +1780,11 @@ def create_app() -> Flask:
             )
             if can_use_session_mode
             else None
+        )
+        equipment_state_manager = build_character_equipment_state_context(
+            campaign_slug,
+            campaign,
+            record,
         )
         spell_manager = build_character_spell_manager_context(campaign_slug, campaign, record)
         character_subpages = [
@@ -1721,7 +1818,8 @@ def create_app() -> Flask:
                 is_session_mode=is_session_mode,
                 rest_preview=rest_preview,
                 character_controls=character_controls,
-                equipment_manager=equipment_manager,
+                inventory_manager=inventory_manager,
+                equipment_state_manager=equipment_state_manager,
                 spell_manager=spell_manager,
             ),
             status_code,
@@ -1745,11 +1843,17 @@ def create_app() -> Flask:
 
         try:
             expected_revision = parse_expected_revision()
-            definition, import_metadata, inventory_quantity_overrides = action(record)
+            result = action(record)
+            inventory_state_overrides = None
+            if isinstance(result, tuple) and len(result) == 4:
+                definition, import_metadata, inventory_quantity_overrides, inventory_state_overrides = result
+            else:
+                definition, import_metadata, inventory_quantity_overrides = result
             merged_state = merge_state_with_definition(
                 definition,
                 record.state_record.state,
                 inventory_quantity_overrides=inventory_quantity_overrides,
+                inventory_state_overrides=inventory_state_overrides,
             )
             character_state_store.replace_state(
                 definition,
@@ -6126,7 +6230,7 @@ def create_app() -> Flask:
         return run_character_definition_mutation(
             campaign_slug,
             character_slug,
-            anchor="character-equipment-manager",
+            anchor="character-inventory-manager",
             success_message="Systems item added to supplemental equipment.",
             action=_action,
         )
@@ -6137,7 +6241,7 @@ def create_app() -> Flask:
         return run_character_definition_mutation(
             campaign_slug,
             character_slug,
-            anchor="character-equipment-manager",
+            anchor="character-inventory-manager",
             success_message="Custom item added to supplemental equipment.",
             action=lambda record: apply_equipment_catalog_edit(
                 campaign_slug,
@@ -6173,7 +6277,7 @@ def create_app() -> Flask:
         return run_character_definition_mutation(
             campaign_slug,
             character_slug,
-            anchor="character-equipment-manager",
+            anchor="character-inventory-manager",
             success_message="Campaign item added to supplemental equipment.",
             action=_action,
         )
@@ -6221,8 +6325,64 @@ def create_app() -> Flask:
         return run_character_definition_mutation(
             campaign_slug,
             character_slug,
-            anchor="character-equipment-manager",
+            anchor="character-inventory-manager",
             success_message="Supplemental equipment updated.",
+            action=_action,
+        )
+
+    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/<item_id>/state")
+    @campaign_scope_access_required("characters")
+    def character_equipment_state_update(campaign_slug: str, character_slug: str, item_id: str):
+        def _action(record):
+            inventory_by_ref = {
+                build_character_inventory_item_ref(item): dict(item)
+                for item in list((record.state_record.state or {}).get("inventory") or [])
+                if build_character_inventory_item_ref(item)
+            }
+            if item_id not in inventory_by_ref:
+                raise CharacterEditValidationError("Choose a valid equipment entry to update.")
+
+            is_equipped = bool(request.form.get("is_equipped"))
+            is_attuned = bool(request.form.get("is_attuned"))
+            attunement_payload = dict((record.state_record.state or {}).get("attunement") or {})
+            max_attuned_items = int(attunement_payload.get("max_attuned_items") or 3)
+            currently_attuned_refs = {
+                item_ref
+                for item_ref, item in inventory_by_ref.items()
+                if item_ref != item_id and bool(item.get("is_attuned", False))
+            }
+            next_attuned_count = len(currently_attuned_refs) + (1 if is_attuned else 0)
+            if max_attuned_items >= 0 and next_attuned_count > max_attuned_items:
+                raise CharacterEditValidationError(
+                    f"This character already has {max_attuned_items} attuned item"
+                    f"{'' if max_attuned_items == 1 else 's'}. Clear one first."
+                )
+
+            definition, import_metadata = apply_equipment_state_edit(
+                campaign_slug,
+                record.definition,
+                record.import_metadata,
+                target_item_id=item_id,
+                is_equipped=is_equipped,
+                is_attuned=is_attuned,
+            )
+            return (
+                definition,
+                import_metadata,
+                {},
+                {
+                    item_id: {
+                        "is_equipped": is_equipped,
+                        "is_attuned": is_attuned,
+                    }
+                },
+            )
+
+        return run_character_definition_mutation(
+            campaign_slug,
+            character_slug,
+            anchor="character-equipment-state",
+            success_message="Equipment state updated.",
             action=_action,
         )
 
@@ -6232,7 +6392,7 @@ def create_app() -> Flask:
         return run_character_definition_mutation(
             campaign_slug,
             character_slug,
-            anchor="character-equipment-manager",
+            anchor="character-inventory-manager",
             success_message="Supplemental equipment removed.",
             action=lambda record: apply_equipment_catalog_edit(
                 campaign_slug,

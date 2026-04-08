@@ -941,6 +941,54 @@ def apply_equipment_catalog_edit(
     return definition, import_metadata, quantity_overrides
 
 
+def apply_equipment_state_edit(
+    campaign_slug: str,
+    current_definition: CharacterDefinition,
+    current_import_metadata: CharacterImportMetadata,
+    *,
+    target_item_id: str,
+    is_equipped: bool,
+    is_attuned: bool,
+) -> tuple[CharacterDefinition, CharacterImportMetadata]:
+    normalized_target_item_id = str(target_item_id or "").strip()
+    if not normalized_target_item_id:
+        raise CharacterEditValidationError("Choose a valid equipment entry to update.")
+
+    found_target = False
+    next_equipment_catalog: list[dict[str, Any]] = []
+    for item in list(current_definition.equipment_catalog or []):
+        item_payload = dict(item or {})
+        if str(item_payload.get("id") or "").strip() == normalized_target_item_id:
+            item_payload["is_equipped"] = bool(is_equipped)
+            item_payload["is_attuned"] = bool(is_attuned)
+            found_target = True
+        next_equipment_catalog.append(item_payload)
+
+    if not found_target:
+        raise CharacterEditValidationError("Choose a valid equipment entry to update.")
+
+    payload = deepcopy(current_definition.to_dict())
+    payload["campaign_slug"] = campaign_slug
+    payload["character_slug"] = current_definition.character_slug
+    payload["equipment_catalog"] = next_equipment_catalog
+
+    definition = CharacterDefinition.from_dict(payload)
+    source_type = str((current_definition.source or {}).get("source_type") or "").strip()
+    if source_type and source_type != "native_character_builder":
+        definition = converge_imported_definition(
+            definition,
+            existing_definition=current_definition,
+        )
+    else:
+        definition = normalize_definition_to_native_model(definition)
+    import_metadata = build_managed_character_import_metadata(
+        campaign_slug,
+        current_definition.character_slug,
+        current_import_metadata,
+    )
+    return definition, import_metadata
+
+
 def build_native_character_edit_context(
     definition: CharacterDefinition,
     *,

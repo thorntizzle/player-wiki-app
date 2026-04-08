@@ -103,6 +103,7 @@
       {% set show_spellcasting_sections = character_subpage == 'spellcasting' %}
       {% set show_feature_sections = character_subpage == 'features' %}
       {% set show_equipment_sections = character_subpage == 'equipment' %}
+      {% set show_inventory_sections = character_subpage == 'inventory' %}
       {% set show_personal_sections = character_subpage == 'personal' %}
       {% set show_note_sections = character_subpage == 'notes' %}
       {% set show_control_sections = character_subpage == 'controls' %}
@@ -272,10 +273,96 @@
         {% include "_character_spellcasting_section.html" %}
       {% endif %}
 
-      {% if show_equipment_sections and not is_session_mode %}
+      {% if show_equipment_sections %}
         <section class="read-section">
           <div class="section-heading">
-            <h2>Equipment and currency</h2>
+            <h2>Equipment</h2>
+          </div>
+          <div class="detail-grid">
+            <article class="detail-card">
+              <h3>Attuned items</h3>
+              <p><strong>{{ equipment_state_manager.attuned_count }} / {{ equipment_state_manager.max_attuned_items }}</strong></p>
+              <p class="meta">Attunement is separate from equipped state and usually has room for up to {{ equipment_state_manager.max_attuned_items }} items.</p>
+              {% if equipment_state_manager.over_attunement_limit %}
+                <p class="meta">This sheet is currently over the normal attunement limit.</p>
+              {% endif %}
+            </article>
+            <article class="detail-card">
+              <h3>Equipped items</h3>
+              <p><strong>{{ equipment_state_manager.equipped_count }}</strong></p>
+              <p class="meta">Use equipped for items that are worn, wielded, or otherwise actively granting their normal benefits.</p>
+            </article>
+          </div>
+
+          {% if equipment_state_manager.rows %}
+            <div class="character-edit-stack" id="character-equipment-state">
+              {% for item in equipment_state_manager.rows %}
+                <article class="detail-card character-edit-row">
+                  <div class="section-heading">
+                    <h3>
+                      {% if item.href %}
+                        <a href="{{ item.href }}">{{ item.name }}</a>
+                      {% else %}
+                        {{ item.name }}
+                      {% endif %}
+                    </h3>
+                    <span class="meta">{{ item.source_label }}</span>
+                  </div>
+                  <p class="meta">
+                    x{{ item.quantity }}
+                    {% if item.weight %} | {{ item.weight }}{% endif %}
+                    {% if item.requires_attunement %} | Requires attunement{% endif %}
+                  </p>
+                  <p class="meta">
+                    {% if item.is_equipped %}Equipped{% else %}Not equipped{% endif %}
+                    {% if item.is_attuned %} | Attuned{% else %} | Not attuned{% endif %}
+                  </p>
+                  {% if item.tags %}
+                    <p class="meta">{{ item.tags | join(", ") }}</p>
+                  {% endif %}
+                  {% if item.notes %}
+                    <p>{{ item.notes }}</p>
+                  {% endif %}
+                  {% if can_use_session_mode and not is_session_mode %}
+                    <form
+                      class="stack-form"
+                      method="post"
+                      action="{{ url_for('character_equipment_state_update', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
+                    >
+                      <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                      <input type="hidden" name="mode" value="read">
+                      <input type="hidden" name="page" value="{{ character_subpage }}">
+                      <div class="detail-grid">
+                        <label class="checkbox-label">
+                          <input type="checkbox" name="is_equipped" value="1" {% if item.is_equipped %}checked{% endif %}>
+                          Equipped
+                        </label>
+                        <label class="checkbox-label">
+                          <input type="checkbox" name="is_attuned" value="1" {% if item.is_attuned %}checked{% endif %}>
+                          Attuned
+                        </label>
+                      </div>
+                      <p class="meta">{{ item.attunement_hint }}</p>
+                      <div class="hero-actions">
+                        <button type="submit">Save equipment state</button>
+                      </div>
+                    </form>
+                  {% endif %}
+                </article>
+              {% endfor %}
+            </div>
+          {% else %}
+            <article class="detail-card">
+              <p class="meta">No equipment is listed on this sheet yet.</p>
+            </article>
+          {% endif %}
+        </section>
+      {% endif %}
+
+      {% if show_inventory_sections and not is_session_mode %}
+        <section class="read-section">
+          <div class="section-heading">
+            <h2>Inventory and currency</h2>
           </div>
           {% if character.inventory %}
             <div class="inventory-list">
@@ -292,9 +379,7 @@
                     <strong>x{{ item.quantity }}</strong>
                   </div>
                   <p class="meta">
-                    {% if item.weight %}{{ item.weight }}{% endif %}
-                    {% if item.is_equipped %}{% if item.weight %} | {% endif %}Equipped{% endif %}
-                    {% if item.is_attuned %}{% if item.weight or item.is_equipped %} | {% endif %}Attuned{% endif %}
+                    {% if item.weight %}{{ item.weight }}{% else %}Tracked item{% endif %}
                   </p>
                   {% if item.tags %}
                     <p class="meta">{{ item.tags | join(", ") }}</p>
@@ -326,14 +411,14 @@
               </article>
             {% endif %}
           </div>
-          {% if not character.inventory and (not equipment_manager or not equipment_manager.supplemental_items) %}
+          {% if not character.inventory and (not inventory_manager or not inventory_manager.supplemental_items) %}
             <article class="detail-card">
-              <p class="meta">No equipment is listed on this sheet yet.</p>
+              <p class="meta">No inventory is listed on this sheet yet.</p>
             </article>
           {% endif %}
 
-          {% if can_use_session_mode and equipment_manager %}
-            <div class="detail-grid" id="character-equipment-manager">
+          {% if can_use_session_mode and inventory_manager %}
+            <div class="detail-grid" id="character-inventory-manager">
               <article class="detail-card session-card">
                 <div class="section-heading">
                   <h3>Add Systems item</h3>
@@ -344,7 +429,7 @@
                   method="post"
                   action="{{ url_for('character_equipment_add_systems', campaign_slug=campaign.slug, character_slug=character.slug) }}"
                   data-character-systems-item-search-form
-                  data-character-systems-item-search-url="{{ equipment_manager.search_url }}"
+                  data-character-systems-item-search-url="{{ inventory_manager.search_url }}"
                 >
                   <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                   <input type="hidden" name="mode" value="read">
@@ -391,7 +476,7 @@
                     <span>Item article</span>
                     <select name="page_ref">
                       <option value="" selected>Choose an item article</option>
-                      {% for option in equipment_manager.campaign_item_page_options %}
+                      {% for option in inventory_manager.campaign_item_page_options %}
                         <option value="{{ option.value }}">{{ option.label }}</option>
                       {% endfor %}
                     </select>
@@ -460,9 +545,9 @@
                   <a href="{{ url_for('character_edit_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">Open the advanced character editor</a>
                 </p>
               {% endif %}
-              {% if equipment_manager.supplemental_items %}
+              {% if inventory_manager.supplemental_items %}
                 <div class="character-edit-stack">
-                  {% for item in equipment_manager.supplemental_items %}
+                  {% for item in inventory_manager.supplemental_items %}
                     <article class="detail-card character-edit-row">
                       <div class="section-heading">
                         <h4>
@@ -812,7 +897,7 @@
       })();
     </script>
   {% endif %}
-  {% if character_subpage == 'equipment' and equipment_manager and can_use_session_mode and not is_session_mode %}
+  {% if character_subpage == 'inventory' and inventory_manager and can_use_session_mode and not is_session_mode %}
     <script>
       (() => {
         const forms = Array.from(document.querySelectorAll("[data-character-systems-item-search-form]"));
