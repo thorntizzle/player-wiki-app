@@ -3126,6 +3126,55 @@ def test_recalculate_definition_attacks_preserves_mode_identity_for_supported_va
     )
 
 
+def test_recalculate_definition_attacks_preserves_structured_attack_mode_identity():
+    quarterstaff = _systems_entry("item", "phb-item-quarterstaff", "Quarterstaff", metadata={"weight": 4})
+    definition = _minimal_character_definition("disciplined-guard", "Disciplined Guard")
+    definition.proficiencies["weapons"] = ["Simple Weapons"]
+    definition.equipment_catalog = [
+        {
+            "id": "quarterstaff-1",
+            "name": "Quarterstaff",
+            "default_quantity": 1,
+            "weight": "4 lb.",
+            "notes": "",
+            "is_equipped": True,
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": quarterstaff.slug,
+                "title": quarterstaff.title,
+                "source_id": "PHB",
+            },
+        }
+    ]
+    definition.features = [
+        {
+            "id": "precision-drill-1",
+            "name": "Precision Drill",
+            "category": "custom_feature",
+            "campaign_option": {
+                "modeled_effects": [
+                    "attack-mode:melee:precise strike:0:0:1d6",
+                ]
+            },
+        }
+    ]
+
+    recalculated = _recalculate_definition_attacks(
+        definition,
+        item_catalog={
+            "by_title": {"quarterstaff": quarterstaff},
+            "by_slug": {quarterstaff.slug: quarterstaff},
+        },
+    )
+    attacks_by_name = {attack["name"]: attack for attack in recalculated}
+
+    assert attacks_by_name["Quarterstaff (precise strike)"]["mode_key"] == "effect:attack-mode:melee:precise-strike"
+    assert attacks_by_name["Quarterstaff (precise strike)"]["variant_label"] == "precise strike"
+    assert attacks_by_name["Quarterstaff (precise strike, two-handed)"]["mode_key"] == (
+        "effect:attack-mode:melee:precise-strike|weapon:two-handed"
+    )
+
+
 def test_normalize_definition_to_native_model_merges_linked_duplicate_equipment_rows_when_names_differ():
     definition = _minimal_character_definition("mira-salt", "Mira Salt")
     definition.equipment_catalog = [
@@ -3479,6 +3528,62 @@ def test_normalize_definition_to_native_model_applies_structured_weapon_effect_b
 
     assert attacks_by_name["Longsword"]["attack_bonus"] == 6
     assert attacks_by_name["Longsword"]["damage"] == "1d8+5 slashing"
+
+
+def test_normalize_definition_to_native_model_applies_structured_attack_modes_to_melee_and_two_handed_rows():
+    quarterstaff = _systems_entry("item", "phb-item-quarterstaff", "Quarterstaff", metadata={"weight": 4})
+    definition = _minimal_imported_character_definition("precise-guard", "Precise Guard")
+    definition.proficiencies["weapons"] = ["Simple Weapons"]
+    definition.equipment_catalog = [
+        {
+            "id": "quarterstaff-1",
+            "name": "Quarterstaff",
+            "default_quantity": 1,
+            "weight": "4 lb.",
+            "notes": "",
+            "is_equipped": True,
+            "systems_ref": {
+                "entry_key": quarterstaff.entry_key,
+                "entry_type": quarterstaff.entry_type,
+                "title": quarterstaff.title,
+                "slug": quarterstaff.slug,
+                "source_id": quarterstaff.source_id,
+            },
+        }
+    ]
+    definition.features = [
+        {
+            "id": "precision-drill-1",
+            "name": "Precision Drill",
+            "category": "custom_feature",
+            "campaign_option": {
+                "modeled_effects": [
+                    "attack-mode:melee:precise strike:0:0:1d6",
+                ]
+            },
+        }
+    ]
+
+    normalized = normalize_definition_to_native_model(
+        definition,
+        item_catalog={
+            "by_title": {"quarterstaff": quarterstaff},
+            "by_slug": {quarterstaff.slug: quarterstaff},
+        },
+    )
+    attacks_by_name = {attack["name"]: attack for attack in normalized.attacks}
+
+    assert attacks_by_name["Quarterstaff (precise strike)"]["damage"] == "1d6+1d6+3 bludgeoning"
+    assert attacks_by_name["Quarterstaff (precise strike)"]["notes"] == "Precise Strike (+1d6 damage)."
+    assert attacks_by_name["Quarterstaff (precise strike)"]["mode_key"] == "effect:attack-mode:melee:precise-strike"
+    assert attacks_by_name["Quarterstaff (precise strike)"]["variant_label"] == "precise strike"
+    assert attacks_by_name["Quarterstaff (precise strike, two-handed)"]["damage"] == "1d8+1d6+3 bludgeoning"
+    assert attacks_by_name["Quarterstaff (precise strike, two-handed)"]["mode_key"] == (
+        "effect:attack-mode:melee:precise-strike|weapon:two-handed"
+    )
+    assert attacks_by_name["Quarterstaff (precise strike, two-handed)"]["variant_label"] == (
+        "precise strike, two-handed"
+    )
 
 
 def test_normalize_definition_to_native_model_derives_supported_imported_spell_math_from_resolved_class():
@@ -5408,6 +5513,115 @@ def test_level_one_builder_generates_xphb_charger_attack_profile():
     assert attacks_by_name["Greatsword (charger)"]["notes"] == "Charger (move 10 feet straight, +1d8 damage, once per turn)."
     assert attacks_by_name["Greatsword (charger)"]["mode_key"] == "feat:xphb-feat-charger"
     assert attacks_by_name["Greatsword (charger)"]["variant_label"] == "charger"
+
+
+def test_level_one_builder_applies_structured_attack_modes_to_firearm_attacks():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+            "starting_equipment": {
+                "defaultData": [
+                    {"_": ["pistol|dmg"]},
+                ]
+            },
+        },
+    )
+    variant_human = _systems_entry(
+        "race",
+        "phb-race-variant-human",
+        "Variant Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}], "feats": [{"any": 1}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    deadeye_drill = _systems_entry(
+        "classfeature",
+        "phb-classfeature-deadeye-drill",
+        "Deadeye Drill",
+        metadata={
+            "level": 1,
+            "campaign_option": {
+                "modeled_effects": [
+                    "attack-mode:firearm:deadeye shot:-2:0:1d6",
+                ]
+            },
+        },
+    )
+    gunner = _systems_entry(
+        "feat",
+        "tce-feat-gunner",
+        "Gunner",
+        source_id="TCE",
+        metadata={"weapon_proficiencies": [{"firearms": True}], "ability": [{"dex": 1}]},
+    )
+    pistol = _systems_entry("item", "dmg-item-pistol", "Pistol", metadata={"weight": 3}, source_id="DMG")
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [variant_human],
+            "background": [acolyte],
+            "feat": [gunner],
+            "subclass": [],
+            "item": [pistol],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                    {"label": "Deadeye Drill", "entry": deadeye_drill, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+    form_values = {
+        "name": "Mira Flint",
+        "character_slug": "mira-flint",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": variant_human.slug,
+        "background_slug": acolyte.slug,
+        "species_feat_1": gunner.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "str": "16",
+        "dex": "14",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+    attacks_by_name = {attack["name"]: attack for attack in definition.attacks}
+
+    assert "Pistol (+4, 1d10+2 piercing)" in context["preview"]["attacks"]
+    assert "Pistol (deadeye shot) (+2, 1d10+1d6+2 piercing)" in context["preview"]["attacks"]
+    assert attacks_by_name["Pistol (deadeye shot)"]["notes"] == (
+        "Ammunition, range 30/90, Gunner (ignore loading, no adjacent disadvantage), "
+        "Deadeye Shot (-2 attack, +1d6 damage)."
+    )
+    assert attacks_by_name["Pistol (deadeye shot)"]["mode_key"] == "effect:attack-mode:firearm:deadeye-shot"
+    assert attacks_by_name["Pistol (deadeye shot)"]["variant_label"] == "deadeye shot"
 
 
 def test_level_one_builder_applies_gunner_to_firearm_attacks():
@@ -12741,6 +12955,106 @@ def test_native_level_up_preserves_ranged_feat_attack_variants():
         "Sharpshooter (ignore cover, no long-range disadvantage), Sharpshooter (-5 attack, +10 damage)."
     )
     assert attacks_by_name["Light Crossbow (sharpshooter)"]["mode_key"] == "feat:phb-feat-sharpshooter"
+
+
+def test_native_level_up_applies_structured_attack_modes_to_melee_rows():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    precision_drill = _systems_entry(
+        "classfeature",
+        "phb-classfeature-precision-drill",
+        "Precision Drill",
+        metadata={
+            "level": 4,
+            "campaign_option": {
+                "modeled_effects": [
+                    "attack-mode:melee:precise strike:0:0:1d6",
+                ]
+            },
+        },
+    )
+    quarterstaff = _systems_entry("item", "phb-item-quarterstaff", "Quarterstaff", metadata={"weight": 4})
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "item": [quarterstaff],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 4,
+                "level_label": "Level 4",
+                "feature_rows": [
+                    {"label": "Precision Drill", "entry": precision_drill, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    current_definition = _minimal_character_definition("precise-veteran", "Precise Veteran")
+    current_definition.profile["class_level_text"] = "Fighter 3"
+    current_definition.profile["classes"][0]["level"] = 3
+    current_definition.stats["max_hp"] = 28
+    current_definition.proficiencies["weapons"] = ["Simple Weapons", "Martial Weapons"]
+    current_definition.equipment_catalog = [
+        {
+            "name": "Quarterstaff",
+            "default_quantity": 1,
+            "weight": "4 lb.",
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-quarterstaff",
+                "title": "Quarterstaff",
+                "source_id": "PHB",
+            },
+        }
+    ]
+
+    form_values = {"hp_gain": "8"}
+    leveled_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values),
+        form_values,
+    )
+
+    attacks_by_name = {attack["name"]: attack for attack in leveled_definition.attacks}
+
+    assert attacks_by_name["Quarterstaff (precise strike)"]["damage"] == "1d6+1d6+3 bludgeoning"
+    assert attacks_by_name["Quarterstaff (precise strike)"]["notes"] == "Precise Strike (+1d6 damage)."
+    assert attacks_by_name["Quarterstaff (precise strike)"]["mode_key"] == "effect:attack-mode:melee:precise-strike"
+    assert attacks_by_name["Quarterstaff (precise strike, two-handed)"]["damage"] == "1d8+1d6+3 bludgeoning"
+    assert attacks_by_name["Quarterstaff (precise strike, two-handed)"]["mode_key"] == (
+        "effect:attack-mode:melee:precise-strike|weapon:two-handed"
+    )
 
 
 def test_native_level_up_preserves_crossbow_expert_bonus_attack_rows():

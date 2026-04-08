@@ -21,7 +21,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-04-08.04"
+CHARACTER_BUILDER_VERSION = "2026-04-08.05"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -48,6 +48,19 @@ ATTACK_MODE_FEAT_CROSSBOW_EXPERT_BONUS = "feat:phb-feat-crossbow-expert:bonus"
 ATTACK_MODE_FEAT_GREAT_WEAPON_MASTER = "feat:phb-feat-great-weapon-master"
 ATTACK_MODE_FEAT_POLEARM_MASTER_BONUS = "feat:phb-feat-polearm-master:bonus"
 ATTACK_MODE_FEAT_SHARPSHOOTER = "feat:phb-feat-sharpshooter"
+ATTACK_MODE_EFFECT_PREFIX = "effect:attack-mode"
+ATTACK_MODE_TARGET_ALL = "all"
+ATTACK_MODE_TARGET_MELEE = "melee"
+ATTACK_MODE_TARGET_RANGED = "ranged"
+ATTACK_MODE_TARGET_FIREARM = "firearm"
+ATTACK_MODE_EFFECT_TARGETS = frozenset(
+    {
+        ATTACK_MODE_TARGET_ALL,
+        ATTACK_MODE_TARGET_MELEE,
+        ATTACK_MODE_TARGET_RANGED,
+        ATTACK_MODE_TARGET_FIREARM,
+    }
+)
 ATTACK_MODE_COMPONENT_LABELS = {
     ATTACK_MODE_WEAPON_THROWN: "thrown",
     ATTACK_MODE_WEAPON_TWO_HANDED: "two-handed",
@@ -2823,6 +2836,8 @@ def _effect_weapon_damage_bonus(effect_keys: list[str]) -> int:
 
 def _attack_mode_component_sort_key(component: str) -> tuple[int, str]:
     clean_component = str(component or "").strip().casefold()
+    if clean_component.startswith(f"{ATTACK_MODE_EFFECT_PREFIX}:"):
+        return (55, clean_component)
     return (int(ATTACK_MODE_COMPONENT_PRIORITY.get(clean_component, 999)), clean_component)
 
 
@@ -2851,10 +2866,23 @@ def _attack_mode_components(mode_key: Any) -> list[str]:
     return [component for component in normalized_mode_key.split("|") if component]
 
 
+def _attack_mode_component_label(component: Any) -> str:
+    clean_component = str(component or "").strip().casefold()
+    label = str(ATTACK_MODE_COMPONENT_LABELS.get(clean_component) or "").strip()
+    if label:
+        return label
+    prefix = f"{ATTACK_MODE_EFFECT_PREFIX}:"
+    if clean_component.startswith(prefix):
+        parts = clean_component.split(":")
+        if len(parts) >= 4:
+            return parts[3].replace("-", " ").strip()
+    return ""
+
+
 def _attack_variant_label_from_mode_key(mode_key: Any) -> str:
     labels: list[str] = []
     for component in _attack_mode_components(mode_key):
-        label = str(ATTACK_MODE_COMPONENT_LABELS.get(component) or "").strip()
+        label = _attack_mode_component_label(component)
         if not label:
             return ""
         labels.append(label)
@@ -2933,6 +2961,133 @@ def _normalize_attack_variant_label(
     if inferred_mode_key:
         return _attack_variant_label_from_mode_key(inferred_mode_key)
     return ""
+
+
+def _effect_attack_mode_component(*, target_kind: str, variant_label: str) -> str:
+    clean_target_kind = normalize_lookup(target_kind)
+    clean_variant_label = str(variant_label or "").strip()
+    if clean_target_kind not in ATTACK_MODE_EFFECT_TARGETS or not clean_variant_label:
+        return ""
+    label_slug = slugify(clean_variant_label)
+    if not label_slug:
+        return ""
+    return f"{ATTACK_MODE_EFFECT_PREFIX}:{clean_target_kind}:{label_slug}"
+
+
+def _normalize_attack_mode_extra_damage(value: Any) -> str:
+    clean_value = str(value or "").strip()
+    if normalize_lookup(clean_value) in {"", "0", "none", "no", "false", "n-a", "na"}:
+        return ""
+    return clean_value
+
+
+def _attack_mode_note_text(
+    *,
+    variant_label: str,
+    attack_delta: int,
+    damage_delta: int,
+    extra_damage: str,
+) -> str:
+    clean_label = str(variant_label or "").strip()
+    adjustments: list[str] = []
+    if attack_delta:
+        adjustments.append(f"{attack_delta:+d} attack")
+    if damage_delta:
+        adjustments.append(f"{damage_delta:+d} damage")
+    if extra_damage:
+        adjustments.append(f"+{extra_damage} damage")
+    if not clean_label:
+        return ""
+    if not adjustments:
+        return clean_label.title()
+    return f"{clean_label.title()} ({', '.join(adjustments)})"
+
+
+def _effect_attack_mode_descriptors(effect_keys: list[str]) -> list[dict[str, Any]]:
+    descriptors: list[dict[str, Any]] = []
+    seen_descriptors: set[tuple[str, int, int, str]] = set()
+    for effect_key in list(effect_keys or []):
+        parts = _split_effect_key(effect_key)
+        if len(parts) != 6 or normalize_lookup(parts[0]) != normalize_lookup("attack-mode"):
+            continue
+        target_kind = normalize_lookup(parts[1])
+        variant_label = str(parts[2] or "").strip()
+        if target_kind not in ATTACK_MODE_EFFECT_TARGETS or not variant_label:
+            continue
+        try:
+            attack_delta = int(parts[3])
+            damage_delta = int(parts[4])
+        except ValueError:
+            continue
+        extra_damage = _normalize_attack_mode_extra_damage(parts[5])
+        if attack_delta == 0 and damage_delta == 0 and not extra_damage:
+            continue
+        mode_component = _effect_attack_mode_component(target_kind=target_kind, variant_label=variant_label)
+        descriptor_key = (mode_component, attack_delta, damage_delta, extra_damage)
+        if not mode_component or descriptor_key in seen_descriptors:
+            continue
+        seen_descriptors.add(descriptor_key)
+        descriptors.append(
+            {
+                "target_kind": target_kind,
+                "variant_label": _attack_mode_component_label(mode_component),
+                "attack_delta": attack_delta,
+                "damage_delta": damage_delta,
+                "extra_damage": extra_damage,
+                "mode_component": mode_component,
+                "note": _attack_mode_note_text(
+                    variant_label=variant_label,
+                    attack_delta=attack_delta,
+                    damage_delta=damage_delta,
+                    extra_damage=extra_damage,
+                ),
+            }
+        )
+    return descriptors
+
+
+def _combine_attack_extra_damage(*values: Any) -> str:
+    parts: list[str] = []
+    for value in values:
+        clean_value = _normalize_attack_mode_extra_damage(value)
+        if clean_value:
+            parts.append(clean_value)
+    return "+".join(parts)
+
+
+def _append_attack_note_text(base_notes: Any, extra_note: Any) -> str:
+    base_text = str(base_notes or "").strip().rstrip(".")
+    extra_text = str(extra_note or "").strip().rstrip(".")
+    if not base_text:
+        return f"{extra_text}." if extra_text else ""
+    if not extra_text:
+        return f"{base_text}."
+    if normalize_lookup(extra_text) in normalize_lookup(base_text):
+        return f"{base_text}."
+    return f"{base_text}, {extra_text}."
+
+
+def _attack_mode_descriptor_applies_to_context(
+    descriptor: dict[str, Any],
+    context: dict[str, Any],
+    *,
+    category_override: str | None = None,
+    profile_override: dict[str, Any] | None = None,
+) -> bool:
+    target_kind = normalize_lookup(str(descriptor.get("target_kind") or "").strip())
+    if not target_kind:
+        return False
+    if target_kind == ATTACK_MODE_TARGET_ALL:
+        return True
+    profile = dict(profile_override or context.get("profile") or {})
+    effective_category = normalize_lookup(category_override or _weapon_attack_category(profile))
+    if target_kind == ATTACK_MODE_TARGET_MELEE:
+        return effective_category == normalize_lookup("melee weapon")
+    if target_kind == ATTACK_MODE_TARGET_RANGED:
+        return effective_category == normalize_lookup("ranged weapon")
+    if target_kind == ATTACK_MODE_TARGET_FIREARM:
+        return _weapon_uses_firearm_proficiency(profile, attack_name=str(context.get("attack_name") or "").strip())
+    return False
 
 
 def _infer_attack_mode_key_from_payload(payload: dict[str, Any]) -> str:
@@ -5310,6 +5465,7 @@ def _build_level_one_attacks(
     attack_support_flags = _collect_attack_support_flags(features)
     shared_weapon_attack_bonus = _effect_weapon_attack_bonus(active_effect_keys)
     shared_weapon_damage_bonus = _effect_weapon_damage_bonus(active_effect_keys)
+    structured_mode_descriptors = _effect_attack_mode_descriptors(active_effect_keys)
     has_charger_phb = bool(attack_support_flags.get("charger_phb"))
     has_charger_xphb = bool(attack_support_flags.get("charger_xphb"))
     has_crossbow_expert = bool(attack_support_flags.get("crossbow_expert"))
@@ -5374,67 +5530,107 @@ def _build_level_one_attacks(
                 ranged_attack=False,
             ),
         )
-        attacks.append(
-            _build_weapon_attack_payload(
-                context,
-                attack_bonus=attack_bonus,
-                damage_bonus=damage_bonus,
-                notes=base_attack_notes,
-                index=len(attacks) + 1,
-            )
+        _append_weapon_attack_payloads(
+            attacks,
+            context,
+            attack_bonus=attack_bonus,
+            damage_bonus=damage_bonus,
+            extra_damage=None,
+            notes=base_attack_notes,
+            structured_mode_descriptors=structured_mode_descriptors,
         )
         if has_great_weapon_master and _qualifies_for_great_weapon_master(context):
-            attacks.append(
-                _build_weapon_attack_payload(
-                    context,
-                    attack_bonus=attack_bonus - 5,
-                    damage_bonus=damage_bonus + 10,
-                    notes=_build_weapon_attack_notes(
-                        profile,
-                        great_weapon_fighting=has_great_weapon_fighting,
-                        has_shield=has_shield,
-                        ignore_loading=ignore_loading,
-                        off_hand_context=off_hand_context,
-                        show_range=not has_thrown_variant,
-                        show_versatile=not has_two_handed_variant,
-                        extra_notes=_base_attack_feat_notes(
-                            context,
-                            has_charger_phb=has_charger_phb,
-                            has_charger_xphb=has_charger_xphb,
-                            has_crossbow_expert=has_crossbow_expert,
-                            has_great_weapon_master=has_great_weapon_master,
-                            has_gunner=has_gunner,
-                            has_martial_adept=has_martial_adept,
-                            has_polearm_master=has_polearm_master,
-                            has_savage_attacker=has_savage_attacker,
-                            has_sharpshooter=has_sharpshooter,
-                            ranged_attack=False,
-                        )
-                        + ["Great Weapon Master (-5 attack, +10 damage)"],
-                    ),
-                    index=len(attacks) + 1,
-                    variant_label="great weapon master",
-                    mode_key=ATTACK_MODE_FEAT_GREAT_WEAPON_MASTER,
-                )
+            _append_weapon_attack_payloads(
+                attacks,
+                context,
+                attack_bonus=attack_bonus - 5,
+                damage_bonus=damage_bonus + 10,
+                extra_damage=None,
+                notes=_build_weapon_attack_notes(
+                    profile,
+                    great_weapon_fighting=has_great_weapon_fighting,
+                    has_shield=has_shield,
+                    ignore_loading=ignore_loading,
+                    off_hand_context=off_hand_context,
+                    show_range=not has_thrown_variant,
+                    show_versatile=not has_two_handed_variant,
+                    extra_notes=_base_attack_feat_notes(
+                        context,
+                        has_charger_phb=has_charger_phb,
+                        has_charger_xphb=has_charger_xphb,
+                        has_crossbow_expert=has_crossbow_expert,
+                        has_great_weapon_master=has_great_weapon_master,
+                        has_gunner=has_gunner,
+                        has_martial_adept=has_martial_adept,
+                        has_polearm_master=has_polearm_master,
+                        has_savage_attacker=has_savage_attacker,
+                        has_sharpshooter=has_sharpshooter,
+                        ranged_attack=False,
+                    )
+                    + ["Great Weapon Master (-5 attack, +10 damage)"],
+                ),
+                structured_mode_descriptors=structured_mode_descriptors,
+                variant_label="great weapon master",
+                mode_key=ATTACK_MODE_FEAT_GREAT_WEAPON_MASTER,
             )
         if has_polearm_master and _qualifies_for_polearm_master(context):
             polearm_bonus_profile = dict(profile)
             polearm_bonus_profile["damage"] = "1d4"
             polearm_bonus_profile["damage_type"] = "B"
-            attacks.append(
-                _build_weapon_attack_payload(
+            _append_weapon_attack_payloads(
+                attacks,
+                context,
+                attack_bonus=attack_bonus,
+                damage_bonus=damage_bonus,
+                extra_damage=None,
+                notes=_build_weapon_attack_notes(
+                    polearm_bonus_profile,
+                    bonus_action=True,
+                    great_weapon_fighting=has_great_weapon_fighting,
+                    has_shield=has_shield,
+                    ignore_loading=ignore_loading,
+                    off_hand_context=off_hand_context,
+                    show_range=False,
+                    show_versatile=False,
+                    extra_notes=_base_attack_feat_notes(
+                        context,
+                        has_charger_phb=has_charger_phb,
+                        has_charger_xphb=has_charger_xphb,
+                        has_crossbow_expert=has_crossbow_expert,
+                        has_great_weapon_master=has_great_weapon_master,
+                        has_gunner=has_gunner,
+                        has_martial_adept=has_martial_adept,
+                        has_polearm_master=has_polearm_master,
+                        has_savage_attacker=has_savage_attacker,
+                        has_sharpshooter=has_sharpshooter,
+                        ranged_attack=False,
+                        include_polearm_master_note=False,
+                    )
+                    + ["Polearm Master bonus attack"],
+                ),
+                structured_mode_descriptors=structured_mode_descriptors,
+                variant_label="polearm master",
+                mode_key=ATTACK_MODE_FEAT_POLEARM_MASTER_BONUS,
+                profile_override=polearm_bonus_profile,
+            )
+            if has_two_handed_variant:
+                polearm_two_handed_profile = dict(polearm_bonus_profile)
+                polearm_two_handed_damage_bonus = int(context["ability_modifier"] or 0)
+                _append_weapon_attack_payloads(
+                    attacks,
                     context,
                     attack_bonus=attack_bonus,
-                    damage_bonus=damage_bonus,
+                    damage_bonus=polearm_two_handed_damage_bonus,
+                    extra_damage=None,
                     notes=_build_weapon_attack_notes(
-                        polearm_bonus_profile,
+                        polearm_two_handed_profile,
                         bonus_action=True,
                         great_weapon_fighting=has_great_weapon_fighting,
-                        has_shield=has_shield,
-                        ignore_loading=ignore_loading,
-                        off_hand_context=off_hand_context,
+                        has_shield=False,
+                        off_hand_context=None,
                         show_range=False,
                         show_versatile=False,
+                        wielded_two_handed=True,
                         extra_notes=_base_attack_feat_notes(
                             context,
                             has_charger_phb=has_charger_phb,
@@ -5451,117 +5647,76 @@ def _build_level_one_attacks(
                         )
                         + ["Polearm Master bonus attack"],
                     ),
-                    index=len(attacks) + 1,
-                    variant_label="polearm master",
-                    mode_key=ATTACK_MODE_FEAT_POLEARM_MASTER_BONUS,
-                    profile_override=polearm_bonus_profile,
-                )
-            )
-            if has_two_handed_variant:
-                polearm_two_handed_profile = dict(polearm_bonus_profile)
-                polearm_two_handed_damage_bonus = int(context["ability_modifier"] or 0)
-                attacks.append(
-                    _build_weapon_attack_payload(
-                        context,
-                        attack_bonus=attack_bonus,
-                        damage_bonus=polearm_two_handed_damage_bonus,
-                        notes=_build_weapon_attack_notes(
-                            polearm_two_handed_profile,
-                            bonus_action=True,
-                            great_weapon_fighting=has_great_weapon_fighting,
-                            has_shield=False,
-                            off_hand_context=None,
-                            show_range=False,
-                            show_versatile=False,
-                            wielded_two_handed=True,
-                            extra_notes=_base_attack_feat_notes(
-                                context,
-                                has_charger_phb=has_charger_phb,
-                                has_charger_xphb=has_charger_xphb,
-                                has_crossbow_expert=has_crossbow_expert,
-                                has_great_weapon_master=has_great_weapon_master,
-                                has_gunner=has_gunner,
-                                has_martial_adept=has_martial_adept,
-                                has_polearm_master=has_polearm_master,
-                                has_savage_attacker=has_savage_attacker,
-                                has_sharpshooter=has_sharpshooter,
-                                ranged_attack=False,
-                                include_polearm_master_note=False,
-                            )
-                            + ["Polearm Master bonus attack"],
-                        ),
-                        index=len(attacks) + 1,
-                        variant_label="polearm master, two-handed",
-                        mode_key=f"{ATTACK_MODE_FEAT_POLEARM_MASTER_BONUS}|{ATTACK_MODE_WEAPON_TWO_HANDED}",
-                        profile_override=polearm_two_handed_profile,
-                    )
+                    structured_mode_descriptors=structured_mode_descriptors,
+                    variant_label="polearm master, two-handed",
+                    mode_key=f"{ATTACK_MODE_FEAT_POLEARM_MASTER_BONUS}|{ATTACK_MODE_WEAPON_TWO_HANDED}",
+                    profile_override=polearm_two_handed_profile,
                 )
         if has_charger_xphb and _qualifies_for_charger(context):
-            attacks.append(
-                _build_weapon_attack_payload(
-                    context,
-                    attack_bonus=attack_bonus,
-                    damage_bonus=damage_bonus,
-                    extra_damage="1d8",
-                    notes=_build_weapon_attack_notes(
-                        profile,
-                        great_weapon_fighting=has_great_weapon_fighting,
-                        has_shield=has_shield,
-                        ignore_loading=ignore_loading,
-                        off_hand_context=off_hand_context,
-                        show_range=not has_thrown_variant,
-                        show_versatile=not has_two_handed_variant,
-                        extra_notes=_base_attack_feat_notes(
-                            context,
-                            has_charger_phb=has_charger_phb,
-                            has_charger_xphb=has_charger_xphb,
-                            has_crossbow_expert=has_crossbow_expert,
-                            has_great_weapon_master=has_great_weapon_master,
-                            has_gunner=has_gunner,
-                            has_martial_adept=has_martial_adept,
-                            has_polearm_master=has_polearm_master,
-                            has_savage_attacker=has_savage_attacker,
-                            has_sharpshooter=has_sharpshooter,
-                            ranged_attack=False,
-                        )
-                        + ["Charger (move 10 feet straight, +1d8 damage, once per turn)"],
-                    ),
-                    index=len(attacks) + 1,
-                    variant_label="charger",
-                    mode_key=ATTACK_MODE_FEAT_CHARGER_XPHB,
-                )
+            _append_weapon_attack_payloads(
+                attacks,
+                context,
+                attack_bonus=attack_bonus,
+                damage_bonus=damage_bonus,
+                extra_damage="1d8",
+                notes=_build_weapon_attack_notes(
+                    profile,
+                    great_weapon_fighting=has_great_weapon_fighting,
+                    has_shield=has_shield,
+                    ignore_loading=ignore_loading,
+                    off_hand_context=off_hand_context,
+                    show_range=not has_thrown_variant,
+                    show_versatile=not has_two_handed_variant,
+                    extra_notes=_base_attack_feat_notes(
+                        context,
+                        has_charger_phb=has_charger_phb,
+                        has_charger_xphb=has_charger_xphb,
+                        has_crossbow_expert=has_crossbow_expert,
+                        has_great_weapon_master=has_great_weapon_master,
+                        has_gunner=has_gunner,
+                        has_martial_adept=has_martial_adept,
+                        has_polearm_master=has_polearm_master,
+                        has_savage_attacker=has_savage_attacker,
+                        has_sharpshooter=has_sharpshooter,
+                        ranged_attack=False,
+                    )
+                    + ["Charger (move 10 feet straight, +1d8 damage, once per turn)"],
+                ),
+                structured_mode_descriptors=structured_mode_descriptors,
+                variant_label="charger",
+                mode_key=ATTACK_MODE_FEAT_CHARGER_XPHB,
             )
         if has_thrown_variant:
-            attacks.append(
-                _build_weapon_attack_payload(
-                    context,
-                    attack_bonus=attack_bonus,
-                    damage_bonus=damage_bonus,
-                    notes=_build_weapon_attack_notes(
-                        profile,
-                        great_weapon_fighting=False,
-                        has_shield=has_shield,
-                        off_hand_context=off_hand_context,
-                        show_versatile=False,
-                        extra_notes=_base_attack_feat_notes(
-                            context,
-                            has_charger_phb=has_charger_phb,
-                            has_charger_xphb=has_charger_xphb,
-                            has_crossbow_expert=has_crossbow_expert,
-                            has_great_weapon_master=has_great_weapon_master,
-                            has_gunner=has_gunner,
-                            has_martial_adept=has_martial_adept,
-                            has_polearm_master=has_polearm_master,
-                            has_savage_attacker=has_savage_attacker,
-                            has_sharpshooter=has_sharpshooter,
-                            ranged_attack=True,
-                        ),
+            _append_weapon_attack_payloads(
+                attacks,
+                context,
+                attack_bonus=attack_bonus,
+                damage_bonus=damage_bonus,
+                extra_damage=None,
+                notes=_build_weapon_attack_notes(
+                    profile,
+                    great_weapon_fighting=False,
+                    has_shield=has_shield,
+                    off_hand_context=off_hand_context,
+                    show_versatile=False,
+                    extra_notes=_base_attack_feat_notes(
+                        context,
+                        has_charger_phb=has_charger_phb,
+                        has_charger_xphb=has_charger_xphb,
+                        has_crossbow_expert=has_crossbow_expert,
+                        has_great_weapon_master=has_great_weapon_master,
+                        has_gunner=has_gunner,
+                        has_martial_adept=has_martial_adept,
+                        has_polearm_master=has_polearm_master,
+                        has_savage_attacker=has_savage_attacker,
+                        has_sharpshooter=has_sharpshooter,
+                        ranged_attack=True,
                     ),
-                    index=len(attacks) + 1,
-                    variant_label="thrown",
-                    mode_key=ATTACK_MODE_WEAPON_THROWN,
-                    category_override="ranged weapon",
-                )
+                ),
+                structured_mode_descriptors=structured_mode_descriptors,
+                variant_label="thrown",
+                mode_key=ATTACK_MODE_WEAPON_THROWN,
+                category_override="ranged weapon",
             )
         if has_two_handed_variant:
             two_handed_profile = dict(profile)
@@ -5570,131 +5725,21 @@ def _build_level_one_attacks(
             if bool(context["is_proficient"]):
                 two_handed_attack_bonus += proficiency_bonus
             two_handed_damage_bonus = int(context["ability_modifier"] or 0)
-            attacks.append(
-                _build_weapon_attack_payload(
-                    context,
-                    attack_bonus=two_handed_attack_bonus,
-                    damage_bonus=two_handed_damage_bonus,
-                    notes=_build_weapon_attack_notes(
-                        two_handed_profile,
-                        great_weapon_fighting=has_great_weapon_fighting,
-                        has_shield=False,
-                        off_hand_context=None,
-                        show_versatile=False,
-                        wielded_two_handed=True,
-                        extra_notes=_base_attack_feat_notes(
-                            context,
-                            has_charger_phb=has_charger_phb,
-                            has_charger_xphb=has_charger_xphb,
-                            has_crossbow_expert=has_crossbow_expert,
-                            has_great_weapon_master=has_great_weapon_master,
-                            has_gunner=has_gunner,
-                            has_martial_adept=has_martial_adept,
-                            has_polearm_master=has_polearm_master,
-                            has_savage_attacker=has_savage_attacker,
-                            has_sharpshooter=has_sharpshooter,
-                            ranged_attack=False,
-                        ),
-                    ),
-                    index=len(attacks) + 1,
-                    variant_label="two-handed",
-                    mode_key=ATTACK_MODE_WEAPON_TWO_HANDED,
-                    profile_override=two_handed_profile,
-                )
-            )
-        if has_sharpshooter and _qualifies_for_sharpshooter(context):
-            attacks.append(
-                _build_weapon_attack_payload(
-                    context,
-                    attack_bonus=attack_bonus - 5,
-                    damage_bonus=damage_bonus + 10,
-                    notes=_build_weapon_attack_notes(
-                        profile,
-                        great_weapon_fighting=False,
-                        has_shield=has_shield,
-                        ignore_loading=ignore_loading,
-                        off_hand_context=off_hand_context,
-                        show_range=not has_thrown_variant,
-                        show_versatile=not has_two_handed_variant,
-                        extra_notes=_base_attack_feat_notes(
-                            context,
-                            has_charger_phb=has_charger_phb,
-                            has_charger_xphb=has_charger_xphb,
-                            has_crossbow_expert=has_crossbow_expert,
-                            has_great_weapon_master=has_great_weapon_master,
-                            has_gunner=has_gunner,
-                            has_martial_adept=has_martial_adept,
-                            has_polearm_master=has_polearm_master,
-                            has_savage_attacker=has_savage_attacker,
-                            has_sharpshooter=has_sharpshooter,
-                            ranged_attack=True,
-                        )
-                        + ["Sharpshooter (-5 attack, +10 damage)"],
-                    ),
-                    index=len(attacks) + 1,
-                    variant_label="sharpshooter",
-                    mode_key=ATTACK_MODE_FEAT_SHARPSHOOTER,
-                )
-            )
-        if has_charger_phb and _qualifies_for_charger(context):
-            attacks.append(
-                _build_weapon_attack_payload(
-                    context,
-                    attack_bonus=attack_bonus,
-                    damage_bonus=damage_bonus + 5,
-                    notes=_build_weapon_attack_notes(
-                        profile,
-                        bonus_action=True,
-                        great_weapon_fighting=has_great_weapon_fighting,
-                        has_shield=has_shield,
-                        ignore_loading=ignore_loading,
-                        off_hand_context=off_hand_context,
-                        show_range=False,
-                        show_versatile=not has_two_handed_variant,
-                        extra_notes=_base_attack_feat_notes(
-                            context,
-                            has_charger_phb=has_charger_phb,
-                            has_charger_xphb=has_charger_xphb,
-                            has_crossbow_expert=has_crossbow_expert,
-                            has_great_weapon_master=has_great_weapon_master,
-                            has_gunner=has_gunner,
-                            has_martial_adept=has_martial_adept,
-                            has_polearm_master=has_polearm_master,
-                            has_savage_attacker=has_savage_attacker,
-                            has_sharpshooter=has_sharpshooter,
-                            ranged_attack=False,
-                        )
-                        + ["Charger (after Dash, move 10 feet straight for +5 damage)"],
-                    ),
-                    index=len(attacks) + 1,
-                    variant_label="charger",
-                    mode_key=ATTACK_MODE_FEAT_CHARGER_PHB,
-                )
-            )
-
-    if off_hand_context is not None:
-        off_hand_damage_bonus = (
-            int(off_hand_context["ability_modifier"] or 0)
-            if has_two_weapon_fighting
-            else min(int(off_hand_context["ability_modifier"] or 0), 0)
-        )
-        off_hand_attack_bonus = int(off_hand_context["ability_modifier"] or 0)
-        if bool(off_hand_context["is_proficient"]):
-            off_hand_attack_bonus += proficiency_bonus
-        attacks.append(
-            _build_weapon_attack_payload(
-                off_hand_context,
-                attack_bonus=off_hand_attack_bonus,
-                damage_bonus=off_hand_damage_bonus,
+            _append_weapon_attack_payloads(
+                attacks,
+                context,
+                attack_bonus=two_handed_attack_bonus,
+                damage_bonus=two_handed_damage_bonus,
+                extra_damage=None,
                 notes=_build_weapon_attack_notes(
-                    dict(off_hand_context["profile"] or {}),
-                    bonus_action=True,
-                    great_weapon_fighting=False,
+                    two_handed_profile,
+                    great_weapon_fighting=has_great_weapon_fighting,
                     has_shield=False,
-                    off_hand_context=off_hand_context,
+                    off_hand_context=None,
                     show_versatile=False,
+                    wielded_two_handed=True,
                     extra_notes=_base_attack_feat_notes(
-                        off_hand_context,
+                        context,
                         has_charger_phb=has_charger_phb,
                         has_charger_xphb=has_charger_xphb,
                         has_crossbow_expert=has_crossbow_expert,
@@ -5707,10 +5752,120 @@ def _build_level_one_attacks(
                         ranged_attack=False,
                     ),
                 ),
-                index=len(attacks) + 1,
-                variant_label="off-hand",
-                mode_key=ATTACK_MODE_WEAPON_OFF_HAND,
+                structured_mode_descriptors=structured_mode_descriptors,
+                variant_label="two-handed",
+                mode_key=ATTACK_MODE_WEAPON_TWO_HANDED,
+                profile_override=two_handed_profile,
             )
+        if has_sharpshooter and _qualifies_for_sharpshooter(context):
+            _append_weapon_attack_payloads(
+                attacks,
+                context,
+                attack_bonus=attack_bonus - 5,
+                damage_bonus=damage_bonus + 10,
+                extra_damage=None,
+                notes=_build_weapon_attack_notes(
+                    profile,
+                    great_weapon_fighting=False,
+                    has_shield=has_shield,
+                    ignore_loading=ignore_loading,
+                    off_hand_context=off_hand_context,
+                    show_range=not has_thrown_variant,
+                    show_versatile=not has_two_handed_variant,
+                    extra_notes=_base_attack_feat_notes(
+                        context,
+                        has_charger_phb=has_charger_phb,
+                        has_charger_xphb=has_charger_xphb,
+                        has_crossbow_expert=has_crossbow_expert,
+                        has_great_weapon_master=has_great_weapon_master,
+                        has_gunner=has_gunner,
+                        has_martial_adept=has_martial_adept,
+                        has_polearm_master=has_polearm_master,
+                        has_savage_attacker=has_savage_attacker,
+                        has_sharpshooter=has_sharpshooter,
+                        ranged_attack=True,
+                    )
+                    + ["Sharpshooter (-5 attack, +10 damage)"],
+                ),
+                structured_mode_descriptors=structured_mode_descriptors,
+                variant_label="sharpshooter",
+                mode_key=ATTACK_MODE_FEAT_SHARPSHOOTER,
+            )
+        if has_charger_phb and _qualifies_for_charger(context):
+            _append_weapon_attack_payloads(
+                attacks,
+                context,
+                attack_bonus=attack_bonus,
+                damage_bonus=damage_bonus + 5,
+                extra_damage=None,
+                notes=_build_weapon_attack_notes(
+                    profile,
+                    bonus_action=True,
+                    great_weapon_fighting=has_great_weapon_fighting,
+                    has_shield=has_shield,
+                    ignore_loading=ignore_loading,
+                    off_hand_context=off_hand_context,
+                    show_range=False,
+                    show_versatile=not has_two_handed_variant,
+                    extra_notes=_base_attack_feat_notes(
+                        context,
+                        has_charger_phb=has_charger_phb,
+                        has_charger_xphb=has_charger_xphb,
+                        has_crossbow_expert=has_crossbow_expert,
+                        has_great_weapon_master=has_great_weapon_master,
+                        has_gunner=has_gunner,
+                        has_martial_adept=has_martial_adept,
+                        has_polearm_master=has_polearm_master,
+                        has_savage_attacker=has_savage_attacker,
+                        has_sharpshooter=has_sharpshooter,
+                        ranged_attack=False,
+                    )
+                    + ["Charger (after Dash, move 10 feet straight for +5 damage)"],
+                ),
+                structured_mode_descriptors=structured_mode_descriptors,
+                variant_label="charger",
+                mode_key=ATTACK_MODE_FEAT_CHARGER_PHB,
+            )
+
+    if off_hand_context is not None:
+        off_hand_damage_bonus = (
+            int(off_hand_context["ability_modifier"] or 0)
+            if has_two_weapon_fighting
+            else min(int(off_hand_context["ability_modifier"] or 0), 0)
+        )
+        off_hand_attack_bonus = int(off_hand_context["ability_modifier"] or 0)
+        if bool(off_hand_context["is_proficient"]):
+            off_hand_attack_bonus += proficiency_bonus
+        _append_weapon_attack_payloads(
+            attacks,
+            off_hand_context,
+            attack_bonus=off_hand_attack_bonus,
+            damage_bonus=off_hand_damage_bonus,
+            extra_damage=None,
+            notes=_build_weapon_attack_notes(
+                dict(off_hand_context["profile"] or {}),
+                bonus_action=True,
+                great_weapon_fighting=False,
+                has_shield=False,
+                off_hand_context=off_hand_context,
+                show_versatile=False,
+                extra_notes=_base_attack_feat_notes(
+                    off_hand_context,
+                    has_charger_phb=has_charger_phb,
+                    has_charger_xphb=has_charger_xphb,
+                    has_crossbow_expert=has_crossbow_expert,
+                    has_great_weapon_master=has_great_weapon_master,
+                    has_gunner=has_gunner,
+                    has_martial_adept=has_martial_adept,
+                    has_polearm_master=has_polearm_master,
+                    has_savage_attacker=has_savage_attacker,
+                    has_sharpshooter=has_sharpshooter,
+                    ranged_attack=False,
+                ),
+            ),
+            structured_mode_descriptors=structured_mode_descriptors,
+            variant_label="off-hand",
+            mode_key=ATTACK_MODE_WEAPON_OFF_HAND,
         )
     if has_crossbow_expert and crossbow_expert_bonus_context is not None:
         crossbow_profile = dict(crossbow_expert_bonus_context["profile"] or {})
@@ -5733,11 +5888,32 @@ def _build_level_one_attacks(
             has_sharpshooter=has_sharpshooter,
             ranged_attack=True,
         ) + ["Crossbow Expert bonus attack"]
-        attacks.append(
-            _build_weapon_attack_payload(
+        _append_weapon_attack_payloads(
+            attacks,
+            crossbow_expert_bonus_context,
+            attack_bonus=crossbow_attack_bonus,
+            damage_bonus=crossbow_damage_bonus,
+            extra_damage=None,
+            notes=_build_weapon_attack_notes(
+                crossbow_profile,
+                bonus_action=True,
+                great_weapon_fighting=False,
+                has_shield=has_shield,
+                ignore_loading=True,
+                off_hand_context=off_hand_context,
+                extra_notes=crossbow_extra_notes,
+            ),
+            structured_mode_descriptors=structured_mode_descriptors,
+            variant_label="crossbow expert",
+            mode_key=ATTACK_MODE_FEAT_CROSSBOW_EXPERT_BONUS,
+        )
+        if has_sharpshooter and _qualifies_for_sharpshooter(crossbow_expert_bonus_context):
+            _append_weapon_attack_payloads(
+                attacks,
                 crossbow_expert_bonus_context,
-                attack_bonus=crossbow_attack_bonus,
-                damage_bonus=crossbow_damage_bonus,
+                attack_bonus=crossbow_attack_bonus - 5,
+                damage_bonus=crossbow_damage_bonus + 10,
+                extra_damage=None,
                 notes=_build_weapon_attack_notes(
                     crossbow_profile,
                     bonus_action=True,
@@ -5745,32 +5921,11 @@ def _build_level_one_attacks(
                     has_shield=has_shield,
                     ignore_loading=True,
                     off_hand_context=off_hand_context,
-                    extra_notes=crossbow_extra_notes,
+                    extra_notes=crossbow_extra_notes + ["Sharpshooter (-5 attack, +10 damage)"],
                 ),
-                index=len(attacks) + 1,
-                variant_label="crossbow expert",
-                mode_key=ATTACK_MODE_FEAT_CROSSBOW_EXPERT_BONUS,
-            )
-        )
-        if has_sharpshooter and _qualifies_for_sharpshooter(crossbow_expert_bonus_context):
-            attacks.append(
-                _build_weapon_attack_payload(
-                    crossbow_expert_bonus_context,
-                    attack_bonus=crossbow_attack_bonus - 5,
-                    damage_bonus=crossbow_damage_bonus + 10,
-                    notes=_build_weapon_attack_notes(
-                        crossbow_profile,
-                        bonus_action=True,
-                        great_weapon_fighting=False,
-                        has_shield=has_shield,
-                        ignore_loading=True,
-                        off_hand_context=off_hand_context,
-                        extra_notes=crossbow_extra_notes + ["Sharpshooter (-5 attack, +10 damage)"],
-                    ),
-                    index=len(attacks) + 1,
-                    variant_label="crossbow expert, sharpshooter",
-                    mode_key=f"{ATTACK_MODE_FEAT_CROSSBOW_EXPERT_BONUS}|{ATTACK_MODE_FEAT_SHARPSHOOTER}",
-                )
+                structured_mode_descriptors=structured_mode_descriptors,
+                variant_label="crossbow expert, sharpshooter",
+                mode_key=f"{ATTACK_MODE_FEAT_CROSSBOW_EXPERT_BONUS}|{ATTACK_MODE_FEAT_SHARPSHOOTER}",
             )
     if has_tavern_brawler:
         attacks.append(
@@ -6047,6 +6202,62 @@ def _build_weapon_attack_payload(
     if clean_variant_label:
         payload["variant_label"] = clean_variant_label
     return payload
+
+
+def _append_weapon_attack_payloads(
+    attacks: list[dict[str, Any]],
+    context: dict[str, Any],
+    *,
+    attack_bonus: int,
+    damage_bonus: int,
+    extra_damage: str | None,
+    notes: str,
+    structured_mode_descriptors: list[dict[str, Any]] | None = None,
+    variant_label: str = "",
+    mode_key: str = "",
+    category_override: str | None = None,
+    profile_override: dict[str, Any] | None = None,
+) -> None:
+    payload = _build_weapon_attack_payload(
+        context,
+        attack_bonus=attack_bonus,
+        damage_bonus=damage_bonus,
+        extra_damage=extra_damage,
+        notes=notes,
+        index=len(attacks) + 1,
+        variant_label=variant_label,
+        mode_key=mode_key,
+        category_override=category_override,
+        profile_override=profile_override,
+    )
+    attacks.append(payload)
+    for descriptor in list(structured_mode_descriptors or []):
+        if not _attack_mode_descriptor_applies_to_context(
+            descriptor,
+            context,
+            category_override=category_override,
+            profile_override=profile_override,
+        ):
+            continue
+        descriptor_mode_component = str(descriptor.get("mode_component") or "").strip()
+        if not descriptor_mode_component:
+            continue
+        combined_mode_key = _normalize_attack_mode_key([payload.get("mode_key"), descriptor_mode_component])
+        attacks.append(
+            _build_weapon_attack_payload(
+                context,
+                attack_bonus=attack_bonus + int(descriptor.get("attack_delta") or 0),
+                damage_bonus=damage_bonus + int(descriptor.get("damage_delta") or 0),
+                extra_damage=_combine_attack_extra_damage(extra_damage, descriptor.get("extra_damage")),
+                notes=_append_attack_note_text(notes, descriptor.get("note")),
+                index=len(attacks) + 1,
+                mode_key=combined_mode_key,
+                category_override=category_override,
+                profile_override=profile_override,
+            )
+        )
+
+
 def _resolve_off_hand_attack_context(
     attack_contexts: list[dict[str, Any]],
     *,
