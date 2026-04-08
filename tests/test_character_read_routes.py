@@ -1651,6 +1651,64 @@ def test_session_active_widget_stays_on_quick_reference_only(client, sign_in, us
     assert "Save vitals" not in features_html
 
 
+def test_quick_reference_hides_item_backed_attacks_when_the_linked_item_is_not_equipped(app, client, sign_in, users):
+    def _mutate(payload: dict) -> None:
+        attacks = list(payload.get("attacks") or [])
+        if len(attacks) >= 2:
+            attacks[0]["equipment_refs"] = ["light-crossbow-1"]
+            attacks[1]["equipment_refs"] = ["quarterstaff-2"]
+        payload["attacks"] = attacks
+
+    def _mutate_state(payload: dict) -> None:
+        inventory = list(payload.get("inventory") or [])
+        for item in inventory:
+            item_ref = str(item.get("catalog_ref") or item.get("id") or "").strip()
+            if item_ref == "light-crossbow-1":
+                item["is_equipped"] = False
+            elif item_ref == "quarterstaff-2":
+                item["is_equipped"] = True
+        payload["inventory"] = inventory
+
+    _write_character_definition(app, "arden-march", _mutate)
+    _write_character_state(app, "arden-march", _mutate_state)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=quick")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+
+    assert html.count('class="attack-card"') == 1
+    assert "Quarterstaff" in html
+    assert "Hidden until equipped: Crossbow, Light." in html
+
+
+def test_quick_reference_can_fall_back_to_legacy_attack_name_matching_for_equipment_state(
+    app, client, sign_in, users
+):
+    def _mutate_state(payload: dict) -> None:
+        inventory = list(payload.get("inventory") or [])
+        for item in inventory:
+            item_ref = str(item.get("catalog_ref") or item.get("id") or "").strip()
+            if item_ref == "light-crossbow-1":
+                item["is_equipped"] = False
+            elif item_ref == "quarterstaff-2":
+                item["is_equipped"] = True
+        payload["inventory"] = inventory
+
+    _write_character_state(app, "arden-march", _mutate_state)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=quick")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+
+    assert html.count('class="attack-card"') == 1
+    assert "Quarterstaff" in html
+    assert "Hidden until equipped: Crossbow, Light." in html
+
+
 def test_character_sheet_renders_systems_links_when_present(app, client, sign_in, users):
     def _mutate(payload: dict) -> None:
         profile = dict(payload.get("profile") or {})

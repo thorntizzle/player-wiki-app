@@ -4116,6 +4116,7 @@ def test_level_one_builder_generates_attack_rows_from_starting_weapons():
     definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
 
     attacks_by_name = {attack["name"]: attack for attack in definition.attacks}
+    equipment_ids_by_name = {item["name"]: item["id"] for item in definition.equipment_catalog}
 
     assert "Longsword (+5, 1d8+3 slashing)" in context["preview"]["attacks"]
     assert "Light Crossbow (+5, 1d8+1 piercing)" in context["preview"]["attacks"]
@@ -4124,11 +4125,13 @@ def test_level_one_builder_generates_attack_rows_from_starting_weapons():
     assert attacks_by_name["Longsword"]["damage"] == "1d8+3 slashing"
     assert attacks_by_name["Longsword"]["notes"] == "Versatile (1d10)."
     assert attacks_by_name["Longsword"]["systems_ref"]["slug"] == "phb-item-longsword"
+    assert attacks_by_name["Longsword"]["equipment_refs"] == [equipment_ids_by_name["Longsword"]]
     assert attacks_by_name["Light Crossbow"]["category"] == "ranged weapon"
     assert attacks_by_name["Light Crossbow"]["attack_bonus"] == 5
     assert attacks_by_name["Light Crossbow"]["damage"] == "1d8+1 piercing"
     assert attacks_by_name["Light Crossbow"]["notes"] == "Ammunition, loading, range 80/320."
     assert attacks_by_name["Light Crossbow"]["systems_ref"]["slug"] == "phb-item-light-crossbow"
+    assert attacks_by_name["Light Crossbow"]["equipment_refs"] == [equipment_ids_by_name["Light Crossbow"]]
 
 
 def test_level_one_builder_derives_armor_class_from_starting_armor_and_shield():
@@ -4428,15 +4431,19 @@ def test_level_one_builder_generates_off_hand_attack_and_two_weapon_fighting_dam
     context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
     definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
     attacks_by_name = {attack["name"]: attack for attack in definition.attacks}
+    handaxe_id = next(item["id"] for item in definition.equipment_catalog if item["name"] == "Handaxe")
 
     assert "Handaxe (+5, 1d6+3 slashing)" in context["preview"]["attacks"]
     assert "Handaxe (thrown) (+5, 1d6+3 slashing)" in context["preview"]["attacks"]
     assert "Handaxe (off-hand) (+5, 1d6+3 slashing)" in context["preview"]["attacks"]
     assert attacks_by_name["Handaxe"]["notes"] == ""
+    assert attacks_by_name["Handaxe"]["equipment_refs"] == [handaxe_id]
     assert attacks_by_name["Handaxe (thrown)"]["category"] == "ranged weapon"
     assert attacks_by_name["Handaxe (thrown)"]["notes"] == "range 20/60."
+    assert attacks_by_name["Handaxe (thrown)"]["equipment_refs"] == [handaxe_id]
     assert attacks_by_name["Handaxe (off-hand)"]["damage"] == "1d6+3 slashing"
     assert attacks_by_name["Handaxe (off-hand)"]["notes"] == "range 20/60, Bonus action."
+    assert attacks_by_name["Handaxe (off-hand)"]["equipment_refs"] == [handaxe_id]
 
 
 def test_level_one_builder_generates_dual_wielder_off_hand_attack_for_non_light_weapons():

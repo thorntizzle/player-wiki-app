@@ -198,32 +198,41 @@
         </section>
       {% endif %}
 
-      {% if show_quick_sections and character.attacks %}
+      {% if show_quick_sections and (character.attacks or character.hidden_attacks) %}
         <section class="read-section">
           <div class="section-heading">
             <h2>Attacks</h2>
           </div>
-          <div class="attack-grid">
-            {% for attack in character.attacks %}
-              <article class="attack-card">
-                <div class="section-heading">
-                  <h3>
-                    {% if attack.href %}
-                      <a href="{{ attack.href }}">{{ attack.name }}</a>
-                    {% else %}
-                      {{ attack.name }}
-                    {% endif %}
-                  </h3>
-                  <span class="meta">{{ attack.category }}</span>
-                </div>
-                <p><strong>{{ attack.attack_bonus }}</strong> to hit</p>
-                <p><strong>{{ attack.damage }}</strong></p>
-                {% if attack.notes %}
-                  <p class="meta">{{ attack.notes }}</p>
-                {% endif %}
-              </article>
-            {% endfor %}
-          </div>
+          {% if character.attacks %}
+            <div class="attack-grid">
+              {% for attack in character.attacks %}
+                <article class="attack-card">
+                  <div class="section-heading">
+                    <h3>
+                      {% if attack.href %}
+                        <a href="{{ attack.href }}">{{ attack.name }}</a>
+                      {% else %}
+                        {{ attack.name }}
+                      {% endif %}
+                    </h3>
+                    <span class="meta">{{ attack.category }}</span>
+                  </div>
+                  <p><strong>{{ attack.attack_bonus }}</strong> to hit</p>
+                  <p><strong>{{ attack.damage }}</strong></p>
+                  {% if attack.notes %}
+                    <p class="meta">{{ attack.notes }}</p>
+                  {% endif %}
+                </article>
+              {% endfor %}
+            </div>
+          {% else %}
+            <article class="detail-card">
+              <p class="meta">No equipped or untracked attacks are currently active on this sheet.</p>
+            </article>
+          {% endif %}
+          {% if character.hidden_attacks %}
+            <p class="meta">Hidden until equipped: {{ character.hidden_attacks | join(", ") }}.</p>
+          {% endif %}
         </section>
       {% endif %}
 

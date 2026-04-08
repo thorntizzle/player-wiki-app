@@ -4953,6 +4953,7 @@ def _build_weapon_attack_payload(
 ) -> dict[str, Any]:
     profile = dict(profile_override or context["profile"] or {})
     attack_name = f"{str(context.get('attack_name') or '').strip()}{name_suffix}"
+    equipment_ref = str(dict(context.get("item") or {}).get("id") or "").strip()
     return {
         "id": f"{slugify(attack_name)}-{index}",
         "name": attack_name,
@@ -4962,6 +4963,7 @@ def _build_weapon_attack_payload(
         "damage_type": DAMAGE_TYPE_LABELS.get(str(profile.get("damage_type") or "").strip().upper(), ""),
         "notes": notes,
         "systems_ref": dict(dict(context.get("item") or {}).get("systems_ref") or {}) or None,
+        "equipment_refs": [equipment_ref] if equipment_ref else [],
     }
 
 
@@ -11063,6 +11065,15 @@ def _normalize_attack_payloads(
             payload["systems_ref"] = systems_ref
         else:
             payload.pop("systems_ref", None)
+        equipment_refs = _normalize_attack_equipment_refs(
+            payload.get("equipment_refs"),
+            fallback=payload.get("equipment_ref"),
+        )
+        if equipment_refs:
+            payload["equipment_refs"] = equipment_refs
+        else:
+            payload.pop("equipment_refs", None)
+        payload.pop("equipment_ref", None)
         normalized_page_ref = _normalize_page_ref_payload(payload.get("page_ref"))
         if normalized_page_ref is not None:
             payload["page_ref"] = normalized_page_ref
@@ -11118,6 +11129,14 @@ def _normalize_attack_payloads(
             existing_payload["systems_ref"] = dict(payload.get("systems_ref") or {})
         if not existing_payload.get("page_ref") and payload.get("page_ref"):
             existing_payload["page_ref"] = payload.get("page_ref")
+        merged_equipment_refs = _normalize_attack_equipment_refs(
+            [
+                *list(existing_payload.get("equipment_refs") or []),
+                *list(payload.get("equipment_refs") or []),
+            ]
+        )
+        if merged_equipment_refs:
+            existing_payload["equipment_refs"] = merged_equipment_refs
         updated_explicit_identity = _normalize_explicit_link_identity(
             systems_ref=dict(existing_payload.get("systems_ref") or {}),
             page_ref=existing_payload.get("page_ref"),
@@ -11132,6 +11151,31 @@ def _normalize_attack_payloads(
         for candidate_key in updated_keys:
             index_by_key[candidate_key] = existing_index
     return normalized_attacks
+
+
+def _normalize_attack_equipment_refs(
+    raw_refs: Any,
+    *,
+    fallback: Any = None,
+) -> list[str]:
+    values = raw_refs
+    if values is None or values == "" or values == [] or values == ():
+        values = fallback
+    if values is None or values == "" or values == [] or values == ():
+        return []
+    if isinstance(values, (list, tuple, set)):
+        candidates = list(values)
+    else:
+        candidates = [values]
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        clean_value = str(candidate or "").strip()
+        if not clean_value or clean_value in seen:
+            continue
+        seen.add(clean_value)
+        normalized.append(clean_value)
+    return normalized
 
 
 def _normalize_equipment_payloads(

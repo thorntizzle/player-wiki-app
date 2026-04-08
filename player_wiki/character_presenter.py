@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+import re
 from typing import Any
 
 import markdown
 
 from .character_models import CharacterRecord
 from .models import Campaign
-from .repository import build_alias_index, render_obsidian_links
+from .repository import build_alias_index, normalize_lookup, render_obsidian_links
 
 ABILITY_ORDER = (
     ("str", "strength", "Strength"),
@@ -39,6 +40,7 @@ REDUNDANT_PASSIVE_FEATURE_NAMES = {
     "martial archetype",
     "psi warrior",
 }
+ATTACK_NAME_SUFFIX_PATTERN = re.compile(r"\s*\([^)]*\)\s*$")
 
 
 def present_character_roster(records: list[CharacterRecord]) -> list[dict[str, Any]]:
@@ -105,6 +107,11 @@ def present_character_detail(
         str(item.get("id") or ""): dict(item or {})
         for item in list(definition.equipment_catalog or [])
         if str(item.get("id") or "").strip()
+    }
+    inventory_lookup = {
+        build_character_inventory_item_ref(item): dict(item or {})
+        for item in list(state.get("inventory") or [])
+        if build_character_inventory_item_ref(item)
     }
 
     overview_stats = [
@@ -287,21 +294,38 @@ def present_character_detail(
             }
         )
 
-    attacks = [
-        {
-            "name": str(attack.get("name") or "Attack"),
-            "href": build_character_entry_href(
-                campaign.slug,
-                systems_ref=attack.get("systems_ref"),
-                page_ref=attack.get("page_ref"),
-            ),
-            "attack_bonus": format_signed(attack.get("attack_bonus")),
-            "damage": str(attack.get("damage") or "--"),
-            "category": humanize_value(attack.get("category")),
-            "notes": str(attack.get("notes") or "").strip(),
-        }
-        for attack in list(definition.attacks or [])
-    ]
+    attacks = []
+    hidden_attacks: list[str] = []
+    for attack in list(definition.attacks or []):
+        linked_item_refs = resolve_attack_linked_item_refs(
+            attack,
+            inventory_lookup=inventory_lookup,
+            equipment_catalog_lookup=equipment_catalog_lookup,
+        )
+        attack_is_equipped = resolve_attack_equipped_state(
+            linked_item_refs,
+            inventory_lookup=inventory_lookup,
+            equipment_catalog_lookup=equipment_catalog_lookup,
+        )
+        if attack_is_equipped is False:
+            hidden_attacks.append(str(attack.get("name") or "Attack"))
+            continue
+        attacks.append(
+            {
+                "name": str(attack.get("name") or "Attack"),
+                "href": build_character_entry_href(
+                    campaign.slug,
+                    systems_ref=attack.get("systems_ref"),
+                    page_ref=attack.get("page_ref"),
+                ),
+                "attack_bonus": format_signed(attack.get("attack_bonus")),
+                "damage": str(attack.get("damage") or "--"),
+                "category": humanize_value(attack.get("category")),
+                "notes": str(attack.get("notes") or "").strip(),
+                "linked_item_refs": linked_item_refs,
+                "is_equipped": attack_is_equipped,
+            }
+        )
 
     inventory = [
         {
@@ -426,6 +450,7 @@ def present_character_detail(
         "proficiency_groups": proficiency_groups,
         "resources": resources,
         "attacks": attacks,
+        "hidden_attacks": dedupe_values(hidden_attacks),
         "feature_groups": feature_groups,
         "spellcasting": spellcasting,
         "inventory": inventory,
@@ -436,6 +461,151 @@ def present_character_detail(
         "other_currency": other_currency,
         "reference_sections": reference_sections,
     }
+
+
+def build_character_inventory_item_ref(item: Any) -> str:
+    payload = dict(item or {}) if isinstance(item, dict) else {}
+    return str(payload.get("catalog_ref") or payload.get("id") or "").strip()
+
+
+def resolve_attack_linked_item_refs(
+    attack: dict[str, Any],
+    *,
+    inventory_lookup: dict[str, dict[str, Any]],
+    equipment_catalog_lookup: dict[str, dict[str, Any]],
+) -> list[str]:
+    explicit_refs = normalize_attack_equipment_refs(attack)
+    if explicit_refs:
+        return explicit_refs
+    linked_refs: list[str] = []
+    attack_systems_slug = str(dict(attack.get("systems_ref") or {}).get("slug") or "").strip()
+    attack_page_slug = normalize_page_ref_slug(attack.get("page_ref"))
+    attack_name_candidates = build_attack_name_candidates(attack)
+    for item_ref, equipment_item in equipment_catalog_lookup.items():
+        if not item_ref:
+            continue
+        inventory_item = dict(inventory_lookup.get(item_ref) or {})
+        item_systems_slug = str(dict(equipment_item.get("systems_ref") or {}).get("slug") or "").strip()
+        item_page_slug = normalize_page_ref_slug(equipment_item.get("page_ref"))
+        if attack_systems_slug and attack_systems_slug == item_systems_slug:
+            linked_refs.append(item_ref)
+            continue
+        if attack_page_slug and attack_page_slug == item_page_slug:
+            linked_refs.append(item_ref)
+            continue
+        item_name_candidates = build_equipment_name_candidates(equipment_item, inventory_item)
+        if attack_name_candidates and item_name_candidates and attack_name_candidates.intersection(item_name_candidates):
+            linked_refs.append(item_ref)
+    return dedupe_values(linked_refs)
+
+
+def resolve_attack_equipped_state(
+    linked_item_refs: list[str],
+    *,
+    inventory_lookup: dict[str, dict[str, Any]],
+    equipment_catalog_lookup: dict[str, dict[str, Any]],
+) -> bool | None:
+    if not linked_item_refs:
+        return None
+    saw_linked_item = False
+    for item_ref in linked_item_refs:
+        inventory_item = dict(inventory_lookup.get(item_ref) or {})
+        equipment_item = dict(equipment_catalog_lookup.get(item_ref) or {})
+        quantity = int(
+            inventory_item.get("quantity")
+            or equipment_item.get("default_quantity")
+            or 0
+        )
+        if quantity <= 0:
+            continue
+        saw_linked_item = True
+        if bool(inventory_item.get("is_equipped", equipment_item.get("is_equipped", False))):
+            return True
+    if not saw_linked_item:
+        return None
+    return False
+
+
+def normalize_attack_equipment_refs(attack: dict[str, Any]) -> list[str]:
+    raw_refs = attack.get("equipment_refs")
+    if raw_refs is None:
+        raw_refs = attack.get("equipment_ref")
+    if raw_refs is None or raw_refs == "" or raw_refs == [] or raw_refs == ():
+        return []
+    if isinstance(raw_refs, (list, tuple, set)):
+        candidates = list(raw_refs)
+    else:
+        candidates = [raw_refs]
+    return dedupe_values(str(candidate or "").strip() for candidate in candidates if str(candidate or "").strip())
+
+
+def build_attack_name_candidates(attack: dict[str, Any]) -> set[str]:
+    candidates: set[str] = set()
+    for value in (
+        attack.get("name"),
+        dict(attack.get("systems_ref") or {}).get("title"),
+        dict(attack.get("page_ref") or {}).get("title"),
+    ):
+        candidates.update(build_name_lookup_candidates(value))
+    return candidates
+
+
+def build_equipment_name_candidates(
+    equipment_item: dict[str, Any],
+    inventory_item: dict[str, Any],
+) -> set[str]:
+    candidates: set[str] = set()
+    for value in (
+        equipment_item.get("name"),
+        inventory_item.get("name"),
+        dict(equipment_item.get("systems_ref") or {}).get("title"),
+        dict(equipment_item.get("page_ref") or {}).get("title"),
+    ):
+        candidates.update(build_name_lookup_candidates(value))
+    return candidates
+
+
+def build_name_lookup_candidates(value: Any) -> set[str]:
+    clean_value = strip_attack_name_suffixes(value)
+    if not clean_value:
+        return set()
+    candidates = {normalize_lookup(clean_value)}
+    if "," in clean_value:
+        comma_parts = [part.strip() for part in clean_value.split(",") if part.strip()]
+        if len(comma_parts) >= 2:
+            candidates.add(normalize_lookup(" ".join([*comma_parts[1:], comma_parts[0]])))
+    return {candidate for candidate in candidates if candidate}
+
+
+def strip_attack_name_suffixes(value: Any) -> str:
+    clean_value = str(value or "").strip()
+    if not clean_value:
+        return ""
+    previous_value = None
+    while clean_value and previous_value != clean_value:
+        previous_value = clean_value
+        clean_value = ATTACK_NAME_SUFFIX_PATTERN.sub("", clean_value).strip()
+    return clean_value
+
+
+def normalize_page_ref_slug(page_ref: Any) -> str:
+    payload = dict(page_ref or {}) if isinstance(page_ref, dict) else {}
+    slug = str(payload.get("slug") or payload.get("page_slug") or "").strip()
+    if slug:
+        return slug
+    return str(page_ref or "").strip()
+
+
+def dedupe_values(values: Any) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        clean_value = str(value or "").strip()
+        if not clean_value or clean_value in seen:
+            continue
+        seen.add(clean_value)
+        ordered.append(clean_value)
+    return ordered
 
 
 def build_reference_sections(
