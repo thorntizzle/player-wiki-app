@@ -10,6 +10,7 @@ from player_wiki.character_campaign_progression import build_campaign_page_progr
 from player_wiki.character_builder import (
     CHARACTER_BUILDER_VERSION,
     _list_campaign_enabled_entries,
+    _recalculate_definition_attacks,
     _resolve_builder_choices,
     apply_imported_progression_repairs,
     build_native_level_up_character_definition,
@@ -2949,6 +2950,182 @@ def test_normalize_definition_to_native_model_merges_linked_duplicate_attack_row
     assert normalized.attacks[0]["systems_ref"]["slug"] == "phb-item-longsword"
 
 
+def test_normalize_definition_to_native_model_merges_linked_duplicate_attack_rows_with_same_mode_key():
+    definition = _minimal_character_definition("mira-salt", "Mira Salt")
+    definition.attacks = [
+        {
+            "id": "huron-blade-sharp-1",
+            "name": "Huron Blade (sharpshooter)",
+            "category": "weapon",
+            "attack_bonus": 1,
+            "damage": "1d8+13 slashing",
+            "damage_type": "slashing",
+            "notes": "Sharpshooter (-5 attack, +10 damage).",
+            "mode_key": "feat:phb-feat-sharpshooter",
+            "variant_label": "sharpshooter",
+            "equipment_refs": ["huron-blade-1"],
+        },
+        {
+            "id": "longsword-sharp-2",
+            "name": "Longsword (sharpshooter)",
+            "category": "weapon",
+            "attack_bonus": 1,
+            "damage": "1d8+13 slashing",
+            "damage_type": "slashing",
+            "notes": "Sharpshooter (-5 attack, +10 damage).",
+            "equipment_refs": ["huron-blade-1"],
+        },
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+
+    assert len(normalized.attacks) == 1
+    assert normalized.attacks[0]["mode_key"] == "feat:phb-feat-sharpshooter"
+    assert normalized.attacks[0]["variant_label"] == "sharpshooter"
+    assert normalized.attacks[0]["equipment_refs"] == ["huron-blade-1"]
+
+
+def test_normalize_definition_to_native_model_keeps_linked_attack_rows_separate_when_mode_keys_differ():
+    definition = _minimal_character_definition("mira-salt", "Mira Salt")
+    definition.attacks = [
+        {
+            "id": "longsword-sharp-1",
+            "name": "Longsword (sharpshooter)",
+            "category": "weapon",
+            "attack_bonus": 1,
+            "damage": "1d8+13 slashing",
+            "damage_type": "slashing",
+            "notes": "Sharpshooter (-5 attack, +10 damage).",
+            "equipment_refs": ["longsword-1"],
+        },
+        {
+            "id": "longsword-charger-2",
+            "name": "Longsword (charger)",
+            "category": "weapon",
+            "attack_bonus": 1,
+            "damage": "1d8+13 slashing",
+            "damage_type": "slashing",
+            "notes": "Charger (move 10 feet straight, +1d8 damage, once per turn).",
+            "equipment_refs": ["longsword-1"],
+        },
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+    attacks_by_name = {attack["name"]: attack for attack in normalized.attacks}
+
+    assert len(normalized.attacks) == 2
+    assert attacks_by_name["Longsword (sharpshooter)"]["mode_key"] == "feat:phb-feat-sharpshooter"
+    assert attacks_by_name["Longsword (charger)"]["mode_key"] == "feat:xphb-feat-charger"
+
+
+def test_normalize_definition_to_native_model_infers_legacy_attack_mode_metadata_from_suffix():
+    definition = _minimal_character_definition("mira-salt", "Mira Salt")
+    definition.attacks = [
+        {
+            "id": "crossbow-expert-1",
+            "name": "Hand Crossbow (crossbow expert, sharpshooter)",
+            "category": "ranged weapon",
+            "attack_bonus": 1,
+            "damage": "1d6+13 piercing",
+            "damage_type": "piercing",
+            "notes": (
+                "Ammunition, range 30/120, Bonus action, Crossbow Expert bonus attack, "
+                "Sharpshooter (-5 attack, +10 damage)."
+            ),
+            "equipment_refs": ["hand-crossbow-1"],
+        }
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+
+    assert normalized.attacks[0]["mode_key"] == "feat:phb-feat-crossbow-expert:bonus|feat:phb-feat-sharpshooter"
+    assert normalized.attacks[0]["variant_label"] == "crossbow expert, sharpshooter"
+
+
+def test_normalize_definition_to_native_model_leaves_unrecognized_imported_attack_suffix_as_notes_only():
+    definition = _minimal_imported_character_definition("mira-salt", "Mira Salt")
+    definition.attacks = [
+        {
+            "id": "greatsword-slayer-1",
+            "name": "Greatsword (slayer)",
+            "category": "weapon",
+            "attack_bonus": 6,
+            "damage": "2d6+3 slashing",
+            "damage_type": "slashing",
+            "notes": "Bonus attack on crit or kill.",
+        }
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+
+    assert normalized.attacks[0]["name"] == "Greatsword (slayer)"
+    assert normalized.attacks[0]["notes"] == "Bonus attack on crit or kill."
+    assert "mode_key" not in normalized.attacks[0]
+    assert "variant_label" not in normalized.attacks[0]
+
+
+def test_recalculate_definition_attacks_preserves_mode_identity_for_supported_variants():
+    hand_crossbow = _systems_entry("item", "phb-item-hand-crossbow", "Hand Crossbow", metadata={"weight": 3})
+    definition = _minimal_character_definition("bolt-dancer", "Bolt Dancer")
+    definition.stats["ability_scores"]["dex"] = {"score": 16, "modifier": 3, "save_bonus": 3}
+    definition.proficiencies["weapons"] = ["Simple Weapons", "Martial Weapons"]
+    definition.equipment_catalog = [
+        {
+            "id": "hand-crossbow-1",
+            "name": "Hand Crossbow",
+            "default_quantity": 1,
+            "weight": "3 lb.",
+            "notes": "",
+            "is_equipped": True,
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": hand_crossbow.slug,
+                "title": hand_crossbow.title,
+                "source_id": "PHB",
+            },
+        }
+    ]
+    definition.features = [
+        {
+            "id": "sharpshooter-1",
+            "name": "Sharpshooter",
+            "category": "feat",
+            "systems_ref": {
+                "entry_type": "feat",
+                "slug": "phb-feat-sharpshooter",
+                "title": "Sharpshooter",
+                "source_id": "PHB",
+            },
+        },
+        {
+            "id": "crossbow-expert-1",
+            "name": "Crossbow Expert",
+            "category": "feat",
+            "systems_ref": {
+                "entry_type": "feat",
+                "slug": "phb-feat-crossbow-expert",
+                "title": "Crossbow Expert",
+                "source_id": "PHB",
+            },
+        },
+    ]
+
+    recalculated = _recalculate_definition_attacks(
+        definition,
+        item_catalog={
+            "by_title": {"hand crossbow": hand_crossbow},
+            "by_slug": {hand_crossbow.slug: hand_crossbow},
+        },
+    )
+    attacks_by_name = {attack["name"]: attack for attack in recalculated}
+
+    assert attacks_by_name["Hand Crossbow (sharpshooter)"]["mode_key"] == "feat:phb-feat-sharpshooter"
+    assert attacks_by_name["Hand Crossbow (crossbow expert)"]["mode_key"] == "feat:phb-feat-crossbow-expert:bonus"
+    assert attacks_by_name["Hand Crossbow (crossbow expert, sharpshooter)"]["mode_key"] == (
+        "feat:phb-feat-crossbow-expert:bonus|feat:phb-feat-sharpshooter"
+    )
+
+
 def test_normalize_definition_to_native_model_merges_linked_duplicate_equipment_rows_when_names_differ():
     definition = _minimal_character_definition("mira-salt", "Mira Salt")
     definition.equipment_catalog = [
@@ -4960,9 +5137,13 @@ def test_level_one_builder_generates_off_hand_attack_and_two_weapon_fighting_dam
     assert attacks_by_name["Handaxe"]["equipment_refs"] == [handaxe_id]
     assert attacks_by_name["Handaxe (thrown)"]["category"] == "ranged weapon"
     assert attacks_by_name["Handaxe (thrown)"]["notes"] == "range 20/60."
+    assert attacks_by_name["Handaxe (thrown)"]["mode_key"] == "weapon:thrown"
+    assert attacks_by_name["Handaxe (thrown)"]["variant_label"] == "thrown"
     assert attacks_by_name["Handaxe (thrown)"]["equipment_refs"] == [handaxe_id]
     assert attacks_by_name["Handaxe (off-hand)"]["damage"] == "1d6+3 slashing"
     assert attacks_by_name["Handaxe (off-hand)"]["notes"] == "range 20/60, Bonus action."
+    assert attacks_by_name["Handaxe (off-hand)"]["mode_key"] == "weapon:off-hand"
+    assert attacks_by_name["Handaxe (off-hand)"]["variant_label"] == "off-hand"
     assert attacks_by_name["Handaxe (off-hand)"]["equipment_refs"] == [handaxe_id]
 
 
@@ -5056,6 +5237,7 @@ def test_level_one_builder_generates_dual_wielder_off_hand_attack_for_non_light_
     assert attacks_by_name["Longsword"]["notes"] == "Versatile (1d10)."
     assert attacks_by_name["Longsword (off-hand)"]["damage"] == "1d8 slashing"
     assert attacks_by_name["Longsword (off-hand)"]["notes"] == "Bonus action."
+    assert attacks_by_name["Longsword (off-hand)"]["mode_key"] == "weapon:off-hand"
 
 
 def test_level_one_builder_generates_phb_charger_bonus_attack_row():
@@ -5139,6 +5321,8 @@ def test_level_one_builder_generates_phb_charger_bonus_attack_row():
 
     assert "Greatsword (charger) (+5, 2d6+8 slashing)" in context["preview"]["attacks"]
     assert attacks_by_name["Greatsword (charger)"]["notes"] == "Bonus action, Charger (after Dash, move 10 feet straight for +5 damage)."
+    assert attacks_by_name["Greatsword (charger)"]["mode_key"] == "feat:phb-feat-charger"
+    assert attacks_by_name["Greatsword (charger)"]["variant_label"] == "charger"
 
 
 def test_level_one_builder_generates_xphb_charger_attack_profile():
@@ -5222,6 +5406,8 @@ def test_level_one_builder_generates_xphb_charger_attack_profile():
 
     assert "Greatsword (charger) (+5, 2d6+1d8+3 slashing)" in context["preview"]["attacks"]
     assert attacks_by_name["Greatsword (charger)"]["notes"] == "Charger (move 10 feet straight, +1d8 damage, once per turn)."
+    assert attacks_by_name["Greatsword (charger)"]["mode_key"] == "feat:xphb-feat-charger"
+    assert attacks_by_name["Greatsword (charger)"]["variant_label"] == "charger"
 
 
 def test_level_one_builder_applies_gunner_to_firearm_attacks():
@@ -5730,6 +5916,8 @@ def test_level_one_builder_populates_starting_equipment_spells_and_currency():
     assert initial_state["currency"]["gp"] == 5
     assert attacks_by_name["Quarterstaff"]["notes"] == ""
     assert attacks_by_name["Quarterstaff (two-handed)"]["damage"] == "1d8-1 bludgeoning"
+    assert attacks_by_name["Quarterstaff (two-handed)"]["mode_key"] == "weapon:two-handed"
+    assert attacks_by_name["Quarterstaff (two-handed)"]["variant_label"] == "two-handed"
     assert spells_by_name["Light"]["mark"] == "Cantrip"
     assert spells_by_name["Magic Missile"]["mark"] == "Prepared + Spellbook"
     assert spells_by_name["Find Familiar"]["mark"] == "Spellbook"
@@ -12353,6 +12541,8 @@ def test_level_one_builder_adds_crossbow_expert_bonus_attack_rows():
         "Ammunition, range 30/120, Bonus action, Crossbow Expert (ignore loading, no adjacent disadvantage), "
         "Crossbow Expert bonus attack."
     )
+    assert attacks_by_name["Hand Crossbow (crossbow expert)"]["mode_key"] == "feat:phb-feat-crossbow-expert:bonus"
+    assert attacks_by_name["Hand Crossbow (crossbow expert)"]["variant_label"] == "crossbow expert"
 
 
 def test_level_one_builder_adds_polearm_master_attack_rows():
@@ -12444,6 +12634,8 @@ def test_level_one_builder_adds_polearm_master_attack_rows():
     assert attacks_by_name["Glaive (polearm master)"]["attack_bonus"] == 5
     assert attacks_by_name["Glaive (polearm master)"]["damage"] == "1d4+3 bludgeoning"
     assert attacks_by_name["Glaive (polearm master)"]["notes"] == "Bonus action, Polearm Master bonus attack."
+    assert attacks_by_name["Glaive (polearm master)"]["mode_key"] == "feat:phb-feat-polearm-master:bonus"
+    assert attacks_by_name["Glaive (polearm master)"]["variant_label"] == "polearm master"
 
 
 def test_native_level_up_preserves_ranged_feat_attack_variants():
@@ -12548,6 +12740,7 @@ def test_native_level_up_preserves_ranged_feat_attack_variants():
         "Ammunition, range 80/320, Crossbow Expert (ignore loading, no adjacent disadvantage), "
         "Sharpshooter (ignore cover, no long-range disadvantage), Sharpshooter (-5 attack, +10 damage)."
     )
+    assert attacks_by_name["Light Crossbow (sharpshooter)"]["mode_key"] == "feat:phb-feat-sharpshooter"
 
 
 def test_native_level_up_preserves_crossbow_expert_bonus_attack_rows():
@@ -12664,6 +12857,10 @@ def test_native_level_up_preserves_crossbow_expert_bonus_attack_rows():
         "Sharpshooter (ignore cover, no long-range disadvantage), Crossbow Expert bonus attack, "
         "Sharpshooter (-5 attack, +10 damage)."
     )
+    assert attacks_by_name["Hand Crossbow (crossbow expert)"]["mode_key"] == "feat:phb-feat-crossbow-expert:bonus"
+    assert attacks_by_name["Hand Crossbow (crossbow expert, sharpshooter)"]["mode_key"] == (
+        "feat:phb-feat-crossbow-expert:bonus|feat:phb-feat-sharpshooter"
+    )
 
 
 def test_native_level_up_preserves_polearm_master_attack_rows():
@@ -12758,6 +12955,7 @@ def test_native_level_up_preserves_polearm_master_attack_rows():
     assert attacks_by_name["Glaive (polearm master)"]["attack_bonus"] == 6
     assert attacks_by_name["Glaive (polearm master)"]["damage"] == "1d4+3 bludgeoning"
     assert attacks_by_name["Glaive (polearm master)"]["notes"] == "Bonus action, Polearm Master bonus attack."
+    assert attacks_by_name["Glaive (polearm master)"]["mode_key"] == "feat:phb-feat-polearm-master:bonus"
 
 
 def test_native_level_up_applies_fighting_initiate_optionalfeature_choice_to_attacks():
@@ -13084,6 +13282,8 @@ def test_native_level_up_adds_martial_adept_resource_and_preserves_melee_feat_va
         "Great Weapon Master (bonus attack on crit or kill), Martial Adept maneuvers available, "
         "Savage Attacker (reroll damage once per turn), Great Weapon Master (-5 attack, +10 damage)."
     )
+    assert attacks_by_name["Greatsword (great weapon master)"]["mode_key"] == "feat:phb-feat-great-weapon-master"
+    assert attacks_by_name["Greatsword (great weapon master)"]["variant_label"] == "great weapon master"
     assert martial_adept_feature["tracker_ref"] == "martial-adept"
     assert resources_by_id["martial-adept"]["max"] == 1
     assert resources_by_id["martial-adept"]["reset_on"] == "short_rest"

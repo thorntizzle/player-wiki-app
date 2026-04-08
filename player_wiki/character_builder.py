@@ -21,7 +21,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-04-08.03"
+CHARACTER_BUILDER_VERSION = "2026-04-08.04"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -38,6 +38,38 @@ CAMPAIGN_PAGE_OPTION_PREFIX = "page:"
 SYSTEMS_OPTION_PREFIX = "systems:"
 CAMPAIGN_PAGE_SOURCE_ID = "Campaign"
 CHOICE_SECTIONS_REGION_ID = "choice-sections"
+ATTACK_NAME_SUFFIX_PATTERN = re.compile(r"\s*\(([^)]*)\)\s*$")
+ATTACK_MODE_WEAPON_THROWN = "weapon:thrown"
+ATTACK_MODE_WEAPON_TWO_HANDED = "weapon:two-handed"
+ATTACK_MODE_WEAPON_OFF_HAND = "weapon:off-hand"
+ATTACK_MODE_FEAT_CHARGER_PHB = "feat:phb-feat-charger"
+ATTACK_MODE_FEAT_CHARGER_XPHB = "feat:xphb-feat-charger"
+ATTACK_MODE_FEAT_CROSSBOW_EXPERT_BONUS = "feat:phb-feat-crossbow-expert:bonus"
+ATTACK_MODE_FEAT_GREAT_WEAPON_MASTER = "feat:phb-feat-great-weapon-master"
+ATTACK_MODE_FEAT_POLEARM_MASTER_BONUS = "feat:phb-feat-polearm-master:bonus"
+ATTACK_MODE_FEAT_SHARPSHOOTER = "feat:phb-feat-sharpshooter"
+ATTACK_MODE_COMPONENT_LABELS = {
+    ATTACK_MODE_WEAPON_THROWN: "thrown",
+    ATTACK_MODE_WEAPON_TWO_HANDED: "two-handed",
+    ATTACK_MODE_WEAPON_OFF_HAND: "off-hand",
+    ATTACK_MODE_FEAT_CHARGER_PHB: "charger",
+    ATTACK_MODE_FEAT_CHARGER_XPHB: "charger",
+    ATTACK_MODE_FEAT_CROSSBOW_EXPERT_BONUS: "crossbow expert",
+    ATTACK_MODE_FEAT_GREAT_WEAPON_MASTER: "great weapon master",
+    ATTACK_MODE_FEAT_POLEARM_MASTER_BONUS: "polearm master",
+    ATTACK_MODE_FEAT_SHARPSHOOTER: "sharpshooter",
+}
+ATTACK_MODE_COMPONENT_PRIORITY = {
+    ATTACK_MODE_FEAT_CROSSBOW_EXPERT_BONUS: 10,
+    ATTACK_MODE_FEAT_POLEARM_MASTER_BONUS: 20,
+    ATTACK_MODE_FEAT_GREAT_WEAPON_MASTER: 30,
+    ATTACK_MODE_FEAT_SHARPSHOOTER: 40,
+    ATTACK_MODE_FEAT_CHARGER_PHB: 50,
+    ATTACK_MODE_FEAT_CHARGER_XPHB: 50,
+    ATTACK_MODE_WEAPON_OFF_HAND: 60,
+    ATTACK_MODE_WEAPON_TWO_HANDED: 70,
+    ATTACK_MODE_WEAPON_THROWN: 80,
+}
 PREVIEW_SUMMARY_REGION_ID = "preview-summary"
 PREVIEW_FEATURES_REGION_ID = "preview-features"
 PREVIEW_RESOURCES_REGION_ID = "preview-resources"
@@ -2789,6 +2821,173 @@ def _effect_weapon_damage_bonus(effect_keys: list[str]) -> int:
     return bonus
 
 
+def _attack_mode_component_sort_key(component: str) -> tuple[int, str]:
+    clean_component = str(component or "").strip().casefold()
+    return (int(ATTACK_MODE_COMPONENT_PRIORITY.get(clean_component, 999)), clean_component)
+
+
+def _normalize_attack_mode_key(value: Any) -> str:
+    if isinstance(value, str):
+        raw_components = value.split("|")
+    elif isinstance(value, (list, tuple, set)):
+        raw_components = list(value)
+    else:
+        return ""
+    components: list[str] = []
+    seen: set[str] = set()
+    for raw_component in raw_components:
+        clean_component = str(raw_component or "").strip().casefold()
+        if not clean_component or clean_component in seen:
+            continue
+        seen.add(clean_component)
+        components.append(clean_component)
+    return "|".join(sorted(components, key=_attack_mode_component_sort_key))
+
+
+def _attack_mode_components(mode_key: Any) -> list[str]:
+    normalized_mode_key = _normalize_attack_mode_key(mode_key)
+    if not normalized_mode_key:
+        return []
+    return [component for component in normalized_mode_key.split("|") if component]
+
+
+def _attack_variant_label_from_mode_key(mode_key: Any) -> str:
+    labels: list[str] = []
+    for component in _attack_mode_components(mode_key):
+        label = str(ATTACK_MODE_COMPONENT_LABELS.get(component) or "").strip()
+        if not label:
+            return ""
+        labels.append(label)
+    return ", ".join(labels)
+
+
+def _attack_name_suffix(variant_label: str) -> str:
+    clean_label = str(variant_label or "").strip()
+    if not clean_label:
+        return ""
+    return f" ({clean_label})"
+
+
+def _extract_attack_name_suffix_label(name: Any) -> str:
+    clean_name = str(name or "").strip()
+    if not clean_name:
+        return ""
+    match = ATTACK_NAME_SUFFIX_PATTERN.search(clean_name)
+    if match is None:
+        return ""
+    return str(match.group(1) or "").strip()
+
+
+def _legacy_attack_mode_component(label: str, *, notes: str = "") -> str:
+    normalized_label = normalize_lookup(label)
+    if not normalized_label:
+        return ""
+    component_map = {
+        normalize_lookup("thrown"): ATTACK_MODE_WEAPON_THROWN,
+        normalize_lookup("two-handed"): ATTACK_MODE_WEAPON_TWO_HANDED,
+        normalize_lookup("off-hand"): ATTACK_MODE_WEAPON_OFF_HAND,
+        normalize_lookup("crossbow expert"): ATTACK_MODE_FEAT_CROSSBOW_EXPERT_BONUS,
+        normalize_lookup("great weapon master"): ATTACK_MODE_FEAT_GREAT_WEAPON_MASTER,
+        normalize_lookup("polearm master"): ATTACK_MODE_FEAT_POLEARM_MASTER_BONUS,
+        normalize_lookup("sharpshooter"): ATTACK_MODE_FEAT_SHARPSHOOTER,
+    }
+    if normalized_label == normalize_lookup("charger"):
+        normalized_notes = normalize_lookup(notes)
+        if normalize_lookup("+1d8 damage") in normalized_notes or normalize_lookup("once per turn") in normalized_notes:
+            return ATTACK_MODE_FEAT_CHARGER_XPHB
+        return ATTACK_MODE_FEAT_CHARGER_PHB
+    return str(component_map.get(normalized_label) or "")
+
+
+def _attack_mode_key_from_variant_label(variant_label: Any, *, notes: Any = "") -> str:
+    raw_label = str(variant_label or "").strip()
+    if not raw_label:
+        return ""
+    components: list[str] = []
+    for label in [part.strip() for part in raw_label.split(",") if part.strip()]:
+        component = _legacy_attack_mode_component(label, notes=str(notes or ""))
+        if not component:
+            return ""
+        components.append(component)
+    return _normalize_attack_mode_key(components)
+
+
+def _normalize_attack_variant_label(
+    *,
+    raw_variant_label: Any,
+    mode_key: Any,
+    attack_name: Any,
+    notes: Any,
+) -> str:
+    clean_variant_label = str(raw_variant_label or "").strip()
+    if clean_variant_label:
+        inferred_mode_key = _attack_mode_key_from_variant_label(clean_variant_label, notes=notes)
+        if inferred_mode_key:
+            return _attack_variant_label_from_mode_key(inferred_mode_key)
+        return clean_variant_label
+    canonical_variant_label = _attack_variant_label_from_mode_key(mode_key)
+    if canonical_variant_label:
+        return canonical_variant_label
+    inferred_suffix_label = _extract_attack_name_suffix_label(attack_name)
+    inferred_mode_key = _attack_mode_key_from_variant_label(inferred_suffix_label, notes=notes)
+    if inferred_mode_key:
+        return _attack_variant_label_from_mode_key(inferred_mode_key)
+    return ""
+
+
+def _infer_attack_mode_key_from_payload(payload: dict[str, Any]) -> str:
+    explicit_mode_key = _normalize_attack_mode_key(payload.get("mode_key"))
+    if explicit_mode_key:
+        return explicit_mode_key
+    variant_label_mode_key = _attack_mode_key_from_variant_label(
+        payload.get("variant_label"),
+        notes=payload.get("notes"),
+    )
+    if variant_label_mode_key:
+        return variant_label_mode_key
+    return _attack_mode_key_from_variant_label(
+        _extract_attack_name_suffix_label(payload.get("name")),
+        notes=payload.get("notes"),
+    )
+
+
+def _extract_attack_feature_slugs(features: list[dict[str, Any]] | None) -> set[str]:
+    slugs: set[str] = set()
+    for feature in list(features or []):
+        systems_ref = dict(feature.get("systems_ref") or {})
+        slug = normalize_lookup(str(systems_ref.get("slug") or "").strip())
+        if slug:
+            slugs.add(slug)
+    return slugs
+
+
+def _collect_attack_support_flags(features: list[dict[str, Any]] | None) -> dict[str, bool]:
+    feature_slugs = _extract_attack_feature_slugs(features)
+    effect_keys = {
+        normalize_lookup(str(value or "").strip())
+        for value in _extract_character_effect_keys(features)
+        if str(value or "").strip()
+    }
+
+    def has_slug(*raw_slugs: str) -> bool:
+        return any(normalize_lookup(raw_slug) in feature_slugs for raw_slug in raw_slugs if str(raw_slug or "").strip())
+
+    return {
+        "charger_phb": has_slug("phb-feat-charger") or normalize_lookup("charger-phb") in effect_keys,
+        "charger_xphb": has_slug("xphb-feat-charger") or normalize_lookup("charger-xphb") in effect_keys,
+        "crossbow_expert": has_slug("phb-feat-crossbow-expert"),
+        "dual_wielder": has_slug("phb-feat-dual-wielder"),
+        "great_weapon_master": has_slug("phb-feat-great-weapon-master"),
+        "gunner": has_slug("tce-feat-gunner"),
+        "martial_adept": has_slug("phb-feat-martial-adept"),
+        "polearm_master": has_slug("phb-feat-polearm-master"),
+        "savage_attacker": has_slug("phb-feat-savage-attacker"),
+        "sharpshooter": has_slug("phb-feat-sharpshooter"),
+        "tavern_brawler": has_slug("phb-feat-tavern-brawler", "xphb-feat-tavern-brawler")
+        or normalize_lookup("tavern-brawler") in effect_keys,
+    }
+
+
 def _derive_definition_max_hp(
     definition: CharacterDefinition,
     *,
@@ -5108,24 +5307,20 @@ def _build_level_one_attacks(
         "phb-optionalfeature-two-weapon-fighting",
     )
     active_effect_keys = list(_extract_character_effect_keys(features))
-    active_feat_effects = {
-        normalize_lookup(name)
-        for name in active_effect_keys
-        if str(name or "").strip()
-    }
+    attack_support_flags = _collect_attack_support_flags(features)
     shared_weapon_attack_bonus = _effect_weapon_attack_bonus(active_effect_keys)
     shared_weapon_damage_bonus = _effect_weapon_damage_bonus(active_effect_keys)
-    has_charger_phb = normalize_lookup("charger-phb") in active_feat_effects
-    has_charger_xphb = normalize_lookup("charger-xphb") in active_feat_effects
-    has_crossbow_expert = normalize_lookup("Crossbow Expert") in active_feat_effects
-    has_dual_wielder = normalize_lookup("Dual Wielder") in active_feat_effects
-    has_great_weapon_master = normalize_lookup("Great Weapon Master") in active_feat_effects
-    has_gunner = normalize_lookup("Gunner") in active_feat_effects
-    has_martial_adept = normalize_lookup("Martial Adept") in active_feat_effects
-    has_polearm_master = normalize_lookup("Polearm Master") in active_feat_effects
-    has_savage_attacker = normalize_lookup("Savage Attacker") in active_feat_effects
-    has_sharpshooter = normalize_lookup("Sharpshooter") in active_feat_effects
-    has_tavern_brawler = normalize_lookup("Tavern Brawler") in active_feat_effects
+    has_charger_phb = bool(attack_support_flags.get("charger_phb"))
+    has_charger_xphb = bool(attack_support_flags.get("charger_xphb"))
+    has_crossbow_expert = bool(attack_support_flags.get("crossbow_expert"))
+    has_dual_wielder = bool(attack_support_flags.get("dual_wielder"))
+    has_great_weapon_master = bool(attack_support_flags.get("great_weapon_master"))
+    has_gunner = bool(attack_support_flags.get("gunner"))
+    has_martial_adept = bool(attack_support_flags.get("martial_adept"))
+    has_polearm_master = bool(attack_support_flags.get("polearm_master"))
+    has_savage_attacker = bool(attack_support_flags.get("savage_attacker"))
+    has_sharpshooter = bool(attack_support_flags.get("sharpshooter"))
+    has_tavern_brawler = bool(attack_support_flags.get("tavern_brawler"))
     off_hand_context = _resolve_off_hand_attack_context(
         attack_contexts,
         allow_non_light=has_dual_wielder,
@@ -5218,7 +5413,8 @@ def _build_level_one_attacks(
                         + ["Great Weapon Master (-5 attack, +10 damage)"],
                     ),
                     index=len(attacks) + 1,
-                    name_suffix=" (great weapon master)",
+                    variant_label="great weapon master",
+                    mode_key=ATTACK_MODE_FEAT_GREAT_WEAPON_MASTER,
                 )
             )
         if has_polearm_master and _qualifies_for_polearm_master(context):
@@ -5256,7 +5452,8 @@ def _build_level_one_attacks(
                         + ["Polearm Master bonus attack"],
                     ),
                     index=len(attacks) + 1,
-                    name_suffix=" (polearm master)",
+                    variant_label="polearm master",
+                    mode_key=ATTACK_MODE_FEAT_POLEARM_MASTER_BONUS,
                     profile_override=polearm_bonus_profile,
                 )
             )
@@ -5294,7 +5491,8 @@ def _build_level_one_attacks(
                             + ["Polearm Master bonus attack"],
                         ),
                         index=len(attacks) + 1,
-                        name_suffix=" (polearm master, two-handed)",
+                        variant_label="polearm master, two-handed",
+                        mode_key=f"{ATTACK_MODE_FEAT_POLEARM_MASTER_BONUS}|{ATTACK_MODE_WEAPON_TWO_HANDED}",
                         profile_override=polearm_two_handed_profile,
                     )
                 )
@@ -5329,7 +5527,8 @@ def _build_level_one_attacks(
                         + ["Charger (move 10 feet straight, +1d8 damage, once per turn)"],
                     ),
                     index=len(attacks) + 1,
-                    name_suffix=" (charger)",
+                    variant_label="charger",
+                    mode_key=ATTACK_MODE_FEAT_CHARGER_XPHB,
                 )
             )
         if has_thrown_variant:
@@ -5359,7 +5558,8 @@ def _build_level_one_attacks(
                         ),
                     ),
                     index=len(attacks) + 1,
-                    name_suffix=" (thrown)",
+                    variant_label="thrown",
+                    mode_key=ATTACK_MODE_WEAPON_THROWN,
                     category_override="ranged weapon",
                 )
             )
@@ -5397,7 +5597,8 @@ def _build_level_one_attacks(
                         ),
                     ),
                     index=len(attacks) + 1,
-                    name_suffix=" (two-handed)",
+                    variant_label="two-handed",
+                    mode_key=ATTACK_MODE_WEAPON_TWO_HANDED,
                     profile_override=two_handed_profile,
                 )
             )
@@ -5431,7 +5632,8 @@ def _build_level_one_attacks(
                         + ["Sharpshooter (-5 attack, +10 damage)"],
                     ),
                     index=len(attacks) + 1,
-                    name_suffix=" (sharpshooter)",
+                    variant_label="sharpshooter",
+                    mode_key=ATTACK_MODE_FEAT_SHARPSHOOTER,
                 )
             )
         if has_charger_phb and _qualifies_for_charger(context):
@@ -5465,7 +5667,8 @@ def _build_level_one_attacks(
                         + ["Charger (after Dash, move 10 feet straight for +5 damage)"],
                     ),
                     index=len(attacks) + 1,
-                    name_suffix=" (charger)",
+                    variant_label="charger",
+                    mode_key=ATTACK_MODE_FEAT_CHARGER_PHB,
                 )
             )
 
@@ -5505,7 +5708,8 @@ def _build_level_one_attacks(
                     ),
                 ),
                 index=len(attacks) + 1,
-                name_suffix=" (off-hand)",
+                variant_label="off-hand",
+                mode_key=ATTACK_MODE_WEAPON_OFF_HAND,
             )
         )
     if has_crossbow_expert and crossbow_expert_bonus_context is not None:
@@ -5544,7 +5748,8 @@ def _build_level_one_attacks(
                     extra_notes=crossbow_extra_notes,
                 ),
                 index=len(attacks) + 1,
-                name_suffix=" (crossbow expert)",
+                variant_label="crossbow expert",
+                mode_key=ATTACK_MODE_FEAT_CROSSBOW_EXPERT_BONUS,
             )
         )
         if has_sharpshooter and _qualifies_for_sharpshooter(crossbow_expert_bonus_context):
@@ -5563,7 +5768,8 @@ def _build_level_one_attacks(
                         extra_notes=crossbow_extra_notes + ["Sharpshooter (-5 attack, +10 damage)"],
                     ),
                     index=len(attacks) + 1,
-                    name_suffix=" (crossbow expert, sharpshooter)",
+                    variant_label="crossbow expert, sharpshooter",
+                    mode_key=f"{ATTACK_MODE_FEAT_CROSSBOW_EXPERT_BONUS}|{ATTACK_MODE_FEAT_SHARPSHOOTER}",
                 )
             )
     if has_tavern_brawler:
@@ -5808,15 +6014,23 @@ def _build_weapon_attack_payload(
     extra_damage: str | None = None,
     notes: str,
     index: int,
-    name_suffix: str = "",
+    variant_label: str = "",
+    mode_key: str = "",
     category_override: str | None = None,
     profile_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     profile = dict(profile_override or context["profile"] or {})
-    attack_name = f"{str(context.get('attack_name') or '').strip()}{name_suffix}"
+    clean_mode_key = _normalize_attack_mode_key(mode_key)
+    clean_variant_label = _normalize_attack_variant_label(
+        raw_variant_label=variant_label,
+        mode_key=clean_mode_key,
+        attack_name=context.get("attack_name"),
+        notes=notes,
+    )
+    attack_name = f"{str(context.get('attack_name') or '').strip()}{_attack_name_suffix(clean_variant_label)}"
     equipment_ref = str(dict(context.get("item") or {}).get("id") or "").strip()
     raw_page_ref = dict(context.get("item") or {}).get("page_ref")
-    return {
+    payload = {
         "id": f"{slugify(attack_name)}-{index}",
         "name": attack_name,
         "category": str(category_override or _weapon_attack_category(profile)),
@@ -5828,8 +6042,11 @@ def _build_weapon_attack_payload(
         "page_ref": dict(raw_page_ref) if isinstance(raw_page_ref, dict) else raw_page_ref or None,
         "equipment_refs": [equipment_ref] if equipment_ref else [],
     }
-
-
+    if clean_mode_key:
+        payload["mode_key"] = clean_mode_key
+    if clean_variant_label:
+        payload["variant_label"] = clean_variant_label
+    return payload
 def _resolve_off_hand_attack_context(
     attack_contexts: list[dict[str, Any]],
     *,
@@ -12173,7 +12390,7 @@ def _normalize_attack_payloads(
     attack_payloads: list[dict[str, Any]] | None,
 ) -> list[dict[str, Any]]:
     normalized_attacks: list[dict[str, Any]] = []
-    index_by_key: dict[tuple[str, Any, str, str, str, str, str], int] = {}
+    index_by_key: dict[tuple[Any, ...], int] = {}
     for attack_payload in list(attack_payloads or []):
         payload = dict(attack_payload or {})
         name = str(payload.get("name") or "").strip()
@@ -12185,6 +12402,21 @@ def _normalize_attack_payloads(
         payload["damage"] = str(payload.get("damage") or "").strip()
         payload["damage_type"] = str(payload.get("damage_type") or "").strip()
         payload["notes"] = str(payload.get("notes") or "").strip()
+        inferred_mode_key = _infer_attack_mode_key_from_payload(payload)
+        if inferred_mode_key:
+            payload["mode_key"] = inferred_mode_key
+        else:
+            payload.pop("mode_key", None)
+        normalized_variant_label = _normalize_attack_variant_label(
+            raw_variant_label=payload.get("variant_label"),
+            mode_key=inferred_mode_key,
+            attack_name=name,
+            notes=payload.get("notes"),
+        )
+        if normalized_variant_label:
+            payload["variant_label"] = normalized_variant_label
+        else:
+            payload.pop("variant_label", None)
         attack_bonus = payload.get("attack_bonus")
         if attack_bonus in {"", None}:
             payload["attack_bonus"] = None
@@ -12216,22 +12448,30 @@ def _normalize_attack_payloads(
         normalized_damage_type = _normalize_merge_text(payload.get("damage_type"))
         normalized_notes = _normalize_merge_text(payload.get("notes"))
         normalized_category = _normalize_merge_text(payload.get("category"))
+        normalized_mode_key = str(payload.get("mode_key") or "").strip()
         normalized_page_identity = _extract_campaign_page_ref(normalized_page_ref)
         explicit_identity = _normalize_explicit_link_identity(
             systems_ref=systems_ref,
             page_ref=normalized_page_ref,
         )
+        equipment_identity_keys = [
+            f"equipment:{equipment_ref}"
+            for equipment_ref in list(equipment_refs or [])
+            if str(equipment_ref or "").strip()
+        ]
         merge_key_tail = (
             payload.get("attack_bonus"),
             normalized_damage,
             normalized_damage_type,
             normalized_notes,
             normalized_category,
+            normalized_mode_key,
             normalized_page_identity,
         )
         candidate_keys = []
         if explicit_identity:
             candidate_keys.append((explicit_identity, *merge_key_tail))
+        candidate_keys.extend((equipment_identity, *merge_key_tail) for equipment_identity in equipment_identity_keys)
         candidate_keys.extend(
             (f"name:{candidate}", *merge_key_tail)
             for candidate in _merge_name_candidates(name)
@@ -12241,7 +12481,7 @@ def _normalize_attack_payloads(
             candidate_index = index_by_key.get(candidate_key)
             if candidate_index is None:
                 continue
-            if candidate_key[0].startswith("name:") and explicit_identity:
+            if (candidate_key[0].startswith("name:") or candidate_key[0].startswith("equipment:")) and explicit_identity:
                 existing_payload = normalized_attacks[candidate_index]
                 existing_explicit_identity = _normalize_explicit_link_identity(
                     systems_ref=dict(existing_payload.get("systems_ref") or {}),
@@ -12262,6 +12502,10 @@ def _normalize_attack_payloads(
             existing_payload["systems_ref"] = dict(payload.get("systems_ref") or {})
         if not existing_payload.get("page_ref") and payload.get("page_ref"):
             existing_payload["page_ref"] = payload.get("page_ref")
+        if not existing_payload.get("mode_key") and payload.get("mode_key"):
+            existing_payload["mode_key"] = str(payload.get("mode_key") or "").strip()
+        if not existing_payload.get("variant_label") and payload.get("variant_label"):
+            existing_payload["variant_label"] = str(payload.get("variant_label") or "").strip()
         merged_equipment_refs = _normalize_attack_equipment_refs(
             [
                 *list(existing_payload.get("equipment_refs") or []),
@@ -12270,15 +12514,44 @@ def _normalize_attack_payloads(
         )
         if merged_equipment_refs:
             existing_payload["equipment_refs"] = merged_equipment_refs
+        updated_mode_key = _infer_attack_mode_key_from_payload(existing_payload)
+        if updated_mode_key:
+            existing_payload["mode_key"] = updated_mode_key
+        else:
+            existing_payload.pop("mode_key", None)
+        updated_variant_label = _normalize_attack_variant_label(
+            raw_variant_label=existing_payload.get("variant_label"),
+            mode_key=updated_mode_key,
+            attack_name=existing_payload.get("name"),
+            notes=existing_payload.get("notes"),
+        )
+        if updated_variant_label:
+            existing_payload["variant_label"] = updated_variant_label
+        else:
+            existing_payload.pop("variant_label", None)
         updated_explicit_identity = _normalize_explicit_link_identity(
             systems_ref=dict(existing_payload.get("systems_ref") or {}),
             page_ref=existing_payload.get("page_ref"),
         )
+        updated_merge_key_tail = (
+            existing_payload.get("attack_bonus"),
+            _normalize_merge_text(existing_payload.get("damage")),
+            _normalize_merge_text(existing_payload.get("damage_type")),
+            _normalize_merge_text(existing_payload.get("notes")),
+            _normalize_merge_text(existing_payload.get("category")),
+            str(existing_payload.get("mode_key") or "").strip(),
+            _extract_campaign_page_ref(existing_payload.get("page_ref")),
+        )
         updated_keys = []
         if updated_explicit_identity:
-            updated_keys.append((updated_explicit_identity, *merge_key_tail))
+            updated_keys.append((updated_explicit_identity, *updated_merge_key_tail))
         updated_keys.extend(
-            (f"name:{candidate}", *merge_key_tail)
+            (f"equipment:{equipment_ref}", *updated_merge_key_tail)
+            for equipment_ref in list(existing_payload.get("equipment_refs") or [])
+            if str(equipment_ref or "").strip()
+        )
+        updated_keys.extend(
+            (f"name:{candidate}", *updated_merge_key_tail)
             for candidate in _merge_name_candidates(str(existing_payload.get("name") or "").strip())
         )
         for candidate_key in updated_keys:
