@@ -18,6 +18,13 @@ from .campaign_visibility import (
     is_valid_visibility,
     normalize_visibility_choice,
 )
+from .dnd5e_rules_reference import (
+    DND5E_RULES_REFERENCE_SENTINEL_ENTRY_KEY,
+    DND5E_RULES_REFERENCE_SOURCE_ID,
+    DND5E_RULES_REFERENCE_SOURCE_TITLE,
+    DND5E_RULES_REFERENCE_VERSION,
+    build_dnd5e_rules_reference_entries,
+)
 from .repository import normalize_lookup
 from .repository_store import RepositoryStore
 from .systems_models import (
@@ -29,6 +36,7 @@ from .systems_models import (
 from .systems_store import SystemsStore
 
 LICENSE_CLASS_LABELS = {
+    "app_reference": "App-authored reference",
     "proprietary_private": "Proprietary - private campaign use",
     "srd_cc": "SRD - Creative Commons",
     "open_license": "Open license",
@@ -76,6 +84,15 @@ ABILITY_NAME_LABELS = {
 }
 
 DND_5E_SOURCE_CATALOG = (
+    {
+        "source_id": DND5E_RULES_REFERENCE_SOURCE_ID,
+        "title": DND5E_RULES_REFERENCE_SOURCE_TITLE,
+        "license_class": "open_license",
+        "public_visibility_allowed": True,
+        "requires_unofficial_notice": False,
+        "default_visibility": VISIBILITY_PLAYERS,
+        "enabled_by_default": True,
+    },
     {
         "source_id": "PHB",
         "title": "Player's Handbook (2014)",
@@ -217,6 +234,7 @@ class SystemsService:
                 public_visibility_allowed=bool(source.get("public_visibility_allowed", False)),
                 requires_unofficial_notice=bool(source.get("requires_unofficial_notice", True)),
             )
+        self._ensure_builtin_reference_entries_seeded(library.library_slug)
         return library
 
     def get_campaign_library_slug(self, campaign_slug: str) -> str:
@@ -271,7 +289,11 @@ class SystemsService:
                 default_visibility = configured.default_visibility
                 is_configured = True
             else:
-                is_enabled = bool(seed.get("enabled", False))
+                is_enabled = (
+                    bool(seed.get("enabled"))
+                    if "enabled" in seed
+                    else self._default_enabled_for_source(source)
+                )
                 default_visibility = self._normalize_or_default_visibility(
                     seed.get("default_visibility"),
                     fallback=self._default_visibility_for_source(source),
@@ -884,6 +906,32 @@ class SystemsService:
             if item["source_id"] == source.source_id:
                 return str(item.get("default_visibility", VISIBILITY_DM))
         return VISIBILITY_DM
+
+    def _default_enabled_for_source(self, source: SystemsSourceRecord) -> bool:
+        catalog = BUILTIN_LIBRARY_CATALOG.get(source.library_slug, {})
+        for item in catalog.get("sources", ()):
+            if item["source_id"] == source.source_id:
+                return bool(item.get("enabled_by_default", False))
+        return False
+
+    def _ensure_builtin_reference_entries_seeded(self, library_slug: str) -> None:
+        if library_slug != "DND-5E":
+            return
+        expected_entries = build_dnd5e_rules_reference_entries()
+        sentinel_entry = self.store.get_entry(library_slug, DND5E_RULES_REFERENCE_SENTINEL_ENTRY_KEY)
+        existing_count = self.store.count_entries_for_source(library_slug, DND5E_RULES_REFERENCE_SOURCE_ID)
+        if (
+            sentinel_entry is not None
+            and sentinel_entry.source_id == DND5E_RULES_REFERENCE_SOURCE_ID
+            and str((sentinel_entry.metadata or {}).get("seed_version") or "") == DND5E_RULES_REFERENCE_VERSION
+            and existing_count == len(expected_entries)
+        ):
+            return
+        self.store.replace_entries_for_source(
+            library_slug,
+            DND5E_RULES_REFERENCE_SOURCE_ID,
+            entries=expected_entries,
+        )
 
     def _normalize_or_default_visibility(self, value: object, *, fallback: str) -> str:
         normalized = normalize_visibility_choice(str(value or ""))

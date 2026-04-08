@@ -83,6 +83,7 @@ SYSTEMS_ENTRY_TYPE_LABELS = {
     "monster": "Monsters",
     "optionalfeature": "Optional Features",
     "race": "Races",
+    "rule": "Rules",
     "sense": "Senses",
     "skill": "Skills",
     "spell": "Spells",
