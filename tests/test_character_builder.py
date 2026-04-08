@@ -810,6 +810,61 @@ def test_imported_level_up_preserves_imported_source_and_records_native_progress
     assert history[-1]["kind"] == "level_up"
     assert history[-1]["from_level"] == 1
     assert history[-1]["to_level"] == 2
+    assert history[-1]["hp_gain"] == 6
+    assert leveled_definition.source["native_progression"]["hp_baseline"] == {"level": 1, "max_hp": 12}
+
+
+def test_native_level_up_records_hp_gain_and_keeps_hp_baseline():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}},
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+        },
+        class_progression=[{"level": 2, "feature_rows": []}],
+    )
+    definition = _minimal_character_definition()
+    level_up_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        definition,
+        {"hp_gain": "6"},
+    )
+
+    leveled_definition, _leveled_import, hp_gain = build_native_level_up_character_definition(
+        "linden-pass",
+        definition,
+        level_up_context,
+        {"hp_gain": "6"},
+    )
+
+    history = list((leveled_definition.source.get("native_progression") or {}).get("history") or [])
+
+    assert hp_gain == 6
+    assert leveled_definition.stats["max_hp"] == 18
+    assert leveled_definition.source["native_progression"]["hp_baseline"] == {"level": 1, "max_hp": 12}
+    assert history[-1]["kind"] == "level_up"
+    assert history[-1]["from_level"] == 1
+    assert history[-1]["to_level"] == 2
+    assert history[-1]["hp_gain"] == 6
 
 
 def test_imported_spell_baseline_with_blank_marks_is_repairable():
@@ -3079,6 +3134,136 @@ def test_normalize_definition_to_native_model_preserves_imported_expertise_and_u
     assert skills_by_name["Insight"]["bonus"] == 6
     assert normalized.stats["passive_perception"] == 19
     assert normalized.stats["passive_insight"] == 16
+
+
+def test_normalize_definition_to_native_model_seeds_hp_baseline_and_preserves_imported_max_hp():
+    definition = _minimal_imported_character_definition("brann-vale", "Brann Vale")
+    definition.stats["max_hp"] = 27
+
+    normalized = normalize_definition_to_native_model(definition)
+
+    assert normalized.stats["max_hp"] == 27
+    assert normalized.source["native_progression"]["hp_baseline"] == {"level": 3, "max_hp": 27}
+
+
+def test_normalize_definition_to_native_model_applies_structured_effect_keys_to_skills_passives_and_stats():
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    definition = _minimal_character_definition("keen-step", "Keen Step")
+    definition.skills = [
+        {"name": "Perception", "bonus": 1, "proficiency_level": "none"},
+        {"name": "Insight", "bonus": 1, "proficiency_level": "none"},
+        {"name": "Investigation", "bonus": 0, "proficiency_level": "none"},
+    ]
+    definition.features = [
+        {
+            "id": "battle-instinct-1",
+            "name": "Battle Instinct",
+            "category": "class_feature",
+            "campaign_option": {
+                "modeled_effects": [
+                    "half-proficiency:skills:Investigation",
+                    "skill-bonus:Perception:2",
+                    "passive-bonus:Insight:3",
+                    "initiative-bonus:2",
+                    "speed-bonus:5",
+                ]
+            },
+        }
+    ]
+
+    normalized = normalize_definition_to_native_model(
+        definition,
+        resolved_species=human,
+    )
+    skills_by_name = {skill["name"]: skill for skill in normalized.skills}
+
+    assert skills_by_name["Perception"]["bonus"] == 3
+    assert skills_by_name["Perception"]["proficiency_level"] == "none"
+    assert skills_by_name["Insight"]["bonus"] == 1
+    assert skills_by_name["Investigation"]["bonus"] == 1
+    assert skills_by_name["Investigation"]["proficiency_level"] == "half_proficient"
+    assert normalized.stats["passive_perception"] == 13
+    assert normalized.stats["passive_insight"] == 14
+    assert normalized.stats["passive_investigation"] == 11
+    assert normalized.stats["initiative_bonus"] == 3
+    assert normalized.stats["speed"] == "35 ft."
+
+
+def test_normalize_definition_to_native_model_maps_title_effects_through_shared_effect_keys():
+    definition = _minimal_character_definition("selise-wynn", "Selise Wynn")
+    definition.skills = [
+        {"name": "Perception", "bonus": 1, "proficiency_level": "none"},
+        {"name": "Insight", "bonus": 1, "proficiency_level": "none"},
+        {"name": "Investigation", "bonus": 0, "proficiency_level": "none"},
+    ]
+    definition.features = [
+        {"id": "joat-1", "name": "Jack of All Trades", "category": "class_feature"},
+        {"id": "observant-1", "name": "Observant", "category": "feat"},
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+    skills_by_name = {skill["name"]: skill for skill in normalized.skills}
+
+    assert skills_by_name["Perception"]["proficiency_level"] == "half_proficient"
+    assert skills_by_name["Perception"]["bonus"] == 2
+    assert skills_by_name["Insight"]["proficiency_level"] == "half_proficient"
+    assert skills_by_name["Investigation"]["proficiency_level"] == "half_proficient"
+    assert normalized.stats["initiative_bonus"] == 2
+    assert normalized.stats["passive_perception"] == 17
+    assert normalized.stats["passive_investigation"] == 16
+
+
+def test_normalize_definition_to_native_model_applies_structured_weapon_effect_bonuses():
+    longsword = _systems_entry("item", "phb-item-longsword", "Longsword", metadata={"weight": 3})
+    definition = _minimal_character_definition("arden-kest", "Arden Kest")
+    definition.proficiencies["weapons"] = ["Longswords"]
+    definition.equipment_catalog = [
+        {
+            "id": "longsword-1",
+            "name": "Longsword",
+            "default_quantity": 1,
+            "weight": "3 lb.",
+            "notes": "",
+            "is_equipped": True,
+            "systems_ref": {
+                "entry_key": longsword.entry_key,
+                "entry_type": longsword.entry_type,
+                "title": longsword.title,
+                "slug": longsword.slug,
+                "source_id": longsword.source_id,
+            },
+        }
+    ]
+    definition.features = [
+        {
+            "id": "weapon-mastery-1",
+            "name": "Weapon Mastery",
+            "category": "feat",
+            "campaign_option": {
+                "modeled_effects": [
+                    "weapon-attack-bonus:1",
+                    "weapon-damage-bonus:2",
+                ]
+            },
+        }
+    ]
+
+    normalized = normalize_definition_to_native_model(
+        definition,
+        item_catalog={
+            "by_title": {"longsword": longsword},
+            "by_slug": {longsword.slug: longsword},
+        },
+    )
+    attacks_by_name = {attack["name"]: attack for attack in normalized.attacks}
+
+    assert attacks_by_name["Longsword"]["attack_bonus"] == 6
+    assert attacks_by_name["Longsword"]["damage"] == "1d8+5 slashing"
 
 
 def test_normalize_definition_to_native_model_derives_supported_imported_spell_math_from_resolved_class():

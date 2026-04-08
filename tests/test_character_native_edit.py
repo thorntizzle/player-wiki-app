@@ -997,9 +997,9 @@ def test_native_character_edits_can_apply_campaign_stat_adjustments(
     assert record.definition.stats["armor_class"] == int(base_stats["armor_class"]) + 1
     assert record.definition.stats["initiative_bonus"] == int(base_stats["initiative_bonus"]) + 2
     assert record.definition.stats["speed"] == "40 ft."
-    assert record.definition.stats["passive_perception"] == int(base_stats["passive_perception"]) + 3
-    assert record.definition.stats["passive_insight"] == int(base_stats["passive_insight"]) - 1
-    assert record.definition.stats["passive_investigation"] == int(base_stats["passive_investigation"]) + 2
+    assert record.definition.stats["passive_perception"] == 17
+    assert record.definition.stats["passive_insight"] == 13
+    assert record.definition.stats["passive_investigation"] == 13
 
     read_response = client.get("/campaigns/linden-pass/characters/arden-march?page=quick")
     assert read_response.status_code == 200

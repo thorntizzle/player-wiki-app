@@ -1396,9 +1396,19 @@ def _preserve_existing_source_metadata(
 ) -> dict[str, Any]:
     source = dict(imported_source or {})
     previous_source = dict(existing_source or {})
-    native_progression = dict(previous_source.get("native_progression") or {})
-    if native_progression and not source.get("native_progression"):
-        source["native_progression"] = native_progression
+    existing_native_progression = dict(previous_source.get("native_progression") or {})
+    incoming_native_progression = dict(source.get("native_progression") or {})
+    if existing_native_progression:
+        merged_native_progression = dict(existing_native_progression)
+        if incoming_native_progression.get("hp_baseline") and not merged_native_progression.get("hp_baseline"):
+            merged_native_progression["hp_baseline"] = dict(incoming_native_progression.get("hp_baseline") or {})
+        if incoming_native_progression.get("history"):
+            merged_native_progression["history"] = [
+                dict(entry) for entry in list(incoming_native_progression.get("history") or []) if isinstance(entry, dict)
+            ]
+        source["native_progression"] = merged_native_progression
+    elif incoming_native_progression:
+        source["native_progression"] = incoming_native_progression
     for field in ("source_path", "source_type", "imported_from"):
         if source.get(field):
             continue

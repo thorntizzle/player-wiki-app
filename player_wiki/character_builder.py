@@ -21,7 +21,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-04-06.01"
+CHARACTER_BUILDER_VERSION = "2026-04-08.02"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -136,8 +136,9 @@ SKILL_ABILITY_KEYS = {
 }
 SKILL_PROFICIENCY_LEVEL_RANKS = {
     "none": 0,
-    "proficient": 1,
-    "expertise": 2,
+    "half_proficient": 1,
+    "proficient": 2,
+    "expertise": 3,
 }
 STANDARD_LANGUAGE_OPTIONS = [
     "Common",
@@ -1008,10 +1009,83 @@ def _native_character_subclass_name(definition: CharacterDefinition) -> str:
 def _native_progression_payload(source_payload: dict[str, Any] | None) -> dict[str, Any]:
     source = dict(source_payload or {})
     payload = dict(source.get("native_progression") or {})
+    hp_baseline = dict(payload.get("hp_baseline") or {})
+    try:
+        baseline_level = int(hp_baseline.get("level") or 0)
+        baseline_max_hp = int(hp_baseline.get("max_hp") or 0)
+    except (TypeError, ValueError):
+        baseline_level = 0
+        baseline_max_hp = 0
+    if baseline_level > 0 and baseline_max_hp > 0:
+        payload["hp_baseline"] = {
+            "level": baseline_level,
+            "max_hp": baseline_max_hp,
+        }
+    else:
+        payload.pop("hp_baseline", None)
     history = [dict(entry) for entry in list(payload.get("history") or []) if isinstance(entry, dict)]
     if history:
         payload["history"] = history
     return payload
+
+
+def _native_progression_hp_baseline(source_payload: dict[str, Any] | None) -> dict[str, int] | None:
+    payload = _native_progression_payload(source_payload)
+    hp_baseline = dict(payload.get("hp_baseline") or {})
+    try:
+        level = int(hp_baseline.get("level") or 0)
+        max_hp = int(hp_baseline.get("max_hp") or 0)
+    except (TypeError, ValueError):
+        return None
+    if level <= 0 or max_hp <= 0:
+        return None
+    return {"level": level, "max_hp": max_hp}
+
+
+def _ensure_native_progression_hp_baseline(
+    source_payload: dict[str, Any] | None,
+    *,
+    level: int,
+    max_hp: int,
+    baseline_repaired: bool = False,
+) -> dict[str, Any]:
+    source = dict(source_payload or {})
+    if _native_progression_hp_baseline(source) is not None:
+        if baseline_repaired:
+            native_progression = _native_progression_payload(source)
+            native_progression["baseline_repaired_at"] = isoformat(utcnow())
+            source["native_progression"] = native_progression
+        return source
+    clean_level = max(int(level or 0), 0)
+    clean_max_hp = max(int(max_hp or 0), 0)
+    if clean_level <= 0 or clean_max_hp <= 0:
+        return source
+    native_progression = _native_progression_payload(source)
+    native_progression["hp_baseline"] = {"level": clean_level, "max_hp": clean_max_hp}
+    if baseline_repaired:
+        native_progression["baseline_repaired_at"] = isoformat(utcnow())
+    source["native_progression"] = native_progression
+    return source
+
+
+def _seed_source_hp_baseline_from_definition(
+    source_payload: dict[str, Any] | None,
+    definition: CharacterDefinition,
+    *,
+    baseline_repaired: bool = False,
+) -> dict[str, Any]:
+    current_level = _resolve_native_character_level(definition)
+    base_stats = _definition_base_stats_without_adjustments(definition)
+    try:
+        max_hp = int(base_stats.get("max_hp") or 0)
+    except (TypeError, ValueError):
+        max_hp = 0
+    return _ensure_native_progression_hp_baseline(
+        source_payload,
+        level=current_level,
+        max_hp=max_hp,
+        baseline_repaired=baseline_repaired,
+    )
 
 
 def _with_native_progression_event(
@@ -1021,6 +1095,8 @@ def _with_native_progression_event(
     target_level: int,
     previous_level: int | None = None,
     baseline_repaired: bool = False,
+    hp_gain: int | None = None,
+    max_hp_delta: int | None = None,
 ) -> dict[str, Any]:
     source = dict(source_payload or {})
     native_progression = _native_progression_payload(source)
@@ -1035,6 +1111,10 @@ def _with_native_progression_event(
     if previous_level is not None:
         event["from_level"] = int(previous_level)
         event["to_level"] = int(target_level or 0)
+    if hp_gain is not None:
+        event["hp_gain"] = int(hp_gain)
+    if max_hp_delta is not None:
+        event["max_hp_delta"] = int(max_hp_delta)
     history.append(event)
     native_progression["history"] = history
     source["native_progression"] = native_progression
@@ -1463,6 +1543,9 @@ def build_native_level_up_character_definition(
             current_definition.source,
             target_level,
             current_level=current_level,
+            current_definition=current_definition,
+            hp_gain=hp_gain,
+            max_hp_delta=total_hp_delta,
         ),
     )
     definition = normalize_definition_to_native_model(
@@ -1781,7 +1864,11 @@ def apply_imported_progression_repairs(
     )
     payload["spellcasting"] = spellcasting
     payload["source"] = _with_native_progression_event(
-        current_definition.source,
+        _seed_source_hp_baseline_from_definition(
+            current_definition.source,
+            current_definition,
+            baseline_repaired=True,
+        ),
         kind="repair",
         target_level=current_level,
         baseline_repaired=True,
@@ -2507,6 +2594,211 @@ def _infer_definition_save_proficiencies(
     return save_proficiencies
 
 
+def _definition_base_stats_without_adjustments(definition: CharacterDefinition) -> dict[str, Any]:
+    stats, _manual_adjustments = strip_manual_stat_adjustments(dict(definition.stats or {}))
+    campaign_option_adjustments = collect_campaign_option_stat_adjustments(
+        _campaign_option_payloads_from_definition(definition)
+    )
+    if campaign_option_adjustments:
+        stats = apply_stat_adjustments(
+            stats,
+            {key: -int(value) for key, value in campaign_option_adjustments.items()},
+        )
+    return stats
+
+
+def _extract_character_effect_keys(features: list[dict[str, Any]] | None) -> list[str]:
+    results: list[str] = []
+    for feature in list(features or []):
+        results.extend(_effect_keys_for_feature(feature))
+    return _dedupe_preserve_order(results)
+
+
+def _split_effect_key(value: Any) -> list[str]:
+    return [part.strip() for part in str(value or "").strip().split(":") if part.strip()]
+
+
+def _parse_effect_skill_names(value: Any) -> list[str]:
+    results: list[str] = []
+    for raw_skill in str(value or "").split(","):
+        normalized_skill = normalize_lookup(raw_skill)
+        if normalized_skill in SKILL_LABELS:
+            results.append(normalized_skill)
+    return _dedupe_preserve_order(results)
+
+
+def _parse_effect_ability_keys(value: Any) -> list[str]:
+    results: list[str] = []
+    for raw_ability in str(value or "").split(","):
+        normalized_ability = normalize_lookup(raw_ability)
+        if normalized_ability in ABILITY_KEYS:
+            results.append(normalized_ability)
+    return _dedupe_preserve_order(results)
+
+
+def _skill_targets_for_effect_key(effect_key: Any) -> list[str]:
+    parts = _split_effect_key(effect_key)
+    if len(parts) < 2 or normalize_lookup(parts[0]) != normalize_lookup("half-proficiency"):
+        return []
+    target_kind = normalize_lookup(parts[1])
+    if target_kind == normalize_lookup("all"):
+        return list(SKILL_LABELS.keys())
+    if target_kind == normalize_lookup("skills") and len(parts) >= 3:
+        return _parse_effect_skill_names(parts[2])
+    if target_kind == normalize_lookup("abilities") and len(parts) >= 3:
+        ability_keys = set(_parse_effect_ability_keys(parts[2]))
+        return [
+            normalized_skill
+            for normalized_skill, ability_key in SKILL_ABILITY_KEYS.items()
+            if ability_key in ability_keys
+        ]
+    return []
+
+
+def _initiative_half_proficiency_bonus(effect_keys: list[str], *, proficiency_bonus: int) -> int:
+    half_bonus = proficiency_bonus // 2
+    if half_bonus <= 0:
+        return 0
+    for effect_key in list(effect_keys or []):
+        parts = _split_effect_key(effect_key)
+        if len(parts) < 2 or normalize_lookup(parts[0]) != normalize_lookup("half-proficiency"):
+            continue
+        target_kind = normalize_lookup(parts[1])
+        if target_kind == normalize_lookup("all"):
+            return half_bonus
+        if target_kind == normalize_lookup("abilities") and len(parts) >= 3:
+            if "dex" in set(_parse_effect_ability_keys(parts[2])):
+                return half_bonus
+    return 0
+
+
+def _effect_skill_bonus_map(effect_keys: list[str]) -> dict[str, int]:
+    bonuses: dict[str, int] = {}
+    for effect_key in list(effect_keys or []):
+        parts = _split_effect_key(effect_key)
+        if len(parts) != 3 or normalize_lookup(parts[0]) != normalize_lookup("skill-bonus"):
+            continue
+        normalized_skill = normalize_lookup(parts[1])
+        if normalized_skill not in SKILL_LABELS:
+            continue
+        try:
+            bonus = int(parts[2])
+        except ValueError:
+            continue
+        bonuses[normalized_skill] = int(bonuses.get(normalized_skill) or 0) + bonus
+    return bonuses
+
+
+def _effect_passive_bonus(effect_keys: list[str], *, skill_name: str) -> int:
+    normalized_skill = normalize_lookup(skill_name)
+    bonus = 0
+    for effect_key in list(effect_keys or []):
+        parts = _split_effect_key(effect_key)
+        if len(parts) != 3 or normalize_lookup(parts[0]) != normalize_lookup("passive-bonus"):
+            continue
+        if normalize_lookup(parts[1]) != normalized_skill:
+            continue
+        try:
+            bonus += int(parts[2])
+        except ValueError:
+            continue
+    return bonus
+
+
+def _effect_initiative_bonus(effect_keys: list[str], *, proficiency_bonus: int) -> int:
+    bonus = _initiative_half_proficiency_bonus(effect_keys, proficiency_bonus=proficiency_bonus)
+    for effect_key in list(effect_keys or []):
+        parts = _split_effect_key(effect_key)
+        if len(parts) != 2 or normalize_lookup(parts[0]) != normalize_lookup("initiative-bonus"):
+            continue
+        try:
+            bonus += int(parts[1])
+        except ValueError:
+            continue
+    return bonus
+
+
+def _effect_speed_bonus(effect_keys: list[str]) -> int:
+    bonus = 0
+    for effect_key in list(effect_keys or []):
+        parts = _split_effect_key(effect_key)
+        if len(parts) != 2 or normalize_lookup(parts[0]) != normalize_lookup("speed-bonus"):
+            continue
+        try:
+            bonus += int(parts[1])
+        except ValueError:
+            continue
+    return bonus
+
+
+def _effect_weapon_attack_bonus(effect_keys: list[str]) -> int:
+    bonus = 0
+    for effect_key in list(effect_keys or []):
+        parts = _split_effect_key(effect_key)
+        if len(parts) != 2 or normalize_lookup(parts[0]) != normalize_lookup("weapon-attack-bonus"):
+            continue
+        try:
+            bonus += int(parts[1])
+        except ValueError:
+            continue
+    return bonus
+
+
+def _effect_weapon_damage_bonus(effect_keys: list[str]) -> int:
+    bonus = 0
+    for effect_key in list(effect_keys or []):
+        parts = _split_effect_key(effect_key)
+        if len(parts) != 2 or normalize_lookup(parts[0]) != normalize_lookup("weapon-damage-bonus"):
+            continue
+        try:
+            bonus += int(parts[1])
+        except ValueError:
+            continue
+    return bonus
+
+
+def _derive_definition_max_hp(
+    definition: CharacterDefinition,
+    *,
+    current_level: int,
+) -> int | None:
+    hp_baseline = _native_progression_hp_baseline(definition.source)
+    if hp_baseline is None:
+        return None
+    baseline_level = int(hp_baseline.get("level") or 0)
+    if current_level < baseline_level or baseline_level <= 0:
+        return None
+    derived_max_hp = int(hp_baseline.get("max_hp") or 0)
+    if current_level == baseline_level:
+        return max(derived_max_hp, 1)
+    native_progression = _native_progression_payload(definition.source)
+    gains_by_level: dict[int, int] = {}
+    for event in list(native_progression.get("history") or []):
+        if not isinstance(event, dict):
+            continue
+        try:
+            event_level = int(event.get("to_level") or event.get("target_level") or 0)
+        except (TypeError, ValueError):
+            continue
+        if event_level <= baseline_level or event_level > current_level:
+            continue
+        if "max_hp_delta" in event:
+            delta_field = "max_hp_delta"
+        elif "hp_gain" in event:
+            delta_field = "hp_gain"
+        else:
+            continue
+        try:
+            gains_by_level[event_level] = int(event.get(delta_field) or 0)
+        except (TypeError, ValueError):
+            return None
+    for level in range(baseline_level + 1, current_level + 1):
+        if level not in gains_by_level:
+            return None
+        derived_max_hp += gains_by_level[level]
+    return max(derived_max_hp, 1)
+
+
 def _derive_definition_skills(
     definition: CharacterDefinition,
     *,
@@ -2532,10 +2824,18 @@ def _derive_definition_skills(
             proficiency_levels.get(normalized_skill),
             "proficient",
         )
+    effect_keys = _extract_character_effect_keys(list(definition.features or []))
+    for effect_key in effect_keys:
+        for normalized_skill in _skill_targets_for_effect_key(effect_key):
+            proficiency_levels[normalized_skill] = _max_skill_proficiency_level(
+                proficiency_levels.get(normalized_skill),
+                "half_proficient",
+            )
     return _build_skills_payload_from_levels(
         ability_scores,
         proficiency_levels,
         proficiency_bonus,
+        skill_bonus_map=_effect_skill_bonus_map(effect_keys),
     )
 
 
@@ -2548,6 +2848,7 @@ def _derive_definition_stats(
     features: list[dict[str, Any]],
     item_catalog: dict[str, Any],
     selected_class: SystemsEntryRecord | None = None,
+    selected_species: SystemsEntryRecord | None = None,
 ) -> dict[str, Any]:
     stats, manual_adjustments = strip_manual_stat_adjustments(dict(definition.stats or {}))
     existing_ability_scores = dict(stats.get("ability_scores") or {})
@@ -2565,18 +2866,23 @@ def _derive_definition_stats(
         proficiency_bonus=proficiency_bonus,
         selected_class=selected_class,
     )
+    effect_keys = _extract_character_effect_keys(features)
     skill_lookup = {normalize_lookup(skill.get("name")): dict(skill) for skill in list(skills or [])}
     if skill_lookup:
         stats["passive_perception"] = 10 + int(
             (skill_lookup.get("perception") or {}).get("bonus") or _ability_modifier(ability_scores["wis"])
-        )
+        ) + _effect_passive_bonus(effect_keys, skill_name="Perception")
         stats["passive_insight"] = 10 + int(
             (skill_lookup.get("insight") or {}).get("bonus") or _ability_modifier(ability_scores["wis"])
-        )
+        ) + _effect_passive_bonus(effect_keys, skill_name="Insight")
         stats["passive_investigation"] = 10 + int(
             (skill_lookup.get("investigation") or {}).get("bonus") or _ability_modifier(ability_scores["int"])
-        )
+        ) + _effect_passive_bonus(effect_keys, skill_name="Investigation")
     stats["proficiency_bonus"] = proficiency_bonus
+    stats["initiative_bonus"] = _ability_modifier(ability_scores["dex"]) + _effect_initiative_bonus(
+        effect_keys,
+        proficiency_bonus=proficiency_bonus,
+    )
     normalized_ability_scores = {
         ability_key: {
             "score": score,
@@ -2603,6 +2909,20 @@ def _derive_definition_stats(
     )
     if derived_armor_class is not None:
         stats["armor_class"] = derived_armor_class
+    derived_speed = ""
+    if selected_species is not None:
+        derived_speed = _apply_speed_bonus_to_label(
+            _extract_speed_label(selected_species),
+            _effect_speed_bonus(effect_keys),
+        )
+    if derived_speed:
+        stats["speed"] = derived_speed
+    derived_max_hp = _derive_definition_max_hp(
+        definition,
+        current_level=max(_resolve_native_character_level(definition), 0),
+    )
+    if derived_max_hp is not None:
+        stats["max_hp"] = derived_max_hp
     stats = apply_stat_adjustments(stats, campaign_option_adjustments)
     return apply_manual_stat_adjustments(stats, manual_adjustments)
 
@@ -2713,6 +3033,7 @@ def _derive_definition_core_sheet_payloads(
         features=normalized_features,
         item_catalog=effective_item_catalog,
         selected_class=resolved_entries.get("selected_class"),
+        selected_species=resolved_entries.get("selected_species"),
     )
     derived_payload = deepcopy(normalized_payload)
     derived_payload["skills"] = skills
@@ -4751,11 +5072,14 @@ def _build_level_one_attacks(
         "Two-Weapon Fighting",
         "phb-optionalfeature-two-weapon-fighting",
     )
+    active_effect_keys = list(_extract_character_effect_keys(features))
     active_feat_effects = {
         normalize_lookup(name)
-        for name in _extract_feat_effect_keys(features)
+        for name in active_effect_keys
         if str(name or "").strip()
     }
+    shared_weapon_attack_bonus = _effect_weapon_attack_bonus(active_effect_keys)
+    shared_weapon_damage_bonus = _effect_weapon_damage_bonus(active_effect_keys)
     has_charger_phb = normalize_lookup("charger-phb") in active_feat_effects
     has_charger_xphb = normalize_lookup("charger-xphb") in active_feat_effects
     has_crossbow_expert = normalize_lookup("Crossbow Expert") in active_feat_effects
@@ -4786,10 +5110,12 @@ def _build_level_one_attacks(
         if bool(context["is_proficient"]):
             attack_bonus += proficiency_bonus
         attack_bonus += int(context.get("item_attack_bonus") or 0)
+        attack_bonus += shared_weapon_attack_bonus
         if has_archery and str(profile.get("type") or "").strip().upper() == "R":
             attack_bonus += 2
         damage_bonus = int(context["ability_modifier"] or 0)
         damage_bonus += int(context.get("item_damage_bonus") or 0)
+        damage_bonus += shared_weapon_damage_bonus
         if has_dueling and _qualifies_for_dueling(context, off_hand_context=off_hand_context):
             damage_bonus += 2
         ignore_loading = (
@@ -5224,11 +5550,11 @@ def _extract_feat_effect_keys(features: list[dict[str, Any]] | None) -> list[str
         entry_type = normalize_lookup(str(systems_ref.get("entry_type") or "").strip())
         if category != normalize_lookup("feat") and entry_type != normalize_lookup("feat"):
             continue
-        results.extend(_feat_effect_keys_for_feature(feature))
+        results.extend(_effect_keys_for_feature(feature))
     return _dedupe_preserve_order(results)
 
 
-def _feat_effect_keys_for_feature(feature: dict[str, Any]) -> list[str]:
+def _effect_keys_for_feature(feature: dict[str, Any]) -> list[str]:
     systems_ref = dict(feature.get("systems_ref") or {})
     campaign_option = dict(feature.get("campaign_option") or {})
     feature_name = str(feature.get("name") or systems_ref.get("title") or "").strip()
@@ -5239,6 +5565,21 @@ def _feat_effect_keys_for_feature(feature: dict[str, Any]) -> list[str]:
         source_id = str(systems_ref.get("source_id") or feature.get("source") or "").strip().upper()
         if normalized_name == normalize_lookup("Charger"):
             effect_keys.append("charger-xphb" if source_id == "XPHB" else "charger-phb")
+        if normalized_name == normalize_lookup("Alert"):
+            effect_keys.append("initiative-bonus:5")
+        if normalized_name == normalize_lookup("Mobile"):
+            effect_keys.append("speed-bonus:10")
+        if normalized_name == normalize_lookup("Observant"):
+            effect_keys.extend(
+                [
+                    "passive-bonus:Perception:5",
+                    "passive-bonus:Investigation:5",
+                ]
+            )
+        if normalized_name == normalize_lookup("Jack of All Trades"):
+            effect_keys.append("half-proficiency:all")
+        if normalized_name == normalize_lookup("Remarkable Athlete"):
+            effect_keys.append("half-proficiency:abilities:str,dex,con")
         if normalized_name == normalize_lookup("Tavern Brawler"):
             effect_keys.append("tavern-brawler")
     for effect in list(campaign_option.get("modeled_effects") or []):
@@ -5246,6 +5587,10 @@ def _feat_effect_keys_for_feature(feature: dict[str, Any]) -> list[str]:
         if clean_effect:
             effect_keys.append(clean_effect)
     return effect_keys
+
+
+def _feat_effect_keys_for_feature(feature: dict[str, Any]) -> list[str]:
+    return _effect_keys_for_feature(feature)
 
 
 def _qualifies_for_crossbow_expert(context: dict[str, Any]) -> bool:
@@ -7938,6 +8283,8 @@ def _normalize_skill_proficiency_level(value: Any) -> str:
     normalized = normalize_lookup(str(value))
     if normalized == "expertise":
         return "expertise"
+    if normalized in {"halfproficient", "halfproficiency"}:
+        return "half_proficient"
     if normalized in {"proficient", "proficiency"}:
         return "proficient"
     return "none"
@@ -7980,6 +8327,8 @@ def _skill_proficiency_level_from_bonus(
         return "expertise"
     if proficiency_bonus > 0 and delta >= proficiency_bonus:
         return "proficient"
+    if proficiency_bonus > 1 and delta == (proficiency_bonus // 2):
+        return "half_proficient"
     return "none"
 
 
@@ -8029,17 +8378,27 @@ def _build_skills_payload_from_levels(
     ability_scores: dict[str, int],
     proficiency_levels: dict[str, str],
     proficiency_bonus: int,
+    *,
+    skill_bonus_map: dict[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    resolved_skill_bonus_map = dict(skill_bonus_map or {})
     for normalized_skill, label in SKILL_LABELS.items():
         ability_key = SKILL_ABILITY_KEYS[normalized_skill]
         modifier = _ability_modifier(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE))
         proficiency_level = _normalize_skill_proficiency_level(proficiency_levels.get(normalized_skill))
-        rank = _skill_proficiency_level_rank(proficiency_level)
+        if proficiency_level == "expertise":
+            proficiency_contribution = proficiency_bonus * 2
+        elif proficiency_level == "proficient":
+            proficiency_contribution = proficiency_bonus
+        elif proficiency_level == "half_proficient":
+            proficiency_contribution = proficiency_bonus // 2
+        else:
+            proficiency_contribution = 0
         rows.append(
             {
                 "name": label,
-                "bonus": modifier + (proficiency_bonus * rank),
+                "bonus": modifier + proficiency_contribution + int(resolved_skill_bonus_map.get(normalized_skill) or 0),
                 "proficiency_level": proficiency_level,
             }
         )
@@ -8807,8 +9166,13 @@ def _build_leveled_source(
     target_level: int,
     *,
     current_level: int | None = None,
+    current_definition: CharacterDefinition | None = None,
+    hp_gain: int | None = None,
+    max_hp_delta: int | None = None,
 ) -> dict[str, Any]:
     source = dict(source_payload or {})
+    if current_definition is not None:
+        source = _seed_source_hp_baseline_from_definition(source, current_definition)
     source_type = str(source.get("source_type") or "").strip()
     if source_type in IMPORTED_CHARACTER_SOURCE_TYPES:
         source["imported_at"] = isoformat(utcnow())
@@ -8818,6 +9182,8 @@ def _build_leveled_source(
             kind="level_up",
             previous_level=current_level,
             target_level=target_level,
+            hp_gain=hp_gain,
+            max_hp_delta=max_hp_delta,
         )
         return source
     source.update(
@@ -8829,7 +9195,14 @@ def _build_leveled_source(
             "parse_warnings": [],
         }
     )
-    return source
+    return _with_native_progression_event(
+        source,
+        kind="level_up",
+        previous_level=current_level,
+        target_level=target_level,
+        hp_gain=hp_gain,
+        max_hp_delta=max_hp_delta,
+    )
 
 
 def _build_leveled_import_metadata(
@@ -12091,9 +12464,11 @@ def normalize_definition_to_native_model(
     resolved_background: SystemsEntryRecord | None = None,
 ) -> CharacterDefinition:
     payload = deepcopy(definition.to_dict())
+    payload["source"] = _seed_source_hp_baseline_from_definition(payload.get("source"), definition)
+    seeded_definition = CharacterDefinition.from_dict(payload)
     payload.update(
         _derive_definition_core_sheet_payloads(
-            definition,
+            seeded_definition,
             item_catalog=item_catalog,
             spell_catalog=spell_catalog,
             systems_service=systems_service,
