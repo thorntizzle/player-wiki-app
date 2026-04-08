@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 import player_wiki.app as app_module
 import pytest
 from player_wiki.auth_store import AuthStore
+from player_wiki.character_builder import normalize_definition_to_native_model
+from player_wiki.character_models import CharacterDefinition
 from player_wiki.systems_models import SystemsEntryRecord
 
 
@@ -2200,4 +2202,57 @@ def test_character_sheet_renders_long_form_imported_ability_keys(app, client, si
     assert "<h3>19</h3>" in html
     assert "<p>Charisma</p>" in html
     assert "Modifier +4 | Save +7" in html
+
+
+def test_character_sheet_renders_recalculated_structured_save_bonus_values(app, client, sign_in, users):
+    sorcerer = SystemsEntryRecord(
+        id=1,
+        library_slug="DND-5E",
+        source_id="PHB",
+        entry_key="dnd-5e|class|phb|phb-class-sorcerer",
+        entry_type="class",
+        slug="phb-class-sorcerer",
+        title="Sorcerer",
+        source_page="",
+        source_path="",
+        search_text="sorcerer",
+        player_safe_default=True,
+        dm_heavy=False,
+        metadata={"proficiency": ["con", "cha"]},
+        body={},
+        rendered_html="",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    def _mutate(payload: dict) -> None:
+        definition = CharacterDefinition.from_dict(payload)
+        definition.features = list(definition.features or []) + [
+            {
+                "id": "steadfast-aura-1",
+                "name": "Steadfast Aura",
+                "category": "custom_feature",
+                "campaign_option": {
+                    "modeled_effects": [
+                        "save-bonus:all:2",
+                        "save-bonus:abilities:wis,cha:1",
+                    ]
+                },
+            }
+        ]
+        normalized = normalize_definition_to_native_model(definition, resolved_class=sorcerer)
+        payload.clear()
+        payload.update(normalized.to_dict())
+
+    _write_character_definition(app, "arden-march", _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get("/campaigns/linden-pass/characters/arden-march")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "<p>Wisdom</p>" in html
+    assert "Modifier +1 | Save +4" in html
+    assert "<p>Charisma</p>" in html
+    assert "Modifier +4 | Save +10" in html
 

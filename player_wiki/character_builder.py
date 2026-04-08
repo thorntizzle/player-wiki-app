@@ -21,7 +21,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-04-08.02"
+CHARACTER_BUILDER_VERSION = "2026-04-08.03"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -2578,6 +2578,11 @@ def _infer_definition_save_proficiencies(
     if proficiency_bonus <= 0:
         return save_proficiencies
     ability_payloads = dict((definition.stats or {}).get("ability_scores") or {})
+    save_bonus_map = (
+        _effect_save_bonus_map(_extract_character_effect_keys(list(definition.features or [])))
+        if selected_class is not None
+        else {}
+    )
     for ability_key in ABILITY_KEYS:
         try:
             save_bonus = int(
@@ -2589,7 +2594,8 @@ def _infer_definition_save_proficiencies(
             )
         except (TypeError, ValueError):
             continue
-        if save_bonus - _ability_modifier(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE)) >= proficiency_bonus:
+        inferred_bonus = save_bonus - int(save_bonus_map.get(ability_key) or 0)
+        if inferred_bonus - _ability_modifier(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE)) >= proficiency_bonus:
             save_proficiencies.add(ability_key)
     return save_proficiencies
 
@@ -2686,6 +2692,32 @@ def _effect_skill_bonus_map(effect_keys: list[str]) -> dict[str, int]:
         except ValueError:
             continue
         bonuses[normalized_skill] = int(bonuses.get(normalized_skill) or 0) + bonus
+    return bonuses
+
+
+def _effect_save_bonus_map(effect_keys: list[str]) -> dict[str, int]:
+    bonuses: dict[str, int] = {}
+    for effect_key in list(effect_keys or []):
+        parts = _split_effect_key(effect_key)
+        if len(parts) < 3 or normalize_lookup(parts[0]) != normalize_lookup("save-bonus"):
+            continue
+        target_kind = normalize_lookup(parts[1])
+        target_ability_keys: list[str] = []
+        raw_bonus = ""
+        if target_kind == normalize_lookup("all") and len(parts) == 3:
+            target_ability_keys = list(ABILITY_KEYS)
+            raw_bonus = parts[2]
+        elif target_kind == normalize_lookup("abilities") and len(parts) == 4:
+            target_ability_keys = _parse_effect_ability_keys(parts[2])
+            raw_bonus = parts[3]
+        if not target_ability_keys:
+            continue
+        try:
+            bonus = int(raw_bonus)
+        except ValueError:
+            continue
+        for ability_key in target_ability_keys:
+            bonuses[ability_key] = int(bonuses.get(ability_key) or 0) + bonus
     return bonuses
 
 
@@ -2867,6 +2899,7 @@ def _derive_definition_stats(
         selected_class=selected_class,
     )
     effect_keys = _extract_character_effect_keys(features)
+    save_bonus_map = _effect_save_bonus_map(effect_keys)
     skill_lookup = {normalize_lookup(skill.get("name")): dict(skill) for skill in list(skills or [])}
     if skill_lookup:
         stats["passive_perception"] = 10 + int(
@@ -2887,7 +2920,9 @@ def _derive_definition_stats(
         ability_key: {
             "score": score,
             "modifier": _ability_modifier(score),
-            "save_bonus": _ability_modifier(score) + (proficiency_bonus if ability_key in save_proficiencies else 0),
+            "save_bonus": _ability_modifier(score)
+            + (proficiency_bonus if ability_key in save_proficiencies else 0)
+            + int(save_bonus_map.get(ability_key) or 0),
         }
         for ability_key, score in ability_scores.items()
     }
@@ -8948,6 +8983,7 @@ def _build_level_one_stats(
         _class_save_proficiencies(selected_class)
         + _extract_feat_saving_throw_proficiencies(feat_selections, selected_choices)
     )
+    save_bonus_map = _effect_save_bonus_map(_extract_character_effect_keys(features or []))
     base_speed = _extract_speed_label(selected_species)
     armor_class = _derive_armor_class_from_character_inputs(
         ability_scores=ability_scores,
@@ -8974,7 +9010,9 @@ def _build_level_one_stats(
             ability_key: {
                 "score": score,
                 "modifier": _ability_modifier(score),
-                "save_bonus": _ability_modifier(score) + (proficiency_bonus if ability_key in save_proficiencies else 0),
+                "save_bonus": _ability_modifier(score)
+                + (proficiency_bonus if ability_key in save_proficiencies else 0)
+                + int(save_bonus_map.get(ability_key) or 0),
             }
             for ability_key, score in ability_scores.items()
         },
@@ -9095,6 +9133,9 @@ def _build_leveled_stats(
         _class_save_proficiencies(selected_class)
         + _extract_feat_saving_throw_proficiencies(feat_selections, selected_choices)
     )
+    save_bonus_map = _effect_save_bonus_map(
+        _extract_character_effect_keys(features or list(current_definition.features or []))
+    )
     feat_hp_bonus = _feat_hit_point_bonus(feat_selections, current_level=current_level)
     stats["max_hp"] = max(int(stats.get("max_hp") or 0) + hp_gain + feat_hp_bonus, 1)
     stats["proficiency_bonus"] = proficiency_bonus
@@ -9125,7 +9166,9 @@ def _build_leveled_stats(
         ability_key: {
             "score": score,
             "modifier": _ability_modifier(score),
-            "save_bonus": _ability_modifier(score) + (proficiency_bonus if ability_key in save_proficiencies else 0),
+            "save_bonus": _ability_modifier(score)
+            + (proficiency_bonus if ability_key in save_proficiencies else 0)
+            + int(save_bonus_map.get(ability_key) or 0),
         }
         for ability_key, score in ability_scores.items()
     }

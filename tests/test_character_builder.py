@@ -3194,6 +3194,44 @@ def test_normalize_definition_to_native_model_applies_structured_effect_keys_to_
     assert normalized.stats["speed"] == "35 ft."
 
 
+def test_normalize_definition_to_native_model_applies_structured_save_bonus_effect_keys_without_false_proficiency():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"proficiency": ["str", "con"]},
+    )
+    definition = _minimal_imported_character_definition("steadfast-hero", "Steadfast Hero")
+    definition.features = [
+        {
+            "id": "steadfast-aura-1",
+            "name": "Steadfast Aura",
+            "category": "custom_feature",
+            "campaign_option": {
+                "modeled_effects": [
+                    "save-bonus:all:2",
+                    "save-bonus:abilities:wis,cha:1",
+                    "save-bonus:abilities:foo:4",
+                    "save-bonus:abilities:wis:not-a-number",
+                    "save-bonus:other:3",
+                ]
+            },
+        }
+    ]
+
+    normalized = normalize_definition_to_native_model(definition, resolved_class=fighter)
+    renormalized = normalize_definition_to_native_model(normalized, resolved_class=fighter)
+
+    assert normalized.stats["ability_scores"]["str"]["save_bonus"] == 7
+    assert normalized.stats["ability_scores"]["dex"]["save_bonus"] == 3
+    assert normalized.stats["ability_scores"]["con"]["save_bonus"] == 6
+    assert normalized.stats["ability_scores"]["int"]["save_bonus"] == 2
+    assert normalized.stats["ability_scores"]["wis"]["save_bonus"] == 4
+    assert normalized.stats["ability_scores"]["cha"]["save_bonus"] == 2
+    assert renormalized.stats["ability_scores"]["dex"]["save_bonus"] == 3
+    assert renormalized.stats["ability_scores"]["wis"]["save_bonus"] == 4
+
+
 def test_normalize_definition_to_native_model_maps_title_effects_through_shared_effect_keys():
     definition = _minimal_character_definition("selise-wynn", "Selise Wynn")
     definition.skills = [
@@ -4303,6 +4341,101 @@ def test_level_one_builder_applies_alert_feat_to_initiative():
     )
 
     assert definition.stats["initiative_bonus"] == 6
+
+
+def test_level_one_builder_applies_structured_save_bonus_effect_keys():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    battle_resilience = _systems_entry(
+        "classfeature",
+        "phb-classfeature-battle-resilience",
+        "Battle Resilience",
+        metadata={
+            "level": 1,
+            "campaign_option": {
+                "modeled_effects": [
+                    "save-bonus:all:2",
+                    "save-bonus:abilities:wis,cha:1",
+                ]
+            },
+        },
+    )
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                    {"label": "Battle Resilience", "entry": battle_resilience, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    form_values = {
+        "name": "Resilient Recruit",
+        "character_slug": "resilient-recruit",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "13",
+        "cha": "8",
+    }
+
+    definition, _ = build_level_one_character_definition(
+        "linden-pass",
+        build_level_one_builder_context(systems_service, "linden-pass", form_values),
+        form_values,
+    )
+
+    assert definition.stats["ability_scores"]["str"]["save_bonus"] == 7
+    assert definition.stats["ability_scores"]["dex"]["save_bonus"] == 3
+    assert definition.stats["ability_scores"]["wis"]["save_bonus"] == 4
+    assert definition.stats["ability_scores"]["cha"]["save_bonus"] == 2
 
 
 def test_level_one_builder_generates_attack_rows_from_starting_weapons():
@@ -7985,6 +8118,90 @@ def test_native_level_up_applies_resilient_feat_side_effects():
     assert dexterity["score"] == 13
     assert dexterity["save_bonus"] == 3
     assert "Resilient" in feature_names
+
+
+def test_native_level_up_applies_structured_save_bonus_effect_keys():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    battle_resilience = _systems_entry(
+        "classfeature",
+        "phb-classfeature-battle-resilience",
+        "Battle Resilience",
+        metadata={
+            "level": 4,
+            "campaign_option": {
+                "modeled_effects": [
+                    "save-bonus:all:2",
+                    "save-bonus:abilities:wis,cha:1",
+                ]
+            },
+        },
+    )
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 4,
+                "level_label": "Level 4",
+                "feature_rows": [
+                    {"label": "Battle Resilience", "entry": battle_resilience, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    current_definition = _minimal_character_definition("resolute-veteran", "Resolute Veteran")
+    current_definition.profile["class_level_text"] = "Fighter 3"
+    current_definition.profile["classes"][0]["level"] = 3
+
+    form_values = {"hp_gain": "8"}
+    context = build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values)
+
+    leveled_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        context,
+        form_values,
+        current_import_metadata=_minimal_import_metadata("resolute-veteran"),
+    )
+
+    assert leveled_definition.stats["ability_scores"]["str"]["save_bonus"] == 7
+    assert leveled_definition.stats["ability_scores"]["dex"]["save_bonus"] == 3
+    assert leveled_definition.stats["ability_scores"]["wis"]["save_bonus"] == 4
+    assert leveled_definition.stats["ability_scores"]["cha"]["save_bonus"] == 2
 
 
 def test_native_level_up_applies_page_backed_feat_grants():
