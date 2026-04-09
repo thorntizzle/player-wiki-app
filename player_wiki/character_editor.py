@@ -22,6 +22,7 @@ from .character_builder import (
     _resolve_builder_choices,
     _resolve_spell_entry,
     _spell_entry_level,
+    _spell_list_class_name_for_class,
     _spell_payload_class_row_id,
     _spell_lookup_key,
     _spell_payload_key,
@@ -149,23 +150,54 @@ def _spell_management_class_rows(
         for index, row in enumerate(row_payloads, start=1):
             row_id = str(row.get("class_row_id") or "").strip() or f"class-row-{index}"
             resolved_row = dict(resolved_rows.get(row_id) or {})
+            resolved_class = resolved_row.get("selected_class")
+            resolved_subclass = resolved_row.get("selected_subclass")
+            row_level = int(row.get("level") or 0)
             results.append(
                 {
                     "class_row_id": row_id,
                     "class_name": str(row.get("class_name") or "").strip(),
+                    "spell_list_class_name": (
+                        str(row.get("spell_list_class_name") or "").strip()
+                        or _spell_list_class_name_for_class(
+                            str(row.get("class_name") or "").strip(),
+                            selected_class=resolved_class if isinstance(resolved_class, SystemsEntryRecord) else None,
+                            selected_subclass=(
+                                resolved_subclass if isinstance(resolved_subclass, SystemsEntryRecord) else None
+                            ),
+                            row_level=row_level,
+                        )
+                    ),
                     "level": int(row.get("level") or 0),
                     "mode": str(row.get("spell_mode") or "").strip(),
                     "spellcasting_ability": str(row.get("spellcasting_ability") or "").strip(),
                     "spell_save_dc": row.get("spell_save_dc"),
                     "spell_attack_bonus": row.get("spell_attack_bonus"),
-                    "selected_class": resolved_row.get("selected_class"),
+                    "selected_class": resolved_class,
+                    "selected_subclass": resolved_subclass,
                     "slot_lane_id": normalize_spell_slot_lane_id(row.get("slot_lane_id")),
                 }
             )
         return results
 
     class_name = _spell_management_class_name(definition, spellcasting=spellcasting)
-    mode = _spellcasting_mode_for_class(class_name, selected_class=selected_class) if class_name else ""
+    first_resolved_row = dict(next(iter(resolved_rows.values()), {}) or {})
+    selected_subclass = (
+        first_resolved_row.get("selected_subclass")
+        if isinstance(first_resolved_row.get("selected_subclass"), SystemsEntryRecord)
+        else None
+    )
+    current_level = _character_total_level(definition)
+    mode = (
+        _spellcasting_mode_for_class(
+            class_name,
+            selected_class=selected_class,
+            selected_subclass=selected_subclass,
+            row_level=current_level,
+        )
+        if class_name
+        else ""
+    )
     if not class_name or not mode:
         return []
     first_profile_row = dict((ensure_profile_class_rows(definition.profile) or [{}])[0] or {})
@@ -173,12 +205,19 @@ def _spell_management_class_rows(
         {
             "class_row_id": str(first_profile_row.get("row_id") or "class-row-1"),
             "class_name": class_name,
-            "level": _character_total_level(definition),
+            "spell_list_class_name": _spell_list_class_name_for_class(
+                class_name,
+                selected_class=selected_class if isinstance(selected_class, SystemsEntryRecord) else None,
+                selected_subclass=selected_subclass,
+                row_level=current_level,
+            ),
+            "level": current_level,
             "mode": mode,
             "spellcasting_ability": str(spellcasting.get("spellcasting_ability") or "").strip(),
             "spell_save_dc": spellcasting.get("spell_save_dc"),
             "spell_attack_bonus": spellcasting.get("spell_attack_bonus"),
             "selected_class": selected_class if isinstance(selected_class, SystemsEntryRecord) else None,
+            "selected_subclass": selected_subclass,
             "slot_lane_id": "",
         }
     ]
@@ -193,9 +232,11 @@ def _build_spell_management_section(
     total_spell_rows: int,
 ) -> dict[str, Any]:
     class_name = str(row_payload.get("class_name") or "").strip()
+    spell_list_class_name = str(row_payload.get("spell_list_class_name") or class_name).strip()
     mode = str(row_payload.get("mode") or "").strip()
     current_level = int(row_payload.get("level") or 0)
     selected_class = row_payload.get("selected_class")
+    selected_subclass = row_payload.get("selected_subclass")
     class_row_id = str(row_payload.get("class_row_id") or "").strip()
     slot_progression = [dict(slot or {}) for slot in list(slot_lane.get("slot_progression") or [])]
     max_spell_level = max((int(slot.get("level") or 0) for slot in slot_progression), default=0)
@@ -220,17 +261,35 @@ def _build_spell_management_section(
 
     ability_scores = _spell_management_ability_scores(definition)
     target_cantrip_count = (
-        _spell_progression_value(class_name, "cantrip_progression", current_level, selected_class=selected_class)
+        _spell_progression_value(
+            class_name,
+            "cantrip_progression",
+            current_level,
+            selected_class=selected_class,
+            selected_subclass=selected_subclass,
+        )
         if class_name and mode
         else 0
     )
     target_known_count = (
-        _spell_progression_value(class_name, "spells_known_progression", current_level, selected_class=selected_class)
+        _spell_progression_value(
+            class_name,
+            "spells_known_progression",
+            current_level,
+            selected_class=selected_class,
+            selected_subclass=selected_subclass,
+        )
         if mode == "known"
         else 0
     )
     target_prepared_count = (
-        _prepared_spell_count_for_level(class_name, ability_scores, current_level, selected_class=selected_class)
+        _prepared_spell_count_for_level(
+            class_name,
+            ability_scores,
+            current_level,
+            selected_class=selected_class,
+            selected_subclass=selected_subclass,
+        )
         if mode in {"prepared", "wizard"}
         else 0
     )
@@ -275,6 +334,7 @@ def _build_spell_management_section(
     return {
         "class_row_id": class_row_id,
         "class_name": class_name,
+        "spell_list_class_name": spell_list_class_name,
         "mode": mode,
         "mode_label": {
             "known": "Known spells",
@@ -351,7 +411,7 @@ def search_character_spell_management_options(
     if len(clean_query) < SPELL_MANAGEMENT_QUERY_MIN_LENGTH:
         return [], "Type at least 2 letters to search eligible class spells."
 
-    class_name = str(section.get("class_name") or "").strip()
+    class_name = str(section.get("spell_list_class_name") or section.get("class_name") or "").strip()
     max_spell_level = int(section.get("max_spell_level") or 0)
     existing_keys = {
         str(row.get("catalog_key") or row.get("spell_key") or "").strip()

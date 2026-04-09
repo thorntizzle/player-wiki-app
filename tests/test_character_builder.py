@@ -716,7 +716,7 @@ def test_multiclass_readiness_allows_pact_magic_rows():
     assert warlock_row["spellcasting_row"] is True
 
 
-def test_multiclass_readiness_blocks_subclass_only_spellcasting_rows():
+def test_multiclass_readiness_allows_supported_subclass_only_spellcasting_rows():
     fighter = _systems_entry(
         "class",
         "phb-class-fighter",
@@ -766,6 +766,70 @@ def test_multiclass_readiness_blocks_subclass_only_spellcasting_rows():
             "level": 3,
             "systems_ref": _systems_ref(fighter),
             "subclass_ref": _systems_ref(eldritch_knight),
+        },
+    ]
+    definition.profile["subclass_ref"] = _systems_ref(champion)
+    definition.profile["class_level_text"] = "Fighter 3 / Fighter 3"
+
+    readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
+
+    assert readiness["status"] == "ready"
+    assert readiness["shared_slot_multiclass_ready"] is True
+    eldritch_knight_row = next(row for row in readiness["selected_class_rows"] if row["row_id"] == "class-row-2")
+    assert eldritch_knight_row["shared_slot_multiclass_supported"] is True
+    assert eldritch_knight_row["spellcasting_row"] is True
+
+
+def test_multiclass_readiness_blocks_unsupported_subclass_only_spellcasting_rows():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "proficiency": ["str", "con"], "subclass_title": "Martial Archetype"},
+    )
+    champion = _systems_entry(
+        "subclass",
+        "phb-subclass-champion",
+        "Champion",
+        metadata={"class_name": "Fighter", "class_source": "PHB"},
+    )
+    spellblade = _systems_entry(
+        "subclass",
+        "phb-subclass-spellblade",
+        "Spellblade",
+        metadata={"class_name": "Fighter", "class_source": "PHB"},
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "subclass": [champion, spellblade],
+            "race": [human],
+            "background": [acolyte],
+        },
+        class_progression=[],
+    )
+    _set_progressions(
+        systems_service,
+        class_by_slug={fighter.slug: [{"level": 3, "feature_rows": [_progression_row("Martial Archetype")]}]},
+        subclass_by_slug={
+            spellblade.slug: [
+                {"level": 3, "feature_rows": [_progression_row("Spellcasting")]},
+            ],
+            champion.slug: [],
+        },
+    )
+    definition = _minimal_character_definition("fighter-spellblade", "Fighter Spellblade")
+    definition.profile["classes"] = [
+        dict(definition.profile["classes"][0], level=3, subclass_name="Champion", subclass_ref=_systems_ref(champion)),
+        {
+            "row_id": "class-row-2",
+            "class_name": "Fighter",
+            "subclass_name": "Spellblade",
+            "level": 3,
+            "systems_ref": _systems_ref(fighter),
+            "subclass_ref": _systems_ref(spellblade),
         },
     ]
     definition.profile["subclass_ref"] = _systems_ref(champion)
@@ -977,6 +1041,222 @@ def test_normalize_definition_to_native_model_derives_separate_slot_lanes_for_wi
             "slot_progression": [
                 {"level": 1, "max_slots": 4},
                 {"level": 2, "max_slots": 2},
+            ],
+        },
+        {
+            "id": "class-row-2-slots",
+            "title": "Warlock Pact Magic slots",
+            "shared": False,
+            "row_ids": ["class-row-2"],
+            "slot_progression": [
+                {"level": 1, "max_slots": 2},
+            ],
+        },
+    ]
+
+
+def test_normalize_definition_to_native_model_supports_single_class_eldritch_knight_spellcasting():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "proficiency": ["str", "con"], "subclass_title": "Martial Archetype"},
+    )
+    eldritch_knight = _systems_entry(
+        "subclass",
+        "phb-subclass-eldritch-knight",
+        "Eldritch Knight",
+        metadata={"class_name": "Fighter", "class_source": "PHB"},
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "subclass": [eldritch_knight],
+            "race": [human],
+            "background": [acolyte],
+        },
+        class_progression=[],
+    )
+    _set_progressions(
+        systems_service,
+        class_by_slug={fighter.slug: [{"level": 3, "feature_rows": [_progression_row("Martial Archetype")]}]},
+        subclass_by_slug={eldritch_knight.slug: [{"level": 3, "feature_rows": [_progression_row("Spellcasting")]}]},
+    )
+    definition = _minimal_character_definition("eldritch-knight", "Eldritch Knight")
+    definition.profile["class_level_text"] = "Fighter 3"
+    definition.profile["class_ref"] = _systems_ref(fighter)
+    definition.profile["subclass_ref"] = _systems_ref(eldritch_knight)
+    definition.profile["classes"][0]["level"] = 3
+    definition.profile["classes"][0]["systems_ref"] = _systems_ref(fighter)
+    definition.profile["classes"][0]["subclass_name"] = "Eldritch Knight"
+    definition.profile["classes"][0]["subclass_ref"] = _systems_ref(eldritch_knight)
+    definition.spellcasting = {"slot_progression": [], "spells": []}
+
+    normalized = normalize_definition_to_native_model(definition, systems_service=systems_service)
+
+    row = dict(normalized.spellcasting["class_rows"][0])
+    assert normalized.spellcasting["spellcasting_class"] == "Fighter"
+    assert normalized.spellcasting["slot_progression"] == [{"level": 1, "max_slots": 2}]
+    assert row["class_name"] == "Fighter"
+    assert row["spell_list_class_name"] == "Wizard"
+    assert row["caster_progression"] == "1/3"
+    assert row["spell_mode"] == "known"
+
+
+def test_normalize_definition_to_native_model_shares_slots_for_eldritch_knight_and_wizard():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "proficiency": ["str", "con"], "subclass_title": "Martial Archetype"},
+    )
+    eldritch_knight = _systems_entry(
+        "subclass",
+        "phb-subclass-eldritch-knight",
+        "Eldritch Knight",
+        metadata={"class_name": "Fighter", "class_source": "PHB"},
+    )
+    wizard = _systems_entry(
+        "class",
+        "phb-class-wizard",
+        "Wizard",
+        metadata={
+            "hit_die": {"faces": 6},
+            "spellcasting_ability": "int",
+            "caster_progression": "full",
+            "spells_known_progression_fixed": [6],
+        },
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter, wizard],
+            "subclass": [eldritch_knight],
+            "race": [human],
+            "background": [acolyte],
+        },
+        class_progression=[],
+    )
+    _set_progressions(
+        systems_service,
+        class_by_slug={
+            fighter.slug: [{"level": 3, "feature_rows": [_progression_row("Martial Archetype")]}],
+            wizard.slug: [{"level": 1, "feature_rows": [_progression_row("Spellcasting")]}],
+        },
+        subclass_by_slug={eldritch_knight.slug: [{"level": 3, "feature_rows": [_progression_row("Spellcasting")]}]},
+    )
+    definition = _minimal_character_definition("ek-wizard", "EK Wizard")
+    definition.profile["classes"] = [
+        {
+            "row_id": "class-row-1",
+            "class_name": "Fighter",
+            "subclass_name": "Eldritch Knight",
+            "level": 3,
+            "systems_ref": _systems_ref(fighter),
+            "subclass_ref": _systems_ref(eldritch_knight),
+        },
+        {
+            "row_id": "class-row-2",
+            "class_name": "Wizard",
+            "subclass_name": "",
+            "level": 1,
+            "systems_ref": _systems_ref(wizard),
+        },
+    ]
+    definition.profile["class_ref"] = _systems_ref(fighter)
+    definition.profile["subclass_ref"] = _systems_ref(eldritch_knight)
+    definition.profile["class_level_text"] = "Fighter 3 / Wizard 1"
+    definition.spellcasting = {"slot_progression": [], "spells": []}
+
+    normalized = normalize_definition_to_native_model(definition, systems_service=systems_service)
+
+    assert normalized.spellcasting["slot_progression"] == [{"level": 1, "max_slots": 3}]
+    assert [row["caster_progression"] for row in normalized.spellcasting["class_rows"]] == ["1/3", "full"]
+    assert all(row["slot_lane_id"] == "shared-multiclass-slots" for row in normalized.spellcasting["class_rows"])
+
+
+def test_normalize_definition_to_native_model_keeps_pact_lane_separate_for_arcane_trickster_and_warlock():
+    rogue = _systems_entry(
+        "class",
+        "phb-class-rogue",
+        "Rogue",
+        metadata={"hit_die": {"faces": 8}, "proficiency": ["dex", "int"], "subclass_title": "Roguish Archetype"},
+    )
+    arcane_trickster = _systems_entry(
+        "subclass",
+        "phb-subclass-arcane-trickster",
+        "Arcane Trickster",
+        metadata={"class_name": "Rogue", "class_source": "PHB"},
+    )
+    warlock = _systems_entry(
+        "class",
+        "phb-class-warlock",
+        "Warlock",
+        metadata={
+            "hit_die": {"faces": 8},
+            "spellcasting_ability": "cha",
+            "caster_progression": "pact",
+            "spells_known_progression": [2, 3, 4],
+        },
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [rogue, warlock],
+            "subclass": [arcane_trickster],
+            "race": [human],
+            "background": [acolyte],
+        },
+        class_progression=[],
+    )
+    _set_progressions(
+        systems_service,
+        class_by_slug={
+            rogue.slug: [{"level": 3, "feature_rows": [_progression_row("Roguish Archetype")]}],
+            warlock.slug: [{"level": 1, "feature_rows": [_progression_row("Pact Magic")]}],
+        },
+        subclass_by_slug={arcane_trickster.slug: [{"level": 3, "feature_rows": [_progression_row("Spellcasting")]}]},
+    )
+    definition = _minimal_character_definition("at-warlock", "AT Warlock")
+    definition.profile["classes"] = [
+        {
+            "row_id": "class-row-1",
+            "class_name": "Rogue",
+            "subclass_name": "Arcane Trickster",
+            "level": 3,
+            "systems_ref": _systems_ref(rogue),
+            "subclass_ref": _systems_ref(arcane_trickster),
+        },
+        {
+            "row_id": "class-row-2",
+            "class_name": "Warlock",
+            "subclass_name": "",
+            "level": 2,
+            "systems_ref": _systems_ref(warlock),
+        },
+    ]
+    definition.profile["class_ref"] = _systems_ref(rogue)
+    definition.profile["subclass_ref"] = _systems_ref(arcane_trickster)
+    definition.profile["class_level_text"] = "Rogue 3 / Warlock 2"
+    definition.spellcasting = {"slot_progression": [], "spells": []}
+
+    normalized = normalize_definition_to_native_model(definition, systems_service=systems_service)
+
+    assert normalized.spellcasting["slot_progression"] == []
+    assert [row["caster_progression"] for row in normalized.spellcasting["class_rows"]] == ["1/3", "pact"]
+    assert normalized.spellcasting["class_rows"][0]["spell_list_class_name"] == "Wizard"
+    assert normalized.spellcasting["slot_lanes"] == [
+        {
+            "id": "class-row-1-slots",
+            "title": "Rogue spell slots",
+            "shared": False,
+            "row_ids": ["class-row-1"],
+            "slot_progression": [
+                {"level": 1, "max_slots": 2},
             ],
         },
         {
@@ -1353,6 +1633,140 @@ def test_native_level_up_advances_selected_multiclass_row_only():
     assert latest_event["class_row_id"] == "class-row-2"
     assert latest_event["row_from_level"] == 1
     assert latest_event["row_to_level"] == 2
+
+
+def test_native_level_up_surfaces_and_applies_eldritch_knight_spell_choices():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "proficiency": ["str", "con"], "subclass_title": "Martial Archetype"},
+    )
+    eldritch_knight = _systems_entry(
+        "subclass",
+        "phb-subclass-eldritch-knight",
+        "Eldritch Knight",
+        metadata={"class_name": "Fighter", "class_source": "PHB"},
+    )
+    fire_bolt = _systems_entry(
+        "spell",
+        "phb-spell-fire-bolt",
+        "Fire Bolt",
+        metadata={"level": 0, "class_lists": {"PHB": ["Wizard"]}},
+    )
+    mage_hand = _systems_entry(
+        "spell",
+        "phb-spell-mage-hand",
+        "Mage Hand",
+        metadata={"level": 0, "class_lists": {"PHB": ["Wizard"]}},
+    )
+    ray_of_frost = _systems_entry(
+        "spell",
+        "phb-spell-ray-of-frost",
+        "Ray of Frost",
+        metadata={"level": 0, "class_lists": {"PHB": ["Wizard"]}},
+    )
+    detect_magic = _systems_entry(
+        "spell",
+        "phb-spell-detect-magic",
+        "Detect Magic",
+        metadata={"level": 1, "class_lists": {"PHB": ["Wizard"]}},
+    )
+    magic_missile = _systems_entry(
+        "spell",
+        "phb-spell-magic-missile",
+        "Magic Missile",
+        metadata={"level": 1, "class_lists": {"PHB": ["Wizard"]}},
+    )
+    shield = _systems_entry(
+        "spell",
+        "phb-spell-shield",
+        "Shield",
+        metadata={"level": 1, "class_lists": {"PHB": ["Wizard"]}},
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "subclass": [eldritch_knight],
+            "race": [human],
+            "background": [acolyte],
+            "spell": [fire_bolt, mage_hand, ray_of_frost, detect_magic, magic_missile, shield],
+        },
+        class_progression=[],
+    )
+    _set_progressions(
+        systems_service,
+        class_by_slug={
+            fighter.slug: [
+                {"level": 3, "feature_rows": [_progression_row("Martial Archetype")]},
+            ],
+        },
+        subclass_by_slug={
+            eldritch_knight.slug: [
+                {"level": 3, "feature_rows": [_progression_row("Spellcasting")]},
+            ],
+        },
+    )
+    current_definition = _minimal_character_definition("eldritch-level-up", "Eldritch Level Up")
+    current_definition.profile["class_level_text"] = "Fighter 2"
+    current_definition.profile["class_ref"] = _systems_ref(fighter)
+    current_definition.profile["classes"][0]["level"] = 2
+    current_definition.profile["classes"][0]["systems_ref"] = _systems_ref(fighter)
+    current_definition.stats["max_hp"] = 20
+
+    form_values = {
+        "advancement_mode": "advance_existing",
+        "target_class_row_id": "class-row-1",
+        "subclass_slug": eldritch_knight.slug,
+        "hp_gain": "6",
+    }
+    context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        current_definition,
+        form_values,
+    )
+
+    assert _find_builder_field(context, "levelup_spell_cantrip_1")["label"] == "New Cantrip 1"
+    assert _find_builder_field(context, "levelup_spell_known_1")["label"] == "New Spell 1"
+
+    form_values.update(
+        {
+            "levelup_spell_cantrip_1": _field_value_for_label(context, "levelup_spell_cantrip_1", "Fire Bolt"),
+            "levelup_spell_cantrip_2": _field_value_for_label(context, "levelup_spell_cantrip_2", "Mage Hand"),
+            "levelup_spell_known_1": _field_value_for_label(context, "levelup_spell_known_1", "Detect Magic"),
+            "levelup_spell_known_2": _field_value_for_label(context, "levelup_spell_known_2", "Magic Missile"),
+            "levelup_spell_known_3": _field_value_for_label(context, "levelup_spell_known_3", "Shield"),
+        }
+    )
+    context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        current_definition,
+        form_values,
+    )
+    leveled_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        context,
+        form_values,
+    )
+
+    spell_row = dict(leveled_definition.spellcasting["class_rows"][0])
+    spells_by_name = {spell["name"]: dict(spell) for spell in leveled_definition.spellcasting["spells"]}
+
+    assert leveled_definition.profile["classes"][0]["subclass_name"] == "Eldritch Knight"
+    assert spell_row["class_name"] == "Fighter"
+    assert spell_row["spell_list_class_name"] == "Wizard"
+    assert spell_row["caster_progression"] == "1/3"
+    assert leveled_definition.spellcasting["slot_progression"] == [{"level": 1, "max_slots": 2}]
+    assert spells_by_name["Fire Bolt"]["mark"] == "Cantrip"
+    assert spells_by_name["Mage Hand"]["mark"] == "Cantrip"
+    assert spells_by_name["Detect Magic"]["mark"] == "Known"
+    assert spells_by_name["Magic Missile"]["class_row_id"] == "class-row-1"
+    assert spells_by_name["Shield"]["class_row_id"] == "class-row-1"
 
 
 def test_imported_multiclass_repair_is_row_aware_and_unlocks_native_advancement():

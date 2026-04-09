@@ -935,6 +935,10 @@ def create_app() -> Flask:
     def resolve_character_spellcasting_class_entries(campaign_slug: str, definition) -> list[dict[str, object]]:
         spellcasting_rows = [dict(row or {}) for row in list((definition.spellcasting or {}).get("class_rows") or []) if isinstance(row, dict)]
         profile_rows = ensure_profile_class_rows(definition.profile)
+        profile_rows_by_id = {
+            str(row.get("row_id") or "").strip() or f"class-row-{index}": dict(row or {})
+            for index, row in enumerate(profile_rows, start=1)
+        }
         results: list[dict[str, object]] = []
         candidate_rows = spellcasting_rows or [
             {
@@ -945,6 +949,7 @@ def create_app() -> Flask:
         ]
         for index, row in enumerate(candidate_rows, start=1):
             row_id = str(row.get("class_row_id") or row.get("row_id") or "").strip() or f"class-row-{index}"
+            profile_row = dict(profile_rows_by_id.get(row_id) or {})
             systems_ref = dict(row.get("class_ref") or row.get("systems_ref") or {})
             if str(systems_ref.get("entry_type") or "").strip() != "class":
                 continue
@@ -954,10 +959,19 @@ def create_app() -> Flask:
             entry = get_systems_service().get_entry_by_slug_for_campaign(campaign_slug, entry_slug)
             if entry is None or str(entry.entry_type or "").strip() != "class":
                 continue
+            selected_subclass = None
+            subclass_slug = str(dict(profile_row.get("subclass_ref") or {}).get("slug") or "").strip()
+            if subclass_slug:
+                selected_subclass = get_systems_service().get_entry_by_slug_for_campaign(campaign_slug, subclass_slug)
+                if selected_subclass is not None and str(selected_subclass.entry_type or "").strip() != "subclass":
+                    selected_subclass = None
             results.append(
                 {
                     "class_row_id": row_id,
+                    "row_id": row_id,
+                    "row_level": int(profile_row.get("level") or row.get("level") or 0),
                     "selected_class": entry,
+                    "selected_subclass": selected_subclass,
                 }
             )
         if not results:
@@ -967,7 +981,22 @@ def create_app() -> Flask:
             if entry_slug:
                 entry = get_systems_service().get_entry_by_slug_for_campaign(campaign_slug, entry_slug)
                 if entry is not None and str(entry.entry_type or "").strip() == "class":
-                    results.append({"class_row_id": "class-row-1", "selected_class": entry})
+                    first_profile_row = dict((profile_rows or [{}])[0] or {})
+                    selected_subclass = None
+                    subclass_slug = str(dict(first_profile_row.get("subclass_ref") or {}).get("slug") or "").strip()
+                    if subclass_slug:
+                        selected_subclass = get_systems_service().get_entry_by_slug_for_campaign(campaign_slug, subclass_slug)
+                        if selected_subclass is not None and str(selected_subclass.entry_type or "").strip() != "subclass":
+                            selected_subclass = None
+                    results.append(
+                        {
+                            "class_row_id": "class-row-1",
+                            "row_id": "class-row-1",
+                            "row_level": int(first_profile_row.get("level") or 0),
+                            "selected_class": entry,
+                            "selected_subclass": selected_subclass,
+                        }
+                    )
         return results
 
     def load_character_spell_management_support(campaign_slug: str, definition) -> tuple[dict[str, object], list[dict[str, object]]]:

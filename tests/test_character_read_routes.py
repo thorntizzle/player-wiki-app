@@ -1092,6 +1092,154 @@ def test_spellcasting_subpage_groups_multiclass_rows_and_allows_same_spell_on_an
     assert detect_magic_rows == ["class-row-1", "class-row-2"]
 
 
+def test_spell_management_search_uses_wizard_list_for_arcane_trickster_rows(app, client, sign_in, users):
+    with app.app_context():
+        systems_store = app.extensions["systems_store"]
+        systems_store.upsert_library("DND-5E", title="DND 5E", system_code="DND-5E")
+        systems_store.upsert_source(
+            "DND-5E",
+            "PHB",
+            title="Player's Handbook",
+            license_class="srd_cc",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        systems_store.replace_entries_for_source(
+            "DND-5E",
+            "PHB",
+            entry_types=["class"],
+            entries=[
+                {
+                    "entry_key": "dnd-5e|class|phb|phb-class-rogue",
+                    "entry_type": "class",
+                    "slug": "phb-class-rogue",
+                    "title": "Rogue",
+                    "source_page": "101",
+                    "source_path": "data/class/class-phb.json",
+                    "search_text": "rogue class",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {
+                        "hit_die": {"faces": 8},
+                        "subclass_title": "Roguish Archetype",
+                    },
+                    "body": {},
+                    "rendered_html": "<p>Rogue.</p>",
+                },
+            ],
+        )
+        systems_store.replace_entries_for_source(
+            "DND-5E",
+            "PHB",
+            entry_types=["subclass"],
+            entries=[
+                {
+                    "entry_key": "dnd-5e|subclass|phb|phb-subclass-arcane-trickster",
+                    "entry_type": "subclass",
+                    "slug": "phb-subclass-arcane-trickster",
+                    "title": "Arcane Trickster",
+                    "source_page": "98",
+                    "source_path": "data/class/class-phb.json",
+                    "search_text": "arcane trickster rogue subclass",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {
+                        "class_name": "Rogue",
+                        "class_source": "PHB",
+                    },
+                    "body": {},
+                    "rendered_html": "<p>Arcane Trickster.</p>",
+                },
+            ],
+        )
+    spell_entries = _seed_systems_spell_entries(
+        app,
+        [
+            {"slug": "phb-spell-detect-magic", "title": "Detect Magic", "level": 1, "class_lists": {"PHB": ["Wizard"]}},
+            {"slug": "phb-spell-bless", "title": "Bless", "level": 1, "class_lists": {"PHB": ["Cleric"]}},
+            {"slug": "phb-spell-mage-hand", "title": "Mage Hand", "level": 0, "class_lists": {"PHB": ["Wizard"]}},
+        ],
+    )
+
+    def _mutate(payload: dict) -> None:
+        profile = dict(payload.get("profile") or {})
+        profile["class_level_text"] = "Rogue 3"
+        profile["class_ref"] = {
+            "entry_key": "dnd-5e|class|phb|phb-class-rogue",
+            "entry_type": "class",
+            "title": "Rogue",
+            "slug": "phb-class-rogue",
+            "source_id": "PHB",
+        }
+        profile["subclass_ref"] = {
+            "entry_key": "dnd-5e|subclass|phb|phb-subclass-arcane-trickster",
+            "entry_type": "subclass",
+            "title": "Arcane Trickster",
+            "slug": "phb-subclass-arcane-trickster",
+            "source_id": "PHB",
+        }
+        profile["classes"] = [
+            {
+                "row_id": "class-row-1",
+                "class_name": "Rogue",
+                "subclass_name": "Arcane Trickster",
+                "level": 3,
+                "systems_ref": dict(profile["class_ref"]),
+                "subclass_ref": dict(profile["subclass_ref"]),
+            }
+        ]
+        payload["profile"] = profile
+        payload["source"] = {
+            "source_path": "builder://native-arcane-trickster",
+            "source_type": "native_character_builder",
+            "imported_from": "In-app Native Builder",
+            "imported_at": "2026-04-09T00:00:00Z",
+            "parse_warnings": [],
+        }
+        payload["spellcasting"] = {
+            "spellcasting_class": "Rogue",
+            "spellcasting_ability": "Intelligence",
+            "spell_save_dc": 13,
+            "spell_attack_bonus": 5,
+            "slot_progression": [
+                {"level": 1, "max_slots": 2},
+            ],
+            "class_rows": [
+                {
+                    "class_row_id": "class-row-1",
+                    "class_name": "Rogue",
+                    "spell_list_class_name": "Wizard",
+                    "class_ref": dict(profile["class_ref"]),
+                    "level": 3,
+                    "caster_progression": "1/3",
+                    "spell_mode": "known",
+                    "spellcasting_ability": "Intelligence",
+                    "spell_save_dc": 13,
+                    "spell_attack_bonus": 5,
+                }
+            ],
+            "spells": [
+                {
+                    **_spell_payload(spell_entries["phb-spell-mage-hand"], source="Rogue", mark="Cantrip"),
+                    "class_row_id": "class-row-1",
+                },
+            ],
+        }
+
+    _write_character_definition(app, "arden-march", _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    search_response = client.get(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/spells/search"
+        "?kind=spell&q=detect&target_class_row_id=class-row-1"
+    )
+    assert search_response.status_code == 200
+    search_payload = search_response.get_json()
+    assert search_payload["message"] == "Found 1 matching spells."
+    assert [result["entry_slug"] for result in search_payload["results"]] == ["phb-spell-detect-magic"]
+
+
 def test_spellcasting_subpage_shows_and_updates_separate_slot_pools_for_wizard_warlock_multiclass(
     app, client, sign_in, users
 ):
