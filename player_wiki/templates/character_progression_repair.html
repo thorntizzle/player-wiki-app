@@ -35,26 +35,34 @@
 
         <form method="post" action="{{ url_for('character_progression_repair_view', campaign_slug=campaign.slug, character_slug=character_slug) }}" class="stack-form character-builder-form">
           <section class="builder-section">
+            <h3>Class Rows</h3>
+            <div class="builder-field-grid">
+              {% for row in repair.class_rows %}
+                <label class="field">
+                  <span>{{ row.class_name or "Class" }} {{ row.row_level }}</span>
+                  <select name="{{ row.class_field_name }}">
+                    <option value="" {% if not row.class_selected %}selected{% endif %}>Choose an option</option>
+                    {% for option in row.class_options %}
+                      <option value="{{ option.value }}" {% if row.class_selected == option.value %}selected{% endif %}>{{ option.label }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Subclass Link</span>
+                  <select name="{{ row.subclass_field_name }}">
+                    <option value="" {% if not row.subclass_selected %}selected{% endif %}>No subclass link</option>
+                    {% for option in row.subclass_options %}
+                      <option value="{{ option.value }}" {% if row.subclass_selected == option.value %}selected{% endif %}>{{ option.label }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+              {% endfor %}
+            </div>
+          </section>
+
+          <section class="builder-section">
             <h3>Baseline Links</h3>
             <div class="builder-field-grid">
-              <label class="field">
-                <span>Class</span>
-                <select name="repair_class_slug">
-                  <option value="" {% if not repair.values.repair_class_slug %}selected{% endif %}>Choose an option</option>
-                  {% for option in repair.class_options %}
-                    <option value="{{ option.value }}" {% if repair.values.repair_class_slug == option.value %}selected{% endif %}>{{ option.label }}</option>
-                  {% endfor %}
-                </select>
-              </label>
-              <label class="field">
-                <span>Subclass</span>
-                <select name="repair_subclass_slug">
-                  <option value="" {% if not repair.values.repair_subclass_slug %}selected{% endif %}>No subclass link</option>
-                  {% for option in repair.subclass_options %}
-                    <option value="{{ option.value }}" {% if repair.values.repair_subclass_slug == option.value %}selected{% endif %}>{{ option.label }}</option>
-                  {% endfor %}
-                </select>
-              </label>
               <label class="field">
                 <span>Species</span>
                 <select name="repair_species_slug">

@@ -17,6 +17,7 @@ from .character_importer import (
     write_yaml,
 )
 from .character_models import CharacterDefinition, CharacterImportMetadata
+from .character_profile import ensure_profile_class_rows, sync_profile_class_summary
 from .character_repository import load_campaign_character_config
 from .character_store import CharacterStateStore
 from .repository import normalize_lookup
@@ -794,34 +795,47 @@ def resolve_definition_systems_links(
     campaign_slug: str,
     definition: CharacterDefinition,
 ) -> dict[str, Any]:
-    classes = list(definition.profile.get("classes") or [])
-    class_name = str(classes[0].get("class_name") or "") if classes else ""
-    subclass_name = str(classes[0].get("subclass_name") or "") if classes else ""
-    if not subclass_name and class_name:
-        subclass_name = _infer_subclass_name(
-            systems_service,
-            campaign_slug,
-            definition,
-            class_name=class_name,
+    classes = ensure_profile_class_rows(definition.profile)
+    class_rows: list[dict[str, Any]] = []
+    for row in classes:
+        class_name = str(row.get("class_name") or dict(row.get("systems_ref") or {}).get("title") or "").strip()
+        subclass_name = str(row.get("subclass_name") or dict(row.get("subclass_ref") or {}).get("title") or "").strip()
+        if not subclass_name and class_name:
+            subclass_name = _infer_subclass_name(
+                systems_service,
+                campaign_slug,
+                definition,
+                class_name=class_name,
+            )
+        class_rows.append(
+            {
+                "row_id": str(row.get("row_id") or "").strip(),
+                "class_name": class_name,
+                "subclass_name": subclass_name,
+                "class": _resolve_named_entry(
+                    systems_service,
+                    campaign_slug,
+                    target_name=class_name,
+                    entry_types=["class"],
+                )
+                if class_name
+                else {"status": "unresolved", "query": "", "candidates": []},
+                "subclass": _resolve_named_entry(
+                    systems_service,
+                    campaign_slug,
+                    target_name=subclass_name,
+                    entry_types=["subclass"],
+                    class_name=class_name,
+                )
+                if subclass_name
+                else {"status": "unresolved", "query": "", "candidates": []},
+            }
         )
+    primary_row = dict(class_rows[0] or {}) if class_rows else {}
     profile_links = {
-        "class": _resolve_named_entry(
-            systems_service,
-            campaign_slug,
-            target_name=class_name,
-            entry_types=["class"],
-        )
-        if class_name
-        else {"status": "unresolved", "query": "", "candidates": []},
-        "subclass": _resolve_named_entry(
-            systems_service,
-            campaign_slug,
-            target_name=subclass_name,
-            entry_types=["subclass"],
-            class_name=class_name,
-        )
-        if subclass_name
-        else {"status": "unresolved", "query": "", "candidates": []},
+        "class": dict(primary_row.get("class") or {"status": "unresolved", "query": "", "candidates": []}),
+        "subclass": dict(primary_row.get("subclass") or {"status": "unresolved", "query": "", "candidates": []}),
+        "class_rows": class_rows,
         "species": _resolve_named_entry(
             systems_service,
             campaign_slug,
@@ -1056,33 +1070,75 @@ def apply_systems_links_to_definition(
     linked_definition = CharacterDefinition.from_dict(copy.deepcopy(definition.to_dict()))
     profile_links = dict(systems_links.get("profile") or {})
     profile = dict(linked_definition.profile or {})
-    classes = list(profile.get("classes") or [])
+    classes = ensure_profile_class_rows(profile)
+    row_links = [dict(row or {}) for row in list(profile_links.get("class_rows") or []) if isinstance(row, dict)]
 
     class_ref = _systems_ref_from_match(dict(profile_links.get("class") or {}))
     subclass_ref = _systems_ref_from_match(dict(profile_links.get("subclass") or {}))
     species_ref = _systems_ref_from_match(dict(profile_links.get("species") or {}))
     background_ref = _systems_ref_from_match(dict(profile_links.get("background") or {}))
-    if class_ref is not None:
-        profile["class_ref"] = class_ref
-    if subclass_ref is not None:
-        profile["subclass_ref"] = subclass_ref
+    if row_links and classes:
+        classes_by_row_id = {
+            str(row.get("row_id") or "").strip(): dict(row)
+            for row in classes
+            if str(row.get("row_id") or "").strip()
+        }
+        updated_classes: list[dict[str, Any]] = []
+        for index, row in enumerate(classes):
+            payload = dict(row or {})
+            row_id = str(payload.get("row_id") or "").strip()
+            link_row = dict(row_links[index] or {}) if index < len(row_links) else {}
+            if row_id and row_id in {str(candidate.get("row_id") or "").strip() for candidate in row_links}:
+                link_row = next(
+                    (
+                        dict(candidate)
+                        for candidate in row_links
+                        if str(candidate.get("row_id") or "").strip() == row_id
+                    ),
+                    link_row,
+                )
+            class_row_ref = _systems_ref_from_match(dict(link_row.get("class") or {}))
+            subclass_row_ref = _systems_ref_from_match(dict(link_row.get("subclass") or {}))
+            if class_row_ref is not None:
+                payload["systems_ref"] = class_row_ref
+                payload["class_name"] = str(payload.get("class_name") or class_row_ref.get("title") or "").strip()
+            if subclass_row_ref is not None:
+                payload["subclass_ref"] = subclass_row_ref
+                if not str(payload.get("subclass_name") or "").strip():
+                    payload["subclass_name"] = subclass_row_ref.get("title", "")
+            updated_classes.append(payload)
+        classes = updated_classes
+        profile["classes"] = classes
         if classes:
             first_class = dict(classes[0] or {})
-            if not str(first_class.get("subclass_name") or "").strip():
-                first_class["subclass_name"] = subclass_ref.get("title", "")
-            first_class["subclass_ref"] = subclass_ref
+            if first_class.get("systems_ref"):
+                profile["class_ref"] = dict(first_class.get("systems_ref") or {})
+            if first_class.get("subclass_ref"):
+                profile["subclass_ref"] = dict(first_class.get("subclass_ref") or {})
+            else:
+                profile["subclass_ref"] = None
+    else:
+        if class_ref is not None:
+            profile["class_ref"] = class_ref
+        if subclass_ref is not None:
+            profile["subclass_ref"] = subclass_ref
+            if classes:
+                first_class = dict(classes[0] or {})
+                if not str(first_class.get("subclass_name") or "").strip():
+                    first_class["subclass_name"] = subclass_ref.get("title", "")
+                first_class["subclass_ref"] = subclass_ref
+                classes[0] = first_class
+        if class_ref is not None and classes:
+            first_class = dict(classes[0] or {})
+            first_class["systems_ref"] = class_ref
             classes[0] = first_class
-    if class_ref is not None and classes:
-        first_class = dict(classes[0] or {})
-        first_class["systems_ref"] = class_ref
-        classes[0] = first_class
     if species_ref is not None:
         profile["species_ref"] = species_ref
     if background_ref is not None:
         profile["background_ref"] = background_ref
     if classes:
         profile["classes"] = classes
-    linked_definition.profile = profile
+    linked_definition.profile = sync_profile_class_summary(profile)
 
     feature_links = list(systems_links.get("features") or [])
     feature_page_links = list((campaign_page_links or {}).get("features") or [])

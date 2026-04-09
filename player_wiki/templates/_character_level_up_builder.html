@@ -10,7 +10,7 @@
       <div class="section-heading">
         <div>
           <h2>Native Level {{ level_up.next_level }} Advancement</h2>
-          <p class="meta">Review the new DND-5E class features, choose any new subclass or spell options from enabled Systems entries, and enter the hit point gain your table is using.</p>
+          <p class="meta">Advance an existing class row or add one new strict-martial multiclass row, then review the resulting features, resources, and hit point change before saving.</p>
         </div>
         <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character_slug) }}">Back to sheet</a>
       </div>
@@ -21,19 +21,85 @@
         class="stack-form character-builder-form"
         data-live-builder-form
       >
-        <section class="builder-section">
+        <section class="builder-section" data-live-builder-region="advancement">
           <h3>Advancement</h3>
           <div class="builder-field-grid">
             <label class="field">
-              <span>Class</span>
-              <input type="text" value="{{ level_up.selected_class.title }}" disabled>
+              <span>Advance By</span>
+              <select
+                name="advancement_mode"
+                data-live-preview-trigger="change"
+                data-live-preview-regions="{{ level_up.live_regions_csv }}"
+                data-live-preview-debounce-ms="100"
+              >
+                {% for option in level_up.mode_options %}
+                  <option value="{{ option.value }}" {% if level_up.values.advancement_mode == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+              </select>
             </label>
-            {% if level_up.selected_subclass %}
+
+            {% if level_up.values.advancement_mode == "add_class" %}
               <label class="field">
-                <span>Current Subclass</span>
-                <input type="text" value="{{ level_up.selected_subclass.title }}" disabled>
+                <span>New Class</span>
+                <select
+                  name="new_class_slug"
+                  data-live-preview-trigger="change"
+                  data-live-preview-regions="{{ level_up.live_regions_csv }}"
+                  data-live-preview-debounce-ms="100"
+                >
+                  <option value="" {% if not level_up.values.new_class_slug %}selected{% endif %}>Choose an option</option>
+                  {% for option in level_up.new_class_options %}
+                    <option value="{{ option.value }}" {% if level_up.values.new_class_slug == option.value %}selected{% endif %}>{{ option.label }}</option>
+                  {% endfor %}
+                </select>
+                {% if level_up.multiclass_requirement_text %}
+                  <small>
+                    Entry requirement: {{ level_up.multiclass_requirement_text }}.
+                    {% if not level_up.multiclass_requirements_met %}Current ability scores do not meet it yet.{% endif %}
+                  </small>
+                {% endif %}
               </label>
+              {% if level_up.new_subclass_options %}
+                <label class="field">
+                  <span>New Subclass</span>
+                  <select
+                    name="new_subclass_slug"
+                    data-live-preview-trigger="change"
+                    data-live-preview-regions="choice-sections,preview-summary,preview-features,preview-resources,preview-spell-slots,preview-spells"
+                    data-live-preview-debounce-ms="100"
+                  >
+                    <option value="" {% if not level_up.values.new_subclass_slug %}selected{% endif %}>No subclass yet</option>
+                    {% for option in level_up.new_subclass_options %}
+                      <option value="{{ option.value }}" {% if level_up.values.new_subclass_slug == option.value %}selected{% endif %}>{{ option.label }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+              {% endif %}
+            {% else %}
+              <label class="field">
+                <span>Class Row</span>
+                <select
+                  name="target_class_row_id"
+                  data-live-preview-trigger="change"
+                  data-live-preview-regions="{{ level_up.live_regions_csv }}"
+                  data-live-preview-debounce-ms="100"
+                >
+                  {% for option in level_up.target_row_options %}
+                    <option value="{{ option.value }}" {% if level_up.values.target_class_row_id == option.value %}selected{% endif %}>{{ option.label }}</option>
+                  {% endfor %}
+                </select>
+                {% if level_up.selected_class %}
+                  <small>Advancing {{ level_up.selected_class.title }} from level {{ level_up.row_current_level }} to {{ level_up.row_target_level }}.</small>
+                {% endif %}
+              </label>
+              {% if level_up.selected_subclass %}
+                <label class="field">
+                  <span>Current Subclass</span>
+                  <input type="text" value="{{ level_up.selected_subclass.title }}" disabled>
+                </label>
+              {% endif %}
             {% endif %}
+
             <label class="field">
               <span>Hit Point Gain</span>
               <input
@@ -97,11 +163,11 @@
       <h2>Preview</h2>
       <div class="builder-preview-list">
         <div>
-          <span class="meta">Current Level</span>
-          <strong>{{ level_up.selected_class.title }} {{ level_up.current_level }}</strong>
+          <span class="meta">Current Classes</span>
+          <strong>{{ level_up.current_class_rows | join(" / ") }}</strong>
         </div>
         <div>
-          <span class="meta">Next Level</span>
+          <span class="meta">Resulting Classes</span>
           <strong>{{ level_up.preview.class_level_text }}</strong>
         </div>
         <div>
@@ -109,6 +175,13 @@
           <strong>{{ level_up.preview.max_hp }}</strong>
         </div>
       </div>
+      {% if level_up.preview.class_rows %}
+        <ul class="plain-list builder-feature-list">
+          {% for row_label in level_up.preview.class_rows %}
+            <li>{{ row_label }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
     </section>
 
     <section class="card sidebar-card" data-live-builder-region="preview-features">
@@ -120,7 +193,7 @@
           {% endfor %}
         </ul>
       {% else %}
-        <p class="meta">This level does not currently add any new modeled feature rows.</p>
+        <p class="meta">This advancement does not currently add any new modeled feature rows.</p>
       {% endif %}
     </section>
 

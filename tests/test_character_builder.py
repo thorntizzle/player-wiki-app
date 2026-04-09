@@ -441,6 +441,48 @@ def _option_value_for_label(options: list[dict[str, object]], label_fragment: st
     raise AssertionError(f"top-level builder options did not contain '{label_fragment}'")
 
 
+def _progression_row(
+    label: str,
+    *,
+    entry: SystemsEntryRecord | None = None,
+    option_groups: list[dict] | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {"label": label}
+    if entry is not None:
+        payload["entry"] = entry
+    if option_groups:
+        payload["embedded_card"] = {"option_groups": list(option_groups)}
+    return payload
+
+
+def _set_progressions(
+    systems_service: _FakeSystemsService,
+    *,
+    class_by_slug: dict[str, list[dict]] | None = None,
+    subclass_by_slug: dict[str, list[dict]] | None = None,
+) -> None:
+    class_progressions = dict(class_by_slug or {})
+    subclass_progressions = dict(subclass_by_slug or {})
+
+    def _build_class_feature_progression_for_class_entry(campaign_slug: str, entry: SystemsEntryRecord | None) -> list[dict]:
+        del campaign_slug
+        if entry is None:
+            return []
+        return list(class_progressions.get(str(entry.slug or ""), []))
+
+    def _build_subclass_feature_progression_for_subclass_entry(
+        campaign_slug: str,
+        entry: SystemsEntryRecord | None,
+    ) -> list[dict]:
+        del campaign_slug
+        if entry is None:
+            return []
+        return list(subclass_progressions.get(str(entry.slug or ""), []))
+
+    systems_service.build_class_feature_progression_for_class_entry = _build_class_feature_progression_for_class_entry
+    systems_service.build_subclass_feature_progression_for_subclass_entry = _build_subclass_feature_progression_for_subclass_entry
+
+
 def test_imported_character_readiness_is_ready_when_required_links_are_present():
     fighter = _systems_entry(
         "class",
@@ -539,7 +581,424 @@ def test_multiclass_readiness_uses_class_rows_for_total_level_even_when_legacy_s
 
     assert readiness["status"] == "unsupported"
     assert readiness["current_level"] == 5
-    assert "single-class native characters only" in readiness["message"].lower()
+    assert "missing enabled links" in readiness["message"].lower()
+
+
+def test_multiclass_readiness_blocks_spellbearing_rows():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "proficiency": ["str", "con"], "subclass_title": "Martial Archetype"},
+    )
+    wizard = _systems_entry(
+        "class",
+        "phb-class-wizard",
+        "Wizard",
+        metadata={"hit_die": {"faces": 6}, "proficiency": ["int", "wis"]},
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter, wizard],
+            "race": [human],
+            "background": [acolyte],
+            "subclass": [],
+        },
+        class_progression=[],
+    )
+    _set_progressions(
+        systems_service,
+        class_by_slug={
+            fighter.slug: [],
+            wizard.slug: [
+                {"level": 1, "feature_rows": [_progression_row("Spellcasting")]},
+            ],
+        },
+    )
+    definition = _minimal_character_definition("fighter-wizard", "Fighter Wizard")
+    definition.profile["classes"] = [
+        dict(definition.profile["classes"][0], level=1),
+        {
+            "row_id": "class-row-2",
+            "class_name": "Wizard",
+            "subclass_name": "",
+            "level": 1,
+            "systems_ref": {
+                "entry_key": wizard.entry_key,
+                "entry_type": wizard.entry_type,
+                "title": wizard.title,
+                "slug": wizard.slug,
+                "source_id": wizard.source_id,
+            },
+        },
+    ]
+    definition.profile["class_level_text"] = "Fighter 1 / Wizard 1"
+
+    readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
+
+    assert readiness["status"] == "unsupported"
+    assert "martial-only multiclass" in readiness["message"].lower()
+    assert any("wizard" in reason.lower() for reason in readiness["reasons"])
+
+
+def test_native_level_up_can_add_strict_martial_class_and_records_row_provenance():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "proficiency": ["str", "con"], "subclass_title": "Martial Archetype"},
+    )
+    rogue = _systems_entry(
+        "class",
+        "phb-class-rogue",
+        "Rogue",
+        metadata={
+            "hit_die": {"faces": 8},
+            "proficiency": ["dex", "int"],
+            "multiclassing": {
+                "requirements": {"dex": 13},
+                "proficienciesGained": {
+                    "armor": ["light"],
+                    "tools": ["thieves' tools"],
+                    "skills": [{"choose": {"count": 1, "from": ["stealth", "investigation"]}}],
+                },
+            },
+        },
+    )
+    sneak_attack = _systems_entry("classfeature", "rogue-sneak-attack", "Sneak Attack")
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter, rogue],
+            "race": [human],
+            "background": [acolyte],
+            "subclass": [],
+        },
+        class_progression=[],
+    )
+    _set_progressions(
+        systems_service,
+        class_by_slug={
+            fighter.slug: [],
+            rogue.slug: [
+                {"level": 1, "feature_rows": [_progression_row("Sneak Attack", entry=sneak_attack)]},
+            ],
+        },
+    )
+    definition = _minimal_character_definition("martial-multi", "Martial Multi")
+    definition.stats["ability_scores"]["dex"] = {"score": 13, "modifier": 1, "save_bonus": 1}
+
+    context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        definition,
+        {
+            "advancement_mode": "add_class",
+            "new_class_slug": f"systems:{rogue.slug}",
+            "multiclass_skill_1": "stealth",
+            "hp_gain": "5",
+        },
+    )
+    leveled_definition, _import_metadata, hp_delta = build_native_level_up_character_definition(
+        "linden-pass",
+        definition,
+        context,
+        context["values"],
+    )
+
+    assert hp_delta == 5
+    assert [row["row_id"] for row in leveled_definition.profile["classes"]] == ["class-row-1", "class-row-2"]
+    assert leveled_definition.profile["class_level_text"] == "Fighter 1 / Rogue 1"
+    assert leveled_definition.profile["classes"][1]["class_name"] == "Rogue"
+    assert leveled_definition.profile["classes"][1]["level"] == 1
+    assert "Light Armor" in leveled_definition.proficiencies["armor"]
+    assert "Thieves' Tools" in leveled_definition.proficiencies["tools"]
+    skills_by_name = {skill["name"]: skill for skill in leveled_definition.skills}
+    assert skills_by_name["Stealth"]["proficiency_level"] == "proficient"
+    assert any(feature.get("class_row_id") == "class-row-2" for feature in leveled_definition.features)
+    latest_event = list((leveled_definition.source or {}).get("native_progression", {}).get("history") or [])[-1]
+    assert latest_event["action"] == "add_class"
+    assert latest_event["class_row_id"] == "class-row-2"
+    assert latest_event["row_from_level"] == 0
+    assert latest_event["row_to_level"] == 1
+
+
+def test_native_level_up_blocks_add_class_when_multiclass_requirements_are_not_met():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "proficiency": ["str", "con"], "subclass_title": "Martial Archetype"},
+    )
+    rogue = _systems_entry(
+        "class",
+        "phb-class-rogue",
+        "Rogue",
+        metadata={
+            "hit_die": {"faces": 8},
+            "proficiency": ["dex", "int"],
+            "multiclassing": {"requirements": {"dex": 13}},
+        },
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter, rogue],
+            "race": [human],
+            "background": [acolyte],
+            "subclass": [],
+        },
+        class_progression=[],
+    )
+    _set_progressions(systems_service, class_by_slug={fighter.slug: [], rogue.slug: []})
+    definition = _minimal_character_definition("blocked-multi", "Blocked Multi")
+
+    context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        definition,
+        {
+            "advancement_mode": "add_class",
+            "new_class_slug": f"systems:{rogue.slug}",
+            "hp_gain": "5",
+        },
+    )
+
+    with pytest.raises(Exception, match="requires Dexterity 13 before multiclassing"):
+        build_native_level_up_character_definition(
+            "linden-pass",
+            definition,
+            context,
+            context["values"],
+        )
+
+
+def test_native_level_up_advances_selected_multiclass_row_only():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "proficiency": ["str", "con"], "subclass_title": "Martial Archetype"},
+    )
+    rogue = _systems_entry(
+        "class",
+        "phb-class-rogue",
+        "Rogue",
+        metadata={"hit_die": {"faces": 8}, "proficiency": ["dex", "int"]},
+    )
+    cunning_action = _systems_entry("classfeature", "rogue-cunning-action", "Cunning Action")
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter, rogue],
+            "race": [human],
+            "background": [acolyte],
+            "subclass": [],
+        },
+        class_progression=[],
+    )
+    _set_progressions(
+        systems_service,
+        class_by_slug={
+            fighter.slug: [],
+            rogue.slug: [
+                {"level": 1, "feature_rows": []},
+                {"level": 2, "feature_rows": [_progression_row("Cunning Action", entry=cunning_action)]},
+            ],
+        },
+    )
+    definition = _minimal_character_definition("fighter-rogue", "Fighter Rogue")
+    definition.profile["classes"] = [
+        dict(definition.profile["classes"][0], row_id="class-row-1", level=1),
+        {
+            "row_id": "class-row-2",
+            "class_name": "Rogue",
+            "subclass_name": "",
+            "level": 1,
+            "systems_ref": {
+                "entry_key": rogue.entry_key,
+                "entry_type": rogue.entry_type,
+                "title": rogue.title,
+                "slug": rogue.slug,
+                "source_id": rogue.source_id,
+            },
+        },
+    ]
+    definition.profile["class_level_text"] = "Fighter 1 / Rogue 1"
+
+    context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        definition,
+        {
+            "advancement_mode": "advance_existing",
+            "target_class_row_id": "class-row-2",
+            "hp_gain": "4",
+        },
+    )
+    leveled_definition, _import_metadata, hp_delta = build_native_level_up_character_definition(
+        "linden-pass",
+        definition,
+        context,
+        context["values"],
+    )
+
+    assert hp_delta == 4
+    assert [row["level"] for row in leveled_definition.profile["classes"]] == [1, 2]
+    assert [row["row_id"] for row in leveled_definition.profile["classes"]] == ["class-row-1", "class-row-2"]
+    assert any(feature["name"] == "Cunning Action" for feature in leveled_definition.features)
+    latest_event = list((leveled_definition.source or {}).get("native_progression", {}).get("history") or [])[-1]
+    assert latest_event["action"] == "advance_existing"
+    assert latest_event["class_row_id"] == "class-row-2"
+    assert latest_event["row_from_level"] == 1
+    assert latest_event["row_to_level"] == 2
+
+
+def test_imported_multiclass_repair_is_row_aware_and_unlocks_native_advancement():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "proficiency": ["str", "con"], "subclass_title": "Martial Archetype"},
+    )
+    rogue = _systems_entry(
+        "class",
+        "phb-class-rogue",
+        "Rogue",
+        metadata={"hit_die": {"faces": 8}, "proficiency": ["dex", "int"]},
+    )
+    cunning_action = _systems_entry("classfeature", "rogue-cunning-action", "Cunning Action")
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter, rogue],
+            "race": [human],
+            "background": [acolyte],
+            "subclass": [],
+        },
+        class_progression=[],
+    )
+    _set_progressions(
+        systems_service,
+        class_by_slug={
+            fighter.slug: [],
+            rogue.slug: [
+                {"level": 1, "feature_rows": []},
+                {"level": 2, "feature_rows": [_progression_row("Cunning Action", entry=cunning_action)]},
+            ],
+        },
+    )
+    definition = _minimal_imported_character_definition("imported-ftr-rogue", "Imported Fighter Rogue")
+    definition.profile["classes"] = [
+        {"row_id": "class-row-1", "class_name": "Fighter", "subclass_name": "", "level": 1},
+        {"row_id": "class-row-2", "class_name": "Rogue", "subclass_name": "", "level": 1},
+    ]
+    definition.profile["class_level_text"] = "Fighter 1 / Rogue 1"
+    definition.profile.pop("class_ref", None)
+    definition.profile.pop("subclass_ref", None)
+
+    readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
+    repair_context = build_imported_progression_repair_context(
+        systems_service,
+        "linden-pass",
+        definition,
+    )
+
+    assert readiness["status"] == "repairable"
+    assert len(repair_context["class_rows"]) == 2
+    repaired_definition, repaired_import = apply_imported_progression_repairs(
+        "linden-pass",
+        definition,
+        _minimal_import_metadata(definition.character_slug),
+        repair_context,
+        {
+            **repair_context["values"],
+            "repair_class_slug_class-row-1": f"systems:{fighter.slug}",
+            "repair_class_slug_class-row-2": f"systems:{rogue.slug}",
+        },
+    )
+    repaired_readiness = native_level_up_readiness(systems_service, "linden-pass", repaired_definition)
+    context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        repaired_definition,
+        {
+            "advancement_mode": "advance_existing",
+            "target_class_row_id": "class-row-2",
+            "hp_gain": "4",
+        },
+    )
+    leveled_definition, _managed_import, _hp_delta = build_native_level_up_character_definition(
+        "linden-pass",
+        repaired_definition,
+        context,
+        context["values"],
+        current_import_metadata=repaired_import,
+    )
+
+    assert repaired_readiness["status"] == "ready"
+    assert [row["row_id"] for row in repaired_definition.profile["classes"]] == ["class-row-1", "class-row-2"]
+    assert [row["level"] for row in leveled_definition.profile["classes"]] == [1, 2]
+    assert any(feature["name"] == "Cunning Action" for feature in leveled_definition.features)
+
+
+def test_imported_multiclass_repair_blocks_duplicate_row_repairs():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "proficiency": ["str", "con"], "subclass_title": "Martial Archetype"},
+    )
+    rogue = _systems_entry(
+        "class",
+        "phb-class-rogue",
+        "Rogue",
+        metadata={"hit_die": {"faces": 8}, "proficiency": ["dex", "int"]},
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter, rogue],
+            "race": [human],
+            "background": [acolyte],
+            "subclass": [],
+        },
+        class_progression=[],
+    )
+    _set_progressions(systems_service, class_by_slug={fighter.slug: [], rogue.slug: []})
+    definition = _minimal_imported_character_definition("duplicate-repair", "Duplicate Repair")
+    definition.profile["classes"] = [
+        {"row_id": "class-row-1", "class_name": "Fighter", "subclass_name": "", "level": 1},
+        {"row_id": "class-row-2", "class_name": "Rogue", "subclass_name": "", "level": 1},
+    ]
+    definition.profile.pop("class_ref", None)
+    definition.profile.pop("subclass_ref", None)
+
+    repair_context = build_imported_progression_repair_context(
+        systems_service,
+        "linden-pass",
+        definition,
+    )
+
+    with pytest.raises(Exception, match="distinct class/subclass repairs"):
+        apply_imported_progression_repairs(
+            "linden-pass",
+            definition,
+            _minimal_import_metadata(definition.character_slug),
+            repair_context,
+            {
+                **repair_context["values"],
+                "repair_class_slug_class-row-1": f"systems:{fighter.slug}",
+                "repair_class_slug_class-row-2": f"systems:{fighter.slug}",
+            },
+        )
 
 
 def test_imported_character_with_unsupported_enabled_class_is_blocked():

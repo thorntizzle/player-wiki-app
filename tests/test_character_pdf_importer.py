@@ -1169,6 +1169,61 @@ def test_apply_systems_links_to_definition_re_normalizes_duplicate_rows_and_keep
     assert longsword_items[0]["systems_ref"]["slug"] == "phb-item-longsword"
 
 
+def test_apply_systems_links_to_definition_preserves_multiclass_rows():
+    fighter = _sample_system_entry(
+        entry_key="class-fighter",
+        entry_type="class",
+        title="Fighter",
+        source_id="PHB",
+    )
+    rogue = _sample_system_entry(
+        entry_key="class-rogue",
+        entry_type="class",
+        title="Rogue",
+        source_id="PHB",
+    )
+    human = _sample_system_entry(
+        entry_key="race-human",
+        entry_type="race",
+        title="Human",
+        source_id="PHB",
+    )
+    sage = _sample_system_entry(
+        entry_key="background-sage",
+        entry_type="background",
+        title="Sage",
+        source_id="PHB",
+    )
+    systems_service = _FakeSystemsService([fighter, rogue, human, sage])
+    definition = _minimal_imported_definition(
+        profile={
+            "class_level_text": "Fighter 1 / Rogue 1",
+            "classes": [
+                {"row_id": "class-row-1", "class_name": "Fighter", "subclass_name": "", "level": 1},
+                {"row_id": "class-row-2", "class_name": "Rogue", "subclass_name": "", "level": 1},
+            ],
+            "species": "Human",
+            "background": "Sage",
+        },
+        spellcasting={
+            "spellcasting_class": "",
+            "spellcasting_ability": "",
+            "spell_save_dc": None,
+            "spell_attack_bonus": None,
+            "slot_progression": [],
+            "spells": [],
+        },
+    )
+
+    links = resolve_definition_systems_links(systems_service, "linden-pass", definition)
+    linked_definition = apply_systems_links_to_definition(definition, links)
+
+    assert [row["row_id"] for row in linked_definition.profile["classes"]] == ["class-row-1", "class-row-2"]
+    assert linked_definition.profile["classes"][0]["systems_ref"]["slug"] == fighter.slug
+    assert linked_definition.profile["classes"][1]["systems_ref"]["slug"] == rogue.slug
+    assert linked_definition.profile["class_ref"]["slug"] == fighter.slug
+
+
 def test_apply_systems_links_to_definition_merges_linked_duplicate_attack_rows_with_different_names():
     definition = CharacterDefinition(
         campaign_slug="linden-pass",

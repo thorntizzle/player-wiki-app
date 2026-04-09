@@ -22,6 +22,7 @@ from .character_builder import (
     normalize_definition_to_native_model,
 )
 from .character_models import CharacterDefinition, CharacterImportMetadata
+from .character_profile import ensure_profile_class_rows
 from .character_repository import CampaignCharacterConfig, load_campaign_character_config
 from .character_service import build_initial_state, merge_state_with_definition
 from .character_store import CharacterStateStore, CharacterStateWriteResult
@@ -1369,6 +1370,17 @@ def _preserve_existing_profile_refs(
     imported_profile: dict[str, Any],
     existing_profile: dict[str, Any],
 ) -> dict[str, Any]:
+    def _class_row_identity(row: dict[str, Any]) -> tuple[str, str, str, str]:
+        payload = dict(row or {})
+        systems_ref = dict(payload.get("systems_ref") or {})
+        subclass_ref = dict(payload.get("subclass_ref") or {})
+        return (
+            str(systems_ref.get("source_id") or "").strip().upper(),
+            str(systems_ref.get("slug") or payload.get("class_name") or "").strip().lower(),
+            str(subclass_ref.get("source_id") or "").strip().upper(),
+            str(subclass_ref.get("slug") or payload.get("subclass_name") or "").strip().lower(),
+        )
+
     profile = dict(imported_profile or {})
     previous_profile = dict(existing_profile or {})
     for field in ("class_ref", "subclass_ref", "species_ref", "background_ref"):
@@ -1376,17 +1388,36 @@ def _preserve_existing_profile_refs(
             continue
         if previous_profile.get(field):
             profile[field] = dict(previous_profile.get(field) or {})
-    imported_classes = [dict(row or {}) for row in list(profile.get("classes") or [])]
-    existing_classes = [dict(row or {}) for row in list(previous_profile.get("classes") or [])]
+    imported_classes = ensure_profile_class_rows(profile)
+    existing_classes = ensure_profile_class_rows(previous_profile)
     if imported_classes and existing_classes:
-        first_imported = dict(imported_classes[0] or {})
-        first_existing = dict(existing_classes[0] or {})
-        if first_existing.get("systems_ref") and not first_imported.get("systems_ref"):
-            first_imported["systems_ref"] = dict(first_existing.get("systems_ref") or {})
-        if first_existing.get("subclass_ref") and not first_imported.get("subclass_ref"):
-            first_imported["subclass_ref"] = dict(first_existing.get("subclass_ref") or {})
-        imported_classes[0] = first_imported
-        profile["classes"] = imported_classes
+        existing_by_row_id = {
+            str(row.get("row_id") or "").strip(): dict(row)
+            for row in existing_classes
+            if str(row.get("row_id") or "").strip()
+        }
+        existing_by_identity = {
+            _class_row_identity(row): dict(row)
+            for row in existing_classes
+            if any(_class_row_identity(row))
+        }
+        preserved_classes: list[dict[str, Any]] = []
+        for index, imported_row in enumerate(imported_classes):
+            payload = dict(imported_row or {})
+            row_id = str(payload.get("row_id") or "").strip()
+            existing_row = existing_by_row_id.get(row_id)
+            if existing_row is None:
+                existing_row = existing_by_identity.get(_class_row_identity(payload))
+            if existing_row is None and index < len(existing_classes):
+                existing_row = dict(existing_classes[index] or {})
+            if existing_row is not None:
+                payload["row_id"] = str(existing_row.get("row_id") or row_id).strip() or row_id
+                if existing_row.get("systems_ref") and not payload.get("systems_ref"):
+                    payload["systems_ref"] = dict(existing_row.get("systems_ref") or {})
+                if existing_row.get("subclass_ref") and not payload.get("subclass_ref"):
+                    payload["subclass_ref"] = dict(existing_row.get("subclass_ref") or {})
+            preserved_classes.append(payload)
+        profile["classes"] = preserved_classes
     return profile
 
 

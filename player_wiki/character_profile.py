@@ -22,6 +22,11 @@ def _coerce_level(value: Any) -> int:
         return 0
 
 
+def _default_class_row_id(index: int) -> str:
+    clean_index = max(int(index or 0), 1)
+    return f"class-row-{clean_index}"
+
+
 def _looks_populated_ref(value: Any) -> bool:
     ref = _copy_ref(value)
     return any(_clean_text(ref.get(field)) for field in ("entry_key", "slug", "title"))
@@ -42,8 +47,48 @@ def profile_class_rows(profile: dict[str, Any] | None) -> list[dict[str, Any]]:
     return [dict(row or {}) for row in list(dict(profile or {}).get("classes") or []) if isinstance(row, dict)]
 
 
+def ensure_profile_class_rows(profile: dict[str, Any] | None) -> list[dict[str, Any]]:
+    normalized_rows: list[dict[str, Any]] = []
+    for index, row in enumerate(profile_class_rows(profile), start=1):
+        payload = dict(row or {})
+        row_id = _clean_text(payload.get("row_id")) or _default_class_row_id(index)
+        payload["row_id"] = row_id
+        payload["level"] = _coerce_level(payload.get("level"))
+
+        class_ref = _copy_ref(payload.get("systems_ref"))
+        if class_ref:
+            payload["systems_ref"] = class_ref
+            if not _clean_text(payload.get("class_name")):
+                payload["class_name"] = _clean_text(class_ref.get("title"))
+        else:
+            payload.pop("systems_ref", None)
+            payload["class_name"] = _clean_text(payload.get("class_name"))
+
+        subclass_ref = _copy_ref(payload.get("subclass_ref"))
+        if subclass_ref:
+            payload["subclass_ref"] = subclass_ref
+            if not _clean_text(payload.get("subclass_name")):
+                payload["subclass_name"] = _clean_text(subclass_ref.get("title"))
+        else:
+            payload.pop("subclass_ref", None)
+            payload["subclass_name"] = _clean_text(payload.get("subclass_name"))
+
+        normalized_rows.append(payload)
+    return normalized_rows
+
+
+def profile_class_row_by_id(profile: dict[str, Any] | None, row_id: str) -> dict[str, Any]:
+    target_row_id = _clean_text(row_id)
+    if not target_row_id:
+        return {}
+    for row in ensure_profile_class_rows(profile):
+        if _clean_text(row.get("row_id")) == target_row_id:
+            return dict(row)
+    return {}
+
+
 def profile_primary_class_row(profile: dict[str, Any] | None) -> dict[str, Any]:
-    class_rows = profile_class_rows(profile)
+    class_rows = ensure_profile_class_rows(profile)
     return dict(class_rows[0] or {}) if class_rows else {}
 
 
@@ -93,7 +138,7 @@ def profile_primary_subclass_name(profile: dict[str, Any] | None) -> str:
 
 
 def profile_total_level(profile: dict[str, Any] | None, *, default: int = 0) -> int:
-    class_rows = profile_class_rows(profile)
+    class_rows = ensure_profile_class_rows(profile)
     total_level = sum(_coerce_level(row.get("level")) for row in class_rows)
     if total_level > 0:
         return total_level
@@ -105,7 +150,7 @@ def profile_total_level(profile: dict[str, Any] | None, *, default: int = 0) -> 
 def profile_class_level_text(profile: dict[str, Any] | None, *, default: str = "Character") -> str:
     current_profile = dict(profile or {})
     parts: list[str] = []
-    for row in profile_class_rows(current_profile):
+    for row in ensure_profile_class_rows(current_profile):
         class_ref = _copy_ref(row.get("systems_ref"))
         class_name = _clean_text(class_ref.get("title") or row.get("class_name"))
         class_level = _coerce_level(row.get("level"))
@@ -135,7 +180,7 @@ def profile_class_level_text(profile: dict[str, Any] | None, *, default: str = "
 
 def sync_profile_class_summary(profile: dict[str, Any] | None, *, default: str = "Character") -> dict[str, Any]:
     normalized_profile = dict(profile or {})
-    class_rows = profile_class_rows(normalized_profile)
+    class_rows = ensure_profile_class_rows(normalized_profile)
     if class_rows:
         normalized_profile["classes"] = class_rows
     normalized_profile["class_level_text"] = profile_class_level_text(normalized_profile, default=default)

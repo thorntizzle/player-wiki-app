@@ -19,6 +19,8 @@ from .character_campaign_options import (
 )
 from .character_models import CharacterDefinition, CharacterImportMetadata
 from .character_profile import (
+    ensure_profile_class_rows,
+    profile_class_level_text,
     profile_class_rows,
     profile_primary_class_name,
     profile_primary_class_ref,
@@ -57,6 +59,7 @@ CAMPAIGN_SESSIONS_SECTION = "Sessions"
 CAMPAIGN_PAGE_OPTION_PREFIX = "page:"
 SYSTEMS_OPTION_PREFIX = "systems:"
 CAMPAIGN_PAGE_SOURCE_ID = "Campaign"
+ADVANCEMENT_REGION_ID = "advancement"
 CHOICE_SECTIONS_REGION_ID = "choice-sections"
 ATTACK_NAME_SUFFIX_PATTERN = re.compile(r"\s*\(([^)]*)\)\s*$")
 ATTACK_MODE_WEAPON_THROWN = "weapon:thrown"
@@ -129,7 +132,7 @@ LEVEL_UP_PREVIEW_REGION_IDS = (
     PREVIEW_SCOPE_REGION_ID,
     PREVIEW_SPELL_SLOTS_REGION_ID,
 )
-LEVEL_UP_LIVE_REGION_IDS = (CHOICE_SECTIONS_REGION_ID, *LEVEL_UP_PREVIEW_REGION_IDS)
+LEVEL_UP_LIVE_REGION_IDS = (ADVANCEMENT_REGION_ID, CHOICE_SECTIONS_REGION_ID, *LEVEL_UP_PREVIEW_REGION_IDS)
 CAMPAIGN_MIXED_SOURCE_SUBSECTIONS_BY_KIND = {
     "species": {"species"},
     "background": {"background", "backgrounds"},
@@ -150,7 +153,16 @@ LEVEL_ONE_BUILDER_STATIC_KEYS = frozenset(
         *ABILITY_KEYS,
     }
 )
-LEVEL_UP_BUILDER_STATIC_KEYS = frozenset({"hp_gain", "subclass_slug"})
+LEVEL_UP_BUILDER_STATIC_KEYS = frozenset(
+    {
+        "hp_gain",
+        "subclass_slug",
+        "advancement_mode",
+        "target_class_row_id",
+        "new_class_slug",
+        "new_subclass_slug",
+    }
+)
 ABILITY_LABELS = {
     "str": "Strength",
     "dex": "Dexterity",
@@ -369,9 +381,10 @@ EXTRA_PHB_LEVEL_ONE_SPELL_LISTS = {
     },
 }
 NATIVE_LEVEL_UP_LIMITATIONS = [
-    "Native level-up currently advances one level at a time for single-class native characters whose base class has imported native progression support.",
+    "Native level-up currently advances one level at a time, including the first martial-only multiclass add-class path and row-specific multiclass advancement.",
     "Hit point gain is entered manually so your table can choose rolled or fixed HP.",
     "Prepared-caster level-up currently preserves existing prepared spells and adds the new picks needed for the next level.",
+    "Multiclass support in this slice stays in the strict martial lane: spell-slot classes, spell-bearing subclasses, and sheet spellcasting expansion still need manual follow-up.",
     "Some advanced feat side effects and non-structured campaign spell access still need manual follow-up.",
 ]
 LEVEL_ONE_ALWAYS_PREPARED_SPELLS_BY_SUBCLASS = {
@@ -868,13 +881,13 @@ def native_level_up_readiness(
             "current_level": current_level,
         }
 
-    classes = profile_class_rows(definition.profile)
-    if len(classes) != 1:
+    classes = ensure_profile_class_rows(definition.profile)
+    if not classes:
         character_label = "imported" if is_imported else "native"
         return {
             "status": NATIVE_LEVEL_UP_UNSUPPORTED,
-            "message": f"Level-up currently supports single-class {character_label} characters only.",
-            "reasons": ["This sheet must stay single-class for the current level-up flow."],
+            "message": f"This {character_label} character is missing a valid class row.",
+            "reasons": ["The character needs at least one class row before native level-up can continue."],
             "source_type": source_type,
             "is_native": is_native,
             "is_imported": is_imported,
@@ -905,7 +918,6 @@ def native_level_up_readiness(
             "current_level": current_level,
         }
 
-    class_payload = dict(classes[0] or {})
     enabled_class_options = _list_campaign_enabled_entries(systems_service, campaign_slug, "class")
     class_options = [entry for entry in enabled_class_options if _supports_native_class_entry(entry)]
     species_options = _build_mixed_character_options(
@@ -919,50 +931,6 @@ def native_level_up_readiness(
         kind="background",
     )
 
-    profile_class_ref = profile_primary_class_ref(definition.profile)
-    class_row_ref = dict(class_payload.get("systems_ref") or {})
-    selected_enabled_class_match = _resolve_profile_entry_match(
-        enabled_class_options,
-        profile_class_ref or class_row_ref,
-        fallback_title=_native_character_class_name(definition),
-    )
-    selected_enabled_class = selected_enabled_class_match.get("entry")
-    if selected_enabled_class is not None and not _supports_native_class_entry(selected_enabled_class):
-        character_label = "imported" if is_imported else "native"
-        class_policy = _native_source_matrix_support_policy(selected_enabled_class)
-        policy_reason = str(class_policy.get("reason") or "").strip()
-        if policy_reason:
-            message = f"This {character_label} character's base class is outside the current native support lane."
-            reasons = [policy_reason]
-        else:
-            message = (
-                f"This {character_label} character's base class does not yet expose the progression metadata "
-                "needed for native level-up."
-            )
-            reasons = [
-                "This class is enabled in Systems, but its progression metadata is still outside the current native level-up flow."
-            ]
-        return {
-            "status": NATIVE_LEVEL_UP_UNSUPPORTED,
-            "message": message,
-            "reasons": reasons,
-            "source_type": source_type,
-            "is_native": is_native,
-            "is_imported": is_imported,
-            "current_level": current_level,
-            "selected_class": None,
-            "selected_species": None,
-            "selected_background": None,
-            "selected_subclass": None,
-            "spell_repair_rows": [],
-        }
-
-    selected_class_match = _resolve_profile_entry_match(
-        class_options,
-        profile_class_ref or class_row_ref,
-        fallback_title=_native_character_class_name(definition),
-    )
-    selected_class = selected_class_match.get("entry")
     selected_species_match = _resolve_profile_entry_match(
         species_options,
         definition.profile.get("species_ref"),
@@ -979,24 +947,154 @@ def native_level_up_readiness(
     selected_background = selected_background_match.get("entry")
 
     repair_reasons: list[str] = []
-    if selected_class is None:
-        repair_reasons.append(
-            f"Choose a supported {_profile_link_subject('base class', systems_ref=profile_class_ref or class_row_ref)} link for this character."
-        )
-    elif is_imported:
-        if _profile_entry_match_needs_confirmation(selected_class_match):
-            repair_reasons.append(
-                f"Confirm the supported {_profile_link_subject('base class', systems_ref=profile_class_ref or class_row_ref, entry=selected_class)} link on the character profile before leveling up."
-            )
-        class_row_match = _resolve_profile_entry_match(
+    selected_class_rows: list[dict[str, Any]] = []
+    strict_multiclass_ready = True
+    strict_multiclass_reasons: list[str] = []
+    selected_class = None
+    selected_subclass = None
+    for index, class_payload in enumerate(classes, start=1):
+        row_id = str(class_payload.get("row_id") or "").strip() or f"class-row-{index}"
+        row_level = max(int(class_payload.get("level") or 0), 0)
+        class_row_ref = dict(class_payload.get("systems_ref") or {})
+        profile_row_ref = profile_primary_class_ref(definition.profile) if index == 1 else {}
+        selected_enabled_class_match = _resolve_profile_entry_match(
             enabled_class_options,
-            class_row_ref,
+            profile_row_ref or class_row_ref,
             fallback_title=str(class_payload.get("class_name") or _native_character_class_name(definition) or "").strip(),
         )
-        if _profile_entry_match_needs_confirmation(class_row_match) or not _systems_ref_slug(class_row_ref):
-            repair_reasons.append(
-                f"Confirm the {_profile_link_subject('class row', systems_ref=class_row_ref, entry=selected_class)} link so native level-up can extend the imported class baseline cleanly."
+        selected_enabled_class = selected_enabled_class_match.get("entry")
+        if selected_enabled_class is not None and not _supports_native_class_entry(selected_enabled_class):
+            character_label = "imported" if is_imported else "native"
+            class_policy = _native_source_matrix_support_policy(selected_enabled_class)
+            policy_reason = str(class_policy.get("reason") or "").strip()
+            message = (
+                f"This {character_label} character's base class is outside the current native support lane."
+                if index == 1
+                else f"This {character_label} character includes a class row outside the current native support lane."
             )
+            return {
+                "status": NATIVE_LEVEL_UP_UNSUPPORTED,
+                "message": message,
+                "reasons": [policy_reason] if policy_reason else [],
+                "source_type": source_type,
+                "is_native": is_native,
+                "is_imported": is_imported,
+                "current_level": current_level,
+                "selected_class": None,
+                "selected_species": selected_species,
+                "selected_background": selected_background,
+                "selected_subclass": None,
+                "spell_repair_rows": [],
+                "selected_class_rows": [],
+            }
+
+        selected_class_match = _resolve_profile_entry_match(
+            class_options,
+            profile_row_ref or class_row_ref,
+            fallback_title=str(class_payload.get("class_name") or _native_character_class_name(definition) or "").strip(),
+        )
+        selected_row_class = selected_class_match.get("entry")
+        if index == 1:
+            selected_class = selected_row_class
+        if selected_row_class is None:
+            subject = "base class" if index == 1 else f"class row {index}"
+            repair_reasons.append(
+                f"Choose a supported {_profile_link_subject(subject, systems_ref=profile_row_ref or class_row_ref)} link for this character."
+            )
+            selected_class_rows.append(
+                {
+                    "row_id": row_id,
+                    "row_index": index,
+                    "row_level": row_level,
+                    "class_payload": dict(class_payload),
+                    "selected_class": None,
+                    "selected_subclass": None,
+                    "class_progression": [],
+                    "subclass_progression": [],
+                    "requires_subclass": False,
+                    "strict_martial_supported": False,
+                }
+            )
+            continue
+
+        if is_imported and index == 1 and _profile_entry_match_needs_confirmation(selected_class_match):
+            repair_reasons.append(
+                f"Confirm the supported {_profile_link_subject('base class', systems_ref=profile_row_ref or class_row_ref, entry=selected_row_class)} link on the character profile before leveling up."
+            )
+        if is_imported:
+            class_row_match = _resolve_profile_entry_match(
+                enabled_class_options,
+                class_row_ref,
+                fallback_title=str(class_payload.get("class_name") or selected_row_class.title or "").strip(),
+            )
+            if _profile_entry_match_needs_confirmation(class_row_match) or not _systems_ref_slug(class_row_ref):
+                subject = "class row" if index == 1 else f"class row {index}"
+                repair_reasons.append(
+                    f"Confirm the {_profile_link_subject(subject, systems_ref=class_row_ref, entry=selected_row_class)} link so native level-up can extend the imported class baseline cleanly."
+                )
+
+        class_progression = _class_progression_for_builder(systems_service, campaign_slug, selected_row_class)
+        subclass_options = _list_subclass_options(systems_service, campaign_slug, selected_row_class)
+        profile_subclass_ref = profile_primary_subclass_ref(definition.profile) if index == 1 else {}
+        class_row_subclass_ref = dict(class_payload.get("subclass_ref") or {})
+        selected_subclass_match = _resolve_profile_entry_match(
+            subclass_options,
+            profile_subclass_ref or class_row_subclass_ref,
+            fallback_title=str(class_payload.get("subclass_name") or (_native_character_subclass_name(definition) if index == 1 else "") or "").strip(),
+        )
+        selected_row_subclass = selected_subclass_match.get("entry")
+        if index == 1:
+            selected_subclass = selected_row_subclass
+        subclass_label = str(selected_row_class.metadata.get("subclass_title") or "subclass").strip() or "subclass"
+        subclass_subject = _profile_link_subject(
+            subclass_label,
+            systems_ref=profile_subclass_ref or class_row_subclass_ref,
+            entry=selected_row_subclass,
+        )
+        requires_subclass = _class_requires_subclass_at_level(selected_row_class, class_progression, row_level)
+        if requires_subclass and selected_row_subclass is None:
+            repair_reasons.append(f"Choose a {subclass_subject} link before leveling up.")
+        elif is_imported and requires_subclass and _profile_entry_match_needs_confirmation(selected_subclass_match):
+            repair_reasons.append(f"Confirm the {subclass_subject} link before leveling up.")
+
+        strict_row_supported = _class_is_strict_martial(systems_service, campaign_slug, selected_row_class)
+        strict_subclass_supported = _subclass_is_strict_martial(
+            systems_service,
+            campaign_slug,
+            selected_row_subclass,
+            selected_class=selected_row_class,
+        )
+        if len(classes) > 1:
+            if not strict_row_supported:
+                strict_multiclass_ready = False
+                strict_multiclass_reasons.append(
+                    f"{selected_row_class.title} is outside the current martial-only multiclass lane."
+                )
+            elif not strict_subclass_supported and selected_row_subclass is not None:
+                strict_multiclass_ready = False
+                strict_multiclass_reasons.append(
+                    f"{selected_row_subclass.title} is outside the current martial-only multiclass lane."
+                )
+
+        selected_class_rows.append(
+            {
+                "row_id": row_id,
+                "row_index": index,
+                "row_level": row_level,
+                "class_payload": dict(class_payload),
+                "selected_class": selected_row_class,
+                "selected_subclass": selected_row_subclass,
+                "class_progression": class_progression,
+                "subclass_progression": _subclass_progression_for_builder(
+                    systems_service,
+                    campaign_slug,
+                    selected_row_subclass,
+                ),
+                "requires_subclass": requires_subclass,
+                "strict_martial_supported": strict_row_supported and strict_subclass_supported,
+            }
+        )
+
     if selected_species is None:
         repair_reasons.append(
             f"Choose a {_profile_link_subject('species', systems_ref=definition.profile.get('species_ref'))} link that the native level-up flow can resolve."
@@ -1014,36 +1112,25 @@ def native_level_up_readiness(
             f"Confirm the {_profile_link_subject('background', systems_ref=definition.profile.get('background_ref'), entry=selected_background)} link so native level-up can keep using the imported baseline."
         )
 
-    subclass_options: list[SystemsEntryRecord] = []
-    selected_subclass: SystemsEntryRecord | None = None
-    if selected_class is not None:
-        subclass_options = _list_subclass_options(systems_service, campaign_slug, selected_class)
-        profile_subclass_ref = profile_primary_subclass_ref(definition.profile)
-        class_row_subclass_ref = dict(class_payload.get("subclass_ref") or {})
-        selected_subclass_match = _resolve_profile_entry_match(
-            subclass_options,
-            profile_subclass_ref or class_row_subclass_ref,
-            fallback_title=_native_character_subclass_name(definition),
-        )
-        selected_subclass = selected_subclass_match.get("entry")
-        class_progression = systems_service.build_class_feature_progression_for_class_entry(campaign_slug, selected_class)
-        subclass_label = str(selected_class.metadata.get("subclass_title") or "subclass").strip() or "subclass"
-        subclass_subject = _profile_link_subject(
-            subclass_label,
-            systems_ref=profile_subclass_ref or class_row_subclass_ref,
-            entry=selected_subclass,
-        )
-        if _class_requires_subclass_at_level(selected_class, class_progression, current_level) and selected_subclass is None:
-            repair_reasons.append(f"Choose a {subclass_subject} link before leveling up.")
-        elif (
-            is_imported
-            and _class_requires_subclass_at_level(selected_class, class_progression, current_level)
-            and _profile_entry_match_needs_confirmation(selected_subclass_match)
-        ):
-            repair_reasons.append(f"Confirm the {subclass_subject} link before leveling up.")
+    if len(classes) > 1 and not strict_multiclass_ready:
+        return {
+            "status": NATIVE_LEVEL_UP_UNSUPPORTED,
+            "message": "This character is outside the current martial-only multiclass progression lane.",
+            "reasons": strict_multiclass_reasons,
+            "source_type": source_type,
+            "is_native": is_native,
+            "is_imported": is_imported,
+            "current_level": current_level,
+            "selected_class": selected_class,
+            "selected_species": selected_species,
+            "selected_background": selected_background,
+            "selected_subclass": selected_subclass,
+            "spell_repair_rows": [],
+            "selected_class_rows": selected_class_rows,
+        }
 
     spell_repair_rows: list[dict[str, Any]] = []
-    if is_imported and selected_class is not None:
+    if is_imported and len(classes) == 1 and selected_class is not None:
         spell_repair_rows = _build_imported_spell_repair_rows(
             definition,
             selected_class=selected_class,
@@ -1069,6 +1156,8 @@ def native_level_up_readiness(
             "selected_background": selected_background,
             "selected_subclass": selected_subclass,
             "spell_repair_rows": spell_repair_rows,
+            "selected_class_rows": selected_class_rows,
+            "strict_multiclass_ready": strict_multiclass_ready,
         }
 
     return {
@@ -1084,6 +1173,8 @@ def native_level_up_readiness(
         "selected_background": selected_background,
         "selected_subclass": selected_subclass,
         "spell_repair_rows": spell_repair_rows,
+        "selected_class_rows": selected_class_rows,
+        "strict_multiclass_ready": strict_multiclass_ready,
     }
 
 
@@ -1186,6 +1277,12 @@ def _with_native_progression_event(
     baseline_repaired: bool = False,
     hp_gain: int | None = None,
     max_hp_delta: int | None = None,
+    action: str | None = None,
+    class_row_id: str | None = None,
+    class_ref: dict[str, Any] | None = None,
+    subclass_ref: dict[str, Any] | None = None,
+    row_from_level: int | None = None,
+    row_to_level: int | None = None,
 ) -> dict[str, Any]:
     source = dict(source_payload or {})
     native_progression = _native_progression_payload(source)
@@ -1204,6 +1301,18 @@ def _with_native_progression_event(
         event["hp_gain"] = int(hp_gain)
     if max_hp_delta is not None:
         event["max_hp_delta"] = int(max_hp_delta)
+    if str(action or "").strip():
+        event["action"] = str(action or "").strip()
+    if str(class_row_id or "").strip():
+        event["class_row_id"] = str(class_row_id or "").strip()
+    if isinstance(class_ref, dict) and class_ref:
+        event["class_ref"] = dict(class_ref)
+    if isinstance(subclass_ref, dict) and subclass_ref:
+        event["subclass_ref"] = dict(subclass_ref)
+    if row_from_level is not None:
+        event["row_from_level"] = int(row_from_level)
+    if row_to_level is not None:
+        event["row_to_level"] = int(row_to_level)
     history.append(event)
     native_progression["history"] = history
     source["native_progression"] = native_progression
@@ -1256,6 +1365,120 @@ def _imported_spell_mark_options(spell_mode: str) -> list[tuple[str, str]]:
     return []
 
 
+def _class_row_level_text(class_payload: dict[str, Any]) -> str:
+    payload = dict(class_payload or {})
+    class_name = str(
+        payload.get("class_name")
+        or dict(payload.get("systems_ref") or {}).get("title")
+        or ""
+    ).strip()
+    level = int(payload.get("level") or 0)
+    if class_name and level > 0:
+        return f"{class_name} {level}"
+    if class_name:
+        return class_name
+    if level > 0:
+        return f"Level {level}"
+    return "Class Row"
+
+
+def _sync_profile_with_class_rows(profile: dict[str, Any], class_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    updated_profile = dict(profile or {})
+    updated_profile["classes"] = ensure_profile_class_rows({"classes": class_rows})
+    first_row = dict(updated_profile["classes"][0] or {}) if updated_profile["classes"] else {}
+    updated_profile["class_ref"] = dict(first_row.get("systems_ref") or {}) or None
+    updated_profile["subclass_ref"] = dict(first_row.get("subclass_ref") or {}) or None
+    return sync_profile_class_summary(updated_profile)
+
+
+def _build_resulting_level_up_profile(
+    current_definition: CharacterDefinition,
+    *,
+    action: str,
+    target_class_row_id: str,
+    selected_class: SystemsEntryRecord,
+    selected_subclass: SystemsEntryRecord | None,
+    row_target_level: int,
+) -> dict[str, Any]:
+    classes = ensure_profile_class_rows(current_definition.profile)
+    updated_rows: list[dict[str, Any]] = []
+    if action == "add_class":
+        updated_rows = [dict(row) for row in classes]
+        new_row = {
+            "row_id": target_class_row_id or f"class-row-{len(updated_rows) + 1}",
+            "class_name": selected_class.title,
+            "subclass_name": selected_subclass.title if selected_subclass is not None else "",
+            "level": row_target_level,
+            "systems_ref": _systems_ref_from_entry(selected_class),
+        }
+        if selected_subclass is not None:
+            new_row["subclass_ref"] = _systems_ref_from_entry(selected_subclass)
+        updated_rows.append(new_row)
+    else:
+        for row in classes:
+            payload = dict(row or {})
+            if str(payload.get("row_id") or "").strip() != str(target_class_row_id or "").strip():
+                updated_rows.append(payload)
+                continue
+            payload["class_name"] = selected_class.title
+            payload["level"] = row_target_level
+            payload["systems_ref"] = _systems_ref_from_entry(selected_class)
+            payload["subclass_name"] = selected_subclass.title if selected_subclass is not None else ""
+            if selected_subclass is not None:
+                payload["subclass_ref"] = _systems_ref_from_entry(selected_subclass)
+            else:
+                payload.pop("subclass_ref", None)
+            updated_rows.append(payload)
+    return _sync_profile_with_class_rows(dict(current_definition.profile or {}), updated_rows)
+
+
+def _build_multiclass_add_choice_sections(
+    *,
+    definition: CharacterDefinition,
+    selected_class: SystemsEntryRecord,
+    selected_subclass: SystemsEntryRecord | None,
+    feat_options: list[SystemsEntryRecord],
+    feat_catalog: dict[str, Any],
+    subclass_options: list[SystemsEntryRecord],
+    requires_subclass: bool,
+    class_progression: list[dict[str, Any]],
+    subclass_progression: list[dict[str, Any]],
+    optionalfeature_catalog: dict[str, SystemsEntryRecord],
+    item_catalog: dict[str, Any],
+    spell_catalog: dict[str, Any],
+    values: dict[str, str],
+) -> list[dict[str, Any]]:
+    sections = _build_level_up_choice_sections(
+        definition=definition,
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        feat_options=feat_options,
+        feat_catalog=feat_catalog,
+        subclass_options=subclass_options,
+        requires_subclass=requires_subclass,
+        class_progression=class_progression,
+        subclass_progression=subclass_progression,
+        optionalfeature_catalog=optionalfeature_catalog,
+        item_catalog=item_catalog,
+        spell_catalog=spell_catalog,
+        target_level=1,
+        current_ability_scores=_ability_scores_from_definition(definition),
+        values=values,
+    )
+    multiclass_fields = (
+        _multiclass_skill_choice_fields(selected_class, definition=definition, values=values)
+        + _multiclass_tool_choice_fields(selected_class, values=values)
+        + _multiclass_language_choice_fields(selected_class, values=values)
+    )
+    if not multiclass_fields:
+        return sections
+    if sections and str(sections[0].get("title") or "").strip() == "Class Choices":
+        first_section = dict(sections[0] or {})
+        first_section["fields"] = multiclass_fields + list(first_section.get("fields") or [])
+        return [first_section, *sections[1:]]
+    return [{"title": "Class Choices", "fields": multiclass_fields}, *sections]
+
+
 def build_native_level_up_context(
     systems_service: Any,
     campaign_slug: str,
@@ -1264,17 +1487,17 @@ def build_native_level_up_context(
     *,
     campaign_page_records: list[Any] | None = None,
 ) -> dict[str, Any]:
-    support_error = _native_level_up_support_error(
+    readiness = native_level_up_readiness(
+        systems_service,
+        campaign_slug,
         definition,
-        systems_service=systems_service,
-        campaign_slug=campaign_slug,
         campaign_page_records=campaign_page_records,
     )
-    if support_error:
-        raise CharacterBuildError(support_error)
+    if str(readiness.get("status") or "").strip() != NATIVE_LEVEL_UP_READY:
+        raise CharacterBuildError(str(readiness.get("message") or "This character is not ready for native level-up."))
 
     values = _normalize_level_up_values(definition, form_values or {})
-    current_level = _resolve_native_character_level(definition)
+    current_level = int(readiness.get("current_level") or _resolve_native_character_level(definition))
     next_level = current_level + 1
     static_bundle = _build_common_builder_static_bundle(
         systems_service,
@@ -1289,88 +1512,210 @@ def build_native_level_up_context(
     optionalfeature_catalog = dict(static_bundle.get("optionalfeature_catalog") or {})
     item_catalog = dict(static_bundle.get("item_catalog") or {})
     spell_catalog = dict(static_bundle.get("spell_catalog") or {})
+    row_contexts = [
+        dict(row or {})
+        for row in list(readiness.get("selected_class_rows") or [])
+        if isinstance(row, dict)
+    ]
+    current_class_rows = ensure_profile_class_rows(definition.profile)
+    target_row_options = [
+        {
+            "value": str(row.get("row_id") or "").strip(),
+            "label": _class_row_level_text(dict(row.get("class_payload") or {})),
+        }
+        for row in row_contexts
+    ]
+    strict_ready_for_add_class = bool(readiness.get("strict_multiclass_ready"))
+    strict_ready_for_add_class = strict_ready_for_add_class and all(
+        bool(row.get("strict_martial_supported"))
+        for row in row_contexts
+        if row.get("selected_class") is not None
+    )
+    values["advancement_mode"] = str(values.get("advancement_mode") or "advance_existing").strip() or "advance_existing"
+    if values["advancement_mode"] not in {"advance_existing", "add_class"}:
+        values["advancement_mode"] = "advance_existing"
+    if values["advancement_mode"] == "add_class" and not strict_ready_for_add_class:
+        values["advancement_mode"] = "advance_existing"
+    default_target_row_id = str((row_contexts[0] or {}).get("row_id") or "").strip() if row_contexts else ""
+    if not str(values.get("target_class_row_id") or "").strip():
+        values["target_class_row_id"] = default_target_row_id
+    allowed_target_row_ids = {str(option.get("value") or "").strip() for option in target_row_options}
+    if str(values.get("target_class_row_id") or "").strip() not in allowed_target_row_ids:
+        values["target_class_row_id"] = default_target_row_id
 
-    selected_class = _resolve_profile_entry(
-        class_options,
-        profile_primary_class_ref(definition.profile),
-        fallback_title=_native_character_class_name(definition),
-    )
-    selected_species = _resolve_profile_entry(
-        species_options,
-        definition.profile.get("species_ref"),
-        page_ref=definition.profile.get("species_page_ref"),
-        fallback_title=str(definition.profile.get("species") or "").strip(),
-    )
-    selected_background = _resolve_profile_entry(
-        background_options,
-        definition.profile.get("background_ref"),
-        page_ref=definition.profile.get("background_page_ref"),
-        fallback_title=str(definition.profile.get("background") or "").strip(),
-    )
-    if selected_class is None or selected_species is None or selected_background is None:
-        raise CharacterBuildError("This native character is missing enabled Systems links needed for level-up.")
-    if not _supports_native_class_entry(selected_class):
-        raise CharacterBuildError("This native character's base class does not yet expose the progression metadata needed for native level-up.")
+    selected_species = readiness.get("selected_species")
+    selected_background = readiness.get("selected_background")
+    if selected_species is None or selected_background is None:
+        raise CharacterBuildError("This character is missing the species or background needed for level-up.")
 
-    subclass_options = _list_subclass_options(
-        systems_service,
-        campaign_slug,
-        selected_class,
-        subclass_entries=list(static_bundle.get("subclass_entries") or []),
-    )
-    existing_subclass_slug = _systems_ref_slug(profile_primary_subclass_ref(definition.profile))
-    if existing_subclass_slug and not str(values.get("subclass_slug") or "").strip():
-        values["subclass_slug"] = existing_subclass_slug
-    values["subclass_slug"] = _sanitize_entry_selection_value(values.get("subclass_slug"), subclass_options)
-    selected_subclass = _resolve_selected_entry(subclass_options, values.get("subclass_slug", ""))
-
-    class_progression = _class_progression_for_builder(systems_service, campaign_slug, selected_class)
-    requires_subclass = (
-        _class_requires_subclass_at_level(selected_class, class_progression, next_level)
-        and selected_subclass is None
-    )
-    subclass_progression = _subclass_progression_for_builder(systems_service, campaign_slug, selected_subclass)
     ability_scores = _ability_scores_from_definition(definition)
-    values, choice_sections = _stabilize_choice_section_values(
-        values,
-        static_keys=LEVEL_UP_BUILDER_STATIC_KEYS,
-        build_sections=lambda current_values: _build_level_up_choice_sections(
-            definition=definition,
-            selected_class=selected_class,
-            selected_subclass=selected_subclass,
-            feat_options=feat_options,
-            feat_catalog=feat_catalog,
-            subclass_options=subclass_options,
-            requires_subclass=requires_subclass,
-            class_progression=class_progression,
-            subclass_progression=subclass_progression,
-            optionalfeature_catalog=optionalfeature_catalog,
-            item_catalog=item_catalog,
-            spell_catalog=spell_catalog,
-            target_level=next_level,
-            current_ability_scores=ability_scores,
-            values=current_values,
-        ),
-    )
+    selected_class: SystemsEntryRecord | None = None
+    selected_subclass: SystemsEntryRecord | None = None
+    class_progression: list[dict[str, Any]] = []
+    subclass_progression: list[dict[str, Any]] = []
+    subclass_options: list[SystemsEntryRecord] = []
+    requires_subclass = False
+    acted_row_id = str(values.get("target_class_row_id") or "").strip()
+    row_current_level = current_level
+    row_target_level = next_level
+    new_class_options = [
+        entry
+        for entry in _list_strict_martial_class_entries(systems_service, campaign_slug)
+        if (
+            str(entry.slug or "").strip(),
+            str(entry.source_id or "").strip().upper(),
+        )
+        not in {
+            (
+                str((row.get("selected_class").slug if isinstance(row.get("selected_class"), SystemsEntryRecord) else "")).strip(),
+                str((row.get("selected_class").source_id if isinstance(row.get("selected_class"), SystemsEntryRecord) else "")).strip().upper(),
+            )
+            for row in row_contexts
+        }
+    ]
+    if values["advancement_mode"] == "add_class" and not new_class_options:
+        values["advancement_mode"] = "advance_existing"
+    if values["advancement_mode"] == "add_class":
+        values["new_class_slug"] = _sanitize_entry_selection_value(values.get("new_class_slug"), new_class_options)
+        selected_class = _resolve_selected_entry(new_class_options, values.get("new_class_slug", ""))
+        acted_row_id = f"class-row-{len(current_class_rows) + 1}"
+        row_current_level = 0
+        row_target_level = 1
+        if selected_class is not None:
+            subclass_options = _list_strict_martial_subclass_options(
+                systems_service,
+                campaign_slug,
+                selected_class,
+                subclass_entries=list(static_bundle.get("subclass_entries") or []),
+            )
+            class_progression = _class_progression_for_builder(systems_service, campaign_slug, selected_class)
+            values["new_subclass_slug"] = _sanitize_entry_selection_value(values.get("new_subclass_slug"), subclass_options)
+            selected_subclass = _resolve_selected_entry(subclass_options, values.get("new_subclass_slug", ""))
+            requires_subclass = _class_requires_subclass_at_level(selected_class, class_progression, 1) and selected_subclass is None
+            subclass_progression = _subclass_progression_for_builder(systems_service, campaign_slug, selected_subclass)
+            values, choice_sections = _stabilize_choice_section_values(
+                values,
+                static_keys=LEVEL_UP_BUILDER_STATIC_KEYS,
+                build_sections=lambda current_values: _build_multiclass_add_choice_sections(
+                    definition=definition,
+                    selected_class=selected_class,
+                    selected_subclass=selected_subclass,
+                    feat_options=feat_options,
+                    feat_catalog=feat_catalog,
+                    subclass_options=subclass_options,
+                    requires_subclass=requires_subclass,
+                    class_progression=class_progression,
+                    subclass_progression=subclass_progression,
+                    optionalfeature_catalog=optionalfeature_catalog,
+                    item_catalog=item_catalog,
+                    spell_catalog=spell_catalog,
+                    values=current_values,
+                ),
+            )
+        else:
+            choice_sections = []
+    else:
+        target_row_context = next(
+            (
+                dict(row)
+                for row in row_contexts
+                if str(row.get("row_id") or "").strip() == str(values.get("target_class_row_id") or "").strip()
+            ),
+            dict(row_contexts[0] or {}) if row_contexts else {},
+        )
+        if not target_row_context:
+            raise CharacterBuildError("This character is missing the class row needed for level-up.")
+        acted_row_id = str(target_row_context.get("row_id") or "").strip()
+        row_current_level = int(target_row_context.get("row_level") or 0)
+        row_target_level = row_current_level + 1
+        selected_class = target_row_context.get("selected_class")
+        selected_subclass = target_row_context.get("selected_subclass")
+        if not isinstance(selected_class, SystemsEntryRecord):
+            raise CharacterBuildError("This character is missing the class row needed for level-up.")
+        subclass_options = _list_subclass_options(
+            systems_service,
+            campaign_slug,
+            selected_class,
+            subclass_entries=list(static_bundle.get("subclass_entries") or []),
+        )
+        existing_subclass_slug = _systems_ref_slug(dict((target_row_context.get("class_payload") or {}).get("subclass_ref") or {}))
+        if existing_subclass_slug and not str(values.get("subclass_slug") or "").strip():
+            values["subclass_slug"] = existing_subclass_slug
+        values["subclass_slug"] = _sanitize_entry_selection_value(values.get("subclass_slug"), subclass_options)
+        selected_subclass = _resolve_selected_entry(subclass_options, values.get("subclass_slug", ""))
+        class_progression = list(target_row_context.get("class_progression") or [])
+        requires_subclass = _class_requires_subclass_at_level(selected_class, class_progression, row_target_level) and selected_subclass is None
+        subclass_progression = _subclass_progression_for_builder(systems_service, campaign_slug, selected_subclass)
+        values, choice_sections = _stabilize_choice_section_values(
+            values,
+            static_keys=LEVEL_UP_BUILDER_STATIC_KEYS,
+            build_sections=lambda current_values: _build_level_up_choice_sections(
+                definition=definition,
+                selected_class=selected_class,
+                selected_subclass=selected_subclass,
+                feat_options=feat_options,
+                feat_catalog=feat_catalog,
+                subclass_options=subclass_options,
+                requires_subclass=requires_subclass,
+                class_progression=class_progression,
+                subclass_progression=subclass_progression,
+                optionalfeature_catalog=optionalfeature_catalog,
+                item_catalog=item_catalog,
+                spell_catalog=spell_catalog,
+                target_level=row_target_level,
+                current_ability_scores=ability_scores,
+                values=current_values,
+            ),
+        )
     choice_sections = _annotate_builder_choice_sections(
         choice_sections,
         preview_region_ids=LEVEL_UP_PREVIEW_REGION_IDS,
     )
-    preview = _build_native_level_up_preview(
-        definition=definition,
-        selected_class=selected_class,
-        selected_subclass=selected_subclass,
-        class_progression=class_progression,
-        subclass_progression=subclass_progression,
-        feat_options=feat_options,
-        feat_catalog=feat_catalog,
-        choice_sections=choice_sections,
-        optionalfeature_catalog=optionalfeature_catalog,
-        spell_catalog=spell_catalog,
-        target_level=next_level,
-        current_ability_scores=ability_scores,
-        values=values,
+    preview_profile = (
+        _build_resulting_level_up_profile(
+            definition,
+            action="add_class" if values["advancement_mode"] == "add_class" else "advance_existing",
+            target_class_row_id=acted_row_id,
+            selected_class=selected_class,
+            selected_subclass=selected_subclass,
+            row_target_level=row_target_level,
+        )
+        if isinstance(selected_class, SystemsEntryRecord)
+        else sync_profile_class_summary(dict(definition.profile or {}))
     )
+    if isinstance(selected_class, SystemsEntryRecord):
+        preview = _build_native_level_up_preview(
+            definition=definition,
+            selected_class=selected_class,
+            selected_subclass=selected_subclass,
+            class_progression=class_progression,
+            subclass_progression=subclass_progression,
+            feat_options=feat_options,
+            feat_catalog=feat_catalog,
+            choice_sections=choice_sections,
+            optionalfeature_catalog=optionalfeature_catalog,
+            spell_catalog=spell_catalog,
+            target_level=row_target_level,
+            total_character_level=next_level,
+            current_ability_scores=ability_scores,
+            values=values,
+            class_row_id=acted_row_id,
+            resulting_profile=preview_profile,
+        )
+    else:
+        try:
+            preview_max_hp = max(int((definition.stats or {}).get("max_hp") or 0) + _parse_level_up_hit_point_gain(values), 1)
+        except CharacterBuildError:
+            preview_max_hp = max(int((definition.stats or {}).get("max_hp") or 0), 1)
+        preview = {
+            "class_level_text": str(preview_profile.get("class_level_text") or profile_class_level_text(definition.profile)),
+            "class_rows": [_class_row_level_text(row) for row in ensure_profile_class_rows(preview_profile)],
+            "max_hp": preview_max_hp,
+            "gained_features": [],
+            "resources": [],
+            "spell_slots": [],
+            "new_spells": [],
+        }
     return {
         "values": values,
         "character_name": definition.name,
@@ -1379,6 +1724,29 @@ def build_native_level_up_context(
         "campaign_slug": campaign_slug,
         "campaign_page_records": list(campaign_page_records or []),
         "systems_service": systems_service,
+        "advancement_mode": values["advancement_mode"],
+        "mode_options": [
+            {"value": "advance_existing", "label": "Advance existing class"},
+            *(
+                [{"value": "add_class", "label": "Add new class"}]
+                if strict_ready_for_add_class and new_class_options
+                else []
+            ),
+        ],
+        "can_add_class": bool(strict_ready_for_add_class and new_class_options),
+        "current_class_rows": [_class_row_level_text(row) for row in current_class_rows],
+        "target_row_options": target_row_options,
+        "target_class_row_id": acted_row_id,
+        "row_current_level": row_current_level,
+        "row_target_level": row_target_level,
+        "new_class_options": [_entry_option(entry) for entry in new_class_options],
+        "new_subclass_options": [_entry_option(entry) for entry in subclass_options] if values["advancement_mode"] == "add_class" else [],
+        "multiclass_requirement_text": _multiclass_requirement_text(selected_class) if values["advancement_mode"] == "add_class" else "",
+        "multiclass_requirements_met": (
+            _meets_multiclass_requirements(selected_class, ability_scores=ability_scores)
+            if values["advancement_mode"] == "add_class" and isinstance(selected_class, SystemsEntryRecord)
+            else True
+        ),
         "selected_class": selected_class,
         "selected_species": selected_species,
         "selected_background": selected_background,
@@ -1419,6 +1787,7 @@ def build_native_level_up_character_definition(
     if support_error:
         raise CharacterBuildError(support_error)
 
+    advancement_mode = str(level_up_context.get("advancement_mode") or "advance_existing").strip() or "advance_existing"
     selected_class = level_up_context.get("selected_class")
     selected_species = level_up_context.get("selected_species")
     selected_background = level_up_context.get("selected_background")
@@ -1451,6 +1820,21 @@ def build_native_level_up_character_definition(
     target_level = int(level_up_context.get("next_level") or (current_level + 1))
     if target_level != current_level + 1:
         raise CharacterBuildError("Level-up currently advances one level at a time.")
+    target_class_row_id = str(level_up_context.get("target_class_row_id") or values.get("target_class_row_id") or "").strip()
+    raw_row_current_level = level_up_context.get("row_current_level")
+    raw_row_target_level = level_up_context.get("row_target_level")
+    row_current_level = int(current_level if raw_row_current_level is None else raw_row_current_level)
+    row_target_level = int((row_current_level + 1) if raw_row_target_level is None else raw_row_target_level)
+    if advancement_mode == "add_class":
+        if not _meets_multiclass_requirements(selected_class, ability_scores=_ability_scores_from_definition(current_definition)):
+            requirement_text = _multiclass_requirement_text(selected_class)
+            if requirement_text:
+                raise CharacterBuildError(f"{selected_class.title} requires {requirement_text} before multiclassing.")
+            raise CharacterBuildError(f"{selected_class.title} does not meet this character's multiclass requirements.")
+        if row_target_level != 1:
+            raise CharacterBuildError("New multiclass rows currently enter at level 1.")
+    elif row_target_level != row_current_level + 1:
+        raise CharacterBuildError("This class row can only advance one level at a time.")
 
     hp_gain = _parse_level_up_hit_point_gain(values)
     _, selected_choices = _resolve_builder_choices(choice_sections, values)
@@ -1459,7 +1843,7 @@ def build_native_level_up_character_definition(
         class_progression=class_progression,
         subclass_progression=subclass_progression,
         feat_options=feat_options,
-        target_level=target_level,
+        target_level=row_target_level,
         values=values,
         strict=True,
     )
@@ -1468,12 +1852,12 @@ def build_native_level_up_character_definition(
         feat_catalog,
         class_progression=class_progression,
         subclass_progression=subclass_progression,
-        target_level=target_level,
+        target_level=row_target_level,
     )
     new_feature_entries = _collect_progression_feature_entries_for_level(
         class_progression=class_progression,
         subclass_progression=subclass_progression,
-        target_level=target_level,
+        target_level=row_target_level,
         selected_choices=selected_choices,
         optionalfeature_catalog=optionalfeature_catalog,
     )
@@ -1507,6 +1891,7 @@ def build_native_level_up_character_definition(
     campaign_option_proficiencies = collect_campaign_option_proficiency_grants(selected_campaign_option_payloads)
     for skill_name in (
         _extract_feat_skill_proficiencies(feat_selections, selected_choices)
+        + (_extract_multiclass_gained_skill_proficiencies(selected_choices) if advancement_mode == "add_class" else [])
         + list(campaign_option_proficiencies.get("skills") or [])
     ):
         normalized_skill = normalize_lookup(skill_name)
@@ -1525,7 +1910,8 @@ def build_native_level_up_character_definition(
     new_features, _ = _build_feature_payloads(
         new_feature_entries,
         ability_scores=ability_scores,
-        current_level=target_level,
+        current_level=row_target_level,
+        class_row_id=target_class_row_id,
     )
     merged_features = _merge_feature_payloads(list(current_definition.features or []), new_features)
     merged_features, derived_resource_templates = _apply_tracker_templates_to_feature_payloads(
@@ -1547,6 +1933,7 @@ def build_native_level_up_character_definition(
         proficiency_bonus=proficiency_bonus,
         weapon_proficiencies=_dedupe_preserve_order(
             list((current_definition.proficiencies or {}).get("weapons") or [])
+            + (_extract_multiclass_gained_weapon_proficiencies(selected_class) if advancement_mode == "add_class" else [])
             + _extract_feat_weapon_proficiencies(feat_selections, selected_choices)
         ),
         selected_choices=combined_selected_choices,
@@ -1556,17 +1943,20 @@ def build_native_level_up_character_definition(
         feat_selections,
         current_level=target_level,
     )
+    resulting_profile = _build_resulting_level_up_profile(
+        current_definition,
+        action=advancement_mode,
+        target_class_row_id=target_class_row_id,
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        row_target_level=row_target_level,
+    )
     definition = CharacterDefinition(
         campaign_slug=campaign_slug,
         character_slug=current_definition.character_slug,
         name=current_definition.name,
         status=current_definition.status,
-        profile=_build_leveled_profile(
-            current_definition=current_definition,
-            selected_class=selected_class,
-            selected_subclass=selected_subclass,
-            target_level=target_level,
-        ),
+        profile=resulting_profile,
         stats=_build_leveled_stats(
             current_definition=current_definition,
             selected_class=selected_class,
@@ -1582,26 +1972,39 @@ def build_native_level_up_character_definition(
             features=merged_features,
             item_catalog=item_catalog,
             selected_campaign_option_payloads=selected_campaign_option_payloads,
+            resulting_profile=resulting_profile,
         ),
         skills=skills,
         proficiencies={
             "armor": _dedupe_preserve_order(
                 list((current_definition.proficiencies or {}).get("armor") or [])
+                + (_extract_multiclass_gained_armor_proficiencies(selected_class) if advancement_mode == "add_class" else [])
                 + _extract_feat_armor_proficiencies(feat_selections, selected_choices)
                 + list(campaign_option_proficiencies.get("armor") or [])
             ),
             "weapons": _dedupe_preserve_order(
                 list((current_definition.proficiencies or {}).get("weapons") or [])
+                + (_extract_multiclass_gained_weapon_proficiencies(selected_class) if advancement_mode == "add_class" else [])
                 + _extract_feat_weapon_proficiencies(feat_selections, selected_choices)
                 + list(campaign_option_proficiencies.get("weapons") or [])
             ),
             "tools": _dedupe_preserve_order(
                 list((current_definition.proficiencies or {}).get("tools") or [])
+                + (
+                    _extract_multiclass_gained_tool_proficiencies(selected_class, selected_choices)
+                    if advancement_mode == "add_class"
+                    else []
+                )
                 + _extract_feat_tool_proficiencies(feat_selections, selected_choices)
                 + list(campaign_option_proficiencies.get("tools") or [])
             ),
             "languages": _dedupe_preserve_order(
                 list((current_definition.proficiencies or {}).get("languages") or [])
+                + (
+                    _extract_multiclass_gained_language_proficiencies(selected_class, selected_choices)
+                    if advancement_mode == "add_class"
+                    else []
+                )
                 + _extract_feat_language_proficiencies(feat_selections, selected_choices)
                 + list(campaign_option_proficiencies.get("languages") or [])
             ),
@@ -1618,7 +2021,7 @@ def build_native_level_up_character_definition(
             choice_sections=choice_sections,
             selected_choices=selected_choices,
             spell_catalog=spell_catalog,
-            target_level=target_level,
+            target_level=row_target_level,
             feature_entries=new_feature_entries,
             selected_campaign_option_payloads=selected_campaign_option_payloads,
         ),
@@ -1635,6 +2038,12 @@ def build_native_level_up_character_definition(
             current_definition=current_definition,
             hp_gain=hp_gain,
             max_hp_delta=total_hp_delta,
+            action=advancement_mode,
+            class_row_id=target_class_row_id,
+            class_ref=_systems_ref_from_entry(selected_class),
+            subclass_ref=_systems_ref_from_entry(selected_subclass) if selected_subclass is not None else None,
+            row_from_level=row_current_level,
+            row_to_level=row_target_level,
         ),
     )
     definition = normalize_definition_to_native_model(
@@ -1675,7 +2084,8 @@ def build_imported_progression_repair_context(
         campaign_page_records=campaign_page_records,
     )
 
-    class_options = _list_supported_class_entries(systems_service, campaign_slug)
+    all_class_options = _list_supported_class_entries(systems_service, campaign_slug)
+    strict_class_options = _list_strict_martial_class_entries(systems_service, campaign_slug)
     species_options = _build_mixed_character_options(
         _list_campaign_enabled_entries(systems_service, campaign_slug, "race"),
         campaign_page_records or [],
@@ -1692,16 +2102,18 @@ def build_imported_progression_repair_context(
         kind="feat",
     )
     optionalfeature_options = list(_list_campaign_enabled_entries(systems_service, campaign_slug, "optionalfeature"))
-    classes = profile_class_rows(definition.profile)
-    class_payload = dict(classes[0] or {}) if classes else {}
+    classes = ensure_profile_class_rows(definition.profile)
+    selected_class_rows = [
+        dict(row or {})
+        for row in list(readiness.get("selected_class_rows") or [])
+        if isinstance(row, dict)
+    ]
 
     selected_class = readiness.get("selected_class") if isinstance(readiness.get("selected_class"), SystemsEntryRecord) else None
-    if selected_class is None:
-        selected_class = _resolve_profile_entry(
-            class_options,
-            profile_primary_class_ref(definition.profile) or dict(class_payload.get("systems_ref") or {}),
-            fallback_title=_native_character_class_name(definition),
-        )
+    if selected_class is None and selected_class_rows:
+        first_row_class = selected_class_rows[0].get("selected_class")
+        if isinstance(first_row_class, SystemsEntryRecord):
+            selected_class = first_row_class
     selected_species = readiness.get("selected_species") if isinstance(readiness.get("selected_species"), SystemsEntryRecord) else None
     if selected_species is None:
         selected_species = _resolve_profile_entry(
@@ -1720,18 +2132,74 @@ def build_imported_progression_repair_context(
             page_ref=definition.profile.get("background_page_ref"),
             fallback_title=str(definition.profile.get("background") or "").strip(),
         )
-    selected_subclass = readiness.get("selected_subclass") if isinstance(readiness.get("selected_subclass"), SystemsEntryRecord) else None
-    if selected_subclass is None and selected_class is not None:
-        selected_subclass = _resolve_profile_entry(
-            _list_subclass_options(systems_service, campaign_slug, selected_class),
-            profile_primary_subclass_ref(definition.profile) or dict(class_payload.get("subclass_ref") or {}),
-            fallback_title=_native_character_subclass_name(definition),
+
+    repair_class_rows: list[dict[str, Any]] = []
+    multiclass_context = len(classes) > 1
+    for index, class_payload in enumerate(classes, start=1):
+        row_id = str(class_payload.get("row_id") or "").strip() or f"class-row-{index}"
+        row_context = next(
+            (
+                dict(candidate)
+                for candidate in selected_class_rows
+                if str(candidate.get("row_id") or "").strip() == row_id
+            ),
+            dict(selected_class_rows[index - 1] or {}) if index - 1 < len(selected_class_rows) else {},
+        )
+        class_entries = strict_class_options if multiclass_context else all_class_options
+        row_selected_class = row_context.get("selected_class") if isinstance(row_context.get("selected_class"), SystemsEntryRecord) else None
+        if row_selected_class is None:
+            row_selected_class = _resolve_profile_entry(
+                class_entries,
+                dict(class_payload.get("systems_ref") or {}),
+                fallback_title=str(class_payload.get("class_name") or "").strip(),
+            )
+        subclass_entries = (
+            _list_strict_martial_subclass_options(systems_service, campaign_slug, row_selected_class)
+            if multiclass_context
+            else _list_subclass_options(systems_service, campaign_slug, row_selected_class)
+        ) if row_selected_class is not None else []
+        row_selected_subclass = (
+            row_context.get("selected_subclass")
+            if isinstance(row_context.get("selected_subclass"), SystemsEntryRecord)
+            else None
+        )
+        if row_selected_subclass is None and row_selected_class is not None:
+            row_selected_subclass = _resolve_profile_entry(
+                subclass_entries,
+                dict(class_payload.get("subclass_ref") or {}),
+                fallback_title=str(class_payload.get("subclass_name") or "").strip(),
+            )
+        class_field_name = f"repair_class_slug_{row_id}"
+        subclass_field_name = f"repair_subclass_slug_{row_id}"
+        values.setdefault(
+            class_field_name,
+            _entry_selection_value(row_selected_class) if row_selected_class is not None else "",
+        )
+        values.setdefault(
+            subclass_field_name,
+            _entry_selection_value(row_selected_subclass) if row_selected_subclass is not None else "",
+        )
+        repair_class_rows.append(
+            {
+                "row_id": row_id,
+                "row_index": index,
+                "row_level": int(class_payload.get("level") or 0),
+                "class_name": str(class_payload.get("class_name") or "").strip(),
+                "subclass_name": str(class_payload.get("subclass_name") or "").strip(),
+                "class_field_name": class_field_name,
+                "subclass_field_name": subclass_field_name,
+                "class_selected": str(values.get(class_field_name) or "").strip(),
+                "subclass_selected": str(values.get(subclass_field_name) or "").strip(),
+                "class_options": [_entry_option(entry) for entry in class_entries],
+                "subclass_options": [_entry_option(entry) for entry in subclass_entries],
+                "class_entries": class_entries,
+                "subclass_entries": subclass_entries,
+            }
         )
 
-    values.setdefault(
-        "repair_class_slug",
-        _entry_selection_value(selected_class) if selected_class is not None else "",
-    )
+    if repair_class_rows:
+        values.setdefault("repair_class_slug", str(repair_class_rows[0].get("class_selected") or "").strip())
+        values.setdefault("repair_subclass_slug", str(repair_class_rows[0].get("subclass_selected") or "").strip())
     values.setdefault(
         "repair_species_slug",
         _entry_selection_value(selected_species)
@@ -1743,18 +2211,6 @@ def build_imported_progression_repair_context(
         _entry_selection_value(selected_background)
         if background_options
         else "",
-    )
-    values.setdefault(
-        "repair_subclass_slug",
-        _entry_selection_value(selected_subclass)
-        if selected_class is not None
-        else "",
-    )
-    selected_class_for_values = _resolve_selected_entry(class_options, values.get("repair_class_slug", ""))
-    subclass_options = (
-        _list_subclass_options(systems_service, campaign_slug, selected_class_for_values)
-        if selected_class_for_values is not None
-        else []
     )
 
     feat_row_count = 2 if current_level >= 4 or any(str((feature.get("category") or "")).strip() == "feat" for feature in list(definition.features or [])) else 0
@@ -1783,10 +2239,7 @@ def build_imported_progression_repair_context(
         )
 
     spell_rows = []
-    selected_spell_class = _resolve_selected_entry(
-        class_options,
-        values.get("repair_class_slug") or (_entry_selection_value(selected_class) if selected_class is not None else ""),
-    )
+    selected_spell_class = selected_class if len(classes) == 1 else None
     for row in _build_imported_spell_repair_rows(definition, selected_class=selected_spell_class) if selected_spell_class is not None else []:
         field_name = str(row.get("field_name") or "").strip()
         if field_name:
@@ -1799,17 +2252,18 @@ def build_imported_progression_repair_context(
         "character_name": definition.name,
         "current_level": current_level,
         "readiness": readiness,
-        "class_options": [_entry_option(entry) for entry in class_options],
+        "class_rows": repair_class_rows,
+        "class_options": [_entry_option(entry) for entry in all_class_options],
         "species_options": [_entry_option(entry) for entry in species_options],
         "background_options": [_entry_option(entry) for entry in background_options],
-        "subclass_options": [_entry_option(entry) for entry in subclass_options],
+        "subclass_options": [_entry_option(entry) for entry in (repair_class_rows[0].get("subclass_entries") if repair_class_rows else [])],
         "feat_rows": feat_rows,
         "optionalfeature_rows": optionalfeature_rows,
         "spell_rows": spell_rows,
-        "class_entries": class_options,
+        "class_entries": all_class_options,
         "species_entries": species_options,
         "background_entries": background_options,
-        "subclass_entries": subclass_options,
+        "subclass_entries": list(repair_class_rows[0].get("subclass_entries") or []) if repair_class_rows else [],
         "feat_entries": feat_options,
         "optionalfeature_entries": optionalfeature_options,
         "systems_service": systems_service,
@@ -1841,25 +2295,58 @@ def apply_imported_progression_repairs(
     class_entries = list(repair_context.get("class_entries") or [])
     species_entries = list(repair_context.get("species_entries") or [])
     background_entries = list(repair_context.get("background_entries") or [])
-    subclass_entries = list(repair_context.get("subclass_entries") or [])
+    repair_class_rows = [dict(row or {}) for row in list(repair_context.get("class_rows") or []) if isinstance(row, dict)]
     feat_entries = list(repair_context.get("feat_entries") or [])
     optionalfeature_entries = list(repair_context.get("optionalfeature_entries") or [])
 
-    selected_class = _resolve_selected_entry(class_entries, values.get("repair_class_slug", ""))
     selected_species = _resolve_selected_entry(species_entries, values.get("repair_species_slug", ""))
     selected_background = _resolve_selected_entry(background_entries, values.get("repair_background_slug", ""))
-    selected_subclass = _resolve_selected_entry(subclass_entries, values.get("repair_subclass_slug", ""))
 
+    resolved_class_rows: list[dict[str, Any]] = []
     missing_refs = []
-    if selected_class is None:
-        missing_refs.append("class")
+    for row in repair_class_rows:
+        class_field_name = str(row.get("class_field_name") or "").strip()
+        subclass_field_name = str(row.get("subclass_field_name") or "").strip()
+        row_class_entries = list(row.get("class_entries") or class_entries)
+        row_subclass_entries = list(row.get("subclass_entries") or [])
+        selected_row_class = _resolve_selected_entry(row_class_entries, values.get(class_field_name, ""))
+        selected_row_subclass = _resolve_selected_entry(row_subclass_entries, values.get(subclass_field_name, ""))
+        if selected_row_class is None:
+            missing_refs.append("class")
+            continue
+        resolved_class_rows.append(
+            {
+                "row_id": str(row.get("row_id") or "").strip(),
+                "row_level": int(row.get("row_level") or 0),
+                "selected_class": selected_row_class,
+                "selected_subclass": selected_row_subclass,
+            }
+        )
+
     if selected_species is None:
         missing_refs.append("species")
     if selected_background is None:
         missing_refs.append("background")
     if missing_refs:
-        joined = ", ".join(missing_refs)
+        joined = ", ".join(_dedupe_preserve_order(missing_refs))
         raise CharacterBuildError(f"Choose the missing {joined} links before saving progression repair.")
+    if len(resolved_class_rows) != len(repair_class_rows):
+        raise CharacterBuildError("Choose the missing class links before saving progression repair.")
+
+    seen_row_identities: set[tuple[str, str]] = set()
+    for row in resolved_class_rows:
+        selected_row_class = row.get("selected_class")
+        selected_row_subclass = row.get("selected_subclass")
+        row_identity = (
+            str(selected_row_class.slug if isinstance(selected_row_class, SystemsEntryRecord) else "").strip(),
+            str(selected_row_subclass.slug if isinstance(selected_row_subclass, SystemsEntryRecord) else "").strip(),
+        )
+        if row_identity in seen_row_identities:
+            raise CharacterBuildError("Choose distinct class/subclass repairs for each class row before saving.")
+        seen_row_identities.add(row_identity)
+
+    selected_class = resolved_class_rows[0]["selected_class"] if resolved_class_rows else None
+    selected_subclass = resolved_class_rows[0]["selected_subclass"] if resolved_class_rows else None
 
     ability_scores = _ability_scores_from_definition(current_definition)
     current_level = max(_resolve_native_character_level(current_definition), 1)
@@ -1912,21 +2399,27 @@ def apply_imported_progression_repairs(
     )
 
     profile = dict(current_definition.profile or {})
-    classes = [dict(row or {}) for row in list(profile.get("classes") or [])]
-    class_payload = dict(classes[0] or {}) if classes else {}
-    class_payload["class_name"] = selected_class.title
-    class_payload["level"] = current_level
-    class_payload["systems_ref"] = _systems_ref_from_entry(selected_class)
-    class_payload["subclass_name"] = selected_subclass.title if selected_subclass is not None else ""
-    if selected_subclass is not None:
-        class_payload["subclass_ref"] = _systems_ref_from_entry(selected_subclass)
-        profile["subclass_ref"] = _systems_ref_from_entry(selected_subclass)
-    else:
-        class_payload.pop("subclass_ref", None)
-        profile["subclass_ref"] = None
-    classes = [class_payload]
+    classes = ensure_profile_class_rows(profile)
+    updated_classes: list[dict[str, Any]] = []
+    for index, resolved_row in enumerate(resolved_class_rows):
+        existing_row = dict(classes[index] or {}) if index < len(classes) else {}
+        selected_row_class = resolved_row["selected_class"]
+        selected_row_subclass = resolved_row.get("selected_subclass")
+        class_payload = dict(existing_row)
+        class_payload["row_id"] = str(resolved_row.get("row_id") or class_payload.get("row_id") or f"class-row-{index + 1}").strip()
+        class_payload["class_name"] = selected_row_class.title
+        class_payload["level"] = int(resolved_row.get("row_level") or class_payload.get("level") or current_level)
+        class_payload["systems_ref"] = _systems_ref_from_entry(selected_row_class)
+        class_payload["subclass_name"] = selected_row_subclass.title if selected_row_subclass is not None else ""
+        if selected_row_subclass is not None:
+            class_payload["subclass_ref"] = _systems_ref_from_entry(selected_row_subclass)
+        else:
+            class_payload.pop("subclass_ref", None)
+        updated_classes.append(class_payload)
+    classes = updated_classes
     profile["classes"] = classes
     profile["class_ref"] = _systems_ref_from_entry(selected_class)
+    profile["subclass_ref"] = _systems_ref_from_entry(selected_subclass) if selected_subclass is not None else None
     profile = sync_profile_class_summary(profile)
 
     species_page_ref = _entry_page_ref(selected_species)
@@ -1973,6 +2466,7 @@ def apply_imported_progression_repairs(
         kind="repair",
         target_level=current_level,
         baseline_repaired=True,
+        action="repair",
     )
 
     definition = normalize_definition_to_native_model(
@@ -2322,6 +2816,85 @@ def _supports_native_subclass_entry(
 ) -> bool:
     policy = _native_source_matrix_support_policy(entry, selected_class=selected_class)
     return str(policy.get("status") or "").strip() == NATIVE_CLASS_SUPPORT_SUPPORTED
+
+
+def _progression_has_spellbearing_features(progression: list[dict[str, Any]]) -> bool:
+    for group in list(progression or []):
+        for feature_row in list(group.get("feature_rows") or []):
+            label = normalize_lookup(str(feature_row.get("label") or "").strip())
+            if any(marker in label for marker in ("spellcasting", "cantrip", "spell ", " spell", "ritual")):
+                return True
+            entry = feature_row.get("entry")
+            if isinstance(entry, SystemsEntryRecord):
+                metadata = dict(entry.metadata or {})
+                if metadata.get("additional_spells") or metadata.get("spell_support"):
+                    return True
+    return False
+
+
+def _class_is_strict_martial(
+    systems_service: Any,
+    campaign_slug: str,
+    selected_class: SystemsEntryRecord | None,
+) -> bool:
+    if not _supports_native_class_entry(selected_class):
+        return False
+    if not isinstance(selected_class, SystemsEntryRecord):
+        return False
+    if _spellcasting_mode_for_class(selected_class.title, selected_class=selected_class):
+        return False
+    class_progression = _class_progression_for_builder(systems_service, campaign_slug, selected_class)
+    return not _progression_has_spellbearing_features(class_progression)
+
+
+def _subclass_is_strict_martial(
+    systems_service: Any,
+    campaign_slug: str,
+    selected_subclass: SystemsEntryRecord | None,
+    *,
+    selected_class: SystemsEntryRecord | None = None,
+) -> bool:
+    if selected_subclass is None:
+        return True
+    if not _supports_native_subclass_entry(selected_subclass, selected_class=selected_class):
+        return False
+    subclass_progression = _subclass_progression_for_builder(systems_service, campaign_slug, selected_subclass)
+    return not _progression_has_spellbearing_features(subclass_progression)
+
+
+def _list_strict_martial_class_entries(
+    systems_service: Any,
+    campaign_slug: str,
+) -> list[SystemsEntryRecord]:
+    return [
+        entry
+        for entry in _list_supported_class_entries(systems_service, campaign_slug)
+        if _class_is_strict_martial(systems_service, campaign_slug, entry)
+    ]
+
+
+def _list_strict_martial_subclass_options(
+    systems_service: Any,
+    campaign_slug: str,
+    selected_class: SystemsEntryRecord | None,
+    *,
+    subclass_entries: list[SystemsEntryRecord] | None = None,
+) -> list[SystemsEntryRecord]:
+    return [
+        entry
+        for entry in _list_subclass_options(
+            systems_service,
+            campaign_slug,
+            selected_class,
+            subclass_entries=subclass_entries,
+        )
+        if _subclass_is_strict_martial(
+            systems_service,
+            campaign_slug,
+            entry,
+            selected_class=selected_class,
+        )
+    ]
 
 
 def _list_campaign_enabled_entries(
@@ -3740,8 +4313,8 @@ def _native_level_up_support_error(
     if source_type != "native_character_builder":
         return "Level-up currently supports native in-app characters only."
     classes = profile_class_rows(definition.profile)
-    if len(classes) != 1:
-        return "Level-up currently supports single-class native characters only."
+    if not classes:
+        return "This native character is missing the class link needed for level-up."
     class_payload = dict(classes[0] or {})
     class_ref = profile_primary_class_ref(definition.profile) or dict(class_payload.get("systems_ref") or {})
     if not str(class_ref.get("title") or class_payload.get("class_name") or "").strip():
@@ -3760,6 +4333,10 @@ def _normalize_level_up_values(
 ) -> dict[str, str]:
     normalized = {key: str(value) for key, value in dict(values or {}).items()}
     normalized.setdefault("hp_gain", "")
+    normalized.setdefault("advancement_mode", "advance_existing")
+    normalized.setdefault("target_class_row_id", "")
+    normalized.setdefault("new_class_slug", "")
+    normalized.setdefault("new_subclass_slug", "")
     existing_subclass_slug = _systems_ref_slug(profile_primary_subclass_ref(definition.profile))
     if existing_subclass_slug and not str(normalized.get("subclass_slug") or "").strip():
         normalized["subclass_slug"] = existing_subclass_slug
@@ -9425,22 +10002,26 @@ def _build_feature_payloads(
     *,
     ability_scores: dict[str, int],
     current_level: int,
+    class_row_id: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     features: list[dict[str, Any]] = []
-    seen_feature_names: set[str] = set()
+    seen_feature_names: set[tuple[str, str]] = set()
 
     for index, feature_entry in enumerate(feature_entries, start=1):
         feature_payload = _build_feature_payload(
             feature_entry,
             index=index,
+            class_row_id=class_row_id,
         )
         if feature_payload is None:
             continue
         feature_name = str(feature_payload.get("name") or "").strip()
         normalized_name = normalize_lookup(feature_name)
-        if not feature_name or normalized_name in seen_feature_names:
+        row_identity = str(feature_payload.get("class_row_id") or "").strip()
+        feature_identity = (normalized_name, row_identity)
+        if not feature_name or feature_identity in seen_feature_names:
             continue
-        seen_feature_names.add(normalized_name)
+        seen_feature_names.add(feature_identity)
         features.append(feature_payload)
     return _apply_tracker_templates_to_feature_payloads(
         features,
@@ -9480,16 +10061,18 @@ def _build_feature_payload(
     feature_entry: dict[str, Any],
     *,
     index: int,
+    class_row_id: str | None = None,
 ) -> dict[str, Any] | None:
     entry = feature_entry.get("entry")
     kind = str(feature_entry.get("kind") or "")
+    feature_id_prefix = f"{slugify(str(class_row_id or '').strip())}-" if str(class_row_id or "").strip() else ""
 
     if isinstance(entry, SystemsEntryRecord):
         feature_name = str(entry.title or "").strip()
         page_ref = _entry_page_ref(entry)
         campaign_option = _entry_campaign_option(entry)
         feature_payload = {
-            "id": f"{slugify(feature_name)}-{index}",
+            "id": f"{feature_id_prefix}{slugify(feature_name)}-{index}",
             "name": feature_name,
             "category": _character_feature_category(entry.entry_type),
             "source": CAMPAIGN_PAGE_SOURCE_ID if page_ref else entry.source_id,
@@ -9498,6 +10081,8 @@ def _build_feature_payload(
             "tracker_ref": None,
             "systems_ref": None if page_ref else _systems_ref_from_entry(entry),
         }
+        if str(class_row_id or "").strip():
+            feature_payload["class_row_id"] = str(class_row_id or "").strip()
         if page_ref:
             feature_payload["page_ref"] = page_ref
         if campaign_option:
@@ -9509,8 +10094,8 @@ def _build_feature_payload(
         feature_name = str(feature_entry.get("label") or "").strip()
         if not slug or not feature_name:
             return None
-        return {
-            "id": f"{slugify(feature_name)}-{index}",
+        payload = {
+            "id": f"{feature_id_prefix}{slugify(feature_name)}-{index}",
             "name": feature_name,
             "category": "class_feature",
             "source": PHB_SOURCE_ID,
@@ -9525,6 +10110,9 @@ def _build_feature_payload(
                 "source_id": PHB_SOURCE_ID,
             },
         }
+        if str(class_row_id or "").strip():
+            payload["class_row_id"] = str(class_row_id or "").strip()
+        return payload
 
     if kind == "species_trait":
         feature_name = str(feature_entry.get("label") or "").strip()
@@ -9534,7 +10122,7 @@ def _build_feature_payload(
         if not feature_name or (not isinstance(systems_entry, SystemsEntryRecord) and not page_ref):
             return None
         feature_payload = {
-            "id": f"{slugify(feature_name)}-{index}",
+            "id": f"{feature_id_prefix}{slugify(feature_name)}-{index}",
             "name": feature_name,
             "category": "species_trait",
             "source": page_ref or (systems_entry.source_id if isinstance(systems_entry, SystemsEntryRecord) else ""),
@@ -9543,6 +10131,8 @@ def _build_feature_payload(
             "tracker_ref": None,
             "systems_ref": _systems_ref_from_entry(systems_entry) if isinstance(systems_entry, SystemsEntryRecord) else None,
         }
+        if str(class_row_id or "").strip():
+            feature_payload["class_row_id"] = str(class_row_id or "").strip()
         if page_ref:
             feature_payload["page_ref"] = page_ref
         if campaign_option:
@@ -9557,7 +10147,7 @@ def _build_feature_payload(
         if not feature_name or (not isinstance(systems_entry, SystemsEntryRecord) and not page_ref):
             return None
         feature_payload = {
-            "id": f"{slugify(feature_name)}-{index}",
+            "id": f"{feature_id_prefix}{slugify(feature_name)}-{index}",
             "name": feature_name,
             "category": "background_feature",
             "source": page_ref or (systems_entry.source_id if isinstance(systems_entry, SystemsEntryRecord) else ""),
@@ -9566,6 +10156,8 @@ def _build_feature_payload(
             "tracker_ref": None,
             "systems_ref": _systems_ref_from_entry(systems_entry) if isinstance(systems_entry, SystemsEntryRecord) else None,
         }
+        if str(class_row_id or "").strip():
+            feature_payload["class_row_id"] = str(class_row_id or "").strip()
         if page_ref:
             feature_payload["page_ref"] = page_ref
         if campaign_option:
@@ -9584,7 +10176,7 @@ def _build_feature_payload(
         if not (slug or page_ref) or not feature_name:
             return None
         feature_payload: dict[str, Any] = {
-            "id": f"{slugify(feature_name)}-{index}",
+            "id": f"{feature_id_prefix}{slugify(feature_name)}-{index}",
             "name": feature_name,
             "category": "feat",
             "source": (
@@ -9611,6 +10203,8 @@ def _build_feature_payload(
                 )
             ),
         }
+        if str(class_row_id or "").strip():
+            feature_payload["class_row_id"] = str(class_row_id or "").strip()
         if page_ref:
             feature_payload["page_ref"] = page_ref
         if campaign_option:
@@ -9622,8 +10216,8 @@ def _build_feature_payload(
         page_ref = str(feature_entry.get("page_ref") or "").strip()
         if not feature_name or not page_ref:
             return None
-        return {
-            "id": f"{slugify(feature_name)}-{index}",
+        payload = {
+            "id": f"{feature_id_prefix}{slugify(feature_name)}-{index}",
             "name": feature_name,
             "category": "custom_feature",
             "source": "Campaign",
@@ -9633,6 +10227,9 @@ def _build_feature_payload(
             "page_ref": page_ref,
             "campaign_option": dict(feature_entry.get("campaign_option") or {}) or None,
         }
+        if str(class_row_id or "").strip():
+            payload["class_row_id"] = str(class_row_id or "").strip()
+        return payload
 
     return None
 
@@ -9802,6 +10399,7 @@ def _build_leveled_stats(
     features: list[dict[str, Any]] | None = None,
     item_catalog: dict[str, Any] | None = None,
     selected_campaign_option_payloads: list[dict[str, Any]] | None = None,
+    resulting_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     stats, manual_adjustments = strip_manual_stat_adjustments(dict(current_definition.stats or {}))
     campaign_option_adjustments = collect_campaign_option_stat_adjustments(
@@ -9813,10 +10411,16 @@ def _build_leveled_stats(
             {key: -int(value) for key, value in campaign_option_adjustments.items()},
         )
     skill_lookup = {normalize_lookup(skill["name"]): skill for skill in skills}
-    save_proficiencies = set(
-        _class_save_proficiencies(selected_class)
-        + _extract_feat_saving_throw_proficiencies(feat_selections, selected_choices)
+    save_proficiencies = _infer_definition_save_proficiencies(
+        current_definition,
+        ability_scores=_ability_scores_from_definition(current_definition),
+        proficiency_bonus=int(
+            (current_definition.stats or {}).get("proficiency_bonus")
+            or _proficiency_bonus_for_level(_resolve_native_character_level(current_definition))
+        ),
+        selected_class=selected_class,
     )
+    save_proficiencies.update(_extract_feat_saving_throw_proficiencies(feat_selections, selected_choices))
     save_bonus_map = _effect_save_bonus_map(
         _extract_character_effect_keys(features or list(current_definition.features or []))
     )
@@ -9832,13 +10436,22 @@ def _build_leveled_stats(
     stats["passive_investigation"] = 10 + int(
         (skill_lookup.get("investigation") or {}).get("bonus") or _ability_modifier(ability_scores["int"])
     ) + _feat_passive_bonus(feat_selections, skill_name="Investigation")
+    preview_profile_definition = CharacterDefinition.from_dict(
+        {
+            **current_definition.to_dict(),
+            "profile": sync_profile_class_summary(resulting_profile or dict(current_definition.profile or {})),
+        }
+    )
     stats["armor_class"] = _derive_armor_class_from_character_inputs(
         ability_scores=ability_scores,
         equipment_catalog=equipment_catalog or list(current_definition.equipment_catalog or []),
         features=features or list(current_definition.features or []),
-        class_names=_character_profile_class_names(current_definition, fallback_class_name=selected_class.title),
+        class_names=_character_profile_class_names(
+            preview_profile_definition,
+            fallback_class_name=selected_class.title,
+        ),
         subclass_names=_character_profile_subclass_names(
-            current_definition,
+            preview_profile_definition,
             fallback_subclass_name=selected_subclass.title if selected_subclass is not None else "",
         ),
         item_catalog=item_catalog or {},
@@ -9895,6 +10508,12 @@ def _build_leveled_source(
     current_definition: CharacterDefinition | None = None,
     hp_gain: int | None = None,
     max_hp_delta: int | None = None,
+    action: str | None = None,
+    class_row_id: str | None = None,
+    class_ref: dict[str, Any] | None = None,
+    subclass_ref: dict[str, Any] | None = None,
+    row_from_level: int | None = None,
+    row_to_level: int | None = None,
 ) -> dict[str, Any]:
     source = dict(source_payload or {})
     if current_definition is not None:
@@ -9910,6 +10529,12 @@ def _build_leveled_source(
             target_level=target_level,
             hp_gain=hp_gain,
             max_hp_delta=max_hp_delta,
+            action=action,
+            class_row_id=class_row_id,
+            class_ref=class_ref,
+            subclass_ref=subclass_ref,
+            row_from_level=row_from_level,
+            row_to_level=row_to_level,
         )
         return source
     source.update(
@@ -9928,6 +10553,12 @@ def _build_leveled_source(
         target_level=target_level,
         hp_gain=hp_gain,
         max_hp_delta=max_hp_delta,
+        action=action,
+        class_row_id=class_row_id,
+        class_ref=class_ref,
+        subclass_ref=subclass_ref,
+        row_from_level=row_from_level,
+        row_to_level=row_to_level,
     )
 
 
@@ -9971,16 +10602,20 @@ def _merge_feature_payloads(
 ) -> list[dict[str, Any]]:
     merged = [dict(feature) for feature in existing_features]
     seen_names = {
-        normalize_lookup(str(feature.get("name") or "").strip())
+        (
+            normalize_lookup(str(feature.get("name") or "").strip()),
+            str(feature.get("class_row_id") or "").strip(),
+        )
         for feature in merged
         if str(feature.get("name") or "").strip()
     }
     for feature in new_features:
         feature_name = str(feature.get("name") or "").strip()
         normalized_name = normalize_lookup(feature_name)
-        if not feature_name or normalized_name in seen_names:
+        feature_identity = (normalized_name, str(feature.get("class_row_id") or "").strip())
+        if not feature_name or feature_identity in seen_names:
             continue
-        seen_names.add(normalized_name)
+        seen_names.add(feature_identity)
         merged.append(dict(feature))
     return merged
 
@@ -10019,6 +10654,8 @@ def _apply_tracker_templates_to_feature_payloads(
             )
             normalized_tracker = dict(tracker_template)
             normalized_tracker.pop("activation_type", None)
+            if str(feature_payload.get("class_row_id") or "").strip():
+                normalized_tracker["class_row_id"] = str(feature_payload.get("class_row_id") or "").strip()
             if not tracker_id or tracker_id not in seen_template_ids:
                 resource_templates.append(normalized_tracker)
                 if tracker_id:
@@ -10171,8 +10808,11 @@ def _build_native_level_up_preview(
     optionalfeature_catalog: dict[str, SystemsEntryRecord],
     spell_catalog: dict[str, Any],
     target_level: int,
+    total_character_level: int,
     current_ability_scores: dict[str, int],
     values: dict[str, str],
+    class_row_id: str | None = None,
+    resulting_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     _, selected_choices = _resolve_builder_choices(choice_sections, values, strict=False)
     base_ability_scores, level_up_feat_entries, asi_summaries = _resolve_level_up_ability_score_choices(
@@ -10255,23 +10895,26 @@ def _build_native_level_up_preview(
         gained_feature_entries,
         ability_scores=ability_scores,
         current_level=target_level,
+        class_row_id=class_row_id,
     )
     _, preview_resource_templates = _apply_tracker_templates_to_feature_payloads(
         _merge_feature_payloads(list(definition.features or []), preview_feature_payloads),
         ability_scores=ability_scores,
-        current_level=target_level,
+        current_level=total_character_level,
     )
     merged_resource_templates = _merge_resource_templates(
         list(definition.resource_templates or []),
         preview_resource_templates,
     )
     preview_campaign_stat_adjustments = collect_campaign_option_stat_adjustments(selected_campaign_option_payloads)
+    preview_profile = sync_profile_class_summary(resulting_profile or dict(definition.profile or {}))
     return {
-        "class_level_text": f"{selected_class.title} {target_level}",
+        "class_level_text": str(preview_profile.get("class_level_text") or f"{selected_class.title} {target_level}"),
+        "class_rows": [_class_row_level_text(row) for row in ensure_profile_class_rows(preview_profile)],
         "max_hp": max(
             int((definition.stats or {}).get("max_hp") or 0)
             + hp_gain
-            + _feat_hit_point_bonus(feat_selections, current_level=target_level)
+            + _feat_hit_point_bonus(feat_selections, current_level=total_character_level)
             + int(preview_campaign_stat_adjustments.get("max_hp") or 0),
             1,
         ),
@@ -12791,6 +13434,11 @@ def _normalize_feature_payloads(
         payload["source"] = str(payload.get("source") or "").strip()
         payload["description_markdown"] = str(payload.get("description_markdown") or "").strip()
         payload["activation_type"] = str(payload.get("activation_type") or "passive").strip() or "passive"
+        class_row_id = str(payload.get("class_row_id") or "").strip()
+        if class_row_id:
+            payload["class_row_id"] = class_row_id
+        else:
+            payload.pop("class_row_id", None)
         tracker_ref = str(payload.get("tracker_ref") or "").strip()
         if tracker_ref:
             payload["tracker_ref"] = tracker_ref
@@ -12842,6 +13490,11 @@ def _normalize_resource_template_payloads(
         payload["rest_behavior"] = str(payload.get("rest_behavior") or "manual_only").strip() or "manual_only"
         payload["notes"] = str(payload.get("notes") or "").strip()
         payload["display_order"] = int(payload.get("display_order") or 0)
+        class_row_id = str(payload.get("class_row_id") or "").strip()
+        if class_row_id:
+            payload["class_row_id"] = class_row_id
+        else:
+            payload.pop("class_row_id", None)
         merge_key = payload["id"]
         existing_index = index_by_key.get(merge_key)
         if existing_index is None:
@@ -13459,6 +14112,233 @@ def _extract_class_tool_proficiencies(selected_class: SystemsEntryRecord | None)
         return []
     raw_values = list(dict(selected_class.metadata.get("starting_proficiencies") or {}).get("tools") or [])
     return [_clean_embedded_text(str(value or "")) for value in raw_values if _clean_embedded_text(str(value or ""))]
+
+
+def _multiclassing_payload(selected_class: SystemsEntryRecord | None) -> dict[str, Any]:
+    if selected_class is None:
+        return {}
+    return dict(selected_class.metadata.get("multiclassing") or {})
+
+
+def _multiclass_requirement_blocks(requirements: Any) -> list[dict[str, int]]:
+    if not isinstance(requirements, dict):
+        return []
+    if "or" in requirements:
+        blocks: list[dict[str, int]] = []
+        for block in list(requirements.get("or") or []):
+            blocks.extend(_multiclass_requirement_blocks(block))
+        return blocks
+    normalized: dict[str, int] = {}
+    for ability_key, minimum in requirements.items():
+        clean_key = normalize_lookup(str(ability_key or "").strip())
+        if clean_key not in ABILITY_KEYS:
+            continue
+        try:
+            normalized[clean_key] = int(minimum)
+        except (TypeError, ValueError):
+            continue
+    return [normalized] if normalized else []
+
+
+def _multiclass_requirement_text(selected_class: SystemsEntryRecord | None) -> str:
+    blocks = _multiclass_requirement_blocks(_multiclassing_payload(selected_class).get("requirements"))
+    if not blocks:
+        return ""
+    rendered_blocks = []
+    for block in blocks:
+        parts = [
+            f"{ABILITY_LABELS.get(ability_key, ability_key.title())} {minimum}"
+            for ability_key, minimum in block.items()
+        ]
+        if parts:
+            rendered_blocks.append(" and ".join(parts))
+    return " or ".join(rendered_blocks)
+
+
+def _meets_multiclass_requirements(
+    selected_class: SystemsEntryRecord | None,
+    *,
+    ability_scores: dict[str, int],
+) -> bool:
+    blocks = _multiclass_requirement_blocks(_multiclassing_payload(selected_class).get("requirements"))
+    if not blocks:
+        return True
+    for block in blocks:
+        if all(int(ability_scores.get(ability_key, 0) or 0) >= int(minimum or 0) for ability_key, minimum in block.items()):
+            return True
+    return False
+
+
+def _extract_multiclass_gained_armor_proficiencies(selected_class: SystemsEntryRecord | None) -> list[str]:
+    raw_values = list(dict(_multiclassing_payload(selected_class).get("proficienciesGained") or {}).get("armor") or [])
+    return [_humanize_proficiency_value(value, category="armor") for value in raw_values]
+
+
+def _extract_multiclass_gained_weapon_proficiencies(selected_class: SystemsEntryRecord | None) -> list[str]:
+    raw_values = list(dict(_multiclassing_payload(selected_class).get("proficienciesGained") or {}).get("weapons") or [])
+    return [_humanize_proficiency_value(value, category="weapons") for value in raw_values]
+
+
+def _extract_multiclass_gained_tool_proficiencies(
+    selected_class: SystemsEntryRecord | None,
+    selected_choices: dict[str, list[str]] | None = None,
+) -> list[str]:
+    raw_blocks = list(dict(_multiclassing_payload(selected_class).get("proficienciesGained") or {}).get("tools") or [])
+    results: list[str] = []
+    for block in raw_blocks:
+        if isinstance(block, str):
+            cleaned = _clean_embedded_text(block)
+            if cleaned:
+                results.append(_humanize_words(cleaned))
+            continue
+        choose = dict(block.get("choose") or {}) if isinstance(block, dict) else {}
+        for value in list((selected_choices or {}).get("multiclass_tools", []) or []):
+            cleaned = _clean_embedded_text(value)
+            if cleaned:
+                results.append(_humanize_words(cleaned))
+    return _dedupe_preserve_order(results)
+
+
+def _extract_multiclass_gained_language_proficiencies(
+    selected_class: SystemsEntryRecord | None,
+    selected_choices: dict[str, list[str]] | None = None,
+) -> list[str]:
+    raw_blocks = list(dict(_multiclassing_payload(selected_class).get("proficienciesGained") or {}).get("languages") or [])
+    results: list[str] = []
+    for block in raw_blocks:
+        if isinstance(block, str):
+            cleaned = _clean_embedded_text(block)
+            if cleaned:
+                results.append(cleaned)
+            continue
+        if not isinstance(block, dict):
+            continue
+        choose = dict(block.get("choose") or {})
+        if choose:
+            for value in list((selected_choices or {}).get("multiclass_languages", []) or []):
+                cleaned = _humanize_proficiency_value(value, category="languages")
+                if cleaned:
+                    results.append(cleaned)
+            continue
+        for key, value in block.items():
+            if value is True:
+                results.append(_humanize_proficiency_value(key, category="languages"))
+    return _dedupe_preserve_order(results)
+
+
+def _multiclass_skill_choice_fields(
+    selected_class: SystemsEntryRecord | None,
+    *,
+    definition: CharacterDefinition,
+    values: dict[str, str],
+) -> list[dict[str, Any]]:
+    if selected_class is None:
+        return []
+    existing_levels = _skill_proficiency_levels_from_rows(
+        list(definition.skills or []),
+        ability_scores=_ability_scores_from_definition(definition),
+        proficiency_bonus=int((definition.stats or {}).get("proficiency_bonus") or _proficiency_bonus_for_level(_resolve_native_character_level(definition))),
+    )
+    raw_blocks = list(dict(_multiclassing_payload(selected_class).get("proficienciesGained") or {}).get("skills") or [])
+    fields: list[dict[str, Any]] = []
+    for block in raw_blocks:
+        choose = dict(block.get("choose") or {}) if isinstance(block, dict) else {}
+        options = [
+            _choice_option(_skill_label(option), option)
+            for option in list(choose.get("from") or [])
+            if not existing_levels.get(normalize_lookup(option))
+        ]
+        count = int(choose.get("count") or 0)
+        if not options or count <= 0:
+            continue
+        for index in range(count):
+            field_name = f"multiclass_skill_{index + 1}"
+            fields.append(
+                {
+                    "name": field_name,
+                    "label": f"Added Class Skill {index + 1}",
+                    "help_text": f"Choose {count} skill{'s' if count != 1 else ''} gained from {selected_class.title} multiclassing.",
+                    "options": options,
+                    "selected": str(values.get(field_name) or "").strip(),
+                    "group_key": "multiclass_skills",
+                    "kind": "skill",
+                }
+            )
+    return fields
+
+
+def _multiclass_tool_choice_fields(
+    selected_class: SystemsEntryRecord | None,
+    *,
+    values: dict[str, str],
+) -> list[dict[str, Any]]:
+    if selected_class is None:
+        return []
+    raw_blocks = list(dict(_multiclassing_payload(selected_class).get("proficienciesGained") or {}).get("tools") or [])
+    fields: list[dict[str, Any]] = []
+    for block in raw_blocks:
+        choose = dict(block.get("choose") or {}) if isinstance(block, dict) else {}
+        options = [
+            _choice_option(_clean_embedded_text(option), option)
+            for option in list(choose.get("from") or [])
+            if _clean_embedded_text(option)
+        ]
+        count = int(choose.get("count") or 0)
+        if not options or count <= 0:
+            continue
+        for index in range(count):
+            field_name = f"multiclass_tool_{index + 1}"
+            fields.append(
+                {
+                    "name": field_name,
+                    "label": f"Added Class Tool {index + 1}",
+                    "help_text": f"Choose {count} tool option{'s' if count != 1 else ''} gained from {selected_class.title} multiclassing.",
+                    "options": options,
+                    "selected": str(values.get(field_name) or "").strip(),
+                    "group_key": "multiclass_tools",
+                    "kind": "tool",
+                }
+            )
+    return fields
+
+
+def _multiclass_language_choice_fields(
+    selected_class: SystemsEntryRecord | None,
+    *,
+    values: dict[str, str],
+) -> list[dict[str, Any]]:
+    if selected_class is None:
+        return []
+    raw_blocks = list(dict(_multiclassing_payload(selected_class).get("proficienciesGained") or {}).get("languages") or [])
+    fields: list[dict[str, Any]] = []
+    for block in raw_blocks:
+        choose = dict(block.get("choose") or {}) if isinstance(block, dict) else {}
+        options = [
+            _choice_option(_humanize_proficiency_value(option, category="languages"), option)
+            for option in list(choose.get("from") or [])
+            if _humanize_proficiency_value(option, category="languages")
+        ]
+        count = int(choose.get("count") or 0)
+        if not options or count <= 0:
+            continue
+        for index in range(count):
+            field_name = f"multiclass_language_{index + 1}"
+            fields.append(
+                {
+                    "name": field_name,
+                    "label": f"Added Class Language {index + 1}",
+                    "help_text": f"Choose {count} language{'s' if count != 1 else ''} gained from {selected_class.title} multiclassing.",
+                    "options": options,
+                    "selected": str(values.get(field_name) or "").strip(),
+                    "group_key": "multiclass_languages",
+                    "kind": "language",
+                }
+            )
+    return fields
+
+
+def _extract_multiclass_gained_skill_proficiencies(selected_choices: dict[str, list[str]] | None = None) -> list[str]:
+    return [_skill_label(value) for value in list((selected_choices or {}).get("multiclass_skills", []) or []) if _skill_label(value)]
 
 
 def _extract_fixed_skills(entry: SystemsEntryRecord | None) -> list[str]:
