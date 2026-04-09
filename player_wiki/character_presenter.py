@@ -13,6 +13,7 @@ from .character_profile import (
     profile_primary_subclass_name,
     profile_primary_subclass_ref,
 )
+from .character_spell_slots import normalize_spell_slot_lane_id, spell_slot_lanes_from_spellcasting
 from .models import Campaign
 from .repository import build_alias_index, normalize_lookup, render_obsidian_links
 
@@ -191,23 +192,40 @@ def present_character_detail(
 
     spellcasting_payload = dict(definition.spellcasting or {})
     spellcasting = None
-    if spellcasting_payload.get("spells") or spellcasting_payload.get("slot_progression"):
+    slot_lanes = spell_slot_lanes_from_spellcasting(spellcasting_payload)
+    if spellcasting_payload.get("spells") or slot_lanes:
         slot_lookup = {
-            int(slot.get("level") or 0): dict(slot) for slot in list(state.get("spell_slots") or [])
+            (
+                normalize_spell_slot_lane_id(slot.get("slot_lane_id")),
+                int(slot.get("level") or 0),
+            ): dict(slot)
+            for slot in list(state.get("spell_slots") or [])
         }
-        slots = []
-        for slot in list(spellcasting_payload.get("slot_progression") or []):
-            level = int(slot.get("level") or 0)
-            max_slots = int(slot.get("max_slots") or 0)
-            state_slot = slot_lookup.get(level, {})
-            used = int(state_slot.get("used") or 0)
-            slots.append(
+        slot_pools = []
+        for lane in slot_lanes:
+            lane_id = normalize_spell_slot_lane_id(lane.get("id"))
+            pool_slots = []
+            for slot in list(lane.get("slot_progression") or []):
+                level = int(slot.get("level") or 0)
+                max_slots = int(slot.get("max_slots") or 0)
+                state_slot = slot_lookup.get((lane_id, level), {})
+                used = int(state_slot.get("used") or 0)
+                pool_slots.append(
+                    {
+                        "level": level,
+                        "label": spell_level_label(level),
+                        "available": max_slots - used,
+                        "used": used,
+                        "max": max_slots,
+                        "slot_lane_id": lane_id,
+                    }
+                )
+            slot_pools.append(
                 {
-                    "level": level,
-                    "label": spell_level_label(level),
-                    "available": max_slots - used,
-                    "used": used,
-                    "max": max_slots,
+                    "id": lane_id,
+                    "title": str(lane.get("title") or "").strip() or "Spell slots",
+                    "shared": bool(lane.get("shared")),
+                    "slots": pool_slots,
                 }
             )
 
@@ -224,6 +242,9 @@ def present_character_detail(
                     "spell_mode": "",
                 }
             ]
+        if len(spell_rows) > 1 and len(slot_pools) == 1 and not bool((slot_pools[0] or {}).get("shared")):
+            slot_pools[0]["shared"] = True
+            slot_pools[0]["title"] = "Shared spell slots"
 
         spells_by_row_id: dict[str, list[dict[str, Any]]] = {
             str(row.get("class_row_id") or "").strip(): []
@@ -319,8 +340,18 @@ def present_character_detail(
             "spellcasting_ability": str(spellcasting_payload.get("spellcasting_ability") or ""),
             "spell_save_dc": spellcasting_payload.get("spell_save_dc"),
             "spell_attack_bonus": format_signed(spellcasting_payload.get("spell_attack_bonus")),
-            "slots": slots,
-            "slots_title": "Shared spell slots" if len(spell_rows) > 1 else "Spell slots",
+            "slots": list((slot_pools[0] or {}).get("slots") or []) if len(slot_pools) == 1 else [],
+            "slots_title": str((slot_pools[0] or {}).get("title") or "Spell slots") if len(slot_pools) == 1 else "",
+            "slot_pools": slot_pools,
+            "multiclass_summary": (
+                "Shared spell slots are shown once below, with spells grouped by class row."
+                if len(spell_rows) > 1 and len(slot_pools) == 1 and bool((slot_pools[0] or {}).get("shared"))
+                else (
+                    "Spell slot pools are shown below, with spells grouped by class row."
+                    if len(spell_rows) > 1 and len(slot_pools) > 1
+                    else "Spell slots are shown below, with spells grouped by class row."
+                )
+            ),
             "row_sections": row_sections,
             "is_multiclass": len(spell_rows) > 1,
         }

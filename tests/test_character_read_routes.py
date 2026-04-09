@@ -1092,6 +1092,175 @@ def test_spellcasting_subpage_groups_multiclass_rows_and_allows_same_spell_on_an
     assert detect_magic_rows == ["class-row-1", "class-row-2"]
 
 
+def test_spellcasting_subpage_shows_and_updates_separate_slot_pools_for_wizard_warlock_multiclass(
+    app, client, sign_in, users
+):
+    spell_entries = _seed_systems_spell_entries(
+        app,
+        [
+            {"slug": "phb-spell-detect-magic", "title": "Detect Magic", "level": 1, "class_lists": {"PHB": ["Wizard"]}},
+            {"slug": "phb-spell-hex", "title": "Hex", "level": 1, "class_lists": {"PHB": ["Warlock"]}},
+        ],
+    )
+
+    def _mutate(payload: dict) -> None:
+        profile = dict(payload.get("profile") or {})
+        profile["class_level_text"] = "Wizard 3 / Warlock 2"
+        profile["classes"] = [
+            {
+                "row_id": "class-row-1",
+                "class_name": "Wizard",
+                "level": 3,
+                "systems_ref": {
+                    "entry_key": "dnd-5e|class|phb|phb-class-wizard",
+                    "entry_type": "class",
+                    "title": "Wizard",
+                    "slug": "phb-class-wizard",
+                    "source_id": "PHB",
+                },
+            },
+            {
+                "row_id": "class-row-2",
+                "class_name": "Warlock",
+                "level": 2,
+                "systems_ref": {
+                    "entry_key": "dnd-5e|class|phb|phb-class-warlock",
+                    "entry_type": "class",
+                    "title": "Warlock",
+                    "slug": "phb-class-warlock",
+                    "source_id": "PHB",
+                },
+            },
+        ]
+        payload["profile"] = profile
+        payload["source"] = {
+            "source_path": "builder://native-multiclass",
+            "source_type": "native_character_builder",
+            "imported_from": "In-app Native Builder",
+            "imported_at": "2026-04-09T00:00:00Z",
+            "parse_warnings": [],
+        }
+        payload["spellcasting"] = {
+            "spellcasting_class": "",
+            "spellcasting_ability": "",
+            "spell_save_dc": None,
+            "spell_attack_bonus": None,
+            "slot_progression": [],
+            "slot_lanes": [
+                {
+                    "id": "class-row-1-slots",
+                    "title": "Wizard spell slots",
+                    "shared": False,
+                    "row_ids": ["class-row-1"],
+                    "slot_progression": [
+                        {"level": 1, "max_slots": 4},
+                        {"level": 2, "max_slots": 2},
+                    ],
+                },
+                {
+                    "id": "class-row-2-slots",
+                    "title": "Warlock Pact Magic slots",
+                    "shared": False,
+                    "row_ids": ["class-row-2"],
+                    "slot_progression": [
+                        {"level": 1, "max_slots": 2},
+                    ],
+                },
+            ],
+            "class_rows": [
+                {
+                    "class_row_id": "class-row-1",
+                    "class_name": "Wizard",
+                    "class_ref": {
+                        "entry_key": "dnd-5e|class|phb|phb-class-wizard",
+                        "entry_type": "class",
+                        "title": "Wizard",
+                        "slug": "phb-class-wizard",
+                        "source_id": "PHB",
+                    },
+                    "level": 3,
+                    "caster_progression": "full",
+                    "spell_mode": "wizard",
+                    "spellcasting_ability": "Intelligence",
+                    "spell_save_dc": 14,
+                    "spell_attack_bonus": 6,
+                    "slot_lane_id": "class-row-1-slots",
+                },
+                {
+                    "class_row_id": "class-row-2",
+                    "class_name": "Warlock",
+                    "class_ref": {
+                        "entry_key": "dnd-5e|class|phb|phb-class-warlock",
+                        "entry_type": "class",
+                        "title": "Warlock",
+                        "slug": "phb-class-warlock",
+                        "source_id": "PHB",
+                    },
+                    "level": 2,
+                    "caster_progression": "pact",
+                    "spell_mode": "known",
+                    "spellcasting_ability": "Charisma",
+                    "spell_save_dc": 13,
+                    "spell_attack_bonus": 5,
+                    "slot_lane_id": "class-row-2-slots",
+                },
+            ],
+            "spells": [
+                {
+                    **_spell_payload(spell_entries["phb-spell-detect-magic"], source="Wizard", mark="O"),
+                    "class_row_id": "class-row-1",
+                },
+                {
+                    **_spell_payload(spell_entries["phb-spell-hex"], source="Warlock", mark="Known"),
+                    "class_row_id": "class-row-2",
+                },
+            ],
+        }
+
+    _write_character_definition(app, "arden-march", _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    page_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=spellcasting")
+    assert page_response.status_code == 200
+    page_html = page_response.get_data(as_text=True)
+    assert "Spell slot pools are shown below" in page_html
+    assert "Wizard spell slots" in page_html
+    assert "Warlock Pact Magic slots" in page_html
+
+    update_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/session/spell-slots/1",
+        data={
+            "expected_revision": str(_character_state_revision(app, "arden-march")),
+            "mode": "session",
+            "page": "spellcasting",
+            "slot_lane_id": "class-row-2-slots",
+            "used": "1",
+        },
+        follow_redirects=False,
+    )
+    assert update_response.status_code == 302
+
+    with app.app_context():
+        repository = app.extensions["character_repository"]
+        record = repository.get_character("linden-pass", "arden-march")
+        assert record is not None
+        wizard_slot = next(
+            slot
+            for slot in list(record.state_record.state.get("spell_slots") or [])
+            if str(slot.get("slot_lane_id") or "") == "class-row-1-slots"
+            and int(slot.get("level") or 0) == 1
+        )
+        warlock_slot = next(
+            slot
+            for slot in list(record.state_record.state.get("spell_slots") or [])
+            if str(slot.get("slot_lane_id") or "") == "class-row-2-slots"
+            and int(slot.get("level") or 0) == 1
+        )
+        assert wizard_slot["used"] == 0
+        assert warlock_slot["used"] == 1
+
+
 def test_dm_controls_subpage_shows_management_controls(client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 

@@ -105,7 +105,7 @@
       <article class="detail-card">
         {% if selected_combat_character.spellcasting.is_multiclass %}
           <h3>Multiclass Spellcasting</h3>
-          <p>Shared spell slots are shown once below, with spells grouped by class row.</p>
+          <p>{{ selected_combat_character.spellcasting.multiclass_summary }}</p>
         {% else %}
           {% set primary_section = (selected_combat_character.spellcasting.row_sections | list | first) if selected_combat_character.spellcasting.row_sections else none %}
           <h3>{{ (primary_section.title if primary_section else selected_combat_character.spellcasting.spellcasting_class) or "Spellcasting" }}</h3>
@@ -120,51 +120,54 @@
           </p>
         {% endif %}
       </article>
-      {% if selected_combat_character.spellcasting.slots %}
-        {% if can_edit_combat_character_state and selected_combatant_id %}
-          <article class="detail-card" id="combat-character-spell-slots">
-            <h3>{{ selected_combat_character.spellcasting.slots_title or "Spell slots" }}</h3>
-            <div class="spell-slot-editor-list">
-              {% for slot in selected_combat_character.spellcasting.slots %}
-                <article class="detail-card">
-                  <form
-                    class="session-inline-form"
-                    method="post"
-                    action="{{ url_for('campaign_combat_character_spell_slots', campaign_slug=campaign.slug, combatant_id=selected_combatant_id, level=slot.level) }}"
-                  >
-                    <input type="hidden" name="expected_revision" value="{{ selected_combat_character.state_revision }}">
-                    <div class="section-heading">
-                      <h3>{{ slot.label }}</h3>
-                      <span class="meta">{{ slot.available }} available / {{ slot.max }}</span>
-                    </div>
-                    <label class="session-field">
-                      <span>Used</span>
-                      <input type="number" name="used" value="{{ slot.used }}" min="0" max="{{ slot.max }}">
-                    </label>
-                    <div class="session-stepper">
-                      <button type="submit" name="delta_used" value="-1">Restore 1</button>
-                      <button type="submit" name="delta_used" value="1">Use 1</button>
-                      <button type="submit">Save</button>
-                    </div>
-                  </form>
-                </article>
-              {% endfor %}
-            </div>
-          </article>
-        {% else %}
-          <article class="detail-card">
-            <h3>{{ selected_combat_character.spellcasting.slots_title or "Spell slots" }}</h3>
-            <ul class="plain-list slot-list">
-              {% for slot in selected_combat_character.spellcasting.slots %}
-                <li>
-                  <span>{{ slot.label }}</span>
-                  <strong>{{ slot.available }} available / {{ slot.max }}</strong>
-                </li>
-              {% endfor %}
-            </ul>
-          </article>
+      {% for slot_pool in selected_combat_character.spellcasting.slot_pools %}
+        {% if slot_pool.slots %}
+          {% if can_edit_combat_character_state and selected_combatant_id %}
+            <article class="detail-card" {% if loop.first %}id="combat-character-spell-slots"{% endif %}>
+              <h3>{{ slot_pool.title or selected_combat_character.spellcasting.slots_title or "Spell slots" }}</h3>
+              <div class="spell-slot-editor-list">
+                {% for slot in slot_pool.slots %}
+                  <article class="detail-card">
+                    <form
+                      class="session-inline-form"
+                      method="post"
+                      action="{{ url_for('campaign_combat_character_spell_slots', campaign_slug=campaign.slug, combatant_id=selected_combatant_id, level=slot.level) }}"
+                    >
+                      <input type="hidden" name="expected_revision" value="{{ selected_combat_character.state_revision }}">
+                      <input type="hidden" name="slot_lane_id" value="{{ slot.slot_lane_id }}">
+                      <div class="section-heading">
+                        <h3>{{ slot.label }}</h3>
+                        <span class="meta">{{ slot.available }} available / {{ slot.max }}</span>
+                      </div>
+                      <label class="session-field">
+                        <span>Used</span>
+                        <input type="number" name="used" value="{{ slot.used }}" min="0" max="{{ slot.max }}">
+                      </label>
+                      <div class="session-stepper">
+                        <button type="submit" name="delta_used" value="-1">Restore 1</button>
+                        <button type="submit" name="delta_used" value="1">Use 1</button>
+                        <button type="submit">Save</button>
+                      </div>
+                    </form>
+                  </article>
+                {% endfor %}
+              </div>
+            </article>
+          {% else %}
+            <article class="detail-card">
+              <h3>{{ slot_pool.title or selected_combat_character.spellcasting.slots_title or "Spell slots" }}</h3>
+              <ul class="plain-list slot-list">
+                {% for slot in slot_pool.slots %}
+                  <li>
+                    <span>{{ slot.label }}</span>
+                    <strong>{{ slot.available }} available / {{ slot.max }}</strong>
+                  </li>
+                {% endfor %}
+              </ul>
+            </article>
+          {% endif %}
         {% endif %}
-      {% endif %}
+      {% endfor %}
     </div>
 
     {% if selected_combat_character.spellcasting.row_sections %}

@@ -32,7 +32,7 @@ from .character_profile import (
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-04-08.07"
+CHARACTER_BUILDER_VERSION = "2026-04-09.01"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -383,10 +383,10 @@ EXTRA_PHB_LEVEL_ONE_SPELL_LISTS = {
     },
 }
 NATIVE_LEVEL_UP_LIMITATIONS = [
-    "Native level-up currently advances one level at a time, including the first shared-slot multiclass add-class path and row-specific multiclass advancement.",
+    "Native level-up currently advances one level at a time, including add-class multiclass starts and row-specific multiclass advancement.",
     "Hit point gain is entered manually so your table can choose rolled or fixed HP.",
     "Prepared-caster level-up currently preserves existing prepared spells and adds the new picks needed for the next level.",
-    "Multiclass support in this slice currently covers shared-slot base casters plus martial rows. Pact magic and subclass-only spellcasting lanes still need manual follow-up.",
+    "Multiclass support in this slice covers shared-slot base casters, Pact Magic base casters, and martial rows. Subclass-only spellcasting lanes still need manual follow-up.",
     "Some advanced feat side effects and non-structured campaign spell access still need manual follow-up.",
 ]
 LEVEL_ONE_ALWAYS_PREPARED_SPELLS_BY_SUBCLASS = {
@@ -825,8 +825,8 @@ def build_level_one_character_definition(
         definition,
         item_catalog=item_catalog,
         spell_catalog=spell_catalog,
-        systems_service=level_up_context.get("systems_service"),
-        campaign_page_records=level_up_context.get("campaign_page_records"),
+        systems_service=builder_context.get("systems_service"),
+        campaign_page_records=builder_context.get("campaign_page_records"),
         resolved_class=selected_class,
         resolved_subclass=selected_subclass,
         resolved_species=selected_species,
@@ -1118,7 +1118,7 @@ def native_level_up_readiness(
     if len(classes) > 1 and not shared_slot_multiclass_ready:
         return {
             "status": NATIVE_LEVEL_UP_UNSUPPORTED,
-            "message": "This character is outside the current shared-slot multiclass progression lane.",
+            "message": "This character is outside the current multiclass spellcasting progression lane.",
             "reasons": shared_slot_multiclass_reasons,
             "source_type": source_type,
             "is_native": is_native,
@@ -3060,10 +3060,8 @@ def _class_supports_shared_slot_multiclass(
     if not isinstance(selected_class, SystemsEntryRecord):
         return False
     caster_progression = _class_caster_progression(selected_class.title, selected_class=selected_class)
-    if caster_progression in SUPPORTED_MULTICLASS_CASTER_PROGRESSIONS:
+    if caster_progression in SUPPORTED_MULTICLASS_CASTER_PROGRESSIONS or caster_progression == "pact":
         return True
-    if caster_progression == "pact":
-        return False
     class_progression = _class_progression_for_builder(systems_service, campaign_slug, selected_class)
     return not _progression_has_spellbearing_features(class_progression)
 
@@ -3124,15 +3122,15 @@ def _evaluate_shared_slot_multiclass_support(
     if base_spellcasting_row:
         if caster_progression == "pact":
             return {
-                "supported": False,
+                "supported": True,
                 "spellcasting_row": True,
-                "reason": f"{selected_class.title} uses Pact Magic, which still needs a separate multiclass slot lane.",
+                "reason": "",
             }
         if caster_progression not in SUPPORTED_MULTICLASS_CASTER_PROGRESSIONS:
             return {
                 "supported": False,
                 "spellcasting_row": True,
-                "reason": f"{selected_class.title} is outside the current shared-slot multiclass lane.",
+                "reason": f"{selected_class.title} is outside the current multiclass spellcasting lane.",
             }
         return {
             "supported": True,
@@ -3144,7 +3142,7 @@ def _evaluate_shared_slot_multiclass_support(
         return {
             "supported": False,
             "spellcasting_row": False,
-            "reason": f"{selected_class.title} has spell-bearing class features outside the current shared-slot multiclass lane.",
+            "reason": f"{selected_class.title} has spell-bearing class features outside the current multiclass spellcasting lane.",
         }
     if subclass_has_spellbearing and selected_subclass is not None:
         return {
@@ -3152,7 +3150,7 @@ def _evaluate_shared_slot_multiclass_support(
             "spellcasting_row": False,
             "reason": (
                 f"{selected_subclass.title} grants subclass-only spellcasting, "
-                "which is not supported in the current shared-slot multiclass lane."
+                "which is not supported in the current multiclass spellcasting lane."
             ),
         }
     return {
@@ -3826,6 +3824,112 @@ def _spellcasting_rows_use_shared_slots(
         str(row.get("caster_progression") or "").strip() in SUPPORTED_MULTICLASS_CASTER_PROGRESSIONS
         for row in spell_rows
     )
+
+
+def _spell_slot_lane_id_for_row(row_payload: dict[str, Any], *, fallback_index: int) -> str:
+    row_id = str(row_payload.get("class_row_id") or "").strip()
+    if row_id:
+        return f"{row_id}-slots"
+    return f"slot-lane-{fallback_index}"
+
+
+def _spell_slot_lane_title_for_row(
+    row_payload: dict[str, Any],
+    *,
+    total_spell_rows: int,
+) -> str:
+    class_name = str(row_payload.get("class_name") or "Spellcasting").strip() or "Spellcasting"
+    caster_progression = _normalize_caster_progression(row_payload.get("caster_progression"))
+    if caster_progression == "pact":
+        return f"{class_name} Pact Magic slots" if total_spell_rows > 1 else "Pact Magic slots"
+    if total_spell_rows > 1:
+        return f"{class_name} spell slots"
+    return "Spell slots"
+
+
+def _spell_slot_lanes_for_rows(
+    spellcasting_rows: list[dict[str, Any]],
+    *,
+    row_contexts: list[dict[str, Any]] | None = None,
+    total_class_rows: int = 0,
+    current_level: int = 0,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    normalized_rows = [dict(row or {}) for row in list(spellcasting_rows or []) if isinstance(row, dict)]
+    if not normalized_rows:
+        return [], []
+
+    selected_class_by_row_id = {
+        str(dict(context or {}).get("row_id") or "").strip(): context.get("selected_class")
+        for context in list(row_contexts or [])
+        if str(dict(context or {}).get("row_id") or "").strip()
+    }
+    total_spell_rows = len(normalized_rows)
+    shareable_row_ids = {
+        str(row.get("class_row_id") or "").strip()
+        for row in normalized_rows
+        if _normalize_caster_progression(row.get("caster_progression")) in SUPPORTED_MULTICLASS_CASTER_PROGRESSIONS
+    }
+    use_shared_lane = bool(total_class_rows > 1 and len(shareable_row_ids) > 1)
+    slot_lanes: list[dict[str, Any]] = []
+    updated_rows: list[dict[str, Any]] = []
+    shared_lane_added = False
+
+    for index, row in enumerate(normalized_rows, start=1):
+        row_payload = dict(row or {})
+        row_id = str(row_payload.get("class_row_id") or "").strip()
+        caster_progression = _normalize_caster_progression(row_payload.get("caster_progression"))
+        row_selected_class = selected_class_by_row_id.get(row_id)
+        class_name = str(row_payload.get("class_name") or "").strip()
+        class_level = max(int(row_payload.get("level") or current_level), 0)
+
+        if use_shared_lane and row_id in shareable_row_ids:
+            row_payload["slot_lane_id"] = "shared-multiclass-slots"
+            row_payload["slot_lane_title"] = "Shared spell slots"
+            if not shared_lane_added:
+                total_caster_level = sum(
+                    _multiclass_slot_contribution_for_row(
+                        int(candidate.get("level") or 0),
+                        str(candidate.get("caster_progression") or "").strip(),
+                    )
+                    for candidate in normalized_rows
+                    if str(candidate.get("class_row_id") or "").strip() in shareable_row_ids
+                )
+                slot_lanes.append(
+                    {
+                        "id": "shared-multiclass-slots",
+                        "title": "Shared spell slots",
+                        "shared": True,
+                        "row_ids": [candidate_id for candidate_id in shareable_row_ids if candidate_id],
+                        "slot_progression": _shared_slot_progression_for_caster_level(total_caster_level),
+                    }
+                )
+                shared_lane_added = True
+            updated_rows.append(row_payload)
+            continue
+
+        slot_lane_id = _spell_slot_lane_id_for_row(row_payload, fallback_index=index)
+        slot_lane_title = _spell_slot_lane_title_for_row(
+            row_payload,
+            total_spell_rows=total_spell_rows,
+        )
+        slot_lanes.append(
+            {
+                "id": slot_lane_id,
+                "title": slot_lane_title,
+                "shared": False,
+                "row_ids": [row_id] if row_id else [],
+                "slot_progression": _spell_slot_progression_for_class_level(
+                    class_name,
+                    class_level,
+                    selected_class=row_selected_class if isinstance(row_selected_class, SystemsEntryRecord) else None,
+                ),
+            }
+        )
+        row_payload["slot_lane_id"] = slot_lane_id
+        row_payload["slot_lane_title"] = slot_lane_title
+        updated_rows.append(row_payload)
+
+    return updated_rows, slot_lanes
 
 
 def _assign_spell_payload_class_rows(
@@ -4586,16 +4690,19 @@ def _derive_definition_spellcasting(
         )
         if row_payload is not None
     ]
+    total_class_rows = len(ensure_profile_class_rows(definition.profile))
+    spellcasting_rows, slot_lanes = _spell_slot_lanes_for_rows(
+        spellcasting_rows,
+        row_contexts=row_contexts,
+        total_class_rows=total_class_rows,
+        current_level=current_level,
+    )
     spellcasting["class_rows"] = spellcasting_rows
     spellcasting["spells"] = _assign_spell_payload_class_rows(
         list(spellcasting.get("spells") or []),
         spellcasting_rows=spellcasting_rows,
     )
-    total_class_rows = len(ensure_profile_class_rows(definition.profile))
-    uses_shared_slots = _spellcasting_rows_use_shared_slots(
-        spellcasting_rows,
-        total_class_rows=total_class_rows,
-    )
+    spellcasting["slot_lanes"] = slot_lanes
     if not spellcasting_rows:
         spellcasting["slot_progression"] = [
             dict(slot or {})
@@ -4608,30 +4715,7 @@ def _derive_definition_spellcasting(
     if len(spellcasting_rows) == 1:
         row_payload = dict(spellcasting_rows[0] or {})
         class_name = str(row_payload.get("class_name") or "").strip()
-        class_level = max(int(row_payload.get("level") or current_level), 0)
-        row_selected_class = next(
-            (
-                candidate.get("selected_class")
-                for candidate in row_contexts
-                if str(candidate.get("row_id") or "").strip() == str(row_payload.get("class_row_id") or "").strip()
-            ),
-            selected_class,
-        )
-        if uses_shared_slots:
-            total_caster_level = sum(
-                _multiclass_slot_contribution_for_row(
-                    int(candidate.get("level") or 0),
-                    str(candidate.get("caster_progression") or "").strip(),
-                )
-                for candidate in spellcasting_rows
-            )
-            slot_progression = _shared_slot_progression_for_caster_level(total_caster_level)
-        else:
-            slot_progression = _spell_slot_progression_for_class_level(
-                class_name,
-                class_level,
-                selected_class=row_selected_class if isinstance(row_selected_class, SystemsEntryRecord) else None,
-            )
+        slot_progression = [dict(slot or {}) for slot in list((slot_lanes[0] or {}).get("slot_progression") or [])]
         spellcasting["spellcasting_class"] = class_name
         spellcasting["spellcasting_ability"] = str(row_payload.get("spellcasting_ability") or "").strip()
         spellcasting["spell_save_dc"] = row_payload.get("spell_save_dc")
@@ -4639,25 +4723,13 @@ def _derive_definition_spellcasting(
         spellcasting["slot_progression"] = slot_progression
         return spellcasting
 
-    if uses_shared_slots:
-        total_caster_level = sum(
-            _multiclass_slot_contribution_for_row(
-                int(row.get("level") or 0),
-                str(row.get("caster_progression") or "").strip(),
-            )
-            for row in spellcasting_rows
-        )
-        spellcasting["slot_progression"] = _shared_slot_progression_for_caster_level(total_caster_level)
-    elif spellcasting_rows:
+    if len(slot_lanes) == 1:
         spellcasting["slot_progression"] = [
             dict(slot or {})
-            for slot in list(spellcasting.get("slot_progression") or [])
+            for slot in list((slot_lanes[0] or {}).get("slot_progression") or [])
         ]
     else:
-        spellcasting["slot_progression"] = [
-            dict(slot or {})
-            for slot in list(spellcasting.get("slot_progression") or [])
-        ]
+        spellcasting["slot_progression"] = []
 
     spellcasting["spellcasting_class"] = ""
     spellcasting["spellcasting_ability"] = ""
@@ -11415,18 +11487,24 @@ def _build_native_level_up_preview(
         class_row_id=class_row_id or "",
     )
     preview_profile = sync_profile_class_summary(resulting_profile or dict(definition.profile or {}))
-    slot_progression = _preview_level_up_slot_progression(
+    slot_lanes = _preview_level_up_slot_lanes(
         definition,
         resulting_profile=preview_profile,
         selected_class=selected_class,
         target_level=target_level,
         class_row_id=str(class_row_id or "").strip(),
     )
-    slot_summary = [
-        f"Level {int(slot.get('level') or 0)}: {int(slot.get('max_slots') or 0)} slots"
-        for slot in slot_progression
-        if int(slot.get("max_slots") or 0) > 0
-    ]
+    slot_summary: list[str] = []
+    for lane in slot_lanes:
+        lane_title = str(lane.get("title") or "").strip() or "Spell slots"
+        lane_progression = [dict(slot or {}) for slot in list(lane.get("slot_progression") or [])]
+        for slot in lane_progression:
+            if int(slot.get("max_slots") or 0) <= 0:
+                continue
+            line = f"Level {int(slot.get('level') or 0)}: {int(slot.get('max_slots') or 0)} slots"
+            if len(slot_lanes) > 1:
+                line = f"{lane_title}: {line}"
+            slot_summary.append(line)
     preview_feature_payloads, _ = _build_feature_payloads(
         gained_feature_entries,
         ability_scores=ability_scores,
@@ -11464,7 +11542,7 @@ def _build_native_level_up_preview(
     }
 
 
-def _preview_level_up_slot_progression(
+def _preview_level_up_slot_lanes(
     definition: CharacterDefinition,
     *,
     resulting_profile: dict[str, Any],
@@ -11493,6 +11571,7 @@ def _preview_level_up_slot_progression(
                         "class_name": class_name,
                         "level": target_level,
                         "caster_progression": caster_progression,
+                        "selected_class": selected_class,
                     }
                 )
             continue
@@ -11512,23 +11591,24 @@ def _preview_level_up_slot_progression(
                     "class_name": class_name,
                     "level": int(row_payload.get("level") or existing_row.get("level") or 0),
                     "caster_progression": caster_progression,
+                    "selected_class": None,
                 }
             )
 
-    if _spellcasting_rows_use_shared_slots(preview_spell_rows, total_class_rows=len(profile_rows)):
-        total_caster_level = sum(
-            _multiclass_slot_contribution_for_row(
-                int(row.get("level") or 0),
-                str(row.get("caster_progression") or "").strip(),
-            )
-            for row in preview_spell_rows
-        )
-        return _shared_slot_progression_for_caster_level(total_caster_level)
-    return _level_up_slot_progression_for_class(
-        selected_class.title,
-        target_level,
-        selected_class=selected_class,
+    preview_row_contexts = [
+        {
+            "row_id": str(row.get("class_row_id") or "").strip(),
+            "selected_class": row.get("selected_class"),
+        }
+        for row in preview_spell_rows
+    ]
+    _preview_rows, slot_lanes = _spell_slot_lanes_for_rows(
+        preview_spell_rows,
+        row_contexts=preview_row_contexts,
+        total_class_rows=len(profile_rows),
+        current_level=target_level,
     )
+    return slot_lanes
 
 
 def _build_level_one_spellcasting(
@@ -11664,7 +11744,17 @@ def _build_level_up_spell_payloads(
 ) -> list[dict[str, Any]]:
     class_name = selected_class.title
     spell_mode = _spellcasting_mode_for_class(class_name, selected_class=selected_class)
-    existing_spells = list((current_definition.spellcasting or {}).get("spells") or [])
+    existing_spell_rows = [
+        dict(row or {})
+        for row in list((current_definition.spellcasting or {}).get("class_rows") or [])
+        if isinstance(row, dict)
+    ]
+    if not existing_spell_rows and class_row_id:
+        existing_spell_rows = [{"class_row_id": class_row_id}]
+    existing_spells = _assign_spell_payload_class_rows(
+        list((current_definition.spellcasting or {}).get("spells") or []),
+        spellcasting_rows=existing_spell_rows,
+    )
     spells_by_key: dict[str, dict[str, Any]] = {}
     for spell in existing_spells:
         payload_key = _spell_payload_map_key(spell)
@@ -13824,9 +13914,19 @@ def _summarize_level_up_spell_choices(
     extra_option_payloads: list[dict[str, Any]] | None = None,
     class_row_id: str = "",
 ) -> list[str]:
+    existing_spell_rows = [
+        dict(row or {})
+        for row in list((definition.spellcasting or {}).get("class_rows") or [])
+        if isinstance(row, dict)
+    ]
+    if not existing_spell_rows and class_row_id:
+        existing_spell_rows = [{"class_row_id": class_row_id}]
     existing_spell_payload_keys = {
         payload_key
-        for spell_payload in list((definition.spellcasting or {}).get("spells") or [])
+        for spell_payload in _assign_spell_payload_class_rows(
+            list((definition.spellcasting or {}).get("spells") or []),
+            spellcasting_rows=existing_spell_rows,
+        )
         if (payload_key := _spell_payload_map_key(spell_payload))
     }
     simulated_payloads = _build_level_up_spell_payloads(

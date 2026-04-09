@@ -41,11 +41,12 @@ from .character_campaign_options import (
 from .character_importer import converge_imported_definition
 from .character_models import CharacterDefinition, CharacterImportMetadata
 from .character_profile import ensure_profile_class_rows, profile_primary_class_name, profile_total_level
+from .character_spell_slots import normalize_spell_slot_lane_id, spell_slot_lanes_from_spellcasting
 from .repository import normalize_lookup
 from .repository import slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_EDITOR_VERSION = "2026-04-06.01"
+CHARACTER_EDITOR_VERSION = "2026-04-09.01"
 CUSTOM_FEATURE_CATEGORY = "custom_feature"
 CUSTOM_EQUIPMENT_SOURCE_KIND = "manual_edit"
 CUSTOM_FEATURE_TRACKER_PREFIX = "manual-feature-tracker"
@@ -102,16 +103,16 @@ def build_character_spell_management_context(
     )
     if not class_row_payloads:
         return None
-    slot_progression = [
-        dict(slot or {})
-        for slot in list(spellcasting.get("slot_progression") or [])
-    ]
-    max_spell_level = max((int(slot.get("level") or 0) for slot in slot_progression), default=0)
+    slot_lanes = spell_slot_lanes_from_spellcasting(spellcasting)
+    slot_lanes_by_id = {
+        normalize_spell_slot_lane_id(lane.get("id")): dict(lane or {})
+        for lane in slot_lanes
+    }
     sections = [
         _build_spell_management_section(
             definition,
             spell_catalog=spell_catalog,
-            max_spell_level=max_spell_level,
+            slot_lane=dict(slot_lanes_by_id.get(normalize_spell_slot_lane_id(row_payload.get("slot_lane_id"))) or {}),
             row_payload=row_payload,
             total_spell_rows=len(class_row_payloads),
         )
@@ -120,8 +121,13 @@ def build_character_spell_management_context(
     return {
         "sections": sections,
         "is_multiclass": len(class_row_payloads) > 1,
-        "shared_slot_label": "Shared spell slots" if len(class_row_payloads) > 1 else "Spell slots",
-        "slot_progression": slot_progression,
+        "shared_slot_label": (
+            str((slot_lanes[0] or {}).get("title") or "Spell slots")
+            if len(slot_lanes) == 1
+            else "Spell slot pools"
+        ),
+        "slot_progression": list((slot_lanes[0] or {}).get("slot_progression") or []) if len(slot_lanes) == 1 else [],
+        "slot_lanes": slot_lanes,
     }
 
 
@@ -153,6 +159,7 @@ def _spell_management_class_rows(
                     "spell_save_dc": row.get("spell_save_dc"),
                     "spell_attack_bonus": row.get("spell_attack_bonus"),
                     "selected_class": resolved_row.get("selected_class"),
+                    "slot_lane_id": normalize_spell_slot_lane_id(row.get("slot_lane_id")),
                 }
             )
         return results
@@ -172,6 +179,7 @@ def _spell_management_class_rows(
             "spell_save_dc": spellcasting.get("spell_save_dc"),
             "spell_attack_bonus": spellcasting.get("spell_attack_bonus"),
             "selected_class": selected_class if isinstance(selected_class, SystemsEntryRecord) else None,
+            "slot_lane_id": "",
         }
     ]
 
@@ -180,7 +188,7 @@ def _build_spell_management_section(
     definition: CharacterDefinition,
     *,
     spell_catalog: dict[str, Any],
-    max_spell_level: int,
+    slot_lane: dict[str, Any],
     row_payload: dict[str, Any],
     total_spell_rows: int,
 ) -> dict[str, Any]:
@@ -189,6 +197,8 @@ def _build_spell_management_section(
     current_level = int(row_payload.get("level") or 0)
     selected_class = row_payload.get("selected_class")
     class_row_id = str(row_payload.get("class_row_id") or "").strip()
+    slot_progression = [dict(slot or {}) for slot in list(slot_lane.get("slot_progression") or [])]
+    max_spell_level = max((int(slot.get("level") or 0) for slot in slot_progression), default=0)
     unavailable_message = ""
     if not class_name or not mode:
         unavailable_message = "This sheet does not currently have a supported class spellcasting model to edit here."

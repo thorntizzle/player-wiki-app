@@ -6,7 +6,7 @@
     <article class="detail-card">
       {% if character.spellcasting.is_multiclass %}
         <h3>Multiclass Spellcasting</h3>
-        <p>Shared spell slots are shown once below, with spells grouped by class row.</p>
+        <p>{{ character.spellcasting.multiclass_summary }}</p>
       {% else %}
         {% set primary_section = (character.spellcasting.row_sections | list | first) if character.spellcasting.row_sections else none %}
         <h3>{{ (primary_section.title if primary_section else character.spellcasting.spellcasting_class) or "Spellcasting" }}</h3>
@@ -21,19 +21,21 @@
         </p>
       {% endif %}
     </article>
-    {% if character.spellcasting.slots %}
-      <article class="detail-card">
-        <h3>{{ character.spellcasting.slots_title or "Spell slots" }}</h3>
-        <ul class="plain-list slot-list">
-          {% for slot in character.spellcasting.slots %}
-            <li>
-              <span>{{ slot.label }}</span>
-              <strong>{{ slot.available }} available / {{ slot.max }}</strong>
-            </li>
-          {% endfor %}
-        </ul>
-      </article>
-    {% endif %}
+    {% for slot_pool in character.spellcasting.slot_pools %}
+      {% if slot_pool.slots %}
+        <article class="detail-card">
+          <h3>{{ slot_pool.title or character.spellcasting.slots_title or "Spell slots" }}</h3>
+          <ul class="plain-list slot-list">
+            {% for slot in slot_pool.slots %}
+              <li>
+                <span>{{ slot.label }}</span>
+                <strong>{{ slot.available }} available / {{ slot.max }}</strong>
+              </li>
+            {% endfor %}
+          </ul>
+        </article>
+      {% endif %}
+    {% endfor %}
   </div>
 
   {% if show_spell_list and spell_manager %}

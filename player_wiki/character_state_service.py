@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .character_models import CharacterRecord, CharacterStateRecord
+from .character_spell_slots import normalize_spell_slot_lane_id, spell_slot_lane_title_map
 from .character_store import CharacterStateStore
 
 
@@ -95,6 +96,7 @@ class CharacterStateService:
         record: CharacterRecord,
         level: int,
         *,
+        slot_lane_id: str = "",
         expected_revision: int,
         used: Any | None = None,
         delta_used: Any | None = None,
@@ -102,9 +104,19 @@ class CharacterStateService:
     ) -> CharacterStateRecord:
         state = deepcopy(record.state_record.state)
         slots = list(state.get("spell_slots") or [])
-        slot = next((item for item in slots if int(item.get("level") or 0) == int(level)), None)
+        clean_lane_id = normalize_spell_slot_lane_id(slot_lane_id)
+        slot = next(
+            (
+                item
+                for item in slots
+                if int(item.get("level") or 0) == int(level)
+                and normalize_spell_slot_lane_id(item.get("slot_lane_id")) == clean_lane_id
+            ),
+            None,
+        )
         if slot is None:
-            raise ValueError(f"Unknown spell slot level: {level}")
+            lane_label = f" in slot lane '{clean_lane_id}'" if clean_lane_id else ""
+            raise ValueError(f"Unknown spell slot level: {level}{lane_label}")
         next_used = int(slot.get("used") or 0)
         if used is not None and str(used).strip() != "":
             next_used = int(used)
@@ -225,7 +237,11 @@ class CharacterStateService:
     def preview_rest(self, record: CharacterRecord, rest_type: str) -> CharacterRestPreview:
         normalized_rest = self._normalize_rest_type(rest_type)
         state = deepcopy(record.state_record.state)
-        changes = self._collect_rest_changes(state, normalized_rest)
+        changes = self._collect_rest_changes(
+            state,
+            normalized_rest,
+            spellcasting=record.definition.spellcasting,
+        )
         return CharacterRestPreview(
             rest_type=normalized_rest,
             label=self._rest_label(normalized_rest),
@@ -274,7 +290,13 @@ class CharacterStateService:
             updated_by_user_id=updated_by_user_id,
         )
 
-    def _collect_rest_changes(self, state: dict[str, Any], rest_type: str) -> list[CharacterRestChange]:
+    def _collect_rest_changes(
+        self,
+        state: dict[str, Any],
+        rest_type: str,
+        *,
+        spellcasting: dict[str, Any] | None = None,
+    ) -> list[CharacterRestChange]:
         changes: list[CharacterRestChange] = []
         for resource in list(state.get("resources") or []):
             if not self._should_reset_resource(resource, rest_type):
@@ -292,14 +314,21 @@ class CharacterStateService:
             )
 
         if rest_type == "long":
+            lane_titles = spell_slot_lane_title_map(spellcasting)
+            total_lanes = len(lane_titles)
             for slot in list(state.get("spell_slots") or []):
                 used = int(slot.get("used") or 0)
                 max_slots = int(slot.get("max") or 0)
                 if used <= 0:
                     continue
+                lane_id = normalize_spell_slot_lane_id(slot.get("slot_lane_id"))
+                lane_title = str(lane_titles.get(lane_id) or "Spell slots").strip()
+                label = f"{self._spell_level_label(int(slot.get('level') or 0))} spell slots"
+                if total_lanes > 1:
+                    label = f"{lane_title}: {label}"
                 changes.append(
                     CharacterRestChange(
-                        label=f"{self._spell_level_label(int(slot.get('level') or 0))} spell slots",
+                        label=label,
                         from_value=f"{max_slots - used} available / {max_slots}",
                         to_value=f"{max_slots} available / {max_slots}",
                     )

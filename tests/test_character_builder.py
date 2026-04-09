@@ -656,7 +656,7 @@ def test_multiclass_readiness_allows_shared_slot_spellcasting_rows():
     assert wizard_row["spellcasting_row"] is True
 
 
-def test_multiclass_readiness_blocks_pact_magic_rows():
+def test_multiclass_readiness_allows_pact_magic_rows():
     fighter = _systems_entry(
         "class",
         "phb-class-fighter",
@@ -709,9 +709,11 @@ def test_multiclass_readiness_blocks_pact_magic_rows():
 
     readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
 
-    assert readiness["status"] == "unsupported"
-    assert "shared-slot multiclass" in readiness["message"].lower()
-    assert any("pact magic" in reason.lower() for reason in readiness["reasons"])
+    assert readiness["status"] == "ready"
+    assert readiness["shared_slot_multiclass_ready"] is True
+    warlock_row = next(row for row in readiness["selected_class_rows"] if row["row_id"] == "class-row-2")
+    assert warlock_row["shared_slot_multiclass_supported"] is True
+    assert warlock_row["spellcasting_row"] is True
 
 
 def test_multiclass_readiness_blocks_subclass_only_spellcasting_rows():
@@ -772,7 +774,7 @@ def test_multiclass_readiness_blocks_subclass_only_spellcasting_rows():
     readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
 
     assert readiness["status"] == "unsupported"
-    assert "shared-slot multiclass" in readiness["message"].lower()
+    assert "multiclass spellcasting progression lane" in readiness["message"].lower()
     assert any("subclass-only spellcasting" in reason.lower() for reason in readiness["reasons"])
 
 
@@ -904,6 +906,126 @@ def test_normalize_definition_to_native_model_derives_shared_slots_for_full_and_
         {"level": 1, "max_slots": 3},
     ]
     assert [row["caster_progression"] for row in normalized.spellcasting["class_rows"]] == ["full", "artificer"]
+
+
+def test_normalize_definition_to_native_model_derives_separate_slot_lanes_for_wizard_and_warlock():
+    wizard = _systems_entry(
+        "class",
+        "phb-class-wizard",
+        "Wizard",
+        metadata={
+            "hit_die": {"faces": 6},
+            "spellcasting_ability": "int",
+            "caster_progression": "full",
+            "spells_known_progression_fixed": [6],
+        },
+    )
+    warlock = _systems_entry(
+        "class",
+        "phb-class-warlock",
+        "Warlock",
+        metadata={
+            "hit_die": {"faces": 8},
+            "spellcasting_ability": "cha",
+            "caster_progression": "pact",
+            "spells_known_progression": [2, 3, 4],
+        },
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [wizard, warlock],
+            "race": [human],
+            "background": [acolyte],
+            "subclass": [],
+        },
+        class_progression=[],
+    )
+    definition = _minimal_character_definition("wizard-warlock", "Wizard Warlock")
+    definition.profile["classes"] = [
+        {
+            "row_id": "class-row-1",
+            "class_name": "Wizard",
+            "subclass_name": "",
+            "level": 3,
+            "systems_ref": _systems_ref(wizard),
+        },
+        {
+            "row_id": "class-row-2",
+            "class_name": "Warlock",
+            "subclass_name": "",
+            "level": 2,
+            "systems_ref": _systems_ref(warlock),
+        },
+    ]
+    definition.profile["class_ref"] = _systems_ref(wizard)
+    definition.profile["class_level_text"] = "Wizard 3 / Warlock 2"
+    definition.spellcasting = {"slot_progression": [], "spells": []}
+
+    normalized = normalize_definition_to_native_model(definition, systems_service=systems_service)
+
+    assert normalized.spellcasting["slot_progression"] == []
+    assert normalized.spellcasting["class_rows"][0]["slot_lane_id"] == "class-row-1-slots"
+    assert normalized.spellcasting["class_rows"][1]["slot_lane_id"] == "class-row-2-slots"
+    assert normalized.spellcasting["slot_lanes"] == [
+        {
+            "id": "class-row-1-slots",
+            "title": "Wizard spell slots",
+            "shared": False,
+            "row_ids": ["class-row-1"],
+            "slot_progression": [
+                {"level": 1, "max_slots": 4},
+                {"level": 2, "max_slots": 2},
+            ],
+        },
+        {
+            "id": "class-row-2-slots",
+            "title": "Warlock Pact Magic slots",
+            "shared": False,
+            "row_ids": ["class-row-2"],
+            "slot_progression": [
+                {"level": 1, "max_slots": 2},
+            ],
+        },
+    ]
+
+
+def test_build_initial_state_tracks_slot_usage_by_lane_for_non_shared_multiclass():
+    definition = _minimal_character_definition("wizard-warlock-state", "Wizard Warlock State")
+    definition.spellcasting = {
+        "slot_progression": [],
+        "slot_lanes": [
+            {
+                "id": "class-row-1-slots",
+                "title": "Wizard spell slots",
+                "shared": False,
+                "row_ids": ["class-row-1"],
+                "slot_progression": [
+                    {"level": 1, "max_slots": 4},
+                    {"level": 2, "max_slots": 2},
+                ],
+            },
+            {
+                "id": "class-row-2-slots",
+                "title": "Warlock Pact Magic slots",
+                "shared": False,
+                "row_ids": ["class-row-2"],
+                "slot_progression": [
+                    {"level": 1, "max_slots": 2},
+                ],
+            },
+        ],
+        "spells": [],
+    }
+
+    initial_state = build_initial_state(definition)
+
+    assert initial_state["spell_slots"] == [
+        {"level": 1, "max": 4, "used": 0, "slot_lane_id": "class-row-1-slots"},
+        {"level": 2, "max": 2, "used": 0, "slot_lane_id": "class-row-1-slots"},
+        {"level": 1, "max": 2, "used": 0, "slot_lane_id": "class-row-2-slots"},
+    ]
 
 
 def test_prepared_spell_formula_supports_simple_level_plus_ability_tokens():

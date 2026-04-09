@@ -2807,6 +2807,7 @@ def register_api(app) -> None:
             lambda record, payload, user_id: get_character_state_service().update_spell_slots(
                 record,
                 level,
+                slot_lane_id=str(payload.get("slot_lane_id") or ""),
                 expected_revision=int(payload.get("expected_revision")),
                 used=payload.get("used"),
                 delta_used=payload.get("delta_used"),

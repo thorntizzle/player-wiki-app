@@ -1110,7 +1110,11 @@ def create_app() -> Flask:
         spellcasting_payload = dict(record.definition.spellcasting or {})
         read_subpage = normalize_character_read_subpage(
             request.values.get("page", ""),
-            include_spellcasting=bool(spellcasting_payload.get("spells") or spellcasting_payload.get("slot_progression")),
+            include_spellcasting=bool(
+                spellcasting_payload.get("spells")
+                or spellcasting_payload.get("slot_progression")
+                or spellcasting_payload.get("slot_lanes")
+            ),
             include_controls=has_session_mode_access(campaign_slug, character_slug),
         )
         mode = request.values.get("mode", "").strip().lower()
@@ -4240,6 +4244,7 @@ def create_app() -> Flask:
             action=lambda record, expected_revision, user_id: get_character_state_service().update_spell_slots(
                 record,
                 level,
+                slot_lane_id=request.form.get("slot_lane_id", ""),
                 expected_revision=expected_revision,
                 used=request.form.get("used"),
                 delta_used=request.form.get("delta_used"),
@@ -6643,6 +6648,7 @@ def create_app() -> Flask:
             action=lambda record, expected_revision, user_id: get_character_state_service().update_spell_slots(
                 record,
                 level,
+                slot_lane_id=request.form.get("slot_lane_id", ""),
                 expected_revision=expected_revision,
                 used=request.form.get("used"),
                 delta_used=request.form.get("delta_used"),

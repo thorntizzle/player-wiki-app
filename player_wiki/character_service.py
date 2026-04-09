@@ -4,6 +4,11 @@ from copy import deepcopy
 from typing import Any
 
 from .character_models import CharacterDefinition
+from .character_spell_slots import (
+    normalize_spell_slot_lane_id,
+    spell_slot_lanes_from_spellcasting,
+    spell_slot_state_entries_from_spellcasting,
+)
 
 MANAGED_CUSTOM_TRACKER_PREFIX = "manual-feature-tracker:"
 
@@ -71,14 +76,7 @@ def _normalize_attunement_state(
 
 def build_initial_state(definition: CharacterDefinition) -> dict[str, Any]:
     max_hp = int(definition.stats.get("max_hp") or 0)
-    spell_slots = [
-        {
-            "level": int(slot.get("level") or 0),
-            "max": int(slot.get("max_slots") or 0),
-            "used": 0,
-        }
-        for slot in definition.spellcasting.get("slot_progression", [])
-    ]
+    spell_slots = spell_slot_state_entries_from_spellcasting(definition.spellcasting)
 
     resources = [build_resource_state(template) for template in definition.resource_templates]
 
@@ -169,30 +167,48 @@ def merge_state_with_definition(
         merged_resources.append(deepcopy(resource))
 
     payload["resources"] = merged_resources
-    existing_slots = list(payload.get("spell_slots") or [])
-    existing_slots_by_level = {
-        int(slot.get("level") or 0): dict(slot)
+    existing_slots = [dict(slot or {}) for slot in list(payload.get("spell_slots") or []) if isinstance(slot, dict)]
+    existing_slots_by_key = {
+        (
+            normalize_spell_slot_lane_id(slot.get("slot_lane_id")),
+            int(slot.get("level") or 0),
+        ): dict(slot)
         for slot in existing_slots
         if int(slot.get("level") or 0) > 0
     }
-    merged_slots: list[dict[str, Any]] = []
-    tracked_slot_levels: set[int] = set()
-    for slot in list((definition.spellcasting or {}).get("slot_progression") or []):
+    legacy_slots_by_level: dict[int, list[dict[str, Any]]] = {}
+    for slot in existing_slots:
         level = int(slot.get("level") or 0)
-        max_slots = int(slot.get("max_slots") or 0)
-        tracked_slot_levels.add(level)
-        existing_slot = existing_slots_by_level.get(level)
-        used_slots = int((existing_slot or {}).get("used") or 0)
-        merged_slots.append(
-            {
+        if level <= 0 or normalize_spell_slot_lane_id(slot.get("slot_lane_id")):
+            continue
+        legacy_slots_by_level.setdefault(level, []).append(dict(slot))
+    merged_slots: list[dict[str, Any]] = []
+    tracked_slot_keys: set[tuple[str, int]] = set()
+    for lane in spell_slot_lanes_from_spellcasting(definition.spellcasting):
+        lane_id = normalize_spell_slot_lane_id(lane.get("id"))
+        for slot in list(lane.get("slot_progression") or []):
+            level = int(slot.get("level") or 0)
+            max_slots = int(slot.get("max_slots") or 0)
+            slot_key = (lane_id, level)
+            tracked_slot_keys.add(slot_key)
+            existing_slot = existing_slots_by_key.get(slot_key)
+            if existing_slot is None and legacy_slots_by_level.get(level):
+                existing_slot = legacy_slots_by_level[level].pop(0)
+            used_slots = int((existing_slot or {}).get("used") or 0)
+            merged_slot = {
                 "level": level,
                 "max": max_slots,
                 "used": max(0, min(used_slots, max_slots)),
             }
-        )
+            if lane_id:
+                merged_slot["slot_lane_id"] = lane_id
+            merged_slots.append(merged_slot)
     for slot in existing_slots:
-        level = int(slot.get("level") or 0)
-        if level in tracked_slot_levels:
+        slot_key = (
+            normalize_spell_slot_lane_id(slot.get("slot_lane_id")),
+            int(slot.get("level") or 0),
+        )
+        if slot_key in tracked_slot_keys:
             continue
         merged_slots.append(deepcopy(slot))
     payload["spell_slots"] = merged_slots
@@ -309,19 +325,28 @@ def validate_state(definition: CharacterDefinition, state: dict[str, Any]) -> di
     payload["resources"] = normalized_resources
 
     slot_limits = {
-        int(slot.get("level") or 0): int(slot.get("max_slots") or 0)
-        for slot in definition.spellcasting.get("slot_progression", [])
+        (
+            normalize_spell_slot_lane_id(lane.get("id")),
+            int(slot.get("level") or 0),
+        ): int(slot.get("max_slots") or 0)
+        for lane in spell_slot_lanes_from_spellcasting(definition.spellcasting)
+        for slot in list(lane.get("slot_progression") or [])
     }
     normalized_slots = []
     for slot in payload.get("spell_slots") or []:
+        lane_id = normalize_spell_slot_lane_id(slot.get("slot_lane_id"))
         level = int(slot.get("level") or 0)
-        max_slots = int(slot.get("max") or slot_limits.get(level) or 0)
+        max_slots = int(slot.get("max") or slot_limits.get((lane_id, level)) or 0)
         used = int(slot.get("used") or 0)
         if used < 0 or used > max_slots:
+            lane_label = f" in slot lane '{lane_id}'" if lane_id else ""
             raise CharacterStateValidationError(
-                f"spell slot usage for level {level} must be between 0 and {max_slots}"
+                f"spell slot usage for level {level}{lane_label} must be between 0 and {max_slots}"
             )
-        normalized_slots.append({"level": level, "max": max_slots, "used": used})
+        normalized_slot = {"level": level, "max": max_slots, "used": used}
+        if lane_id:
+            normalized_slot["slot_lane_id"] = lane_id
+        normalized_slots.append(normalized_slot)
     payload["spell_slots"] = normalized_slots
 
     normalized_inventory = []
