@@ -515,6 +515,33 @@ def test_imported_character_with_missing_progression_links_is_repairable_even_wh
     assert any("before leveling up" in reason.lower() and "link" in reason.lower() for reason in readiness["reasons"])
 
 
+def test_multiclass_readiness_uses_class_rows_for_total_level_even_when_legacy_summary_is_stale():
+    systems_service = _FakeSystemsService({}, class_progression=[])
+    definition = _minimal_character_definition("multiclass-hero", "Multiclass Hero")
+    definition.profile["class_level_text"] = "Fighter 3"
+    definition.profile["classes"] = [
+        dict(definition.profile["classes"][0], level=3),
+        {
+            "class_name": "Wizard",
+            "subclass_name": "",
+            "level": 2,
+            "systems_ref": {
+                "entry_key": "dnd-5e|class|phb|wizard",
+                "entry_type": "class",
+                "title": "Wizard",
+                "slug": "phb-class-wizard",
+                "source_id": "PHB",
+            },
+        },
+    ]
+
+    readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
+
+    assert readiness["status"] == "unsupported"
+    assert readiness["current_level"] == 5
+    assert "single-class native characters only" in readiness["message"].lower()
+
+
 def test_imported_character_with_unsupported_enabled_class_is_blocked():
     mystic = _systems_entry(
         "class",

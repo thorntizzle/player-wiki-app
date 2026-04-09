@@ -18,6 +18,15 @@ from .character_campaign_options import (
     collect_campaign_option_stat_adjustments,
 )
 from .character_models import CharacterDefinition, CharacterImportMetadata
+from .character_profile import (
+    profile_class_rows,
+    profile_primary_class_name,
+    profile_primary_class_ref,
+    profile_primary_subclass_name,
+    profile_primary_subclass_ref,
+    profile_total_level,
+    sync_profile_class_summary,
+)
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
@@ -859,7 +868,7 @@ def native_level_up_readiness(
             "current_level": current_level,
         }
 
-    classes = list((definition.profile or {}).get("classes") or [])
+    classes = profile_class_rows(definition.profile)
     if len(classes) != 1:
         character_label = "imported" if is_imported else "native"
         return {
@@ -910,8 +919,8 @@ def native_level_up_readiness(
         kind="background",
     )
 
-    profile_class_ref = definition.profile.get("class_ref")
-    class_row_ref = class_payload.get("systems_ref")
+    profile_class_ref = profile_primary_class_ref(definition.profile)
+    class_row_ref = dict(class_payload.get("systems_ref") or {})
     selected_enabled_class_match = _resolve_profile_entry_match(
         enabled_class_options,
         profile_class_ref or class_row_ref,
@@ -1009,9 +1018,11 @@ def native_level_up_readiness(
     selected_subclass: SystemsEntryRecord | None = None
     if selected_class is not None:
         subclass_options = _list_subclass_options(systems_service, campaign_slug, selected_class)
+        profile_subclass_ref = profile_primary_subclass_ref(definition.profile)
+        class_row_subclass_ref = dict(class_payload.get("subclass_ref") or {})
         selected_subclass_match = _resolve_profile_entry_match(
             subclass_options,
-            definition.profile.get("subclass_ref") or dict((classes[0] or {}).get("subclass_ref") or {}),
+            profile_subclass_ref or class_row_subclass_ref,
             fallback_title=_native_character_subclass_name(definition),
         )
         selected_subclass = selected_subclass_match.get("entry")
@@ -1019,7 +1030,7 @@ def native_level_up_readiness(
         subclass_label = str(selected_class.metadata.get("subclass_title") or "subclass").strip() or "subclass"
         subclass_subject = _profile_link_subject(
             subclass_label,
-            systems_ref=definition.profile.get("subclass_ref") or dict((classes[0] or {}).get("subclass_ref") or {}),
+            systems_ref=profile_subclass_ref or class_row_subclass_ref,
             entry=selected_subclass,
         )
         if _class_requires_subclass_at_level(selected_class, class_progression, current_level) and selected_subclass is None:
@@ -1081,13 +1092,7 @@ def _character_source_type(definition: CharacterDefinition) -> str:
 
 
 def _native_character_subclass_name(definition: CharacterDefinition) -> str:
-    classes = list((definition.profile or {}).get("classes") or [])
-    if classes:
-        class_payload = dict(classes[0] or {})
-        subclass_ref = dict(class_payload.get("subclass_ref") or {})
-        return str(subclass_ref.get("title") or class_payload.get("subclass_name") or "").strip()
-    subclass_ref = dict((definition.profile or {}).get("subclass_ref") or {})
-    return str(subclass_ref.get("title") or "").strip()
+    return profile_primary_subclass_name(definition.profile)
 
 
 def _native_progression_payload(source_payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -1287,7 +1292,7 @@ def build_native_level_up_context(
 
     selected_class = _resolve_profile_entry(
         class_options,
-        definition.profile.get("class_ref"),
+        profile_primary_class_ref(definition.profile),
         fallback_title=_native_character_class_name(definition),
     )
     selected_species = _resolve_profile_entry(
@@ -1313,7 +1318,7 @@ def build_native_level_up_context(
         selected_class,
         subclass_entries=list(static_bundle.get("subclass_entries") or []),
     )
-    existing_subclass_slug = _systems_ref_slug(definition.profile.get("subclass_ref"))
+    existing_subclass_slug = _systems_ref_slug(profile_primary_subclass_ref(definition.profile))
     if existing_subclass_slug and not str(values.get("subclass_slug") or "").strip():
         values["subclass_slug"] = existing_subclass_slug
     values["subclass_slug"] = _sanitize_entry_selection_value(values.get("subclass_slug"), subclass_options)
@@ -1687,14 +1692,14 @@ def build_imported_progression_repair_context(
         kind="feat",
     )
     optionalfeature_options = list(_list_campaign_enabled_entries(systems_service, campaign_slug, "optionalfeature"))
-    classes = [dict(row or {}) for row in list((definition.profile or {}).get("classes") or [])]
+    classes = profile_class_rows(definition.profile)
     class_payload = dict(classes[0] or {}) if classes else {}
 
     selected_class = readiness.get("selected_class") if isinstance(readiness.get("selected_class"), SystemsEntryRecord) else None
     if selected_class is None:
         selected_class = _resolve_profile_entry(
             class_options,
-            definition.profile.get("class_ref") or class_payload.get("systems_ref"),
+            profile_primary_class_ref(definition.profile) or dict(class_payload.get("systems_ref") or {}),
             fallback_title=_native_character_class_name(definition),
         )
     selected_species = readiness.get("selected_species") if isinstance(readiness.get("selected_species"), SystemsEntryRecord) else None
@@ -1719,7 +1724,7 @@ def build_imported_progression_repair_context(
     if selected_subclass is None and selected_class is not None:
         selected_subclass = _resolve_profile_entry(
             _list_subclass_options(systems_service, campaign_slug, selected_class),
-            definition.profile.get("subclass_ref") or class_payload.get("subclass_ref"),
+            profile_primary_subclass_ref(definition.profile) or dict(class_payload.get("subclass_ref") or {}),
             fallback_title=_native_character_subclass_name(definition),
         )
 
@@ -1912,14 +1917,17 @@ def apply_imported_progression_repairs(
     class_payload["class_name"] = selected_class.title
     class_payload["level"] = current_level
     class_payload["systems_ref"] = _systems_ref_from_entry(selected_class)
+    class_payload["subclass_name"] = selected_subclass.title if selected_subclass is not None else ""
     if selected_subclass is not None:
-        class_payload["subclass_name"] = selected_subclass.title
         class_payload["subclass_ref"] = _systems_ref_from_entry(selected_subclass)
         profile["subclass_ref"] = _systems_ref_from_entry(selected_subclass)
+    else:
+        class_payload.pop("subclass_ref", None)
+        profile["subclass_ref"] = None
     classes = [class_payload]
     profile["classes"] = classes
     profile["class_ref"] = _systems_ref_from_entry(selected_class)
-    profile["class_level_text"] = f"{selected_class.title} {current_level}"
+    profile = sync_profile_class_summary(profile)
 
     species_page_ref = _entry_page_ref(selected_species)
     profile["species"] = selected_species.title
@@ -2769,12 +2777,12 @@ def _resolve_definition_sheet_entries(
         definition.campaign_slug,
         campaign_page_records=campaign_page_records,
     )
-    classes = [dict(row or {}) for row in list((definition.profile or {}).get("classes") or [])]
+    classes = profile_class_rows(definition.profile)
     class_payload = dict(classes[0] or {}) if classes else {}
     if selected_class is None:
         selected_class = _resolve_profile_entry(
             list(static_bundle.get("supported_class_entries") or []),
-            (definition.profile or {}).get("class_ref") or class_payload.get("systems_ref"),
+            profile_primary_class_ref(definition.profile) or dict(class_payload.get("systems_ref") or {}),
             fallback_title=_native_character_class_name(definition),
         )
     if selected_species is None:
@@ -2800,7 +2808,7 @@ def _resolve_definition_sheet_entries(
         )
         selected_subclass = _resolve_profile_entry(
             subclass_options,
-            (definition.profile or {}).get("subclass_ref") or class_payload.get("subclass_ref"),
+            profile_primary_subclass_ref(definition.profile) or dict(class_payload.get("subclass_ref") or {}),
             fallback_title=_native_character_subclass_name(definition),
         )
     return {
@@ -2857,12 +2865,10 @@ def _definition_spellcasting_class_name(definition: CharacterDefinition) -> str:
     spellcasting_class = str((definition.spellcasting or {}).get("spellcasting_class") or "").strip()
     if spellcasting_class:
         return spellcasting_class
-    class_name = _native_character_class_name(definition)
+    class_name = profile_primary_class_name(definition.profile)
     if class_name:
         return class_name
-    class_level_text = str((definition.profile or {}).get("class_level_text") or "").strip()
-    match = re.match(r"([A-Za-z][A-Za-z' -]+)", class_level_text)
-    return str(match.group(1) or "").strip() if match is not None else ""
+    return ""
 
 
 def _infer_definition_save_proficiencies(
@@ -3707,24 +3713,11 @@ def _derive_definition_core_sheet_payloads(
 
 
 def _resolve_native_character_level(definition: CharacterDefinition) -> int:
-    classes = list((definition.profile or {}).get("classes") or [])
-    if classes:
-        return max(int((classes[0] or {}).get("level") or 0), 0)
-    class_level_text = str((definition.profile or {}).get("class_level_text") or "").strip()
-    match = re.search(r"(\d+)\s*$", class_level_text)
-    if match:
-        return int(match.group(1))
-    return 0
+    return profile_total_level(definition.profile, default=0)
 
 
 def _native_character_class_name(definition: CharacterDefinition) -> str:
-    classes = list((definition.profile or {}).get("classes") or [])
-    if classes:
-        class_payload = dict(classes[0] or {})
-        class_ref = dict(class_payload.get("systems_ref") or {})
-        return str(class_ref.get("title") or class_payload.get("class_name") or "").strip()
-    class_ref = dict((definition.profile or {}).get("class_ref") or {})
-    return str(class_ref.get("title") or "").strip()
+    return profile_primary_class_name(definition.profile)
 
 
 def _native_level_up_support_error(
@@ -3746,11 +3739,11 @@ def _native_level_up_support_error(
     source_type = _character_source_type(definition)
     if source_type != "native_character_builder":
         return "Level-up currently supports native in-app characters only."
-    classes = list((definition.profile or {}).get("classes") or [])
+    classes = profile_class_rows(definition.profile)
     if len(classes) != 1:
         return "Level-up currently supports single-class native characters only."
     class_payload = dict(classes[0] or {})
-    class_ref = dict(class_payload.get("systems_ref") or (definition.profile or {}).get("class_ref") or {})
+    class_ref = profile_primary_class_ref(definition.profile) or dict(class_payload.get("systems_ref") or {})
     if not str(class_ref.get("title") or class_payload.get("class_name") or "").strip():
         return "This native character is missing the class link needed for level-up."
     current_level = _resolve_native_character_level(definition)
@@ -3767,7 +3760,7 @@ def _normalize_level_up_values(
 ) -> dict[str, str]:
     normalized = {key: str(value) for key, value in dict(values or {}).items()}
     normalized.setdefault("hp_gain", "")
-    existing_subclass_slug = _systems_ref_slug((definition.profile or {}).get("subclass_ref"))
+    existing_subclass_slug = _systems_ref_slug(profile_primary_subclass_ref(definition.profile))
     if existing_subclass_slug and not str(normalized.get("subclass_slug") or "").strip():
         normalized["subclass_slug"] = existing_subclass_slug
     return normalized
@@ -6778,10 +6771,9 @@ def _character_profile_class_names(
         class_name = str(dict(class_payload or {}).get("class_name") or "").strip()
         if class_name:
             classes.append(class_name)
-    class_ref = dict((definition.profile or {}).get("class_ref") or {})
     fallback = str(
         fallback_class_name
-        or class_ref.get("title")
+        or profile_primary_class_name(definition.profile)
         or (definition.profile or {}).get("class_name")
         or ""
     ).strip()
@@ -9738,25 +9730,27 @@ def _build_level_one_profile(
     }
     if selected_subclass is not None:
         class_payload["subclass_ref"] = _systems_ref_from_entry(selected_subclass)
-    return {
-        "sheet_name": name,
-        "display_name": name,
-        "class_level_text": f"{selected_class.title} 1",
-        "classes": [class_payload],
-        "class_ref": _systems_ref_from_entry(selected_class),
-        "subclass_ref": _systems_ref_from_entry(selected_subclass) if selected_subclass is not None else None,
-        "species": selected_species.title,
-        "species_ref": None if species_page_ref else _systems_ref_from_entry(selected_species),
-        "species_page_ref": species_page_ref or None,
-        "background": selected_background.title,
-        "background_ref": None if background_page_ref else _systems_ref_from_entry(selected_background),
-        "background_page_ref": background_page_ref or None,
-        "alignment": str(values.get("alignment") or "").strip(),
-        "experience_model": str(values.get("experience_model") or DEFAULT_EXPERIENCE_MODEL).strip(),
-        "size": _extract_size_label(selected_species),
-        "biography_markdown": "",
-        "personality_markdown": "",
-    }
+    return sync_profile_class_summary(
+        {
+            "sheet_name": name,
+            "display_name": name,
+            "class_level_text": f"{selected_class.title} 1",
+            "classes": [class_payload],
+            "class_ref": _systems_ref_from_entry(selected_class),
+            "subclass_ref": _systems_ref_from_entry(selected_subclass) if selected_subclass is not None else None,
+            "species": selected_species.title,
+            "species_ref": None if species_page_ref else _systems_ref_from_entry(selected_species),
+            "species_page_ref": species_page_ref or None,
+            "background": selected_background.title,
+            "background_ref": None if background_page_ref else _systems_ref_from_entry(selected_background),
+            "background_page_ref": background_page_ref or None,
+            "alignment": str(values.get("alignment") or "").strip(),
+            "experience_model": str(values.get("experience_model") or DEFAULT_EXPERIENCE_MODEL).strip(),
+            "size": _extract_size_label(selected_species),
+            "biography_markdown": "",
+            "personality_markdown": "",
+        }
+    )
 
 
 def _proficiency_bonus_for_level(level: int) -> int:
@@ -9888,10 +9882,9 @@ def _build_leveled_profile(
     else:
         class_payload.pop("subclass_ref", None)
     profile["classes"] = [class_payload]
-    profile["class_level_text"] = f"{selected_class.title} {target_level}"
     profile["class_ref"] = _systems_ref_from_entry(selected_class)
     profile["subclass_ref"] = _systems_ref_from_entry(selected_subclass) if selected_subclass is not None else None
-    return profile
+    return sync_profile_class_summary(profile)
 
 
 def _build_leveled_source(
@@ -13268,6 +13261,7 @@ def normalize_definition_to_native_model(
             resolved_background=resolved_background,
         )
     )
+    payload["profile"] = sync_profile_class_summary(payload.get("profile"))
     return CharacterDefinition.from_dict(payload)
 
 

@@ -38,6 +38,7 @@ from .character_campaign_options import (
 )
 from .character_importer import converge_imported_definition
 from .character_models import CharacterDefinition, CharacterImportMetadata
+from .character_profile import profile_primary_class_name, profile_total_level
 from .repository import normalize_lookup
 from .repository import slugify
 from .systems_models import SystemsEntryRecord
@@ -490,20 +491,7 @@ def _spell_management_class_name(
     if clean_spellcasting_class:
         return clean_spellcasting_class
 
-    profile = dict(definition.profile or {})
-    class_ref = dict(profile.get("class_ref") or {})
-    class_ref_title = str(class_ref.get("title") or "").strip()
-    if class_ref_title:
-        return class_ref_title
-
-    for row in list(profile.get("classes") or []):
-        class_name = str(dict(row or {}).get("class_name") or "").strip()
-        if class_name:
-            return class_name
-
-    class_level_text = str(profile.get("class_level_text") or "").strip()
-    match = re.match(r"([A-Za-z][A-Za-z' -]+)", class_level_text)
-    return str(match.group(1) or "").strip() if match is not None else ""
+    return profile_primary_class_name(definition.profile)
 
 
 def _spell_management_ability_scores(definition: CharacterDefinition) -> dict[str, int]:
@@ -1941,13 +1929,7 @@ def _campaign_option_spell_map_key(
 
 
 def _character_total_level(definition: CharacterDefinition) -> int:
-    class_rows = list((definition.profile or {}).get("classes") or [])
-    total_level = sum(int(dict(row).get("level") or 0) for row in class_rows if isinstance(row, dict))
-    if total_level > 0:
-        return total_level
-    class_level_text = str((definition.profile or {}).get("class_level_text") or "").strip()
-    match = re.search(r"(\d+)", class_level_text)
-    return int(match.group(1)) if match else 1
+    return profile_total_level(definition.profile, default=1)
 
 
 def _apply_campaign_option_spells_to_spellcasting(

@@ -55,6 +55,7 @@ from .campaign_dm_content_service import CampaignDMContentValidationError
 from .campaign_session_service import CampaignSessionValidationError
 from .campaign_visibility import CAMPAIGN_VISIBILITY_SCOPES
 from .character_models import CharacterRecord, CharacterStateRecord
+from .character_profile import profile_class_level_text
 from .character_service import CharacterStateValidationError
 from .character_store import CharacterStateConflictError
 from .combat_presenter import DND_5E_CONDITION_OPTIONS, present_combat_tracker
@@ -949,7 +950,7 @@ def register_api(app) -> None:
                     {
                         "slug": record.definition.character_slug,
                         "name": record.definition.name,
-                        "subtitle": str(record.definition.profile.get("class_level_text") or "Character").strip(),
+                        "subtitle": profile_class_level_text(record.definition.profile).strip(),
                         "initiative_bonus": str(int(record.definition.stats.get("initiative_bonus") or 0)),
                     }
                     for record in combat_service.list_available_player_characters(campaign_slug)
@@ -1011,7 +1012,7 @@ def register_api(app) -> None:
             "slug": record.definition.character_slug,
             "name": record.definition.name,
             "status": record.definition.status,
-            "class_level_text": str(profile.get("class_level_text") or ""),
+            "class_level_text": profile_class_level_text(profile, default=""),
             "species": str(profile.get("species") or ""),
             "background": str(profile.get("background") or ""),
             "current_hp": int(vitals.get("current_hp") or 0),

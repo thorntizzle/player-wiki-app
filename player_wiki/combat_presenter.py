@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .character_models import CharacterRecord
+from .character_profile import profile_class_level_text
 from .combat_models import (
     COMBAT_SOURCE_KIND_CHARACTER,
     COMBAT_SOURCE_KIND_DM_STATBLOCK,
@@ -86,7 +87,7 @@ def present_combat_tracker(
                 "source_label": COMBAT_SOURCE_LABELS.get(source_kind, "Unknown source") if show_detail else "",
                 "type_label": "Player character" if combatant.is_player_character else "NPC",
                 "subtitle": (
-                    str(profile.get("class_level_text") or "").strip()
+                    profile_class_level_text(profile, default="").strip()
                     if character_record is not None
                     else COMBAT_SOURCE_LABELS.get(source_kind, "NPC")
                 ),

@@ -7,6 +7,12 @@ from typing import Any
 import markdown
 
 from .character_models import CharacterRecord
+from .character_profile import (
+    profile_class_level_text,
+    profile_primary_class_ref,
+    profile_primary_subclass_name,
+    profile_primary_subclass_ref,
+)
 from .models import Campaign
 from .repository import build_alias_index, normalize_lookup, render_obsidian_links
 
@@ -63,7 +69,7 @@ def present_character_roster(records: list[CharacterRecord]) -> list[dict[str, A
 
         search_parts = [
             definition.name,
-            str(profile.get("class_level_text") or ""),
+            profile_class_level_text(profile, default=""),
             str(profile.get("species") or ""),
             str(profile.get("background") or ""),
         ]
@@ -72,7 +78,7 @@ def present_character_roster(records: list[CharacterRecord]) -> list[dict[str, A
             {
                 "slug": definition.character_slug,
                 "name": definition.name,
-                "class_level_text": str(profile.get("class_level_text") or "Character"),
+                "class_level_text": profile_class_level_text(profile),
                 "species": str(profile.get("species") or ""),
                 "background": str(profile.get("background") or ""),
                 "current_hp": int(vitals.get("current_hp") or 0),
@@ -97,8 +103,6 @@ def present_character_detail(
     vitals = dict(state.get("vitals") or {})
     stats = dict(definition.stats or {})
     profile = dict(definition.profile or {})
-    classes = list(profile.get("classes") or [])
-    first_class = dict(classes[0] or {}) if classes else {}
     notes_payload = dict(state.get("notes") or {})
     resource_lookup = {
         str(resource.get("id") or ""): resource for resource in list(state.get("resources") or [])
@@ -373,13 +377,13 @@ def present_character_detail(
 
     class_level_href = build_systems_entry_href(
         campaign.slug,
-        profile.get("class_ref") or first_class.get("systems_ref"),
+        profile_primary_class_ref(profile),
     )
-    subclass_ref = profile.get("subclass_ref") or first_class.get("subclass_ref")
-    subclass_label = str(first_class.get("subclass_name") or (subclass_ref or {}).get("title") or "").strip()
+    subclass_ref = profile_primary_subclass_ref(profile)
+    subclass_label = profile_primary_subclass_name(profile)
     header_segments = [
         {
-            "text": str(profile.get("class_level_text") or "Character"),
+            "text": profile_class_level_text(profile),
             "href": class_level_href,
         }
     ]
@@ -432,7 +436,7 @@ def present_character_detail(
         "personal_background_html": render_campaign_markdown(campaign, personal_background_markdown)
         if personal_background_markdown.strip()
         else "",
-        "class_level_text": str(profile.get("class_level_text") or "Character"),
+        "class_level_text": profile_class_level_text(profile),
         "header_segments": [segment for segment in header_segments if str(segment.get("text") or "").strip()],
         "species": str(profile.get("species") or ""),
         "background": str(profile.get("background") or ""),

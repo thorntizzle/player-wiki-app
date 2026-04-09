@@ -37,6 +37,19 @@ def _write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+def _write_character_definition(app, character_slug: str, mutator) -> None:
+    definition_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "characters"
+        / character_slug
+        / "definition.yaml"
+    )
+    payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
+    mutator(payload)
+    definition_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+
 def _import_systems_goblin(app, tmp_path) -> tuple[str, str]:
     data_root = tmp_path / "api-systems-dnd5e-source"
     _write_json(
@@ -435,6 +448,49 @@ def test_api_character_endpoints_allow_assigned_owner_updates(client, app, users
 
     assert blocked_response.status_code == 403
     assert blocked_response.get_json()["error"]["code"] == "forbidden"
+
+
+def test_api_character_list_derives_multiclass_summary_from_class_rows(client, app, users):
+    def _mutate(payload: dict) -> None:
+        profile = dict(payload.get("profile") or {})
+        profile["class_level_text"] = "Fighter 3"
+        profile["classes"] = [
+            {
+                "class_name": "Fighter",
+                "subclass_name": "",
+                "level": 3,
+                "systems_ref": {
+                    "entry_key": "dnd-5e|class|phb|fighter",
+                    "entry_type": "class",
+                    "title": "Fighter",
+                    "slug": "phb-class-fighter",
+                    "source_id": "PHB",
+                },
+            },
+            {
+                "class_name": "Wizard",
+                "subclass_name": "",
+                "level": 2,
+                "systems_ref": {
+                    "entry_key": "dnd-5e|class|phb|wizard",
+                    "entry_type": "class",
+                    "title": "Wizard",
+                    "slug": "phb-class-wizard",
+                    "source_id": "PHB",
+                },
+            },
+        ]
+        payload["profile"] = profile
+
+    _write_character_definition(app, "tobin-slate", _mutate)
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-character-list-api")
+
+    response = client.get("/api/v1/campaigns/linden-pass/characters", headers=api_headers(dm_token))
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    tobin = next(character for character in payload["characters"] if character["slug"] == "tobin-slate")
+    assert tobin["class_level_text"] == "Fighter 3 / Wizard 2"
 
 
 def test_api_content_page_management_requires_dm_and_refreshes_repository(client, app, users):

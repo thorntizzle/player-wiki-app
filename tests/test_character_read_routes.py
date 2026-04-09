@@ -282,6 +282,50 @@ def test_dm_can_open_character_roster_and_read_sheet(client, sign_in, users):
     assert "Open campaign wiki" not in sheet_html
 
 
+def test_roster_and_read_sheet_derive_multiclass_summary_from_class_rows(app, client, sign_in, users):
+    def _mutate(payload: dict) -> None:
+        profile = dict(payload.get("profile") or {})
+        profile["class_level_text"] = "Fighter 3"
+        profile["classes"] = [
+            {
+                "class_name": "Fighter",
+                "subclass_name": "",
+                "level": 3,
+                "systems_ref": {
+                    "entry_key": "dnd-5e|class|phb|fighter",
+                    "entry_type": "class",
+                    "title": "Fighter",
+                    "slug": "phb-class-fighter",
+                    "source_id": "PHB",
+                },
+            },
+            {
+                "class_name": "Wizard",
+                "subclass_name": "",
+                "level": 2,
+                "systems_ref": {
+                    "entry_key": "dnd-5e|class|phb|wizard",
+                    "entry_type": "class",
+                    "title": "Wizard",
+                    "slug": "phb-class-wizard",
+                    "source_id": "PHB",
+                },
+            },
+        ]
+        payload["profile"] = profile
+
+    _write_character_definition(app, "tobin-slate", _mutate)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    roster = client.get("/campaigns/linden-pass/characters")
+    sheet = client.get("/campaigns/linden-pass/characters/tobin-slate?mode=read")
+
+    assert roster.status_code == 200
+    assert "Fighter 3 / Wizard 2" in roster.get_data(as_text=True)
+    assert sheet.status_code == 200
+    assert "Fighter 3 / Wizard 2" in sheet.get_data(as_text=True)
+
+
 def test_non_5e_roster_hides_native_character_builder_affordances(app, client, sign_in, users):
     _write_campaign_config(app, lambda payload: payload.__setitem__("system", "Pathfinder 2E"))
 

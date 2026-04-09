@@ -67,6 +67,7 @@ from .character_editor import (
     search_character_spell_management_options,
 )
 from .character_importer import write_yaml
+from .character_profile import profile_class_level_text, profile_class_rows, profile_primary_class_ref
 from .character_service import CharacterStateValidationError, build_initial_state, merge_state_with_definition
 from .combat_presenter import DND_5E_CONDITION_OPTIONS, present_combat_tracker
 from .character_presenter import (
@@ -933,12 +934,9 @@ def create_app() -> Flask:
 
     def resolve_character_spellcasting_class_entry(campaign_slug: str, definition):
         profile = dict(definition.profile or {})
-        candidate_refs = [profile.get("class_ref")]
-        candidate_refs.extend(
-            dict(row or {}).get("systems_ref")
-            for row in list(profile.get("classes") or [])
-            if isinstance(row, dict)
-        )
+        candidate_refs = [dict(row or {}).get("systems_ref") for row in profile_class_rows(profile)]
+        candidate_refs.append(profile_primary_class_ref(profile))
+        candidate_refs.append(profile.get("class_ref"))
         for raw_ref in candidate_refs:
             systems_ref = dict(raw_ref or {})
             if str(systems_ref.get("entry_type") or "").strip() != "class":
@@ -2348,7 +2346,7 @@ def create_app() -> Flask:
                     {
                         "slug": record.definition.character_slug,
                         "name": record.definition.name,
-                        "subtitle": str(record.definition.profile.get("class_level_text") or "Character").strip(),
+                        "subtitle": profile_class_level_text(record.definition.profile).strip(),
                         "initiative_bonus": str(int(record.definition.stats.get("initiative_bonus") or 0)),
                     }
                     for record in combat_service.list_available_player_characters(campaign_slug)
