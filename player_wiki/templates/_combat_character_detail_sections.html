@@ -103,21 +103,27 @@
     </div>
     <div class="detail-grid">
       <article class="detail-card">
-        <h3>{{ selected_combat_character.spellcasting.spellcasting_class or "Spellcasting" }}</h3>
-        <p>
-          {{ selected_combat_character.spellcasting.spellcasting_ability }} spellcasting
-          {% if selected_combat_character.spellcasting.spell_save_dc %}
-            | Save DC {{ selected_combat_character.spellcasting.spell_save_dc }}
-          {% endif %}
-          {% if selected_combat_character.spellcasting.spell_attack_bonus %}
-            | Attack {{ selected_combat_character.spellcasting.spell_attack_bonus }}
-          {% endif %}
-        </p>
+        {% if selected_combat_character.spellcasting.is_multiclass %}
+          <h3>Multiclass Spellcasting</h3>
+          <p>Shared spell slots are shown once below, with spells grouped by class row.</p>
+        {% else %}
+          {% set primary_section = (selected_combat_character.spellcasting.row_sections | list | first) if selected_combat_character.spellcasting.row_sections else none %}
+          <h3>{{ (primary_section.title if primary_section else selected_combat_character.spellcasting.spellcasting_class) or "Spellcasting" }}</h3>
+          <p>
+            {{ (primary_section.spellcasting_ability if primary_section else selected_combat_character.spellcasting.spellcasting_ability) }} spellcasting
+            {% if (primary_section.spell_save_dc if primary_section else selected_combat_character.spellcasting.spell_save_dc) %}
+              | Save DC {{ primary_section.spell_save_dc if primary_section else selected_combat_character.spellcasting.spell_save_dc }}
+            {% endif %}
+            {% if (primary_section.spell_attack_bonus if primary_section else selected_combat_character.spellcasting.spell_attack_bonus) %}
+              | Attack {{ primary_section.spell_attack_bonus if primary_section else selected_combat_character.spellcasting.spell_attack_bonus }}
+            {% endif %}
+          </p>
+        {% endif %}
       </article>
       {% if selected_combat_character.spellcasting.slots %}
         {% if can_edit_combat_character_state and selected_combatant_id %}
           <article class="detail-card" id="combat-character-spell-slots">
-            <h3>Spell slots</h3>
+            <h3>{{ selected_combat_character.spellcasting.slots_title or "Spell slots" }}</h3>
             <div class="spell-slot-editor-list">
               {% for slot in selected_combat_character.spellcasting.slots %}
                 <article class="detail-card">
@@ -147,7 +153,7 @@
           </article>
         {% else %}
           <article class="detail-card">
-            <h3>Spell slots</h3>
+            <h3>{{ selected_combat_character.spellcasting.slots_title or "Spell slots" }}</h3>
             <ul class="plain-list slot-list">
               {% for slot in selected_combat_character.spellcasting.slots %}
                 <li>
@@ -161,35 +167,63 @@
       {% endif %}
     </div>
 
-    {% if selected_combat_character.spellcasting.spells %}
-      <div class="spell-list">
-        {% for spell in selected_combat_character.spellcasting.spells %}
-          <article class="spell-row">
-            <div class="spell-row__header">
-              <h3>
-                {% if spell.href %}
-                  <a href="{{ spell.href }}">{{ spell.name }}</a>
-                {% else %}
-                  {{ spell.name }}
-                {% endif %}
-              </h3>
-              {% if spell.badges %}
-                <div class="badge-list">
-                  {% for badge in spell.badges %}
-                    <span class="meta-badge">{{ badge }}</span>
-                  {% endfor %}
+    {% if selected_combat_character.spellcasting.row_sections %}
+      {% for spell_section in selected_combat_character.spellcasting.row_sections %}
+        <div class="section-heading">
+          <div>
+            <h3>{{ spell_section.title }}</h3>
+            {% if spell_section.spellcasting_ability %}
+              <p class="meta">
+                {{ spell_section.spellcasting_ability }} spellcasting
+                {% if spell_section.spell_save_dc %}| Save DC {{ spell_section.spell_save_dc }}{% endif %}
+                {% if spell_section.spell_attack_bonus %}| Attack {{ spell_section.spell_attack_bonus }}{% endif %}
+              </p>
+            {% endif %}
+          </div>
+        </div>
+        {% if spell_section.counts %}
+          <ul class="plain-list slot-list">
+            {% for count in spell_section.counts %}
+              <li>
+                <span>{{ count.label }}</span>
+                <strong>{{ count.value }}</strong>
+              </li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+        {% if spell_section.spells %}
+          <div class="spell-list">
+            {% for spell in spell_section.spells %}
+              <article class="spell-row">
+                <div class="spell-row__header">
+                  <h3>
+                    {% if spell.href %}
+                      <a href="{{ spell.href }}">{{ spell.name }}</a>
+                    {% else %}
+                      {{ spell.name }}
+                    {% endif %}
+                  </h3>
+                  {% if spell.badges %}
+                    <div class="badge-list">
+                      {% for badge in spell.badges %}
+                        <span class="meta-badge">{{ badge }}</span>
+                      {% endfor %}
+                    </div>
+                  {% endif %}
                 </div>
-              {% endif %}
-            </div>
-            <p class="meta">
-              {{ spell.casting_time }} | {{ spell.range }} | {{ spell.duration }} | {{ spell.components }}
-              {% if spell.save_or_hit and spell.save_or_hit != '--' %}
-                | {{ spell.save_or_hit }}
-              {% endif %}
-            </p>
-          </article>
-        {% endfor %}
-      </div>
+                <p class="meta">
+                  {{ spell.casting_time }} | {{ spell.range }} | {{ spell.duration }} | {{ spell.components }}
+                  {% if spell.save_or_hit and spell.save_or_hit != '--' %}
+                    | {{ spell.save_or_hit }}
+                  {% endif %}
+                </p>
+              </article>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="meta">No spells recorded yet for this class row.</p>
+        {% endif %}
+      {% endfor %}
     {% endif %}
   </section>
 {% endif %}

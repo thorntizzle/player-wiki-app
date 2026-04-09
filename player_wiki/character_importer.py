@@ -1274,6 +1274,8 @@ def _equipment_match_keys(payload: dict[str, Any]) -> list[tuple[Any, ...]]:
 
 def _spell_match_keys(payload: dict[str, Any]) -> list[tuple[Any, ...]]:
     spell_id = str(payload.get("id") or "").strip()
+    class_row_id = str(payload.get("class_row_id") or "").strip()
+    tail = (class_row_id,) if class_row_id else ()
     systems_ref = dict(payload.get("systems_ref") or {})
     page_ref = _normalize_page_ref_payload(payload.get("page_ref"))
     explicit_identity = _normalize_explicit_link_identity(
@@ -1282,13 +1284,13 @@ def _spell_match_keys(payload: dict[str, Any]) -> list[tuple[Any, ...]]:
     )
     keys: list[tuple[Any, ...]] = []
     if spell_id:
-        keys.append(("id", spell_id))
+        keys.append(("id", spell_id, *tail))
     if explicit_identity:
-        keys.append(("explicit", explicit_identity))
+        keys.append(("explicit", explicit_identity, *tail))
     spell_key = _spell_payload_key(payload)
     if spell_key:
-        keys.append(("spell-key", spell_key.strip().lower()))
-    keys.extend(("name", candidate) for candidate in _merge_name_candidates(payload.get("name")))
+        keys.append(("spell-key", spell_key.strip().lower(), *tail))
+    keys.extend(("name", candidate, *tail) for candidate in _merge_name_candidates(payload.get("name")))
     return keys
 
 

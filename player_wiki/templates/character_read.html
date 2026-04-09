@@ -808,6 +808,7 @@
           const status = form.querySelector("[data-character-spell-status]");
           const searchUrl = form.dataset.characterSpellSearchUrl || "";
           const searchKind = form.dataset.characterSpellSearchKind || "spell";
+          const targetClassRowId = form.dataset.characterSpellSearchTargetRow || "";
           const emptyLabel = form.dataset.characterSpellSearchEmptyLabel || "Search to load matching spells";
           const promptMessage = form.dataset.characterSpellSearchPrompt || "Type at least 2 letters to search eligible class spells.";
           if (
@@ -862,8 +863,15 @@
             searchAbortController = new AbortController();
             status.textContent = "Searching spells...";
             try {
+              const params = new URLSearchParams({
+                kind: searchKind,
+                q: query,
+              });
+              if (targetClassRowId) {
+                params.set("target_class_row_id", targetClassRowId);
+              }
               const response = await fetch(
-                `${searchUrl}?kind=${encodeURIComponent(searchKind)}&q=${encodeURIComponent(query)}`,
+                `${searchUrl}?${params.toString()}`,
                 {
                   headers: {
                     "X-Requested-With": "XMLHttpRequest",

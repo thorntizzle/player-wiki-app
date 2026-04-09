@@ -342,6 +342,8 @@ LEVEL_TWO_SPELL_RULES_BY_CLASS = {
     "Warlock": {"spell_mode": "known", "new_level_one_spells": 1},
     "Wizard": {"spell_mode": "wizard", "ability_key": "int", "new_spellbook_spells": 2},
 }
+SUPPORTED_MULTICLASS_CASTER_PROGRESSIONS = {"full", "1/2", "artificer"}
+MULTICLASS_SHARED_SLOT_REFERENCE_CLASS = "Wizard"
 EXTRA_PHB_LEVEL_ONE_SPELL_LISTS = {
     "Paladin": {
         "1": [
@@ -381,10 +383,10 @@ EXTRA_PHB_LEVEL_ONE_SPELL_LISTS = {
     },
 }
 NATIVE_LEVEL_UP_LIMITATIONS = [
-    "Native level-up currently advances one level at a time, including the first martial-only multiclass add-class path and row-specific multiclass advancement.",
+    "Native level-up currently advances one level at a time, including the first shared-slot multiclass add-class path and row-specific multiclass advancement.",
     "Hit point gain is entered manually so your table can choose rolled or fixed HP.",
     "Prepared-caster level-up currently preserves existing prepared spells and adds the new picks needed for the next level.",
-    "Multiclass support in this slice stays in the strict martial lane: spell-slot classes, spell-bearing subclasses, and sheet spellcasting expansion still need manual follow-up.",
+    "Multiclass support in this slice currently covers shared-slot base casters plus martial rows. Pact magic and subclass-only spellcasting lanes still need manual follow-up.",
     "Some advanced feat side effects and non-structured campaign spell access still need manual follow-up.",
 ]
 LEVEL_ONE_ALWAYS_PREPARED_SPELLS_BY_SUBCLASS = {
@@ -823,6 +825,8 @@ def build_level_one_character_definition(
         definition,
         item_catalog=item_catalog,
         spell_catalog=spell_catalog,
+        systems_service=level_up_context.get("systems_service"),
+        campaign_page_records=level_up_context.get("campaign_page_records"),
         resolved_class=selected_class,
         resolved_subclass=selected_subclass,
         resolved_species=selected_species,
@@ -948,8 +952,8 @@ def native_level_up_readiness(
 
     repair_reasons: list[str] = []
     selected_class_rows: list[dict[str, Any]] = []
-    strict_multiclass_ready = True
-    strict_multiclass_reasons: list[str] = []
+    shared_slot_multiclass_ready = True
+    shared_slot_multiclass_reasons: list[str] = []
     selected_class = None
     selected_subclass = None
     for index, class_payload in enumerate(classes, start=1):
@@ -1012,7 +1016,9 @@ def native_level_up_readiness(
                     "class_progression": [],
                     "subclass_progression": [],
                     "requires_subclass": False,
-                    "strict_martial_supported": False,
+                    "shared_slot_multiclass_supported": False,
+                    "spellcasting_row": False,
+                    "multiclass_support_reason": "",
                 }
             )
             continue
@@ -1057,24 +1063,19 @@ def native_level_up_readiness(
         elif is_imported and requires_subclass and _profile_entry_match_needs_confirmation(selected_subclass_match):
             repair_reasons.append(f"Confirm the {subclass_subject} link before leveling up.")
 
-        strict_row_supported = _class_is_strict_martial(systems_service, campaign_slug, selected_row_class)
-        strict_subclass_supported = _subclass_is_strict_martial(
+        multiclass_support = _evaluate_shared_slot_multiclass_support(
             systems_service,
             campaign_slug,
-            selected_row_subclass,
             selected_class=selected_row_class,
+            selected_subclass=selected_row_subclass,
         )
+        row_multiclass_supported = bool(multiclass_support.get("supported"))
+        multiclass_support_reason = str(multiclass_support.get("reason") or "").strip()
         if len(classes) > 1:
-            if not strict_row_supported:
-                strict_multiclass_ready = False
-                strict_multiclass_reasons.append(
-                    f"{selected_row_class.title} is outside the current martial-only multiclass lane."
-                )
-            elif not strict_subclass_supported and selected_row_subclass is not None:
-                strict_multiclass_ready = False
-                strict_multiclass_reasons.append(
-                    f"{selected_row_subclass.title} is outside the current martial-only multiclass lane."
-                )
+            if not row_multiclass_supported:
+                shared_slot_multiclass_ready = False
+                if multiclass_support_reason:
+                    shared_slot_multiclass_reasons.append(multiclass_support_reason)
 
         selected_class_rows.append(
             {
@@ -1091,7 +1092,9 @@ def native_level_up_readiness(
                     selected_row_subclass,
                 ),
                 "requires_subclass": requires_subclass,
-                "strict_martial_supported": strict_row_supported and strict_subclass_supported,
+                "shared_slot_multiclass_supported": row_multiclass_supported,
+                "spellcasting_row": bool(multiclass_support.get("spellcasting_row")),
+                "multiclass_support_reason": multiclass_support_reason,
             }
         )
 
@@ -1112,11 +1115,11 @@ def native_level_up_readiness(
             f"Confirm the {_profile_link_subject('background', systems_ref=definition.profile.get('background_ref'), entry=selected_background)} link so native level-up can keep using the imported baseline."
         )
 
-    if len(classes) > 1 and not strict_multiclass_ready:
+    if len(classes) > 1 and not shared_slot_multiclass_ready:
         return {
             "status": NATIVE_LEVEL_UP_UNSUPPORTED,
-            "message": "This character is outside the current martial-only multiclass progression lane.",
-            "reasons": strict_multiclass_reasons,
+            "message": "This character is outside the current shared-slot multiclass progression lane.",
+            "reasons": shared_slot_multiclass_reasons,
             "source_type": source_type,
             "is_native": is_native,
             "is_imported": is_imported,
@@ -1130,10 +1133,10 @@ def native_level_up_readiness(
         }
 
     spell_repair_rows: list[dict[str, Any]] = []
-    if is_imported and len(classes) == 1 and selected_class is not None:
+    if is_imported:
         spell_repair_rows = _build_imported_spell_repair_rows(
             definition,
-            selected_class=selected_class,
+            selected_class_rows=selected_class_rows,
         )
         if spell_repair_rows:
             repair_reasons.append("Classify the current imported spell rows so native spell progression can trust them.")
@@ -1157,7 +1160,7 @@ def native_level_up_readiness(
             "selected_subclass": selected_subclass,
             "spell_repair_rows": spell_repair_rows,
             "selected_class_rows": selected_class_rows,
-            "strict_multiclass_ready": strict_multiclass_ready,
+            "shared_slot_multiclass_ready": shared_slot_multiclass_ready,
         }
 
     return {
@@ -1174,7 +1177,7 @@ def native_level_up_readiness(
         "selected_subclass": selected_subclass,
         "spell_repair_rows": spell_repair_rows,
         "selected_class_rows": selected_class_rows,
-        "strict_multiclass_ready": strict_multiclass_ready,
+        "shared_slot_multiclass_ready": shared_slot_multiclass_ready,
     }
 
 
@@ -1322,31 +1325,185 @@ def _with_native_progression_event(
 def _build_imported_spell_repair_rows(
     definition: CharacterDefinition,
     *,
-    selected_class: SystemsEntryRecord,
+    selected_class_rows: list[dict[str, Any]] | None,
+    spell_catalog: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    spell_mode = _spellcasting_mode_for_class(selected_class.title, selected_class=selected_class)
-    if not spell_mode:
+    spell_row_contexts: list[dict[str, Any]] = []
+    for row in list(selected_class_rows or []):
+        row_context = dict(row or {})
+        selected_class = row_context.get("selected_class")
+        if not isinstance(selected_class, SystemsEntryRecord):
+            continue
+        spell_mode = _spellcasting_mode_for_class(selected_class.title, selected_class=selected_class)
+        if not spell_mode:
+            continue
+        spell_row_contexts.append(
+            {
+                "row_id": str(row_context.get("row_id") or "").strip(),
+                "class_name": str(selected_class.title or "").strip(),
+                "spell_mode": spell_mode,
+                "class_entry": selected_class,
+            }
+        )
+    if not spell_row_contexts:
         return []
+
     rows: list[dict[str, Any]] = []
-    mark_options = _imported_spell_mark_options(spell_mode)
-    if not mark_options:
-        return rows
+    row_option_lookup = {
+        str(row.get("row_id") or "").strip(): {
+            "value": str(row.get("row_id") or "").strip(),
+            "label": str(row.get("class_name") or "Spellcasting").strip(),
+            "spell_mode": str(row.get("spell_mode") or "").strip(),
+        }
+        for row in spell_row_contexts
+        if str(row.get("row_id") or "").strip()
+    }
     for index, spell in enumerate(list((definition.spellcasting or {}).get("spells") or []), start=1):
         payload = dict(spell or {})
         name = str(payload.get("name") or "").strip()
         mark = str(payload.get("mark") or "").strip()
-        if not name or mark:
+        if not name:
+            continue
+        candidate_row_ids = _imported_spell_candidate_row_ids(
+            payload,
+            spell_row_contexts=spell_row_contexts,
+            spell_catalog=spell_catalog,
+        )
+        if not candidate_row_ids:
+            candidate_row_ids = list(row_option_lookup.keys())
+        selected_row_id = str(payload.get("class_row_id") or "").strip()
+        if selected_row_id not in candidate_row_ids:
+            selected_row_id = candidate_row_ids[0] if len(candidate_row_ids) == 1 else ""
+        option_rows = [
+            dict(row_option_lookup[row_id])
+            for row_id in candidate_row_ids
+            if row_id in row_option_lookup
+        ]
+        mark_options = _imported_spell_mark_options_for_rows(
+            spell_row_contexts,
+            selected_row_id=selected_row_id,
+            candidate_row_ids=candidate_row_ids,
+        )
+        selected_row_mode = next(
+            (str(option.get("spell_mode") or "").strip() for option in option_rows if option.get("value") == selected_row_id),
+            "",
+        )
+        if mark and _spell_mark_is_valid_for_mode(mark, selected_row_mode or "") and (selected_row_id or len(option_rows) <= 1):
             continue
         rows.append(
             {
                 "index": index,
                 "name": name,
                 "field_name": f"repair_spell_mark_{index}",
-                "selected": "",
+                "class_row_field_name": f"repair_spell_class_row_{index}",
+                "class_row_selected": selected_row_id,
+                "class_row_options": option_rows,
+                "selected": mark if _spell_mark_is_valid_for_mode(mark, selected_row_mode or "") else "",
                 "options": [_choice_option(label, value) for value, label in mark_options],
+                "selected_row_mode": selected_row_mode,
             }
         )
     return rows
+
+
+def _spell_mark_is_valid_for_mode(mark: str, spell_mode: str) -> bool:
+    clean_mark = str(mark or "").strip()
+    if not clean_mark or not spell_mode:
+        return False
+    valid_marks = {value for value, _label in _imported_spell_mark_options(spell_mode)}
+    return clean_mark in valid_marks
+
+
+def _imported_spell_mark_options_for_rows(
+    spell_row_contexts: list[dict[str, Any]],
+    *,
+    selected_row_id: str,
+    candidate_row_ids: list[str],
+) -> list[tuple[str, str]]:
+    if selected_row_id:
+        selected_mode = next(
+            (
+                str(row.get("spell_mode") or "").strip()
+                for row in spell_row_contexts
+                if str(row.get("row_id") or "").strip() == selected_row_id
+            ),
+            "",
+        )
+        if selected_mode:
+            return _imported_spell_mark_options(selected_mode)
+    merged: list[tuple[str, str]] = []
+    seen_values: set[str] = set()
+    for row_id in candidate_row_ids:
+        spell_mode = next(
+            (
+                str(row.get("spell_mode") or "").strip()
+                for row in spell_row_contexts
+                if str(row.get("row_id") or "").strip() == row_id
+            ),
+            "",
+        )
+        for value, label in _imported_spell_mark_options(spell_mode):
+            if value in seen_values:
+                continue
+            seen_values.add(value)
+            merged.append((value, label))
+    return merged
+
+
+def _imported_spell_candidate_row_ids(
+    spell_payload: dict[str, Any],
+    *,
+    spell_row_contexts: list[dict[str, Any]],
+    spell_catalog: dict[str, Any] | None = None,
+) -> list[str]:
+    explicit_row_id = str(spell_payload.get("class_row_id") or "").strip()
+    known_row_ids = [
+        str(row.get("row_id") or "").strip()
+        for row in spell_row_contexts
+        if str(row.get("row_id") or "").strip()
+    ]
+    if explicit_row_id and explicit_row_id in set(known_row_ids):
+        return [explicit_row_id]
+
+    matched_row_ids: list[str] = []
+    spell_entry = None
+    payload_key = _spell_payload_key(spell_payload)
+    if payload_key:
+        spell_entry = _resolve_spell_entry(payload_key, dict(spell_catalog or {}))
+    if spell_entry is None:
+        spell_name = str(spell_payload.get("name") or "").strip()
+        if spell_name:
+            spell_entry = _resolve_spell_entry(spell_name, dict(spell_catalog or {}))
+    if spell_entry is not None:
+        class_lists = dict((getattr(spell_entry, "metadata", {}) or {})).get("class_lists") or {}
+        allowed_class_names = {
+            normalize_lookup(candidate)
+            for class_names in dict(class_lists).values()
+            for candidate in list(class_names or [])
+            if str(candidate or "").strip()
+        }
+        matched_row_ids = [
+            str(row.get("row_id") or "").strip()
+            for row in spell_row_contexts
+            if normalize_lookup(str(row.get("class_name") or "").strip()) in allowed_class_names
+        ]
+        if len(matched_row_ids) == 1:
+            return matched_row_ids
+
+    source_label = normalize_lookup(str(spell_payload.get("source") or "").strip())
+    if source_label:
+        matched_row_ids = [
+            str(row.get("row_id") or "").strip()
+            for row in spell_row_contexts
+            if normalize_lookup(str(row.get("class_name") or "").strip()) == source_label
+            or source_label.startswith(f"{normalize_lookup(str(row.get('class_name') or '').strip())} ")
+        ]
+        if matched_row_ids:
+            return matched_row_ids
+
+    if len(spell_row_contexts) == 1:
+        return [str(spell_row_contexts[0].get("row_id") or "").strip()]
+    return list(known_row_ids)
 
 
 def _imported_spell_mark_options(spell_mode: str) -> list[tuple[str, str]]:
@@ -1525,16 +1682,16 @@ def build_native_level_up_context(
         }
         for row in row_contexts
     ]
-    strict_ready_for_add_class = bool(readiness.get("strict_multiclass_ready"))
-    strict_ready_for_add_class = strict_ready_for_add_class and all(
-        bool(row.get("strict_martial_supported"))
+    shared_slot_ready_for_add_class = bool(readiness.get("shared_slot_multiclass_ready"))
+    shared_slot_ready_for_add_class = shared_slot_ready_for_add_class and all(
+        bool(row.get("shared_slot_multiclass_supported"))
         for row in row_contexts
         if row.get("selected_class") is not None
     )
     values["advancement_mode"] = str(values.get("advancement_mode") or "advance_existing").strip() or "advance_existing"
     if values["advancement_mode"] not in {"advance_existing", "add_class"}:
         values["advancement_mode"] = "advance_existing"
-    if values["advancement_mode"] == "add_class" and not strict_ready_for_add_class:
+    if values["advancement_mode"] == "add_class" and not shared_slot_ready_for_add_class:
         values["advancement_mode"] = "advance_existing"
     default_target_row_id = str((row_contexts[0] or {}).get("row_id") or "").strip() if row_contexts else ""
     if not str(values.get("target_class_row_id") or "").strip():
@@ -1560,7 +1717,7 @@ def build_native_level_up_context(
     row_target_level = next_level
     new_class_options = [
         entry
-        for entry in _list_strict_martial_class_entries(systems_service, campaign_slug)
+        for entry in _list_shared_slot_multiclass_class_entries(systems_service, campaign_slug)
         if (
             str(entry.slug or "").strip(),
             str(entry.source_id or "").strip().upper(),
@@ -1582,7 +1739,7 @@ def build_native_level_up_context(
         row_current_level = 0
         row_target_level = 1
         if selected_class is not None:
-            subclass_options = _list_strict_martial_subclass_options(
+            subclass_options = _list_shared_slot_multiclass_subclass_options(
                 systems_service,
                 campaign_slug,
                 selected_class,
@@ -1729,11 +1886,11 @@ def build_native_level_up_context(
             {"value": "advance_existing", "label": "Advance existing class"},
             *(
                 [{"value": "add_class", "label": "Add new class"}]
-                if strict_ready_for_add_class and new_class_options
+                if shared_slot_ready_for_add_class and new_class_options
                 else []
             ),
         ],
-        "can_add_class": bool(strict_ready_for_add_class and new_class_options),
+        "can_add_class": bool(shared_slot_ready_for_add_class and new_class_options),
         "current_class_rows": [_class_row_level_text(row) for row in current_class_rows],
         "target_row_options": target_row_options,
         "target_class_row_id": acted_row_id,
@@ -1763,6 +1920,7 @@ def build_native_level_up_context(
         "spell_catalog": spell_catalog,
         "limitations": list(NATIVE_LEVEL_UP_LIMITATIONS),
         "preview": preview,
+        "selected_class_rows": row_contexts,
         "preview_region_ids": list(LEVEL_UP_PREVIEW_REGION_IDS),
         "preview_regions_csv": ",".join(LEVEL_UP_PREVIEW_REGION_IDS),
         "live_region_ids": list(LEVEL_UP_LIVE_REGION_IDS),
@@ -2024,6 +2182,7 @@ def build_native_level_up_character_definition(
             target_level=row_target_level,
             feature_entries=new_feature_entries,
             selected_campaign_option_payloads=selected_campaign_option_payloads,
+            class_row_id=target_class_row_id,
         ),
         equipment_catalog=list(current_definition.equipment_catalog or []),
         reference_notes=dict(current_definition.reference_notes or {}),
@@ -2083,9 +2242,16 @@ def build_imported_progression_repair_context(
         definition,
         campaign_page_records=campaign_page_records,
     )
+    static_bundle = _build_common_builder_static_bundle(
+        systems_service,
+        campaign_slug,
+        campaign_page_records=campaign_page_records,
+    )
+    item_catalog = dict(static_bundle.get("item_catalog") or {})
+    spell_catalog = dict(static_bundle.get("spell_catalog") or {})
 
     all_class_options = _list_supported_class_entries(systems_service, campaign_slug)
-    strict_class_options = _list_strict_martial_class_entries(systems_service, campaign_slug)
+    shared_slot_class_options = _list_shared_slot_multiclass_class_entries(systems_service, campaign_slug)
     species_options = _build_mixed_character_options(
         _list_campaign_enabled_entries(systems_service, campaign_slug, "race"),
         campaign_page_records or [],
@@ -2145,7 +2311,7 @@ def build_imported_progression_repair_context(
             ),
             dict(selected_class_rows[index - 1] or {}) if index - 1 < len(selected_class_rows) else {},
         )
-        class_entries = strict_class_options if multiclass_context else all_class_options
+        class_entries = shared_slot_class_options if multiclass_context else all_class_options
         row_selected_class = row_context.get("selected_class") if isinstance(row_context.get("selected_class"), SystemsEntryRecord) else None
         if row_selected_class is None:
             row_selected_class = _resolve_profile_entry(
@@ -2154,7 +2320,7 @@ def build_imported_progression_repair_context(
                 fallback_title=str(class_payload.get("class_name") or "").strip(),
             )
         subclass_entries = (
-            _list_strict_martial_subclass_options(systems_service, campaign_slug, row_selected_class)
+            _list_shared_slot_multiclass_subclass_options(systems_service, campaign_slug, row_selected_class)
             if multiclass_context
             else _list_subclass_options(systems_service, campaign_slug, row_selected_class)
         ) if row_selected_class is not None else []
@@ -2239,12 +2405,36 @@ def build_imported_progression_repair_context(
         )
 
     spell_rows = []
-    selected_spell_class = selected_class if len(classes) == 1 else None
-    for row in _build_imported_spell_repair_rows(definition, selected_class=selected_spell_class) if selected_spell_class is not None else []:
+    for row in _build_imported_spell_repair_rows(
+        definition,
+        selected_class_rows=selected_class_rows,
+        spell_catalog=spell_catalog,
+    ):
         field_name = str(row.get("field_name") or "").strip()
         if field_name:
             row = dict(row)
             row["selected"] = str(values.get(field_name) or row.get("selected") or "").strip()
+            class_row_field_name = str(row.get("class_row_field_name") or "").strip()
+            if class_row_field_name:
+                row["class_row_selected"] = str(values.get(class_row_field_name) or row.get("class_row_selected") or "").strip()
+                row["options"] = [
+                    _choice_option(label, value)
+                    for value, label in _imported_spell_mark_options_for_rows(
+                        [
+                            {
+                                "row_id": str(option.get("value") or "").strip(),
+                                "spell_mode": str(option.get("spell_mode") or "").strip(),
+                            }
+                            for option in list(row.get("class_row_options") or [])
+                        ],
+                        selected_row_id=str(row.get("class_row_selected") or "").strip(),
+                        candidate_row_ids=[
+                            str(option.get("value") or "").strip()
+                            for option in list(row.get("class_row_options") or [])
+                            if str(option.get("value") or "").strip()
+                        ],
+                    )
+                ]
             spell_rows.append(row)
 
     return {
@@ -2268,16 +2458,8 @@ def build_imported_progression_repair_context(
         "optionalfeature_entries": optionalfeature_options,
         "systems_service": systems_service,
         "campaign_page_records": list(campaign_page_records or []),
-        "item_catalog": dict(_build_common_builder_static_bundle(
-            systems_service,
-            campaign_slug,
-            campaign_page_records=campaign_page_records,
-        ).get("item_catalog") or {}),
-        "spell_catalog": dict(_build_common_builder_static_bundle(
-            systems_service,
-            campaign_slug,
-            campaign_page_records=campaign_page_records,
-        ).get("spell_catalog") or {}),
+        "item_catalog": item_catalog,
+        "spell_catalog": spell_catalog,
     }
 
 
@@ -2438,12 +2620,36 @@ def apply_imported_progression_repairs(
         field_name = str(row.get("field_name") or "").strip()
         if not field_name:
             continue
+        class_row_field_name = str(row.get("class_row_field_name") or "").strip()
+        selected_row_id = str(
+            values.get(class_row_field_name)
+            or row.get("class_row_selected")
+            or ""
+        ).strip()
         selected_mark = str(values.get(field_name) or "").strip()
-        if not selected_mark:
-            continue
         spell_index = max(int(row.get("index") or 0) - 1, 0)
         if spell_index >= len(repaired_spells):
             continue
+        row_options = {
+            str(option.get("value") or "").strip(): dict(option or {})
+            for option in list(row.get("class_row_options") or [])
+            if str(option.get("value") or "").strip()
+        }
+        if row_options and not selected_row_id:
+            raise CharacterBuildError(f"Choose which class row owns {row.get('name') or 'this spell'} before saving progression repair.")
+        if row_options and selected_row_id not in row_options:
+            raise CharacterBuildError(f"Choose a valid class row for {row.get('name') or 'this spell'}.")
+        selected_row_mode = str(
+            row_options.get(selected_row_id, {}).get("spell_mode")
+            or row.get("selected_row_mode")
+            or ""
+        ).strip()
+        if not selected_mark:
+            raise CharacterBuildError(f"Choose a spell mark for {row.get('name') or 'this spell'} before saving progression repair.")
+        if not _spell_mark_is_valid_for_mode(selected_mark, selected_row_mode):
+            raise CharacterBuildError(f"{row.get('name') or 'This spell'} needs a mark that matches the selected class row.")
+        if selected_row_id:
+            repaired_spells[spell_index]["class_row_id"] = selected_row_id
         repaired_spells[spell_index]["mark"] = selected_mark
     spellcasting["spells"] = _normalize_spell_payloads(repaired_spells)
 
@@ -2832,7 +3038,19 @@ def _progression_has_spellbearing_features(progression: list[dict[str, Any]]) ->
     return False
 
 
-def _class_is_strict_martial(
+def _class_has_base_spellcasting(
+    selected_class: SystemsEntryRecord | None,
+) -> bool:
+    if not isinstance(selected_class, SystemsEntryRecord):
+        return False
+    class_name = str(selected_class.title or "").strip()
+    return bool(
+        _spellcasting_mode_for_class(class_name, selected_class=selected_class)
+        or _class_caster_progression(class_name, selected_class=selected_class)
+    )
+
+
+def _class_supports_shared_slot_multiclass(
     systems_service: Any,
     campaign_slug: str,
     selected_class: SystemsEntryRecord | None,
@@ -2841,13 +3059,16 @@ def _class_is_strict_martial(
         return False
     if not isinstance(selected_class, SystemsEntryRecord):
         return False
-    if _spellcasting_mode_for_class(selected_class.title, selected_class=selected_class):
+    caster_progression = _class_caster_progression(selected_class.title, selected_class=selected_class)
+    if caster_progression in SUPPORTED_MULTICLASS_CASTER_PROGRESSIONS:
+        return True
+    if caster_progression == "pact":
         return False
     class_progression = _class_progression_for_builder(systems_service, campaign_slug, selected_class)
     return not _progression_has_spellbearing_features(class_progression)
 
 
-def _subclass_is_strict_martial(
+def _subclass_supports_shared_slot_multiclass(
     systems_service: Any,
     campaign_slug: str,
     selected_subclass: SystemsEntryRecord | None,
@@ -2858,22 +3079,101 @@ def _subclass_is_strict_martial(
         return True
     if not _supports_native_subclass_entry(selected_subclass, selected_class=selected_class):
         return False
+    if _class_has_base_spellcasting(selected_class):
+        return True
     subclass_progression = _subclass_progression_for_builder(systems_service, campaign_slug, selected_subclass)
     return not _progression_has_spellbearing_features(subclass_progression)
 
 
-def _list_strict_martial_class_entries(
+def _evaluate_shared_slot_multiclass_support(
+    systems_service: Any,
+    campaign_slug: str,
+    *,
+    selected_class: SystemsEntryRecord | None,
+    selected_subclass: SystemsEntryRecord | None = None,
+) -> dict[str, Any]:
+    if not isinstance(selected_class, SystemsEntryRecord):
+        return {
+            "supported": False,
+            "spellcasting_row": False,
+            "reason": "This class row is missing the enabled class link needed for multiclass spellcasting support.",
+        }
+    if not _supports_native_class_entry(selected_class):
+        policy = _native_source_matrix_support_policy(selected_class)
+        return {
+            "supported": False,
+            "spellcasting_row": False,
+            "reason": str(policy.get("reason") or "").strip() or f"{selected_class.title} is outside the native support lane.",
+        }
+    if selected_subclass is not None and not _supports_native_subclass_entry(selected_subclass, selected_class=selected_class):
+        policy = _native_source_matrix_support_policy(selected_subclass, selected_class=selected_class)
+        return {
+            "supported": False,
+            "spellcasting_row": False,
+            "reason": str(policy.get("reason") or "").strip() or f"{selected_subclass.title} is outside the native support lane.",
+        }
+
+    class_name = str(selected_class.title or "").strip()
+    class_progression = _class_progression_for_builder(systems_service, campaign_slug, selected_class)
+    subclass_progression = _subclass_progression_for_builder(systems_service, campaign_slug, selected_subclass)
+    spell_mode = _spellcasting_mode_for_class(class_name, selected_class=selected_class)
+    caster_progression = _class_caster_progression(class_name, selected_class=selected_class)
+    base_spellcasting_row = bool(spell_mode or caster_progression)
+    subclass_has_spellbearing = _progression_has_spellbearing_features(subclass_progression)
+
+    if base_spellcasting_row:
+        if caster_progression == "pact":
+            return {
+                "supported": False,
+                "spellcasting_row": True,
+                "reason": f"{selected_class.title} uses Pact Magic, which still needs a separate multiclass slot lane.",
+            }
+        if caster_progression not in SUPPORTED_MULTICLASS_CASTER_PROGRESSIONS:
+            return {
+                "supported": False,
+                "spellcasting_row": True,
+                "reason": f"{selected_class.title} is outside the current shared-slot multiclass lane.",
+            }
+        return {
+            "supported": True,
+            "spellcasting_row": True,
+            "reason": "",
+        }
+
+    if _progression_has_spellbearing_features(class_progression):
+        return {
+            "supported": False,
+            "spellcasting_row": False,
+            "reason": f"{selected_class.title} has spell-bearing class features outside the current shared-slot multiclass lane.",
+        }
+    if subclass_has_spellbearing and selected_subclass is not None:
+        return {
+            "supported": False,
+            "spellcasting_row": False,
+            "reason": (
+                f"{selected_subclass.title} grants subclass-only spellcasting, "
+                "which is not supported in the current shared-slot multiclass lane."
+            ),
+        }
+    return {
+        "supported": True,
+        "spellcasting_row": False,
+        "reason": "",
+    }
+
+
+def _list_shared_slot_multiclass_class_entries(
     systems_service: Any,
     campaign_slug: str,
 ) -> list[SystemsEntryRecord]:
     return [
         entry
         for entry in _list_supported_class_entries(systems_service, campaign_slug)
-        if _class_is_strict_martial(systems_service, campaign_slug, entry)
+        if _class_supports_shared_slot_multiclass(systems_service, campaign_slug, entry)
     ]
 
 
-def _list_strict_martial_subclass_options(
+def _list_shared_slot_multiclass_subclass_options(
     systems_service: Any,
     campaign_slug: str,
     selected_class: SystemsEntryRecord | None,
@@ -2888,7 +3188,7 @@ def _list_strict_martial_subclass_options(
             selected_class,
             subclass_entries=subclass_entries,
         )
-        if _subclass_is_strict_martial(
+        if _subclass_supports_shared_slot_multiclass(
             systems_service,
             campaign_slug,
             entry,
@@ -3332,7 +3632,7 @@ def _resolve_definition_sheet_entries(
     resolved_subclass: SystemsEntryRecord | None = None,
     resolved_species: SystemsEntryRecord | None = None,
     resolved_background: SystemsEntryRecord | None = None,
-) -> dict[str, SystemsEntryRecord | None]:
+) -> dict[str, Any]:
     selected_class = resolved_class if isinstance(resolved_class, SystemsEntryRecord) else None
     selected_subclass = resolved_subclass if isinstance(resolved_subclass, SystemsEntryRecord) else None
     selected_species = resolved_species if isinstance(resolved_species, SystemsEntryRecord) else None
@@ -3343,6 +3643,7 @@ def _resolve_definition_sheet_entries(
             "selected_subclass": selected_subclass,
             "selected_species": selected_species,
             "selected_background": selected_background,
+            "selected_class_rows": [],
         }
 
     static_bundle = _build_common_builder_static_bundle(
@@ -3384,11 +3685,47 @@ def _resolve_definition_sheet_entries(
             profile_primary_subclass_ref(definition.profile) or dict(class_payload.get("subclass_ref") or {}),
             fallback_title=_native_character_subclass_name(definition),
         )
+    selected_class_rows: list[dict[str, Any]] = []
+    for index, row in enumerate(ensure_profile_class_rows(definition.profile), start=1):
+        row_payload = dict(row or {})
+        row_id = str(row_payload.get("row_id") or "").strip() or f"class-row-{index}"
+        row_class = selected_class if index == 1 and selected_class is not None else _resolve_profile_entry(
+            list(static_bundle.get("supported_class_entries") or []),
+            dict(row_payload.get("systems_ref") or {}),
+            fallback_title=str(row_payload.get("class_name") or "").strip(),
+        )
+        row_subclass = (
+            selected_subclass
+            if index == 1 and selected_subclass is not None
+            else None
+        )
+        if row_subclass is None and row_class is not None:
+            row_subclass = _resolve_profile_entry(
+                _list_subclass_options(
+                    systems_service,
+                    definition.campaign_slug,
+                    row_class,
+                    subclass_entries=list(static_bundle.get("subclass_entries") or []),
+                ),
+                dict(row_payload.get("subclass_ref") or {}),
+                fallback_title=str(row_payload.get("subclass_name") or "").strip(),
+            )
+        selected_class_rows.append(
+            {
+                "row_id": row_id,
+                "row_index": index,
+                "row_level": int(row_payload.get("level") or 0),
+                "class_payload": row_payload,
+                "selected_class": row_class,
+                "selected_subclass": row_subclass,
+            }
+        )
     return {
         "selected_class": selected_class,
         "selected_subclass": selected_subclass,
         "selected_species": selected_species,
         "selected_background": selected_background,
+        "selected_class_rows": selected_class_rows,
     }
 
 
@@ -3442,6 +3779,74 @@ def _definition_spellcasting_class_name(definition: CharacterDefinition) -> str:
     if class_name:
         return class_name
     return ""
+
+
+def _spellcasting_row_payload_from_context(
+    row_context: dict[str, Any],
+    *,
+    ability_scores: dict[str, int],
+    proficiency_bonus: int,
+) -> dict[str, Any] | None:
+    selected_class = row_context.get("selected_class")
+    if not isinstance(selected_class, SystemsEntryRecord):
+        return None
+    class_payload = dict(row_context.get("class_payload") or {})
+    class_name = str(selected_class.title or class_payload.get("class_name") or "").strip()
+    spell_mode = _spellcasting_mode_for_class(class_name, selected_class=selected_class)
+    caster_progression = _class_caster_progression(class_name, selected_class=selected_class)
+    if not spell_mode and not caster_progression:
+        return None
+
+    ability_name = _spellcasting_ability_name_for_class(class_name, selected_class=selected_class)
+    ability_key = next((key for key, label in ABILITY_LABELS.items() if label == ability_name), "")
+    modifier = _ability_modifier(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE)) if ability_key else 0
+    row_level = max(int(row_context.get("row_level") or class_payload.get("level") or 0), 0)
+    return {
+        "class_row_id": str(row_context.get("row_id") or class_payload.get("row_id") or "").strip(),
+        "class_name": class_name,
+        "class_ref": _systems_ref_from_entry(selected_class),
+        "level": row_level,
+        "caster_progression": caster_progression,
+        "spell_mode": spell_mode,
+        "spellcasting_ability": ability_name,
+        "spell_save_dc": 8 + proficiency_bonus + modifier if ability_key else None,
+        "spell_attack_bonus": proficiency_bonus + modifier if ability_key else None,
+    }
+
+
+def _spellcasting_rows_use_shared_slots(
+    class_rows: list[dict[str, Any]],
+    *,
+    total_class_rows: int = 0,
+) -> bool:
+    spell_rows = [dict(row or {}) for row in list(class_rows or []) if dict(row or {})]
+    if not spell_rows or int(total_class_rows or 0) <= 1:
+        return False
+    return all(
+        str(row.get("caster_progression") or "").strip() in SUPPORTED_MULTICLASS_CASTER_PROGRESSIONS
+        for row in spell_rows
+    )
+
+
+def _assign_spell_payload_class_rows(
+    spell_payloads: list[dict[str, Any]],
+    *,
+    spellcasting_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    normalized_rows = [dict(row or {}) for row in list(spellcasting_rows or []) if dict(row or {})]
+    if not normalized_rows:
+        return _normalize_spell_payloads(spell_payloads)
+    if len(normalized_rows) == 1:
+        default_row_id = str(normalized_rows[0].get("class_row_id") or "").strip()
+        if default_row_id:
+            assigned_payloads: list[dict[str, Any]] = []
+            for payload in list(spell_payloads or []):
+                spell_payload = dict(payload or {})
+                if not str(spell_payload.get("class_row_id") or "").strip():
+                    spell_payload["class_row_id"] = default_row_id
+                assigned_payloads.append(spell_payload)
+            return _normalize_spell_payloads(assigned_payloads)
+    return _normalize_spell_payloads(spell_payloads)
 
 
 def _infer_definition_save_proficiencies(
@@ -4155,44 +4560,109 @@ def _derive_definition_spellcasting(
     proficiency_bonus: int,
     current_level: int,
     selected_class: SystemsEntryRecord | None = None,
+    selected_class_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     spellcasting = dict(definition.spellcasting or {})
-    spellcasting["spells"] = _normalize_spell_payloads(list(spellcasting.get("spells") or []))
-    class_name = _definition_spellcasting_class_name(definition)
-    existing_class_name = str(spellcasting.get("spellcasting_class") or "").strip()
-    progression = _class_spell_progression(class_name, selected_class=selected_class) if class_name and selected_class is not None else {}
-    ability_name = (
-        _spellcasting_ability_name_for_class(class_name, selected_class=selected_class)
-        if class_name and selected_class is not None
-        else ""
-    )
-    existing_ability_name = str(spellcasting.get("spellcasting_ability") or "").strip()
-    if not ability_name and existing_ability_name in set(ABILITY_LABELS.values()):
-        ability_name = existing_ability_name
-    slot_progression = (
-        _spell_slot_progression_for_class_level(
-            class_name,
-            current_level,
-            selected_class=selected_class,
+    row_contexts = [dict(row or {}) for row in list(selected_class_rows or []) if isinstance(row, dict)]
+    if not row_contexts and selected_class is not None:
+        row_contexts = [
+            {
+                "row_id": str((ensure_profile_class_rows(definition.profile)[0] or {}).get("row_id") or "class-row-1"),
+                "row_level": current_level,
+                "class_payload": dict((ensure_profile_class_rows(definition.profile)[0] or {})),
+                "selected_class": selected_class,
+                "selected_subclass": None,
+            }
+        ]
+    spellcasting_rows = [
+        row_payload
+        for row_payload in (
+            _spellcasting_row_payload_from_context(
+                row_context,
+                ability_scores=ability_scores,
+                proficiency_bonus=proficiency_bonus,
+            )
+            for row_context in row_contexts
         )
-        if selected_class is not None
-        else list(spellcasting.get("slot_progression") or [])
+        if row_payload is not None
+    ]
+    spellcasting["class_rows"] = spellcasting_rows
+    spellcasting["spells"] = _assign_spell_payload_class_rows(
+        list(spellcasting.get("spells") or []),
+        spellcasting_rows=spellcasting_rows,
     )
-    if class_name and (ability_name or slot_progression or existing_class_name):
+    total_class_rows = len(ensure_profile_class_rows(definition.profile))
+    uses_shared_slots = _spellcasting_rows_use_shared_slots(
+        spellcasting_rows,
+        total_class_rows=total_class_rows,
+    )
+    if not spellcasting_rows:
+        spellcasting["slot_progression"] = [
+            dict(slot or {})
+            for slot in list(spellcasting.get("slot_progression") or [])
+        ]
+        spellcasting["spellcasting_class"] = str(spellcasting.get("spellcasting_class") or "").strip()
+        spellcasting["spellcasting_ability"] = str(spellcasting.get("spellcasting_ability") or "").strip()
+        return spellcasting
+
+    if len(spellcasting_rows) == 1:
+        row_payload = dict(spellcasting_rows[0] or {})
+        class_name = str(row_payload.get("class_name") or "").strip()
+        class_level = max(int(row_payload.get("level") or current_level), 0)
+        row_selected_class = next(
+            (
+                candidate.get("selected_class")
+                for candidate in row_contexts
+                if str(candidate.get("row_id") or "").strip() == str(row_payload.get("class_row_id") or "").strip()
+            ),
+            selected_class,
+        )
+        if uses_shared_slots:
+            total_caster_level = sum(
+                _multiclass_slot_contribution_for_row(
+                    int(candidate.get("level") or 0),
+                    str(candidate.get("caster_progression") or "").strip(),
+                )
+                for candidate in spellcasting_rows
+            )
+            slot_progression = _shared_slot_progression_for_caster_level(total_caster_level)
+        else:
+            slot_progression = _spell_slot_progression_for_class_level(
+                class_name,
+                class_level,
+                selected_class=row_selected_class if isinstance(row_selected_class, SystemsEntryRecord) else None,
+            )
         spellcasting["spellcasting_class"] = class_name
-    elif not ability_name and not slot_progression and not existing_class_name:
-        spellcasting["spellcasting_class"] = ""
-    if ability_name:
-        ability_key = next((key for key, label in ABILITY_LABELS.items() if label == ability_name), "")
-        if ability_key:
-            modifier = _ability_modifier(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE))
-            spellcasting["spellcasting_ability"] = ability_name
-            spellcasting["spell_save_dc"] = 8 + proficiency_bonus + modifier
-            spellcasting["spell_attack_bonus"] = proficiency_bonus + modifier
-    elif not existing_ability_name:
-        spellcasting["spellcasting_ability"] = ""
-    if progression or selected_class is not None or existing_class_name:
+        spellcasting["spellcasting_ability"] = str(row_payload.get("spellcasting_ability") or "").strip()
+        spellcasting["spell_save_dc"] = row_payload.get("spell_save_dc")
+        spellcasting["spell_attack_bonus"] = row_payload.get("spell_attack_bonus")
         spellcasting["slot_progression"] = slot_progression
+        return spellcasting
+
+    if uses_shared_slots:
+        total_caster_level = sum(
+            _multiclass_slot_contribution_for_row(
+                int(row.get("level") or 0),
+                str(row.get("caster_progression") or "").strip(),
+            )
+            for row in spellcasting_rows
+        )
+        spellcasting["slot_progression"] = _shared_slot_progression_for_caster_level(total_caster_level)
+    elif spellcasting_rows:
+        spellcasting["slot_progression"] = [
+            dict(slot or {})
+            for slot in list(spellcasting.get("slot_progression") or [])
+        ]
+    else:
+        spellcasting["slot_progression"] = [
+            dict(slot or {})
+            for slot in list(spellcasting.get("slot_progression") or [])
+        ]
+
+    spellcasting["spellcasting_class"] = ""
+    spellcasting["spellcasting_ability"] = ""
+    spellcasting["spell_save_dc"] = None
+    spellcasting["spell_attack_bonus"] = None
     return spellcasting
 
 
@@ -4275,6 +4745,7 @@ def _derive_definition_core_sheet_payloads(
             proficiency_bonus=proficiency_bonus,
             current_level=max(current_level, 1),
             selected_class=resolved_entries.get("selected_class"),
+            selected_class_rows=list(resolved_entries.get("selected_class_rows") or []),
         ),
         "resource_templates": _normalize_resource_template_payloads(
             _merge_resource_templates(
@@ -8770,6 +9241,50 @@ def _class_spell_progression(
     return progression
 
 
+def _normalize_caster_progression(caster_progression: Any) -> str:
+    clean_value = normalize_lookup(str(caster_progression or "").strip())
+    if clean_value in {"half", "12", "onehalf"}:
+        return "1/2"
+    if clean_value in {"artificer", "full", "pact"}:
+        return clean_value
+    return clean_value
+
+
+def _class_caster_progression(
+    class_name: str,
+    *,
+    selected_class: SystemsEntryRecord | None = None,
+) -> str:
+    progression = _class_spell_progression(class_name, selected_class=selected_class)
+    return _normalize_caster_progression(progression.get("caster_progression"))
+
+
+def _multiclass_slot_contribution_for_row(level: int, caster_progression: str) -> int:
+    clean_level = max(int(level or 0), 0)
+    clean_progression = _normalize_caster_progression(caster_progression)
+    if clean_level <= 0:
+        return 0
+    if clean_progression == "full":
+        return clean_level
+    if clean_progression == "1/2":
+        return clean_level // 2
+    if clean_progression == "artificer":
+        return (clean_level + 1) // 2
+    return 0
+
+
+def _shared_slot_progression_for_caster_level(total_caster_level: int) -> list[dict[str, Any]]:
+    clean_level = max(int(total_caster_level or 0), 0)
+    if clean_level <= 0:
+        return []
+    slot_rows = list(
+        _class_spell_progression(MULTICLASS_SHARED_SLOT_REFERENCE_CLASS).get("slot_progression") or []
+    )
+    if 1 <= clean_level <= len(slot_rows):
+        return [dict(slot or {}) for slot in list(slot_rows[clean_level - 1] or [])]
+    return []
+
+
 def _spellcasting_mode_for_class(
     class_name: str,
     *,
@@ -8848,11 +9363,14 @@ def _evaluate_prepared_spell_formula(
     ability_scores: dict[str, int],
     target_level: int,
 ) -> int:
-    match = re.fullmatch(r"<\$level\$>(?:\s*/\s*(\d+))?\s*\+\s*<\$([a-z]+)_mod\$>", str(formula or "").strip())
+    clean_formula = str(formula or "").strip()
+    match = re.fullmatch(r"<\$level\$>(?:\s*/\s*(\d+))?\s*\+\s*<\$([a-z]+)_mod\$>", clean_formula)
+    if match is None:
+        match = re.fullmatch(r"level(?:\s*/\s*(\d+))?\s*\+\s*([a-z]+)", clean_formula, flags=re.IGNORECASE)
     if match is None:
         return 0
     divisor_text, ability_key = match.groups()
-    clean_ability_key = str(ability_key or "").strip().lower()
+    clean_ability_key = _prepared_spell_formula_ability_key(ability_key)
     if clean_ability_key not in ABILITY_KEYS:
         return 0
     level_value = int(target_level or 0)
@@ -8861,6 +9379,20 @@ def _evaluate_prepared_spell_formula(
         level_value //= divisor
     modifier = _ability_modifier(ability_scores.get(clean_ability_key, DEFAULT_ABILITY_SCORE))
     return max(level_value + modifier, 1)
+
+
+def _prepared_spell_formula_ability_key(raw_ability_key: str) -> str:
+    clean_key = normalize_lookup(str(raw_ability_key or "").strip())
+    if clean_key in ABILITY_KEYS:
+        return clean_key
+    return next(
+        (
+            ability_key
+            for ability_key, label in ABILITY_LABELS.items()
+            if clean_key == normalize_lookup(label)
+        ),
+        "",
+    )
 
 
 def _build_spell_options_for_class_level(
@@ -10880,11 +11412,15 @@ def _build_native_level_up_preview(
         target_level=target_level,
         feature_entries=gained_feature_entries,
         extra_option_payloads=selected_campaign_option_payloads,
+        class_row_id=class_row_id or "",
     )
-    slot_progression = _level_up_slot_progression_for_class(
-        selected_class.title,
-        target_level,
+    preview_profile = sync_profile_class_summary(resulting_profile or dict(definition.profile or {}))
+    slot_progression = _preview_level_up_slot_progression(
+        definition,
+        resulting_profile=preview_profile,
         selected_class=selected_class,
+        target_level=target_level,
+        class_row_id=str(class_row_id or "").strip(),
     )
     slot_summary = [
         f"Level {int(slot.get('level') or 0)}: {int(slot.get('max_slots') or 0)} slots"
@@ -10907,7 +11443,6 @@ def _build_native_level_up_preview(
         preview_resource_templates,
     )
     preview_campaign_stat_adjustments = collect_campaign_option_stat_adjustments(selected_campaign_option_payloads)
-    preview_profile = sync_profile_class_summary(resulting_profile or dict(definition.profile or {}))
     return {
         "class_level_text": str(preview_profile.get("class_level_text") or f"{selected_class.title} {target_level}"),
         "class_rows": [_class_row_level_text(row) for row in ensure_profile_class_rows(preview_profile)],
@@ -10927,6 +11462,73 @@ def _build_native_level_up_preview(
         "spell_slots": slot_summary,
         "new_spells": new_spell_names,
     }
+
+
+def _preview_level_up_slot_progression(
+    definition: CharacterDefinition,
+    *,
+    resulting_profile: dict[str, Any],
+    selected_class: SystemsEntryRecord,
+    target_level: int,
+    class_row_id: str,
+) -> list[dict[str, Any]]:
+    current_spell_rows = {
+        str(row.get("class_row_id") or "").strip(): dict(row or {})
+        for row in list((definition.spellcasting or {}).get("class_rows") or [])
+        if str(dict(row or {}).get("class_row_id") or "").strip()
+    }
+    preview_spell_rows: list[dict[str, Any]] = []
+    profile_rows = ensure_profile_class_rows(resulting_profile)
+    for index, row in enumerate(profile_rows, start=1):
+        row_payload = dict(row or {})
+        row_id = str(row_payload.get("row_id") or "").strip() or f"class-row-{index}"
+        if row_id == class_row_id:
+            class_name = str(selected_class.title or row_payload.get("class_name") or "").strip()
+            caster_progression = _class_caster_progression(class_name, selected_class=selected_class)
+            spell_mode = _spellcasting_mode_for_class(class_name, selected_class=selected_class)
+            if spell_mode or caster_progression:
+                preview_spell_rows.append(
+                    {
+                        "class_row_id": row_id,
+                        "class_name": class_name,
+                        "level": target_level,
+                        "caster_progression": caster_progression,
+                    }
+                )
+            continue
+
+        existing_row = dict(current_spell_rows.get(row_id) or {})
+        class_name = str(existing_row.get("class_name") or row_payload.get("class_name") or "").strip()
+        caster_progression = str(existing_row.get("caster_progression") or "").strip()
+        spell_mode = str(existing_row.get("spell_mode") or "").strip()
+        if not spell_mode and class_name:
+            spell_mode = _spellcasting_mode_for_class(class_name)
+        if not caster_progression and class_name:
+            caster_progression = _class_caster_progression(class_name)
+        if spell_mode or caster_progression:
+            preview_spell_rows.append(
+                {
+                    "class_row_id": row_id,
+                    "class_name": class_name,
+                    "level": int(row_payload.get("level") or existing_row.get("level") or 0),
+                    "caster_progression": caster_progression,
+                }
+            )
+
+    if _spellcasting_rows_use_shared_slots(preview_spell_rows, total_class_rows=len(profile_rows)):
+        total_caster_level = sum(
+            _multiclass_slot_contribution_for_row(
+                int(row.get("level") or 0),
+                str(row.get("caster_progression") or "").strip(),
+            )
+            for row in preview_spell_rows
+        )
+        return _shared_slot_progression_for_caster_level(total_caster_level)
+    return _level_up_slot_progression_for_class(
+        selected_class.title,
+        target_level,
+        selected_class=selected_class,
+    )
 
 
 def _build_level_one_spellcasting(
@@ -11003,6 +11605,7 @@ def _build_level_up_spellcasting(
     target_level: int,
     feature_entries: list[dict[str, Any]] | None = None,
     selected_campaign_option_payloads: list[dict[str, Any]] | None = None,
+    class_row_id: str = "",
 ) -> dict[str, Any]:
     class_name = selected_class.title
     ability_name = _spellcasting_ability_name_for_class(class_name, selected_class=selected_class)
@@ -11018,6 +11621,7 @@ def _build_level_up_spellcasting(
         target_level=target_level,
         feature_entries=feature_entries,
         selected_campaign_option_payloads=selected_campaign_option_payloads,
+        class_row_id=class_row_id,
     )
 
     if not ability_name:
@@ -11056,13 +11660,14 @@ def _build_level_up_spell_payloads(
     target_level: int,
     feature_entries: list[dict[str, Any]] | None = None,
     selected_campaign_option_payloads: list[dict[str, Any]] | None = None,
+    class_row_id: str = "",
 ) -> list[dict[str, Any]]:
     class_name = selected_class.title
     spell_mode = _spellcasting_mode_for_class(class_name, selected_class=selected_class)
     existing_spells = list((current_definition.spellcasting or {}).get("spells") or [])
     spells_by_key: dict[str, dict[str, Any]] = {}
     for spell in existing_spells:
-        payload_key = _spell_payload_key(spell)
+        payload_key = _spell_payload_map_key(spell)
         if payload_key:
             spells_by_key[payload_key] = dict(spell)
     values = _values_from_selected_choices(choice_sections, selected_choices)
@@ -11073,12 +11678,14 @@ def _build_level_up_spell_payloads(
             selected_value=selected_value,
             spell_catalog=spell_catalog,
             mark="Cantrip",
+            class_row_id=class_row_id,
         )
     for selected_value in _selected_additional_known_spell_values(selected_choices, prefix="levelup_bonus_spell_known"):
         _add_bonus_known_spell_to_payloads(
             spells_by_key,
             selected_value=selected_value,
             spell_catalog=spell_catalog,
+            class_row_id=class_row_id,
         )
 
     if spell_mode in {"known", "prepared"}:
@@ -11088,12 +11695,21 @@ def _build_level_up_spell_payloads(
             replacement_from = str(values.get("levelup_spell_replace_from_1") or "").strip()
             replacement_to = str(values.get("levelup_spell_replace_to_1") or "").strip()
             if replacement_from and replacement_to:
-                spells_by_key.pop(_spell_lookup_key(replacement_from, spell_catalog), None)
+                spells_by_key.pop(
+                    _spell_payload_map_key(
+                        {
+                            "systems_ref": {"slug": _spell_lookup_key(replacement_from, spell_catalog)},
+                            "class_row_id": class_row_id,
+                        }
+                    ),
+                    None,
+                )
                 _add_spell_to_payloads(
                     spells_by_key,
                     selected_value=replacement_to,
                     spell_catalog=spell_catalog,
                     mark="Known",
+                    class_row_id=class_row_id,
                 )
         for selected_value in selected_choices.get(group_key, []):
             _add_spell_to_payloads(
@@ -11101,6 +11717,7 @@ def _build_level_up_spell_payloads(
                 selected_value=selected_value,
                 spell_catalog=spell_catalog,
                 mark=mark,
+                class_row_id=class_row_id,
             )
     elif spell_mode == "wizard":
         existing_prepared = _spell_selection_values_by_mark(existing_spells, "Prepared")
@@ -11112,9 +11729,15 @@ def _build_level_up_spell_payloads(
                 selected_value=selected_value,
                 spell_catalog=spell_catalog,
                 mark="Prepared + Spellbook" if selected_value in new_prepared_values else "Spellbook",
+                class_row_id=class_row_id,
             )
         for selected_value in new_prepared_values:
-            payload_key = _spell_lookup_key(selected_value, spell_catalog)
+            payload_key = _spell_payload_map_key(
+                {
+                    "systems_ref": {"slug": _spell_lookup_key(selected_value, spell_catalog)},
+                    "class_row_id": class_row_id,
+                }
+            )
             existing_payload = spells_by_key.get(payload_key)
             if existing_payload is None:
                 _add_spell_to_payloads(
@@ -11122,12 +11745,18 @@ def _build_level_up_spell_payloads(
                     selected_value=selected_value,
                     spell_catalog=spell_catalog,
                     mark="Prepared + Spellbook",
+                    class_row_id=class_row_id,
                 )
                 continue
             if "Prepared" not in str(existing_payload.get("mark") or ""):
                 existing_payload["mark"] = _merge_spell_mark(str(existing_payload.get("mark") or "").strip(), "Prepared")
         for selected_value in existing_prepared:
-            payload_key = _spell_lookup_key(selected_value, spell_catalog)
+            payload_key = _spell_payload_map_key(
+                {
+                    "systems_ref": {"slug": _spell_lookup_key(selected_value, spell_catalog)},
+                    "class_row_id": class_row_id,
+                }
+            )
             existing_payload = spells_by_key.get(payload_key)
             if existing_payload is not None and "Prepared" not in str(existing_payload.get("mark") or ""):
                 existing_payload["mark"] = _merge_spell_mark(str(existing_payload.get("mark") or "").strip(), "Prepared")
@@ -11142,6 +11771,7 @@ def _build_level_up_spell_payloads(
             spells_by_key,
             selected_value=selected_value,
             spell_catalog=spell_catalog,
+            class_row_id=class_row_id,
         )
     for selected_value in _automatic_prepared_spell_values(
         selected_class=selected_class,
@@ -11154,6 +11784,7 @@ def _build_level_up_spell_payloads(
             selected_value=selected_value,
             spell_catalog=spell_catalog,
             is_always_prepared=True,
+            class_row_id=class_row_id,
         )
     _apply_spell_support_grants_to_payloads(
         spells_by_key,
@@ -11165,6 +11796,7 @@ def _build_level_up_spell_payloads(
             feature_entries=feature_entries,
         ),
         spell_catalog=spell_catalog,
+        class_row_id=class_row_id,
     )
     _apply_selected_spell_support_fields_to_payloads(
         spells_by_key,
@@ -11176,12 +11808,14 @@ def _build_level_up_spell_payloads(
         field_prefix="levelup_spell_support",
         exact_level=target_level,
         feature_entries=feature_entries,
+        class_row_id=class_row_id,
     )
     _apply_selected_feat_spell_fields_to_payloads(
         spells_by_key,
         choice_sections=choice_sections,
         selected_choices=selected_choices,
         spell_catalog=spell_catalog,
+        class_row_id=class_row_id,
     )
     _apply_selected_campaign_option_spells_to_payloads(
         spells_by_key,
@@ -11189,6 +11823,7 @@ def _build_level_up_spell_payloads(
         selected_choices=selected_choices,
         spell_catalog=spell_catalog,
         extra_option_payloads=selected_campaign_option_payloads,
+        class_row_id=class_row_id,
     )
     for spell_title in _automatic_feat_known_spell_values(
         feat_selections=feat_selections,
@@ -11199,6 +11834,7 @@ def _build_level_up_spell_payloads(
             spells_by_key,
             selected_value=spell_title,
             spell_catalog=spell_catalog,
+            class_row_id=class_row_id,
         )
     for spell_title in _automatic_feat_prepared_spell_values(
         feat_selections=feat_selections,
@@ -11210,6 +11846,7 @@ def _build_level_up_spell_payloads(
             selected_value=spell_title,
             spell_catalog=spell_catalog,
             is_always_prepared=True,
+            class_row_id=class_row_id,
         )
     for spell_grant in _automatic_feat_innate_spell_values(
         feat_selections=feat_selections,
@@ -11222,6 +11859,7 @@ def _build_level_up_spell_payloads(
             spell_catalog=spell_catalog,
             mark=str(spell_grant.get("mark") or "").strip(),
             is_ritual=bool(spell_grant.get("is_ritual")),
+            class_row_id=class_row_id,
         )
     for spell_grant in _automatic_innate_spell_values(
         selected_class=selected_class,
@@ -11235,6 +11873,7 @@ def _build_level_up_spell_payloads(
             spell_catalog=spell_catalog,
             mark=str(spell_grant.get("mark") or "").strip(),
             is_ritual=bool(spell_grant.get("is_ritual")),
+            class_row_id=class_row_id,
         )
     _apply_selected_spell_support_replacements_to_payloads(
         spells_by_key,
@@ -11246,6 +11885,7 @@ def _build_level_up_spell_payloads(
         field_prefix="levelup_spell_support",
         exact_level=target_level,
         feature_entries=feature_entries,
+        class_row_id=class_row_id,
     )
 
     return list(spells_by_key.values())
@@ -11442,6 +12082,18 @@ def _spell_payload_key(spell_payload: dict[str, Any]) -> str:
     return str(systems_ref.get("slug") or spell_payload.get("name") or "").strip()
 
 
+def _spell_payload_class_row_id(spell_payload: dict[str, Any]) -> str:
+    return str(spell_payload.get("class_row_id") or "").strip()
+
+
+def _spell_payload_map_key(spell_payload: dict[str, Any]) -> str:
+    payload_key = _spell_payload_key(spell_payload)
+    if not payload_key:
+        return ""
+    class_row_id = _spell_payload_class_row_id(spell_payload)
+    return f"{class_row_id}::{payload_key}" if class_row_id else payload_key
+
+
 def _spell_lookup_key(selected_value: str, spell_catalog: dict[str, Any]) -> str:
     spell_entry = _resolve_spell_entry(selected_value, spell_catalog)
     if spell_entry is not None:
@@ -11532,6 +12184,7 @@ def _apply_selected_feat_spell_fields_to_payloads(
     choice_sections: list[dict[str, Any]],
     selected_choices: dict[str, list[str]],
     spell_catalog: dict[str, Any],
+    class_row_id: str = "",
 ) -> None:
     for field, selected_value in _selected_feat_spell_field_values(choice_sections, selected_choices):
         kind = str(field.get("kind") or "").strip()
@@ -11540,6 +12193,7 @@ def _apply_selected_feat_spell_fields_to_payloads(
                 spells_by_key,
                 selected_value=selected_value,
                 spell_catalog=spell_catalog,
+                class_row_id=class_row_id,
             )
             continue
         _add_spell_to_payloads(
@@ -11549,6 +12203,7 @@ def _apply_selected_feat_spell_fields_to_payloads(
             mark=str(field.get("spell_mark") or "").strip(),
             is_always_prepared=bool(field.get("spell_is_always_prepared")),
             is_ritual=bool(field.get("spell_is_ritual")),
+            class_row_id=class_row_id,
         )
 
 
@@ -11559,6 +12214,7 @@ def _apply_selected_campaign_option_spells_to_payloads(
     selected_choices: dict[str, list[str]],
     spell_catalog: dict[str, Any],
     extra_option_payloads: list[dict[str, Any]] | None = None,
+    class_row_id: str = "",
 ) -> None:
     for spell_grant in collect_campaign_option_spell_grants(
         _selected_campaign_option_payloads(
@@ -11574,6 +12230,7 @@ def _apply_selected_campaign_option_spells_to_payloads(
             mark=str(spell_grant.get("mark") or "").strip(),
             is_always_prepared=bool(spell_grant.get("always_prepared")),
             is_ritual=bool(spell_grant.get("ritual")),
+            class_row_id=class_row_id,
         )
 
 
@@ -11900,6 +12557,7 @@ def _apply_spell_support_grants_to_payloads(
     *,
     grants: list[dict[str, Any]],
     spell_catalog: dict[str, Any],
+    class_row_id: str = "",
 ) -> None:
     for grant in list(grants or []):
         selected_value = str(grant.get("value") or "").strip()
@@ -11910,6 +12568,7 @@ def _apply_spell_support_grants_to_payloads(
                 spells_by_key,
                 selected_value=selected_value,
                 spell_catalog=spell_catalog,
+                class_row_id=class_row_id,
             )
             continue
         _add_spell_to_payloads(
@@ -11919,6 +12578,7 @@ def _apply_spell_support_grants_to_payloads(
             mark=str(grant.get("mark") or "").strip(),
             is_always_prepared=bool(grant.get("always_prepared")),
             is_ritual=bool(grant.get("ritual")),
+            class_row_id=class_row_id,
         )
 
 
@@ -11933,6 +12593,7 @@ def _apply_selected_spell_support_fields_to_payloads(
     field_prefix: str,
     exact_level: int | None = None,
     feature_entries: list[dict[str, Any]] | None = None,
+    class_row_id: str = "",
 ) -> None:
     specs = _extract_spell_support_choice_specs(
         selected_class=selected_class,
@@ -11954,6 +12615,7 @@ def _apply_selected_spell_support_fields_to_payloads(
                     spells_by_key,
                     selected_value=selected_value,
                     spell_catalog=spell_catalog,
+                    class_row_id=class_row_id,
                 )
                 continue
             _add_spell_to_payloads(
@@ -11963,6 +12625,7 @@ def _apply_selected_spell_support_fields_to_payloads(
                 mark=str(spec.get("mark") or "").strip(),
                 is_always_prepared=bool(spec.get("always_prepared")),
                 is_ritual=bool(spec.get("ritual")),
+                class_row_id=class_row_id,
             )
 
 
@@ -11977,6 +12640,7 @@ def _apply_selected_spell_support_replacements_to_payloads(
     field_prefix: str,
     exact_level: int | None = None,
     feature_entries: list[dict[str, Any]] | None = None,
+    class_row_id: str = "",
 ) -> None:
     specs = _extract_spell_support_replacement_specs(
         selected_class=selected_class,
@@ -12007,12 +12671,21 @@ def _apply_selected_spell_support_replacements_to_payloads(
             replacement_to = str(values.get(to_name) or "").strip()
             if not replacement_from or not replacement_to:
                 continue
-            spells_by_key.pop(_spell_lookup_key(replacement_from, spell_catalog), None)
+            spells_by_key.pop(
+                _spell_payload_map_key(
+                    {
+                        "systems_ref": {"slug": _spell_lookup_key(replacement_from, spell_catalog)},
+                        "class_row_id": class_row_id,
+                    }
+                ),
+                None,
+            )
             if category == "known":
                 _add_bonus_known_spell_to_payloads(
                     spells_by_key,
                     selected_value=replacement_to,
                     spell_catalog=spell_catalog,
+                    class_row_id=class_row_id,
                 )
                 continue
             _add_spell_to_payloads(
@@ -12022,6 +12695,7 @@ def _apply_selected_spell_support_replacements_to_payloads(
                 mark=str(spec.get("mark") or "").strip(),
                 is_always_prepared=bool(spec.get("always_prepared")),
                 is_ritual=bool(spec.get("ritual")),
+                class_row_id=class_row_id,
             )
 
 
@@ -13148,11 +13822,12 @@ def _summarize_level_up_spell_choices(
     target_level: int,
     feature_entries: list[dict[str, Any]] | None = None,
     extra_option_payloads: list[dict[str, Any]] | None = None,
+    class_row_id: str = "",
 ) -> list[str]:
     existing_spell_payload_keys = {
         payload_key
         for spell_payload in list((definition.spellcasting or {}).get("spells") or [])
-        if (payload_key := _spell_payload_key(spell_payload))
+        if (payload_key := _spell_payload_map_key(spell_payload))
     }
     simulated_payloads = _build_level_up_spell_payloads(
         current_definition=definition,
@@ -13165,12 +13840,13 @@ def _summarize_level_up_spell_choices(
         target_level=target_level,
         feature_entries=feature_entries,
         selected_campaign_option_payloads=extra_option_payloads,
+        class_row_id=class_row_id,
     )
 
     summaries: list[str] = []
     seen: set[str] = set()
     for spell_payload in simulated_payloads:
-        payload_key = _spell_payload_key(spell_payload)
+        payload_key = _spell_payload_map_key(spell_payload)
         if payload_key and payload_key in existing_spell_payload_keys:
             continue
         label = str(spell_payload.get("name") or "").strip()
@@ -13191,10 +13867,19 @@ def _add_spell_to_payloads(
     is_always_prepared: bool = False,
     is_bonus_known: bool = False,
     is_ritual: bool = False,
+    class_row_id: str = "",
 ) -> None:
     spell_entry = _resolve_spell_entry(selected_value, spell_catalog)
     spell_payload = _build_spell_payload(selected_value, spell_entry)
-    payload_key = str((spell_entry.slug if spell_entry is not None else selected_value) or "").strip()
+    if str(class_row_id or "").strip():
+        spell_payload["class_row_id"] = str(class_row_id or "").strip()
+    payload_key = _spell_payload_map_key(
+        {
+            "systems_ref": _systems_ref_from_entry(spell_entry),
+            "name": selected_value,
+            "class_row_id": class_row_id,
+        }
+    )
     if not payload_key:
         return
 
@@ -13228,6 +13913,7 @@ def _add_bonus_known_spell_to_payloads(
     *,
     selected_value: str,
     spell_catalog: dict[str, Any],
+    class_row_id: str = "",
 ) -> None:
     spell_entry = _resolve_spell_entry(selected_value, spell_catalog)
     mark = "Cantrip" if spell_entry is not None and _spell_entry_level(spell_entry) == 0 else "Known"
@@ -13237,6 +13923,7 @@ def _add_bonus_known_spell_to_payloads(
         spell_catalog=spell_catalog,
         mark=mark,
         is_bonus_known=True,
+        class_row_id=class_row_id,
     )
 
 
@@ -13341,6 +14028,11 @@ def _normalize_spell_payloads(
             continue
         payload["name"] = name
         payload["id"] = str(payload.get("id") or "").strip() or f"{slugify(name)}-{len(normalized_spells) + 1}"
+        class_row_id = _spell_payload_class_row_id(payload)
+        if class_row_id:
+            payload["class_row_id"] = class_row_id
+        else:
+            payload.pop("class_row_id", None)
         systems_ref = dict(payload.get("systems_ref") or {})
         if systems_ref:
             payload["systems_ref"] = systems_ref
@@ -13358,8 +14050,11 @@ def _normalize_spell_payloads(
         )
         candidate_keys: list[str] = []
         if explicit_identity:
-            candidate_keys.append(explicit_identity)
-        candidate_keys.extend(f"name:{candidate}" for candidate in _merge_name_candidates(name))
+            candidate_keys.append(f"{class_row_id}|{explicit_identity}" if class_row_id else explicit_identity)
+        candidate_keys.extend(
+            f"{class_row_id}|name:{candidate}" if class_row_id else f"name:{candidate}"
+            for candidate in _merge_name_candidates(name)
+        )
 
         existing_index = None
         for candidate_key in candidate_keys:
@@ -13409,9 +14104,16 @@ def _normalize_spell_payloads(
         )
         updated_keys: list[str] = []
         if updated_explicit_identity:
-            updated_keys.append(updated_explicit_identity)
+            existing_row_id = _spell_payload_class_row_id(existing_payload)
+            updated_keys.append(
+                f"{existing_row_id}|{updated_explicit_identity}" if existing_row_id else updated_explicit_identity
+            )
         updated_keys.extend(
-            f"name:{candidate}"
+            (
+                f"{_spell_payload_class_row_id(existing_payload)}|name:{candidate}"
+                if _spell_payload_class_row_id(existing_payload)
+                else f"name:{candidate}"
+            )
             for candidate in _merge_name_candidates(str(existing_payload.get("name") or "").strip())
         )
         for candidate_key in updated_keys:

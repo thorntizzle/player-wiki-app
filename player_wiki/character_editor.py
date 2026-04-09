@@ -22,8 +22,10 @@ from .character_builder import (
     _resolve_builder_choices,
     _resolve_spell_entry,
     _spell_entry_level,
+    _spell_payload_class_row_id,
     _spell_lookup_key,
     _spell_payload_key,
+    _spell_payload_map_key,
     _spell_progression_value,
     _spell_selection_values_by_mark,
     _spellcasting_mode_for_class,
@@ -38,7 +40,7 @@ from .character_campaign_options import (
 )
 from .character_importer import converge_imported_definition
 from .character_models import CharacterDefinition, CharacterImportMetadata
-from .character_profile import profile_primary_class_name, profile_total_level
+from .character_profile import ensure_profile_class_rows, profile_primary_class_name, profile_total_level
 from .repository import normalize_lookup
 from .repository import slugify
 from .systems_models import SystemsEntryRecord
@@ -85,35 +87,110 @@ def build_character_spell_management_context(
     *,
     spell_catalog: dict[str, Any] | None = None,
     selected_class: Any | None = None,
+    selected_class_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     spellcasting = dict(definition.spellcasting or {})
     if not spellcasting:
         return None
 
     spell_catalog = dict(spell_catalog or {})
-    class_name = _spell_management_class_name(definition, spellcasting=spellcasting)
-    mode = _spellcasting_mode_for_class(class_name, selected_class=selected_class) if class_name else ""
-    current_level = _character_total_level(definition)
+    class_row_payloads = _spell_management_class_rows(
+        definition,
+        spellcasting=spellcasting,
+        selected_class=selected_class,
+        selected_class_rows=selected_class_rows,
+    )
+    if not class_row_payloads:
+        return None
     slot_progression = [
         dict(slot or {})
         for slot in list(spellcasting.get("slot_progression") or [])
     ]
     max_spell_level = max((int(slot.get("level") or 0) for slot in slot_progression), default=0)
-
-    class_names = [
-        str(dict(row or {}).get("class_name") or "").strip()
-        for row in list((definition.profile or {}).get("classes") or [])
-        if str(dict(row or {}).get("class_name") or "").strip()
+    sections = [
+        _build_spell_management_section(
+            definition,
+            spell_catalog=spell_catalog,
+            max_spell_level=max_spell_level,
+            row_payload=row_payload,
+            total_spell_rows=len(class_row_payloads),
+        )
+        for row_payload in class_row_payloads
     ]
-    distinct_class_names = {
-        normalize_lookup(name)
-        for name in class_names
-        if str(name).strip()
+    return {
+        "sections": sections,
+        "is_multiclass": len(class_row_payloads) > 1,
+        "shared_slot_label": "Shared spell slots" if len(class_row_payloads) > 1 else "Spell slots",
+        "slot_progression": slot_progression,
     }
+
+
+def _spell_management_class_rows(
+    definition: CharacterDefinition,
+    *,
+    spellcasting: dict[str, Any],
+    selected_class: Any | None = None,
+    selected_class_rows: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    resolved_rows = {
+        str(dict(row or {}).get("class_row_id") or dict(row or {}).get("row_id") or "").strip(): dict(row or {})
+        for row in list(selected_class_rows or [])
+        if str(dict(row or {}).get("class_row_id") or dict(row or {}).get("row_id") or "").strip()
+    }
+    row_payloads = [dict(row or {}) for row in list(spellcasting.get("class_rows") or []) if isinstance(row, dict)]
+    if row_payloads:
+        results: list[dict[str, Any]] = []
+        for index, row in enumerate(row_payloads, start=1):
+            row_id = str(row.get("class_row_id") or "").strip() or f"class-row-{index}"
+            resolved_row = dict(resolved_rows.get(row_id) or {})
+            results.append(
+                {
+                    "class_row_id": row_id,
+                    "class_name": str(row.get("class_name") or "").strip(),
+                    "level": int(row.get("level") or 0),
+                    "mode": str(row.get("spell_mode") or "").strip(),
+                    "spellcasting_ability": str(row.get("spellcasting_ability") or "").strip(),
+                    "spell_save_dc": row.get("spell_save_dc"),
+                    "spell_attack_bonus": row.get("spell_attack_bonus"),
+                    "selected_class": resolved_row.get("selected_class"),
+                }
+            )
+        return results
+
+    class_name = _spell_management_class_name(definition, spellcasting=spellcasting)
+    mode = _spellcasting_mode_for_class(class_name, selected_class=selected_class) if class_name else ""
+    if not class_name or not mode:
+        return []
+    first_profile_row = dict((ensure_profile_class_rows(definition.profile) or [{}])[0] or {})
+    return [
+        {
+            "class_row_id": str(first_profile_row.get("row_id") or "class-row-1"),
+            "class_name": class_name,
+            "level": _character_total_level(definition),
+            "mode": mode,
+            "spellcasting_ability": str(spellcasting.get("spellcasting_ability") or "").strip(),
+            "spell_save_dc": spellcasting.get("spell_save_dc"),
+            "spell_attack_bonus": spellcasting.get("spell_attack_bonus"),
+            "selected_class": selected_class if isinstance(selected_class, SystemsEntryRecord) else None,
+        }
+    ]
+
+
+def _build_spell_management_section(
+    definition: CharacterDefinition,
+    *,
+    spell_catalog: dict[str, Any],
+    max_spell_level: int,
+    row_payload: dict[str, Any],
+    total_spell_rows: int,
+) -> dict[str, Any]:
+    class_name = str(row_payload.get("class_name") or "").strip()
+    mode = str(row_payload.get("mode") or "").strip()
+    current_level = int(row_payload.get("level") or 0)
+    selected_class = row_payload.get("selected_class")
+    class_row_id = str(row_payload.get("class_row_id") or "").strip()
     unavailable_message = ""
-    if len(distinct_class_names) > 1:
-        unavailable_message = "Spell management on the sheet currently supports single-class casters only."
-    elif not class_name or not mode:
+    if not class_name or not mode:
         unavailable_message = "This sheet does not currently have a supported class spellcasting model to edit here."
 
     rows = _build_spell_management_rows(
@@ -121,6 +198,8 @@ def build_character_spell_management_context(
         spell_catalog=spell_catalog,
         mode=mode,
         class_name=class_name,
+        class_row_id=class_row_id,
+        total_spell_rows=total_spell_rows,
     )
 
     mutable_cantrip_count = sum(1 for row in rows if row["counts_against_cantrip_limit"])
@@ -148,46 +227,16 @@ def build_character_spell_management_context(
 
     counts: list[dict[str, str]] = []
     if target_cantrip_count:
-        counts.append(
-            {
-                "label": "Cantrips",
-                "value": f"{mutable_cantrip_count} / {target_cantrip_count}",
-            }
-        )
+        counts.append({"label": "Cantrips", "value": f"{mutable_cantrip_count} / {target_cantrip_count}"})
     if mode == "known":
-        counts.append(
-            {
-                "label": "Known spells",
-                "value": f"{mutable_known_count} / {target_known_count}",
-            }
-        )
+        counts.append({"label": "Known spells", "value": f"{mutable_known_count} / {target_known_count}"})
     elif mode == "prepared":
-        counts.append(
-            {
-                "label": "Prepared spells",
-                "value": f"{mutable_prepared_count} / {target_prepared_count}",
-            }
-        )
+        counts.append({"label": "Prepared spells", "value": f"{mutable_prepared_count} / {target_prepared_count}"})
     elif mode == "wizard":
-        counts.append(
-            {
-                "label": "Prepared spells",
-                "value": f"{mutable_prepared_count} / {target_prepared_count}",
-            }
-        )
-        counts.append(
-            {
-                "label": "Spellbook spells",
-                "value": str(mutable_spellbook_count),
-            }
-        )
+        counts.append({"label": "Prepared spells", "value": f"{mutable_prepared_count} / {target_prepared_count}"})
+        counts.append({"label": "Spellbook spells", "value": str(mutable_spellbook_count)})
     if fixed_spell_count:
-        counts.append(
-            {
-                "label": "Fixed feature spells",
-                "value": str(fixed_spell_count),
-            }
-        )
+        counts.append({"label": "Fixed feature spells", "value": str(fixed_spell_count)})
 
     can_manage = bool(mode and class_name and not unavailable_message and list(spell_catalog.get("entries") or []))
     if not can_manage and not unavailable_message and mode:
@@ -214,6 +263,7 @@ def build_character_spell_management_context(
     }.get(mode, "")
 
     return {
+        "class_row_id": class_row_id,
         "class_name": class_name,
         "mode": mode,
         "mode_label": {
@@ -221,6 +271,7 @@ def build_character_spell_management_context(
             "prepared": "Prepared spells",
             "wizard": "Wizard spellbook",
         }.get(mode, "Spellcasting"),
+        "title": f"{class_name} {current_level}" if class_name and current_level > 0 else class_name or "Spellcasting",
         "current_level": current_level,
         "max_spell_level": max_spell_level,
         "target_cantrip_count": target_cantrip_count,
@@ -249,6 +300,9 @@ def build_character_spell_management_context(
         ),
         "spell_add_kind": "spellbook" if mode == "wizard" else "spell",
         "spell_add_label": spell_add_label,
+        "spellcasting_ability": str(row_payload.get("spellcasting_ability") or "").strip(),
+        "spell_save_dc": row_payload.get("spell_save_dc"),
+        "spell_attack_bonus": row_payload.get("spell_attack_bonus"),
     }
 
 
@@ -257,35 +311,41 @@ def search_character_spell_management_options(
     *,
     spell_catalog: dict[str, Any] | None = None,
     selected_class: Any | None = None,
+    selected_class_rows: list[dict[str, Any]] | None = None,
     query: str,
     kind: str,
+    target_class_row_id: str = "",
     limit: int = 20,
 ) -> tuple[list[dict[str, str]], str]:
     manager = build_character_spell_management_context(
         definition,
         spell_catalog=spell_catalog,
         selected_class=selected_class,
+        selected_class_rows=selected_class_rows,
     )
     if manager is None:
         return [], "This sheet does not currently have spellcasting content."
-    if not manager.get("can_manage"):
-        return [], str(manager.get("unavailable_message") or "This sheet cannot manage spells here yet.")
+    section = _resolve_spell_management_section(manager, target_class_row_id)
+    if section is None:
+        return [], "Choose a valid spellcasting class row."
+    if not section.get("can_manage"):
+        return [], str(section.get("unavailable_message") or "This sheet cannot manage spells here yet.")
 
     clean_kind = str(kind or "").strip().lower()
     if clean_kind not in {"cantrip", "spell", "spellbook"}:
         return [], "Choose a valid spell search type."
-    if clean_kind == "spellbook" and manager.get("mode") != "wizard":
+    if clean_kind == "spellbook" and section.get("mode") != "wizard":
         return [], "Only wizard sheets use spellbook additions."
 
     clean_query = normalize_lookup(query)
     if len(clean_query) < SPELL_MANAGEMENT_QUERY_MIN_LENGTH:
         return [], "Type at least 2 letters to search eligible class spells."
 
-    class_name = str(manager.get("class_name") or "").strip()
-    max_spell_level = int(manager.get("max_spell_level") or 0)
+    class_name = str(section.get("class_name") or "").strip()
+    max_spell_level = int(section.get("max_spell_level") or 0)
     existing_keys = {
         str(row.get("catalog_key") or row.get("spell_key") or "").strip()
-        for row in list(manager.get("rows") or [])
+        for row in list(section.get("rows") or [])
         if str(row.get("catalog_key") or row.get("spell_key") or "").strip()
     }
     results: list[dict[str, str]] = []
@@ -336,28 +396,35 @@ def apply_character_spell_management_edit(
     *,
     spell_catalog: dict[str, Any] | None = None,
     selected_class: Any | None = None,
+    selected_class_rows: list[dict[str, Any]] | None = None,
     systems_service: Any | None = None,
     operation: str,
     spell_key: str = "",
     selected_value: str = "",
     kind: str = "",
     prepared_value: str = "",
+    target_class_row_id: str = "",
 ) -> tuple[CharacterDefinition, CharacterImportMetadata, dict[str, int]]:
     manager = build_character_spell_management_context(
         current_definition,
         spell_catalog=spell_catalog,
         selected_class=selected_class,
+        selected_class_rows=selected_class_rows,
     )
     if manager is None:
         raise CharacterEditValidationError("This sheet does not currently have spellcasting content.")
-    if not manager.get("can_manage"):
+    section = _resolve_spell_management_section(manager, target_class_row_id)
+    if section is None:
+        raise CharacterEditValidationError("Choose a valid spellcasting class row.")
+    if not section.get("can_manage"):
         raise CharacterEditValidationError(
-            str(manager.get("unavailable_message") or "This sheet cannot manage spells here yet.")
+            str(section.get("unavailable_message") or "This sheet cannot manage spells here yet.")
         )
 
     rows_by_key = {
         str(row.get("spell_key") or "").strip(): dict(row)
-        for row in list(manager.get("rows") or [])
+        for section_rows in [list(candidate.get("rows") or []) for candidate in list(manager.get("sections") or [])]
+        for row in section_rows
         if str(row.get("spell_key") or "").strip()
     }
     spells_by_key = {
@@ -366,14 +433,19 @@ def apply_character_spell_management_edit(
     }
     catalog_keys = {
         str(row.get("catalog_key") or row.get("spell_key") or "").strip()
-        for row in list(rows_by_key.values())
+        for row in list(section.get("rows") or [])
         if str(row.get("catalog_key") or row.get("spell_key") or "").strip()
     }
     clean_operation = str(operation or "").strip().lower()
     clean_kind = str(kind or "").strip().lower()
     clean_spell_key = str(spell_key or "").strip()
     clean_selected_value = str(selected_value or "").strip()
-    clean_mode = str(manager.get("mode") or "").strip()
+    clean_mode = str(section.get("mode") or "").strip()
+    clean_target_class_row_id = str(section.get("class_row_id") or target_class_row_id or "").strip()
+    if clean_spell_key and clean_spell_key not in rows_by_key and clean_target_class_row_id and "::" not in clean_spell_key:
+        fallback_key = f"{clean_target_class_row_id}::{clean_spell_key}"
+        if fallback_key in rows_by_key:
+            clean_spell_key = fallback_key
 
     if clean_operation == "add":
         if not clean_selected_value:
@@ -387,31 +459,34 @@ def apply_character_spell_management_edit(
         if resolved_key in catalog_keys:
             raise CharacterEditValidationError("That spell is already on this sheet.")
         if clean_kind == "cantrip":
-            if not bool(manager.get("can_add_cantrip")):
+            if not bool(section.get("can_add_cantrip")):
                 raise CharacterEditValidationError("This sheet is already at its current cantrip count.")
             _add_spell_to_payloads(
                 spells_by_key,
                 selected_value=clean_selected_value,
                 spell_catalog=dict(spell_catalog or {}),
                 mark="Cantrip",
+                class_row_id=clean_target_class_row_id,
             )
         elif clean_kind == "spell" and clean_mode == "known":
-            if not bool(manager.get("can_add_spell")):
+            if not bool(section.get("can_add_spell")):
                 raise CharacterEditValidationError("This sheet is already at its current known-spell count.")
             _add_spell_to_payloads(
                 spells_by_key,
                 selected_value=clean_selected_value,
                 spell_catalog=dict(spell_catalog or {}),
                 mark="Known",
+                class_row_id=clean_target_class_row_id,
             )
         elif clean_kind == "spell" and clean_mode == "prepared":
-            if not bool(manager.get("can_add_spell")):
+            if not bool(section.get("can_add_spell")):
                 raise CharacterEditValidationError("This sheet is already at its current prepared-spell count.")
             _add_spell_to_payloads(
                 spells_by_key,
                 selected_value=clean_selected_value,
                 spell_catalog=dict(spell_catalog or {}),
                 mark="Prepared",
+                class_row_id=clean_target_class_row_id,
             )
         elif clean_kind == "spellbook" and clean_mode == "wizard":
             _add_spell_to_payloads(
@@ -419,6 +494,7 @@ def apply_character_spell_management_edit(
                 selected_value=clean_selected_value,
                 spell_catalog=dict(spell_catalog or {}),
                 mark="Spellbook",
+                class_row_id=clean_target_class_row_id,
             )
         else:
             raise CharacterEditValidationError("Choose a valid spell-management action.")
@@ -440,7 +516,7 @@ def apply_character_spell_management_edit(
             set_prepared
             and not bool(row.get("is_prepared"))
             and clean_mode == "wizard"
-            and int(manager.get("current_prepared_count") or 0) >= int(manager.get("target_prepared_count") or 0)
+            and int(section.get("current_prepared_count") or 0) >= int(section.get("target_prepared_count") or 0)
         ):
             raise CharacterEditValidationError("This wizard is already at the current prepared-spell count.")
         payload = deepcopy(spells_by_key.get(clean_spell_key) or {})
@@ -482,6 +558,22 @@ def apply_character_spell_management_edit(
     return definition, import_metadata, {}
 
 
+def _resolve_spell_management_section(
+    manager: dict[str, Any],
+    target_class_row_id: str,
+) -> dict[str, Any] | None:
+    sections = [dict(section or {}) for section in list(manager.get("sections") or []) if isinstance(section, dict)]
+    if not sections:
+        return None
+    clean_target = str(target_class_row_id or "").strip()
+    if clean_target:
+        for section in sections:
+            if str(section.get("class_row_id") or "").strip() == clean_target:
+                return section
+        return None
+    return dict(sections[0] or {})
+
+
 def _spell_management_class_name(
     definition: CharacterDefinition,
     *,
@@ -508,16 +600,26 @@ def _build_spell_management_rows(
     spell_catalog: dict[str, Any],
     mode: str,
     class_name: str,
+    class_row_id: str,
+    total_spell_rows: int,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for raw_spell_payload in list((definition.spellcasting or {}).get("spells") or []):
+        payload_row_id = _spell_payload_class_row_id(dict(raw_spell_payload or {}))
+        if class_row_id:
+            if payload_row_id and payload_row_id != class_row_id:
+                continue
+            if not payload_row_id and total_spell_rows > 1:
+                continue
         normalized_payload, spell_entry, spell_level = _normalize_spell_management_payload(
             raw_spell_payload,
             spell_catalog=spell_catalog,
             mode=mode,
             class_name=class_name,
         )
-        spell_key = _spell_payload_key(normalized_payload)
+        if class_row_id and not _spell_payload_class_row_id(normalized_payload):
+            normalized_payload["class_row_id"] = class_row_id
+        spell_key = _spell_payload_map_key(normalized_payload)
         if not spell_key:
             continue
 

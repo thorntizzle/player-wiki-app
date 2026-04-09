@@ -67,7 +67,7 @@ from .character_editor import (
     search_character_spell_management_options,
 )
 from .character_importer import write_yaml
-from .character_profile import profile_class_level_text, profile_class_rows, profile_primary_class_ref
+from .character_profile import ensure_profile_class_rows, profile_class_level_text, profile_class_rows, profile_primary_class_ref
 from .character_service import CharacterStateValidationError, build_initial_state, merge_state_with_definition
 from .combat_presenter import DND_5E_CONDITION_OPTIONS, present_combat_tracker
 from .character_presenter import (
@@ -932,24 +932,45 @@ def create_app() -> Flask:
             "over_attunement_limit": attuned_count > max_attuned_items,
         }
 
-    def resolve_character_spellcasting_class_entry(campaign_slug: str, definition):
-        profile = dict(definition.profile or {})
-        candidate_refs = [dict(row or {}).get("systems_ref") for row in profile_class_rows(profile)]
-        candidate_refs.append(profile_primary_class_ref(profile))
-        candidate_refs.append(profile.get("class_ref"))
-        for raw_ref in candidate_refs:
-            systems_ref = dict(raw_ref or {})
+    def resolve_character_spellcasting_class_entries(campaign_slug: str, definition) -> list[dict[str, object]]:
+        spellcasting_rows = [dict(row or {}) for row in list((definition.spellcasting or {}).get("class_rows") or []) if isinstance(row, dict)]
+        profile_rows = ensure_profile_class_rows(definition.profile)
+        results: list[dict[str, object]] = []
+        candidate_rows = spellcasting_rows or [
+            {
+                "class_row_id": str(row.get("row_id") or "").strip() or f"class-row-{index}",
+                "class_ref": dict(row.get("systems_ref") or {}),
+            }
+            for index, row in enumerate(profile_rows, start=1)
+        ]
+        for index, row in enumerate(candidate_rows, start=1):
+            row_id = str(row.get("class_row_id") or row.get("row_id") or "").strip() or f"class-row-{index}"
+            systems_ref = dict(row.get("class_ref") or row.get("systems_ref") or {})
             if str(systems_ref.get("entry_type") or "").strip() != "class":
                 continue
             entry_slug = str(systems_ref.get("slug") or "").strip()
             if not entry_slug:
                 continue
             entry = get_systems_service().get_entry_by_slug_for_campaign(campaign_slug, entry_slug)
-            if entry is not None and str(entry.entry_type or "").strip() == "class":
-                return entry
-        return None
+            if entry is None or str(entry.entry_type or "").strip() != "class":
+                continue
+            results.append(
+                {
+                    "class_row_id": row_id,
+                    "selected_class": entry,
+                }
+            )
+        if not results:
+            profile = dict(definition.profile or {})
+            systems_ref = profile_primary_class_ref(profile) or dict(profile.get("class_ref") or {})
+            entry_slug = str(dict(systems_ref or {}).get("slug") or "").strip()
+            if entry_slug:
+                entry = get_systems_service().get_entry_by_slug_for_campaign(campaign_slug, entry_slug)
+                if entry is not None and str(entry.entry_type or "").strip() == "class":
+                    results.append({"class_row_id": "class-row-1", "selected_class": entry})
+        return results
 
-    def load_character_spell_management_support(campaign_slug: str, definition) -> tuple[dict[str, object], object | None]:
+    def load_character_spell_management_support(campaign_slug: str, definition) -> tuple[dict[str, object], list[dict[str, object]]]:
         spell_catalog = _build_spell_catalog(
             _list_campaign_enabled_entries(
                 get_systems_service(),
@@ -957,47 +978,52 @@ def create_app() -> Flask:
                 "spell",
             )
         )
-        selected_class = resolve_character_spellcasting_class_entry(campaign_slug, definition)
-        return spell_catalog, selected_class
+        selected_class_rows = resolve_character_spellcasting_class_entries(campaign_slug, definition)
+        return spell_catalog, selected_class_rows
 
     def build_character_spell_manager_context(
         campaign_slug: str,
         campaign,
         record,
     ) -> dict[str, object] | None:
-        spell_catalog, selected_class = load_character_spell_management_support(campaign_slug, record.definition)
+        spell_catalog, selected_class_rows = load_character_spell_management_support(campaign_slug, record.definition)
         manager = build_character_spell_management_context(
             record.definition,
             spell_catalog=spell_catalog,
-            selected_class=selected_class,
+            selected_class_rows=selected_class_rows,
         )
         if manager is None:
             return None
 
-        rows: list[dict[str, object]] = []
-        for row in list(manager.get("rows") or []):
-            payload = dict(row.get("payload") or {})
-            rows.append(
-                {
-                    **dict(row),
-                    "href": build_character_entry_href(
-                        campaign.slug,
-                        systems_ref=payload.get("systems_ref"),
-                        page_ref=payload.get("page_ref"),
-                    ),
-                    "casting_time": str(payload.get("casting_time") or "").strip(),
-                    "range": str(payload.get("range") or "").strip(),
-                    "duration": str(payload.get("duration") or "").strip(),
-                    "components": str(payload.get("components") or "").strip(),
-                    "save_or_hit": str(payload.get("save_or_hit") or "").strip(),
-                    "source": str(payload.get("source") or "").strip(),
-                    "reference": str(payload.get("reference") or "").strip(),
-                }
-            )
+        sections: list[dict[str, object]] = []
+        for section in list(manager.get("sections") or []):
+            section_payload = dict(section or {})
+            rows: list[dict[str, object]] = []
+            for row in list(section_payload.get("rows") or []):
+                payload = dict(row.get("payload") or {})
+                rows.append(
+                    {
+                        **dict(row),
+                        "href": build_character_entry_href(
+                            campaign.slug,
+                            systems_ref=payload.get("systems_ref"),
+                            page_ref=payload.get("page_ref"),
+                        ),
+                        "casting_time": str(payload.get("casting_time") or "").strip(),
+                        "range": str(payload.get("range") or "").strip(),
+                        "duration": str(payload.get("duration") or "").strip(),
+                        "components": str(payload.get("components") or "").strip(),
+                        "save_or_hit": str(payload.get("save_or_hit") or "").strip(),
+                        "source": str(payload.get("source") or "").strip(),
+                        "reference": str(payload.get("reference") or "").strip(),
+                    }
+                )
+            section_payload["rows"] = rows
+            sections.append(section_payload)
 
         return {
             **manager,
-            "rows": rows,
+            "sections": sections,
             "search_url": url_for(
                 "character_spell_search",
                 campaign_slug=campaign_slug,
@@ -6108,16 +6134,17 @@ def create_app() -> Flask:
         if not has_session_mode_access(campaign_slug, character_slug):
             abort(403)
 
-        spell_catalog, selected_class = load_character_spell_management_support(
+        spell_catalog, selected_class_rows = load_character_spell_management_support(
             campaign_slug,
             record.definition,
         )
         results, message = search_character_spell_management_options(
             record.definition,
             spell_catalog=spell_catalog,
-            selected_class=selected_class,
+            selected_class_rows=selected_class_rows,
             query=request.args.get("q", ""),
             kind=request.args.get("kind", ""),
+            target_class_row_id=request.args.get("target_class_row_id", ""),
         )
         return jsonify(
             {
@@ -6130,7 +6157,7 @@ def create_app() -> Flask:
     @campaign_scope_access_required("characters")
     def character_spell_add(campaign_slug: str, character_slug: str):
         def _action(record):
-            spell_catalog, selected_class = load_character_spell_management_support(
+            spell_catalog, selected_class_rows = load_character_spell_management_support(
                 campaign_slug,
                 record.definition,
             )
@@ -6139,11 +6166,12 @@ def create_app() -> Flask:
                 record.definition,
                 record.import_metadata,
                 spell_catalog=spell_catalog,
-                selected_class=selected_class,
+                selected_class_rows=selected_class_rows,
                 systems_service=get_systems_service(),
                 operation="add",
                 kind=request.form.get("kind", ""),
                 selected_value=request.form.get("selected_value", ""),
+                target_class_row_id=request.form.get("target_class_row_id", ""),
             )
 
         return run_character_definition_mutation(
@@ -6158,7 +6186,7 @@ def create_app() -> Flask:
     @campaign_scope_access_required("characters")
     def character_spell_update(campaign_slug: str, character_slug: str):
         def _action(record):
-            spell_catalog, selected_class = load_character_spell_management_support(
+            spell_catalog, selected_class_rows = load_character_spell_management_support(
                 campaign_slug,
                 record.definition,
             )
@@ -6167,11 +6195,12 @@ def create_app() -> Flask:
                 record.definition,
                 record.import_metadata,
                 spell_catalog=spell_catalog,
-                selected_class=selected_class,
+                selected_class_rows=selected_class_rows,
                 systems_service=get_systems_service(),
                 operation="update",
                 spell_key=request.form.get("spell_key", ""),
                 prepared_value=request.form.get("prepared_value", ""),
+                target_class_row_id=request.form.get("target_class_row_id", ""),
             )
 
         return run_character_definition_mutation(
@@ -6186,7 +6215,7 @@ def create_app() -> Flask:
     @campaign_scope_access_required("characters")
     def character_spell_remove(campaign_slug: str, character_slug: str):
         def _action(record):
-            spell_catalog, selected_class = load_character_spell_management_support(
+            spell_catalog, selected_class_rows = load_character_spell_management_support(
                 campaign_slug,
                 record.definition,
             )
@@ -6195,10 +6224,11 @@ def create_app() -> Flask:
                 record.definition,
                 record.import_metadata,
                 spell_catalog=spell_catalog,
-                selected_class=selected_class,
+                selected_class_rows=selected_class_rows,
                 systems_service=get_systems_service(),
                 operation="remove",
                 spell_key=request.form.get("spell_key", ""),
+                target_class_row_id=request.form.get("target_class_row_id", ""),
             )
 
         return run_character_definition_mutation(

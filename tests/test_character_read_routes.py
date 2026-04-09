@@ -886,6 +886,212 @@ def test_spellcasting_subpage_can_manage_wizard_spellbooks_and_prepare_spells(
     assert final_shield["mark"] == "Prepared + Spellbook"
 
 
+def test_spellcasting_subpage_groups_multiclass_rows_and_allows_same_spell_on_another_row(
+    app, client, sign_in, users
+):
+    with app.app_context():
+        systems_store = app.extensions["systems_store"]
+        systems_store.upsert_library("DND-5E", title="DND 5E", system_code="DND-5E")
+        systems_store.upsert_source(
+            "DND-5E",
+            "PHB",
+            title="Player's Handbook",
+            license_class="srd_cc",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        systems_store.replace_entries_for_source(
+            "DND-5E",
+            "PHB",
+            entry_types=["class"],
+            entries=[
+                {
+                    "entry_key": "dnd-5e|class|phb|phb-class-wizard",
+                    "entry_type": "class",
+                    "slug": "phb-class-wizard",
+                    "title": "Wizard",
+                    "source_page": "100",
+                    "source_path": "data/class/class-phb.json",
+                    "search_text": "wizard class",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {
+                        "hit_die": {"faces": 6},
+                        "spellcasting_ability": "int",
+                        "caster_progression": "full",
+                        "spells_known_progression_fixed": [6],
+                    },
+                    "body": {},
+                    "rendered_html": "<p>Wizard.</p>",
+                },
+                {
+                    "entry_key": "dnd-5e|class|phb|phb-class-cleric",
+                    "entry_type": "class",
+                    "slug": "phb-class-cleric",
+                    "title": "Cleric",
+                    "source_page": "101",
+                    "source_path": "data/class/class-phb.json",
+                    "search_text": "cleric class",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {
+                        "hit_die": {"faces": 8},
+                        "spellcasting_ability": "wis",
+                        "caster_progression": "full",
+                        "prepared_spells": "level + wis",
+                    },
+                    "body": {},
+                    "rendered_html": "<p>Cleric.</p>",
+                },
+            ],
+        )
+    spell_entries = _seed_systems_spell_entries(
+        app,
+        [
+            {"slug": "phb-spell-detect-magic", "title": "Detect Magic", "level": 1, "class_lists": {"PHB": ["Wizard", "Cleric"]}},
+            {"slug": "phb-spell-bless", "title": "Bless", "level": 1, "class_lists": {"PHB": ["Cleric"]}},
+        ],
+    )
+
+    def _mutate(payload: dict) -> None:
+        profile = dict(payload.get("profile") or {})
+        profile["class_level_text"] = "Wizard 3 / Cleric 3"
+        profile["classes"] = [
+            {
+                "row_id": "class-row-1",
+                "class_name": "Wizard",
+                "level": 3,
+                "systems_ref": {
+                    "entry_key": "dnd-5e|class|phb|phb-class-wizard",
+                    "entry_type": "class",
+                    "title": "Wizard",
+                    "slug": "phb-class-wizard",
+                    "source_id": "PHB",
+                },
+            },
+            {
+                "row_id": "class-row-2",
+                "class_name": "Cleric",
+                "level": 3,
+                "systems_ref": {
+                    "entry_key": "dnd-5e|class|phb|phb-class-cleric",
+                    "entry_type": "class",
+                    "title": "Cleric",
+                    "slug": "phb-class-cleric",
+                    "source_id": "PHB",
+                },
+            },
+        ]
+        payload["profile"] = profile
+        payload["source"] = {
+            "source_path": "builder://native-multiclass",
+            "source_type": "native_character_builder",
+            "imported_from": "In-app Native Builder",
+            "imported_at": "2026-04-08T00:00:00Z",
+            "parse_warnings": [],
+        }
+        payload["spellcasting"] = {
+            "spellcasting_class": "",
+            "spellcasting_ability": "",
+            "spell_save_dc": None,
+            "spell_attack_bonus": None,
+            "slot_progression": [
+                {"level": 1, "max_slots": 4},
+                {"level": 2, "max_slots": 3},
+                {"level": 3, "max_slots": 3},
+            ],
+            "class_rows": [
+                {
+                    "class_row_id": "class-row-1",
+                    "class_name": "Wizard",
+                    "class_ref": {
+                        "entry_key": "dnd-5e|class|phb|phb-class-wizard",
+                        "entry_type": "class",
+                        "title": "Wizard",
+                        "slug": "phb-class-wizard",
+                        "source_id": "PHB",
+                    },
+                    "level": 3,
+                    "caster_progression": "full",
+                    "spell_mode": "wizard",
+                    "spellcasting_ability": "Intelligence",
+                    "spell_save_dc": 14,
+                    "spell_attack_bonus": 6,
+                },
+                {
+                    "class_row_id": "class-row-2",
+                    "class_name": "Cleric",
+                    "class_ref": {
+                        "entry_key": "dnd-5e|class|phb|phb-class-cleric",
+                        "entry_type": "class",
+                        "title": "Cleric",
+                        "slug": "phb-class-cleric",
+                        "source_id": "PHB",
+                    },
+                    "level": 3,
+                    "caster_progression": "full",
+                    "spell_mode": "prepared",
+                    "spellcasting_ability": "Wisdom",
+                    "spell_save_dc": 13,
+                    "spell_attack_bonus": 5,
+                },
+            ],
+            "spells": [
+                {
+                    **_spell_payload(spell_entries["phb-spell-detect-magic"], source="Wizard", mark="O"),
+                    "class_row_id": "class-row-1",
+                },
+                {
+                    **_spell_payload(spell_entries["phb-spell-bless"], source="Cleric", mark="P"),
+                    "class_row_id": "class-row-2",
+                },
+            ],
+        }
+
+    _write_character_definition(app, "arden-march", _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    page_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=spellcasting")
+    assert page_response.status_code == 200
+    page_html = page_response.get_data(as_text=True)
+    assert "Multiclass Spellcasting" in page_html
+    assert "Shared spell slots" in page_html
+    assert "Wizard 3" in page_html
+    assert "Cleric 3" in page_html
+
+    search_response = client.get(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/spells/search"
+        "?kind=spell&q=detect&target_class_row_id=class-row-2"
+    )
+    assert search_response.status_code == 200
+    search_payload = search_response.get_json()
+    assert search_payload["message"] == "Found 1 matching spells."
+    assert [result["entry_slug"] for result in search_payload["results"]] == ["phb-spell-detect-magic"]
+
+    add_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/add",
+        data={
+            "expected_revision": str(_character_state_revision(app, "arden-march")),
+            "mode": "read",
+            "page": "spellcasting",
+            "kind": "spell",
+            "selected_value": "phb-spell-detect-magic",
+            "target_class_row_id": "class-row-2",
+        },
+        follow_redirects=False,
+    )
+    assert add_response.status_code == 302
+
+    updated_definition = _read_character_definition(app, "arden-march")
+    detect_magic_rows = [
+        str(spell.get("class_row_id") or "").strip()
+        for spell in list((updated_definition.get("spellcasting") or {}).get("spells") or [])
+        if str(spell.get("name") or "").strip() == "Detect Magic"
+    ]
+    assert detect_magic_rows == ["class-row-1", "class-row-2"]
+
+
 def test_dm_controls_subpage_shows_management_controls(client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 

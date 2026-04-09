@@ -129,6 +129,17 @@
               <h3>Spell Baseline</h3>
               <div class="builder-field-grid">
                 {% for row in repair.spell_rows %}
+                  {% if row.class_row_options|length > 1 %}
+                    <label class="field">
+                      <span>{{ row.name }} Class Row</span>
+                      <select name="{{ row.class_row_field_name }}">
+                        <option value="" {% if not row.class_row_selected %}selected{% endif %}>Choose a class row</option>
+                        {% for option in row.class_row_options %}
+                          <option value="{{ option.value }}" {% if row.class_row_selected == option.value %}selected{% endif %}>{{ option.label }}</option>
+                        {% endfor %}
+                      </select>
+                    </label>
+                  {% endif %}
                   <label class="field">
                     <span>{{ row.name }}</span>
                     <select name="{{ row.field_name }}">
