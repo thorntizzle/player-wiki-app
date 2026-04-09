@@ -258,6 +258,12 @@ def test_player_session_page_preserves_lookup_preview_during_article_load(client
     assert 'previewRoot.setAttribute("aria-busy", isBusy ? "true" : "false");' in session_html
 
 
+def test_session_loading_styles_do_not_dim_live_session_surfaces():
+    css = Path("player_wiki/static/styles.css").read_text(encoding="utf-8")
+
+    assert "session-live-root][data-loading" not in css
+
+
 def test_session_dm_page_preserves_open_article_details_across_live_rerenders(client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 

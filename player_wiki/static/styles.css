@@ -2111,13 +2111,8 @@ button {
   align-content: start;
 }
 
-[data-live-builder-root][data-loading='1'] [data-live-builder-region],
-[data-session-live-root][data-loading='1'] [data-session-status-card],
-[data-session-live-root][data-loading='1'] [data-session-chat-card],
-[data-session-live-root][data-loading='1'] [data-session-controls-root],
-[data-session-live-root][data-loading='1'] [data-session-staged-root],
-[data-session-live-root][data-loading='1'] [data-session-revealed-root],
-[data-session-live-root][data-loading='1'] [data-session-logs-root] {
+/* Root loading dimming is opt-in so steady live polling does not blink whole surfaces. */
+[data-live-loading-dim='1'][data-loading='1'] [data-live-loading-dim-region] {
   opacity: 0.82;
   transition: opacity 120ms ease;
 }

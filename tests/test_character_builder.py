@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 import player_wiki.app as app_module
@@ -12435,6 +12436,12 @@ def test_character_builder_page_renders_top_level_live_preview_metadata(app, cli
     assert 'name="str"' in html
     assert 'data-live-preview-trigger="input"' in html
     assert 'data-live-preview-debounce-ms="350"' in html
+
+
+def test_character_builder_loading_styles_do_not_dim_live_builder_surfaces():
+    css = Path("player_wiki/static/styles.css").read_text(encoding="utf-8")
+
+    assert "live-builder-root][data-loading" not in css
 
 
 def test_character_builder_route_passes_only_builder_relevant_campaign_pages_into_builder(
