@@ -2059,3 +2059,50 @@ def test_converge_imported_definition_does_not_downgrade_native_progression_from
     assert converged.source["native_progression"]["history"][-1]["to_level"] == 4
 
 
+def test_converge_imported_definition_preserves_egw_subclass_ref_identity():
+    existing_definition = _minimal_imported_definition(
+        profile={
+            "class_level_text": "Wizard 3",
+            "class_ref": {"slug": "phb-class-wizard", "title": "Wizard", "entry_type": "class", "source_id": "PHB"},
+            "subclass_ref": {
+                "slug": "egw-subclass-wizard-chronurgy-magic",
+                "title": "Chronurgy Magic",
+                "entry_type": "subclass",
+                "source_id": "EGW",
+            },
+            "species_ref": {"slug": "phb-race-human", "title": "Human", "entry_type": "race", "source_id": "PHB"},
+            "background_ref": {"slug": "phb-background-sage", "title": "Sage", "entry_type": "background", "source_id": "PHB"},
+            "classes": [
+                {
+                    "class_name": "Wizard",
+                    "subclass_name": "Chronurgy Magic",
+                    "level": 3,
+                    "systems_ref": {"slug": "phb-class-wizard", "title": "Wizard", "entry_type": "class", "source_id": "PHB"},
+                    "subclass_ref": {
+                        "slug": "egw-subclass-wizard-chronurgy-magic",
+                        "title": "Chronurgy Magic",
+                        "entry_type": "subclass",
+                        "source_id": "EGW",
+                    },
+                }
+            ],
+        },
+    )
+    incoming_definition = _minimal_imported_definition(
+        profile={
+            "class_level_text": "Wizard 3",
+            "classes": [{"class_name": "Wizard", "subclass_name": "Chronurgy Magic", "level": 3}],
+        },
+    )
+
+    converged = converge_imported_definition(
+        incoming_definition,
+        existing_definition=existing_definition,
+    )
+
+    assert converged.profile["subclass_ref"]["slug"] == "egw-subclass-wizard-chronurgy-magic"
+    assert converged.profile["subclass_ref"]["source_id"] == "EGW"
+    assert converged.profile["classes"][0]["subclass_ref"]["slug"] == "egw-subclass-wizard-chronurgy-magic"
+    assert converged.profile["classes"][0]["subclass_ref"]["source_id"] == "EGW"
+
+

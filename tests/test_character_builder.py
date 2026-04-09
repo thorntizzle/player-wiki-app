@@ -833,6 +833,249 @@ def test_imported_tce_artificer_with_stale_source_locked_refs_repairs_to_tce_ent
     assert repaired_readiness["status"] == "ready"
 
 
+def test_imported_xge_subclass_with_stale_source_locked_ref_repairs_to_xge_entry():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "subclass_title": "Martial Archetype",
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+        source_id="PHB",
+    )
+    phb_arcane_archer = _systems_entry(
+        "subclass",
+        "phb-subclass-fighter-arcane-archer",
+        "Arcane Archer",
+        source_id="PHB",
+        metadata={"class_name": "Fighter", "class_source": "PHB"},
+    )
+    xge_arcane_archer = _systems_entry(
+        "subclass",
+        "xge-subclass-fighter-arcane-archer",
+        "Arcane Archer",
+        source_id="XGE",
+        metadata={"class_name": "Fighter", "class_source": "PHB"},
+    )
+    human = _systems_entry("race", "phb-race-human", "Human", source_id="PHB")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte", source_id="PHB")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "subclass": [phb_arcane_archer, xge_arcane_archer],
+            "race": [human],
+            "background": [acolyte],
+            "spell": [],
+        },
+        class_progression=[{"level": 3, "feature_rows": [{"label": "Martial Archetype"}]}],
+        enabled_source_ids=["PHB", "XGE"],
+    )
+    definition = _minimal_imported_character_definition("xge-archer", "XGE Archer")
+    definition.profile["class_level_text"] = "Fighter 3"
+    definition.profile["classes"][0] = {
+        "class_name": "Fighter",
+        "subclass_name": "Arcane Archer",
+        "level": 3,
+        "systems_ref": {
+            "entry_key": "dnd-5e|class|phb|fighter",
+            "entry_type": "class",
+            "title": "Fighter",
+            "slug": fighter.slug,
+            "source_id": "PHB",
+        },
+        "subclass_ref": {
+            "entry_key": "dnd-5e|subclass|xge|arcane-archer",
+            "entry_type": "subclass",
+            "title": "Arcane Archer",
+            "slug": "stale-xge-subclass-arcane-archer",
+            "source_id": "XGE",
+        },
+    }
+    definition.profile["class_ref"] = dict(definition.profile["classes"][0]["systems_ref"])
+    definition.profile["subclass_ref"] = dict(definition.profile["classes"][0]["subclass_ref"])
+    definition.profile["species"] = "Human"
+    definition.profile["species_ref"] = {
+        "entry_key": "dnd-5e|race|phb|human",
+        "entry_type": "race",
+        "title": "Human",
+        "slug": human.slug,
+        "source_id": "PHB",
+    }
+    definition.profile["background"] = "Acolyte"
+    definition.profile["background_ref"] = {
+        "entry_key": "dnd-5e|background|phb|acolyte",
+        "entry_type": "background",
+        "title": "Acolyte",
+        "slug": acolyte.slug,
+        "source_id": "PHB",
+    }
+    import_metadata = CharacterImportMetadata(
+        campaign_slug="linden-pass",
+        character_slug=definition.character_slug,
+        source_path="imports://xge-archer.md",
+        imported_at_utc="2026-04-08T00:00:00Z",
+        parser_version="fixture",
+        import_status="clean",
+        warnings=[],
+    )
+
+    readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
+
+    assert readiness["status"] == "repairable"
+    assert readiness["selected_subclass"].slug == xge_arcane_archer.slug
+    assert readiness["selected_subclass"].source_id == "XGE"
+    assert any("XGE Martial Archetype link" in reason for reason in readiness["reasons"])
+
+    repair_context = build_imported_progression_repair_context(
+        systems_service,
+        "linden-pass",
+        definition,
+    )
+
+    assert repair_context["values"]["repair_subclass_slug"] == f"systems:{xge_arcane_archer.slug}"
+
+    repaired_definition, _ = apply_imported_progression_repairs(
+        "linden-pass",
+        definition,
+        import_metadata,
+        repair_context,
+        repair_context["values"],
+    )
+    repaired_readiness = native_level_up_readiness(systems_service, "linden-pass", repaired_definition)
+
+    assert repaired_definition.profile["subclass_ref"]["slug"] == xge_arcane_archer.slug
+    assert repaired_definition.profile["subclass_ref"]["source_id"] == "XGE"
+    assert repaired_readiness["status"] == "ready"
+
+
+def test_imported_egw_subclass_with_stale_source_locked_ref_repairs_to_egw_entry():
+    wizard = _systems_entry(
+        "class",
+        "phb-class-wizard",
+        "Wizard",
+        metadata={
+            "hit_die": {"faces": 6},
+            "proficiency": ["int", "wis"],
+            "subclass_title": "Arcane Tradition",
+            "starting_proficiencies": {
+                "weapons": ["dagger", "dart", "sling", "quarterstaff", "light crossbow"],
+                "skills": [{"choose": {"count": 2, "from": ["arcana", "history", "insight", "investigation"]}}],
+            },
+        },
+        source_id="PHB",
+    )
+    phb_chronurgy = _systems_entry(
+        "subclass",
+        "phb-subclass-wizard-chronurgy-magic",
+        "Chronurgy Magic",
+        source_id="PHB",
+        metadata={"class_name": "Wizard", "class_source": "PHB"},
+    )
+    egw_chronurgy = _systems_entry(
+        "subclass",
+        "egw-subclass-wizard-chronurgy-magic",
+        "Chronurgy Magic",
+        source_id="EGW",
+        metadata={"class_name": "Wizard", "class_source": "PHB"},
+    )
+    human = _systems_entry("race", "phb-race-human", "Human", source_id="PHB")
+    sage = _systems_entry("background", "phb-background-sage", "Sage", source_id="PHB")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [wizard],
+            "subclass": [phb_chronurgy, egw_chronurgy],
+            "race": [human],
+            "background": [sage],
+            "spell": [],
+        },
+        class_progression=[{"level": 2, "feature_rows": [{"label": "Arcane Tradition"}]}],
+        enabled_source_ids=["PHB", "EGW"],
+    )
+    definition = _minimal_imported_character_definition("egw-chronurgist", "EGW Chronurgist")
+    definition.profile["class_level_text"] = "Wizard 2"
+    definition.profile["classes"][0] = {
+        "class_name": "Wizard",
+        "subclass_name": "Chronurgy Magic",
+        "level": 2,
+        "systems_ref": {
+            "entry_key": "dnd-5e|class|phb|wizard",
+            "entry_type": "class",
+            "title": "Wizard",
+            "slug": wizard.slug,
+            "source_id": "PHB",
+        },
+        "subclass_ref": {
+            "entry_key": "dnd-5e|subclass|egw|chronurgy-magic",
+            "entry_type": "subclass",
+            "title": "Chronurgy Magic",
+            "slug": "stale-egw-subclass-chronurgy-magic",
+            "source_id": "EGW",
+        },
+    }
+    definition.profile["class_ref"] = dict(definition.profile["classes"][0]["systems_ref"])
+    definition.profile["subclass_ref"] = dict(definition.profile["classes"][0]["subclass_ref"])
+    definition.profile["species"] = "Human"
+    definition.profile["species_ref"] = {
+        "entry_key": "dnd-5e|race|phb|human",
+        "entry_type": "race",
+        "title": "Human",
+        "slug": human.slug,
+        "source_id": "PHB",
+    }
+    definition.profile["background"] = "Sage"
+    definition.profile["background_ref"] = {
+        "entry_key": "dnd-5e|background|phb|sage",
+        "entry_type": "background",
+        "title": "Sage",
+        "slug": sage.slug,
+        "source_id": "PHB",
+    }
+    import_metadata = CharacterImportMetadata(
+        campaign_slug="linden-pass",
+        character_slug=definition.character_slug,
+        source_path="imports://egw-chronurgist.md",
+        imported_at_utc="2026-04-08T00:00:00Z",
+        parser_version="fixture",
+        import_status="clean",
+        warnings=[],
+    )
+
+    readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
+
+    assert readiness["status"] == "repairable"
+    assert readiness["selected_subclass"].slug == egw_chronurgy.slug
+    assert readiness["selected_subclass"].source_id == "EGW"
+    assert any("EGW Arcane Tradition link" in reason for reason in readiness["reasons"])
+
+    repair_context = build_imported_progression_repair_context(
+        systems_service,
+        "linden-pass",
+        definition,
+    )
+
+    assert repair_context["values"]["repair_subclass_slug"] == f"systems:{egw_chronurgy.slug}"
+
+    repaired_definition, _ = apply_imported_progression_repairs(
+        "linden-pass",
+        definition,
+        import_metadata,
+        repair_context,
+        repair_context["values"],
+    )
+    repaired_readiness = native_level_up_readiness(systems_service, "linden-pass", repaired_definition)
+
+    assert repaired_definition.profile["subclass_ref"]["slug"] == egw_chronurgy.slug
+    assert repaired_definition.profile["subclass_ref"]["source_id"] == "EGW"
+    assert repaired_readiness["status"] == "ready"
+
+
 def test_imported_progression_repair_can_restore_refs_and_add_prior_feature_links():
     fighter = _systems_entry(
         "class",
@@ -3748,6 +3991,87 @@ def test_normalize_definition_to_native_model_uses_source_locked_tce_species_res
 
     assert normalized.stats["speed"] == "35 ft."
     assert normalized.spellcasting["spellcasting_class"] == "Artificer"
+
+
+def test_normalize_definition_to_native_model_uses_source_locked_scag_species_resolution():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "proficiency": ["str", "con"]},
+        source_id="PHB",
+    )
+    phb_human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+        source_id="PHB",
+    )
+    scag_human = _systems_entry(
+        "race",
+        "scag-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 40, "languages": [{"common": True}]},
+        source_id="SCAG",
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+        source_id="PHB",
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [phb_human, scag_human],
+            "background": [acolyte],
+            "subclass": [],
+            "spell": [],
+        },
+        class_progression=[],
+        enabled_source_ids=["PHB", "SCAG"],
+    )
+    definition = _minimal_imported_character_definition("scag-source-locked", "SCAG Source Locked")
+    definition.profile["class_level_text"] = "Fighter 1"
+    definition.profile["classes"][0] = {
+        "class_name": "Fighter",
+        "subclass_name": "",
+        "level": 1,
+        "systems_ref": {
+            "entry_key": "dnd-5e|class|phb|fighter",
+            "entry_type": "class",
+            "title": "Fighter",
+            "slug": fighter.slug,
+            "source_id": "PHB",
+        },
+    }
+    definition.profile["class_ref"] = dict(definition.profile["classes"][0]["systems_ref"])
+    definition.profile.pop("subclass_ref", None)
+    definition.profile["species"] = "Human"
+    definition.profile["species_ref"] = {
+        "entry_key": "dnd-5e|race|scag|human",
+        "entry_type": "race",
+        "title": "Human",
+        "slug": "stale-scag-race-human",
+        "source_id": "SCAG",
+    }
+    definition.profile["background"] = "Acolyte"
+    definition.profile["background_ref"] = {
+        "entry_key": "dnd-5e|background|phb|acolyte",
+        "entry_type": "background",
+        "title": "Acolyte",
+        "slug": acolyte.slug,
+        "source_id": "PHB",
+    }
+
+    normalized = normalize_definition_to_native_model(
+        definition,
+        systems_service=systems_service,
+    )
+
+    assert normalized.stats["speed"] == "40 ft."
 
 
 def test_normalize_definition_to_native_model_applies_structured_save_bonus_effect_keys_without_false_proficiency():

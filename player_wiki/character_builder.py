@@ -21,7 +21,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-04-08.06"
+CHARACTER_BUILDER_VERSION = "2026-04-08.07"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -37,6 +37,8 @@ PROFILE_ENTRY_MATCH_FALLBACK_TITLE = "fallback_title"
 PROFILE_ENTRY_MATCH_UNRESOLVED_SOURCE_LOCKED = "unresolved_source_locked"
 PROFILE_ENTRY_MATCH_UNRESOLVED = "unresolved"
 TCE_FIRST_NATIVE_CLASS_KEYS = frozenset({("TCE", "artificer")})
+NATIVE_SOURCE_MATRIX_NON_PHB_SOURCE_IDS = frozenset({"TCE", "SCAG", "XGE", "EGW"})
+NATIVE_SOURCE_MATRIX_SUBCLASS_ENTRY_TYPES = frozenset({"subclass", "subclassfeature"})
 IMPORTED_CHARACTER_SOURCE_TYPES = frozenset({"markdown_character_sheet", "pdf_character_sheet_annotations"})
 CAMPAIGN_FEATURE_CHOICE_SLOTS = 2
 CAMPAIGN_ITEM_CHOICE_SLOTS = 3
@@ -918,7 +920,7 @@ def native_level_up_readiness(
     selected_enabled_class = selected_enabled_class_match.get("entry")
     if selected_enabled_class is not None and not _supports_native_class_entry(selected_enabled_class):
         character_label = "imported" if is_imported else "native"
-        class_policy = _native_non_phb_class_support_policy(selected_enabled_class)
+        class_policy = _native_source_matrix_support_policy(selected_enabled_class)
         policy_reason = str(class_policy.get("reason") or "").strip()
         if policy_reason:
             message = f"This {character_label} character's base class is outside the current native support lane."
@@ -969,25 +971,39 @@ def native_level_up_readiness(
 
     repair_reasons: list[str] = []
     if selected_class is None:
-        repair_reasons.append("Choose a supported base class link for this character.")
+        repair_reasons.append(
+            f"Choose a supported {_profile_link_subject('base class', systems_ref=profile_class_ref or class_row_ref)} link for this character."
+        )
     elif is_imported:
         if _profile_entry_match_needs_confirmation(selected_class_match):
-            repair_reasons.append("Confirm the supported base class link on the character profile before leveling up.")
+            repair_reasons.append(
+                f"Confirm the supported {_profile_link_subject('base class', systems_ref=profile_class_ref or class_row_ref, entry=selected_class)} link on the character profile before leveling up."
+            )
         class_row_match = _resolve_profile_entry_match(
             enabled_class_options,
             class_row_ref,
             fallback_title=str(class_payload.get("class_name") or _native_character_class_name(definition) or "").strip(),
         )
         if _profile_entry_match_needs_confirmation(class_row_match) or not _systems_ref_slug(class_row_ref):
-            repair_reasons.append("Confirm the class row link so native level-up can extend the imported class baseline cleanly.")
+            repair_reasons.append(
+                f"Confirm the {_profile_link_subject('class row', systems_ref=class_row_ref, entry=selected_class)} link so native level-up can extend the imported class baseline cleanly."
+            )
     if selected_species is None:
-        repair_reasons.append("Choose a species link that the native level-up flow can resolve.")
+        repair_reasons.append(
+            f"Choose a {_profile_link_subject('species', systems_ref=definition.profile.get('species_ref'))} link that the native level-up flow can resolve."
+        )
     elif is_imported and _profile_entry_match_needs_confirmation(selected_species_match):
-        repair_reasons.append("Confirm the species link so native level-up can keep using the imported baseline.")
+        repair_reasons.append(
+            f"Confirm the {_profile_link_subject('species', systems_ref=definition.profile.get('species_ref'), entry=selected_species)} link so native level-up can keep using the imported baseline."
+        )
     if selected_background is None:
-        repair_reasons.append("Choose a background link that the native level-up flow can resolve.")
+        repair_reasons.append(
+            f"Choose a {_profile_link_subject('background', systems_ref=definition.profile.get('background_ref'))} link that the native level-up flow can resolve."
+        )
     elif is_imported and _profile_entry_match_needs_confirmation(selected_background_match):
-        repair_reasons.append("Confirm the background link so native level-up can keep using the imported baseline.")
+        repair_reasons.append(
+            f"Confirm the {_profile_link_subject('background', systems_ref=definition.profile.get('background_ref'), entry=selected_background)} link so native level-up can keep using the imported baseline."
+        )
 
     subclass_options: list[SystemsEntryRecord] = []
     selected_subclass: SystemsEntryRecord | None = None
@@ -1000,18 +1016,20 @@ def native_level_up_readiness(
         )
         selected_subclass = selected_subclass_match.get("entry")
         class_progression = systems_service.build_class_feature_progression_for_class_entry(campaign_slug, selected_class)
+        subclass_label = str(selected_class.metadata.get("subclass_title") or "subclass").strip() or "subclass"
+        subclass_subject = _profile_link_subject(
+            subclass_label,
+            systems_ref=definition.profile.get("subclass_ref") or dict((classes[0] or {}).get("subclass_ref") or {}),
+            entry=selected_subclass,
+        )
         if _class_requires_subclass_at_level(selected_class, class_progression, current_level) and selected_subclass is None:
-            repair_reasons.append(
-                f"Choose a {str(selected_class.metadata.get('subclass_title') or 'subclass').strip() or 'subclass'} link before leveling up."
-            )
+            repair_reasons.append(f"Choose a {subclass_subject} link before leveling up.")
         elif (
             is_imported
             and _class_requires_subclass_at_level(selected_class, class_progression, current_level)
             and _profile_entry_match_needs_confirmation(selected_subclass_match)
         ):
-            repair_reasons.append(
-                f"Confirm the {str(selected_class.metadata.get('subclass_title') or 'subclass').strip() or 'subclass'} link before leveling up."
-            )
+            repair_reasons.append(f"Confirm the {subclass_subject} link before leveling up.")
 
     spell_repair_rows: list[dict[str, Any]] = []
     if is_imported and selected_class is not None:
@@ -1669,12 +1687,41 @@ def build_imported_progression_repair_context(
         kind="feat",
     )
     optionalfeature_options = list(_list_campaign_enabled_entries(systems_service, campaign_slug, "optionalfeature"))
+    classes = [dict(row or {}) for row in list((definition.profile or {}).get("classes") or [])]
+    class_payload = dict(classes[0] or {}) if classes else {}
 
-    selected_class = _resolve_profile_entry(
-        class_options,
-        definition.profile.get("class_ref"),
-        fallback_title=_native_character_class_name(definition),
+    selected_class = readiness.get("selected_class") if isinstance(readiness.get("selected_class"), SystemsEntryRecord) else None
+    if selected_class is None:
+        selected_class = _resolve_profile_entry(
+            class_options,
+            definition.profile.get("class_ref") or class_payload.get("systems_ref"),
+            fallback_title=_native_character_class_name(definition),
+        )
+    selected_species = readiness.get("selected_species") if isinstance(readiness.get("selected_species"), SystemsEntryRecord) else None
+    if selected_species is None:
+        selected_species = _resolve_profile_entry(
+            species_options,
+            definition.profile.get("species_ref"),
+            page_ref=definition.profile.get("species_page_ref"),
+            fallback_title=str(definition.profile.get("species") or "").strip(),
+        )
+    selected_background = (
+        readiness.get("selected_background") if isinstance(readiness.get("selected_background"), SystemsEntryRecord) else None
     )
+    if selected_background is None:
+        selected_background = _resolve_profile_entry(
+            background_options,
+            definition.profile.get("background_ref"),
+            page_ref=definition.profile.get("background_page_ref"),
+            fallback_title=str(definition.profile.get("background") or "").strip(),
+        )
+    selected_subclass = readiness.get("selected_subclass") if isinstance(readiness.get("selected_subclass"), SystemsEntryRecord) else None
+    if selected_subclass is None and selected_class is not None:
+        selected_subclass = _resolve_profile_entry(
+            _list_subclass_options(systems_service, campaign_slug, selected_class),
+            definition.profile.get("subclass_ref") or class_payload.get("subclass_ref"),
+            fallback_title=_native_character_subclass_name(definition),
+        )
 
     values.setdefault(
         "repair_class_slug",
@@ -1682,39 +1729,19 @@ def build_imported_progression_repair_context(
     )
     values.setdefault(
         "repair_species_slug",
-        _entry_selection_value(
-            _resolve_profile_entry(
-                species_options,
-                definition.profile.get("species_ref"),
-                page_ref=definition.profile.get("species_page_ref"),
-                fallback_title=str(definition.profile.get("species") or "").strip(),
-            )
-        )
+        _entry_selection_value(selected_species)
         if species_options
         else "",
     )
     values.setdefault(
         "repair_background_slug",
-        _entry_selection_value(
-            _resolve_profile_entry(
-                background_options,
-                definition.profile.get("background_ref"),
-                page_ref=definition.profile.get("background_page_ref"),
-                fallback_title=str(definition.profile.get("background") or "").strip(),
-            )
-        )
+        _entry_selection_value(selected_background)
         if background_options
         else "",
     )
     values.setdefault(
         "repair_subclass_slug",
-        _entry_selection_value(
-            _resolve_profile_entry(
-                _list_subclass_options(systems_service, campaign_slug, selected_class) if selected_class is not None else [],
-                definition.profile.get("subclass_ref") or dict((definition.profile.get("classes") or [{}])[0].get("subclass_ref") or {}),
-                fallback_title=_native_character_subclass_name(definition),
-            )
-        )
+        _entry_selection_value(selected_subclass)
         if selected_class is not None
         else "",
     )
@@ -2138,6 +2165,31 @@ def _list_supported_class_entries(
     return list(static_bundle.get("supported_class_entries") or [])
 
 
+def _native_entry_type(entry: SystemsEntryRecord | None) -> str:
+    if not isinstance(entry, SystemsEntryRecord):
+        return ""
+    return str(entry.entry_type or "").strip().lower()
+
+
+def _native_source_matrix_label(source_id: str) -> str:
+    normalized_source_id = str(source_id or "").strip().upper()
+    return normalized_source_id or "non-PHB"
+
+
+def _native_base_class_identity_supported(
+    *,
+    class_name: str,
+    class_source: str,
+) -> bool:
+    normalized_class_name = normalize_lookup(str(class_name or "").strip())
+    normalized_class_source = str(class_source or "").strip().upper()
+    if not normalized_class_name or not normalized_class_source:
+        return False
+    if normalized_class_source == PHB_SOURCE_ID:
+        return True
+    return (normalized_class_source, normalized_class_name) in TCE_FIRST_NATIVE_CLASS_KEYS
+
+
 def _native_non_phb_class_support_policy(entry: SystemsEntryRecord | None) -> dict[str, str]:
     if not isinstance(entry, SystemsEntryRecord):
         return {
@@ -2153,22 +2205,84 @@ def _native_non_phb_class_support_policy(entry: SystemsEntryRecord | None) -> di
     if (source_id, normalized_title) in TCE_FIRST_NATIVE_CLASS_KEYS:
         return {"status": NATIVE_CLASS_SUPPORT_SUPPORTED, "reason": ""}
 
-    if source_id == "TCE":
-        return {
-            "status": NATIVE_CLASS_SUPPORT_BLOCKED,
-            "reason": "This TCE class is outside the current TCE-first native support lane.",
-        }
-
     return {
         "status": NATIVE_CLASS_SUPPORT_BLOCKED,
-        "reason": "This non-PHB class is outside the current TCE-first native support lane.",
+        "reason": f"This {_native_source_matrix_label(source_id)} class is outside the current native base-class support lane.",
     }
+
+
+def _native_subclass_support_policy(
+    entry: SystemsEntryRecord | None,
+    *,
+    selected_class: SystemsEntryRecord | None = None,
+) -> dict[str, str]:
+    if not isinstance(entry, SystemsEntryRecord):
+        return {
+            "status": NATIVE_CLASS_SUPPORT_BLOCKED,
+            "reason": "This subclass is missing the Systems entry needed for the current native progression flow.",
+        }
+
+    source_id = str(entry.source_id or "").strip().upper()
+    source_label = _native_source_matrix_label(source_id)
+    if source_id and source_id not in ({PHB_SOURCE_ID} | NATIVE_SOURCE_MATRIX_NON_PHB_SOURCE_IDS):
+        return {
+            "status": NATIVE_CLASS_SUPPORT_BLOCKED,
+            "reason": f"This {source_label} subclass is outside the current native source matrix.",
+        }
+
+    metadata = dict(entry.metadata or {})
+    class_name = str(metadata.get("class_name") or "").strip()
+    class_source = str(metadata.get("class_source") or "").strip().upper()
+    if not class_name and isinstance(selected_class, SystemsEntryRecord):
+        class_name = str(selected_class.title or "").strip()
+    if not class_source and isinstance(selected_class, SystemsEntryRecord):
+        class_source = str(selected_class.source_id or "").strip().upper()
+
+    if not class_name or not class_source:
+        return {
+            "status": NATIVE_CLASS_SUPPORT_BLOCKED,
+            "reason": f"This {source_label} subclass is missing the base-class metadata needed for native progression.",
+        }
+
+    if not _native_base_class_identity_supported(class_name=class_name, class_source=class_source):
+        return {
+            "status": NATIVE_CLASS_SUPPORT_BLOCKED,
+            "reason": f"This {source_label} subclass attaches to a base class outside the current native base-class support lane.",
+        }
+
+    if isinstance(selected_class, SystemsEntryRecord):
+        selected_class_name = normalize_lookup(str(selected_class.title or "").strip())
+        if selected_class_name != normalize_lookup(class_name) or str(selected_class.source_id or "").strip().upper() != class_source:
+            return {
+                "status": NATIVE_CLASS_SUPPORT_BLOCKED,
+                "reason": f"This {source_label} subclass does not match the supported base class on this character.",
+            }
+
+    return {"status": NATIVE_CLASS_SUPPORT_SUPPORTED, "reason": ""}
+
+
+def _native_source_matrix_support_policy(
+    entry: SystemsEntryRecord | None,
+    *,
+    selected_class: SystemsEntryRecord | None = None,
+) -> dict[str, str]:
+    if not isinstance(entry, SystemsEntryRecord):
+        return {
+            "status": NATIVE_CLASS_SUPPORT_BLOCKED,
+            "reason": "This entry is missing the Systems row needed for the current native progression flow.",
+        }
+    entry_type = _native_entry_type(entry)
+    if entry_type == "class":
+        return _native_non_phb_class_support_policy(entry)
+    if entry_type in NATIVE_SOURCE_MATRIX_SUBCLASS_ENTRY_TYPES:
+        return _native_subclass_support_policy(entry, selected_class=selected_class)
+    return {"status": NATIVE_CLASS_SUPPORT_SUPPORTED, "reason": ""}
 
 
 def _supports_native_class_entry(entry: SystemsEntryRecord | None) -> bool:
     if not isinstance(entry, SystemsEntryRecord):
         return False
-    policy = _native_non_phb_class_support_policy(entry)
+    policy = _native_source_matrix_support_policy(entry)
     if str(policy.get("status") or "").strip() != NATIVE_CLASS_SUPPORT_SUPPORTED:
         return False
     metadata = dict(entry.metadata or {})
@@ -2191,6 +2305,15 @@ def _supports_native_class_entry(entry: SystemsEntryRecord | None) -> bool:
             "slot_progression",
         )
     )
+
+
+def _supports_native_subclass_entry(
+    entry: SystemsEntryRecord | None,
+    *,
+    selected_class: SystemsEntryRecord | None = None,
+) -> bool:
+    policy = _native_source_matrix_support_policy(entry, selected_class=selected_class)
+    return str(policy.get("status") or "").strip() == NATIVE_CLASS_SUPPORT_SUPPORTED
 
 
 def _list_campaign_enabled_entries(
@@ -2263,6 +2386,7 @@ def _list_subclass_options(
         for entry in options
         if str(entry.metadata.get("class_name") or "").strip() == selected_class.title
         and str(entry.metadata.get("class_source") or "").strip().upper() == selected_class.source_id
+        and _supports_native_subclass_entry(entry, selected_class=selected_class)
     ]
 
 
@@ -2519,6 +2643,27 @@ def _systems_ref_title(payload: Any) -> str:
     if not isinstance(payload, dict):
         return ""
     return str(payload.get("title") or "").strip()
+
+
+def _profile_link_source_prefix(
+    *,
+    systems_ref: Any = None,
+    entry: Any = None,
+) -> str:
+    source_id = _systems_ref_source_id(systems_ref) or str(_entry_option_source_id(entry) or "").strip().upper()
+    if source_id not in NATIVE_SOURCE_MATRIX_NON_PHB_SOURCE_IDS:
+        return ""
+    return f"{source_id} "
+
+
+def _profile_link_subject(
+    label: str,
+    *,
+    systems_ref: Any = None,
+    entry: Any = None,
+) -> str:
+    clean_label = str(label or "").strip() or "link"
+    return f"{_profile_link_source_prefix(systems_ref=systems_ref, entry=entry)}{clean_label}"
 
 
 def _resolve_profile_entry_match(
