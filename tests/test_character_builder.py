@@ -551,7 +551,7 @@ def test_imported_character_with_unsupported_enabled_class_is_blocked():
     readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
 
     assert readiness["status"] == "unsupported"
-    assert "progression metadata" in readiness["message"].lower()
+    assert "native support lane" in readiness["message"].lower()
 
 
 def test_imported_artificer_with_stale_enabled_class_metadata_uses_reference_progression():
@@ -667,6 +667,170 @@ def test_imported_artificer_with_stale_enabled_class_metadata_uses_reference_pro
         for section in level_up_context["choice_sections"]
         for field in section["fields"]
     )
+
+
+def test_imported_tce_artificer_with_stale_source_locked_refs_repairs_to_tce_entries():
+    artificer = _systems_entry(
+        "class",
+        "tce-class-artificer",
+        "Artificer",
+        source_id="TCE",
+        metadata={
+            "hit_die": {"faces": 8},
+            "proficiency": ["con", "int"],
+            "subclass_title": "Artificer Specialist",
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "shield"],
+                "weapons": ["simple"],
+                "tools": ["thieves' tools", "tinker's tools"],
+                "skills": [{"choose": {"count": 2, "from": ["arcana", "history", "investigation", "medicine"]}}],
+            },
+        },
+    )
+    phb_human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+        source_id="PHB",
+    )
+    tce_human = _systems_entry(
+        "race",
+        "tce-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 35, "languages": [{"common": True}]},
+        source_id="TCE",
+    )
+    phb_sage = _systems_entry("background", "phb-background-sage", "Sage", source_id="PHB")
+    tce_sage = _systems_entry("background", "tce-background-sage", "Sage", source_id="TCE")
+    phb_armorer = _systems_entry(
+        "subclass",
+        "phb-subclass-armorer-artificer-tce",
+        "Armorer",
+        source_id="PHB",
+        metadata={"class_name": "Artificer", "class_source": "TCE"},
+    )
+    tce_armorer = _systems_entry(
+        "subclass",
+        "tce-subclass-armorer-artificer-tce",
+        "Armorer",
+        source_id="TCE",
+        metadata={"class_name": "Artificer", "class_source": "TCE"},
+    )
+    cure_wounds = _systems_entry(
+        "spell",
+        "phb-spell-cure-wounds",
+        "Cure Wounds",
+        metadata={"level": 1, "class_lists": {"TCE": ["Artificer"]}},
+        source_id="PHB",
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [artificer],
+            "subclass": [phb_armorer, tce_armorer],
+            "race": [phb_human, tce_human],
+            "background": [phb_sage, tce_sage],
+            "spell": [cure_wounds],
+        },
+        class_progression=[{"level": 3, "feature_rows": [{"label": "Artificer Specialist"}]}],
+        enabled_source_ids=["PHB", "TCE"],
+    )
+    definition = _minimal_imported_character_definition("artificer-repair", "Artificer Repair")
+    definition.profile["class_level_text"] = "Artificer 5"
+    definition.profile["classes"][0] = {
+        "class_name": "Artificer",
+        "subclass_name": "Armorer",
+        "level": 5,
+        "systems_ref": {
+            "entry_key": "dnd-5e|class|tce|artificer",
+            "entry_type": "class",
+            "title": "Artificer",
+            "slug": "stale-tce-class-artificer",
+            "source_id": "TCE",
+        },
+        "subclass_ref": {
+            "entry_key": "dnd-5e|subclass|tce|armorer-artificer-tce",
+            "entry_type": "subclass",
+            "title": "Armorer",
+            "slug": "stale-tce-subclass-armorer",
+            "source_id": "TCE",
+        },
+    }
+    definition.profile["class_ref"] = dict(definition.profile["classes"][0]["systems_ref"])
+    definition.profile["subclass_ref"] = dict(definition.profile["classes"][0]["subclass_ref"])
+    definition.profile["species"] = "Human"
+    definition.profile["species_ref"] = {
+        "entry_key": "dnd-5e|race|tce|human",
+        "entry_type": "race",
+        "title": "Human",
+        "slug": "stale-tce-race-human",
+        "source_id": "TCE",
+    }
+    definition.profile["background"] = "Sage"
+    definition.profile["background_ref"] = {
+        "entry_key": "dnd-5e|background|tce|sage",
+        "entry_type": "background",
+        "title": "Sage",
+        "slug": "stale-tce-background-sage",
+        "source_id": "TCE",
+    }
+    definition.stats["ability_scores"]["int"] = {"score": 16, "modifier": 3, "save_bonus": 3}
+    import_metadata = CharacterImportMetadata(
+        campaign_slug="linden-pass",
+        character_slug=definition.character_slug,
+        source_path="imports://artificer-repair.md",
+        imported_at_utc="2026-04-08T00:00:00Z",
+        parser_version="fixture",
+        import_status="clean",
+        warnings=[],
+    )
+
+    readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
+
+    assert readiness["status"] == "repairable"
+    assert readiness["selected_class"].slug == artificer.slug
+    assert readiness["selected_class"].source_id == "TCE"
+    assert readiness["selected_species"].slug == tce_human.slug
+    assert readiness["selected_species"].source_id == "TCE"
+    assert readiness["selected_background"].slug == tce_sage.slug
+    assert readiness["selected_background"].source_id == "TCE"
+    assert readiness["selected_subclass"].slug == tce_armorer.slug
+    assert readiness["selected_subclass"].source_id == "TCE"
+    assert any("base class link" in reason for reason in readiness["reasons"])
+    assert any("class row link" in reason for reason in readiness["reasons"])
+    assert any("species link" in reason for reason in readiness["reasons"])
+    assert any("background link" in reason for reason in readiness["reasons"])
+
+    repair_context = build_imported_progression_repair_context(
+        systems_service,
+        "linden-pass",
+        definition,
+    )
+
+    assert repair_context["values"]["repair_class_slug"] == f"systems:{artificer.slug}"
+    assert repair_context["values"]["repair_species_slug"] == f"systems:{tce_human.slug}"
+    assert repair_context["values"]["repair_background_slug"] == f"systems:{tce_sage.slug}"
+    assert repair_context["values"]["repair_subclass_slug"] == f"systems:{tce_armorer.slug}"
+
+    repaired_definition, _ = apply_imported_progression_repairs(
+        "linden-pass",
+        definition,
+        import_metadata,
+        repair_context,
+        repair_context["values"],
+    )
+    repaired_readiness = native_level_up_readiness(systems_service, "linden-pass", repaired_definition)
+
+    assert repaired_definition.profile["class_ref"]["slug"] == artificer.slug
+    assert repaired_definition.profile["class_ref"]["source_id"] == "TCE"
+    assert repaired_definition.profile["classes"][0]["systems_ref"]["slug"] == artificer.slug
+    assert repaired_definition.profile["species_ref"]["slug"] == tce_human.slug
+    assert repaired_definition.profile["species_ref"]["source_id"] == "TCE"
+    assert repaired_definition.profile["background_ref"]["slug"] == tce_sage.slug
+    assert repaired_definition.profile["background_ref"]["source_id"] == "TCE"
+    assert repaired_definition.profile["subclass_ref"]["slug"] == tce_armorer.slug
+    assert repaired_definition.profile["subclass_ref"]["source_id"] == "TCE"
+    assert repaired_readiness["status"] == "ready"
 
 
 def test_imported_progression_repair_can_restore_refs_and_add_prior_feature_links():
@@ -2720,6 +2884,90 @@ def test_level_one_builder_limits_mixed_source_page_options_to_structured_mechan
     assert not any("Blessing of the Tide" in label for label in feat_labels)
 
 
+def test_level_one_builder_keeps_non_artificer_tce_classes_outside_tce_first_support_lane():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+        source_id="PHB",
+    )
+    swordmage = _systems_entry(
+        "class",
+        "tce-class-swordmage",
+        "Swordmage",
+        metadata={
+            "hit_die": {"faces": 8},
+            "proficiency": ["con", "int"],
+            "spellcasting_ability": "int",
+            "cantrip_progression": [2, 2],
+            "slot_progression": [[{"level": 1, "max_slots": 2}], [{"level": 1, "max_slots": 2}]],
+        },
+        source_id="TCE",
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+        source_id="PHB",
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+        source_id="PHB",
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter, swordmage],
+            "race": [human],
+            "background": [acolyte],
+            "subclass": [],
+            "feat": [],
+            "optionalfeature": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[],
+        enabled_source_ids=["PHB", "TCE"],
+    )
+
+    context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        {
+            "name": "Lane Guard",
+            "character_slug": "lane-guard",
+            "alignment": "Neutral",
+            "experience_model": "Milestone",
+            "class_slug": fighter.slug,
+            "species_slug": human.slug,
+            "background_slug": acolyte.slug,
+            "class_skill_1": "athletics",
+            "class_skill_2": "history",
+            "str": "16",
+            "dex": "12",
+            "con": "14",
+            "int": "10",
+            "wis": "11",
+            "cha": "8",
+        },
+    )
+
+    assert any(option["slug"] == fighter.slug for option in context["class_options"])
+    assert all(option["slug"] != swordmage.slug for option in context["class_options"])
+
+
 def test_level_one_builder_supports_enabled_non_phb_species_background_feat_and_subclass_options():
     fighter = _systems_entry(
         "class",
@@ -3418,6 +3666,88 @@ def test_normalize_definition_to_native_model_applies_structured_effect_keys_to_
     assert normalized.stats["passive_investigation"] == 11
     assert normalized.stats["initiative_bonus"] == 3
     assert normalized.stats["speed"] == "35 ft."
+
+
+def test_normalize_definition_to_native_model_uses_source_locked_tce_species_resolution():
+    artificer = _systems_entry(
+        "class",
+        "tce-class-artificer",
+        "Artificer",
+        metadata={"hit_die": {"faces": 8}, "proficiency": ["con", "int"]},
+        source_id="TCE",
+    )
+    phb_human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+        source_id="PHB",
+    )
+    tce_human = _systems_entry(
+        "race",
+        "tce-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 35, "languages": [{"common": True}]},
+        source_id="TCE",
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+        source_id="PHB",
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [artificer],
+            "race": [phb_human, tce_human],
+            "background": [acolyte],
+            "subclass": [],
+            "spell": [],
+        },
+        class_progression=[],
+        enabled_source_ids=["PHB", "TCE"],
+    )
+    definition = _minimal_imported_character_definition("source-locked", "Source Locked")
+    definition.profile["class_level_text"] = "Artificer 1"
+    definition.profile["classes"][0] = {
+        "class_name": "Artificer",
+        "subclass_name": "",
+        "level": 1,
+        "systems_ref": {
+            "entry_key": "dnd-5e|class|tce|artificer",
+            "entry_type": "class",
+            "title": "Artificer",
+            "slug": "stale-tce-class-artificer",
+            "source_id": "TCE",
+        },
+    }
+    definition.profile["class_ref"] = dict(definition.profile["classes"][0]["systems_ref"])
+    definition.profile.pop("subclass_ref", None)
+    definition.profile["species"] = "Human"
+    definition.profile["species_ref"] = {
+        "entry_key": "dnd-5e|race|tce|human",
+        "entry_type": "race",
+        "title": "Human",
+        "slug": "stale-tce-race-human",
+        "source_id": "TCE",
+    }
+    definition.profile["background"] = "Acolyte"
+    definition.profile["background_ref"] = {
+        "entry_key": "dnd-5e|background|phb|acolyte",
+        "entry_type": "background",
+        "title": "Acolyte",
+        "slug": "phb-background-acolyte",
+        "source_id": "PHB",
+    }
+
+    normalized = normalize_definition_to_native_model(
+        definition,
+        systems_service=systems_service,
+    )
+
+    assert normalized.stats["speed"] == "35 ft."
+    assert normalized.spellcasting["spellcasting_class"] == "Artificer"
 
 
 def test_normalize_definition_to_native_model_applies_structured_save_bonus_effect_keys_without_false_proficiency():

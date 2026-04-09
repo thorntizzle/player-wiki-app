@@ -21,13 +21,22 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-04-08.05"
+CHARACTER_BUILDER_VERSION = "2026-04-08.06"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
 NATIVE_LEVEL_UP_READY = "ready"
 NATIVE_LEVEL_UP_REPAIRABLE = "repairable"
 NATIVE_LEVEL_UP_UNSUPPORTED = "unsupported"
+NATIVE_CLASS_SUPPORT_SUPPORTED = "supported"
+NATIVE_CLASS_SUPPORT_BLOCKED = "blocked"
+PROFILE_ENTRY_MATCH_PAGE_REF = "page_ref"
+PROFILE_ENTRY_MATCH_SYSTEMS_SLUG = "systems_slug"
+PROFILE_ENTRY_MATCH_SYSTEMS_SOURCE_TITLE = "systems_source_title"
+PROFILE_ENTRY_MATCH_FALLBACK_TITLE = "fallback_title"
+PROFILE_ENTRY_MATCH_UNRESOLVED_SOURCE_LOCKED = "unresolved_source_locked"
+PROFILE_ENTRY_MATCH_UNRESOLVED = "unresolved"
+TCE_FIRST_NATIVE_CLASS_KEYS = frozenset({("TCE", "artificer")})
 IMPORTED_CHARACTER_SOURCE_TYPES = frozenset({"markdown_character_sheet", "pdf_character_sheet_annotations"})
 CAMPAIGN_FEATURE_CHOICE_SLOTS = 2
 CAMPAIGN_ITEM_CHOICE_SLOTS = 3
@@ -589,7 +598,7 @@ def build_level_one_builder_context(
         "item_catalog": item_catalog,
         "spell_catalog": spell_catalog,
         "limitations": [
-            "Base classes now come from the campaign's enabled Systems sources when their native progression metadata is available, while older PHB fallback data still covers previously imported local classes.",
+            "Base classes now come from the campaign's enabled Systems sources only when they fall inside the current native support lane and expose the needed progression metadata, while older PHB fallback data still covers previously imported local classes.",
             "Species, backgrounds, and feats can come from either enabled Systems entries or published campaign pages that expose structured character-option metadata.",
             "Published campaign wiki features and items can also be linked in during creation through the optional campaign content fields.",
             "Enter level-1 ability scores after species bonuses. Native feat-driven ability increases are applied automatically.",
@@ -901,22 +910,31 @@ def native_level_up_readiness(
 
     profile_class_ref = definition.profile.get("class_ref")
     class_row_ref = class_payload.get("systems_ref")
-    selected_enabled_class = _resolve_profile_entry(
+    selected_enabled_class_match = _resolve_profile_entry_match(
         enabled_class_options,
         profile_class_ref or class_row_ref,
         fallback_title=_native_character_class_name(definition),
     )
+    selected_enabled_class = selected_enabled_class_match.get("entry")
     if selected_enabled_class is not None and not _supports_native_class_entry(selected_enabled_class):
         character_label = "imported" if is_imported else "native"
-        return {
-            "status": NATIVE_LEVEL_UP_UNSUPPORTED,
-            "message": (
+        class_policy = _native_non_phb_class_support_policy(selected_enabled_class)
+        policy_reason = str(class_policy.get("reason") or "").strip()
+        if policy_reason:
+            message = f"This {character_label} character's base class is outside the current native support lane."
+            reasons = [policy_reason]
+        else:
+            message = (
                 f"This {character_label} character's base class does not yet expose the progression metadata "
                 "needed for native level-up."
-            ),
-            "reasons": [
+            )
+            reasons = [
                 "This class is enabled in Systems, but its progression metadata is still outside the current native level-up flow."
-            ],
+            ]
+        return {
+            "status": NATIVE_LEVEL_UP_UNSUPPORTED,
+            "message": message,
+            "reasons": reasons,
             "source_type": source_type,
             "is_native": is_native,
             "is_imported": is_imported,
@@ -928,56 +946,59 @@ def native_level_up_readiness(
             "spell_repair_rows": [],
         }
 
-    selected_class = _resolve_profile_entry(
+    selected_class_match = _resolve_profile_entry_match(
         class_options,
         profile_class_ref or class_row_ref,
         fallback_title=_native_character_class_name(definition),
     )
-    selected_species = _resolve_profile_entry(
+    selected_class = selected_class_match.get("entry")
+    selected_species_match = _resolve_profile_entry_match(
         species_options,
         definition.profile.get("species_ref"),
         page_ref=definition.profile.get("species_page_ref"),
         fallback_title=str(definition.profile.get("species") or "").strip(),
     )
-    selected_background = _resolve_profile_entry(
+    selected_species = selected_species_match.get("entry")
+    selected_background_match = _resolve_profile_entry_match(
         background_options,
         definition.profile.get("background_ref"),
         page_ref=definition.profile.get("background_page_ref"),
         fallback_title=str(definition.profile.get("background") or "").strip(),
     )
+    selected_background = selected_background_match.get("entry")
 
     repair_reasons: list[str] = []
     if selected_class is None:
         repair_reasons.append("Choose a supported base class link for this character.")
     elif is_imported:
-        if not _systems_ref_slug(profile_class_ref):
+        if _profile_entry_match_needs_confirmation(selected_class_match):
             repair_reasons.append("Confirm the supported base class link on the character profile before leveling up.")
-        if not _systems_ref_slug(class_row_ref):
+        class_row_match = _resolve_profile_entry_match(
+            enabled_class_options,
+            class_row_ref,
+            fallback_title=str(class_payload.get("class_name") or _native_character_class_name(definition) or "").strip(),
+        )
+        if _profile_entry_match_needs_confirmation(class_row_match) or not _systems_ref_slug(class_row_ref):
             repair_reasons.append("Confirm the class row link so native level-up can extend the imported class baseline cleanly.")
     if selected_species is None:
         repair_reasons.append("Choose a species link that the native level-up flow can resolve.")
-    elif is_imported and not _has_profile_entry_link(
-        definition.profile.get("species_ref"),
-        page_ref=definition.profile.get("species_page_ref"),
-    ):
+    elif is_imported and _profile_entry_match_needs_confirmation(selected_species_match):
         repair_reasons.append("Confirm the species link so native level-up can keep using the imported baseline.")
     if selected_background is None:
         repair_reasons.append("Choose a background link that the native level-up flow can resolve.")
-    elif is_imported and not _has_profile_entry_link(
-        definition.profile.get("background_ref"),
-        page_ref=definition.profile.get("background_page_ref"),
-    ):
+    elif is_imported and _profile_entry_match_needs_confirmation(selected_background_match):
         repair_reasons.append("Confirm the background link so native level-up can keep using the imported baseline.")
 
     subclass_options: list[SystemsEntryRecord] = []
     selected_subclass: SystemsEntryRecord | None = None
     if selected_class is not None:
         subclass_options = _list_subclass_options(systems_service, campaign_slug, selected_class)
-        selected_subclass = _resolve_profile_entry(
+        selected_subclass_match = _resolve_profile_entry_match(
             subclass_options,
             definition.profile.get("subclass_ref") or dict((classes[0] or {}).get("subclass_ref") or {}),
             fallback_title=_native_character_subclass_name(definition),
         )
+        selected_subclass = selected_subclass_match.get("entry")
         class_progression = systems_service.build_class_feature_progression_for_class_entry(campaign_slug, selected_class)
         if _class_requires_subclass_at_level(selected_class, class_progression, current_level) and selected_subclass is None:
             repair_reasons.append(
@@ -986,7 +1007,7 @@ def native_level_up_readiness(
         elif (
             is_imported
             and _class_requires_subclass_at_level(selected_class, class_progression, current_level)
-            and not _systems_ref_slug(definition.profile.get("subclass_ref"))
+            and _profile_entry_match_needs_confirmation(selected_subclass_match)
         ):
             repair_reasons.append(
                 f"Confirm the {str(selected_class.metadata.get('subclass_title') or 'subclass').strip() or 'subclass'} link before leveling up."
@@ -2117,8 +2138,38 @@ def _list_supported_class_entries(
     return list(static_bundle.get("supported_class_entries") or [])
 
 
+def _native_non_phb_class_support_policy(entry: SystemsEntryRecord | None) -> dict[str, str]:
+    if not isinstance(entry, SystemsEntryRecord):
+        return {
+            "status": NATIVE_CLASS_SUPPORT_BLOCKED,
+            "reason": "This class is missing the Systems entry needed for the current native progression flow.",
+        }
+
+    source_id = str(entry.source_id or "").strip().upper()
+    if source_id == PHB_SOURCE_ID:
+        return {"status": NATIVE_CLASS_SUPPORT_SUPPORTED, "reason": ""}
+
+    normalized_title = normalize_lookup(str(entry.title or "").strip())
+    if (source_id, normalized_title) in TCE_FIRST_NATIVE_CLASS_KEYS:
+        return {"status": NATIVE_CLASS_SUPPORT_SUPPORTED, "reason": ""}
+
+    if source_id == "TCE":
+        return {
+            "status": NATIVE_CLASS_SUPPORT_BLOCKED,
+            "reason": "This TCE class is outside the current TCE-first native support lane.",
+        }
+
+    return {
+        "status": NATIVE_CLASS_SUPPORT_BLOCKED,
+        "reason": "This non-PHB class is outside the current TCE-first native support lane.",
+    }
+
+
 def _supports_native_class_entry(entry: SystemsEntryRecord | None) -> bool:
     if not isinstance(entry, SystemsEntryRecord):
+        return False
+    policy = _native_non_phb_class_support_policy(entry)
+    if str(policy.get("status") or "").strip() != NATIVE_CLASS_SUPPORT_SUPPORTED:
         return False
     metadata = dict(entry.metadata or {})
     if not str(entry.title or "").strip() or not metadata.get("hit_die"):
@@ -2458,6 +2509,71 @@ def _systems_ref_slug(payload: Any) -> str:
     return str(payload.get("slug") or "").strip()
 
 
+def _systems_ref_source_id(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("source_id") or "").strip().upper()
+
+
+def _systems_ref_title(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("title") or "").strip()
+
+
+def _resolve_profile_entry_match(
+    options: list[SystemsEntryRecord],
+    systems_ref: Any,
+    *,
+    page_ref: Any = None,
+    fallback_title: str = "",
+) -> dict[str, Any]:
+    selected_page_ref = _extract_campaign_page_ref(page_ref)
+    if selected_page_ref:
+        resolved = next((entry for entry in options if _entry_page_ref(entry) == selected_page_ref), None)
+        if resolved is not None:
+            return {"entry": resolved, "match_mode": PROFILE_ENTRY_MATCH_PAGE_REF}
+
+    selected_slug = _systems_ref_slug(systems_ref)
+    if selected_slug:
+        resolved = _resolve_selected_entry(options, selected_slug)
+        if resolved is not None:
+            return {"entry": resolved, "match_mode": PROFILE_ENTRY_MATCH_SYSTEMS_SLUG}
+
+    source_locked_title = _systems_ref_title(systems_ref) or str(fallback_title or "").strip()
+    normalized_source_locked_title = normalize_lookup(source_locked_title)
+    source_id = _systems_ref_source_id(systems_ref)
+    if source_id and normalized_source_locked_title:
+        resolved = next(
+            (
+                entry
+                for entry in options
+                if str(entry.source_id or "").strip().upper() == source_id
+                and normalize_lookup(entry.title) == normalized_source_locked_title
+            ),
+            None,
+        )
+        if resolved is not None:
+            return {"entry": resolved, "match_mode": PROFILE_ENTRY_MATCH_SYSTEMS_SOURCE_TITLE}
+        return {"entry": None, "match_mode": PROFILE_ENTRY_MATCH_UNRESOLVED_SOURCE_LOCKED}
+
+    normalized_title = normalize_lookup(source_locked_title)
+    if not normalized_title:
+        return {"entry": None, "match_mode": PROFILE_ENTRY_MATCH_UNRESOLVED}
+    resolved = next((entry for entry in options if normalize_lookup(entry.title) == normalized_title), None)
+    if resolved is not None:
+        return {"entry": resolved, "match_mode": PROFILE_ENTRY_MATCH_FALLBACK_TITLE}
+    return {"entry": None, "match_mode": PROFILE_ENTRY_MATCH_UNRESOLVED}
+
+
+def _profile_entry_match_needs_confirmation(match_result: dict[str, Any] | None) -> bool:
+    match_mode = str((match_result or {}).get("match_mode") or "").strip()
+    return match_mode in {
+        PROFILE_ENTRY_MATCH_SYSTEMS_SOURCE_TITLE,
+        PROFILE_ENTRY_MATCH_FALLBACK_TITLE,
+    }
+
+
 def _has_profile_entry_link(
     systems_ref: Any,
     *,
@@ -2473,20 +2589,12 @@ def _resolve_profile_entry(
     page_ref: Any = None,
     fallback_title: str = "",
 ) -> SystemsEntryRecord | None:
-    selected_page_ref = _extract_campaign_page_ref(page_ref)
-    if selected_page_ref:
-        resolved = next((entry for entry in options if _entry_page_ref(entry) == selected_page_ref), None)
-        if resolved is not None:
-            return resolved
-    selected_slug = _systems_ref_slug(systems_ref)
-    if selected_slug:
-        resolved = _resolve_selected_entry(options, selected_slug)
-        if resolved is not None:
-            return resolved
-    normalized_title = normalize_lookup(fallback_title)
-    if not normalized_title:
-        return None
-    return next((entry for entry in options if normalize_lookup(entry.title) == normalized_title), None)
+    return _resolve_profile_entry_match(
+        options,
+        systems_ref,
+        page_ref=page_ref,
+        fallback_title=fallback_title,
+    ).get("entry")
 
 
 def _resolve_definition_sheet_entries(
@@ -4167,9 +4275,15 @@ def _resolve_level_up_ability_score_choices(
                     "entry": None,
                     "name": feat_title,
                     "label": feat_title,
-                    "slug": feat_slug,
+                    "slug": _entry_option_slug(feat_entry)
+                    or (
+                        feat_slug[len(SYSTEMS_OPTION_PREFIX):]
+                        if feat_slug.startswith(SYSTEMS_OPTION_PREFIX)
+                        else feat_slug
+                    ),
                     "systems_entry": feat_entry if isinstance(feat_entry, SystemsEntryRecord) else None,
                     "page_ref": _entry_page_ref(feat_entry),
+                    "source_id": _entry_option_source_id(feat_entry) or PHB_SOURCE_ID,
                     "campaign_option": _entry_campaign_option(feat_entry) or None,
                 }
             )
@@ -9323,8 +9437,11 @@ def _build_feature_payload(
 
     if kind == "feat":
         slug = str(feature_entry.get("slug") or "").strip()
+        if slug.startswith(SYSTEMS_OPTION_PREFIX):
+            slug = slug[len(SYSTEMS_OPTION_PREFIX):]
         feature_name = str(feature_entry.get("title") or feature_entry.get("label") or "").strip()
         systems_entry = feature_entry.get("systems_entry")
+        fallback_source_id = str(feature_entry.get("source_id") or "").strip() or PHB_SOURCE_ID
         page_ref = str(feature_entry.get("page_ref") or _entry_page_ref(systems_entry)).strip()
         campaign_option = dict(feature_entry.get("campaign_option") or _entry_campaign_option(systems_entry) or {})
         if not (slug or page_ref) or not feature_name:
@@ -9336,7 +9453,7 @@ def _build_feature_payload(
             "source": (
                 CAMPAIGN_PAGE_SOURCE_ID
                 if page_ref
-                else (systems_entry.source_id if isinstance(systems_entry, SystemsEntryRecord) else PHB_SOURCE_ID)
+                else (systems_entry.source_id if isinstance(systems_entry, SystemsEntryRecord) else fallback_source_id)
             ),
             "description_markdown": str(campaign_option.get("description_markdown") or "").strip(),
             "activation_type": "passive",
@@ -9352,7 +9469,7 @@ def _build_feature_payload(
                         "entry_type": "feat",
                         "title": feature_name,
                         "slug": slug,
-                        "source_id": PHB_SOURCE_ID,
+                        "source_id": fallback_source_id,
                     }
                 )
             ),
