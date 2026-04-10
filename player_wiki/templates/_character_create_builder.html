@@ -37,8 +37,9 @@
                 name="name"
                 value="{{ builder.values.name }}"
                 placeholder="Zigzag Blackscar"
-                data-live-preview-trigger="blur"
-                data-live-preview-regions=""
+                data-live-preview-trigger="{{ builder.field_live_preview.name.live_preview_trigger }}"
+                data-live-preview-regions="{{ builder.field_live_preview.name.live_preview_regions }}"
+                data-live-preview-debounce-ms="{{ builder.field_live_preview.name.live_preview_debounce_ms }}"
               >
             </label>
             <label class="field">
@@ -48,8 +49,9 @@
                 name="character_slug"
                 value="{{ builder.values.character_slug }}"
                 placeholder="Auto-generated from the name if left blank"
-                data-live-preview-trigger="blur"
-                data-live-preview-regions=""
+                data-live-preview-trigger="{{ builder.field_live_preview.character_slug.live_preview_trigger }}"
+                data-live-preview-regions="{{ builder.field_live_preview.character_slug.live_preview_regions }}"
+                data-live-preview-debounce-ms="{{ builder.field_live_preview.character_slug.live_preview_debounce_ms }}"
               >
             </label>
             <label class="field">
@@ -59,8 +61,9 @@
                 name="alignment"
                 value="{{ builder.values.alignment }}"
                 placeholder="Neutral Good"
-                data-live-preview-trigger="blur"
-                data-live-preview-regions=""
+                data-live-preview-trigger="{{ builder.field_live_preview.alignment.live_preview_trigger }}"
+                data-live-preview-regions="{{ builder.field_live_preview.alignment.live_preview_regions }}"
+                data-live-preview-debounce-ms="{{ builder.field_live_preview.alignment.live_preview_debounce_ms }}"
               >
             </label>
             <label class="field">
@@ -69,8 +72,9 @@
                 type="text"
                 name="experience_model"
                 value="{{ builder.values.experience_model }}"
-                data-live-preview-trigger="blur"
-                data-live-preview-regions=""
+                data-live-preview-trigger="{{ builder.field_live_preview.experience_model.live_preview_trigger }}"
+                data-live-preview-regions="{{ builder.field_live_preview.experience_model.live_preview_regions }}"
+                data-live-preview-debounce-ms="{{ builder.field_live_preview.experience_model.live_preview_debounce_ms }}"
               >
             </label>
           </div>
@@ -83,9 +87,9 @@
               <span>Class</span>
               <select
                 name="class_slug"
-                data-live-preview-trigger="change"
-                data-live-preview-regions="{{ builder.live_regions_csv }}"
-                data-live-preview-debounce-ms="120"
+                data-live-preview-trigger="{{ builder.field_live_preview.class_slug.live_preview_trigger }}"
+                data-live-preview-regions="{{ builder.field_live_preview.class_slug.live_preview_regions }}"
+                data-live-preview-debounce-ms="{{ builder.field_live_preview.class_slug.live_preview_debounce_ms }}"
               >
                 <option value="" {% if not builder.selected_class %}selected{% endif %}>Choose a class</option>
                 {% for option in builder.class_options %}
@@ -101,9 +105,9 @@
                 <span>Subclass</span>
                 <select
                   name="subclass_slug"
-                  data-live-preview-trigger="change"
-                  data-live-preview-regions="{{ builder.live_regions_csv }}"
-                  data-live-preview-debounce-ms="120"
+                  data-live-preview-trigger="{{ builder.field_live_preview.subclass_slug.live_preview_trigger }}"
+                  data-live-preview-regions="{{ builder.field_live_preview.subclass_slug.live_preview_regions }}"
+                  data-live-preview-debounce-ms="{{ builder.field_live_preview.subclass_slug.live_preview_debounce_ms }}"
                 >
                   <option value="" {% if not builder.selected_subclass %}selected{% endif %}>
                     {% if builder.requires_subclass %}Choose a subclass{% else %}No subclass{% endif %}
@@ -121,9 +125,9 @@
               <span>Species</span>
               <select
                 name="species_slug"
-                data-live-preview-trigger="change"
-                data-live-preview-regions="{{ builder.live_regions_csv }}"
-                data-live-preview-debounce-ms="120"
+                data-live-preview-trigger="{{ builder.field_live_preview.species_slug.live_preview_trigger }}"
+                data-live-preview-regions="{{ builder.field_live_preview.species_slug.live_preview_regions }}"
+                data-live-preview-debounce-ms="{{ builder.field_live_preview.species_slug.live_preview_debounce_ms }}"
               >
                 <option value="" {% if not builder.selected_species %}selected{% endif %}>Choose a species</option>
                 {% for option in builder.species_options %}
@@ -138,9 +142,9 @@
               <span>Background</span>
               <select
                 name="background_slug"
-                data-live-preview-trigger="change"
-                data-live-preview-regions="{{ builder.live_regions_csv }}"
-                data-live-preview-debounce-ms="120"
+                data-live-preview-trigger="{{ builder.field_live_preview.background_slug.live_preview_trigger }}"
+                data-live-preview-regions="{{ builder.field_live_preview.background_slug.live_preview_regions }}"
+                data-live-preview-debounce-ms="{{ builder.field_live_preview.background_slug.live_preview_debounce_ms }}"
               >
                 <option value="" {% if not builder.selected_background %}selected{% endif %}>Choose a background</option>
                 {% for option in builder.background_options %}
@@ -173,9 +177,9 @@
                   min="1"
                   max="30"
                   value="{{ builder.values[ability_key] }}"
-                  data-live-preview-trigger="input"
-                  data-live-preview-regions="{{ builder.preview_regions_csv }}"
-                  data-live-preview-debounce-ms="350"
+                  data-live-preview-trigger="{{ builder.field_live_preview[ability_key].live_preview_trigger }}"
+                  data-live-preview-regions="{{ builder.field_live_preview[ability_key].live_preview_regions }}"
+                  data-live-preview-debounce-ms="{{ builder.field_live_preview[ability_key].live_preview_debounce_ms }}"
                 >
               </label>
             {% endfor %}

@@ -71,6 +71,7 @@ ATTACK_MODE_FEAT_CROSSBOW_EXPERT_BONUS = "feat:phb-feat-crossbow-expert:bonus"
 ATTACK_MODE_FEAT_GREAT_WEAPON_MASTER = "feat:phb-feat-great-weapon-master"
 ATTACK_MODE_FEAT_POLEARM_MASTER_BONUS = "feat:phb-feat-polearm-master:bonus"
 ATTACK_MODE_FEAT_SHARPSHOOTER = "feat:phb-feat-sharpshooter"
+ATTACK_MODE_FEAT_SHIELD_MASTER_SHOVE = "feat:phb-feat-shield-master:shove"
 ATTACK_MODE_EFFECT_PREFIX = "effect:attack-mode"
 ATTACK_MODE_TARGET_ALL = "all"
 ATTACK_MODE_TARGET_MELEE = "melee"
@@ -129,6 +130,7 @@ LEVEL_UP_PREVIEW_REGION_IDS = (
     PREVIEW_FEATURES_REGION_ID,
     PREVIEW_RESOURCES_REGION_ID,
     PREVIEW_SPELLS_REGION_ID,
+    PREVIEW_ATTACKS_REGION_ID,
     PREVIEW_SCOPE_REGION_ID,
     PREVIEW_SPELL_SLOTS_REGION_ID,
 )
@@ -638,6 +640,7 @@ def build_level_one_builder_context(
             "Gold-alternative loadouts, non-structured campaign spell access, and a few remaining feat/spell edge cases still need manual follow-up.",
         ],
         "preview": preview,
+        "field_live_preview": _level_one_field_live_preview_metadata(),
         "preview_region_ids": list(LEVEL_ONE_PREVIEW_REGION_IDS),
         "preview_regions_csv": ",".join(LEVEL_ONE_PREVIEW_REGION_IDS),
         "live_region_ids": list(LEVEL_ONE_LIVE_REGION_IDS),
@@ -1799,6 +1802,8 @@ def build_native_level_up_context(
         else:
             choice_sections = []
     else:
+        values["new_class_slug"] = ""
+        values["new_subclass_slug"] = ""
         target_row_context = next(
             (
                 dict(row)
@@ -1949,6 +1954,7 @@ def build_native_level_up_context(
         "limitations": list(NATIVE_LEVEL_UP_LIMITATIONS),
         "preview": preview,
         "selected_class_rows": row_contexts,
+        "field_live_preview": _level_up_field_live_preview_metadata(),
         "preview_region_ids": list(LEVEL_UP_PREVIEW_REGION_IDS),
         "preview_regions_csv": ",".join(LEVEL_UP_PREVIEW_REGION_IDS),
         "live_region_ids": list(LEVEL_UP_LIVE_REGION_IDS),
@@ -4563,6 +4569,7 @@ def _collect_attack_support_flags(features: list[dict[str, Any]] | None) -> dict
         "polearm_master": has_slug("phb-feat-polearm-master"),
         "savage_attacker": has_slug("phb-feat-savage-attacker"),
         "sharpshooter": has_slug("phb-feat-sharpshooter"),
+        "shield_master": has_slug("phb-feat-shield-master"),
         "tavern_brawler": has_slug("phb-feat-tavern-brawler", "xphb-feat-tavern-brawler")
         or normalize_lookup("tavern-brawler") in effect_keys,
     }
@@ -5022,17 +5029,61 @@ def _field_live_preview_region_ids(
     field: dict[str, Any],
     *,
     preview_region_ids: tuple[str, ...],
+    live_region_ids: tuple[str, ...] | None = None,
 ) -> tuple[str, ...]:
     field_name = str(field.get("name") or "").strip()
     kind = str(field.get("kind") or "").strip()
-    preview_set = set(preview_region_ids)
+    available_live_region_ids = tuple(live_region_ids or preview_region_ids)
+    non_scope_preview_region_ids = tuple(
+        region_id
+        for region_id in preview_region_ids
+        if region_id != PREVIEW_SCOPE_REGION_ID
+    ) or tuple(preview_region_ids)
 
     def _matching_region_ids(*region_ids: str) -> tuple[str, ...]:
-        return tuple(region_id for region_id in region_ids if region_id in preview_set)
+        ordered_region_ids: list[str] = []
+        seen_region_ids: set[str] = set()
+        allowed_region_ids = {
+            str(region_id or "").strip()
+            for region_id in available_live_region_ids
+            if str(region_id or "").strip()
+        }
+        for region_id in region_ids:
+            clean_region_id = str(region_id or "").strip()
+            if not clean_region_id or clean_region_id not in allowed_region_ids or clean_region_id in seen_region_ids:
+                continue
+            seen_region_ids.add(clean_region_id)
+            ordered_region_ids.append(clean_region_id)
+        return tuple(ordered_region_ids)
 
+    if field_name in {"name", "character_slug", "alignment", "experience_model"}:
+        return ()
     if field_name == "hp_gain":
         return _matching_region_ids(PREVIEW_SUMMARY_REGION_ID)
-    if kind in {"spell", "spell_support_replace_from", "spell_support_replace_to"} or field_name.startswith(
+    if field_name in ABILITY_KEYS or kind in {"ability", "feat_ability"}:
+        return _matching_region_ids(
+            PREVIEW_SUMMARY_REGION_ID,
+            PREVIEW_SPELLS_REGION_ID,
+            PREVIEW_ATTACKS_REGION_ID,
+        )
+    if kind in {"language", "feat_language", "skill", "feat_skill", "tool", "feat_tool", "save", "feat_save"}:
+        return _matching_region_ids(PREVIEW_SUMMARY_REGION_ID)
+    if kind in {"weapon", "feat_weapon", "mixed_proficiency", "feat_mixed_proficiency"}:
+        return _matching_region_ids(
+            PREVIEW_SUMMARY_REGION_ID,
+            PREVIEW_ATTACKS_REGION_ID,
+        )
+    if kind == "equipment":
+        return _matching_region_ids(
+            PREVIEW_SUMMARY_REGION_ID,
+            PREVIEW_EQUIPMENT_REGION_ID,
+            PREVIEW_ATTACKS_REGION_ID,
+        )
+    if kind in {"spell", "spell_support_replace_from", "spell_support_replace_to"} or kind.startswith(
+        "spell_support_"
+    ) or kind.startswith(
+        "feat_spell_"
+    ) or field_name.startswith(
         (
             "spell_",
             "wizard_",
@@ -5045,18 +5096,123 @@ def _field_live_preview_region_ids(
         )
     ):
         return _matching_region_ids(PREVIEW_SPELLS_REGION_ID)
-    if kind == "campaign_page_item":
+    if field_name == "class_slug":
         return _matching_region_ids(
+            CHOICE_SECTIONS_REGION_ID,
             PREVIEW_SUMMARY_REGION_ID,
-            PREVIEW_EQUIPMENT_REGION_ID,
-            PREVIEW_ATTACKS_REGION_ID,
-        )
-    if kind == "campaign_page_feature":
-        return _matching_region_ids(
             PREVIEW_FEATURES_REGION_ID,
             PREVIEW_RESOURCES_REGION_ID,
             PREVIEW_SPELLS_REGION_ID,
+            PREVIEW_EQUIPMENT_REGION_ID,
+            PREVIEW_ATTACKS_REGION_ID,
         )
+    if field_name in {"subclass_slug", "new_subclass_slug"}:
+        return _matching_region_ids(
+            CHOICE_SECTIONS_REGION_ID,
+            PREVIEW_SUMMARY_REGION_ID,
+            PREVIEW_FEATURES_REGION_ID,
+            PREVIEW_RESOURCES_REGION_ID,
+            PREVIEW_SPELLS_REGION_ID,
+            PREVIEW_ATTACKS_REGION_ID,
+            PREVIEW_SPELL_SLOTS_REGION_ID,
+        )
+    if field_name == "species_slug":
+        return _matching_region_ids(
+            CHOICE_SECTIONS_REGION_ID,
+            PREVIEW_SUMMARY_REGION_ID,
+            PREVIEW_FEATURES_REGION_ID,
+            PREVIEW_RESOURCES_REGION_ID,
+            PREVIEW_SPELLS_REGION_ID,
+            PREVIEW_ATTACKS_REGION_ID,
+        )
+    if field_name == "background_slug":
+        return _matching_region_ids(
+            CHOICE_SECTIONS_REGION_ID,
+            PREVIEW_SUMMARY_REGION_ID,
+            PREVIEW_SPELLS_REGION_ID,
+            PREVIEW_EQUIPMENT_REGION_ID,
+            PREVIEW_ATTACKS_REGION_ID,
+        )
+    if field_name in {"advancement_mode", "target_class_row_id", "new_class_slug"}:
+        return _matching_region_ids(
+            ADVANCEMENT_REGION_ID,
+            CHOICE_SECTIONS_REGION_ID,
+            PREVIEW_SUMMARY_REGION_ID,
+            PREVIEW_FEATURES_REGION_ID,
+            PREVIEW_RESOURCES_REGION_ID,
+            PREVIEW_SPELLS_REGION_ID,
+            PREVIEW_ATTACKS_REGION_ID,
+            PREVIEW_SPELL_SLOTS_REGION_ID,
+        )
+    if kind == "campaign_page_item":
+        option_payloads = [
+            dict(option.get("campaign_option") or {})
+            for option in list(field.get("options") or [])
+            if isinstance(option.get("campaign_option"), dict)
+        ]
+        region_ids: list[str] = []
+        if any(payload.get("spell_support") or payload.get("additional_spells") for payload in option_payloads):
+            region_ids.append(CHOICE_SECTIONS_REGION_ID)
+        region_ids.extend(
+            [
+                PREVIEW_SUMMARY_REGION_ID,
+                PREVIEW_EQUIPMENT_REGION_ID,
+                PREVIEW_ATTACKS_REGION_ID,
+            ]
+        )
+        if any(payload.get("spells") or payload.get("spell_support") or payload.get("additional_spells") for payload in option_payloads):
+            region_ids.append(PREVIEW_SPELLS_REGION_ID)
+        if any(dict(payload.get("stat_adjustments") or {}) for payload in option_payloads):
+            region_ids.extend((PREVIEW_ATTACKS_REGION_ID, PREVIEW_SPELLS_REGION_ID))
+        return _matching_region_ids(*region_ids)
+    if kind == "campaign_page_feature":
+        option_payloads = [
+            dict(option.get("campaign_option") or {})
+            for option in list(field.get("options") or [])
+            if isinstance(option.get("campaign_option"), dict)
+        ]
+        adds_choice_sections = any(payload.get("spell_support") or payload.get("additional_spells") for payload in option_payloads)
+        adds_summary = any(
+            dict(payload.get("stat_adjustments") or {})
+            or payload.get("modeled_effects")
+            or payload.get("size")
+            or payload.get("speed") is not None
+            or payload.get("languages")
+            or payload.get("skill_proficiencies")
+            or payload.get("tool_proficiencies")
+            or any(
+                list(dict(payload.get("proficiencies") or {}).get(key) or [])
+                for key in ("armor", "weapons", "tools", "languages", "skills")
+            )
+            for payload in option_payloads
+        )
+        adds_spells = any(
+            payload.get("spells") or payload.get("spell_support") or payload.get("additional_spells")
+            for payload in option_payloads
+        )
+        adds_resources = any(payload.get("resource") for payload in option_payloads)
+        adds_attacks = any(
+            dict(payload.get("stat_adjustments") or {})
+            or list(dict(payload.get("proficiencies") or {}).get("weapons") or [])
+            or any(
+                normalize_lookup(effect).startswith(normalize_lookup(ATTACK_MODE_EFFECT_PREFIX))
+                for effect in list(payload.get("modeled_effects") or [])
+            )
+            for payload in option_payloads
+        )
+        region_ids: list[str] = []
+        if adds_choice_sections:
+            region_ids.append(CHOICE_SECTIONS_REGION_ID)
+        if adds_summary:
+            region_ids.append(PREVIEW_SUMMARY_REGION_ID)
+        region_ids.append(PREVIEW_FEATURES_REGION_ID)
+        if adds_resources:
+            region_ids.append(PREVIEW_RESOURCES_REGION_ID)
+        if adds_spells:
+            region_ids.append(PREVIEW_SPELLS_REGION_ID)
+        if adds_attacks:
+            region_ids.append(PREVIEW_ATTACKS_REGION_ID)
+        return _matching_region_ids(*region_ids)
     if kind in {"subclass", "feat", "optionalfeature", "asi_mode", "feat_spell_source"} or field_name.startswith(
         (
             "class_option_",
@@ -5066,8 +5222,151 @@ def _field_live_preview_region_ids(
             "levelup_feat_",
         )
     ):
-        return (CHOICE_SECTIONS_REGION_ID, *preview_region_ids)
-    return tuple(preview_region_ids)
+        return _matching_region_ids(CHOICE_SECTIONS_REGION_ID, *non_scope_preview_region_ids)
+    return _matching_region_ids(*non_scope_preview_region_ids)
+
+
+def _live_preview_field_metadata(
+    *,
+    trigger: str,
+    region_ids: tuple[str, ...],
+    debounce_ms: int,
+) -> dict[str, Any]:
+    return {
+        "live_preview_trigger": str(trigger or "").strip(),
+        "live_preview_regions": ",".join(region_ids),
+        "live_preview_debounce_ms": int(debounce_ms or 0),
+    }
+
+
+def _top_level_field_live_preview_metadata(
+    *,
+    field_name: str,
+    preview_region_ids: tuple[str, ...],
+    live_region_ids: tuple[str, ...],
+    trigger: str,
+    debounce_ms: int,
+    kind: str = "",
+) -> dict[str, Any]:
+    return _live_preview_field_metadata(
+        trigger=trigger,
+        region_ids=_field_live_preview_region_ids(
+            {"name": field_name, "kind": kind},
+            preview_region_ids=preview_region_ids,
+            live_region_ids=live_region_ids,
+        ),
+        debounce_ms=debounce_ms,
+    )
+
+
+def _level_one_field_live_preview_metadata() -> dict[str, dict[str, Any]]:
+    metadata = {
+        "name": _top_level_field_live_preview_metadata(
+            field_name="name",
+            preview_region_ids=LEVEL_ONE_PREVIEW_REGION_IDS,
+            live_region_ids=LEVEL_ONE_LIVE_REGION_IDS,
+            trigger="blur",
+            debounce_ms=0,
+        ),
+        "character_slug": _top_level_field_live_preview_metadata(
+            field_name="character_slug",
+            preview_region_ids=LEVEL_ONE_PREVIEW_REGION_IDS,
+            live_region_ids=LEVEL_ONE_LIVE_REGION_IDS,
+            trigger="blur",
+            debounce_ms=0,
+        ),
+        "alignment": _top_level_field_live_preview_metadata(
+            field_name="alignment",
+            preview_region_ids=LEVEL_ONE_PREVIEW_REGION_IDS,
+            live_region_ids=LEVEL_ONE_LIVE_REGION_IDS,
+            trigger="blur",
+            debounce_ms=0,
+        ),
+        "experience_model": _top_level_field_live_preview_metadata(
+            field_name="experience_model",
+            preview_region_ids=LEVEL_ONE_PREVIEW_REGION_IDS,
+            live_region_ids=LEVEL_ONE_LIVE_REGION_IDS,
+            trigger="blur",
+            debounce_ms=0,
+        ),
+        "class_slug": _top_level_field_live_preview_metadata(
+            field_name="class_slug",
+            preview_region_ids=LEVEL_ONE_PREVIEW_REGION_IDS,
+            live_region_ids=LEVEL_ONE_LIVE_REGION_IDS,
+            trigger="change",
+            debounce_ms=120,
+        ),
+        "subclass_slug": _top_level_field_live_preview_metadata(
+            field_name="subclass_slug",
+            preview_region_ids=LEVEL_ONE_PREVIEW_REGION_IDS,
+            live_region_ids=LEVEL_ONE_LIVE_REGION_IDS,
+            trigger="change",
+            debounce_ms=120,
+        ),
+        "species_slug": _top_level_field_live_preview_metadata(
+            field_name="species_slug",
+            preview_region_ids=LEVEL_ONE_PREVIEW_REGION_IDS,
+            live_region_ids=LEVEL_ONE_LIVE_REGION_IDS,
+            trigger="change",
+            debounce_ms=120,
+        ),
+        "background_slug": _top_level_field_live_preview_metadata(
+            field_name="background_slug",
+            preview_region_ids=LEVEL_ONE_PREVIEW_REGION_IDS,
+            live_region_ids=LEVEL_ONE_LIVE_REGION_IDS,
+            trigger="change",
+            debounce_ms=120,
+        ),
+    }
+    for ability_key in ABILITY_KEYS:
+        metadata[ability_key] = _top_level_field_live_preview_metadata(
+            field_name=ability_key,
+            preview_region_ids=LEVEL_ONE_PREVIEW_REGION_IDS,
+            live_region_ids=LEVEL_ONE_LIVE_REGION_IDS,
+            trigger="input",
+            debounce_ms=350,
+        )
+    return metadata
+
+
+def _level_up_field_live_preview_metadata() -> dict[str, dict[str, Any]]:
+    return {
+        "advancement_mode": _top_level_field_live_preview_metadata(
+            field_name="advancement_mode",
+            preview_region_ids=LEVEL_UP_PREVIEW_REGION_IDS,
+            live_region_ids=LEVEL_UP_LIVE_REGION_IDS,
+            trigger="change",
+            debounce_ms=100,
+        ),
+        "new_class_slug": _top_level_field_live_preview_metadata(
+            field_name="new_class_slug",
+            preview_region_ids=LEVEL_UP_PREVIEW_REGION_IDS,
+            live_region_ids=LEVEL_UP_LIVE_REGION_IDS,
+            trigger="change",
+            debounce_ms=100,
+        ),
+        "new_subclass_slug": _top_level_field_live_preview_metadata(
+            field_name="new_subclass_slug",
+            preview_region_ids=LEVEL_UP_PREVIEW_REGION_IDS,
+            live_region_ids=LEVEL_UP_LIVE_REGION_IDS,
+            trigger="change",
+            debounce_ms=100,
+        ),
+        "target_class_row_id": _top_level_field_live_preview_metadata(
+            field_name="target_class_row_id",
+            preview_region_ids=LEVEL_UP_PREVIEW_REGION_IDS,
+            live_region_ids=LEVEL_UP_LIVE_REGION_IDS,
+            trigger="change",
+            debounce_ms=100,
+        ),
+        "hp_gain": _top_level_field_live_preview_metadata(
+            field_name="hp_gain",
+            preview_region_ids=LEVEL_UP_PREVIEW_REGION_IDS,
+            live_region_ids=LEVEL_UP_LIVE_REGION_IDS,
+            trigger="input",
+            debounce_ms=350,
+        ),
+    }
 
 
 def _annotate_builder_choice_sections(
@@ -5075,6 +5374,7 @@ def _annotate_builder_choice_sections(
     *,
     preview_region_ids: tuple[str, ...],
 ) -> list[dict[str, Any]]:
+    live_region_ids = (CHOICE_SECTIONS_REGION_ID, *preview_region_ids)
     annotated_sections: list[dict[str, Any]] = []
     for section in list(choice_sections or []):
         section_copy = dict(section)
@@ -5084,10 +5384,15 @@ def _annotate_builder_choice_sections(
             region_ids = _field_live_preview_region_ids(
                 field,
                 preview_region_ids=preview_region_ids,
+                live_region_ids=live_region_ids,
             )
-            field["live_preview_trigger"] = "change"
-            field["live_preview_regions"] = ",".join(region_ids)
-            field["live_preview_debounce_ms"] = 120
+            field.update(
+                _live_preview_field_metadata(
+                    trigger="change",
+                    region_ids=region_ids,
+                    debounce_ms=120,
+                )
+            )
             section_copy["fields"].append(field)
         annotated_sections.append(section_copy)
     return annotated_sections
@@ -6977,12 +7282,18 @@ def _build_level_one_attacks(
     has_polearm_master = bool(attack_support_flags.get("polearm_master"))
     has_savage_attacker = bool(attack_support_flags.get("savage_attacker"))
     has_sharpshooter = bool(attack_support_flags.get("sharpshooter"))
+    has_shield_master = bool(attack_support_flags.get("shield_master"))
     has_tavern_brawler = bool(attack_support_flags.get("tavern_brawler"))
     off_hand_context = _resolve_off_hand_attack_context(
         attack_contexts,
         allow_non_light=has_dual_wielder,
     )
     crossbow_expert_bonus_context = _resolve_crossbow_expert_bonus_attack_context(attack_contexts)
+    shield_item_refs = [
+        str(item.get("id") or "").strip()
+        for item in equipment_catalog
+        if _is_shield_item(item) and str(item.get("id") or "").strip()
+    ]
     has_shield = any(_is_shield_item(item) for item in equipment_catalog)
 
     for context in attack_contexts:
@@ -7428,6 +7739,17 @@ def _build_level_one_attacks(
                 variant_label="crossbow expert, sharpshooter",
                 mode_key=f"{ATTACK_MODE_FEAT_CROSSBOW_EXPERT_BONUS}|{ATTACK_MODE_FEAT_SHARPSHOOTER}",
             )
+    if has_shield_master and shield_item_refs:
+        attacks.append(
+            _build_special_attack_payload(
+                name="Shield Shove",
+                category="special action",
+                notes="Bonus action after taking the Attack action; Shield Master shove within 5 feet.",
+                index=len(attacks) + 1,
+                mode_key=ATTACK_MODE_FEAT_SHIELD_MASTER_SHOVE,
+                equipment_refs=shield_item_refs,
+            )
+        )
     if has_tavern_brawler:
         attacks.append(
             _build_unarmed_attack_payload(
@@ -8405,6 +8727,33 @@ def _build_unarmed_attack_payload(
         "notes": "Tavern Brawler enhanced unarmed strike.",
         "systems_ref": None,
     }
+
+
+def _build_special_attack_payload(
+    *,
+    name: str,
+    category: str,
+    notes: str,
+    index: int,
+    mode_key: str = "",
+    equipment_refs: list[str] | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "id": f"{slugify(name)}-{index}",
+        "name": str(name or "").strip(),
+        "category": str(category or "").strip(),
+        "attack_bonus": None,
+        "damage": "",
+        "damage_type": "",
+        "notes": str(notes or "").strip(),
+    }
+    clean_mode_key = _normalize_attack_mode_key(mode_key)
+    if clean_mode_key:
+        payload["mode_key"] = clean_mode_key
+    normalized_refs = _normalize_attack_equipment_refs(equipment_refs)
+    if normalized_refs:
+        payload["equipment_refs"] = normalized_refs
+    return payload
 
 
 def _build_weapon_attack_notes(
@@ -10061,9 +10410,9 @@ def _build_level_one_preview(
             if not bool(item.get("is_currency_only")) and _describe_equipment_spec(item)
         ],
         "attacks": [
-            f"{attack['name']} ({int(attack.get('attack_bonus') or 0):+d}, {attack.get('damage')})"
+            summary
             for attack in attacks
-            if str(attack.get("name") or "").strip()
+            if (summary := _summarize_preview_attack(attack))
         ],
         "starting_currency": _format_currency_seed(_collect_currency_seed_from_equipment(equipment_catalog)),
         "spells": [_summarize_preview_spell(spell) for spell in list(spellcasting.get("spells") or [])],
@@ -11857,14 +12206,24 @@ def _build_native_level_up_preview(
         current_level=target_level,
         class_row_id=class_row_id,
     )
+    merged_features = _merge_feature_payloads(list(definition.features or []), preview_feature_payloads)
     _, preview_resource_templates = _apply_tracker_templates_to_feature_payloads(
-        _merge_feature_payloads(list(definition.features or []), preview_feature_payloads),
+        merged_features,
         ability_scores=ability_scores,
         current_level=total_character_level,
     )
     merged_resource_templates = _merge_resource_templates(
         list(definition.resource_templates or []),
         preview_resource_templates,
+    )
+    merged_attacks = _recalculate_definition_attacks(
+        CharacterDefinition.from_dict(
+            {
+                **definition.to_dict(),
+                "equipment_catalog": list(definition.equipment_catalog or []),
+                "features": merged_features,
+            }
+        )
     )
     preview_campaign_stat_adjustments = collect_campaign_option_stat_adjustments(selected_campaign_option_payloads)
     return {
@@ -11883,6 +12242,7 @@ def _build_native_level_up_preview(
             for template in merged_resource_templates
             if _summarize_preview_resource(template)
         ],
+        "attacks": [summary for attack in merged_attacks if (summary := _summarize_preview_attack(attack))],
         "spell_slots": slot_summary,
         "new_spells": new_spell_names,
     }
@@ -16000,6 +16360,48 @@ def _build_feature_tracker_template(
             "display_order": display_order,
             "activation_type": "special",
         }
+    if _feature_has_effect(effect_keys, "Dragon Fear"):
+        return {
+            "id": "dragon-fear",
+            "label": "Dragon Fear",
+            "category": "feat",
+            "initial_current": 1,
+            "max": 1,
+            "reset_on": "short_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Dragon Fear",
+            "display_order": display_order,
+            "activation_type": "special",
+        }
+    if _feature_has_effect(effect_keys, "Orcish Fury"):
+        return {
+            "id": "orcish-fury",
+            "label": "Orcish Fury",
+            "category": "feat",
+            "initial_current": 1,
+            "max": 1,
+            "reset_on": "short_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Orcish Fury",
+            "display_order": display_order,
+            "activation_type": "special",
+        }
+    if _feature_has_effect(effect_keys, "Second Chance"):
+        return {
+            "id": "second-chance",
+            "label": "Second Chance",
+            "category": "feat",
+            "initial_current": 1,
+            "max": 1,
+            "reset_on": "short_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Second Chance",
+            "display_order": display_order,
+            "activation_type": "reaction",
+        }
     if _feature_has_effect(effect_keys, "Martial Adept"):
         return {
             "id": "martial-adept",
@@ -16270,6 +16672,25 @@ def _summarize_preview_resource(template: dict[str, Any]) -> str:
     if reset_on == "long_rest":
         return f"{summary} (Long Rest)"
     return summary
+
+
+def _summarize_preview_attack(attack: dict[str, Any]) -> str:
+    name = str(attack.get("name") or "").strip()
+    if not name:
+        return ""
+    attack_bonus = attack.get("attack_bonus")
+    damage = str(attack.get("damage") or "").strip()
+    parts: list[str] = []
+    if attack_bonus not in {"", None}:
+        parts.append(f"{int(attack_bonus):+d}")
+    if damage:
+        parts.append(damage)
+    if parts:
+        return f"{name} ({', '.join(parts)})"
+    category = str(attack.get("category") or "").strip()
+    if category:
+        return f"{name} ({category})"
+    return name
 
 
 def _class_save_proficiencies(selected_class: SystemsEntryRecord | None) -> list[str]:

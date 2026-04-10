@@ -6,9 +6,9 @@
         <span>Advance By</span>
         <select
           name="advancement_mode"
-          data-live-preview-trigger="change"
-          data-live-preview-regions="{{ level_up.live_regions_csv }}"
-          data-live-preview-debounce-ms="100"
+          data-live-preview-trigger="{{ level_up.field_live_preview.advancement_mode.live_preview_trigger }}"
+          data-live-preview-regions="{{ level_up.field_live_preview.advancement_mode.live_preview_regions }}"
+          data-live-preview-debounce-ms="{{ level_up.field_live_preview.advancement_mode.live_preview_debounce_ms }}"
         >
           {% for option in level_up.mode_options %}
             <option value="{{ option.value }}" {% if level_up.values.advancement_mode == option.value %}selected{% endif %}>{{ option.label }}</option>
@@ -21,9 +21,9 @@
           <span>New Class</span>
           <select
             name="new_class_slug"
-            data-live-preview-trigger="change"
-            data-live-preview-regions="{{ level_up.live_regions_csv }}"
-            data-live-preview-debounce-ms="100"
+            data-live-preview-trigger="{{ level_up.field_live_preview.new_class_slug.live_preview_trigger }}"
+            data-live-preview-regions="{{ level_up.field_live_preview.new_class_slug.live_preview_regions }}"
+            data-live-preview-debounce-ms="{{ level_up.field_live_preview.new_class_slug.live_preview_debounce_ms }}"
           >
             <option value="" {% if not level_up.values.new_class_slug %}selected{% endif %}>Choose an option</option>
             {% for option in level_up.new_class_options %}
@@ -42,9 +42,9 @@
             <span>New Subclass</span>
             <select
               name="new_subclass_slug"
-              data-live-preview-trigger="change"
-              data-live-preview-regions="choice-sections,preview-summary,preview-features,preview-resources,preview-spell-slots,preview-spells"
-              data-live-preview-debounce-ms="100"
+              data-live-preview-trigger="{{ level_up.field_live_preview.new_subclass_slug.live_preview_trigger }}"
+              data-live-preview-regions="{{ level_up.field_live_preview.new_subclass_slug.live_preview_regions }}"
+              data-live-preview-debounce-ms="{{ level_up.field_live_preview.new_subclass_slug.live_preview_debounce_ms }}"
             >
               <option value="" {% if not level_up.values.new_subclass_slug %}selected{% endif %}>No subclass yet</option>
               {% for option in level_up.new_subclass_options %}
@@ -58,9 +58,9 @@
           <span>Class Row</span>
           <select
             name="target_class_row_id"
-            data-live-preview-trigger="change"
-            data-live-preview-regions="{{ level_up.live_regions_csv }}"
-            data-live-preview-debounce-ms="100"
+            data-live-preview-trigger="{{ level_up.field_live_preview.target_class_row_id.live_preview_trigger }}"
+            data-live-preview-regions="{{ level_up.field_live_preview.target_class_row_id.live_preview_regions }}"
+            data-live-preview-debounce-ms="{{ level_up.field_live_preview.target_class_row_id.live_preview_debounce_ms }}"
           >
             {% for option in level_up.target_row_options %}
               <option value="{{ option.value }}" {% if level_up.values.target_class_row_id == option.value %}selected{% endif %}>{{ option.label }}</option>
@@ -86,9 +86,9 @@
           min="1"
           value="{{ level_up.values.hp_gain }}"
           placeholder="6"
-          data-live-preview-trigger="input"
-          data-live-preview-regions="preview-summary"
-          data-live-preview-debounce-ms="350"
+          data-live-preview-trigger="{{ level_up.field_live_preview.hp_gain.live_preview_trigger }}"
+          data-live-preview-regions="{{ level_up.field_live_preview.hp_gain.live_preview_regions }}"
+          data-live-preview-debounce-ms="{{ level_up.field_live_preview.hp_gain.live_preview_debounce_ms }}"
         >
         <small>Enter the HP increase for this level based on your table's method.</small>
       </label>
@@ -182,6 +182,21 @@
       </ul>
     {% else %}
       <p class="meta">No modeled limited-use resources are on the resulting sheet yet.</p>
+    {% endif %}
+  </section>
+{% endif %}
+
+{% if "preview-attacks" in requested_regions %}
+  <section class="card sidebar-card" data-live-builder-region="preview-attacks">
+    <h2>Attacks After Level Up</h2>
+    {% if level_up.preview.attacks %}
+      <ul class="plain-list builder-feature-list">
+        {% for attack_name in level_up.preview.attacks %}
+          <li>{{ attack_name }}</li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="meta">Modeled attack updates will appear here when this advancement changes your attack rows.</p>
     {% endif %}
   </section>
 {% endif %}

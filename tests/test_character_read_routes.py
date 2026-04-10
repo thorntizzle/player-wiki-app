@@ -2379,6 +2379,129 @@ def test_quick_reference_can_fall_back_to_legacy_attack_name_matching_for_equipm
     assert "Hidden until equipped: Crossbow, Light." in html
 
 
+def test_quick_reference_renders_shield_master_helper_row_without_placeholder_math(app, client, sign_in, users):
+    def _mutate(payload: dict) -> None:
+        payload["equipment_catalog"] = [
+            {
+                "id": "shield-1",
+                "name": "Shield",
+                "default_quantity": 1,
+                "weight": "6 lb.",
+                "notes": "",
+                "systems_ref": {
+                    "entry_type": "item",
+                    "slug": "phb-item-shield",
+                    "title": "Shield",
+                    "source_id": "PHB",
+                },
+            }
+        ]
+        payload["attacks"] = [
+            {
+                "id": "shield-shove-1",
+                "name": "Shield Shove",
+                "category": "special action",
+                "attack_bonus": None,
+                "damage": "",
+                "damage_type": "",
+                "notes": "Bonus action after taking the Attack action; Shield Master shove within 5 feet.",
+                "mode_key": "feat:phb-feat-shield-master:shove",
+                "equipment_refs": ["shield-1"],
+            }
+        ]
+
+    def _mutate_state(payload: dict) -> None:
+        payload["inventory"] = [
+            {
+                "id": "shield-1",
+                "catalog_ref": "shield-1",
+                "name": "Shield",
+                "quantity": 1,
+                "weight": "6 lb.",
+                "notes": "",
+                "is_equipped": True,
+                "is_attuned": False,
+                "tags": [],
+            }
+        ]
+
+    _write_character_definition(app, "arden-march", _mutate)
+    _write_character_state(app, "arden-march", _mutate_state)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=quick")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+
+    assert html.count('class="attack-card"') == 1
+    assert "Shield Shove" in html
+    assert "Special Action" in html
+    assert "Bonus action after taking the Attack action; Shield Master shove within 5 feet." in html
+    assert "to hit" not in html
+    assert "<strong>--</strong>" not in html
+
+
+def test_quick_reference_hides_shield_master_helper_row_until_shield_is_equipped(app, client, sign_in, users):
+    def _mutate(payload: dict) -> None:
+        payload["equipment_catalog"] = [
+            {
+                "id": "shield-1",
+                "name": "Shield",
+                "default_quantity": 1,
+                "weight": "6 lb.",
+                "notes": "",
+                "systems_ref": {
+                    "entry_type": "item",
+                    "slug": "phb-item-shield",
+                    "title": "Shield",
+                    "source_id": "PHB",
+                },
+            }
+        ]
+        payload["attacks"] = [
+            {
+                "id": "shield-shove-1",
+                "name": "Shield Shove",
+                "category": "special action",
+                "attack_bonus": None,
+                "damage": "",
+                "damage_type": "",
+                "notes": "Bonus action after taking the Attack action; Shield Master shove within 5 feet.",
+                "mode_key": "feat:phb-feat-shield-master:shove",
+                "equipment_refs": ["shield-1"],
+            }
+        ]
+
+    def _mutate_state(payload: dict) -> None:
+        payload["inventory"] = [
+            {
+                "id": "shield-1",
+                "catalog_ref": "shield-1",
+                "name": "Shield",
+                "quantity": 1,
+                "weight": "6 lb.",
+                "notes": "",
+                "is_equipped": False,
+                "is_attuned": False,
+                "tags": [],
+            }
+        ]
+
+    _write_character_definition(app, "arden-march", _mutate)
+    _write_character_state(app, "arden-march", _mutate_state)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=quick")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+
+    assert html.count('class="attack-card"') == 0
+    assert "Hidden until equipped: Shield Shove." in html
+    assert "Bonus action after taking the Attack action; Shield Master shove within 5 feet." not in html
+
+
 def test_character_sheet_renders_systems_links_when_present(app, client, sign_in, users):
     def _mutate(payload: dict) -> None:
         profile = dict(payload.get("profile") or {})

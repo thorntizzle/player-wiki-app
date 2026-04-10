@@ -420,6 +420,9 @@ def present_character_detail(
         if attack_is_equipped is False:
             hidden_attacks.append(str(attack.get("name") or "Attack"))
             continue
+        raw_attack_bonus = attack.get("attack_bonus")
+        attack_bonus = format_signed(raw_attack_bonus) if raw_attack_bonus not in {"", None} else ""
+        damage = str(attack.get("damage") or "").strip()
         attacks.append(
             {
                 "name": str(attack.get("name") or "Attack"),
@@ -428,8 +431,8 @@ def present_character_detail(
                     systems_ref=attack.get("systems_ref"),
                     page_ref=attack.get("page_ref"),
                 ),
-                "attack_bonus": format_signed(attack.get("attack_bonus")),
-                "damage": str(attack.get("damage") or "--"),
+                "attack_bonus": attack_bonus,
+                "damage": damage,
                 "category": humanize_value(attack.get("category")),
                 "notes": str(attack.get("notes") or "").strip(),
                 "linked_item_refs": linked_item_refs,

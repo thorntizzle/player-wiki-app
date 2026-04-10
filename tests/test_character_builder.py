@@ -399,6 +399,62 @@ def _builder_context_fixture() -> dict[str, object]:
             "background": "Acolyte",
             "subclass": "",
         },
+        "field_live_preview": {
+            "name": {"live_preview_trigger": "blur", "live_preview_regions": "", "live_preview_debounce_ms": 0},
+            "character_slug": {"live_preview_trigger": "blur", "live_preview_regions": "", "live_preview_debounce_ms": 0},
+            "alignment": {"live_preview_trigger": "blur", "live_preview_regions": "", "live_preview_debounce_ms": 0},
+            "experience_model": {"live_preview_trigger": "blur", "live_preview_regions": "", "live_preview_debounce_ms": 0},
+            "class_slug": {
+                "live_preview_trigger": "change",
+                "live_preview_regions": "choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-equipment,preview-attacks",
+                "live_preview_debounce_ms": 120,
+            },
+            "subclass_slug": {
+                "live_preview_trigger": "change",
+                "live_preview_regions": "choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-attacks",
+                "live_preview_debounce_ms": 120,
+            },
+            "species_slug": {
+                "live_preview_trigger": "change",
+                "live_preview_regions": "choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-attacks",
+                "live_preview_debounce_ms": 120,
+            },
+            "background_slug": {
+                "live_preview_trigger": "change",
+                "live_preview_regions": "choice-sections,preview-summary,preview-spells,preview-equipment,preview-attacks",
+                "live_preview_debounce_ms": 120,
+            },
+            "str": {
+                "live_preview_trigger": "input",
+                "live_preview_regions": "preview-summary,preview-spells,preview-attacks",
+                "live_preview_debounce_ms": 350,
+            },
+            "dex": {
+                "live_preview_trigger": "input",
+                "live_preview_regions": "preview-summary,preview-spells,preview-attacks",
+                "live_preview_debounce_ms": 350,
+            },
+            "con": {
+                "live_preview_trigger": "input",
+                "live_preview_regions": "preview-summary,preview-spells,preview-attacks",
+                "live_preview_debounce_ms": 350,
+            },
+            "int": {
+                "live_preview_trigger": "input",
+                "live_preview_regions": "preview-summary,preview-spells,preview-attacks",
+                "live_preview_debounce_ms": 350,
+            },
+            "wis": {
+                "live_preview_trigger": "input",
+                "live_preview_regions": "preview-summary,preview-spells,preview-attacks",
+                "live_preview_debounce_ms": 350,
+            },
+            "cha": {
+                "live_preview_trigger": "input",
+                "live_preview_regions": "preview-summary,preview-spells,preview-attacks",
+                "live_preview_debounce_ms": 350,
+            },
+        },
         "preview_region_ids": [
             "preview-summary",
             "preview-features",
@@ -423,12 +479,123 @@ def _builder_context_fixture() -> dict[str, object]:
     }
 
 
+def _level_up_context_fixture() -> dict[str, object]:
+    return {
+        "values": {
+            "advancement_mode": "advance_existing",
+            "target_class_row_id": "class-row-1",
+            "new_class_slug": "",
+            "new_subclass_slug": "",
+            "hp_gain": "8",
+        },
+        "character_name": "Leveler",
+        "current_level": 1,
+        "next_level": 2,
+        "campaign_slug": "linden-pass",
+        "selected_class": SimpleNamespace(title="Fighter"),
+        "selected_species": SimpleNamespace(title="Human"),
+        "selected_background": SimpleNamespace(title="Acolyte"),
+        "selected_subclass": None,
+        "subclass_options": [],
+        "requires_subclass": False,
+        "choice_sections": [],
+        "class_progression": [],
+        "subclass_progression": [],
+        "spell_catalog": {},
+        "limitations": [],
+        "preview": {
+            "class_level_text": "Fighter 2",
+            "max_hp": 20,
+            "gained_features": ["Action Surge"],
+            "resources": [],
+            "attacks": [],
+            "spell_slots": [],
+            "new_spells": [],
+            "class_rows": ["Fighter 2"],
+        },
+        "selected_class_rows": [],
+        "mode_options": [{"value": "advance_existing", "label": "Advance existing class"}],
+        "can_add_class": False,
+        "current_class_rows": ["Fighter 1"],
+        "target_row_options": [{"value": "class-row-1", "label": "Fighter 1"}],
+        "target_class_row_id": "class-row-1",
+        "row_current_level": 1,
+        "row_target_level": 2,
+        "new_class_options": [],
+        "new_subclass_options": [],
+        "multiclass_requirement_text": "",
+        "multiclass_requirements_met": True,
+        "state_revision": 3,
+        "field_live_preview": {
+            "advancement_mode": {
+                "live_preview_trigger": "change",
+                "live_preview_regions": "advancement,choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-attacks,preview-spell-slots",
+                "live_preview_debounce_ms": 100,
+            },
+            "new_class_slug": {
+                "live_preview_trigger": "change",
+                "live_preview_regions": "advancement,choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-attacks,preview-spell-slots",
+                "live_preview_debounce_ms": 100,
+            },
+            "new_subclass_slug": {
+                "live_preview_trigger": "change",
+                "live_preview_regions": "choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-attacks,preview-spell-slots",
+                "live_preview_debounce_ms": 100,
+            },
+            "target_class_row_id": {
+                "live_preview_trigger": "change",
+                "live_preview_regions": "advancement,choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-attacks,preview-spell-slots",
+                "live_preview_debounce_ms": 100,
+            },
+            "hp_gain": {
+                "live_preview_trigger": "input",
+                "live_preview_regions": "preview-summary",
+                "live_preview_debounce_ms": 350,
+            },
+        },
+        "preview_region_ids": [
+            "preview-summary",
+            "preview-features",
+            "preview-resources",
+            "preview-spells",
+            "preview-attacks",
+            "preview-scope",
+            "preview-spell-slots",
+        ],
+        "preview_regions_csv": "preview-summary,preview-features,preview-resources,preview-spells,preview-attacks,preview-scope,preview-spell-slots",
+        "live_region_ids": [
+            "advancement",
+            "choice-sections",
+            "preview-summary",
+            "preview-features",
+            "preview-resources",
+            "preview-spells",
+            "preview-attacks",
+            "preview-scope",
+            "preview-spell-slots",
+        ],
+        "live_regions_csv": "advancement,choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-attacks,preview-scope,preview-spell-slots",
+    }
+
+
 def _find_builder_field(builder_context: dict[str, object], field_name: str) -> dict:
     for section in list(builder_context.get("choice_sections") or []):
         for field in list(section.get("fields") or []):
             if field.get("name") == field_name:
                 return dict(field)
     raise AssertionError(f"builder field '{field_name}' was not found")
+
+
+def _assert_live_preview_metadata(
+    payload: dict[str, object],
+    *,
+    trigger: str,
+    regions: str,
+    debounce_ms: int,
+) -> None:
+    assert payload["live_preview_trigger"] == trigger
+    assert payload["live_preview_regions"] == regions
+    assert payload["live_preview_debounce_ms"] == debounce_ms
 
 
 def _field_value_for_label(builder_context: dict[str, object], field_name: str, label_fragment: str) -> str:
@@ -450,6 +617,194 @@ def _option_value_for_label(options: list[dict[str, object]], label_fragment: st
         if label_fragment.lower() in str(option.get("label") or "").lower():
             return str(option.get("value") or option.get("slug") or "")
     raise AssertionError(f"top-level builder options did not contain '{label_fragment}'")
+
+
+_SINGLE_TRACKER_FEAT_CASES = [
+    pytest.param(
+        "Dragon Fear",
+        "xge-feat-dragon-fear",
+        "dragon-fear",
+        "Dragon Fear: 1 / 1 (Short Rest)",
+        "special",
+        id="dragon-fear",
+    ),
+    pytest.param(
+        "Orcish Fury",
+        "xge-feat-orcish-fury",
+        "orcish-fury",
+        "Orcish Fury: 1 / 1 (Short Rest)",
+        "special",
+        id="orcish-fury",
+    ),
+    pytest.param(
+        "Second Chance",
+        "xge-feat-second-chance",
+        "second-chance",
+        "Second Chance: 1 / 1 (Short Rest)",
+        "reaction",
+        id="second-chance",
+    ),
+]
+
+
+def _build_single_tracker_feat_level_one_fixture(
+    feat_name: str,
+    feat_slug: str,
+) -> tuple[_FakeSystemsService, dict[str, str]]:
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    variant_human = _systems_entry(
+        "race",
+        "phb-race-variant-human",
+        "Variant Human",
+        metadata={
+            "size": ["M"],
+            "speed": 30,
+            "languages": [{"common": True}],
+            "feats": [{"any": 1}],
+        },
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    feat_entry = _systems_entry("feat", feat_slug, feat_name, source_id="XGE")
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [variant_human],
+            "background": [acolyte],
+            "feat": [feat_entry],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    form_values = {
+        "name": f"{feat_name} Hero",
+        "character_slug": feat_slug.replace("-", "_"),
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": variant_human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "species_feat_1": feat_entry.slug,
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "13",
+        "cha": "8",
+    }
+    return systems_service, form_values
+
+
+def _build_single_tracker_feat_level_up_fixture(
+    feat_name: str,
+    feat_slug: str,
+) -> tuple[_FakeSystemsService, CharacterDefinition, dict[str, str]]:
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    ability_score_improvement = _systems_entry(
+        "classfeature",
+        "phb-classfeature-ability-score-improvement",
+        "Ability Score Improvement",
+        metadata={"level": 8},
+    )
+    feat_entry = _systems_entry("feat", feat_slug, feat_name, source_id="XGE")
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [feat_entry],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 8,
+                "level_label": "Level 8",
+                "feature_rows": [
+                    {
+                        "label": "Ability Score Improvement",
+                        "entry": ability_score_improvement,
+                        "embedded_card": {"option_groups": []},
+                    }
+                ],
+            }
+        ],
+    )
+
+    current_definition = _minimal_character_definition(
+        feat_slug.replace("-", "_"),
+        f"{feat_name} Veteran",
+    )
+    current_definition.profile["class_level_text"] = "Fighter 7"
+    current_definition.profile["classes"][0]["level"] = 7
+    current_definition.stats["max_hp"] = 60
+    current_definition.proficiencies["weapons"] = ["Simple Weapons", "Martial Weapons"]
+
+    form_values = {
+        "hp_gain": "8",
+        "levelup_asi_mode_1": "feat",
+        "levelup_feat_1": feat_entry.slug,
+    }
+    return systems_service, current_definition, form_values
 
 
 def _progression_row(
@@ -1551,6 +1906,75 @@ def test_native_level_up_blocks_add_class_when_multiclass_requirements_are_not_m
             context,
             context["values"],
         )
+
+
+def test_native_level_up_clears_stale_add_class_fields_after_switching_back_to_existing_row():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "proficiency": ["str", "con"], "subclass_title": "Martial Archetype"},
+    )
+    rogue = _systems_entry(
+        "class",
+        "phb-class-rogue",
+        "Rogue",
+        metadata={
+            "hit_die": {"faces": 8},
+            "proficiency": ["dex", "int"],
+            "multiclassing": {
+                "requirements": {"dex": 13},
+                "proficienciesGained": {
+                    "skills": [{"choose": {"count": 1, "from": ["stealth", "investigation"]}}],
+                },
+            },
+        },
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter, rogue],
+            "race": [human],
+            "background": [acolyte],
+            "subclass": [],
+        },
+        class_progression=[],
+    )
+    _set_progressions(systems_service, class_by_slug={fighter.slug: [], rogue.slug: []})
+    current_definition = _minimal_character_definition("mode-shift", "Mode Shift")
+    current_definition.stats["ability_scores"]["dex"] = {"score": 13, "modifier": 1, "save_bonus": 1}
+
+    add_class_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        current_definition,
+        {
+            "advancement_mode": "add_class",
+            "new_class_slug": f"systems:{rogue.slug}",
+            "multiclass_skill_1": "stealth",
+            "hp_gain": "5",
+        },
+    )
+    shifted_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        current_definition,
+        {
+            **add_class_context["values"],
+            "advancement_mode": "advance_existing",
+            "target_class_row_id": "class-row-1",
+        },
+    )
+
+    assert "multiclass_skill_1" in _builder_field_names(add_class_context)
+    assert "multiclass_skill_1" not in _builder_field_names(shifted_context)
+    assert shifted_context["values"].get("new_class_slug", "") == ""
+    assert shifted_context["values"].get("multiclass_skill_1", "") == ""
+    assert shifted_context["values"].get("hp_gain", "") == "5"
+    assert shifted_context["field_live_preview"]["advancement_mode"]["live_preview_regions"] == (
+        "advancement,choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-attacks,preview-spell-slots"
+    )
 
 
 def test_native_level_up_advances_selected_multiclass_row_only():
@@ -5183,6 +5607,65 @@ def test_normalize_definition_to_native_model_preserves_imported_armor_class_whe
     assert normalized.stats["armor_class"] == 17
 
 
+def test_normalize_definition_to_native_model_adds_single_shield_master_helper_row_for_multiple_shields():
+    definition = _minimal_character_definition("shield-marshal", "Shield Marshal")
+    definition.features = [
+        {
+            "id": "shield-master-1",
+            "name": "Shield Master",
+            "category": "feat",
+            "source": "PHB",
+            "description_markdown": "",
+            "systems_ref": {
+                "entry_type": "feat",
+                "slug": "phb-feat-shield-master",
+                "title": "Shield Master",
+                "source_id": "PHB",
+            },
+        }
+    ]
+    definition.equipment_catalog = [
+        {
+            "id": "shield-1",
+            "name": "Shield",
+            "default_quantity": 1,
+            "weight": "6 lb.",
+            "notes": "",
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-shield",
+                "title": "Shield",
+                "source_id": "PHB",
+            },
+        },
+        {
+            "id": "shield-2",
+            "name": "Shield",
+            "default_quantity": 1,
+            "weight": "6 lb.",
+            "notes": "Spare shield",
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-shield",
+                "title": "Shield",
+                "source_id": "PHB",
+            },
+        },
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+
+    assert len(normalized.attacks) == 1
+    shield_shove = normalized.attacks[0]
+    assert shield_shove["name"] == "Shield Shove"
+    assert shield_shove["category"] == "special action"
+    assert shield_shove["attack_bonus"] is None
+    assert shield_shove["damage"] == ""
+    assert shield_shove["notes"] == "Bonus action after taking the Attack action; Shield Master shove within 5 feet."
+    assert shield_shove["mode_key"] == "feat:phb-feat-shield-master:shove"
+    assert shield_shove["equipment_refs"] == ["shield-1", "shield-2"]
+
+
 def test_normalize_definition_to_native_model_derives_barbarian_unarmored_defense_for_imported_character():
     definition = _minimal_imported_character_definition("bryn-coal", "Bryn Coal")
     definition.profile["class_level_text"] = "Barbarian 3"
@@ -5812,6 +6295,40 @@ def test_normalize_definition_to_native_model_adds_additional_modeled_feat_track
     assert resources_by_id["recover-vitality-dice"]["reset_on"] == "long_rest"
 
 
+def test_normalize_definition_to_native_model_adds_single_use_short_rest_feat_trackers():
+    definition = _minimal_character_definition("kora-flint", "Kora Flint")
+    definition.profile["class_level_text"] = "Fighter 5"
+    definition.profile["classes"] = [{"class_name": "Fighter", "subclass_name": "", "level": 5}]
+    definition.features = [
+        {"id": "dragon-fear-1", "name": "Dragon Fear", "category": "feat", "source": "XGE", "description_markdown": ""},
+        {"id": "orcish-fury-1", "name": "Orcish Fury", "category": "feat", "source": "XGE", "description_markdown": ""},
+        {
+            "id": "second-chance-1",
+            "name": "Second Chance",
+            "category": "feat",
+            "source": "XGE",
+            "description_markdown": "",
+        },
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+    features_by_name = {feature["name"]: feature for feature in normalized.features}
+    resources_by_id = {resource["id"]: resource for resource in normalized.resource_templates}
+
+    assert features_by_name["Dragon Fear"]["tracker_ref"] == "dragon-fear"
+    assert features_by_name["Dragon Fear"]["activation_type"] == "special"
+    assert features_by_name["Orcish Fury"]["tracker_ref"] == "orcish-fury"
+    assert features_by_name["Orcish Fury"]["activation_type"] == "special"
+    assert features_by_name["Second Chance"]["tracker_ref"] == "second-chance"
+    assert features_by_name["Second Chance"]["activation_type"] == "reaction"
+    assert resources_by_id["dragon-fear"]["max"] == 1
+    assert resources_by_id["dragon-fear"]["reset_on"] == "short_rest"
+    assert resources_by_id["orcish-fury"]["max"] == 1
+    assert resources_by_id["orcish-fury"]["reset_on"] == "short_rest"
+    assert resources_by_id["second-chance"]["max"] == 1
+    assert resources_by_id["second-chance"]["reset_on"] == "short_rest"
+
+
 def test_level_one_builder_surfaces_and_applies_skilled_feat_choices():
     fighter = _systems_entry(
         "class",
@@ -6258,9 +6775,121 @@ def test_level_one_builder_clears_stale_species_feat_and_spell_fields_after_spec
     assert not any(name.startswith("feat_species_feat_1_") for name in field_names)
     assert stale_context["values"].get("species_feat_1", "") == ""
     assert stale_context["values"].get("feat_species_feat_1_spell_known_1_1", "") == ""
+    assert stale_context["values"].get("class_skill_1", "") == "athletics"
+    assert stale_context["values"].get("class_skill_2", "") == "history"
     assert stale_context["preview"]["spells"] == []
     assert definition.spellcasting["spells"] == []
     assert all(feature["name"] != "Magic Initiate" for feature in definition.features)
+
+
+def test_level_one_builder_updates_background_preview_and_preserves_valid_class_choices_after_background_change():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 1, "from": ["athletics", "history"]}}],
+            },
+            "starting_equipment": {
+                "defaultData": [
+                    {"a": ["longsword|phb"], "b": ["handaxe|phb"]},
+                ]
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={
+            "skill_proficiencies": [{"insight": True, "religion": True}],
+            "language_proficiencies": [{"anyStandard": 1}],
+            "starting_equipment": [{"_": ["holy symbol|phb"]}],
+        },
+    )
+    hermit = _systems_entry(
+        "background",
+        "phb-background-hermit",
+        "Hermit",
+        metadata={
+            "skill_proficiencies": [{"medicine": True, "religion": True}],
+            "tool_proficiencies": ["Herbalism Kit"],
+            "starting_equipment": [{"_": ["herbalism kit|phb"]}],
+        },
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    longsword = _systems_entry("item", "phb-item-longsword", "Longsword")
+    handaxe = _systems_entry("item", "phb-item-handaxe", "Handaxe")
+    holy_symbol = _systems_entry("item", "phb-item-holy-symbol", "Holy Symbol")
+    herbalism_kit = _systems_entry("item", "phb-item-herbalism-kit", "Herbalism Kit")
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte, hermit],
+            "feat": [],
+            "subclass": [],
+            "item": [longsword, handaxe, holy_symbol, herbalism_kit],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    base_form = {
+        "name": "Shifted Pilgrim",
+        "character_slug": "shifted-pilgrim",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "background_language_1": "Elvish",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "13",
+        "cha": "8",
+    }
+
+    base_context = build_level_one_builder_context(systems_service, "linden-pass", base_form)
+    base_form["class_equipment_1"] = _field_value_for_label(base_context, "class_equipment_1", "Longsword")
+    switched_context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        {
+            **base_form,
+            "background_slug": hermit.slug,
+        },
+    )
+
+    assert "background_language_1" not in _builder_field_names(switched_context)
+    assert switched_context["values"].get("background_language_1", "") == ""
+    assert switched_context["values"].get("class_equipment_1", "") == base_form["class_equipment_1"]
+    assert switched_context["preview"]["background"] == "Hermit"
+    assert "Longsword" in switched_context["preview"]["equipment"]
+    assert "Herbalism Kit" in switched_context["preview"]["equipment"]
+    assert "Holy Symbol" not in switched_context["preview"]["equipment"]
 
 
 def test_level_one_builder_applies_metamagic_adept_tracker():
@@ -6590,6 +7219,32 @@ def test_level_one_builder_applies_gift_of_the_gem_dragon_tracker():
     assert gem_feature["tracker_ref"] == "telekinetic-reprisal"
     assert resources_by_id["telekinetic-reprisal"]["max"] == 2
     assert resources_by_id["telekinetic-reprisal"]["reset_on"] == "long_rest"
+
+
+@pytest.mark.parametrize(
+    ("feat_name", "feat_slug", "tracker_id", "preview_label", "activation_type"),
+    _SINGLE_TRACKER_FEAT_CASES,
+)
+def test_level_one_builder_applies_single_use_short_rest_feat_trackers(
+    feat_name: str,
+    feat_slug: str,
+    tracker_id: str,
+    preview_label: str,
+    activation_type: str,
+):
+    systems_service, form_values = _build_single_tracker_feat_level_one_fixture(feat_name, feat_slug)
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+
+    feat_feature = next(feature for feature in definition.features if feature["name"] == feat_name)
+    resources_by_id = {resource["id"]: resource for resource in definition.resource_templates}
+
+    assert preview_label in context["preview"]["resources"]
+    assert feat_feature["tracker_ref"] == tracker_id
+    assert feat_feature["activation_type"] == activation_type
+    assert resources_by_id[tracker_id]["max"] == 1
+    assert resources_by_id[tracker_id]["reset_on"] == "short_rest"
 
 
 def test_level_one_builder_applies_alert_feat_to_initiative():
@@ -7847,6 +8502,94 @@ def test_level_one_builder_adds_tavern_brawler_unarmed_attack_and_improvised_pro
     assert "Improvised Weapons" in definition.proficiencies["weapons"]
     assert "Unarmed Strike (+5, 1d4+3 bludgeoning)" in context["preview"]["attacks"]
     assert unarmed_attack["notes"] == "Tavern Brawler enhanced unarmed strike."
+
+
+def test_level_one_builder_adds_shield_master_helper_row():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+            "starting_equipment": {
+                "defaultData": [
+                    {"_": ["shield|phb"]},
+                ]
+            },
+        },
+    )
+    variant_human = _systems_entry(
+        "race",
+        "phb-race-variant-human",
+        "Variant Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}], "feats": [{"any": 1}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    shield_master = _systems_entry("feat", "phb-feat-shield-master", "Shield Master")
+    shield = _systems_entry("item", "phb-item-shield", "Shield", metadata={"weight": 6, "type": "S"})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [variant_human],
+            "background": [acolyte],
+            "feat": [shield_master],
+            "subclass": [],
+            "item": [shield],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+    form_values = {
+        "name": "Shield Hero",
+        "character_slug": "shield-hero",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": variant_human.slug,
+        "background_slug": acolyte.slug,
+        "species_feat_1": shield_master.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+    shield_id = next(item["id"] for item in definition.equipment_catalog if item["name"] == "Shield")
+    shield_shove = next(attack for attack in definition.attacks if attack["name"] == "Shield Shove")
+
+    assert "Shield Shove (special action)" in context["preview"]["attacks"]
+    assert shield_shove["attack_bonus"] is None
+    assert shield_shove["damage"] == ""
+    assert shield_shove["notes"] == "Bonus action after taking the Attack action; Shield Master shove within 5 feet."
+    assert shield_shove["mode_key"] == "feat:phb-feat-shield-master:shove"
+    assert shield_shove["equipment_refs"] == [shield_id]
 
 
 def test_level_one_builder_populates_starting_equipment_spells_and_currency():
@@ -13768,9 +14511,335 @@ def test_build_level_one_builder_context_marks_choice_fields_with_live_preview_r
     class_option_field = _find_builder_field(builder_context, "class_option_1")
     species_feat_field = _find_builder_field(builder_context, "species_feat_1")
 
-    assert class_option_field["live_preview_trigger"] == "change"
-    assert class_option_field["live_preview_regions"].startswith("choice-sections,")
-    assert species_feat_field["live_preview_regions"].startswith("choice-sections,")
+    _assert_live_preview_metadata(
+        builder_context["field_live_preview"]["class_slug"],
+        trigger="change",
+        regions="choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-equipment,preview-attacks",
+        debounce_ms=120,
+    )
+    _assert_live_preview_metadata(
+        builder_context["field_live_preview"]["str"],
+        trigger="input",
+        regions="preview-summary,preview-spells,preview-attacks",
+        debounce_ms=350,
+    )
+    _assert_live_preview_metadata(
+        class_option_field,
+        trigger="change",
+        regions="choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-equipment,preview-attacks",
+        debounce_ms=120,
+    )
+    _assert_live_preview_metadata(
+        species_feat_field,
+        trigger="change",
+        regions="choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-equipment,preview-attacks",
+        debounce_ms=120,
+    )
+
+
+def test_build_level_one_builder_context_assigns_targeted_live_preview_regions_for_representative_field_families():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 1, "from": ["athletics", "history"]}}],
+            },
+            "starting_equipment": {
+                "defaultData": [
+                    {"a": ["longsword|phb"], "b": ["handaxe|phb"]},
+                ]
+            },
+        },
+    )
+    variant_human = _systems_entry(
+        "race",
+        "phb-race-variant-human",
+        "Variant Human",
+        metadata={
+            "size": ["M"],
+            "speed": 30,
+            "languages": [{"common": True, "anyStandard": 1}],
+            "skill_proficiencies": [{"any": 1}],
+            "feats": [{"any": 1}],
+        },
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={
+            "skill_proficiencies": [{"insight": True, "religion": True}],
+            "language_proficiencies": [{"anyStandard": 1}],
+        },
+    )
+    archery = _systems_entry("feat", "phb-feat-archery", "Archery")
+    defense = _systems_entry("feat", "phb-feat-defense", "Defense")
+    magic_initiate = _systems_entry(
+        "feat",
+        "phb-feat-magic-initiate",
+        "Magic Initiate",
+        metadata={
+            "additional_spells": [
+                {
+                    "ability": "wis",
+                    "known": {"_": [{"choose": "level=0|class=Cleric", "count": 1}]},
+                    "innate": {"_": {"daily": {"1": [{"choose": "level=1|class=Cleric"}]}}},
+                }
+            ]
+        },
+    )
+    guidance = _systems_entry(
+        "spell",
+        "phb-spell-guidance",
+        "Guidance",
+        metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 0, "class_lists": {"PHB": ["Cleric"]}},
+    )
+    cure_wounds = _systems_entry(
+        "spell",
+        "phb-spell-cure-wounds",
+        "Cure Wounds",
+        metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1, "class_lists": {"PHB": ["Cleric"]}},
+    )
+    longsword = _systems_entry("item", "phb-item-longsword", "Longsword")
+    handaxe = _systems_entry("item", "phb-item-handaxe", "Handaxe")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [variant_human],
+            "background": [acolyte],
+            "feat": [archery, defense, magic_initiate],
+            "subclass": [],
+            "item": [longsword, handaxe],
+            "spell": [guidance, cure_wounds],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "feature_rows": [
+                    {
+                        "label": "Fighting Style",
+                        "embedded_card": {
+                            "option_groups": [
+                                {
+                                    "options": [
+                                        {"label": "Archery", "slug": archery.slug},
+                                        {"label": "Defense", "slug": defense.slug},
+                                    ]
+                                }
+                            ]
+                        },
+                    }
+                ],
+            }
+        ],
+    )
+    campaign_page_records = [
+        _campaign_page_record(
+            "mechanics/arcane-overload",
+            "Arcane Overload",
+            section="Mechanics",
+            subsection="Boons",
+            metadata={
+                "character_option": {
+                    "kind": "feature",
+                    "name": "Arcane Overload",
+                    "proficiencies": {"weapons": ["martial"]},
+                    "resource": {"label": "Arcane Overload", "max": 1, "reset_on": "long_rest"},
+                    "spell_support": [
+                        {"choices": {"1": [{"category": "known", "filter": "level=0|class=Cleric", "count": 1}]}}
+                    ],
+                    "modeled_effects": ["effect:attack-mode:melee:arcane-overload"],
+                }
+            },
+        ),
+        _campaign_page_record(
+            "items/stormglass-compass",
+            "Stormglass Compass",
+            section="Items",
+            subsection="Wondrous Items",
+            metadata={
+                "character_option": {
+                    "kind": "item",
+                    "name": "Stormglass Compass",
+                    "spells": [{"value": guidance.slug, "mark": "Granted"}],
+                }
+            },
+        ),
+    ]
+
+    context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        {
+            "class_slug": fighter.slug,
+            "species_slug": variant_human.slug,
+            "background_slug": acolyte.slug,
+            "species_feat_1": magic_initiate.slug,
+        },
+        campaign_page_records=campaign_page_records,
+    )
+
+    _assert_live_preview_metadata(
+        context["field_live_preview"]["background_slug"],
+        trigger="change",
+        regions="choice-sections,preview-summary,preview-spells,preview-equipment,preview-attacks",
+        debounce_ms=120,
+    )
+    _assert_live_preview_metadata(
+        _find_builder_field(context, "species_language_1"),
+        trigger="change",
+        regions="preview-summary",
+        debounce_ms=120,
+    )
+    _assert_live_preview_metadata(
+        _find_builder_field(context, "class_equipment_1"),
+        trigger="change",
+        regions="preview-summary,preview-equipment,preview-attacks",
+        debounce_ms=120,
+    )
+    _assert_live_preview_metadata(
+        _find_builder_field(context, "feat_species_feat_1_spell_known_1_1"),
+        trigger="change",
+        regions="preview-spells",
+        debounce_ms=120,
+    )
+    _assert_live_preview_metadata(
+        _find_builder_field(context, "campaign_feature_page_ref_1"),
+        trigger="change",
+        regions="choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-attacks",
+        debounce_ms=120,
+    )
+    _assert_live_preview_metadata(
+        _find_builder_field(context, "campaign_item_page_ref_1"),
+        trigger="change",
+        regions="preview-summary,preview-equipment,preview-attacks,preview-spells",
+        debounce_ms=120,
+    )
+
+
+def test_build_native_level_up_context_assigns_targeted_live_preview_regions_for_controls_and_asi_fields():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "proficiency": ["str", "con"], "subclass_title": "Martial Archetype"},
+    )
+    human = _systems_entry("race", "phb-race-human", "Human", metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]})
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    ability_score_improvement = _systems_entry("classfeature", "phb-classfeature-asi", "Ability Score Improvement", metadata={"level": 4})
+    magic_initiate = _systems_entry(
+        "feat",
+        "phb-feat-magic-initiate",
+        "Magic Initiate",
+        metadata={
+            "additional_spells": [
+                {
+                    "ability": "wis",
+                    "known": {"_": [{"choose": "level=0|class=Cleric", "count": 1}]},
+                    "innate": {"_": {"daily": {"1": [{"choose": "level=1|class=Cleric"}]}}},
+                }
+            ]
+        },
+    )
+    guidance = _systems_entry(
+        "spell",
+        "phb-spell-guidance",
+        "Guidance",
+        metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 0, "class_lists": {"PHB": ["Cleric"]}},
+    )
+    cure_wounds = _systems_entry(
+        "spell",
+        "phb-spell-cure-wounds",
+        "Cure Wounds",
+        metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1, "class_lists": {"PHB": ["Cleric"]}},
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [magic_initiate],
+            "subclass": [],
+            "item": [],
+            "spell": [guidance, cure_wounds],
+        },
+        class_progression=[
+            {
+                "level": 4,
+                "feature_rows": [
+                    {"label": "Ability Score Improvement", "entry": ability_score_improvement, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+    current_definition = _minimal_character_definition("asi-preview", "ASI Preview")
+    current_definition.profile["class_level_text"] = "Fighter 3"
+    current_definition.profile["classes"][0]["level"] = 3
+    current_definition.stats["max_hp"] = 24
+
+    context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        current_definition,
+        {"hp_gain": "8"},
+    )
+
+    _assert_live_preview_metadata(
+        context["field_live_preview"]["advancement_mode"],
+        trigger="change",
+        regions="advancement,choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-attacks,preview-spell-slots",
+        debounce_ms=100,
+    )
+    _assert_live_preview_metadata(
+        context["field_live_preview"]["target_class_row_id"],
+        trigger="change",
+        regions="advancement,choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-attacks,preview-spell-slots",
+        debounce_ms=100,
+    )
+    _assert_live_preview_metadata(
+        context["field_live_preview"]["hp_gain"],
+        trigger="input",
+        regions="preview-summary",
+        debounce_ms=350,
+    )
+    _assert_live_preview_metadata(
+        _find_builder_field(context, "levelup_asi_mode_1"),
+        trigger="change",
+        regions="choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-attacks,preview-spell-slots",
+        debounce_ms=120,
+    )
+    _assert_live_preview_metadata(
+        _find_builder_field(context, "levelup_asi_ability_1_1"),
+        trigger="change",
+        regions="preview-summary,preview-spells,preview-attacks",
+        debounce_ms=120,
+    )
+
+    feat_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        current_definition,
+        {"hp_gain": "8", "levelup_asi_mode_1": "feat", "levelup_feat_1": magic_initiate.slug},
+    )
+
+    _assert_live_preview_metadata(
+        _find_builder_field(feat_context, "levelup_feat_1"),
+        trigger="change",
+        regions="choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-attacks,preview-spell-slots",
+        debounce_ms=120,
+    )
+    _assert_live_preview_metadata(
+        _find_builder_field(feat_context, "feat_levelup_feat_1_spell_known_1_1"),
+        trigger="change",
+        regions="preview-spells",
+        debounce_ms=120,
+    )
 
 
 def test_character_builder_live_preview_route_returns_fragment(app, client, sign_in, users, monkeypatch):
@@ -13827,10 +14896,12 @@ def test_character_builder_page_renders_top_level_live_preview_metadata(app, cli
     assert 'name="name"' in html
     assert 'data-live-preview-trigger="blur"' in html
     assert 'data-live-preview-regions=""' in html
+    assert 'data-live-preview-debounce-ms="0"' in html
     assert 'name="class_slug"' in html
-    assert 'data-live-preview-regions="choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-scope,preview-equipment,preview-attacks"' in html
+    assert 'data-live-preview-regions="choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-equipment,preview-attacks"' in html
     assert 'name="str"' in html
     assert 'data-live-preview-trigger="input"' in html
+    assert 'data-live-preview-regions="preview-summary,preview-spells,preview-attacks"' in html
     assert 'data-live-preview-debounce-ms="350"' in html
 
 
@@ -13892,30 +14963,7 @@ def test_level_up_route_passes_only_builder_relevant_campaign_pages_into_builder
     monkeypatch.setattr(
         app_module,
         "build_native_level_up_context",
-        lambda *args, **kwargs: {
-            "values": {"hp_gain": "8"},
-            "character_name": "Leveler",
-            "current_level": 1,
-            "next_level": 2,
-            "selected_class": SimpleNamespace(title="Fighter"),
-            "selected_species": SimpleNamespace(title="Human"),
-            "selected_background": SimpleNamespace(title="Acolyte"),
-            "selected_subclass": None,
-            "subclass_options": [],
-            "requires_subclass": False,
-            "choice_sections": [],
-            "class_progression": [],
-            "subclass_progression": [],
-            "spell_catalog": {},
-            "limitations": [],
-            "preview": {
-                "class_level_text": "Fighter 2",
-                "max_hp": 20,
-                "gained_features": ["Action Surge"],
-                "spell_slots": [],
-                "new_spells": [],
-            },
-        },
+        lambda *args, **kwargs: _level_up_context_fixture(),
     )
 
     response = client.get("/campaigns/linden-pass/characters/leveler/level-up")
@@ -14043,30 +15091,7 @@ def test_dm_can_apply_native_level_up_route(app, client, sign_in, users, get_cha
     monkeypatch.setattr(
         app_module,
         "build_native_level_up_context",
-        lambda *args, **kwargs: {
-            "values": {"hp_gain": "8"},
-            "character_name": "Leveler",
-            "current_level": 1,
-            "next_level": 2,
-            "selected_class": SimpleNamespace(title="Fighter"),
-            "selected_species": SimpleNamespace(title="Human"),
-            "selected_background": SimpleNamespace(title="Acolyte"),
-            "selected_subclass": None,
-            "subclass_options": [],
-            "requires_subclass": False,
-            "choice_sections": [],
-            "class_progression": [],
-            "subclass_progression": [],
-            "spell_catalog": {},
-            "limitations": [],
-            "preview": {
-                "class_level_text": "Fighter 2",
-                "max_hp": 20,
-                "gained_features": ["Action Surge"],
-                "spell_slots": [],
-                "new_spells": [],
-            },
-        },
+        lambda *args, **kwargs: _level_up_context_fixture(),
     )
 
     leveled_definition = _minimal_character_definition("leveler", "Leveler")
@@ -14252,51 +15277,7 @@ def test_level_up_live_preview_route_returns_fragment(app, client, sign_in, user
     monkeypatch.setattr(
         app_module,
         "build_native_level_up_context",
-        lambda *args, **kwargs: {
-            "values": {"hp_gain": "8"},
-            "character_name": "Leveler",
-            "current_level": 1,
-            "next_level": 2,
-            "selected_class": SimpleNamespace(title="Fighter"),
-            "selected_species": SimpleNamespace(title="Human"),
-            "selected_background": SimpleNamespace(title="Acolyte"),
-            "selected_subclass": None,
-            "subclass_options": [],
-            "requires_subclass": False,
-            "choice_sections": [],
-            "class_progression": [],
-            "subclass_progression": [],
-            "spell_catalog": {},
-            "limitations": [],
-            "preview": {
-                "class_level_text": "Fighter 2",
-                "max_hp": 20,
-                "gained_features": ["Action Surge"],
-                "resources": [],
-                "spell_slots": [],
-                "new_spells": [],
-            },
-            "state_revision": 1,
-            "preview_region_ids": [
-                "preview-summary",
-                "preview-features",
-                "preview-resources",
-                "preview-spells",
-                "preview-scope",
-                "preview-spell-slots",
-            ],
-            "preview_regions_csv": "preview-summary,preview-features,preview-resources,preview-spells,preview-scope,preview-spell-slots",
-            "live_region_ids": [
-                "choice-sections",
-                "preview-summary",
-                "preview-features",
-                "preview-resources",
-                "preview-spells",
-                "preview-scope",
-                "preview-spell-slots",
-            ],
-            "live_regions_csv": "choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-scope,preview-spell-slots",
-        },
+        lambda *args, **kwargs: _level_up_context_fixture(),
     )
 
     response = client.get("/campaigns/linden-pass/characters/leveler/level-up?_live_preview=1&hp_gain=8")
@@ -14333,51 +15314,7 @@ def test_level_up_live_preview_route_returns_requested_regions_only(app, client,
     monkeypatch.setattr(
         app_module,
         "build_native_level_up_context",
-        lambda *args, **kwargs: {
-            "values": {"hp_gain": "8"},
-            "character_name": "Leveler",
-            "current_level": 1,
-            "next_level": 2,
-            "selected_class": SimpleNamespace(title="Fighter"),
-            "selected_species": SimpleNamespace(title="Human"),
-            "selected_background": SimpleNamespace(title="Acolyte"),
-            "selected_subclass": None,
-            "subclass_options": [],
-            "requires_subclass": False,
-            "choice_sections": [],
-            "class_progression": [],
-            "subclass_progression": [],
-            "spell_catalog": {},
-            "limitations": [],
-            "preview": {
-                "class_level_text": "Fighter 2",
-                "max_hp": 20,
-                "gained_features": ["Action Surge"],
-                "resources": [],
-                "spell_slots": [],
-                "new_spells": [],
-            },
-            "state_revision": 1,
-            "preview_region_ids": [
-                "preview-summary",
-                "preview-features",
-                "preview-resources",
-                "preview-spells",
-                "preview-scope",
-                "preview-spell-slots",
-            ],
-            "preview_regions_csv": "preview-summary,preview-features,preview-resources,preview-spells,preview-scope,preview-spell-slots",
-            "live_region_ids": [
-                "choice-sections",
-                "preview-summary",
-                "preview-features",
-                "preview-resources",
-                "preview-spells",
-                "preview-scope",
-                "preview-spell-slots",
-            ],
-            "live_regions_csv": "choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-scope,preview-spell-slots",
-        },
+        lambda *args, **kwargs: _level_up_context_fixture(),
     )
 
     response = client.get(
@@ -14410,51 +15347,7 @@ def test_level_up_page_renders_hp_gain_as_summary_only_live_preview(app, client,
     monkeypatch.setattr(
         app_module,
         "build_native_level_up_context",
-        lambda *args, **kwargs: {
-            "values": {"hp_gain": "8"},
-            "character_name": "Leveler",
-            "current_level": 1,
-            "next_level": 2,
-            "selected_class": SimpleNamespace(title="Fighter"),
-            "selected_species": SimpleNamespace(title="Human"),
-            "selected_background": SimpleNamespace(title="Acolyte"),
-            "selected_subclass": None,
-            "subclass_options": [],
-            "requires_subclass": False,
-            "choice_sections": [],
-            "class_progression": [],
-            "subclass_progression": [],
-            "spell_catalog": {},
-            "limitations": [],
-            "preview": {
-                "class_level_text": "Fighter 2",
-                "max_hp": 20,
-                "gained_features": ["Action Surge"],
-                "resources": [],
-                "spell_slots": [],
-                "new_spells": [],
-            },
-            "state_revision": 1,
-            "preview_region_ids": [
-                "preview-summary",
-                "preview-features",
-                "preview-resources",
-                "preview-spells",
-                "preview-scope",
-                "preview-spell-slots",
-            ],
-            "preview_regions_csv": "preview-summary,preview-features,preview-resources,preview-spells,preview-scope,preview-spell-slots",
-            "live_region_ids": [
-                "choice-sections",
-                "preview-summary",
-                "preview-features",
-                "preview-resources",
-                "preview-spells",
-                "preview-scope",
-                "preview-spell-slots",
-            ],
-            "live_regions_csv": "choice-sections,preview-summary,preview-features,preview-resources,preview-spells,preview-scope,preview-spell-slots",
-        },
+        lambda *args, **kwargs: _level_up_context_fixture(),
     )
 
     response = client.get("/campaigns/linden-pass/characters/leveler/level-up")
@@ -15329,6 +16222,110 @@ def test_native_level_up_preserves_polearm_master_attack_rows():
     assert attacks_by_name["Glaive (polearm master)"]["mode_key"] == "feat:phb-feat-polearm-master:bonus"
 
 
+def test_native_level_up_adds_shield_master_helper_row():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    ability_score_improvement = _systems_entry(
+        "classfeature",
+        "phb-classfeature-ability-score-improvement",
+        "Ability Score Improvement",
+        metadata={"level": 4},
+    )
+    shield_master = _systems_entry("feat", "phb-feat-shield-master", "Shield Master")
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [shield_master],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 4,
+                "level_label": "Level 4",
+                "feature_rows": [
+                    {
+                        "label": "Ability Score Improvement",
+                        "entry": ability_score_improvement,
+                        "embedded_card": {"option_groups": []},
+                    }
+                ],
+            }
+        ],
+    )
+
+    current_definition = _minimal_character_definition("shield-veteran", "Shield Veteran")
+    current_definition.profile["class_level_text"] = "Fighter 3"
+    current_definition.profile["classes"][0]["level"] = 3
+    current_definition.stats["max_hp"] = 28
+    current_definition.equipment_catalog = [
+        {
+            "id": "shield-1",
+            "name": "Shield",
+            "default_quantity": 1,
+            "weight": "6 lb.",
+            "notes": "",
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-shield",
+                "title": "Shield",
+                "source_id": "PHB",
+            },
+        }
+    ]
+
+    form_values = {
+        "hp_gain": "8",
+        "levelup_asi_mode_1": "feat",
+        "levelup_feat_1": shield_master.slug,
+    }
+
+    level_up_context = build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values)
+    leveled_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        level_up_context,
+        form_values,
+    )
+    shield_shove = next(attack for attack in leveled_definition.attacks if attack["name"] == "Shield Shove")
+
+    assert "Shield Master" in level_up_context["preview"]["gained_features"]
+    assert "Shield Shove (special action)" in level_up_context["preview"]["attacks"]
+    assert shield_shove["attack_bonus"] is None
+    assert shield_shove["damage"] == ""
+    assert shield_shove["notes"] == "Bonus action after taking the Attack action; Shield Master shove within 5 feet."
+    assert shield_shove["mode_key"] == "feat:phb-feat-shield-master:shove"
+    assert shield_shove["equipment_refs"] == ["shield-1"]
+
+
 def test_native_level_up_applies_fighting_initiate_optionalfeature_choice_to_attacks():
     fighter = _systems_entry(
         "class",
@@ -15660,6 +16657,38 @@ def test_native_level_up_adds_martial_adept_resource_and_preserves_melee_feat_va
     assert resources_by_id["martial-adept"]["reset_on"] == "short_rest"
     assert state_resources_by_id["martial-adept"]["current"] == 1
     assert state_resources_by_id["martial-adept"]["max"] == 1
+
+
+@pytest.mark.parametrize(
+    ("feat_name", "feat_slug", "tracker_id", "preview_label", "activation_type"),
+    _SINGLE_TRACKER_FEAT_CASES,
+)
+def test_native_level_up_applies_single_use_short_rest_feat_trackers(
+    feat_name: str,
+    feat_slug: str,
+    tracker_id: str,
+    preview_label: str,
+    activation_type: str,
+):
+    systems_service, current_definition, form_values = _build_single_tracker_feat_level_up_fixture(feat_name, feat_slug)
+
+    level_up_context = build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values)
+    leveled_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        level_up_context,
+        form_values,
+    )
+
+    feat_feature = next(feature for feature in leveled_definition.features if feature["name"] == feat_name)
+    resources_by_id = {resource["id"]: resource for resource in leveled_definition.resource_templates}
+
+    assert feat_name in level_up_context["preview"]["gained_features"]
+    assert preview_label in level_up_context["preview"]["resources"]
+    assert feat_feature["tracker_ref"] == tracker_id
+    assert feat_feature["activation_type"] == activation_type
+    assert resources_by_id[tracker_id]["max"] == 1
+    assert resources_by_id[tracker_id]["reset_on"] == "short_rest"
 
 
 def test_level_one_builder_applies_campaign_subclass_progression_feature_and_tracker():

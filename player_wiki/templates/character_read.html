@@ -217,8 +217,12 @@
                     </h3>
                     <span class="meta">{{ attack.category }}</span>
                   </div>
-                  <p><strong>{{ attack.attack_bonus }}</strong> to hit</p>
-                  <p><strong>{{ attack.damage }}</strong></p>
+                  {% if attack.attack_bonus %}
+                    <p><strong>{{ attack.attack_bonus }}</strong> to hit</p>
+                  {% endif %}
+                  {% if attack.damage %}
+                    <p><strong>{{ attack.damage }}</strong></p>
+                  {% endif %}
                   {% if attack.notes %}
                     <p class="meta">{{ attack.notes }}</p>
                   {% endif %}
