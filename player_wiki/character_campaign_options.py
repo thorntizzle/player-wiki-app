@@ -115,6 +115,14 @@ def normalize_campaign_character_option(
         )
         if resource is not None:
             normalized["resource"] = resource
+        additional_spells = raw_option.get("additional_spells", raw_option.get("additionalSpells"))
+        if additional_spells is not None:
+            normalized["additional_spells"] = deepcopy(additional_spells)
+        modeled_effects = _normalize_modeled_effects(
+            raw_option.get("modeled_effects", raw_option.get("modeledEffects"))
+        )
+        if modeled_effects:
+            normalized["modeled_effects"] = modeled_effects
         if kind == "feature":
             return normalized
         if kind == "feat":
@@ -140,11 +148,6 @@ def normalize_campaign_character_option(
             additional_spells = raw_option.get("additional_spells", raw_option.get("additionalSpells"))
             if additional_spells is not None:
                 normalized["additional_spells"] = deepcopy(additional_spells)
-            modeled_effects = _normalize_modeled_effects(
-                raw_option.get("modeled_effects", raw_option.get("modeledEffects"))
-            )
-            if modeled_effects:
-                normalized["modeled_effects"] = modeled_effects
             return normalized
         if kind == "species":
             normalized["species_name"] = str(raw_option.get("name") or "").strip() or str(title or "").strip()

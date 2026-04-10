@@ -14,9 +14,16 @@ from .character_adjustments import (
 from .character_builder import (
     _add_bonus_known_spell_to_payloads,
     _add_spell_to_payloads,
+    _automatic_innate_spell_values,
+    _automatic_known_spell_values,
+    _automatic_prepared_spell_values,
     _automatic_spell_support_grants,
+    _build_additional_spell_filter_options,
     _build_spell_support_choice_fields,
     _build_spell_support_replacement_fields,
+    _extract_additional_known_choice_specs,
+    _extract_feat_innate_choice_specs,
+    _extract_feat_prepared_choice_specs,
     _merge_spell_mark,
     _prepared_spell_count_for_level,
     _resolve_builder_choices,
@@ -29,6 +36,7 @@ from .character_builder import (
     _spell_payload_map_key,
     _spell_progression_value,
     _spell_selection_values_by_mark,
+    _spell_options_are_cantrips,
     _spellcasting_mode_for_class,
     normalize_definition_to_native_model,
 )
@@ -47,7 +55,7 @@ from .repository import normalize_lookup
 from .repository import slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_EDITOR_VERSION = "2026-04-09.01"
+CHARACTER_EDITOR_VERSION = "2026-04-10.01"
 CUSTOM_FEATURE_CATEGORY = "custom_feature"
 CUSTOM_EQUIPMENT_SOURCE_KIND = "manual_edit"
 CUSTOM_FEATURE_TRACKER_PREFIX = "manual-feature-tracker"
@@ -1379,7 +1387,7 @@ def build_native_character_edit_context(
             }
         )
 
-    feature_rows = _attach_spell_support_fields_to_feature_rows(
+    feature_rows = _attach_spell_fields_to_feature_rows(
         feature_rows=feature_rows,
         equipment_rows=equipment_rows,
         current_spellcasting=definition.spellcasting,
@@ -1490,6 +1498,7 @@ def apply_native_character_edits(
     used_feature_ids = set(manual_feature_lookup.keys())
     manual_features: list[dict[str, Any]] = []
     manual_resource_templates: list[dict[str, Any]] = []
+    selected_additional_spell_entries: list[dict[str, Any]] = []
     selected_spell_support_entries: list[dict[str, Any]] = []
     seen_feature_names: set[str] = set()
     for index in range(1, max(_max_row_index(values, "custom_feature"), MIN_CUSTOM_FEATURE_ROWS) + 1):
@@ -1562,6 +1571,14 @@ def apply_native_character_edits(
         )
         if page_ref:
             existing["page_ref"] = page_ref
+        if dict(campaign_option or {}).get("additional_spells"):
+            selected_additional_spell_entries.append(
+                {
+                    "field_prefix": _editor_additional_spell_field_prefix(index),
+                    "campaign_option": dict(campaign_option or {}),
+                    "source_ref": str(page_ref or (campaign_option or {}).get("title") or name).strip(),
+                }
+            )
         if dict(campaign_option or {}).get("spell_support"):
             selected_spell_support_entries.append(
                 {
@@ -1657,6 +1674,7 @@ def apply_native_character_edits(
         spell_catalog=spell_catalog,
         values=values,
         current_level=current_level,
+        selected_additional_spell_entries=selected_additional_spell_entries,
         selected_spell_support_entries=selected_spell_support_entries,
     )
 
@@ -1785,7 +1803,7 @@ def _merge_editor_proficiencies(
     }
 
 
-def _attach_spell_support_fields_to_feature_rows(
+def _attach_spell_fields_to_feature_rows(
     *,
     feature_rows: list[dict[str, Any]],
     equipment_rows: list[dict[str, Any]],
@@ -1806,6 +1824,19 @@ def _attach_spell_support_fields_to_feature_rows(
     ]
     provisional_values = dict(values)
     for row in rows:
+        additional_fields = _build_editor_additional_spell_choice_fields_for_row(
+            row=row,
+            tracked_spell_payloads=tracked_spell_payloads,
+            spell_catalog=spell_catalog,
+            values=provisional_values,
+            current_level=current_level,
+        )
+        row["spell_fields"] = additional_fields
+        for field in additional_fields:
+            field_name = str(field.get("name") or "").strip()
+            selected_value = str(field.get("selected") or "").strip()
+            if field_name and selected_value and not str(provisional_values.get(field_name) or "").strip():
+                provisional_values[field_name] = selected_value
         choice_fields = _build_editor_spell_support_choice_fields_for_row(
             row=row,
             tracked_spell_payloads=tracked_spell_payloads,
@@ -1813,7 +1844,7 @@ def _attach_spell_support_fields_to_feature_rows(
             values=provisional_values,
             current_level=current_level,
         )
-        row["spell_fields"] = choice_fields
+        row["spell_fields"].extend(choice_fields)
         for field in choice_fields:
             field_name = str(field.get("name") or "").strip()
             selected_value = str(field.get("selected") or "").strip()
@@ -1839,6 +1870,138 @@ def _attach_spell_support_fields_to_feature_rows(
         )
         row["spell_fields"].extend(replacement_fields)
     return rows
+
+
+def _build_editor_additional_spell_choice_fields_for_row(
+    *,
+    row: dict[str, Any],
+    tracked_spell_payloads: list[dict[str, Any]],
+    spell_catalog: dict[str, Any],
+    values: dict[str, str],
+    current_level: int,
+) -> list[dict[str, Any]]:
+    option = dict(row.get("campaign_option") or {})
+    additional_spells = list(option.get("additional_spells") or [])
+    if not additional_spells:
+        return []
+    field_prefix = _editor_additional_spell_field_prefix(int(row.get("index") or 0))
+    source_ref = str(option.get("page_ref") or row.get("page_ref") or option.get("title") or "").strip()
+    fields = _build_editor_additional_spell_choice_fields(
+        additional_spells=additional_spells,
+        spell_catalog=spell_catalog,
+        values=values,
+        field_prefix=field_prefix,
+        current_level=current_level,
+    )
+    for field in fields:
+        field_name = str(field.get("name") or "").strip()
+        if field_name and str(values.get(field_name) or "").strip():
+            field["selected"] = str(values.get(field_name) or "").strip()
+            continue
+        field["selected"] = _infer_editor_additional_spell_choice_value(
+            tracked_spell_payloads=tracked_spell_payloads,
+            source_ref=source_ref,
+            field_name=field_name,
+            field_prefix=field_prefix,
+        )
+    return fields
+
+
+def _build_editor_additional_spell_choice_fields(
+    *,
+    additional_spells: list[Any],
+    spell_catalog: dict[str, Any],
+    values: dict[str, str],
+    field_prefix: str,
+    current_level: int,
+) -> list[dict[str, Any]]:
+    fields: list[dict[str, Any]] = []
+    known_specs = _extract_additional_known_choice_specs(
+        selected_class=None,
+        selected_subclass=None,
+        target_level=current_level,
+        feature_entries=[{"campaign_option": {"additional_spells": additional_spells}}],
+    )
+    prepared_specs: list[dict[str, Any]] = []
+    granted_specs: list[dict[str, Any]] = []
+    for block in additional_spells:
+        if not isinstance(block, dict):
+            continue
+        prepared_specs.extend(_extract_feat_prepared_choice_specs(block, target_level=current_level))
+        granted_specs.extend(_extract_feat_innate_choice_specs(block, target_level=current_level))
+    fields.extend(
+        _build_editor_additional_spell_fields_from_specs(
+            specs=known_specs,
+            spell_catalog=spell_catalog,
+            values=values,
+            field_prefix=field_prefix,
+            category="known",
+            default_help_text="Choose a feature-granted bonus spell.",
+        )
+    )
+    fields.extend(
+        _build_editor_additional_spell_fields_from_specs(
+            specs=prepared_specs,
+            spell_catalog=spell_catalog,
+            values=values,
+            field_prefix=field_prefix,
+            category="prepared",
+            default_help_text="Choose a feature-granted spell.",
+        )
+    )
+    fields.extend(
+        _build_editor_additional_spell_fields_from_specs(
+            specs=granted_specs,
+            spell_catalog=spell_catalog,
+            values=values,
+            field_prefix=field_prefix,
+            category="granted",
+            default_help_text="Choose a feature-granted spell.",
+        )
+    )
+    return fields
+
+
+def _build_editor_additional_spell_fields_from_specs(
+    *,
+    specs: list[dict[str, Any]],
+    spell_catalog: dict[str, Any],
+    values: dict[str, str],
+    field_prefix: str,
+    category: str,
+    default_help_text: str,
+) -> list[dict[str, Any]]:
+    fields: list[dict[str, Any]] = []
+    for spec_index, spec in enumerate(specs, start=1):
+        options = _build_additional_spell_filter_options(str(spec.get("filter") or ""), spell_catalog)
+        if not options:
+            continue
+        count = max(int(spec.get("count") or 1), 1)
+        is_cantrip = _spell_options_are_cantrips(options, spell_catalog)
+        label_prefix = str(spec.get("label_prefix") or "").strip() or (
+            "Granted Cantrip" if is_cantrip else "Granted Spell"
+        )
+        help_text = str(spec.get("help_text") or "").strip() or (
+            "Choose a feature-granted cantrip." if is_cantrip else default_help_text
+        )
+        group_key = f"{field_prefix}_{category}_{spec_index}"
+        for choice_index in range(1, count + 1):
+            field_name = f"{field_prefix}_{category}_{spec_index}_{choice_index}"
+            fields.append(
+                {
+                    "name": field_name,
+                    "label": f"{label_prefix} {choice_index}",
+                    "help_text": help_text,
+                    "options": options,
+                    "selected": str(values.get(field_name) or "").strip(),
+                    "group_key": group_key,
+                    "kind": f"additional_spell_{category}",
+                    "spell_mark": str(spec.get("spell_mark") or "").strip(),
+                    "spell_is_always_prepared": bool(spec.get("spell_is_always_prepared")),
+                    "spell_is_ritual": bool(spec.get("spell_is_ritual")),
+                }
+            )
+    return fields
 
 
 def _build_editor_spell_support_choice_fields_for_row(
@@ -1939,6 +2102,14 @@ def _build_provisional_editor_spell_payloads(
         selected_campaign_option_payloads=selected_option_payloads,
         spell_catalog=spell_catalog,
     )
+    for entry in _editor_additional_spell_entries_from_feature_rows(feature_rows):
+        _apply_editor_additional_spell_grants_and_choices(
+            spells_by_key,
+            entry=entry,
+            spell_catalog=spell_catalog,
+            values=values,
+            current_level=current_level,
+        )
     for entry in _editor_spell_support_entries_from_feature_rows(feature_rows):
         _apply_editor_spell_support_grants_and_choices(
             spells_by_key,
@@ -1948,6 +2119,26 @@ def _build_provisional_editor_spell_payloads(
             current_level=current_level,
         )
     return list(spells_by_key.values())
+
+
+def _editor_additional_spell_entries_from_feature_rows(feature_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for row in list(feature_rows or []):
+        option = dict(row.get("campaign_option") or {})
+        if not option.get("additional_spells"):
+            continue
+        entries.append(
+            {
+                "field_prefix": _editor_additional_spell_field_prefix(int(row.get("index") or 0)),
+                "campaign_option": option,
+                "source_ref": str(option.get("page_ref") or row.get("page_ref") or option.get("title") or "").strip(),
+            }
+        )
+    return entries
+
+
+def _editor_additional_spell_field_prefix(row_index: int) -> str:
+    return f"custom_feature_additional_spells_{row_index}"
 
 
 def _editor_spell_support_entries_from_feature_rows(feature_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1968,6 +2159,22 @@ def _editor_spell_support_entries_from_feature_rows(feature_rows: list[dict[str,
 
 def _editor_spell_support_field_prefix(row_index: int) -> str:
     return f"custom_feature_spell_support_{row_index}"
+
+
+def _parse_editor_additional_spell_choice_field_identity(
+    field_name: str,
+    field_prefix: str,
+) -> tuple[str, int, int] | None:
+    prefix = f"{field_prefix}_"
+    if not field_name.startswith(prefix):
+        return None
+    parts = field_name[len(prefix):].split("_")
+    if len(parts) != 3:
+        return None
+    category, spec_index, choice_index = parts
+    if not spec_index.isdigit() or not choice_index.isdigit():
+        return None
+    return category, int(spec_index), int(choice_index)
 
 
 def _parse_editor_spell_support_choice_field_identity(
@@ -2000,6 +2207,31 @@ def _parse_editor_spell_support_replacement_field_identity(
     if not spec_index.isdigit() or not choice_index.isdigit():
         return None
     return category, int(spec_index), part, int(choice_index)
+
+
+def _infer_editor_additional_spell_choice_value(
+    *,
+    tracked_spell_payloads: list[dict[str, Any]],
+    source_ref: str,
+    field_name: str,
+    field_prefix: str,
+) -> str:
+    identity = _parse_editor_additional_spell_choice_field_identity(field_name, field_prefix)
+    if identity is None:
+        return ""
+    category, spec_index, choice_index = identity
+    for payload in tracked_spell_payloads:
+        if _payload_has_campaign_option_annotation(
+            payload,
+            annotation_key="campaign_option_sources",
+            source_ref=source_ref,
+            mode="additional_spell_choice",
+            category=category,
+            spec_index=spec_index,
+            choice_index=choice_index,
+        ):
+            return _spell_payload_key(payload)
+    return ""
 
 
 def _infer_editor_spell_support_choice_value(
@@ -2112,6 +2344,7 @@ def _apply_campaign_option_spells_to_spellcasting(
     spell_catalog: dict[str, Any],
     values: dict[str, str],
     current_level: int,
+    selected_additional_spell_entries: list[dict[str, Any]] | None = None,
     selected_spell_support_entries: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     spellcasting = dict(current_spellcasting or {})
@@ -2131,6 +2364,16 @@ def _apply_campaign_option_spells_to_spellcasting(
 
     choice_fields: list[dict[str, Any]] = []
     replacement_fields: list[dict[str, Any]] = []
+    for entry in list(selected_additional_spell_entries or []):
+        choice_fields.extend(
+            _apply_editor_additional_spell_grants_and_choices(
+                spells_by_key,
+                entry=entry,
+                spell_catalog=spell_catalog,
+                values=values,
+                current_level=current_level,
+            )
+        )
     for entry in list(selected_spell_support_entries or []):
         choice_fields.extend(
             _apply_editor_spell_support_grants_and_choices(
@@ -2205,6 +2448,127 @@ def _apply_editor_legacy_campaign_option_grants(
             is_always_prepared=bool(spell_grant.get("always_prepared")),
             is_ritual=bool(spell_grant.get("ritual")),
         )
+
+
+def _apply_editor_additional_spell_grants_and_choices(
+    spells_by_key: dict[str, dict[str, Any]],
+    *,
+    entry: dict[str, Any],
+    spell_catalog: dict[str, Any],
+    values: dict[str, str],
+    current_level: int,
+) -> list[dict[str, Any]]:
+    feature_entries = [{"campaign_option": dict(entry.get("campaign_option") or {})}]
+    source_ref = str(entry.get("source_ref") or "").strip()
+    field_prefix = str(entry.get("field_prefix") or "").strip()
+    for selected_value in _automatic_known_spell_values(
+        selected_class=None,
+        selected_subclass=None,
+        target_level=current_level,
+        feature_entries=feature_entries,
+    ):
+        _add_editor_campaign_option_spell(
+            spells_by_key,
+            selected_value=selected_value,
+            spell_catalog=spell_catalog,
+            annotation={
+                "source_ref": source_ref,
+                "mode": "additional_spell_grant",
+                "category": "known",
+            },
+            bonus_known=True,
+        )
+    for selected_value in _automatic_prepared_spell_values(
+        selected_class=None,
+        selected_subclass=None,
+        target_level=current_level,
+        feature_entries=feature_entries,
+    ):
+        _add_editor_campaign_option_spell(
+            spells_by_key,
+            selected_value=selected_value,
+            spell_catalog=spell_catalog,
+            annotation={
+                "source_ref": source_ref,
+                "mode": "additional_spell_grant",
+                "category": "prepared",
+                "always_prepared": True,
+            },
+            is_always_prepared=True,
+        )
+    for spell_grant in _automatic_innate_spell_values(
+        selected_class=None,
+        selected_subclass=None,
+        target_level=current_level,
+        feature_entries=feature_entries,
+    ):
+        _add_editor_campaign_option_spell(
+            spells_by_key,
+            selected_value=str(spell_grant.get("name") or "").strip(),
+            spell_catalog=spell_catalog,
+            annotation={
+                "source_ref": source_ref,
+                "mode": "additional_spell_grant",
+                "category": "granted",
+                "mark": str(spell_grant.get("mark") or "").strip(),
+                "ritual": bool(spell_grant.get("is_ritual")),
+            },
+            mark=str(spell_grant.get("mark") or "").strip(),
+            is_ritual=bool(spell_grant.get("is_ritual")),
+        )
+
+    choice_fields = _build_editor_additional_spell_choice_fields_for_entry(
+        entry=entry,
+        spell_catalog=spell_catalog,
+        values=values,
+        current_level=current_level,
+    )
+    for field in choice_fields:
+        selected_value = str(values.get(str(field.get("name") or "")) or "").strip()
+        if not selected_value:
+            continue
+        identity = _parse_editor_additional_spell_choice_field_identity(
+            str(field.get("name") or ""),
+            field_prefix,
+        )
+        category, spec_index, choice_index = identity or ("", 0, 0)
+        _add_editor_campaign_option_spell(
+            spells_by_key,
+            selected_value=selected_value,
+            spell_catalog=spell_catalog,
+            annotation={
+                "source_ref": source_ref,
+                "mode": "additional_spell_choice",
+                "category": category,
+                "spec_index": spec_index,
+                "choice_index": choice_index,
+                "mark": str(field.get("spell_mark") or "").strip(),
+                "always_prepared": bool(field.get("spell_is_always_prepared")),
+                "ritual": bool(field.get("spell_is_ritual")),
+            },
+            mark=str(field.get("spell_mark") or "").strip(),
+            is_always_prepared=bool(field.get("spell_is_always_prepared")),
+            is_ritual=bool(field.get("spell_is_ritual")),
+            bonus_known=str(category or "").strip() == "known",
+        )
+    return choice_fields
+
+
+def _build_editor_additional_spell_choice_fields_for_entry(
+    *,
+    entry: dict[str, Any],
+    spell_catalog: dict[str, Any],
+    values: dict[str, str],
+    current_level: int,
+) -> list[dict[str, Any]]:
+    option = dict(entry.get("campaign_option") or {})
+    return _build_editor_additional_spell_choice_fields(
+        additional_spells=list(option.get("additional_spells") or []),
+        spell_catalog=spell_catalog,
+        values=values,
+        field_prefix=str(entry.get("field_prefix") or "").strip(),
+        current_level=current_level,
+    )
 
 
 def _apply_editor_spell_support_grants_and_choices(

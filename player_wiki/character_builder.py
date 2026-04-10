@@ -13620,6 +13620,10 @@ def _additional_spell_metadata_entries(
     for feature_entry in list(feature_entries or []):
         entry = feature_entry.get("entry")
         if not isinstance(entry, SystemsEntryRecord):
+            campaign_option = dict(feature_entry.get("campaign_option") or {})
+            additional_spells = campaign_option.get("additional_spells")
+            if additional_spells:
+                values.append(additional_spells)
             continue
         entry_key = str(entry.entry_key or entry.slug or entry.title or "").strip()
         if not entry_key or entry_key in seen_entries:

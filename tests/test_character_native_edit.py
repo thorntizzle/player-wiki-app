@@ -505,6 +505,223 @@ Swap training happens on the end of the pier.
     assert b"Replace Spell 1 and Replacement Spell 1 must both be chosen together." in response.data
 
 
+def test_native_character_edits_can_apply_and_remove_campaign_page_additional_spells(
+    app, client, sign_in, users, get_character, set_campaign_visibility
+):
+    training_page_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "content"
+        / "mechanics"
+        / "harbor-spell-lessons.md"
+    )
+    training_page_path.write_text(
+        """---
+title: Harbor Spell Lessons
+section: Mechanics
+subsection: Blessings
+published: true
+summary: Harbor magisters drill a tide-touched spell cadence into your reflexes.
+character_option:
+  name: Harbor Spell Lessons
+  description_markdown: Harbor magisters teach you a practiced magical cadence.
+  activation_type: special
+  additional_spells:
+    - known:
+        "1":
+          - choose: level=0|class=Wizard
+      prepared:
+        "1":
+          - Detect Magic
+      innate:
+        "1":
+          daily:
+            "1":
+              - choose: level=1|class=Wizard
+---
+Salt-stiff harbor lessons leave a little magic behind.
+""",
+        encoding="utf-8",
+    )
+
+    with app.app_context():
+        systems_store = app.extensions["systems_store"]
+        systems_store.upsert_library("DND-5E", title="DND 5E", system_code="DND-5E")
+        systems_store.upsert_source(
+            "DND-5E",
+            "PHB",
+            title="Player's Handbook",
+            license_class="srd_cc",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        systems_store.replace_entries_for_source(
+            "DND-5E",
+            "PHB",
+            entry_types=["spell"],
+            entries=[
+                {
+                    "entry_key": "dnd-5e|spell|phb|mage-hand",
+                    "entry_type": "spell",
+                    "slug": "phb-spell-mage-hand",
+                    "title": "Mage Hand",
+                    "source_page": "256",
+                    "source_path": "data/spells/spells-phb.json",
+                    "search_text": "mage hand",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {
+                        "casting_time": [{"number": 1, "unit": "action"}],
+                        "level": 0,
+                        "class_lists": {"PHB": ["Wizard"]},
+                    },
+                    "body": {},
+                    "rendered_html": "<p>Mage Hand.</p>",
+                },
+                {
+                    "entry_key": "dnd-5e|spell|phb|light",
+                    "entry_type": "spell",
+                    "slug": "phb-spell-light",
+                    "title": "Light",
+                    "source_page": "255",
+                    "source_path": "data/spells/spells-phb.json",
+                    "search_text": "light",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {
+                        "casting_time": [{"number": 1, "unit": "action"}],
+                        "level": 0,
+                        "class_lists": {"PHB": ["Wizard"]},
+                    },
+                    "body": {},
+                    "rendered_html": "<p>Light.</p>",
+                },
+                {
+                    "entry_key": "dnd-5e|spell|phb|detect-magic",
+                    "entry_type": "spell",
+                    "slug": "phb-spell-detect-magic",
+                    "title": "Detect Magic",
+                    "source_page": "231",
+                    "source_path": "data/spells/spells-phb.json",
+                    "search_text": "detect magic",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {
+                        "casting_time": [{"number": 1, "unit": "action"}],
+                        "level": 1,
+                        "class_lists": {"PHB": ["Wizard"]},
+                        "ritual": True,
+                    },
+                    "body": {},
+                    "rendered_html": "<p>Detect Magic.</p>",
+                },
+                {
+                    "entry_key": "dnd-5e|spell|phb|shield",
+                    "entry_type": "spell",
+                    "slug": "phb-spell-shield",
+                    "title": "Shield",
+                    "source_page": "275",
+                    "source_path": "data/spells/spells-phb.json",
+                    "search_text": "shield",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {
+                        "casting_time": [{"number": 1, "unit": "reaction"}],
+                        "level": 1,
+                        "class_lists": {"PHB": ["Wizard"]},
+                    },
+                    "body": {},
+                    "rendered_html": "<p>Shield.</p>",
+                },
+                {
+                    "entry_key": "dnd-5e|spell|phb|feather-fall",
+                    "entry_type": "spell",
+                    "slug": "phb-spell-feather-fall",
+                    "title": "Feather Fall",
+                    "source_page": "239",
+                    "source_path": "data/spells/spells-phb.json",
+                    "search_text": "feather fall",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {
+                        "casting_time": [{"number": 1, "unit": "reaction"}],
+                        "level": 1,
+                        "class_lists": {"PHB": ["Wizard"]},
+                    },
+                    "body": {},
+                    "rendered_html": "<p>Feather Fall.</p>",
+                },
+            ],
+        )
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    record = get_character("arden-march")
+    assert record is not None
+
+    add_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "",
+            "weapon_proficiencies_text": "Daggers\nLight Crossbows\nQuarterstaffs",
+            "tool_proficiencies_text": "Navigator's Tools",
+            "custom_feature_name_1": "",
+            "custom_feature_page_ref_1": "mechanics/harbor-spell-lessons",
+            "custom_feature_activation_type_1": "special",
+            "custom_feature_description_1": "",
+            "custom_feature_additional_spells_1_known_1_1": "phb-spell-mage-hand",
+            "custom_feature_additional_spells_1_granted_1_1": "phb-spell-shield",
+        },
+        follow_redirects=False,
+    )
+
+    assert add_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    spells_by_name = {spell["name"]: spell for spell in record.definition.spellcasting["spells"]}
+    custom_feature = next(
+        feature
+        for feature in record.definition.features
+        if feature.get("category") == "custom_feature" and feature.get("page_ref") == "mechanics/harbor-spell-lessons"
+    )
+
+    assert spells_by_name["Mage Hand"]["mark"] == "Cantrip"
+    assert spells_by_name["Mage Hand"]["is_bonus_known"] is True
+    assert spells_by_name["Detect Magic"]["is_always_prepared"] is True
+    assert spells_by_name["Shield"]["mark"] == "1 / Long Rest"
+
+    remove_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "",
+            "weapon_proficiencies_text": "Daggers\nLight Crossbows\nQuarterstaffs",
+            "tool_proficiencies_text": "Navigator's Tools",
+            "custom_feature_id_1": custom_feature["id"],
+            "custom_feature_name_1": "",
+            "custom_feature_page_ref_1": "",
+            "custom_feature_activation_type_1": "passive",
+            "custom_feature_description_1": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert remove_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    spells_by_name = {spell["name"]: spell for spell in record.definition.spellcasting["spells"]}
+
+    assert "Mage Hand" not in spells_by_name
+    assert "Detect Magic" not in spells_by_name
+    assert "Shield" not in spells_by_name
+
+
 def test_native_character_edits_accept_page_backed_feat_links_and_preserve_tracker_state(
     app, client, sign_in, users, get_character, set_campaign_visibility
 ):
