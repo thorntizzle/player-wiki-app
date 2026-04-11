@@ -238,9 +238,10 @@ def _spell_payload(
     mark: str = "",
     is_always_prepared: bool = False,
     is_bonus_known: bool = False,
+    **extra: object,
 ) -> dict[str, object]:
     metadata = dict(entry.metadata or {})
-    return {
+    payload = {
         "name": str(entry.title or "").strip(),
         "casting_time": "1 action",
         "range": "60 feet" if int(metadata.get("level") or 0) > 0 else "Self",
@@ -254,6 +255,8 @@ def _spell_payload(
         "is_bonus_known": is_bonus_known,
         "systems_ref": _systems_ref(entry),
     }
+    payload.update(dict(extra or {}))
+    return payload
 
 
 def test_dm_can_open_character_roster_and_read_sheet(client, sign_in, users):
@@ -550,6 +553,88 @@ def test_spellcasting_subpage_is_only_shown_for_casters_and_holds_spell_list(cli
     assert noncaster_quick.status_code == 200
     noncaster_quick_html = noncaster_quick.get_data(as_text=True)
     assert "?page=spellcasting" not in noncaster_quick_html
+
+
+def test_spellcasting_subpage_shows_supported_feat_spell_rows_as_read_only_sections(
+    app, client, sign_in, users
+):
+    spell_entries = _seed_systems_spell_entries(
+        app,
+        [
+            {"slug": "phb-spell-mage-hand", "title": "Mage Hand", "level": 0, "class_lists": {"TCE": ["Artificer"], "PHB": ["Wizard"]}},
+            {"slug": "phb-spell-cure-wounds", "title": "Cure Wounds", "level": 1, "class_lists": {"TCE": ["Artificer"], "PHB": ["Cleric", "Druid"]}},
+        ],
+    )
+
+    def _mutate(payload: dict) -> None:
+        profile = dict(payload.get("profile") or {})
+        profile["class_level_text"] = "Fighter 5"
+        profile["classes"] = [{"class_name": "Fighter", "level": 5}]
+        payload["profile"] = profile
+        source_row_id = "feat-spell-source:artificer-initiate:species-feat-1"
+        payload["spellcasting"] = {
+            "spellcasting_class": "",
+            "spellcasting_ability": "",
+            "spell_save_dc": None,
+            "spell_attack_bonus": None,
+            "slot_progression": [],
+            "class_rows": [],
+            "source_rows": [
+                {
+                    "source_row_id": source_row_id,
+                    "source_row_kind": "feat",
+                    "title": "Artificer Initiate",
+                    "spellcasting_ability": "Intelligence",
+                    "spell_save_dc": 12,
+                    "spell_attack_bonus": 4,
+                }
+            ],
+            "spells": [
+                _spell_payload(
+                    spell_entries["phb-spell-mage-hand"],
+                    source="PHB",
+                    mark="Cantrip",
+                    is_bonus_known=True,
+                    spell_source_row_id=source_row_id,
+                    spell_source_row_kind="feat",
+                    spell_source_row_title="Artificer Initiate",
+                    spell_source_ability_key="int",
+                    grant_source_label="Artificer Initiate",
+                ),
+                _spell_payload(
+                    spell_entries["phb-spell-cure-wounds"],
+                    source="PHB",
+                    is_bonus_known=True,
+                    spell_source_row_id=source_row_id,
+                    spell_source_row_kind="feat",
+                    spell_source_row_title="Artificer Initiate",
+                    spell_source_ability_key="int",
+                    grant_source_label="Artificer Initiate",
+                    spell_access_type="free_cast",
+                    spell_access_uses=1,
+                    spell_access_reset_on="long_rest",
+                ),
+            ],
+        }
+
+    _write_character_definition(app, "arden-march", _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=spellcasting")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Artificer Initiate" in html
+    assert "Feat spells" in html
+    assert "Intelligence spellcasting" in html
+    assert "Save DC 12" in html
+    assert "Attack +4" in html
+    assert "Feature granted" in html
+    assert "1 / Long Rest" in html
+    assert "Feat-granted spells stay read-only here in this slice." in html
+    assert "Prepare spell" not in html
+    assert "Add spellbook spell" not in html
+    assert "Remove cantrip" not in html
 
 
 def test_spellcasting_subpage_can_search_add_and_remove_known_spells(app, client, sign_in, users):
@@ -1812,6 +1897,125 @@ def test_native_equipment_state_update_recalculates_attunement_gated_magic_weapo
         assert definition_item["is_equipped"] is True
         assert definition_item["is_attuned"] is True
         assert record.state_record.state["attunement"]["attuned_item_refs"] == ["light-crossbow-1"]
+
+
+def test_native_equipment_state_update_recalculates_medium_armor_master_armor_class(
+    app, client, sign_in, users
+):
+    def _mutate_definition(payload: dict) -> None:
+        payload["source"] = {
+            "source_type": "native_character_builder",
+            "source_path": "builder://arden-march",
+            "imported_from": "In-app Native Level 5 Builder",
+        }
+        stats = dict(payload.get("stats") or {})
+        ability_scores = dict(stats.get("ability_scores") or {})
+        ability_scores["dex"] = {"score": 16, "modifier": 3, "save_bonus": 3}
+        stats["ability_scores"] = ability_scores
+        stats["armor_class"] = 13
+        payload["stats"] = stats
+        payload["features"] = [
+            {
+                "id": "medium-armor-master-1",
+                "name": "Medium Armor Master",
+                "category": "feat",
+                "source": "PHB",
+                "description_markdown": "",
+                "activation_type": "passive",
+                "tracker_ref": None,
+                "systems_ref": {
+                    "entry_type": "feat",
+                    "slug": "phb-feat-medium-armor-master",
+                    "title": "Medium Armor Master",
+                    "source_id": "PHB",
+                },
+            }
+        ]
+        payload["equipment_catalog"] = [
+            {
+                "id": "scale-mail-1",
+                "name": "Scale Mail",
+                "default_quantity": 1,
+                "weight": "45 lb.",
+                "notes": "",
+                "systems_ref": {
+                    "entry_type": "item",
+                    "slug": "phb-item-scale-mail",
+                    "title": "Scale Mail",
+                    "source_id": "PHB",
+                },
+                "is_equipped": False,
+                "is_attuned": False,
+            }
+        ]
+
+    def _mutate_state(payload: dict) -> None:
+        payload["inventory"] = [
+            {
+                "id": "scale-mail-1",
+                "catalog_ref": "scale-mail-1",
+                "name": "Scale Mail",
+                "quantity": 1,
+                "weight": "45 lb.",
+                "notes": "",
+                "is_equipped": False,
+                "is_attuned": False,
+                "tags": [],
+            }
+        ]
+        payload["attunement"] = {"max_attuned_items": 3, "attuned_item_refs": []}
+
+    _write_character_definition(app, "arden-march", _mutate_definition)
+    _write_character_state(app, "arden-march", _mutate_state)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    equip_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/equipment/scale-mail-1/state",
+        data={
+            "expected_revision": _character_state_revision(app, "arden-march"),
+            "mode": "read",
+            "page": "equipment",
+            "is_equipped": "1",
+        },
+        follow_redirects=False,
+    )
+
+    assert equip_response.status_code == 302
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert record is not None
+        definition_item = next(
+            item
+            for item in list(record.definition.equipment_catalog or [])
+            if str(item.get("id") or "") == "scale-mail-1"
+        )
+        assert record.definition.stats["armor_class"] == 17
+        assert definition_item["is_equipped"] is True
+
+    unequip_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/equipment/scale-mail-1/state",
+        data={
+            "expected_revision": _character_state_revision(app, "arden-march"),
+            "mode": "read",
+            "page": "equipment",
+        },
+        follow_redirects=False,
+    )
+
+    assert unequip_response.status_code == 302
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert record is not None
+        definition_item = next(
+            item
+            for item in list(record.definition.equipment_catalog or [])
+            if str(item.get("id") or "") == "scale-mail-1"
+        )
+        assert record.definition.stats["armor_class"] == 13
+        assert definition_item["is_equipped"] is False
 
 
 def test_imported_character_equipment_controls_can_search_and_add_systems_items_without_resetting_other_quantities(

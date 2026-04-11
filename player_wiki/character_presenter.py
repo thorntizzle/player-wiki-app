@@ -6,6 +6,7 @@ from typing import Any
 
 import markdown
 
+from .character_builder import _spell_access_badge_label
 from .character_models import CharacterRecord
 from .character_profile import (
     profile_class_level_text,
@@ -229,9 +230,29 @@ def present_character_detail(
                 }
             )
 
-        spell_rows = [dict(row or {}) for row in list(spellcasting_payload.get("class_rows") or []) if isinstance(row, dict)]
-        if not spell_rows and (spellcasting_payload.get("spellcasting_class") or spellcasting_payload.get("spells")):
-            spell_rows = [
+        class_spell_rows = [
+            dict(row or {})
+            for row in list(spellcasting_payload.get("class_rows") or [])
+            if isinstance(row, dict)
+        ]
+        source_spell_rows = [
+            {
+                "class_row_id": str(dict(row or {}).get("source_row_id") or "").strip(),
+                "class_name": str(dict(row or {}).get("title") or "").strip() or "Feature spells",
+                "level": 0,
+                "spellcasting_ability": str(dict(row or {}).get("spellcasting_ability") or "").strip(),
+                "spell_save_dc": dict(row or {}).get("spell_save_dc"),
+                "spell_attack_bonus": dict(row or {}).get("spell_attack_bonus"),
+                "spell_mode": "",
+                "row_kind": str(dict(row or {}).get("source_row_kind") or "source").strip() or "source",
+            }
+            for row in list(spellcasting_payload.get("source_rows") or [])
+            if str(dict(row or {}).get("source_row_id") or "").strip()
+        ]
+        if not class_spell_rows and not source_spell_rows and (
+            spellcasting_payload.get("spellcasting_class") or spellcasting_payload.get("spells")
+        ):
+            class_spell_rows = [
                 {
                     "class_row_id": "class-row-1",
                     "class_name": str(spellcasting_payload.get("spellcasting_class") or "Spellcasting").strip() or "Spellcasting",
@@ -242,7 +263,8 @@ def present_character_detail(
                     "spell_mode": "",
                 }
             ]
-        if len(spell_rows) > 1 and len(slot_pools) == 1 and not bool((slot_pools[0] or {}).get("shared")):
+        spell_rows = class_spell_rows + source_spell_rows
+        if len(class_spell_rows) > 1 and len(slot_pools) == 1 and not bool((slot_pools[0] or {}).get("shared")):
             slot_pools[0]["shared"] = True
             slot_pools[0]["title"] = "Shared spell slots"
 
@@ -251,16 +273,31 @@ def present_character_detail(
             for row in spell_rows
             if str(row.get("class_row_id") or "").strip()
         }
-        fallback_row_id = str((spell_rows[0] or {}).get("class_row_id") or "").strip() if len(spell_rows) == 1 else ""
+        fallback_row_id = (
+            str((class_spell_rows[0] or {}).get("class_row_id") or "").strip()
+            if len(class_spell_rows) == 1
+            else ""
+        )
         for spell in list(spellcasting_payload.get("spells") or []):
             badges = []
+            if bool(spell.get("is_bonus_known")):
+                badges.append("Feature granted")
             if bool(spell.get("is_always_prepared")) or normalize_lookup("Always prepared") in normalize_lookup(str(spell.get("source") or "").strip()):
                 badges.append("Always prepared")
             if bool(spell.get("is_ritual")):
                 badges.append("Ritual")
+            access_badge = _spell_access_badge_label(dict(spell or {}))
+            if access_badge and access_badge not in badges:
+                badges.append(access_badge)
             mark = str(spell.get("mark") or "").strip()
             if mark and mark not in badges:
                 badges.append(mark)
+            source_label = str(spell.get("grant_source_label") or spell.get("source") or "").strip()
+            management_note = ""
+            if bool(spell.get("is_always_prepared")) and source_label:
+                management_note = f"Always prepared from {source_label}."
+            elif bool(spell.get("is_bonus_known")) and source_label:
+                management_note = f"Granted by {source_label}."
 
             presented_spell = (
                 {
@@ -278,7 +315,10 @@ def present_character_detail(
                     "source": str(spell.get("source") or "").strip(),
                     "reference": str(spell.get("reference") or "").strip(),
                     "badges": badges,
-                    "class_row_id": str(spell.get("class_row_id") or fallback_row_id).strip(),
+                    "class_row_id": str(
+                        spell.get("class_row_id") or spell.get("spell_source_row_id") or fallback_row_id
+                    ).strip(),
+                    "management_note": management_note,
                 }
             )
             target_row_id = str(presented_spell.get("class_row_id") or "").strip()
@@ -298,7 +338,10 @@ def present_character_detail(
             known_count = sum(1 for spell in row_spells if "Known" in list(spell.get("badges") or []))
             if cantrip_count:
                 counts.append({"label": "Cantrips", "value": str(cantrip_count)})
-            if str(row.get("spell_mode") or "").strip() == "known" and known_count:
+            if str(row.get("row_kind") or "class").strip() != "class":
+                if row_spells:
+                    counts.append({"label": "Feature spells", "value": str(len(row_spells))})
+            elif str(row.get("spell_mode") or "").strip() == "known" and known_count:
                 counts.append({"label": "Known spells", "value": str(known_count)})
             elif str(row.get("spell_mode") or "").strip() == "prepared" and prepared_count:
                 counts.append({"label": "Prepared spells", "value": str(prepared_count)})
@@ -345,15 +388,15 @@ def present_character_detail(
             "slot_pools": slot_pools,
             "multiclass_summary": (
                 "Shared spell slots are shown once below, with spells grouped by class row."
-                if len(spell_rows) > 1 and len(slot_pools) == 1 and bool((slot_pools[0] or {}).get("shared"))
+                if len(class_spell_rows) > 1 and len(slot_pools) == 1 and bool((slot_pools[0] or {}).get("shared"))
                 else (
                     "Spell slot pools are shown below, with spells grouped by class row."
-                    if len(spell_rows) > 1 and len(slot_pools) > 1
+                    if len(class_spell_rows) > 1 and len(slot_pools) > 1
                     else "Spell slots are shown below, with spells grouped by class row."
                 )
             ),
             "row_sections": row_sections,
-            "is_multiclass": len(spell_rows) > 1,
+            "is_multiclass": len(class_spell_rows) > 1,
         }
 
     feature_groups_ordered: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()

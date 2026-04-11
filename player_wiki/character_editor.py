@@ -28,9 +28,10 @@ from .character_builder import (
     _prepared_spell_count_for_level,
     _resolve_builder_choices,
     _resolve_spell_entry,
+    _spell_access_badge_label,
     _spell_entry_level,
     _spell_list_class_name_for_class,
-    _spell_payload_class_row_id,
+    _spell_payload_management_row_id,
     _spell_lookup_key,
     _spell_payload_key,
     _spell_payload_map_key,
@@ -112,6 +113,11 @@ def build_character_spell_management_context(
     )
     if not class_row_payloads:
         return None
+    managed_class_rows = [
+        row_payload
+        for row_payload in class_row_payloads
+        if str(row_payload.get("row_kind") or "class").strip() == "class"
+    ]
     slot_lanes = spell_slot_lanes_from_spellcasting(spellcasting)
     slot_lanes_by_id = {
         normalize_spell_slot_lane_id(lane.get("id")): dict(lane or {})
@@ -123,13 +129,13 @@ def build_character_spell_management_context(
             spell_catalog=spell_catalog,
             slot_lane=dict(slot_lanes_by_id.get(normalize_spell_slot_lane_id(row_payload.get("slot_lane_id"))) or {}),
             row_payload=row_payload,
-            total_spell_rows=len(class_row_payloads),
+            total_spell_rows=len(managed_class_rows),
         )
         for row_payload in class_row_payloads
     ]
     return {
         "sections": sections,
-        "is_multiclass": len(class_row_payloads) > 1,
+        "is_multiclass": len(managed_class_rows) > 1,
         "shared_slot_label": (
             str((slot_lanes[0] or {}).get("title") or "Spell slots")
             if len(slot_lanes) == 1
@@ -152,9 +158,9 @@ def _spell_management_class_rows(
         for row in list(selected_class_rows or [])
         if str(dict(row or {}).get("class_row_id") or dict(row or {}).get("row_id") or "").strip()
     }
+    results: list[dict[str, Any]] = []
     row_payloads = [dict(row or {}) for row in list(spellcasting.get("class_rows") or []) if isinstance(row, dict)]
     if row_payloads:
-        results: list[dict[str, Any]] = []
         for index, row in enumerate(row_payloads, start=1):
             row_id = str(row.get("class_row_id") or "").strip() or f"class-row-{index}"
             resolved_row = dict(resolved_rows.get(row_id) or {})
@@ -184,51 +190,74 @@ def _spell_management_class_rows(
                     "selected_class": resolved_class,
                     "selected_subclass": resolved_subclass,
                     "slot_lane_id": normalize_spell_slot_lane_id(row.get("slot_lane_id")),
+                    "row_kind": "class",
                 }
             )
-        return results
-
-    class_name = _spell_management_class_name(definition, spellcasting=spellcasting)
-    first_resolved_row = dict(next(iter(resolved_rows.values()), {}) or {})
-    selected_subclass = (
-        first_resolved_row.get("selected_subclass")
-        if isinstance(first_resolved_row.get("selected_subclass"), SystemsEntryRecord)
-        else None
-    )
-    current_level = _character_total_level(definition)
-    mode = (
-        _spellcasting_mode_for_class(
-            class_name,
-            selected_class=selected_class,
-            selected_subclass=selected_subclass,
-            row_level=current_level,
+    else:
+        class_name = _spell_management_class_name(definition, spellcasting=spellcasting)
+        first_resolved_row = dict(next(iter(resolved_rows.values()), {}) or {})
+        selected_subclass = (
+            first_resolved_row.get("selected_subclass")
+            if isinstance(first_resolved_row.get("selected_subclass"), SystemsEntryRecord)
+            else None
         )
-        if class_name
-        else ""
-    )
-    if not class_name or not mode:
-        return []
-    first_profile_row = dict((ensure_profile_class_rows(definition.profile) or [{}])[0] or {})
-    return [
-        {
-            "class_row_id": str(first_profile_row.get("row_id") or "class-row-1"),
-            "class_name": class_name,
-            "spell_list_class_name": _spell_list_class_name_for_class(
+        current_level = _character_total_level(definition)
+        mode = (
+            _spellcasting_mode_for_class(
                 class_name,
-                selected_class=selected_class if isinstance(selected_class, SystemsEntryRecord) else None,
+                selected_class=selected_class,
                 selected_subclass=selected_subclass,
                 row_level=current_level,
-            ),
-            "level": current_level,
-            "mode": mode,
-            "spellcasting_ability": str(spellcasting.get("spellcasting_ability") or "").strip(),
-            "spell_save_dc": spellcasting.get("spell_save_dc"),
-            "spell_attack_bonus": spellcasting.get("spell_attack_bonus"),
-            "selected_class": selected_class if isinstance(selected_class, SystemsEntryRecord) else None,
-            "selected_subclass": selected_subclass,
-            "slot_lane_id": "",
-        }
-    ]
+            )
+            if class_name
+            else ""
+        )
+        if class_name and mode:
+            first_profile_row = dict((ensure_profile_class_rows(definition.profile) or [{}])[0] or {})
+            results.append(
+                {
+                    "class_row_id": str(first_profile_row.get("row_id") or "class-row-1"),
+                    "class_name": class_name,
+                    "spell_list_class_name": _spell_list_class_name_for_class(
+                        class_name,
+                        selected_class=selected_class if isinstance(selected_class, SystemsEntryRecord) else None,
+                        selected_subclass=selected_subclass,
+                        row_level=current_level,
+                    ),
+                    "level": current_level,
+                    "mode": mode,
+                    "spellcasting_ability": str(spellcasting.get("spellcasting_ability") or "").strip(),
+                    "spell_save_dc": spellcasting.get("spell_save_dc"),
+                    "spell_attack_bonus": spellcasting.get("spell_attack_bonus"),
+                    "selected_class": selected_class if isinstance(selected_class, SystemsEntryRecord) else None,
+                    "selected_subclass": selected_subclass,
+                    "slot_lane_id": "",
+                    "row_kind": "class",
+                }
+            )
+
+    for row in list(spellcasting.get("source_rows") or []):
+        payload = dict(row or {})
+        source_row_id = str(payload.get("source_row_id") or "").strip()
+        if not source_row_id:
+            continue
+        results.append(
+            {
+                "class_row_id": source_row_id,
+                "class_name": str(payload.get("title") or "").strip() or "Feature spells",
+                "spell_list_class_name": "",
+                "level": 0,
+                "mode": "",
+                "spellcasting_ability": str(payload.get("spellcasting_ability") or "").strip(),
+                "spell_save_dc": payload.get("spell_save_dc"),
+                "spell_attack_bonus": payload.get("spell_attack_bonus"),
+                "selected_class": None,
+                "selected_subclass": None,
+                "slot_lane_id": "",
+                "row_kind": str(payload.get("source_row_kind") or "source").strip() or "source",
+            }
+        )
+    return results
 
 
 def _build_spell_management_section(
@@ -242,6 +271,7 @@ def _build_spell_management_section(
     class_name = str(row_payload.get("class_name") or "").strip()
     spell_list_class_name = str(row_payload.get("spell_list_class_name") or class_name).strip()
     mode = str(row_payload.get("mode") or "").strip()
+    row_kind = str(row_payload.get("row_kind") or "class").strip() or "class"
     current_level = int(row_payload.get("level") or 0)
     selected_class = row_payload.get("selected_class")
     selected_subclass = row_payload.get("selected_subclass")
@@ -249,7 +279,9 @@ def _build_spell_management_section(
     slot_progression = [dict(slot or {}) for slot in list(slot_lane.get("slot_progression") or [])]
     max_spell_level = max((int(slot.get("level") or 0) for slot in slot_progression), default=0)
     unavailable_message = ""
-    if not class_name or not mode:
+    if row_kind != "class":
+        unavailable_message = "Feat-granted spells stay read-only here in this slice."
+    elif not class_name or not mode:
         unavailable_message = "This sheet does not currently have a supported class spellcasting model to edit here."
 
     rows = _build_spell_management_rows(
@@ -259,6 +291,7 @@ def _build_spell_management_section(
         class_name=class_name,
         class_row_id=class_row_id,
         total_spell_rows=total_spell_rows,
+        row_kind=row_kind,
     )
 
     mutable_cantrip_count = sum(1 for row in rows if row["counts_against_cantrip_limit"])
@@ -315,7 +348,13 @@ def _build_spell_management_section(
     if fixed_spell_count:
         counts.append({"label": "Fixed feature spells", "value": str(fixed_spell_count)})
 
-    can_manage = bool(mode and class_name and not unavailable_message and list(spell_catalog.get("entries") or []))
+    can_manage = bool(
+        row_kind == "class"
+        and mode
+        and class_name
+        and not unavailable_message
+        and list(spell_catalog.get("entries") or [])
+    )
     if not can_manage and not unavailable_message and mode:
         unavailable_message = "Enable Systems spell entries in this campaign to manage spells from the character sheet."
 
@@ -338,17 +377,29 @@ def _build_spell_management_section(
             "then mark which spellbook spells are currently prepared."
         ),
     }.get(mode, "")
+    if row_kind == "feat":
+        rules_note = "Feat-granted spell packages are preserved on the sheet here, but stay read-only in this slice."
+    elif row_kind != "class":
+        rules_note = "Feature-granted spell packages are preserved on the sheet here, but stay read-only in this slice."
 
     return {
         "class_row_id": class_row_id,
         "class_name": class_name,
         "spell_list_class_name": spell_list_class_name,
         "mode": mode,
-        "mode_label": {
-            "known": "Known spells",
-            "prepared": "Prepared spells",
-            "wizard": "Wizard spellbook",
-        }.get(mode, "Spellcasting"),
+        "mode_label": (
+            "Feat spells"
+            if row_kind == "feat"
+            else (
+                "Feature spells"
+                if row_kind != "class"
+                else {
+                    "known": "Known spells",
+                    "prepared": "Prepared spells",
+                    "wizard": "Wizard spellbook",
+                }.get(mode, "Spellcasting")
+            )
+        ),
         "title": f"{class_name} {current_level}" if class_name and current_level > 0 else class_name or "Spellcasting",
         "current_level": current_level,
         "max_spell_level": max_spell_level,
@@ -680,10 +731,11 @@ def _build_spell_management_rows(
     class_name: str,
     class_row_id: str,
     total_spell_rows: int,
+    row_kind: str = "class",
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for raw_spell_payload in list((definition.spellcasting or {}).get("spells") or []):
-        payload_row_id = _spell_payload_class_row_id(dict(raw_spell_payload or {}))
+        payload_row_id = _spell_payload_management_row_id(dict(raw_spell_payload or {}))
         if class_row_id:
             if payload_row_id and payload_row_id != class_row_id:
                 continue
@@ -695,14 +747,18 @@ def _build_spell_management_rows(
             mode=mode,
             class_name=class_name,
         )
-        if class_row_id and not _spell_payload_class_row_id(normalized_payload):
+        if class_row_id and row_kind == "class" and not _spell_payload_management_row_id(normalized_payload):
             normalized_payload["class_row_id"] = class_row_id
         spell_key = _spell_payload_map_key(normalized_payload)
         if not spell_key:
             continue
 
         normalized_mark = normalize_lookup(str(normalized_payload.get("mark") or "").strip())
-        source_label = str(normalized_payload.get("source") or "").strip()
+        source_label = str(
+            normalized_payload.get("grant_source_label")
+            or normalized_payload.get("source")
+            or ""
+        ).strip()
         is_cantrip = spell_level == 0
         is_prepared = bool(
             not is_cantrip
@@ -737,6 +793,12 @@ def _build_spell_management_rows(
             badges.append("Always prepared")
         elif bool(normalized_payload.get("is_bonus_known")):
             badges.append("Feature granted")
+        access_badge = _spell_access_badge_label(normalized_payload)
+        if access_badge and access_badge not in badges:
+            badges.append(access_badge)
+        mark = str(normalized_payload.get("mark") or "").strip()
+        if mark and mark not in {"Cantrip", "Known", "Prepared", "Spellbook", "Prepared + Spellbook"} and mark not in badges:
+            badges.append(mark)
 
         management_note = ""
         if bool(normalized_payload.get("is_always_prepared")) and source_label:
@@ -776,9 +838,10 @@ def _build_spell_management_rows(
                     and not bool(normalized_payload.get("is_always_prepared"))
                 ),
                 "counts_against_spellbook_total": bool(not is_cantrip and in_spellbook),
-                "can_remove": not is_fixed,
+                "can_remove": bool(row_kind == "class" and not is_fixed),
                 "can_toggle_prepared": bool(
-                    mode == "wizard"
+                    row_kind == "class"
+                    and mode == "wizard"
                     and not is_cantrip
                     and in_spellbook
                     and not bool(normalized_payload.get("is_always_prepared"))

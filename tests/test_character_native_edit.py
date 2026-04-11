@@ -1224,6 +1224,116 @@ def test_native_character_edits_can_apply_campaign_stat_adjustments(
     assert "40 ft." in read_html
 
 
+def test_native_character_edits_preserve_medium_armor_master_ac_and_manual_layering_once(
+    app, client, sign_in, users, get_character, set_campaign_visibility
+):
+    definition_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "characters"
+        / "arden-march"
+        / "definition.yaml"
+    )
+    payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
+    payload["source"] = {
+        "source_path": "builder://arden-march",
+        "source_type": "native_character_builder",
+        "imported_from": "In-app Native Level 5 Builder",
+        "imported_at": "2026-04-10T00:00:00Z",
+        "parse_warnings": [],
+    }
+    stats = dict(payload.get("stats") or {})
+    ability_scores = dict(stats.get("ability_scores") or {})
+    ability_scores["dex"] = {"score": 16, "modifier": 3, "save_bonus": 3}
+    stats["ability_scores"] = ability_scores
+    stats["armor_class"] = 99
+    stats["manual_adjustments"] = {}
+    payload["stats"] = stats
+    payload["features"] = [
+        {
+            "id": "medium-armor-master-1",
+            "name": "Medium Armor Master",
+            "category": "feat",
+            "source": "PHB",
+            "description_markdown": "",
+            "activation_type": "passive",
+            "tracker_ref": None,
+            "systems_ref": {
+                "entry_type": "feat",
+                "slug": "phb-feat-medium-armor-master",
+                "title": "Medium Armor Master",
+                "source_id": "PHB",
+            },
+        }
+    ]
+    payload["equipment_catalog"] = [
+        {
+            "id": "scale-mail-1",
+            "name": "Scale Mail",
+            "default_quantity": 1,
+            "weight": "45 lb.",
+            "notes": "",
+            "is_equipped": True,
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-scale-mail",
+                "title": "Scale Mail",
+                "source_id": "PHB",
+            },
+        }
+    ]
+    definition_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    record = get_character("arden-march")
+    assert record is not None
+
+    edit_payload = {
+        "languages_text": "Common\nElvish",
+        "armor_proficiencies_text": "Light Armor\nMedium Armor",
+        "weapon_proficiencies_text": "Simple Weapons",
+        "tool_proficiencies_text": "",
+        "stat_adjustment_armor_class": "1",
+        "biography_markdown": "Keeps a careful watch on every approach.",
+    }
+    response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            **edit_payload,
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    assert record.definition.stats["armor_class"] == 18
+    assert record.definition.stats["manual_adjustments"]["armor_class"] == 1
+
+    second_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            **{
+                **edit_payload,
+                "biography_markdown": "Still keeps a careful watch on every approach.",
+            },
+        },
+        follow_redirects=False,
+    )
+
+    assert second_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    assert record.definition.stats["armor_class"] == 18
+    assert record.definition.stats["manual_adjustments"]["armor_class"] == 1
+
+
 def test_native_character_edits_reconverge_imported_equipment_rows(
     app, client, sign_in, users, get_character, set_campaign_visibility, monkeypatch
 ):

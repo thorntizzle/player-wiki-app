@@ -173,6 +173,114 @@ ABILITY_LABELS = {
     "wis": "Wisdom",
     "cha": "Charisma",
 }
+SPELL_ACCESS_TYPE_AT_WILL = "at_will"
+SPELL_ACCESS_TYPE_FREE_CAST = "free_cast"
+SPELL_ACCESS_RESET_SHORT_REST = "short_rest"
+SPELL_ACCESS_RESET_LONG_REST = "long_rest"
+SPELL_ACCESS_RESET_SHORT_OR_LONG_REST = "short_or_long_rest"
+SPELL_ACCESS_RESET_LABELS = {
+    SPELL_ACCESS_RESET_SHORT_REST: "Short Rest",
+    SPELL_ACCESS_RESET_LONG_REST: "Long Rest",
+    SPELL_ACCESS_RESET_SHORT_OR_LONG_REST: "Short or Long Rest",
+}
+SUPPORTED_FREE_CAST_FEAT_SPELLS = {
+    ("tce", "tcefeatartificerinitiate"): {
+        "source_title": "Artificer Initiate",
+        "ability_key": "int",
+        "choice_fields": [
+            {
+                "category": "spell_known",
+                "filter": "level=0|class=Artificer",
+                "count": 1,
+                "label_prefix": "Granted Cantrip",
+                "help_text": "Choose an artificer cantrip granted by Artificer Initiate.",
+                "prefer_known_mark": False,
+            },
+            {
+                "category": "spell_known",
+                "filter": "level=1|class=Artificer",
+                "count": 1,
+                "label_prefix": "Granted Spell",
+                "help_text": "Choose a 1st-level artificer spell granted by Artificer Initiate.",
+                "prefer_known_mark": False,
+                "access_type": SPELL_ACCESS_TYPE_FREE_CAST,
+                "access_uses": 1,
+                "access_reset_on": SPELL_ACCESS_RESET_LONG_REST,
+            },
+        ],
+        "automatic_grants": [],
+    },
+    ("xge", "xgefeatdrowhighmagic"): {
+        "source_title": "Drow High Magic",
+        "ability_key": "cha",
+        "choice_fields": [],
+        "automatic_grants": [
+            {
+                "spell": "Detect Magic",
+                "prefer_known_mark": False,
+                "access_type": SPELL_ACCESS_TYPE_AT_WILL,
+            },
+            {
+                "spell": "Levitate",
+                "prefer_known_mark": False,
+                "access_type": SPELL_ACCESS_TYPE_FREE_CAST,
+                "access_uses": 1,
+                "access_reset_on": SPELL_ACCESS_RESET_LONG_REST,
+            },
+            {
+                "spell": "Dispel Magic",
+                "prefer_known_mark": False,
+                "access_type": SPELL_ACCESS_TYPE_FREE_CAST,
+                "access_uses": 1,
+                "access_reset_on": SPELL_ACCESS_RESET_LONG_REST,
+            },
+        ],
+    },
+    ("xge", "xgefeatfeyteleportation"): {
+        "source_title": "Fey Teleportation",
+        "ability_key": "int",
+        "choice_fields": [],
+        "automatic_grants": [
+            {
+                "spell": "Misty Step",
+                "prefer_known_mark": False,
+                "access_type": SPELL_ACCESS_TYPE_FREE_CAST,
+                "access_uses": 1,
+                "access_reset_on": SPELL_ACCESS_RESET_SHORT_OR_LONG_REST,
+            }
+        ],
+    },
+    ("xge", "xgefeatwoodelfmagic"): {
+        "source_title": "Wood Elf Magic",
+        "ability_key": "wis",
+        "choice_fields": [
+            {
+                "category": "spell_known",
+                "filter": "level=0|class=Druid",
+                "count": 1,
+                "label_prefix": "Granted Cantrip",
+                "help_text": "Choose a druid cantrip granted by Wood Elf Magic.",
+                "prefer_known_mark": False,
+            }
+        ],
+        "automatic_grants": [
+            {
+                "spell": "Longstrider",
+                "prefer_known_mark": False,
+                "access_type": SPELL_ACCESS_TYPE_FREE_CAST,
+                "access_uses": 1,
+                "access_reset_on": SPELL_ACCESS_RESET_LONG_REST,
+            },
+            {
+                "spell": "Pass without Trace",
+                "prefer_known_mark": False,
+                "access_type": SPELL_ACCESS_TYPE_FREE_CAST,
+                "access_uses": 1,
+                "access_reset_on": SPELL_ACCESS_RESET_LONG_REST,
+            },
+        ],
+    },
+}
 SKILL_LABELS = {
     "acrobatics": "Acrobatics",
     "animal handling": "Animal Handling",
@@ -736,7 +844,14 @@ def build_level_one_character_definition(
         feat_selections=feat_selections,
         campaign_option_payloads=selected_campaign_option_payloads,
     )
-    skills = _build_skills_payload(ability_scores, proficiencies["skills"], proficiency_bonus)
+    skills = _build_skills_payload(
+        ability_scores,
+        proficiencies["skills"],
+        proficiency_bonus,
+        feat_selections=feat_selections,
+        selected_choices=selected_choices,
+        strict=True,
+    )
 
     features, resource_templates = _build_feature_payloads(
         selected_feature_entries,
@@ -2093,6 +2208,12 @@ def build_native_level_up_character_definition(
             existing_skill_proficiency_levels.get(normalized_skill),
             "proficient",
         )
+    existing_skill_proficiency_levels = _apply_feat_expertise_to_skill_proficiency_levels(
+        existing_skill_proficiency_levels,
+        feat_selections=feat_selections,
+        selected_choices=selected_choices,
+        strict=True,
+    )
     skills = _build_skills_payload_from_levels(
         ability_scores,
         existing_skill_proficiency_levels,
@@ -3395,6 +3516,7 @@ def _build_campaign_page_entry(
         for key in (
             "ability",
             "skill_proficiencies",
+            "expertise",
             "language_proficiencies",
             "tool_proficiencies",
             "weapon_proficiencies",
@@ -4036,11 +4158,53 @@ def _assign_spell_payload_class_rows(
             assigned_payloads: list[dict[str, Any]] = []
             for payload in list(spell_payloads or []):
                 spell_payload = dict(payload or {})
-                if not str(spell_payload.get("class_row_id") or "").strip():
+                if (
+                    not str(spell_payload.get("class_row_id") or "").strip()
+                    and not _spell_payload_source_row_id(spell_payload)
+                ):
                     spell_payload["class_row_id"] = default_row_id
                 assigned_payloads.append(spell_payload)
             return _normalize_spell_payloads(assigned_payloads)
     return _normalize_spell_payloads(spell_payloads)
+
+
+def _derive_spell_source_rows(
+    spell_payloads: list[dict[str, Any]],
+    *,
+    ability_scores: dict[str, int],
+    proficiency_bonus: int,
+) -> list[dict[str, Any]]:
+    source_rows: list[dict[str, Any]] = []
+    index_by_id: dict[str, int] = {}
+    for spell_payload in list(spell_payloads or []):
+        payload = dict(spell_payload or {})
+        source_row_id = _spell_payload_source_row_id(payload)
+        if not source_row_id:
+            continue
+        ability_key = _prepared_spell_formula_ability_key(str(payload.get("spell_source_ability_key") or "").strip())
+        modifier = _ability_modifier(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE)) if ability_key else 0
+        row_payload = {
+            "source_row_id": source_row_id,
+            "source_row_kind": str(payload.get("spell_source_row_kind") or "source").strip() or "source",
+            "title": (
+                str(payload.get("spell_source_row_title") or "").strip()
+                or str(payload.get("grant_source_label") or "").strip()
+                or "Feature spells"
+            ),
+            "spellcasting_ability": str(ABILITY_LABELS.get(ability_key, "")).strip(),
+            "spell_save_dc": 8 + proficiency_bonus + modifier if ability_key else None,
+            "spell_attack_bonus": proficiency_bonus + modifier if ability_key else None,
+        }
+        existing_index = index_by_id.get(source_row_id)
+        if existing_index is None:
+            index_by_id[source_row_id] = len(source_rows)
+            source_rows.append(row_payload)
+            continue
+        existing_payload = source_rows[existing_index]
+        for key in ("source_row_kind", "title", "spellcasting_ability", "spell_save_dc", "spell_attack_bonus"):
+            if existing_payload.get(key) in {"", None} and row_payload.get(key) not in {"", None}:
+                existing_payload[key] = row_payload.get(key)
+    return source_rows
 
 
 def _infer_definition_save_proficiencies(
@@ -4237,6 +4401,23 @@ def _effect_speed_bonus(effect_keys: list[str]) -> int:
         except ValueError:
             continue
     return bonus
+
+
+def _effect_armor_dex_cap_bonus_map(effect_keys: list[str]) -> dict[str, int]:
+    bonuses: dict[str, int] = {}
+    for effect_key in list(effect_keys or []):
+        parts = _split_effect_key(effect_key)
+        if len(parts) != 3 or normalize_lookup(parts[0]) != normalize_lookup("armor-dex-cap-bonus"):
+            continue
+        armor_category = normalize_lookup(parts[1])
+        if not armor_category:
+            continue
+        try:
+            bonus = int(parts[2])
+        except ValueError:
+            continue
+        bonuses[armor_category] = int(bonuses.get(armor_category) or 0) + bonus
+    return bonuses
 
 
 def _effect_weapon_attack_bonus(effect_keys: list[str]) -> int:
@@ -4558,20 +4739,22 @@ def _collect_attack_support_flags(features: list[dict[str, Any]] | None) -> dict
     def has_slug(*raw_slugs: str) -> bool:
         return any(normalize_lookup(raw_slug) in feature_slugs for raw_slug in raw_slugs if str(raw_slug or "").strip())
 
+    def has_effect(*raw_effects: str) -> bool:
+        return any(normalize_lookup(raw_effect) in effect_keys for raw_effect in raw_effects if str(raw_effect or "").strip())
+
     return {
         "charger_phb": has_slug("phb-feat-charger") or normalize_lookup("charger-phb") in effect_keys,
         "charger_xphb": has_slug("xphb-feat-charger") or normalize_lookup("charger-xphb") in effect_keys,
-        "crossbow_expert": has_slug("phb-feat-crossbow-expert"),
-        "dual_wielder": has_slug("phb-feat-dual-wielder"),
-        "great_weapon_master": has_slug("phb-feat-great-weapon-master"),
-        "gunner": has_slug("tce-feat-gunner"),
-        "martial_adept": has_slug("phb-feat-martial-adept"),
-        "polearm_master": has_slug("phb-feat-polearm-master"),
-        "savage_attacker": has_slug("phb-feat-savage-attacker"),
-        "sharpshooter": has_slug("phb-feat-sharpshooter"),
-        "shield_master": has_slug("phb-feat-shield-master"),
-        "tavern_brawler": has_slug("phb-feat-tavern-brawler", "xphb-feat-tavern-brawler")
-        or normalize_lookup("tavern-brawler") in effect_keys,
+        "crossbow_expert": has_slug("phb-feat-crossbow-expert") or has_effect("Crossbow Expert"),
+        "dual_wielder": has_slug("phb-feat-dual-wielder") or has_effect("Dual Wielder"),
+        "great_weapon_master": has_slug("phb-feat-great-weapon-master") or has_effect("Great Weapon Master"),
+        "gunner": has_slug("tce-feat-gunner") or has_effect("Gunner"),
+        "martial_adept": has_slug("phb-feat-martial-adept") or has_effect("Martial Adept"),
+        "polearm_master": has_slug("phb-feat-polearm-master") or has_effect("Polearm Master"),
+        "savage_attacker": has_slug("phb-feat-savage-attacker") or has_effect("Savage Attacker"),
+        "sharpshooter": has_slug("phb-feat-sharpshooter") or has_effect("Sharpshooter"),
+        "shield_master": has_slug("phb-feat-shield-master") or has_effect("Shield Master"),
+        "tavern_brawler": has_slug("phb-feat-tavern-brawler", "xphb-feat-tavern-brawler") or has_effect("Tavern Brawler"),
     }
 
 
@@ -4792,6 +4975,11 @@ def _derive_definition_spellcasting(
     spellcasting["spells"] = _assign_spell_payload_class_rows(
         list(spellcasting.get("spells") or []),
         spellcasting_rows=spellcasting_rows,
+    )
+    spellcasting["source_rows"] = _derive_spell_source_rows(
+        list(spellcasting.get("spells") or []),
+        ability_scores=ability_scores,
+        proficiency_bonus=proficiency_bonus,
     )
     spellcasting["slot_lanes"] = slot_lanes
     if not spellcasting_rows:
@@ -6170,7 +6358,7 @@ def _build_feat_choice_fields_for_selection(
             for option in list(choose.get("from") or [])
             if normalize_lookup(str(option)) in SKILL_LABELS
         ]
-        count = int(choose.get("count") or 0)
+        count = int(choose.get("count") or 1)
         if not options and int(block.get("any") or 0) > 0:
             options = skill_options
             count = int(block.get("any") or 0)
@@ -6187,6 +6375,34 @@ def _build_feat_choice_fields_for_selection(
                     "options": options,
                     "selected": str(values.get(field_name) or "").strip(),
                     "group_key": _feat_group_key(instance_key, "skills"),
+                    "kind": "feat_skill",
+                }
+            )
+
+    expertise_choice_count = sum(
+        int(dict(block).get("anyProficientSkill") or 0)
+        for block in list(metadata.get("expertise") or [])
+        if isinstance(block, dict)
+    )
+    expertise_choice_index = 0
+    for block in list(metadata.get("expertise") or []):
+        if not isinstance(block, dict):
+            continue
+        count = int(block.get("anyProficientSkill") or 0)
+        if count <= 0:
+            continue
+        for _ in range(count):
+            expertise_choice_index += 1
+            field_name = _feat_field_name(instance_key, "expertise", expertise_choice_index)
+            label_suffix = f" {expertise_choice_index}" if expertise_choice_count > 1 else ""
+            fields.append(
+                {
+                    "name": field_name,
+                    "label": f"{feat_title} Expertise{label_suffix}",
+                    "help_text": f"Choose a skill that already has proficiency so {feat_title} can grant expertise.",
+                    "options": skill_options,
+                    "selected": str(values.get(field_name) or "").strip(),
+                    "group_key": _feat_group_key(instance_key, "expertise"),
                     "kind": "feat_skill",
                 }
             )
@@ -6826,6 +7042,8 @@ def _build_feat_spell_source_field(
     instance_key = str(selection.get("instance_key") or "").strip()
     if not isinstance(feat_entry, SystemsEntryRecord) or not instance_key:
         return None
+    if _supported_feat_spell_config(selection):
+        return None
     options = _feat_spell_block_options(feat_entry)
     if not options:
         return None
@@ -6850,6 +7068,8 @@ def _selected_feat_additional_spell_blocks(
     instance_key = str(selection.get("instance_key") or "").strip()
     if not isinstance(feat_entry, SystemsEntryRecord) or not instance_key:
         return []
+    if _supported_feat_spell_config(selection):
+        return []
     metadata = dict(feat_entry.metadata or {})
     blocks = [dict(block) for block in list(metadata.get("additional_spells") or []) if isinstance(block, dict)]
     options = _feat_spell_block_options(feat_entry)
@@ -6866,6 +7086,87 @@ def _selected_feat_additional_spell_blocks(
     if 1 <= selected_index <= len(blocks):
         return [blocks[selected_index - 1]]
     return []
+
+
+def _supported_feat_spell_config(selection: dict[str, Any]) -> dict[str, Any]:
+    feat_entry = selection.get("entry")
+    if not isinstance(feat_entry, SystemsEntryRecord):
+        return {}
+    feat_slug = normalize_lookup(str(feat_entry.slug or "").strip())
+    return dict(
+        SUPPORTED_FREE_CAST_FEAT_SPELLS.get(
+            (
+                normalize_lookup(str(feat_entry.source_id or "").strip()),
+                feat_slug,
+            ),
+            {},
+        )
+    )
+
+
+def _supported_feat_spell_source_row_payload(
+    *,
+    selection: dict[str, Any],
+    support_config: dict[str, Any],
+) -> dict[str, str]:
+    feat_entry = selection.get("entry")
+    instance_key = str(selection.get("instance_key") or "").strip()
+    feat_slug = ""
+    if isinstance(feat_entry, SystemsEntryRecord):
+        feat_slug = str(feat_entry.slug or "").strip()
+    if not feat_slug:
+        feat_slug = str(selection.get("slug") or selection.get("selection_value") or "").strip()
+    source_title = str(
+        support_config.get("source_title")
+        or (feat_entry.title if isinstance(feat_entry, SystemsEntryRecord) else selection.get("label") or "")
+    ).strip()
+    ability_key = _prepared_spell_formula_ability_key(str(support_config.get("ability_key") or "").strip())
+    row_slug = slugify(feat_slug or source_title or "feat")
+    instance_slug = slugify(instance_key or row_slug)
+    return {
+        "spell_source_row_id": f"feat-spell-source:{row_slug}:{instance_slug}",
+        "spell_source_row_kind": "feat",
+        "spell_source_row_title": source_title,
+        "spell_source_ability_key": ability_key,
+        "grant_source_label": source_title,
+    }
+
+
+def _supported_feat_spell_automatic_grants(
+    *,
+    feat_selections: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    grants: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for selection in feat_selections:
+        support_config = _supported_feat_spell_config(selection)
+        if not support_config:
+            continue
+        source_row_payload = _supported_feat_spell_source_row_payload(
+            selection=selection,
+            support_config=support_config,
+        )
+        source_row_id = str(source_row_payload.get("spell_source_row_id") or "").strip()
+        for raw_grant in list(support_config.get("automatic_grants") or []):
+            grant = dict(raw_grant or {})
+            spell_name = str(grant.get("spell") or "").strip()
+            if not spell_name:
+                continue
+            marker = (source_row_id, normalize_lookup(spell_name))
+            if marker in seen:
+                continue
+            seen.add(marker)
+            grants.append(
+                {
+                    "name": spell_name,
+                    "prefer_known_mark": bool(grant.get("prefer_known_mark", True)),
+                    **source_row_payload,
+                    "spell_access_type": str(grant.get("access_type") or "").strip(),
+                    "spell_access_uses": grant.get("access_uses"),
+                    "spell_access_reset_on": str(grant.get("access_reset_on") or "").strip(),
+                }
+            )
+    return grants
 
 
 def _build_equipment_groups(
@@ -7781,6 +8082,7 @@ def _effect_keys_for_feature(feature: dict[str, Any]) -> list[str]:
     if feature_name:
         effect_keys.append(feature_name)
         normalized_name = normalize_lookup(feature_name)
+        normalized_slug = normalize_lookup(str(systems_ref.get("slug") or "").strip())
         source_id = str(systems_ref.get("source_id") or feature.get("source") or "").strip().upper()
         if normalized_name == normalize_lookup("Charger"):
             effect_keys.append("charger-xphb" if source_id == "XPHB" else "charger-phb")
@@ -7799,6 +8101,10 @@ def _effect_keys_for_feature(feature: dict[str, Any]) -> list[str]:
             effect_keys.append("half-proficiency:all")
         if normalized_name == normalize_lookup("Remarkable Athlete"):
             effect_keys.append("half-proficiency:abilities:str,dex,con")
+        if normalized_slug == normalize_lookup("phb-feat-medium-armor-master") or (
+            not normalized_slug and normalized_name == normalize_lookup("Medium Armor Master")
+        ):
+            effect_keys.append("armor-dex-cap-bonus:medium:1")
         if normalized_name == normalize_lookup("Tavern Brawler"):
             effect_keys.append("tavern-brawler")
     for effect in list(campaign_option.get("modeled_effects") or []):
@@ -8398,6 +8704,8 @@ def _derive_armor_class_from_character_inputs(
     wis_modifier = _ability_modifier(int(ability_scores.get("wis", DEFAULT_ABILITY_SCORE) or DEFAULT_ABILITY_SCORE))
     normalized_classes = {normalize_lookup(name) for name in list(class_names or []) if str(name or "").strip()}
     normalized_subclasses = {normalize_lookup(name) for name in list(subclass_names or []) if str(name or "").strip()}
+    effect_keys = _extract_character_effect_keys(features)
+    armor_dex_cap_bonus_map = _effect_armor_dex_cap_bonus_map(effect_keys)
 
     all_items = [dict(item or {}) for item in list(equipment_catalog or [])]
     equipped_items = [item for item in all_items if bool(item.get("is_equipped"))]
@@ -8406,7 +8714,10 @@ def _derive_armor_class_from_character_inputs(
         for item in equipped_items
         if (profile := _resolve_armor_profile(item, item_catalog)) is not None
     ]
-    armor_items = equipped_items if any(not bool(profile.get("is_shield")) for _, profile in equipped_armor_profiles) else all_items
+    if allow_plain_unarmored_base:
+        armor_items = equipped_items
+    else:
+        armor_items = equipped_items if any(not bool(profile.get("is_shield")) for _, profile in equipped_armor_profiles) else all_items
     resolved_profiles = [
         (item, profile)
         for item in armor_items
@@ -8443,7 +8754,10 @@ def _derive_armor_class_from_character_inputs(
             total += dex_modifier
         elif armor_category == "medium":
             dex_cap = profile.get("dex_cap")
-            total += min(dex_modifier, int(dex_cap if dex_cap is not None else 2))
+            total += min(
+                dex_modifier,
+                int(dex_cap if dex_cap is not None else 2) + int(armor_dex_cap_bonus_map.get("medium") or 0),
+            )
         if has_defense_fighting_style:
             total += 1
         total += shield_bonus
@@ -10324,7 +10638,14 @@ def _build_level_one_preview(
         feat_selections=feat_selections,
         campaign_option_payloads=selected_campaign_option_payloads,
     )
-    skills = _build_skills_payload(ability_scores, proficiencies["skills"], proficiency_bonus)
+    skills = _build_skills_payload(
+        ability_scores,
+        proficiencies["skills"],
+        proficiency_bonus,
+        feat_selections=feat_selections,
+        selected_choices=selected_choices,
+        strict=False,
+    )
     equipment_catalog = _build_level_one_equipment_catalog(
         equipment_groups,
         choice_sections=choice_sections,
@@ -10610,6 +10931,81 @@ def _extract_feat_skill_proficiencies(
             if str(value).startswith("skill:"):
                 results.append(_skill_label(str(value).split(":", 1)[1]))
     return _dedupe_preserve_order(results)
+
+
+def _apply_skill_expertise_level(
+    proficiency_levels: dict[str, str],
+    *,
+    skill_name: Any,
+    feat_title: str,
+    strict: bool,
+) -> None:
+    normalized_skill = normalize_lookup(skill_name)
+    if normalized_skill not in SKILL_LABELS:
+        if strict:
+            raise CharacterBuildError(f"Choose a valid expertise skill for {feat_title}.")
+        return
+    current_level = _normalize_skill_proficiency_level(proficiency_levels.get(normalized_skill))
+    if current_level == "expertise":
+        if strict:
+            raise CharacterBuildError(f"{feat_title} requires choosing a skill that does not already have expertise.")
+        return
+    if current_level != "proficient":
+        if strict:
+            raise CharacterBuildError(f"{feat_title} requires choosing a skill that already has proficiency.")
+        return
+    proficiency_levels[normalized_skill] = "expertise"
+
+
+def _apply_feat_expertise_to_skill_proficiency_levels(
+    proficiency_levels: dict[str, str],
+    *,
+    feat_selections: list[dict[str, Any]],
+    selected_choices: dict[str, list[str]] | None = None,
+    strict: bool = False,
+) -> dict[str, str]:
+    updated_levels = {
+        normalized_skill: _normalize_skill_proficiency_level(level)
+        for raw_skill, level in dict(proficiency_levels or {}).items()
+        if (normalized_skill := normalize_lookup(raw_skill)) in SKILL_LABELS
+    }
+    choice_map = dict(selected_choices or {})
+    for selection in feat_selections:
+        feat_entry = selection.get("entry")
+        if not isinstance(feat_entry, SystemsEntryRecord):
+            continue
+        metadata = dict(feat_entry.metadata or {})
+        expertise_blocks = [dict(block) for block in list(metadata.get("expertise") or []) if isinstance(block, dict)]
+        if not expertise_blocks:
+            continue
+        feat_title = str(feat_entry.title or "").strip() or "This feat"
+        for block in expertise_blocks:
+            for key, value in block.items():
+                if key == "anyProficientSkill" or value is not True:
+                    continue
+                _apply_skill_expertise_level(
+                    updated_levels,
+                    skill_name=key,
+                    feat_title=feat_title,
+                    strict=strict,
+                )
+        any_proficient_skill_count = sum(int(block.get("anyProficientSkill") or 0) for block in expertise_blocks)
+        if any_proficient_skill_count <= 0:
+            continue
+        instance_key = str(selection.get("instance_key") or "").strip()
+        if not instance_key:
+            if strict:
+                raise CharacterBuildError(f"{feat_title} is missing the expertise choice metadata needed to save.")
+            continue
+        selected_expertise_skills = _feat_selected_values(choice_map, instance_key, "expertise")
+        for selected_skill in selected_expertise_skills[:any_proficient_skill_count]:
+            _apply_skill_expertise_level(
+                updated_levels,
+                skill_name=selected_skill,
+                feat_title=feat_title,
+                strict=strict,
+            )
+    return updated_levels
 
 
 def _extract_feat_language_proficiencies(
@@ -10998,10 +11394,22 @@ def _build_skills_payload(
     ability_scores: dict[str, int],
     proficient_skills: list[str],
     proficiency_bonus: int,
+    *,
+    feat_selections: list[dict[str, Any]] | None = None,
+    selected_choices: dict[str, list[str]] | None = None,
+    strict: bool = False,
 ) -> list[dict[str, Any]]:
+    proficiency_levels = _skill_proficiency_levels_from_names(proficient_skills)
+    if feat_selections:
+        proficiency_levels = _apply_feat_expertise_to_skill_proficiency_levels(
+            proficiency_levels,
+            feat_selections=feat_selections,
+            selected_choices=selected_choices,
+            strict=strict,
+        )
     return _build_skills_payload_from_levels(
         ability_scores,
-        _skill_proficiency_levels_from_names(proficient_skills),
+        proficiency_levels,
         proficiency_bonus,
     )
 
@@ -12659,6 +13067,15 @@ def _build_level_up_spell_payloads(
         extra_option_payloads=selected_campaign_option_payloads,
         class_row_id=class_row_id,
     )
+    for spell_grant in _supported_feat_spell_automatic_grants(feat_selections=feat_selections):
+        _add_bonus_known_spell_to_payloads(
+            spells_by_key,
+            selected_value=str(spell_grant.get("name") or "").strip(),
+            spell_catalog=spell_catalog,
+            class_row_id=class_row_id,
+            prefer_known_mark=bool(spell_grant.get("prefer_known_mark", True)),
+            **_spell_payload_support_kwargs(spell_grant),
+        )
     for spell_title in _automatic_feat_known_spell_values(
         feat_selections=feat_selections,
         values=values,
@@ -12897,6 +13314,14 @@ def _build_level_one_spell_payloads(
         selected_choices=selected_choices,
         spell_catalog=spell_catalog,
     )
+    for spell_grant in _supported_feat_spell_automatic_grants(feat_selections=feat_selections):
+        _add_bonus_known_spell_to_payloads(
+            spells_by_key,
+            selected_value=str(spell_grant.get("name") or "").strip(),
+            spell_catalog=spell_catalog,
+            prefer_known_mark=bool(spell_grant.get("prefer_known_mark", True)),
+            **_spell_payload_support_kwargs(spell_grant),
+        )
     _apply_selected_campaign_option_spells_to_payloads(
         spells_by_key,
         choice_sections=choice_sections,
@@ -12927,12 +13352,123 @@ def _spell_payload_class_row_id(spell_payload: dict[str, Any]) -> str:
     return str(spell_payload.get("class_row_id") or "").strip()
 
 
+def _spell_payload_source_row_id(spell_payload: dict[str, Any]) -> str:
+    return str(spell_payload.get("spell_source_row_id") or "").strip()
+
+
+def _spell_payload_management_row(spell_payload: dict[str, Any]) -> tuple[str, str]:
+    class_row_id = _spell_payload_class_row_id(spell_payload)
+    if class_row_id:
+        return "class", class_row_id
+    source_row_id = _spell_payload_source_row_id(spell_payload)
+    if source_row_id:
+        return str(spell_payload.get("spell_source_row_kind") or "source").strip() or "source", source_row_id
+    return "", ""
+
+
+def _spell_payload_management_row_id(spell_payload: dict[str, Any]) -> str:
+    return _spell_payload_management_row(spell_payload)[1]
+
+
+def _spell_payload_management_scope_key(spell_payload: dict[str, Any]) -> str:
+    row_kind, row_id = _spell_payload_management_row(spell_payload)
+    if not row_id:
+        return ""
+    if row_kind == "class":
+        return row_id
+    return f"{row_kind}:{row_id}"
+
+
+def _spell_access_payload(raw_value: Any) -> dict[str, Any]:
+    payload = dict(raw_value or {}) if isinstance(raw_value, dict) else {}
+    access_type = str(payload.get("spell_access_type") or payload.get("access_type") or "").strip()
+    if access_type not in {SPELL_ACCESS_TYPE_AT_WILL, SPELL_ACCESS_TYPE_FREE_CAST}:
+        return {}
+    normalized = {"spell_access_type": access_type}
+    if access_type == SPELL_ACCESS_TYPE_FREE_CAST:
+        try:
+            uses = int(payload.get("spell_access_uses", payload.get("access_uses")) or 0)
+        except (TypeError, ValueError):
+            uses = 0
+        if uses > 0:
+            normalized["spell_access_uses"] = uses
+        reset_on = str(payload.get("spell_access_reset_on") or payload.get("access_reset_on") or "").strip()
+        if reset_on:
+            normalized["spell_access_reset_on"] = reset_on
+    return normalized
+
+
+def _spell_access_badge_label(raw_value: Any) -> str:
+    access_payload = _spell_access_payload(raw_value)
+    access_type = str(access_payload.get("spell_access_type") or "").strip()
+    if access_type == SPELL_ACCESS_TYPE_AT_WILL:
+        return "At will"
+    if access_type != SPELL_ACCESS_TYPE_FREE_CAST:
+        return ""
+    reset_on = str(access_payload.get("spell_access_reset_on") or "").strip()
+    reset_label = SPELL_ACCESS_RESET_LABELS.get(reset_on, _humanize_words(reset_on))
+    try:
+        uses = int(access_payload.get("spell_access_uses") or 0)
+    except (TypeError, ValueError):
+        uses = 0
+    if uses > 0 and reset_label:
+        return f"{uses} / {reset_label}"
+    if reset_label:
+        return f"Free cast ({reset_label})"
+    return "Free cast"
+
+
+def _spell_payload_support_kwargs(raw_value: Any) -> dict[str, Any]:
+    payload = dict(raw_value or {}) if isinstance(raw_value, dict) else {}
+    support_kwargs: dict[str, Any] = {}
+    source_row_id = _spell_payload_source_row_id(payload)
+    if source_row_id:
+        support_kwargs["spell_source_row_id"] = source_row_id
+        support_kwargs["spell_source_row_kind"] = (
+            str(payload.get("spell_source_row_kind") or "source").strip() or "source"
+        )
+        support_kwargs["spell_source_row_title"] = str(payload.get("spell_source_row_title") or "").strip()
+        support_kwargs["spell_source_ability_key"] = str(payload.get("spell_source_ability_key") or "").strip()
+    grant_source_label = str(payload.get("grant_source_label") or "").strip()
+    if grant_source_label:
+        support_kwargs["grant_source_label"] = grant_source_label
+    support_kwargs.update(_spell_access_payload(payload))
+    return support_kwargs
+
+
+def _apply_spell_payload_support_metadata(
+    spell_payload: dict[str, Any],
+    support_payload: dict[str, Any],
+) -> None:
+    source_row_id = str(support_payload.get("spell_source_row_id") or "").strip()
+    if source_row_id:
+        spell_payload["spell_source_row_id"] = source_row_id
+        spell_payload["spell_source_row_kind"] = (
+            str(support_payload.get("spell_source_row_kind") or "source").strip() or "source"
+        )
+        spell_source_row_title = str(support_payload.get("spell_source_row_title") or "").strip()
+        if spell_source_row_title:
+            spell_payload["spell_source_row_title"] = spell_source_row_title
+        spell_source_ability_key = _prepared_spell_formula_ability_key(
+            str(support_payload.get("spell_source_ability_key") or "").strip()
+        )
+        if spell_source_ability_key:
+            spell_payload["spell_source_ability_key"] = spell_source_ability_key
+        spell_payload.pop("class_row_id", None)
+    grant_source_label = str(support_payload.get("grant_source_label") or "").strip()
+    if grant_source_label:
+        spell_payload["grant_source_label"] = grant_source_label
+    access_payload = _spell_access_payload(support_payload)
+    if access_payload:
+        spell_payload.update(access_payload)
+
+
 def _spell_payload_map_key(spell_payload: dict[str, Any]) -> str:
     payload_key = _spell_payload_key(spell_payload)
     if not payload_key:
         return ""
-    class_row_id = _spell_payload_class_row_id(spell_payload)
-    return f"{class_row_id}::{payload_key}" if class_row_id else payload_key
+    scope_key = _spell_payload_management_scope_key(spell_payload)
+    return f"{scope_key}::{payload_key}" if scope_key else payload_key
 
 
 def _spell_lookup_key(selected_value: str, spell_catalog: dict[str, Any]) -> str:
@@ -13033,12 +13569,15 @@ def _apply_selected_feat_spell_fields_to_payloads(
 ) -> None:
     for field, selected_value in _selected_feat_spell_field_values(choice_sections, selected_choices):
         kind = str(field.get("kind") or "").strip()
+        support_kwargs = _spell_payload_support_kwargs(field)
         if kind == "feat_spell_known":
             _add_bonus_known_spell_to_payloads(
                 spells_by_key,
                 selected_value=selected_value,
                 spell_catalog=spell_catalog,
                 class_row_id=class_row_id,
+                prefer_known_mark=bool(field.get("prefer_known_mark", True)),
+                **support_kwargs,
             )
             continue
         _add_spell_to_payloads(
@@ -13049,6 +13588,7 @@ def _apply_selected_feat_spell_fields_to_payloads(
             is_always_prepared=bool(field.get("spell_is_always_prepared")),
             is_ritual=bool(field.get("spell_is_ritual")),
             class_row_id=class_row_id,
+            **support_kwargs,
         )
 
 
@@ -13577,6 +14117,35 @@ def _build_feat_spell_choice_fields_for_selection(
         return []
 
     fields: list[dict[str, Any]] = []
+    support_config = _supported_feat_spell_config(selection)
+    if support_config:
+        source_row_payload = _supported_feat_spell_source_row_payload(
+            selection=selection,
+            support_config=support_config,
+        )
+        for spec_index, spec in enumerate(list(support_config.get("choice_fields") or []), start=1):
+            fields.extend(
+                _build_feat_spell_fields_from_spec(
+                    feat_title=feat_entry.title,
+                    instance_key=instance_key,
+                    category=str(dict(spec or {}).get("category") or "spell_known").strip() or "spell_known",
+                    spec_index=spec_index,
+                    spec={
+                        **dict(spec or {}),
+                        **source_row_payload,
+                        "spell_access_type": str(dict(spec or {}).get("access_type") or "").strip(),
+                        "spell_access_uses": dict(spec or {}).get("access_uses"),
+                        "spell_access_reset_on": str(dict(spec or {}).get("access_reset_on") or "").strip(),
+                    },
+                    spell_catalog=spell_catalog,
+                    values=values,
+                    default_label_prefix="Granted Spell",
+                    default_help_text="Choose a feat-granted spell.",
+                    kind="feat_spell_known",
+                )
+            )
+        return fields
+
     known_specs: list[dict[str, Any]] = []
     prepared_specs: list[dict[str, Any]] = []
     granted_specs: list[dict[str, Any]] = []
@@ -13675,6 +14244,23 @@ def _build_feat_spell_fields_from_spec(
                 "spell_mark": str(spec.get("spell_mark") or "").strip(),
                 "spell_is_always_prepared": bool(spec.get("spell_is_always_prepared")),
                 "spell_is_ritual": bool(spec.get("spell_is_ritual")),
+                "prefer_known_mark": bool(spec.get("prefer_known_mark", True)),
+                "spell_source_row_id": str(spec.get("spell_source_row_id") or "").strip(),
+                "spell_source_row_kind": str(spec.get("spell_source_row_kind") or "").strip(),
+                "spell_source_row_title": str(spec.get("spell_source_row_title") or "").strip(),
+                "spell_source_ability_key": str(spec.get("spell_source_ability_key") or "").strip(),
+                "grant_source_label": str(spec.get("grant_source_label") or "").strip(),
+                "spell_access_type": str(
+                    spec.get("spell_access_type")
+                    or spec.get("access_type")
+                    or ""
+                ).strip(),
+                "spell_access_uses": spec.get("spell_access_uses", spec.get("access_uses")),
+                "spell_access_reset_on": str(
+                    spec.get("spell_access_reset_on")
+                    or spec.get("access_reset_on")
+                    or ""
+                ).strip(),
             }
         )
     return fields
@@ -14727,16 +15313,39 @@ def _add_spell_to_payloads(
     is_bonus_known: bool = False,
     is_ritual: bool = False,
     class_row_id: str = "",
+    spell_source_row_id: str = "",
+    spell_source_row_kind: str = "",
+    spell_source_row_title: str = "",
+    spell_source_ability_key: str = "",
+    grant_source_label: str = "",
+    spell_access_type: str = "",
+    spell_access_uses: Any = None,
+    spell_access_reset_on: str = "",
 ) -> None:
     spell_entry = _resolve_spell_entry(selected_value, spell_catalog)
     spell_payload = _build_spell_payload(selected_value, spell_entry)
-    if str(class_row_id or "").strip():
+    support_payload = _spell_payload_support_kwargs(
+        {
+            "spell_source_row_id": spell_source_row_id,
+            "spell_source_row_kind": spell_source_row_kind,
+            "spell_source_row_title": spell_source_row_title,
+            "spell_source_ability_key": spell_source_ability_key,
+            "grant_source_label": grant_source_label,
+            "spell_access_type": spell_access_type,
+            "spell_access_uses": spell_access_uses,
+            "spell_access_reset_on": spell_access_reset_on,
+        }
+    )
+    if support_payload:
+        _apply_spell_payload_support_metadata(spell_payload, support_payload)
+    elif str(class_row_id or "").strip():
         spell_payload["class_row_id"] = str(class_row_id or "").strip()
     payload_key = _spell_payload_map_key(
         {
             "systems_ref": _systems_ref_from_entry(spell_entry),
             "name": selected_value,
-            "class_row_id": class_row_id,
+            **support_payload,
+            "class_row_id": "" if support_payload else class_row_id,
         }
     )
     if not payload_key:
@@ -14752,6 +15361,8 @@ def _add_spell_to_payloads(
             spell_payload["is_bonus_known"] = True
         if is_ritual:
             spell_payload["is_ritual"] = True
+        if support_payload:
+            _apply_spell_payload_support_metadata(spell_payload, support_payload)
         spells_by_key[payload_key] = spell_payload
         return
 
@@ -14765,6 +15376,8 @@ def _add_spell_to_payloads(
         existing_payload["is_bonus_known"] = True
     if is_ritual:
         existing_payload["is_ritual"] = True
+    if support_payload:
+        _apply_spell_payload_support_metadata(existing_payload, support_payload)
 
 
 def _add_bonus_known_spell_to_payloads(
@@ -14773,9 +15386,22 @@ def _add_bonus_known_spell_to_payloads(
     selected_value: str,
     spell_catalog: dict[str, Any],
     class_row_id: str = "",
+    prefer_known_mark: bool = True,
+    spell_source_row_id: str = "",
+    spell_source_row_kind: str = "",
+    spell_source_row_title: str = "",
+    spell_source_ability_key: str = "",
+    grant_source_label: str = "",
+    spell_access_type: str = "",
+    spell_access_uses: Any = None,
+    spell_access_reset_on: str = "",
 ) -> None:
     spell_entry = _resolve_spell_entry(selected_value, spell_catalog)
-    mark = "Cantrip" if spell_entry is not None and _spell_entry_level(spell_entry) == 0 else "Known"
+    mark = (
+        "Cantrip"
+        if spell_entry is not None and _spell_entry_level(spell_entry) == 0
+        else ("Known" if prefer_known_mark else "")
+    )
     _add_spell_to_payloads(
         spells_by_key,
         selected_value=selected_value,
@@ -14783,6 +15409,14 @@ def _add_bonus_known_spell_to_payloads(
         mark=mark,
         is_bonus_known=True,
         class_row_id=class_row_id,
+        spell_source_row_id=spell_source_row_id,
+        spell_source_row_kind=spell_source_row_kind,
+        spell_source_row_title=spell_source_row_title,
+        spell_source_ability_key=spell_source_ability_key,
+        grant_source_label=grant_source_label,
+        spell_access_type=spell_access_type,
+        spell_access_uses=spell_access_uses,
+        spell_access_reset_on=spell_access_reset_on,
     )
 
 
@@ -14892,6 +15526,42 @@ def _normalize_spell_payloads(
             payload["class_row_id"] = class_row_id
         else:
             payload.pop("class_row_id", None)
+        source_row_id = _spell_payload_source_row_id(payload)
+        if source_row_id:
+            payload["spell_source_row_id"] = source_row_id
+            payload["spell_source_row_kind"] = (
+                str(payload.get("spell_source_row_kind") or "source").strip() or "source"
+            )
+            source_row_title = str(payload.get("spell_source_row_title") or "").strip()
+            if source_row_title:
+                payload["spell_source_row_title"] = source_row_title
+            else:
+                payload.pop("spell_source_row_title", None)
+            source_ability_key = _prepared_spell_formula_ability_key(
+                str(payload.get("spell_source_ability_key") or "").strip()
+            )
+            if source_ability_key:
+                payload["spell_source_ability_key"] = source_ability_key
+            else:
+                payload.pop("spell_source_ability_key", None)
+            payload.pop("class_row_id", None)
+        else:
+            payload.pop("spell_source_row_id", None)
+            payload.pop("spell_source_row_kind", None)
+            payload.pop("spell_source_row_title", None)
+            payload.pop("spell_source_ability_key", None)
+        grant_source_label = str(payload.get("grant_source_label") or "").strip()
+        if grant_source_label:
+            payload["grant_source_label"] = grant_source_label
+        else:
+            payload.pop("grant_source_label", None)
+        access_payload = _spell_access_payload(payload)
+        if access_payload:
+            payload.update(access_payload)
+        else:
+            payload.pop("spell_access_type", None)
+            payload.pop("spell_access_uses", None)
+            payload.pop("spell_access_reset_on", None)
         systems_ref = dict(payload.get("systems_ref") or {})
         if systems_ref:
             payload["systems_ref"] = systems_ref
@@ -14907,11 +15577,12 @@ def _normalize_spell_payloads(
             systems_ref=systems_ref,
             page_ref=normalized_page_ref,
         )
+        scope_key = _spell_payload_management_scope_key(payload)
         candidate_keys: list[str] = []
         if explicit_identity:
-            candidate_keys.append(f"{class_row_id}|{explicit_identity}" if class_row_id else explicit_identity)
+            candidate_keys.append(f"{scope_key}|{explicit_identity}" if scope_key else explicit_identity)
         candidate_keys.extend(
-            f"{class_row_id}|name:{candidate}" if class_row_id else f"name:{candidate}"
+            f"{scope_key}|name:{candidate}" if scope_key else f"name:{candidate}"
             for candidate in _merge_name_candidates(name)
         )
 
@@ -14957,20 +15628,22 @@ def _normalize_spell_payloads(
                 list(existing_payload.get("campaign_option_sources") or [])
                 + list(payload.get("campaign_option_sources") or [])
             )
+        if payload.get("spell_source_row_id") or payload.get("grant_source_label") or payload.get("spell_access_type"):
+            _apply_spell_payload_support_metadata(existing_payload, payload)
         updated_explicit_identity = _normalize_explicit_link_identity(
             systems_ref=dict(existing_payload.get("systems_ref") or {}),
             page_ref=existing_payload.get("page_ref"),
         )
+        existing_scope_key = _spell_payload_management_scope_key(existing_payload)
         updated_keys: list[str] = []
         if updated_explicit_identity:
-            existing_row_id = _spell_payload_class_row_id(existing_payload)
             updated_keys.append(
-                f"{existing_row_id}|{updated_explicit_identity}" if existing_row_id else updated_explicit_identity
+                f"{existing_scope_key}|{updated_explicit_identity}" if existing_scope_key else updated_explicit_identity
             )
         updated_keys.extend(
             (
-                f"{_spell_payload_class_row_id(existing_payload)}|name:{candidate}"
-                if _spell_payload_class_row_id(existing_payload)
+                f"{existing_scope_key}|name:{candidate}"
+                if existing_scope_key
                 else f"name:{candidate}"
             )
             for candidate in _merge_name_candidates(str(existing_payload.get("name") or "").strip())
@@ -15486,6 +16159,9 @@ def _summarize_preview_spell(spell: dict[str, Any]) -> str:
         badges.append("Always prepared")
     elif bool(spell.get("is_bonus_known")):
         badges.append("Granted")
+    access_badge = _spell_access_badge_label(spell)
+    if access_badge:
+        badges.append(access_badge)
     mark = str(spell.get("mark") or "").strip()
     if mark:
         badges.append(mark)

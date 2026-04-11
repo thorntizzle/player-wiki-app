@@ -130,6 +130,7 @@ def normalize_campaign_character_option(
             for key in (
                 "ability",
                 "skill_proficiencies",
+                "expertise",
                 "language_proficiencies",
                 "tool_proficiencies",
                 "weapon_proficiencies",
