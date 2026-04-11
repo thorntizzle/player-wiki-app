@@ -7733,6 +7733,26 @@ def test_normalize_definition_to_native_model_maps_title_effects_through_shared_
     assert normalized.stats["passive_investigation"] == 16
 
 
+def test_normalize_definition_to_native_model_derives_carrying_capacity_from_size_and_title_effects():
+    definition = _minimal_character_definition("river-stone", "River Stone")
+    definition.profile["size"] = "Large"
+    definition.features = [
+        {
+            "id": "powerful-build-1",
+            "name": "Powerful Build",
+            "category": "species_trait",
+            "activation_type": "passive",
+        }
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+    renormalized = normalize_definition_to_native_model(normalized)
+
+    assert normalized.stats["carrying_capacity"] == 960
+    assert normalized.stats["push_drag_lift"] == 1920
+    assert renormalized.stats["carrying_capacity"] == 960
+
+
 def test_normalize_definition_to_native_model_applies_structured_weapon_effect_bonuses():
     longsword = _systems_entry("item", "phb-item-longsword", "Longsword", metadata={"weight": 3})
     definition = _minimal_character_definition("arden-kest", "Arden Kest")
@@ -9647,6 +9667,98 @@ def test_level_one_builder_applies_structured_save_bonus_effect_keys():
     assert definition.stats["ability_scores"]["dex"]["save_bonus"] == 3
     assert definition.stats["ability_scores"]["wis"]["save_bonus"] == 4
     assert definition.stats["ability_scores"]["cha"]["save_bonus"] == 2
+
+
+def test_level_one_builder_applies_structured_carrying_capacity_effect_keys():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    mighty_frame = _systems_entry(
+        "classfeature",
+        "phb-classfeature-mighty-frame",
+        "Mighty Frame",
+        metadata={
+            "level": 1,
+            "campaign_option": {
+                "modeled_effects": [
+                    "carrying-capacity-multiplier:2",
+                ]
+            },
+        },
+    )
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                    {"label": "Mighty Frame", "entry": mighty_frame, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    form_values = {
+        "name": "Loadbearer",
+        "character_slug": "loadbearer",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "13",
+        "cha": "8",
+    }
+
+    definition, _ = build_level_one_character_definition(
+        "linden-pass",
+        build_level_one_builder_context(systems_service, "linden-pass", form_values),
+        form_values,
+    )
+
+    assert definition.stats["carrying_capacity"] == 480
+    assert definition.stats["push_drag_lift"] == 960
 
 
 def test_level_one_builder_generates_attack_rows_from_starting_weapons():
@@ -13853,6 +13965,87 @@ def test_native_level_up_applies_structured_save_bonus_effect_keys():
     assert leveled_definition.stats["ability_scores"]["dex"]["save_bonus"] == 3
     assert leveled_definition.stats["ability_scores"]["wis"]["save_bonus"] == 4
     assert leveled_definition.stats["ability_scores"]["cha"]["save_bonus"] == 2
+
+
+def test_native_level_up_applies_structured_carrying_capacity_effect_keys():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    mighty_frame = _systems_entry(
+        "classfeature",
+        "phb-classfeature-mighty-frame",
+        "Mighty Frame",
+        metadata={
+            "level": 4,
+            "campaign_option": {
+                "modeled_effects": [
+                    "carrying-capacity-multiplier:2",
+                ]
+            },
+        },
+    )
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 4,
+                "level_label": "Level 4",
+                "feature_rows": [
+                    {"label": "Mighty Frame", "entry": mighty_frame, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    current_definition = _minimal_character_definition("loadbearer-veteran", "Loadbearer Veteran")
+    current_definition.profile["class_level_text"] = "Fighter 3"
+    current_definition.profile["classes"][0]["level"] = 3
+
+    form_values = {"hp_gain": "8"}
+    context = build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values)
+
+    leveled_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        context,
+        form_values,
+        current_import_metadata=_minimal_import_metadata("loadbearer-veteran"),
+    )
+
+    assert leveled_definition.stats["carrying_capacity"] == 480
+    assert leveled_definition.stats["push_drag_lift"] == 960
 
 
 def test_native_level_up_applies_page_backed_feat_grants():

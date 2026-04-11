@@ -287,6 +287,46 @@ def test_dm_can_open_character_roster_and_read_sheet(client, sign_in, users):
     assert "Open campaign wiki" not in sheet_html
 
 
+def test_read_sheet_shows_carrying_capacity_stats(app, client, sign_in, users):
+    def _mutate(payload: dict) -> None:
+        profile = dict(payload.get("profile") or {})
+        profile["size"] = "Large"
+        payload["profile"] = profile
+
+        stats = dict(payload.get("stats") or {})
+        ability_scores = dict(stats.get("ability_scores") or {})
+        ability_scores["str"] = {"score": 16, "modifier": 3, "save_bonus": 3}
+        stats["ability_scores"] = ability_scores
+        payload["stats"] = stats
+
+        features = list(payload.get("features") or [])
+        features.append(
+            {
+                "id": "powerful-build-1",
+                "name": "Powerful Build",
+                "category": "species_trait",
+                "activation_type": "passive",
+            }
+        )
+        payload["features"] = features
+
+        normalized = normalize_definition_to_native_model(CharacterDefinition.from_dict(payload))
+        payload.clear()
+        payload.update(normalized.to_dict())
+
+    _write_character_definition(app, "selene-brook", _mutate)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    sheet = client.get("/campaigns/linden-pass/characters/selene-brook")
+
+    assert sheet.status_code == 200
+    sheet_html = sheet.get_data(as_text=True)
+    assert "Carrying Capacity" in sheet_html
+    assert "960 lb." in sheet_html
+    assert "Push / Drag / Lift" in sheet_html
+    assert "1920 lb." in sheet_html
+
+
 def test_roster_and_read_sheet_derive_multiclass_summary_from_class_rows(app, client, sign_in, users):
     def _mutate(payload: dict) -> None:
         profile = dict(payload.get("profile") or {})

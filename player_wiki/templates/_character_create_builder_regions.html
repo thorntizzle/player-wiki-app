@@ -52,6 +52,14 @@
         <strong>{{ builder.preview.size or "Not set" }}</strong>
       </div>
       <div>
+        <span class="meta">Carrying Capacity</span>
+        <strong>{{ builder.preview.carrying_capacity or "Not set" }}</strong>
+      </div>
+      <div>
+        <span class="meta">Push / Drag / Lift</span>
+        <strong>{{ builder.preview.push_drag_lift or "Not set" }}</strong>
+      </div>
+      <div>
         <span class="meta">Saving Throws</span>
         <strong>
           {% if builder.preview.saving_throws %}

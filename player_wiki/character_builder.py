@@ -33,7 +33,7 @@ from .managed_resource_registry import resolve_managed_resource_family_and_membe
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-04-09.01"
+CHARACTER_BUILDER_VERSION = "2026-04-11.01"
 PHB_SOURCE_ID = "PHB"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -458,6 +458,14 @@ SIZE_LABELS = {
     "L": "Large",
     "H": "Huge",
     "G": "Gargantuan",
+}
+SIZE_CARRYING_CAPACITY_MULTIPLIERS = {
+    "tiny": 0.5,
+    "small": 1.0,
+    "medium": 1.0,
+    "large": 2.0,
+    "huge": 4.0,
+    "gargantuan": 8.0,
 }
 REDUNDANT_SPECIES_TRAIT_NAMES = {
     "age",
@@ -4704,6 +4712,22 @@ def _effect_speed_bonus(effect_keys: list[str]) -> int:
     return bonus
 
 
+def _effect_carrying_capacity_multiplier(effect_keys: list[str]) -> float:
+    multiplier = 1.0
+    for effect_key in list(effect_keys or []):
+        parts = _split_effect_key(effect_key)
+        if len(parts) != 2 or normalize_lookup(parts[0]) != normalize_lookup("carrying-capacity-multiplier"):
+            continue
+        try:
+            value = float(parts[1])
+        except ValueError:
+            continue
+        if value <= 0:
+            continue
+        multiplier *= value
+    return multiplier
+
+
 def _effect_armor_dex_cap_bonus_map(effect_keys: list[str]) -> dict[str, int]:
     bonuses: dict[str, int] = {}
     for effect_key in list(effect_keys or []):
@@ -5244,6 +5268,13 @@ def _derive_definition_stats(
         )
     if derived_speed:
         stats["speed"] = derived_speed
+    stats.update(
+        _derive_carrying_capacity_stats(
+            strength_score=ability_scores["str"],
+            size_label=_definition_size_label(definition, selected_species=selected_species),
+            effect_keys=effect_keys,
+        )
+    )
     derived_max_hp = _derive_definition_max_hp(
         definition,
         current_level=max(_resolve_native_character_level(definition), 0),
@@ -8688,6 +8719,8 @@ def _effect_keys_for_feature(feature: dict[str, Any]) -> list[str]:
             effect_keys.append("initiative-bonus:5")
         if normalized_name == normalize_lookup("Mobile"):
             effect_keys.append("speed-bonus:10")
+        if normalized_name == normalize_lookup("Powerful Build"):
+            effect_keys.append("carrying-capacity-multiplier:2")
         if normalized_name == normalize_lookup("Observant"):
             effect_keys.extend(
                 [
@@ -11367,6 +11400,8 @@ def _build_level_one_preview(
         "max_hp": int(stats.get("max_hp") or 0),
         "speed": str(stats.get("speed") or _extract_speed_label(selected_species)),
         "size": _extract_size_label(selected_species),
+        "carrying_capacity": _format_weight_value(stats.get("carrying_capacity")),
+        "push_drag_lift": _format_weight_value(stats.get("push_drag_lift")),
         "proficiency_bonus": proficiency_bonus,
         "saving_throws": [_humanize_saving_throw(code) for code in save_proficiencies],
         "languages": list(proficiencies["languages"]),
@@ -12715,7 +12750,8 @@ def _build_level_one_stats(
         _class_save_proficiencies(selected_class)
         + _extract_feat_saving_throw_proficiencies(feat_selections, selected_choices)
     )
-    save_bonus_map = _effect_save_bonus_map(_extract_character_effect_keys(features or []))
+    effect_keys = _extract_character_effect_keys(features or [])
+    save_bonus_map = _effect_save_bonus_map(effect_keys)
     base_speed = _extract_speed_label(selected_species)
     armor_class = _derive_armor_class_from_character_inputs(
         ability_scores=ability_scores,
@@ -12749,6 +12785,13 @@ def _build_level_one_stats(
             for ability_key, score in ability_scores.items()
         },
     }
+    stats.update(
+        _derive_carrying_capacity_stats(
+            strength_score=ability_scores["str"],
+            size_label=_extract_size_label(selected_species),
+            effect_keys=effect_keys,
+        )
+    )
     return apply_stat_adjustments(
         stats,
         collect_campaign_option_stat_adjustments(
@@ -12874,9 +12917,8 @@ def _build_leveled_stats(
         selected_class=selected_class,
     )
     save_proficiencies.update(_extract_feat_saving_throw_proficiencies(feat_selections, selected_choices))
-    save_bonus_map = _effect_save_bonus_map(
-        _extract_character_effect_keys(features or list(current_definition.features or []))
-    )
+    effect_keys = _extract_character_effect_keys(features or list(current_definition.features or []))
+    save_bonus_map = _effect_save_bonus_map(effect_keys)
     feat_hp_bonus = _feat_hit_point_bonus(feat_selections, current_level=current_level)
     stats["max_hp"] = max(int(stats.get("max_hp") or 0) + hp_gain + feat_hp_bonus, 1)
     stats["proficiency_bonus"] = proficiency_bonus
@@ -12912,6 +12954,16 @@ def _build_leveled_stats(
     )
     stats["initiative_bonus"] = _ability_modifier(ability_scores["dex"]) + _feat_initiative_bonus(feat_selections)
     stats["speed"] = _apply_speed_bonus_to_label(str(stats.get("speed") or ""), _feat_speed_bonus(feat_selections))
+    stats.update(
+        _derive_carrying_capacity_stats(
+            strength_score=ability_scores["str"],
+            size_label=_definition_size_label(
+                current_definition,
+                profile=resulting_profile or dict(current_definition.profile or {}),
+            ),
+            effect_keys=effect_keys,
+        )
+    )
     stats["ability_scores"] = {
         ability_key: {
             "score": score,
@@ -13598,6 +13650,11 @@ def _build_native_level_up_preview(
         )
     )
     preview_campaign_stat_adjustments = collect_campaign_option_stat_adjustments(selected_campaign_option_payloads)
+    preview_carrying_stats = _derive_carrying_capacity_stats(
+        strength_score=ability_scores["str"],
+        size_label=_definition_size_label(definition, profile=preview_profile),
+        effect_keys=_extract_character_effect_keys(merged_features),
+    )
     return {
         "class_level_text": str(preview_profile.get("class_level_text") or f"{selected_class.title} {target_level}"),
         "class_rows": [_class_row_level_text(row) for row in ensure_profile_class_rows(preview_profile)],
@@ -13608,6 +13665,8 @@ def _build_native_level_up_preview(
             + int(preview_campaign_stat_adjustments.get("max_hp") or 0),
             1,
         ),
+        "carrying_capacity": _format_weight_value(preview_carrying_stats.get("carrying_capacity")),
+        "push_drag_lift": _format_weight_value(preview_carrying_stats.get("push_drag_lift")),
         "gained_features": gained_features,
         "resources": [
             _summarize_preview_resource(template)
@@ -18946,6 +19005,32 @@ def _extract_size_label(entry: SystemsEntryRecord | None) -> str:
     return SIZE_LABELS.get(str(size_values[0] or "").strip().upper(), str(size_values[0] or "").strip())
 
 
+def _normalize_size_label(value: Any) -> str:
+    clean_value = str(value or "").strip()
+    if not clean_value:
+        return ""
+    if clean_value.upper() in SIZE_LABELS:
+        return SIZE_LABELS[clean_value.upper()]
+    normalized_value = normalize_lookup(clean_value)
+    for label in SIZE_LABELS.values():
+        if normalize_lookup(label) == normalized_value:
+            return label
+    return clean_value
+
+
+def _definition_size_label(
+    definition: CharacterDefinition,
+    *,
+    selected_species: SystemsEntryRecord | None = None,
+    profile: dict[str, Any] | None = None,
+) -> str:
+    species_size = _extract_size_label(selected_species)
+    if species_size:
+        return species_size
+    profile_payload = dict(profile or definition.profile or {})
+    return _normalize_size_label(profile_payload.get("size"))
+
+
 def _extract_speed_label(entry: SystemsEntryRecord | None) -> str:
     if entry is None:
         return ""
@@ -18953,6 +19038,38 @@ def _extract_speed_label(entry: SystemsEntryRecord | None) -> str:
     if isinstance(raw_speed, (int, float)):
         return f"{int(raw_speed)} ft."
     return str(raw_speed or "").strip()
+
+
+def _size_carrying_capacity_multiplier(size_label: Any) -> float:
+    normalized_size = normalize_lookup(_normalize_size_label(size_label))
+    return float(SIZE_CARRYING_CAPACITY_MULTIPLIERS.get(normalized_size) or 1.0)
+
+
+def _normalize_weight_limit_value(value: float) -> int | float:
+    rounded_value = round(float(value), 1)
+    if rounded_value.is_integer():
+        return int(rounded_value)
+    return rounded_value
+
+
+def _derive_carrying_capacity_stats(
+    *,
+    strength_score: int,
+    size_label: Any,
+    effect_keys: list[str] | None = None,
+) -> dict[str, int | float]:
+    clean_strength_score = max(int(strength_score or 0), 0)
+    if clean_strength_score <= 0:
+        return {}
+    carrying_capacity = clean_strength_score * 15
+    carrying_capacity *= _size_carrying_capacity_multiplier(size_label)
+    carrying_capacity *= _effect_carrying_capacity_multiplier(list(effect_keys or []))
+    if carrying_capacity <= 0:
+        return {}
+    return {
+        "carrying_capacity": _normalize_weight_limit_value(carrying_capacity),
+        "push_drag_lift": _normalize_weight_limit_value(carrying_capacity * 2),
+    }
 
 
 def _ability_modifier(score: int) -> int:

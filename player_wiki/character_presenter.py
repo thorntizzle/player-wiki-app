@@ -6,7 +6,7 @@ from typing import Any
 
 import markdown
 
-from .character_builder import _spell_access_badge_label, _spell_payload_map_key
+from .character_builder import _format_weight_value, _spell_access_badge_label, _spell_payload_map_key
 from .character_models import CharacterRecord
 from .character_profile import (
     profile_class_level_text,
@@ -143,6 +143,20 @@ def present_character_detail(
         {"label": "Passive Insight", "value": str(int(stats.get("passive_insight") or 0))},
         {"label": "Passive Investigation", "value": str(int(stats.get("passive_investigation") or 0))},
     ]
+    if stats.get("carrying_capacity") not in (None, ""):
+        overview_stats.append(
+            {
+                "label": "Carrying Capacity",
+                "value": _format_weight_value(stats.get("carrying_capacity")) or "--",
+            }
+        )
+    if stats.get("push_drag_lift") not in (None, ""):
+        overview_stats.append(
+            {
+                "label": "Push / Drag / Lift",
+                "value": _format_weight_value(stats.get("push_drag_lift")) or "--",
+            }
+        )
 
     death_saves = dict(vitals.get("death_saves") or {})
     death_save_summary = None

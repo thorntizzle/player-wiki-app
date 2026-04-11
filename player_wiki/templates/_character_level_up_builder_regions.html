@@ -145,6 +145,14 @@
         <span class="meta">Preview Max HP</span>
         <strong>{{ level_up.preview.max_hp }}</strong>
       </div>
+      <div>
+        <span class="meta">Carrying Capacity</span>
+        <strong>{{ level_up.preview.carrying_capacity or "Not set" }}</strong>
+      </div>
+      <div>
+        <span class="meta">Push / Drag / Lift</span>
+        <strong>{{ level_up.preview.push_drag_lift or "Not set" }}</strong>
+      </div>
     </div>
     {% if level_up.preview.class_rows %}
       <ul class="plain-list builder-feature-list">
