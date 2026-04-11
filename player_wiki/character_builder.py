@@ -141,6 +141,14 @@ CAMPAIGN_MIXED_SOURCE_SUBSECTIONS_BY_KIND = {
     "background": {"background", "backgrounds"},
     "feat": {"feat", "feats"},
 }
+LINKED_CAMPAIGN_PAGE_ALLOWED_KINDS_BY_FIELD_KIND = {
+    "campaign_page_feature": frozenset({"feature", "feat"}),
+    "campaign_page_item": frozenset({"item"}),
+}
+LINKED_CAMPAIGN_PAGE_REQUIRED_SECTION_BY_FIELD_KIND = {
+    "campaign_page_feature": CAMPAIGN_MECHANICS_SECTION,
+    "campaign_page_item": CAMPAIGN_ITEMS_SECTION,
+}
 
 ABILITY_KEYS = ("str", "dex", "con", "int", "wis", "cha")
 LEVEL_ONE_BUILDER_STATIC_KEYS = frozenset(
@@ -806,8 +814,8 @@ def build_level_one_builder_context(
         "spell_catalog": spell_catalog,
         "limitations": [
             "Base classes now come from the campaign's enabled Systems sources only when they fall inside the current native support lane and expose the needed progression metadata, while older PHB fallback data still covers previously imported local classes.",
-            "Species, backgrounds, and feats can come from either enabled Systems entries or published campaign pages that expose structured character-option metadata.",
-            "Published campaign wiki features and items can also be linked in during creation through the optional campaign content fields.",
+            "Species, backgrounds, and feats can come from either enabled Systems entries or structured published Mechanics pages in the matching subsection.",
+            "The optional campaign content fields currently accept published Mechanics feature/feat pages for linked rewards and published Items pages for linked equipment.",
             "Enter level-1 ability scores after species bonuses. Native feat-driven ability increases are applied automatically.",
             "Native attack rows now cover basic PHB weapons, off-hand attacks, key level-1 fighting-style adjustments, and the current modeled feat attack variants, but a few advanced riders still need manual follow-up.",
             "Gold-alternative loadouts, non-structured campaign spell access, and a few remaining feat/spell edge cases still need manual follow-up.",
@@ -3760,6 +3768,27 @@ def _campaign_page_option_allowed_for_mixed_source(
     if not subsection:
         return True
     return subsection in CAMPAIGN_MIXED_SOURCE_SUBSECTIONS_BY_KIND.get(kind, set())
+
+
+def _campaign_page_option_allowed_for_linked_field(
+    record: Any,
+    *,
+    field_kind: str,
+    campaign_option: dict[str, Any] | None = None,
+) -> bool:
+    required_section = LINKED_CAMPAIGN_PAGE_REQUIRED_SECTION_BY_FIELD_KIND.get(field_kind)
+    if not required_section:
+        return False
+    page = getattr(record, "page", None)
+    if page is None:
+        return False
+    if str(getattr(page, "section", "") or "").strip() != required_section:
+        return False
+    option = dict(campaign_option or {}) if isinstance(campaign_option, dict) else {}
+    option_kind = str(option.get("kind") or "").strip().lower()
+    if not option_kind:
+        return True
+    return option_kind in LINKED_CAMPAIGN_PAGE_ALLOWED_KINDS_BY_FIELD_KIND.get(field_kind, frozenset())
 
 
 def _entry_page_ref(entry: Any) -> str:
@@ -9707,6 +9736,7 @@ def _build_campaign_page_choice_options(
 ) -> list[dict[str, str]]:
     options: list[dict[str, str]] = []
     seen_page_refs: set[str] = set()
+    field_kind = "campaign_page_item" if include_items else "campaign_page_feature"
     for record in list(campaign_page_records or []):
         page_ref = _extract_campaign_page_ref(record)
         page = getattr(record, "page", None)
@@ -9719,14 +9749,11 @@ def _build_campaign_page_choice_options(
             record,
             default_kind="item" if section == CAMPAIGN_ITEMS_SECTION else "feature",
         )
-        option_kind = (
-            str((campaign_option or {}).get("kind") or "").strip()
-            if campaign_option is not None
-            else ("item" if section == CAMPAIGN_ITEMS_SECTION else "feature")
-        )
-        if include_items and option_kind != "item":
-            continue
-        if not include_items and option_kind != "feature":
+        if not _campaign_page_option_allowed_for_linked_field(
+            record,
+            field_kind=field_kind,
+            campaign_option=campaign_option,
+        ):
             continue
         if page_ref in seen_page_refs:
             continue
@@ -9763,7 +9790,7 @@ def _build_campaign_feature_choice_fields(
             {
                 "name": field_name,
                 "label": f"Campaign Feature {index}",
-                "help_text": "Optional. Link a published campaign wiki mechanic, boon, or other player-safe feature page into the character at creation time.",
+                "help_text": "Optional. Link a published Mechanics feature or feat page into the character at creation time.",
                 "options": [dict(option) for option in campaign_feature_options],
                 "selected": str(values.get(field_name) or "").strip(),
                 "group_key": field_name,
@@ -12232,12 +12259,13 @@ def _collect_selected_campaign_feature_entries(
         campaign_option = dict(option.get("campaign_option") or {})
         kind = str(campaign_option.get("kind") or "").strip()
         field_kind = str(option.get("field_kind") or "").strip()
-        if kind and kind != "feature":
+        if kind and kind not in LINKED_CAMPAIGN_PAGE_ALLOWED_KINDS_BY_FIELD_KIND["campaign_page_feature"]:
             continue
         if not kind and field_kind != "campaign_page_feature":
             continue
         title = str(
-            campaign_option.get("feature_name")
+            campaign_option.get("feat_name")
+            or campaign_option.get("feature_name")
             or option.get("title")
             or option.get("label")
             or page_ref
@@ -12246,10 +12274,11 @@ def _collect_selected_campaign_feature_entries(
             continue
         feature_entries.append(
             {
-                "kind": "campaign_page_feature",
+                "kind": "feat" if kind == "feat" else "campaign_page_feature",
                 "entry": None,
                 "name": title,
                 "label": title,
+                "title": title,
                 "page_ref": page_ref,
                 "description_markdown": str(
                     campaign_option.get("description_markdown")

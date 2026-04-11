@@ -12,11 +12,13 @@ from .character_adjustments import (
     strip_manual_stat_adjustments,
 )
 from .character_builder import (
+    LINKED_CAMPAIGN_PAGE_ALLOWED_KINDS_BY_FIELD_KIND,
     _add_bonus_known_spell_to_payloads,
     _add_spell_to_payloads,
     _ability_scores_from_definition,
     _apply_feat_ability_score_bonuses,
     _apply_campaign_feature_spell_manager_payloads,
+    _campaign_page_option_allowed_for_linked_field,
     _campaign_option_feat_selections_from_features,
     _automatic_innate_spell_values,
     _automatic_known_spell_values,
@@ -61,7 +63,6 @@ from .character_builder import (
     normalize_definition_to_native_model,
 )
 from .character_campaign_options import (
-    FEATURE_LIKE_CAMPAIGN_OPTION_KINDS,
     build_campaign_page_character_option,
     collect_campaign_option_proficiency_grants,
     collect_campaign_option_spell_grants,
@@ -1286,8 +1287,17 @@ def apply_equipment_catalog_edit(
     page_ref: str = "",
     systems_ref: dict[str, Any] | None = None,
 ) -> tuple[CharacterDefinition, CharacterImportMetadata, dict[str, int]]:
-    campaign_page_lookup = _build_campaign_page_lookup(campaign_page_records or [])
     manual_items = _manual_equipment_entries(current_definition)
+    equipment_linked_page_refs = {
+        _extract_page_ref_value(item.get("page_ref"))
+        for item in manual_items
+        if _extract_page_ref_value(item.get("page_ref"))
+    }
+    campaign_page_lookup = _build_campaign_page_lookup(
+        campaign_page_records or [],
+        field_kind="campaign_page_item",
+        include_page_refs=equipment_linked_page_refs,
+    )
     manual_item_lookup = {
         str(item.get("id") or "").strip(): dict(item)
         for item in manual_items
@@ -1457,9 +1467,22 @@ def build_native_character_edit_context(
         if str(template.get("id") or "").strip()
     }
     stat_adjustments = normalize_manual_stat_adjustments((definition.stats or {}).get("manual_adjustments"))
-    campaign_page_lookup = _build_campaign_page_lookup(campaign_page_records or [])
+    feature_linked_page_refs = {
+        _extract_page_ref_value(feature.get("page_ref"))
+        for feature in list(manual_features or [])
+        if _extract_page_ref_value(feature.get("page_ref"))
+    }
+    campaign_page_lookup = _build_campaign_page_lookup(
+        campaign_page_records or [],
+        field_kind="campaign_page_feature",
+        include_page_refs=feature_linked_page_refs,
+    )
     generated_optionalfeature_selections = _native_edit_optionalfeature_selection_lookup(definition)
-    campaign_page_options = _build_campaign_page_options(campaign_page_records or [])
+    campaign_page_options = _build_campaign_page_options(
+        campaign_page_records or [],
+        field_kind="campaign_page_feature",
+        include_page_refs=feature_linked_page_refs,
+    )
     equipment_linked_page_refs = {
         _extract_page_ref_value(item.get("page_ref"))
         for item in list(manual_items or [])
@@ -1467,7 +1490,7 @@ def build_native_character_edit_context(
     }
     equipment_page_options = _build_campaign_page_options(
         campaign_page_records or [],
-        allowed_sections={CAMPAIGN_ITEMS_SECTION},
+        field_kind="campaign_page_item",
         include_page_refs=equipment_linked_page_refs,
     )
     current_level = _character_total_level(definition)
@@ -1719,7 +1742,16 @@ def apply_native_character_edits(
     values = dict(form_values or {})
     optionalfeature_catalog = dict(optionalfeature_catalog or {})
     item_catalog = dict(item_catalog or _build_item_catalog([]))
-    campaign_page_lookup = _build_campaign_page_lookup(campaign_page_records or [])
+    feature_linked_page_refs = {
+        _extract_page_ref_value(feature.get("page_ref"))
+        for feature in _manual_custom_features(current_definition)
+        if _extract_page_ref_value(feature.get("page_ref"))
+    }
+    campaign_page_lookup = _build_campaign_page_lookup(
+        campaign_page_records or [],
+        field_kind="campaign_page_feature",
+        include_page_refs=feature_linked_page_refs,
+    )
     equipment_linked_page_refs = {
         _extract_page_ref_value(item.get("page_ref"))
         for item in _manual_equipment_entries(current_definition)
@@ -1727,7 +1759,7 @@ def apply_native_character_edits(
     }
     equipment_campaign_page_lookup = _build_campaign_page_lookup(
         campaign_page_records or [],
-        allowed_sections={CAMPAIGN_ITEMS_SECTION},
+        field_kind="campaign_page_item",
         include_page_refs=equipment_linked_page_refs,
     )
     manual_feature_lookup = {
@@ -2205,11 +2237,8 @@ def _editable_campaign_option_for_page_ref(
     if not option:
         return None
     kind = str(option.get("kind") or default_kind or "").strip().lower()
-    allowed_kinds = (
-        FEATURE_LIKE_CAMPAIGN_OPTION_KINDS
-        if default_kind == "feature"
-        else {default_kind}
-    )
+    field_kind = "campaign_page_feature" if default_kind == "feature" else "campaign_page_item"
+    allowed_kinds = LINKED_CAMPAIGN_PAGE_ALLOWED_KINDS_BY_FIELD_KIND.get(field_kind, frozenset({default_kind}))
     if kind and kind not in allowed_kinds:
         return None
     return option
@@ -3869,14 +3898,9 @@ def _build_manual_feature_resource_template(
 def _build_campaign_page_options(
     campaign_page_records: list[Any],
     *,
-    allowed_sections: set[str] | None = None,
+    field_kind: str,
     include_page_refs: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    normalized_allowed_sections = {
-        str(value or "").strip()
-        for value in set(allowed_sections or set())
-        if str(value or "").strip()
-    }
     normalized_include_page_refs = {
         (str(value.get("page_ref") or value.get("slug") or "").strip() if isinstance(value, dict) else str(value or "").strip())
         for value in set(include_page_refs or set())
@@ -3891,12 +3915,19 @@ def _build_campaign_page_options(
         title = str(getattr(page, "title", "") or "").strip() or page_ref
         section = str(getattr(page, "section", "") or "").strip()
         subsection = str(getattr(page, "subsection", "") or "").strip()
-        if normalized_allowed_sections and section not in normalized_allowed_sections and page_ref not in normalized_include_page_refs:
-            continue
         campaign_option = build_campaign_page_character_option(
             record,
-            default_kind="item" if section == "Items" else "feature",
+            default_kind="item" if section == CAMPAIGN_ITEMS_SECTION else "feature",
         )
+        if (
+            page_ref not in normalized_include_page_refs
+            and not _campaign_page_option_allowed_for_linked_field(
+                record,
+                field_kind=field_kind,
+                campaign_option=campaign_option,
+            )
+        ):
+            continue
         option_title = str((campaign_option or {}).get("display_name") or title).strip() or title
         label_parts = [option_title]
         if section:
@@ -3919,13 +3950,13 @@ def _build_campaign_page_options(
 def _build_campaign_page_lookup(
     campaign_page_records: list[Any],
     *,
-    allowed_sections: set[str] | None = None,
+    field_kind: str,
     include_page_refs: set[str] | None = None,
 ) -> dict[str, dict[str, Any]]:
     lookup: dict[str, dict[str, Any]] = {}
     for option in _build_campaign_page_options(
         campaign_page_records,
-        allowed_sections=allowed_sections,
+        field_kind=field_kind,
         include_page_refs=include_page_refs,
     ):
         page_ref = str(option.get("value") or "").strip()

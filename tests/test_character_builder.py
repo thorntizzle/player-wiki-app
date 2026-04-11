@@ -4615,6 +4615,240 @@ def test_level_one_builder_applies_structured_campaign_page_option_grants():
     assert any("Detect Magic" in spell_line for spell_line in context["preview"]["spells"])
 
 
+def test_level_one_builder_campaign_page_slots_follow_allowed_content_policy():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    soldier = _systems_entry(
+        "background",
+        "phb-background-soldier",
+        "Soldier",
+        metadata={"skill_proficiencies": [{"athletics": True, "intimidation": True}]},
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [soldier],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+    campaign_page_records = [
+        _campaign_page_record(
+            "mechanics/arcane-overload",
+            "Arcane Overload",
+            section="Mechanics",
+            subsection="Boons",
+            metadata={"character_option": {"kind": "feature", "name": "Arcane Overload"}},
+        ),
+        _campaign_page_record(
+            "mechanics/bulwark-discipline",
+            "Bulwark Discipline",
+            section="Mechanics",
+            subsection="Feats",
+            metadata={"character_option": {"kind": "feat", "name": "Bulwark Discipline"}},
+        ),
+        _campaign_page_record(
+            "species/sea-blessed",
+            "Sea-Blessed",
+            section="Mechanics",
+            subsection="Species",
+            metadata={"character_option": {"kind": "species", "name": "Sea-Blessed", "size": ["M"], "speed": 35}},
+        ),
+        _campaign_page_record(
+            "backgrounds/harbor-initiate",
+            "Harbor Initiate",
+            section="Mechanics",
+            subsection="Backgrounds",
+            metadata={"character_option": {"kind": "background", "name": "Harbor Initiate"}},
+        ),
+        _campaign_page_record(
+            "items/stormglass-compass",
+            "Stormglass Compass",
+            section="Items",
+            subsection="Wondrous Items",
+            metadata={"character_option": {"kind": "item", "name": "Stormglass Compass"}},
+        ),
+    ]
+
+    context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        {
+            "name": "Ward",
+            "character_slug": "ward",
+            "alignment": "Lawful Good",
+            "experience_model": "Milestone",
+            "class_slug": fighter.slug,
+            "str": "16",
+            "dex": "12",
+            "con": "14",
+            "int": "10",
+            "wis": "12",
+            "cha": "8",
+        },
+        campaign_page_records=campaign_page_records,
+    )
+
+    feature_labels = [str(option.get("label") or "") for option in _find_builder_field(context, "campaign_feature_page_ref_1")["options"]]
+    item_labels = [str(option.get("label") or "") for option in _find_builder_field(context, "campaign_item_page_ref_1")["options"]]
+
+    assert _option_value_for_label(context["species_options"], "Sea-Blessed")
+    assert _option_value_for_label(context["background_options"], "Harbor Initiate")
+    assert any("Arcane Overload" in label for label in feature_labels)
+    assert any("Bulwark Discipline" in label for label in feature_labels)
+    assert all("Sea-Blessed" not in label for label in feature_labels)
+    assert all("Harbor Initiate" not in label for label in feature_labels)
+    assert all("Stormglass Compass" not in label for label in feature_labels)
+    assert any("Stormglass Compass" in label for label in item_labels)
+    assert all("Arcane Overload" not in label for label in item_labels)
+    assert all("Bulwark Discipline" not in label for label in item_labels)
+
+
+def test_level_one_builder_campaign_feat_pages_can_be_added_through_campaign_feature_slots():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    soldier = _systems_entry(
+        "background",
+        "phb-background-soldier",
+        "Soldier",
+        metadata={"skill_proficiencies": [{"athletics": True, "intimidation": True}]},
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [soldier],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+    campaign_page_records = [
+        _campaign_page_record(
+            "mechanics/bulwark-discipline",
+            "Bulwark Discipline",
+            section="Mechanics",
+            subsection="Feats",
+            metadata={
+                "character_option": {
+                    "kind": "feat",
+                    "name": "Bulwark Discipline",
+                    "description_markdown": "A disciplined bulwark technique.",
+                    "grants": {
+                        "languages": ["Primordial"],
+                        "skills": ["Perception"],
+                    },
+                }
+            },
+        )
+    ]
+    form_values = {
+        "name": "Bulwark Recruit",
+        "character_slug": "bulwark-recruit",
+        "alignment": "Lawful Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": human.slug,
+        "background_slug": soldier.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "12",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=campaign_page_records,
+    )
+    form_values = {
+        **form_values,
+        "campaign_feature_page_ref_1": _field_value_for_label(context, "campaign_feature_page_ref_1", "Bulwark Discipline"),
+    }
+
+    context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=campaign_page_records,
+    )
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+
+    bulwark_discipline = next(feature for feature in definition.features if feature["name"] == "Bulwark Discipline")
+    skills_by_name = {skill["name"]: skill for skill in definition.skills}
+
+    assert bulwark_discipline["category"] == "feat"
+    assert bulwark_discipline["page_ref"] == "mechanics/bulwark-discipline"
+    assert dict(bulwark_discipline.get("campaign_option") or {}).get("kind") == "feat"
+    assert "Primordial" in definition.proficiencies["languages"]
+    assert skills_by_name["Perception"]["proficiency_level"] == "proficient"
+
+
 def test_level_one_builder_applies_campaign_feature_spell_support_and_create_replacement():
     warlock = _systems_entry(
         "class",

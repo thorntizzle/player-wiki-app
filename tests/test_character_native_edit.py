@@ -1781,6 +1781,38 @@ def test_native_character_edit_manual_equipment_rejects_non_item_linked_pages(
     assert all(item.get("source_kind") != "manual_edit" for item in record.definition.equipment_catalog)
 
 
+def test_native_character_edit_custom_features_reject_item_linked_pages(
+    client, sign_in, users, get_character, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    record = get_character("arden-march")
+    assert record is not None
+
+    response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "custom_feature_name_1": "",
+            "custom_feature_page_ref_1": "items/stormglass-compass",
+            "custom_feature_activation_type_1": "passive",
+            "custom_feature_description_1": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    assert "Choose a valid linked campaign page." in response.get_data(as_text=True)
+
+    record = get_character("arden-march")
+    assert record is not None
+    assert all(
+        str(feature.get("page_ref") or "").strip() != "items/stormglass-compass"
+        for feature in record.definition.features
+    )
+
+
 def test_owner_player_can_save_native_character_edits_and_reconcile_inventory_state(
     client, sign_in, users, get_character, set_campaign_visibility
 ):
