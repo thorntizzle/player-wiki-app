@@ -7468,6 +7468,63 @@ def test_normalize_definition_to_native_model_adds_single_shield_master_helper_r
     assert shield_shove["equipment_refs"] == ["shield-1", "shield-2"]
 
 
+def test_normalize_definition_to_native_model_adds_phb_grappler_helper_row():
+    definition = _minimal_character_definition("lockdown-marshal", "Lockdown Marshal")
+    definition.features = [
+        {
+            "id": "grappler-1",
+            "name": "Grappler",
+            "category": "feat",
+            "source": "PHB",
+            "description_markdown": "",
+            "systems_ref": {
+                "entry_type": "feat",
+                "slug": "phb-feat-grappler",
+                "title": "Grappler",
+                "source_id": "PHB",
+            },
+        }
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+
+    assert len(normalized.attacks) == 1
+    grapple_helper = normalized.attacks[0]
+    assert grapple_helper["name"] == "Pin Grappled Creature"
+    assert grapple_helper["category"] == "special action"
+    assert grapple_helper["attack_bonus"] is None
+    assert grapple_helper["damage"] == ""
+    assert (
+        grapple_helper["notes"]
+        == "Action while grappling a creature; make another grapple check to pin both you and the target until the grapple ends."
+    )
+    assert grapple_helper["mode_key"] == "feat:phb-feat-grappler:pin"
+    assert "equipment_refs" not in grapple_helper
+
+
+def test_normalize_definition_to_native_model_keeps_xphb_grappler_out_of_phb_helper_slice():
+    definition = _minimal_character_definition("xphb-grappler", "XPHB Grappler")
+    definition.features = [
+        {
+            "id": "grappler-1",
+            "name": "Grappler",
+            "category": "feat",
+            "source": "XPHB",
+            "description_markdown": "",
+            "systems_ref": {
+                "entry_type": "feat",
+                "slug": "xphb-feat-grappler",
+                "title": "Grappler",
+                "source_id": "XPHB",
+            },
+        }
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+
+    assert normalized.attacks == []
+
+
 def test_normalize_definition_to_native_model_derives_barbarian_unarmored_defense_for_imported_character():
     definition = _minimal_imported_character_definition("bryn-coal", "Bryn Coal")
     definition.profile["class_level_text"] = "Barbarian 3"
@@ -11102,6 +11159,90 @@ def test_level_one_builder_adds_shield_master_helper_row():
     assert shield_shove["equipment_refs"] == [shield_id]
     assert shield_master_rule["active"] is True
     assert shield_master_rule["effects"][0]["summary"].startswith("Add +2 to Dexterity saves")
+
+
+def test_level_one_builder_adds_phb_grappler_helper_row():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    variant_human = _systems_entry(
+        "race",
+        "phb-race-variant-human",
+        "Variant Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}], "feats": [{"any": 1}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    grappler = _systems_entry("feat", "phb-feat-grappler", "Grappler")
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [variant_human],
+            "background": [acolyte],
+            "feat": [grappler],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+    form_values = {
+        "name": "Lockdown Hero",
+        "character_slug": "lockdown-hero",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": variant_human.slug,
+        "background_slug": acolyte.slug,
+        "species_feat_1": grappler.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+    grapple_helper = next(attack for attack in definition.attacks if attack["name"] == "Pin Grappled Creature")
+
+    assert "Pin Grappled Creature (special action)" in context["preview"]["attacks"]
+    assert grapple_helper["attack_bonus"] is None
+    assert grapple_helper["damage"] == ""
+    assert (
+        grapple_helper["notes"]
+        == "Action while grappling a creature; make another grapple check to pin both you and the target until the grapple ends."
+    )
+    assert grapple_helper["mode_key"] == "feat:phb-feat-grappler:pin"
+    assert "equipment_refs" not in grapple_helper
 
 
 def test_level_one_builder_populates_starting_equipment_spells_and_currency():
@@ -20369,6 +20510,123 @@ def test_native_level_up_adds_campaign_feat_modeled_helper_row():
     assert shield_shove["notes"] == "Bonus action after taking the Attack action; Shield Master shove within 5 feet."
     assert shield_shove["mode_key"] == "feat:phb-feat-shield-master:shove"
     assert shield_shove["equipment_refs"] == ["shield-1"]
+
+
+def test_native_level_up_adds_campaign_grappler_helper_row():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    ability_score_improvement = _systems_entry(
+        "classfeature",
+        "phb-classfeature-ability-score-improvement",
+        "Ability Score Improvement",
+        metadata={"level": 4},
+    )
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 4,
+                "level_label": "Level 4",
+                "feature_rows": [
+                    {
+                        "label": "Ability Score Improvement",
+                        "entry": ability_score_improvement,
+                        "embedded_card": {"option_groups": []},
+                    }
+                ],
+            }
+        ],
+    )
+    campaign_page_records = [
+        _campaign_page_record(
+            "mechanics/lockdown-discipline",
+            "Lockdown Discipline",
+            section="Mechanics",
+            subsection="Feats",
+            metadata={
+                "character_option": {
+                    "kind": "feat",
+                    "name": "Lockdown Discipline",
+                    "modeled_effects": ["grappler-phb"],
+                }
+            },
+        )
+    ]
+
+    current_definition = _minimal_character_definition("lockdown-veteran", "Lockdown Veteran")
+    current_definition.profile["class_level_text"] = "Fighter 3"
+    current_definition.profile["classes"][0]["level"] = 3
+    current_definition.stats["max_hp"] = 28
+
+    form_values = {
+        "hp_gain": "8",
+        "levelup_asi_mode_1": "feat",
+    }
+
+    context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        current_definition,
+        form_values,
+        campaign_page_records=campaign_page_records,
+    )
+    form_values["levelup_feat_1"] = _field_value_for_label(context, "levelup_feat_1", "Lockdown Discipline")
+
+    level_up_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        current_definition,
+        form_values,
+        campaign_page_records=campaign_page_records,
+    )
+    leveled_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        level_up_context,
+        form_values,
+    )
+    lockdown_discipline = next(feature for feature in leveled_definition.features if feature["name"] == "Lockdown Discipline")
+    grapple_helper = next(attack for attack in leveled_definition.attacks if attack["name"] == "Pin Grappled Creature")
+
+    assert "Lockdown Discipline" in level_up_context["preview"]["gained_features"]
+    assert "Pin Grappled Creature (special action)" in level_up_context["preview"]["attacks"]
+    assert lockdown_discipline["page_ref"] == "mechanics/lockdown-discipline"
+    assert grapple_helper["attack_bonus"] is None
+    assert grapple_helper["damage"] == ""
+    assert (
+        grapple_helper["notes"]
+        == "Action while grappling a creature; make another grapple check to pin both you and the target until the grapple ends."
+    )
+    assert grapple_helper["mode_key"] == "feat:phb-feat-grappler:pin"
+    assert "equipment_refs" not in grapple_helper
 
 
 def test_native_level_up_applies_medium_armor_master_to_equipped_medium_armor():

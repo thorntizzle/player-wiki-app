@@ -68,6 +68,7 @@ ATTACK_MODE_FEAT_CHARGER_PHB = "feat:phb-feat-charger"
 ATTACK_MODE_FEAT_CHARGER_XPHB = "feat:xphb-feat-charger"
 ATTACK_MODE_FEAT_CROSSBOW_EXPERT_BONUS = "feat:phb-feat-crossbow-expert:bonus"
 ATTACK_MODE_FEAT_GREAT_WEAPON_MASTER = "feat:phb-feat-great-weapon-master"
+ATTACK_MODE_FEAT_GRAPPLER_PIN = "feat:phb-feat-grappler:pin"
 ATTACK_MODE_FEAT_POLEARM_MASTER_BONUS = "feat:phb-feat-polearm-master:bonus"
 ATTACK_MODE_FEAT_SHARPSHOOTER = "feat:phb-feat-sharpshooter"
 ATTACK_MODE_FEAT_SHIELD_MASTER_SHOVE = "feat:phb-feat-shield-master:shove"
@@ -92,6 +93,7 @@ ATTACK_MODE_COMPONENT_LABELS = {
     ATTACK_MODE_FEAT_CHARGER_XPHB: "charger",
     ATTACK_MODE_FEAT_CROSSBOW_EXPERT_BONUS: "crossbow expert",
     ATTACK_MODE_FEAT_GREAT_WEAPON_MASTER: "great weapon master",
+    ATTACK_MODE_FEAT_GRAPPLER_PIN: "grappler",
     ATTACK_MODE_FEAT_POLEARM_MASTER_BONUS: "polearm master",
     ATTACK_MODE_FEAT_SHARPSHOOTER: "sharpshooter",
 }
@@ -5066,6 +5068,7 @@ def _collect_attack_support_flags(features: list[dict[str, Any]] | None) -> dict
         "crossbow_expert": has_slug("phb-feat-crossbow-expert") or has_effect("Crossbow Expert"),
         "dual_wielder": has_slug("phb-feat-dual-wielder") or has_effect("Dual Wielder"),
         "great_weapon_master": has_slug("phb-feat-great-weapon-master") or has_effect("Great Weapon Master"),
+        "grappler_phb": has_slug("phb-feat-grappler") or normalize_lookup("grappler-phb") in effect_keys,
         "gunner": has_slug("tce-feat-gunner") or has_effect("Gunner"),
         "martial_adept": has_slug("phb-feat-martial-adept") or has_effect("Martial Adept"),
         "polearm_master": has_slug("phb-feat-polearm-master") or has_effect("Polearm Master"),
@@ -8226,6 +8229,7 @@ def _build_level_one_attacks(
     has_crossbow_expert = bool(attack_support_flags.get("crossbow_expert"))
     has_dual_wielder = bool(attack_support_flags.get("dual_wielder"))
     has_great_weapon_master = bool(attack_support_flags.get("great_weapon_master"))
+    has_grappler_phb = bool(attack_support_flags.get("grappler_phb"))
     has_gunner = bool(attack_support_flags.get("gunner"))
     has_martial_adept = bool(attack_support_flags.get("martial_adept"))
     has_polearm_master = bool(attack_support_flags.get("polearm_master"))
@@ -8699,6 +8703,16 @@ def _build_level_one_attacks(
                 equipment_refs=shield_item_refs,
             )
         )
+    if has_grappler_phb:
+        attacks.append(
+            _build_special_attack_payload(
+                name="Pin Grappled Creature",
+                category="special action",
+                notes="Action while grappling a creature; make another grapple check to pin both you and the target until the grapple ends.",
+                index=len(attacks) + 1,
+                mode_key=ATTACK_MODE_FEAT_GRAPPLER_PIN,
+            )
+        )
     if has_tavern_brawler:
         attacks.append(
             _build_unarmed_attack_payload(
@@ -8734,6 +8748,8 @@ def _effect_keys_for_feature(feature: dict[str, Any]) -> list[str]:
         source_id = str(systems_ref.get("source_id") or feature.get("source") or "").strip().upper()
         if normalized_name == normalize_lookup("Charger"):
             effect_keys.append("charger-xphb" if source_id == "XPHB" else "charger-phb")
+        if normalized_name == normalize_lookup("Grappler"):
+            effect_keys.append("grappler-xphb" if source_id == "XPHB" else "grappler-phb")
         if normalized_name == normalize_lookup("Alert"):
             effect_keys.append("initiative-bonus:5")
         if normalized_name == normalize_lookup("Mobile"):
@@ -9607,8 +9623,25 @@ def _recalculate_definition_attacks(
 ) -> list[dict[str, Any]]:
     effective_item_catalog = dict(item_catalog or _build_item_catalog([]))
     equipment_catalog = list(definition.equipment_catalog or [])
+    existing_attacks = list(definition.attacks or [])
+    feature_only_attacks = _build_level_one_attacks(
+        equipment_catalog=[],
+        item_catalog=effective_item_catalog,
+        ability_scores=_ability_scores_from_definition(definition),
+        proficiency_bonus=int(
+            (definition.stats or {}).get("proficiency_bonus")
+            or _proficiency_bonus_for_level(_resolve_native_character_level(definition))
+        ),
+        weapon_proficiencies=[
+            str(value).strip()
+            for value in list((definition.proficiencies or {}).get("weapons") or [])
+            if str(value).strip()
+        ],
+        selected_choices={},
+        features=list(definition.features or []),
+    )
     if not equipment_catalog:
-        return _normalize_attack_payloads(list(definition.attacks or []))
+        return _normalize_attack_payloads([*existing_attacks, *feature_only_attacks])
     has_structured_equipment = any(
         bool(dict(item.get("systems_ref") or {}))
         or bool(_normalize_page_ref_payload(item.get("page_ref")))
@@ -9617,7 +9650,7 @@ def _recalculate_definition_attacks(
         for item in equipment_catalog
     )
     if not has_structured_equipment:
-        return _normalize_attack_payloads(list(definition.attacks or []))
+        return _normalize_attack_payloads([*existing_attacks, *feature_only_attacks])
     recalculated_attacks = _build_level_one_attacks(
         equipment_catalog=equipment_catalog,
         item_catalog=effective_item_catalog,
@@ -9634,8 +9667,8 @@ def _recalculate_definition_attacks(
         selected_choices={},
         features=list(definition.features or []),
     )
-    if not recalculated_attacks and list(definition.attacks or []):
-        return _normalize_attack_payloads(list(definition.attacks or []))
+    if not recalculated_attacks and existing_attacks:
+        return _normalize_attack_payloads(existing_attacks)
     return _normalize_attack_payloads(
         recalculated_attacks
     )

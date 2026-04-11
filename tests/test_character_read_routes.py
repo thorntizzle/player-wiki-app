@@ -2929,6 +2929,37 @@ def test_quick_reference_renders_shield_master_helper_row_without_placeholder_ma
     assert "<strong>--</strong>" not in html
 
 
+def test_quick_reference_renders_grappler_helper_row_without_placeholder_math(app, client, sign_in, users):
+    def _mutate(payload: dict) -> None:
+        payload["attacks"] = [
+            {
+                "id": "pin-grappled-creature-1",
+                "name": "Pin Grappled Creature",
+                "category": "special action",
+                "attack_bonus": None,
+                "damage": "",
+                "damage_type": "",
+                "notes": "Action while grappling a creature; make another grapple check to pin both you and the target until the grapple ends.",
+                "mode_key": "feat:phb-feat-grappler:pin",
+            }
+        ]
+
+    _write_character_definition(app, "arden-march", _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=quick")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+
+    assert html.count('class="attack-card"') == 1
+    assert "Pin Grappled Creature" in html
+    assert "Special Action" in html
+    assert "Action while grappling a creature; make another grapple check to pin both you and the target until the grapple ends." in html
+    assert "to hit" not in html
+    assert "<strong>--</strong>" not in html
+
+
 def test_quick_reference_hides_shield_master_helper_row_until_shield_is_equipped(app, client, sign_in, users):
     def _mutate(payload: dict) -> None:
         payload["equipment_catalog"] = [
