@@ -77,7 +77,7 @@
         <div class="section-heading">
           <h2>Custom Features</h2>
         </div>
-        <p class="meta">Use this for campaign boons, curses, training rewards, or other custom rules text. Optional tracker fields let the sheet and combat-facing state treat the feature as a limited-use resource.</p>
+        <p class="meta">Use this for campaign boons, curses, training rewards, or other custom rules text. Optional tracker fields let the sheet and combat-facing state treat the feature as a limited-use resource, and linked feat-like pages can surface structured follow-up choices here when the reward grants one.</p>
         <div class="character-edit-stack">
           {% for row in edit_context.feature_rows %}
             <article class="detail-card character-edit-row">
@@ -123,9 +123,9 @@
                   </select>
                 </label>
               </div>
-              {% if row.spell_fields %}
+              {% if row.choice_fields %}
                 <div class="detail-grid character-edit-grid">
-                  {% for field in row.spell_fields %}
+                  {% for field in row.choice_fields %}
                     <label class="field">
                       <span>{{ field.label }}</span>
                       <select name="{{ field.name }}">

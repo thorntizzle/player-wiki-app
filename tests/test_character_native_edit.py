@@ -1180,6 +1180,166 @@ The harbor priests mark trusted wardens with a breath of salt and storm.
     assert resource_state["max"] == 3
 
 
+def test_native_character_edits_support_page_backed_feat_optionalfeature_choices(
+    app, client, sign_in, users, get_character, set_campaign_visibility
+):
+    feat_page_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "content"
+        / "mechanics"
+        / "harbor-drill.md"
+    )
+    feat_page_path.write_text(
+        """---
+title: Harbor Drill
+section: Mechanics
+subsection: Feats
+published: true
+summary: A harbor discipline that grants a fighting style.
+character_option:
+  kind: feat
+  name: Harbor Drill
+  description_markdown: Harbor veterans drill you into a practiced fighting style.
+  optionalfeature_progression:
+    - name: Fighting Style
+      featureType:
+        - FS:F
+      progression:
+        "1": 1
+---
+The harbor masters insist on repetition until every motion is clean.
+""",
+        encoding="utf-8",
+    )
+
+    with app.app_context():
+        systems_store = app.extensions["systems_store"]
+        systems_store.upsert_library("DND-5E", title="DND 5E", system_code="DND-5E")
+        systems_store.upsert_source(
+            "DND-5E",
+            "PHB",
+            title="Player's Handbook",
+            license_class="srd_cc",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        systems_store.replace_entries_for_source(
+            "DND-5E",
+            "PHB",
+            entry_types=["optionalfeature"],
+            entries=[
+                {
+                    "entry_key": "dnd-5e|optionalfeature|phb|defense",
+                    "entry_type": "optionalfeature",
+                    "slug": "phb-optionalfeature-defense",
+                    "title": "Defense",
+                    "source_page": "72",
+                    "source_path": "data/class/class-fighter.json",
+                    "search_text": "defense fighting style",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"feature_type": ["FS:F"]},
+                    "body": {},
+                    "rendered_html": "<p>Defense.</p>",
+                },
+                {
+                    "entry_key": "dnd-5e|optionalfeature|phb|dueling",
+                    "entry_type": "optionalfeature",
+                    "slug": "phb-optionalfeature-dueling",
+                    "title": "Dueling",
+                    "source_page": "72",
+                    "source_path": "data/class/class-fighter.json",
+                    "search_text": "dueling fighting style",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"feature_type": ["FS:F"]},
+                    "body": {},
+                    "rendered_html": "<p>Dueling.</p>",
+                },
+            ],
+        )
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    record = get_character("arden-march")
+    assert record is not None
+
+    add_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "",
+            "weapon_proficiencies_text": "Daggers\nLight Crossbows\nQuarterstaffs",
+            "tool_proficiencies_text": "Navigator's Tools",
+            "custom_feature_name_1": "",
+            "custom_feature_page_ref_1": "mechanics/harbor-drill",
+            "custom_feature_activation_type_1": "passive",
+            "custom_feature_description_1": "",
+            "custom_feature_optionalfeature_1_1_1": "phb-optionalfeature-defense",
+        },
+        follow_redirects=False,
+    )
+
+    assert add_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    harbor_drill = next(
+        feature
+        for feature in record.definition.features
+        if feature.get("category") == "custom_feature" and feature.get("page_ref") == "mechanics/harbor-drill"
+    )
+    defense = next(
+        feature
+        for feature in record.definition.features
+        if dict(feature.get("systems_ref") or {}).get("slug") == "phb-optionalfeature-defense"
+    )
+
+    assert harbor_drill["name"] == "Harbor Drill"
+    assert defense["name"] == "Defense"
+    assert defense["native_edit_parent_feature_id"] == harbor_drill["id"]
+    assert defense["native_edit_optionalfeature_section_index"] == 1
+    assert defense["native_edit_optionalfeature_choice_index"] == 1
+
+    edit_response = client.get("/campaigns/linden-pass/characters/arden-march/edit")
+    assert edit_response.status_code == 200
+    edit_html = edit_response.get_data(as_text=True)
+    assert "Harbor Drill Fighting Style" in edit_html
+    assert 'value="phb-optionalfeature-defense" selected' in edit_html
+
+    swap_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "",
+            "weapon_proficiencies_text": "Daggers\nLight Crossbows\nQuarterstaffs",
+            "tool_proficiencies_text": "Navigator's Tools",
+            "custom_feature_id_1": harbor_drill["id"],
+            "custom_feature_name_1": "",
+            "custom_feature_page_ref_1": "mechanics/harbor-drill",
+            "custom_feature_activation_type_1": "passive",
+            "custom_feature_description_1": "",
+            "custom_feature_optionalfeature_1_1_1": "phb-optionalfeature-dueling",
+        },
+        follow_redirects=False,
+    )
+
+    assert swap_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    feature_slugs = {
+        str(dict(feature.get("systems_ref") or {}).get("slug") or "").strip()
+        for feature in record.definition.features
+    }
+    assert "phb-optionalfeature-defense" not in feature_slugs
+    assert "phb-optionalfeature-dueling" in feature_slugs
+
+
 def test_owner_player_can_open_native_character_edit_page(
     client, sign_in, users, set_campaign_visibility
 ):

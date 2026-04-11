@@ -21,12 +21,15 @@ from .character_builder import (
     _automatic_campaign_feature_spell_manager_grants,
     _automatic_spell_support_grants,
     _build_campaign_feature_spell_manager_fields,
+    _build_campaign_page_entry,
     _build_additional_spell_filter_options,
+    _build_feature_payload,
     _build_spell_support_choice_fields,
     _build_spell_support_replacement_fields,
     _extract_additional_known_choice_specs,
     _extract_feat_innate_choice_specs,
     _extract_feat_prepared_choice_specs,
+    _feat_optionalfeature_sections,
     _merge_spell_mark,
     _prepared_spell_count_for_level,
     _resolve_builder_choices,
@@ -60,7 +63,7 @@ from .repository import normalize_lookup
 from .repository import slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_EDITOR_VERSION = "2026-04-10.01"
+CHARACTER_EDITOR_VERSION = "2026-04-11.01"
 CUSTOM_FEATURE_CATEGORY = "custom_feature"
 CUSTOM_EQUIPMENT_SOURCE_KIND = "manual_edit"
 CUSTOM_FEATURE_TRACKER_PREFIX = "manual-feature-tracker"
@@ -68,6 +71,9 @@ CAMPAIGN_ITEMS_SECTION = "Items"
 MIN_CUSTOM_FEATURE_ROWS = 3
 MIN_CUSTOM_EQUIPMENT_ROWS = 3
 SPELL_MANAGEMENT_QUERY_MIN_LENGTH = 2
+NATIVE_EDIT_PARENT_FEATURE_ID_KEY = "native_edit_parent_feature_id"
+NATIVE_EDIT_OPTIONALFEATURE_SECTION_KEY = "native_edit_optionalfeature_section_index"
+NATIVE_EDIT_OPTIONALFEATURE_CHOICE_KEY = "native_edit_optionalfeature_choice_index"
 FEATURE_ACTIVATION_OPTIONS = (
     ("passive", "Passive"),
     ("action", "Action"),
@@ -1422,9 +1428,11 @@ def build_native_character_edit_context(
     *,
     campaign_page_records: list[Any] | None = None,
     form_values: dict[str, str] | None = None,
+    optionalfeature_catalog: dict[str, SystemsEntryRecord] | None = None,
     spell_catalog: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     values = dict(form_values or {})
+    optionalfeature_catalog = dict(optionalfeature_catalog or {})
     spell_catalog = dict(spell_catalog or {})
     proficiency_lists = _display_proficiency_lists_for_editor(definition)
     manual_features = _manual_custom_features(definition)
@@ -1436,6 +1444,7 @@ def build_native_character_edit_context(
     }
     stat_adjustments = normalize_manual_stat_adjustments((definition.stats or {}).get("manual_adjustments"))
     campaign_page_lookup = _build_campaign_page_lookup(campaign_page_records or [])
+    generated_optionalfeature_selections = _native_edit_optionalfeature_selection_lookup(definition)
     campaign_page_options = _build_campaign_page_options(campaign_page_records or [])
     equipment_linked_page_refs = {
         _extract_page_ref_value(item.get("page_ref"))
@@ -1628,6 +1637,16 @@ def build_native_character_edit_context(
         values=values,
         current_level=current_level,
     )
+    for row in feature_rows:
+        existing_selection_map = generated_optionalfeature_selections.get(str(row.get("id") or "").strip(), {})
+        optionalfeature_fields = _build_editor_optionalfeature_fields_for_row(
+            row=row,
+            campaign_page_lookup=campaign_page_lookup,
+            optionalfeature_catalog=optionalfeature_catalog,
+            values=values,
+            selected_choices=existing_selection_map,
+        )
+        row["choice_fields"] = optionalfeature_fields + list(row.get("spell_fields") or [])
 
     return {
         "values": values,
@@ -1665,10 +1684,12 @@ def apply_native_character_edits(
     *,
     campaign_page_records: list[Any] | None = None,
     form_values: dict[str, str] | None = None,
+    optionalfeature_catalog: dict[str, SystemsEntryRecord] | None = None,
     spell_catalog: dict[str, Any] | None = None,
     systems_service: Any | None = None,
 ) -> tuple[CharacterDefinition, CharacterImportMetadata, dict[str, int]]:
     values = dict(form_values or {})
+    optionalfeature_catalog = dict(optionalfeature_catalog or {})
     campaign_page_lookup = _build_campaign_page_lookup(campaign_page_records or [])
     equipment_linked_page_refs = {
         _extract_page_ref_value(item.get("page_ref"))
@@ -1731,6 +1752,7 @@ def apply_native_character_edits(
     used_feature_ids = set(manual_feature_lookup.keys())
     manual_features: list[dict[str, Any]] = []
     manual_resource_templates: list[dict[str, Any]] = []
+    generated_optionalfeature_features: list[dict[str, Any]] = []
     selected_additional_spell_entries: list[dict[str, Any]] = []
     selected_spell_support_entries: list[dict[str, Any]] = []
     selected_spell_manager_entries: list[dict[str, Any]] = []
@@ -1860,6 +1882,16 @@ def apply_native_character_edits(
                 )
             )
         manual_features.append(existing)
+        generated_optionalfeature_features.extend(
+            _build_editor_selected_optionalfeature_features(
+                row_index=index,
+                parent_feature_id=feature_id,
+                campaign_page_lookup=campaign_page_lookup,
+                optionalfeature_catalog=optionalfeature_catalog,
+                values=values,
+                page_ref=page_ref,
+            )
+        )
 
     used_item_ids = set(manual_item_lookup.keys())
     inventory_quantity_overrides: dict[str, int] = {}
@@ -1950,7 +1982,8 @@ def apply_native_character_edits(
         dict(feature)
         for feature in list(current_definition.features or [])
         if str(feature.get("category") or "") != CUSTOM_FEATURE_CATEGORY
-    ] + manual_features
+        and not _is_native_edit_generated_feature(feature)
+    ] + manual_features + generated_optionalfeature_features
     payload["equipment_catalog"] = [
         dict(item)
         for item in list(current_definition.equipment_catalog or [])
@@ -1993,6 +2026,33 @@ def _manual_custom_features(definition: CharacterDefinition) -> list[dict[str, A
         for feature in list(definition.features or [])
         if str(feature.get("category") or "") == CUSTOM_FEATURE_CATEGORY
     ]
+
+
+def _is_native_edit_generated_feature(feature: dict[str, Any]) -> bool:
+    return bool(str(feature.get(NATIVE_EDIT_PARENT_FEATURE_ID_KEY) or "").strip())
+
+
+def _native_edit_optionalfeature_selection_lookup(
+    definition: CharacterDefinition,
+) -> dict[str, dict[tuple[int, int], str]]:
+    selections: dict[str, dict[tuple[int, int], str]] = {}
+    for feature in list(definition.features or []):
+        parent_feature_id = str(feature.get(NATIVE_EDIT_PARENT_FEATURE_ID_KEY) or "").strip()
+        if not parent_feature_id:
+            continue
+        systems_ref = dict(feature.get("systems_ref") or {})
+        selected_slug = str(systems_ref.get("slug") or "").strip()
+        if not selected_slug:
+            continue
+        try:
+            section_index = int(feature.get(NATIVE_EDIT_OPTIONALFEATURE_SECTION_KEY) or 0)
+            choice_index = int(feature.get(NATIVE_EDIT_OPTIONALFEATURE_CHOICE_KEY) or 0)
+        except (TypeError, ValueError):
+            continue
+        if section_index <= 0 or choice_index <= 0:
+            continue
+        selections.setdefault(parent_feature_id, {})[(section_index, choice_index)] = selected_slug
+    return selections
 
 
 def _manual_equipment_entries(definition: CharacterDefinition) -> list[dict[str, Any]]:
@@ -2050,6 +2110,17 @@ def _editable_campaign_option_for_page_ref(
     if kind and kind not in allowed_kinds:
         return None
     return option
+
+
+def _editable_campaign_feat_entry_for_page_ref(
+    page_ref: str,
+    campaign_page_lookup: dict[str, dict[str, Any]],
+) -> SystemsEntryRecord | None:
+    record = (campaign_page_lookup.get(page_ref) or {}).get("record")
+    if record is None:
+        return None
+    entry = _build_campaign_page_entry(record, kind="feat")
+    return entry if isinstance(entry, SystemsEntryRecord) else None
 
 
 def _merge_editor_proficiencies(
@@ -2143,6 +2214,107 @@ def _attach_spell_fields_to_feature_rows(
         )
         row["spell_fields"].extend(replacement_fields)
     return rows
+
+
+def _editor_optionalfeature_field_name(
+    row_index: int,
+    section_index: int,
+    choice_index: int,
+) -> str:
+    return f"custom_feature_optionalfeature_{row_index}_{section_index}_{choice_index}"
+
+
+def _build_editor_optionalfeature_fields_for_row(
+    *,
+    row: dict[str, Any],
+    campaign_page_lookup: dict[str, dict[str, Any]],
+    optionalfeature_catalog: dict[str, SystemsEntryRecord],
+    values: dict[str, str],
+    selected_choices: dict[tuple[int, int], str] | None = None,
+) -> list[dict[str, Any]]:
+    page_ref = str(row.get("page_ref") or "").strip()
+    if not page_ref or not optionalfeature_catalog:
+        return []
+    feat_entry = _editable_campaign_feat_entry_for_page_ref(page_ref, campaign_page_lookup)
+    if not isinstance(feat_entry, SystemsEntryRecord):
+        return []
+    row_index = max(int(row.get("index") or 0), 0)
+    if row_index <= 0:
+        return []
+    feature_title = str(row.get("name") or feat_entry.title or "Linked Feature").strip() or "Linked Feature"
+    existing_selections = dict(selected_choices or {})
+    fields: list[dict[str, Any]] = []
+    for section in _feat_optionalfeature_sections(feat_entry, optionalfeature_catalog):
+        section_index = int(section.get("index") or 0)
+        options = [dict(option) for option in list(section.get("options") or []) if str(option.get("value") or "").strip()]
+        choice_count = max(int(section.get("count") or 0), 0)
+        if section_index <= 0 or choice_count <= 0 or not options:
+            continue
+        section_title = str(section.get("title") or "Optional Feature").strip() or "Optional Feature"
+        for choice_index in range(1, choice_count + 1):
+            field_name = _editor_optionalfeature_field_name(row_index, section_index, choice_index)
+            selected_value = str(values.get(field_name) or existing_selections.get((section_index, choice_index)) or "").strip()
+            label_suffix = f" {choice_index}" if choice_count > 1 else ""
+            fields.append(
+                {
+                    "name": field_name,
+                    "label": f"{feature_title} {section_title}{label_suffix}",
+                    "help_text": f"Choose the {section_title.lower()} granted by {feature_title}.",
+                    "options": options,
+                    "selected": selected_value,
+                    "group_key": field_name,
+                    "kind": "feat_optionalfeature",
+                }
+            )
+    return fields
+
+
+def _build_editor_selected_optionalfeature_features(
+    *,
+    row_index: int,
+    parent_feature_id: str,
+    campaign_page_lookup: dict[str, dict[str, Any]],
+    optionalfeature_catalog: dict[str, SystemsEntryRecord],
+    values: dict[str, str],
+    page_ref: str,
+) -> list[dict[str, Any]]:
+    feat_entry = _editable_campaign_feat_entry_for_page_ref(page_ref, campaign_page_lookup)
+    if not isinstance(feat_entry, SystemsEntryRecord):
+        return []
+    features: list[dict[str, Any]] = []
+    for section in _feat_optionalfeature_sections(feat_entry, optionalfeature_catalog):
+        section_index = int(section.get("index") or 0)
+        choice_count = max(int(section.get("count") or 0), 0)
+        if section_index <= 0 or choice_count <= 0:
+            continue
+        section_title = str(section.get("title") or "optional feature").strip() or "optional feature"
+        for choice_index in range(1, choice_count + 1):
+            field_name = _editor_optionalfeature_field_name(row_index, section_index, choice_index)
+            selected_slug = str(values.get(field_name) or "").strip()
+            if not selected_slug:
+                raise CharacterEditValidationError(
+                    f"Choose an option for {feat_entry.title} {section_title}."
+                )
+            selected_entry = optionalfeature_catalog.get(selected_slug)
+            if not isinstance(selected_entry, SystemsEntryRecord):
+                raise CharacterEditValidationError(f"Choose a valid option for {feat_entry.title}.")
+            feature_payload = _build_feature_payload(
+                {
+                    "kind": "optionalfeature",
+                    "entry": selected_entry,
+                    "name": selected_entry.title,
+                    "label": selected_entry.title,
+                    "slug": str(selected_entry.slug or "").strip(),
+                },
+                index=len(features) + 1,
+            )
+            if feature_payload is None:
+                continue
+            feature_payload[NATIVE_EDIT_PARENT_FEATURE_ID_KEY] = parent_feature_id
+            feature_payload[NATIVE_EDIT_OPTIONALFEATURE_SECTION_KEY] = section_index
+            feature_payload[NATIVE_EDIT_OPTIONALFEATURE_CHOICE_KEY] = choice_index
+            features.append(feature_payload)
+    return features
 
 
 def _build_editor_additional_spell_choice_fields_for_row(
@@ -3547,6 +3719,7 @@ def _build_campaign_page_options(
                 "label": " | ".join(label_parts),
                 "title": option_title,
                 "campaign_option": dict(campaign_option or {}) or None,
+                "record": record,
             }
         )
     return options
@@ -3572,6 +3745,7 @@ def _build_campaign_page_lookup(
             "label": str(option.get("label") or page_ref),
             "title": str(option.get("title") or page_ref),
             "campaign_option": dict(option.get("campaign_option") or {}) or None,
+            "record": option.get("record"),
         }
     return lookup
 

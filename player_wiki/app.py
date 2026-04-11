@@ -5951,11 +5951,21 @@ def create_app() -> Flask:
                 "spell",
             )
         )
+        optionalfeature_catalog = {
+            str(entry.slug or "").strip(): entry
+            for entry in _list_campaign_enabled_entries(
+                app.extensions["systems_service"],
+                campaign_slug,
+                "optionalfeature",
+            )
+            if str(entry.slug or "").strip()
+        }
         form_values = dict(request.form if request.method == "POST" else request.args)
         edit_context = build_native_character_edit_context(
             record.definition,
             campaign_page_records=campaign_page_records,
             form_values=form_values if request.method == "POST" else None,
+            optionalfeature_catalog=optionalfeature_catalog,
             spell_catalog=spell_catalog,
         )
         edit_context["state_revision"] = record.state_record.revision
@@ -5975,6 +5985,7 @@ def create_app() -> Flask:
                 record.import_metadata,
                 campaign_page_records=campaign_page_records,
                 form_values=form_values,
+                optionalfeature_catalog=optionalfeature_catalog,
                 spell_catalog=spell_catalog,
                 systems_service=app.extensions["systems_service"],
             )
