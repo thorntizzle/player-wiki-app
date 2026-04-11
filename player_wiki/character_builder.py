@@ -13906,6 +13906,100 @@ def _spell_access_badge_label(raw_value: Any) -> str:
     return "Free cast"
 
 
+def _spell_source_support_payload(raw_value: Any) -> dict[str, Any]:
+    payload = dict(raw_value or {}) if isinstance(raw_value, dict) else {}
+    raw_source = payload.get("spell_source", payload.get("source"))
+    source_payload = dict(raw_source or {}) if isinstance(raw_source, dict) else {}
+    source_row_id = str(
+        payload.get("spell_source_row_id")
+        or source_payload.get("row_id")
+        or source_payload.get("id")
+        or ""
+    ).strip()
+    source_row_title = str(
+        payload.get("spell_source_row_title")
+        or source_payload.get("title")
+        or source_payload.get("label")
+        or ""
+    ).strip()
+    if not source_row_id and source_row_title:
+        source_row_id = f"spell-source:{slugify(source_row_title)}"
+
+    grant_source_label = str(
+        payload.get("grant_source_label")
+        or source_payload.get("grant_source_label")
+        or source_row_title
+        or ""
+    ).strip()
+    if not source_row_id:
+        return {"grant_source_label": grant_source_label} if grant_source_label else {}
+
+    support_payload: dict[str, Any] = {
+        "spell_source_row_id": source_row_id,
+        "spell_source_row_kind": str(
+            payload.get("spell_source_row_kind")
+            or source_payload.get("row_kind")
+            or source_payload.get("kind")
+            or "source"
+        ).strip()
+        or "source",
+    }
+    if source_row_title:
+        support_payload["spell_source_row_title"] = source_row_title
+    ability_key = _prepared_spell_formula_ability_key(
+        str(
+            payload.get("spell_source_ability_key")
+            or source_payload.get("ability_key")
+            or source_payload.get("spellcasting_ability_key")
+            or ""
+        ).strip()
+    )
+    if ability_key:
+        support_payload["spell_source_ability_key"] = ability_key
+    source_mode = str(
+        payload.get("spell_source_mode")
+        or source_payload.get("mode")
+        or ""
+    ).strip()
+    if source_mode:
+        support_payload["spell_source_mode"] = source_mode
+    spell_list_class_name = str(
+        payload.get("spell_source_spell_list_class_name")
+        or source_payload.get("spell_list_class_name")
+        or source_payload.get("class_name")
+        or ""
+    ).strip()
+    if spell_list_class_name:
+        support_payload["spell_source_spell_list_class_name"] = spell_list_class_name
+    if grant_source_label:
+        support_payload["grant_source_label"] = grant_source_label
+    return support_payload
+
+
+def _merge_spell_support_kwargs(
+    base: dict[str, Any] | None,
+    overrides: dict[str, Any] | None,
+) -> dict[str, Any]:
+    merged = dict(base or {})
+    for key, value in dict(overrides or {}).items():
+        if value in {"", None}:
+            continue
+        merged[key] = value
+    return merged
+
+
+def _spell_support_support_kwargs(
+    raw_value: Any,
+    *,
+    inherited_support_kwargs: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    support_kwargs = _merge_spell_support_kwargs(
+        inherited_support_kwargs,
+        _spell_source_support_payload(raw_value),
+    )
+    return _merge_spell_support_kwargs(support_kwargs, _spell_access_payload(raw_value))
+
+
 def _spell_payload_support_kwargs(raw_value: Any) -> dict[str, Any]:
     payload = dict(raw_value or {}) if isinstance(raw_value, dict) else {}
     support_kwargs: dict[str, Any] = {}
@@ -14220,6 +14314,18 @@ def _build_spell_support_choice_fields(
                     "spell_mark": str(spec.get("mark") or "").strip(),
                     "spell_is_always_prepared": bool(spec.get("always_prepared")),
                     "spell_is_ritual": bool(spec.get("ritual")),
+                    "spell_source_row_id": str(spec.get("spell_source_row_id") or "").strip(),
+                    "spell_source_row_kind": str(spec.get("spell_source_row_kind") or "").strip(),
+                    "spell_source_row_title": str(spec.get("spell_source_row_title") or "").strip(),
+                    "spell_source_ability_key": str(spec.get("spell_source_ability_key") or "").strip(),
+                    "spell_source_mode": str(spec.get("spell_source_mode") or "").strip(),
+                    "spell_source_spell_list_class_name": str(
+                        spec.get("spell_source_spell_list_class_name") or ""
+                    ).strip(),
+                    "grant_source_label": str(spec.get("grant_source_label") or "").strip(),
+                    "spell_access_type": str(spec.get("spell_access_type") or "").strip(),
+                    "spell_access_uses": spec.get("spell_access_uses"),
+                    "spell_access_reset_on": str(spec.get("spell_access_reset_on") or "").strip(),
                 }
             )
     return fields
@@ -14448,12 +14554,14 @@ def _apply_spell_support_grants_to_payloads(
         selected_value = str(grant.get("value") or "").strip()
         if not selected_value:
             continue
+        support_kwargs = _spell_payload_support_kwargs(grant)
         if bool(grant.get("bonus_known")):
             _add_bonus_known_spell_to_payloads(
                 spells_by_key,
                 selected_value=selected_value,
                 spell_catalog=spell_catalog,
                 class_row_id=class_row_id,
+                **support_kwargs,
             )
             continue
         _add_spell_to_payloads(
@@ -14464,6 +14572,7 @@ def _apply_spell_support_grants_to_payloads(
             is_always_prepared=bool(grant.get("always_prepared")),
             is_ritual=bool(grant.get("ritual")),
             class_row_id=class_row_id,
+            **support_kwargs,
         )
 
 
@@ -14501,6 +14610,18 @@ def _apply_selected_spell_support_fields_to_payloads(
                     selected_value=selected_value,
                     spell_catalog=spell_catalog,
                     class_row_id=class_row_id,
+                    spell_source_row_id=str(spec.get("spell_source_row_id") or "").strip(),
+                    spell_source_row_kind=str(spec.get("spell_source_row_kind") or "").strip(),
+                    spell_source_row_title=str(spec.get("spell_source_row_title") or "").strip(),
+                    spell_source_ability_key=str(spec.get("spell_source_ability_key") or "").strip(),
+                    spell_source_mode=str(spec.get("spell_source_mode") or "").strip(),
+                    spell_source_spell_list_class_name=str(
+                        spec.get("spell_source_spell_list_class_name") or ""
+                    ).strip(),
+                    grant_source_label=str(spec.get("grant_source_label") or "").strip(),
+                    spell_access_type=str(spec.get("spell_access_type") or "").strip(),
+                    spell_access_uses=spec.get("spell_access_uses"),
+                    spell_access_reset_on=str(spec.get("spell_access_reset_on") or "").strip(),
                 )
                 continue
             _add_spell_to_payloads(
@@ -14511,6 +14632,18 @@ def _apply_selected_spell_support_fields_to_payloads(
                 is_always_prepared=bool(spec.get("always_prepared")),
                 is_ritual=bool(spec.get("ritual")),
                 class_row_id=class_row_id,
+                spell_source_row_id=str(spec.get("spell_source_row_id") or "").strip(),
+                spell_source_row_kind=str(spec.get("spell_source_row_kind") or "").strip(),
+                spell_source_row_title=str(spec.get("spell_source_row_title") or "").strip(),
+                spell_source_ability_key=str(spec.get("spell_source_ability_key") or "").strip(),
+                spell_source_mode=str(spec.get("spell_source_mode") or "").strip(),
+                spell_source_spell_list_class_name=str(
+                    spec.get("spell_source_spell_list_class_name") or ""
+                ).strip(),
+                grant_source_label=str(spec.get("grant_source_label") or "").strip(),
+                spell_access_type=str(spec.get("spell_access_type") or "").strip(),
+                spell_access_uses=spec.get("spell_access_uses"),
+                spell_access_reset_on=str(spec.get("spell_access_reset_on") or "").strip(),
             )
 
 
@@ -15208,20 +15341,35 @@ def _extract_spell_support_grants(
     for block in list(spell_support or []):
         if not isinstance(block, dict):
             continue
+        block_support_kwargs = _spell_support_support_kwargs(block)
         for raw_value in _iter_unlocked_additional_spell_values(
             block.get("grants", block.get("fixed")),
             target_level=target_level,
             exact_level=exact_level,
         ):
-            grants.extend(_extract_spell_support_grants_from_value(raw_value))
+            grants.extend(
+                _extract_spell_support_grants_from_value(
+                    raw_value,
+                    inherited_support_kwargs=block_support_kwargs,
+                )
+            )
     return grants
 
 
-def _extract_spell_support_grants_from_value(raw_value: Any) -> list[dict[str, Any]]:
+def _extract_spell_support_grants_from_value(
+    raw_value: Any,
+    *,
+    inherited_support_kwargs: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     if isinstance(raw_value, list):
         grants: list[dict[str, Any]] = []
         for item in raw_value:
-            grants.extend(_extract_spell_support_grants_from_value(item))
+            grants.extend(
+                _extract_spell_support_grants_from_value(
+                    item,
+                    inherited_support_kwargs=inherited_support_kwargs,
+                )
+            )
         return grants
     if isinstance(raw_value, str):
         clean_value = _normalize_additional_spell_reference(raw_value)
@@ -15233,6 +15381,7 @@ def _extract_spell_support_grants_from_value(raw_value: Any) -> list[dict[str, A
                     "always_prepared": False,
                     "ritual": False,
                     "bonus_known": False,
+                    **dict(inherited_support_kwargs or {}),
                 }
             ]
             if clean_value
@@ -15243,7 +15392,12 @@ def _extract_spell_support_grants_from_value(raw_value: Any) -> list[dict[str, A
 
     grants: list[dict[str, Any]] = []
     if "_" in raw_value:
-        grants.extend(_extract_spell_support_grants_from_value(raw_value.get("_")))
+        grants.extend(
+            _extract_spell_support_grants_from_value(
+                raw_value.get("_"),
+                inherited_support_kwargs=inherited_support_kwargs,
+            )
+        )
     clean_value = _normalize_additional_spell_reference(
         str(
             raw_value.get("spell")
@@ -15260,6 +15414,10 @@ def _extract_spell_support_grants_from_value(raw_value: Any) -> list[dict[str, A
     if not bonus_known and normalize_lookup(normalized_mark) in {"known", "cantrip"}:
         bonus_known = True
         normalized_mark = ""
+    support_kwargs = _spell_support_support_kwargs(
+        raw_value,
+        inherited_support_kwargs=inherited_support_kwargs,
+    )
     grants.append(
         {
             "value": clean_value,
@@ -15267,6 +15425,7 @@ def _extract_spell_support_grants_from_value(raw_value: Any) -> list[dict[str, A
             "always_prepared": bool(raw_value.get("always_prepared") or raw_value.get("prepared")),
             "ritual": bool(raw_value.get("ritual") or raw_value.get("is_ritual")),
             "bonus_known": bonus_known,
+            **support_kwargs,
         }
     )
     return grants
@@ -15274,18 +15433,29 @@ def _extract_spell_support_grants_from_value(raw_value: Any) -> list[dict[str, A
 
 def _dedupe_spell_support_grants(grants: list[dict[str, Any]]) -> list[dict[str, Any]]:
     deduped: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, bool, bool, bool]] = set()
+    seen: set[tuple[str, str, bool, bool, bool, str, str, str, str, str, str, str, str, int, str]] = set()
     for grant in list(grants or []):
         payload = dict(grant or {})
         value = str(payload.get("value") or "").strip()
         if not value:
             continue
+        support_payload = _spell_payload_support_kwargs(payload)
         marker = (
             value.casefold(),
             str(payload.get("mark") or "").strip().casefold(),
             bool(payload.get("always_prepared")),
             bool(payload.get("ritual")),
             bool(payload.get("bonus_known")),
+            str(support_payload.get("spell_source_row_id") or "").strip(),
+            str(support_payload.get("spell_source_row_kind") or "").strip(),
+            str(support_payload.get("spell_source_row_title") or "").strip(),
+            str(support_payload.get("spell_source_ability_key") or "").strip(),
+            str(support_payload.get("spell_source_mode") or "").strip(),
+            str(support_payload.get("spell_source_spell_list_class_name") or "").strip(),
+            str(support_payload.get("grant_source_label") or "").strip(),
+            str(support_payload.get("spell_access_type") or "").strip(),
+            int(support_payload.get("spell_access_uses") or 0),
+            str(support_payload.get("spell_access_reset_on") or "").strip(),
         )
         if marker in seen:
             continue
@@ -15311,27 +15481,47 @@ def _extract_spell_support_choice_specs(
         for block in list(spell_support or []):
             if not isinstance(block, dict):
                 continue
+            block_support_kwargs = _spell_support_support_kwargs(block)
             for raw_value in _iter_unlocked_additional_spell_values(
                 block.get("choices", block.get("select")),
                 target_level=target_level,
                 exact_level=exact_level,
             ):
-                specs.extend(_extract_spell_support_choice_specs_from_value(raw_value))
+                specs.extend(
+                    _extract_spell_support_choice_specs_from_value(
+                        raw_value,
+                        inherited_support_kwargs=block_support_kwargs,
+                    )
+                )
     return specs
 
 
-def _extract_spell_support_choice_specs_from_value(raw_value: Any) -> list[dict[str, Any]]:
+def _extract_spell_support_choice_specs_from_value(
+    raw_value: Any,
+    *,
+    inherited_support_kwargs: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     if isinstance(raw_value, list):
         specs: list[dict[str, Any]] = []
         for item in raw_value:
-            specs.extend(_extract_spell_support_choice_specs_from_value(item))
+            specs.extend(
+                _extract_spell_support_choice_specs_from_value(
+                    item,
+                    inherited_support_kwargs=inherited_support_kwargs,
+                )
+            )
         return specs
     if not isinstance(raw_value, dict):
         return []
 
     specs: list[dict[str, Any]] = []
     if "_" in raw_value:
-        specs.extend(_extract_spell_support_choice_specs_from_value(raw_value.get("_")))
+        specs.extend(
+            _extract_spell_support_choice_specs_from_value(
+                raw_value.get("_"),
+                inherited_support_kwargs=inherited_support_kwargs,
+            )
+        )
     category = normalize_lookup(str(raw_value.get("category") or raw_value.get("kind") or "").strip())
     if category not in {"known", "prepared", "granted"}:
         return specs
@@ -15339,6 +15529,10 @@ def _extract_spell_support_choice_specs_from_value(raw_value: Any) -> list[dict[
     option_values = _flatten_additional_spell_values(raw_value.get("options", raw_value.get("spells")))
     if not filter_expression and not option_values:
         return specs
+    support_kwargs = _spell_support_support_kwargs(
+        raw_value,
+        inherited_support_kwargs=inherited_support_kwargs,
+    )
     specs.append(
         {
             "category": category,
@@ -15350,6 +15544,18 @@ def _extract_spell_support_choice_specs_from_value(raw_value: Any) -> list[dict[
             "always_prepared": bool(raw_value.get("always_prepared") or raw_value.get("prepared") or category == "prepared"),
             "ritual": bool(raw_value.get("ritual") or raw_value.get("is_ritual")),
             "mark": str(raw_value.get("mark") or ("Granted" if category == "granted" else "")).strip(),
+            "spell_source_row_id": str(support_kwargs.get("spell_source_row_id") or "").strip(),
+            "spell_source_row_kind": str(support_kwargs.get("spell_source_row_kind") or "").strip(),
+            "spell_source_row_title": str(support_kwargs.get("spell_source_row_title") or "").strip(),
+            "spell_source_ability_key": str(support_kwargs.get("spell_source_ability_key") or "").strip(),
+            "spell_source_mode": str(support_kwargs.get("spell_source_mode") or "").strip(),
+            "spell_source_spell_list_class_name": str(
+                support_kwargs.get("spell_source_spell_list_class_name") or ""
+            ).strip(),
+            "grant_source_label": str(support_kwargs.get("grant_source_label") or "").strip(),
+            "spell_access_type": str(support_kwargs.get("spell_access_type") or "").strip(),
+            "spell_access_uses": support_kwargs.get("spell_access_uses"),
+            "spell_access_reset_on": str(support_kwargs.get("spell_access_reset_on") or "").strip(),
         }
     )
     return specs

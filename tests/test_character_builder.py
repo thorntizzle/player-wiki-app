@@ -4832,6 +4832,151 @@ def test_level_one_builder_applies_campaign_feature_spell_support_and_create_rep
     assert spells_by_name["Detect Magic"]["systems_ref"]["slug"] == detect_magic.slug
 
 
+def test_level_one_builder_applies_campaign_feature_spell_support_source_rows_for_free_cast_spells():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    soldier = _systems_entry(
+        "background",
+        "phb-background-soldier",
+        "Soldier",
+        metadata={"skill_proficiencies": [{"athletics": True, "intimidation": True}]},
+    )
+    misty_step = _systems_entry(
+        "spell",
+        "phb-spell-misty-step",
+        "Misty Step",
+        metadata={"casting_time": [{"number": 1, "unit": "bonus"}], "level": 2},
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [soldier],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [misty_step],
+        },
+        class_progression=[],
+    )
+    campaign_page_records = [
+        _campaign_page_record(
+            "mechanics/moonlit-step",
+            "Moonlit Step",
+            section="Mechanics",
+            subsection="Blessings",
+            summary="A moon-marked step that slips between moments.",
+            metadata={
+                "character_option": {
+                    "name": "Moonlit Step",
+                    "description_markdown": "You can slip through a moonlit seam in the air.",
+                    "activation_type": "special",
+                    "spell_support": [
+                        {
+                            "source": {
+                                "title": "Moonlit Step",
+                                "kind": "feature",
+                                "ability_key": "wis",
+                            },
+                            "grants": {
+                                "_": [
+                                    {
+                                        "spell": "Misty Step",
+                                        "mark": "Granted",
+                                        "access_type": "free_cast",
+                                        "access_uses": 1,
+                                        "access_reset_on": "short_or_long_rest",
+                                    }
+                                ]
+                            },
+                        }
+                    ],
+                }
+            },
+        )
+    ]
+    base_form_values = {
+        "name": "Maeve Dain",
+        "character_slug": "maeve-dain",
+        "alignment": "Neutral Good",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": human.slug,
+        "background_slug": soldier.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "str": "15",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "14",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        base_form_values,
+        campaign_page_records=campaign_page_records,
+    )
+    form_values = {
+        **base_form_values,
+        "campaign_feature_page_ref_1": _field_value_for_label(
+            context,
+            "campaign_feature_page_ref_1",
+            "Moonlit Step",
+        ),
+    }
+
+    context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=campaign_page_records,
+    )
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+
+    moonlit_step = next(feature for feature in definition.features if feature["name"] == "Moonlit Step")
+    source_rows = [dict(row or {}) for row in list(definition.spellcasting.get("source_rows") or [])]
+    assert len(source_rows) == 1
+    source_row = source_rows[0]
+    spells_by_name = {spell["name"]: spell for spell in definition.spellcasting["spells"]}
+
+    assert moonlit_step["page_ref"] == "mechanics/moonlit-step"
+    assert source_row["source_row_id"] == "spell-source:moonlit-step"
+    assert source_row["source_row_kind"] == "feature"
+    assert source_row["title"] == "Moonlit Step"
+    assert source_row["spellcasting_ability"] == "Wisdom"
+    assert source_row["spell_save_dc"] == 12
+    assert source_row["spell_attack_bonus"] == 4
+    assert spells_by_name["Misty Step"]["spell_source_row_id"] == "spell-source:moonlit-step"
+    assert spells_by_name["Misty Step"]["spell_source_row_kind"] == "feature"
+    assert spells_by_name["Misty Step"]["spell_source_row_title"] == "Moonlit Step"
+    assert spells_by_name["Misty Step"]["spell_access_type"] == "free_cast"
+    assert spells_by_name["Misty Step"]["spell_access_uses"] == 1
+    assert spells_by_name["Misty Step"]["spell_access_reset_on"] == "short_or_long_rest"
+    assert spells_by_name["Misty Step"]["grant_source_label"] == "Moonlit Step"
+    assert any("Misty Step" in spell_line for spell_line in context["preview"]["spells"])
+
+
 def test_level_one_builder_applies_campaign_feat_spell_support_for_noncasters():
     fighter = _systems_entry(
         "class",

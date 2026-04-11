@@ -394,6 +394,176 @@ The drill is meant to replace a memorized shortcut with a more disciplined respo
     assert not list(record.definition.spellcasting.get("campaign_option_replacement_bases") or [])
 
 
+def test_native_character_edits_can_apply_and_remove_campaign_page_spell_support_source_rows(
+    app, client, sign_in, users, get_character, set_campaign_visibility
+):
+    training_page_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "content"
+        / "mechanics"
+        / "harbor-moon-lesson.md"
+    )
+    training_page_path.write_text(
+        """---
+title: Harbor Moon Lesson
+section: Mechanics
+subsection: Blessings
+published: true
+summary: A moonlit harbor lesson that teaches one emergency spell.
+character_option:
+  name: Harbor Moon Lesson
+  description_markdown: Harbor lantern-keepers teach you one emergency casting.
+  activation_type: special
+  spell_support:
+    - source:
+        title: Harbor Moon Lesson
+        kind: feature
+        ability_key: int
+      choices:
+        _:
+          - category: granted
+            options:
+              - Shield
+              - Feather Fall
+            count: 1
+            label_prefix: Harbor Lesson Spell
+            mark: Granted
+            access_type: free_cast
+            access_uses: 1
+            access_reset_on: long_rest
+---
+Lantern-keepers pass the lesson down from one storm season to the next.
+""",
+        encoding="utf-8",
+    )
+
+    with app.app_context():
+        systems_store = app.extensions["systems_store"]
+        systems_store.upsert_library("DND-5E", title="DND 5E", system_code="DND-5E")
+        systems_store.upsert_source(
+            "DND-5E",
+            "PHB",
+            title="Player's Handbook",
+            license_class="srd_cc",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        systems_store.replace_entries_for_source(
+            "DND-5E",
+            "PHB",
+            entry_types=["spell"],
+            entries=[
+                {
+                    "entry_key": "dnd-5e|spell|phb|shield",
+                    "entry_type": "spell",
+                    "slug": "phb-spell-shield",
+                    "title": "Shield",
+                    "source_page": "275",
+                    "source_path": "data/spells/spells-phb.json",
+                    "search_text": "shield",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"casting_time": [{"number": 1, "unit": "reaction"}], "level": 1},
+                    "body": {},
+                    "rendered_html": "<p>Shield.</p>",
+                },
+                {
+                    "entry_key": "dnd-5e|spell|phb|feather-fall",
+                    "entry_type": "spell",
+                    "slug": "phb-spell-feather-fall",
+                    "title": "Feather Fall",
+                    "source_page": "239",
+                    "source_path": "data/spells/spells-phb.json",
+                    "search_text": "feather fall",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"casting_time": [{"number": 1, "unit": "reaction"}], "level": 1},
+                    "body": {},
+                    "rendered_html": "<p>Feather Fall.</p>",
+                },
+            ],
+        )
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    record = get_character("arden-march")
+    assert record is not None
+
+    add_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "",
+            "weapon_proficiencies_text": "Daggers\nLight Crossbows\nQuarterstaffs",
+            "tool_proficiencies_text": "Navigator's Tools",
+            "custom_feature_name_1": "",
+            "custom_feature_page_ref_1": "mechanics/harbor-moon-lesson",
+            "custom_feature_activation_type_1": "special",
+            "custom_feature_description_1": "",
+            "custom_feature_spell_support_1_granted_1_1": "phb-spell-shield",
+        },
+        follow_redirects=False,
+    )
+
+    assert add_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    custom_feature = next(
+        feature
+        for feature in record.definition.features
+        if feature.get("category") == "custom_feature" and feature.get("page_ref") == "mechanics/harbor-moon-lesson"
+    )
+    source_rows = [dict(row or {}) for row in list(record.definition.spellcasting.get("source_rows") or [])]
+    assert len(source_rows) == 1
+    source_row = source_rows[0]
+    spells_by_name = {spell["name"]: spell for spell in record.definition.spellcasting["spells"]}
+
+    assert custom_feature["name"] == "Harbor Moon Lesson"
+    assert source_row["source_row_id"] == "spell-source:harbor-moon-lesson"
+    assert source_row["source_row_kind"] == "feature"
+    assert source_row["title"] == "Harbor Moon Lesson"
+    assert source_row["spellcasting_ability"] == "Intelligence"
+    assert spells_by_name["Shield"]["spell_source_row_id"] == "spell-source:harbor-moon-lesson"
+    assert spells_by_name["Shield"]["spell_source_row_kind"] == "feature"
+    assert spells_by_name["Shield"]["spell_source_row_title"] == "Harbor Moon Lesson"
+    assert spells_by_name["Shield"]["spell_access_type"] == "free_cast"
+    assert spells_by_name["Shield"]["spell_access_uses"] == 1
+    assert spells_by_name["Shield"]["spell_access_reset_on"] == "long_rest"
+    assert spells_by_name["Shield"]["grant_source_label"] == "Harbor Moon Lesson"
+
+    remove_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "",
+            "weapon_proficiencies_text": "Daggers\nLight Crossbows\nQuarterstaffs",
+            "tool_proficiencies_text": "Navigator's Tools",
+            "custom_feature_id_1": custom_feature["id"],
+            "custom_feature_name_1": "",
+            "custom_feature_page_ref_1": "",
+            "custom_feature_activation_type_1": "passive",
+            "custom_feature_description_1": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert remove_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    spells_by_name = {spell["name"]: spell for spell in record.definition.spellcasting["spells"]}
+    assert "Shield" not in spells_by_name
+    assert all(
+        str(row.get("source_row_id") or "").strip() != "spell-source:harbor-moon-lesson"
+        for row in list(record.definition.spellcasting.get("source_rows") or [])
+    )
+
+
 def test_native_character_edits_require_complete_spell_support_replacement_pairs(
     app, client, sign_in, users, get_character, set_campaign_visibility
 ):

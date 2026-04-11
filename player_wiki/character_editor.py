@@ -38,6 +38,7 @@ from .character_builder import (
     _spell_progression_value,
     _spell_selection_values_by_mark,
     _spell_options_are_cantrips,
+    _spell_payload_support_kwargs,
     _spellcasting_mode_for_class,
     normalize_definition_to_native_model,
 )
@@ -2831,6 +2832,7 @@ def _apply_editor_spell_support_grants_and_choices(
             is_always_prepared=bool(grant.get("always_prepared")),
             is_ritual=bool(grant.get("ritual")),
             bonus_known=bool(grant.get("bonus_known")),
+            support_kwargs=_spell_payload_support_kwargs(grant),
         )
 
     choice_fields = _build_spell_support_choice_fields(
@@ -2867,6 +2869,7 @@ def _apply_editor_spell_support_grants_and_choices(
             is_always_prepared=bool(field.get("spell_is_always_prepared")),
             is_ritual=bool(field.get("spell_is_ritual")),
             bonus_known=str(category or "").strip() == "known",
+            support_kwargs=_spell_payload_support_kwargs(field),
         )
     return choice_fields
 
@@ -2978,12 +2981,24 @@ def _add_editor_campaign_option_spell(
     is_always_prepared: bool = False,
     is_ritual: bool = False,
     bonus_known: bool = False,
+    support_kwargs: dict[str, Any] | None = None,
 ) -> None:
     clean_value = str(selected_value or "").strip()
     if not clean_value:
         return
     spell_entry = _resolve_spell_entry(clean_value, spell_catalog)
-    payload_key = str((spell_entry.slug if spell_entry is not None else clean_value) or "").strip()
+    normalized_support_kwargs = dict(support_kwargs or {})
+    payload_key = _spell_payload_map_key(
+        {
+            "systems_ref": (
+                {"slug": str(spell_entry.slug or "").strip()}
+                if spell_entry is not None
+                else {}
+            ),
+            "name": clean_value,
+            **normalized_support_kwargs,
+        }
+    )
     if not payload_key:
         return
     existed_before = payload_key in spells_by_key
@@ -2992,6 +3007,7 @@ def _add_editor_campaign_option_spell(
             spells_by_key,
             selected_value=clean_value,
             spell_catalog=spell_catalog,
+            **normalized_support_kwargs,
         )
     else:
         _add_spell_to_payloads(
@@ -3001,6 +3017,7 @@ def _add_editor_campaign_option_spell(
             mark=mark,
             is_always_prepared=is_always_prepared,
             is_ritual=is_ritual,
+            **normalized_support_kwargs,
         )
     payload = spells_by_key.get(payload_key)
     if payload is None:
@@ -3137,6 +3154,7 @@ def _iter_campaign_option_spell_grants(option_payloads: list[dict[str, Any]]) ->
                     "mark": str(payload.get("mark") or "").strip(),
                     "always_prepared": bool(payload.get("always_prepared")),
                     "ritual": bool(payload.get("ritual")),
+                    **_spell_payload_support_kwargs(payload),
                 }
             )
     return grants
