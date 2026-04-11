@@ -4977,6 +4977,379 @@ def test_level_one_builder_applies_campaign_feature_spell_support_source_rows_fo
     assert any("Misty Step" in spell_line for spell_line in context["preview"]["spells"])
 
 
+def test_level_one_builder_applies_campaign_feature_ritual_book_spell_manager():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    soldier = _systems_entry(
+        "background",
+        "phb-background-soldier",
+        "Soldier",
+        metadata={"skill_proficiencies": [{"athletics": True, "intimidation": True}]},
+    )
+    detect_magic = _systems_entry(
+        "spell",
+        "phb-spell-detect-magic",
+        "Detect Magic",
+        metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1, "class_lists": {"PHB": ["Wizard"]}, "ritual": True},
+    )
+    identify = _systems_entry(
+        "spell",
+        "phb-spell-identify",
+        "Identify",
+        metadata={"casting_time": [{"number": 1, "unit": "minute"}], "level": 1, "class_lists": {"PHB": ["Wizard"]}, "ritual": True},
+    )
+    magic_missile = _systems_entry(
+        "spell",
+        "phb-spell-magic-missile",
+        "Magic Missile",
+        metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1, "class_lists": {"PHB": ["Wizard"]}},
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [soldier],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [detect_magic, identify, magic_missile],
+        },
+        class_progression=[],
+    )
+    campaign_page_records = [
+        _campaign_page_record(
+            "mechanics/harbor-ritual-book",
+            "Harbor Ritual Book",
+            section="Mechanics",
+            subsection="Blessings",
+            summary="A warded ritual book kept in the harbor shrine.",
+            metadata={
+                "character_option": {
+                    "name": "Harbor Ritual Book",
+                    "description_markdown": "You keep a slim ritual book of harbor wards.",
+                    "activation_type": "special",
+                    "spell_manager": {
+                        "mode": "ritual_book",
+                        "source_row_kind": "feature",
+                        "source_title": "Harbor Ritual Book",
+                        "spell_list_class_name": "Wizard",
+                        "ability_key": "int",
+                        "max_spell_level_formula": "ritual_caster_half_level_rounded_up",
+                        "choice_fields": [
+                            {
+                                "category": "spell_managed",
+                                "filter": "level=1|class=Wizard|miscellaneous=ritual",
+                                "count": 2,
+                                "label_prefix": "Ritual Spell",
+                                "help_text": "Choose a wizard ritual for the harbor ritual book.",
+                                "spell_mark": "Ritual Book",
+                                "spell_is_ritual": True,
+                            }
+                        ],
+                    },
+                }
+            },
+        )
+    ]
+    base_form_values = {
+        "name": "Corin Vale",
+        "character_slug": "corin-vale",
+        "alignment": "Neutral Good",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": human.slug,
+        "background_slug": soldier.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "str": "15",
+        "dex": "12",
+        "con": "14",
+        "int": "14",
+        "wis": "10",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        base_form_values,
+        campaign_page_records=campaign_page_records,
+    )
+    form_values = {
+        **base_form_values,
+        "campaign_feature_page_ref_1": _field_value_for_label(
+            context,
+            "campaign_feature_page_ref_1",
+            "Harbor Ritual Book",
+        ),
+    }
+
+    context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=campaign_page_records,
+    )
+    first_ritual_field = _field_name_for_label(context, "Harbor Ritual Book Ritual Spell 1")
+    second_ritual_field = _field_name_for_label(context, "Harbor Ritual Book Ritual Spell 2")
+    form_values[first_ritual_field] = _field_value_for_label(context, first_ritual_field, "Detect Magic")
+    form_values[second_ritual_field] = _field_value_for_label(context, second_ritual_field, "Identify")
+
+    context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=campaign_page_records,
+    )
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+
+    harbor_ritual_book = next(feature for feature in definition.features if feature["name"] == "Harbor Ritual Book")
+    spell_manager = dict(harbor_ritual_book.get("spell_manager") or {})
+    spells_by_name = {spell["name"]: spell for spell in definition.spellcasting["spells"]}
+    source_rows = [dict(row or {}) for row in list(definition.spellcasting.get("source_rows") or []) if isinstance(row, dict)]
+
+    assert definition.spellcasting["spellcasting_class"] == ""
+    assert spell_manager["mode"] == "ritual_book"
+    assert spell_manager["title"] == "Harbor Ritual Book"
+    assert spell_manager["spell_list_class_name"] == "Wizard"
+    assert spell_manager["spellcasting_ability"] == "Intelligence"
+    assert spell_manager["max_spell_level_formula"] == "ritual_caster_half_level_rounded_up"
+    assert {spell["name"] for spell in definition.spellcasting["spells"]} == {"Detect Magic", "Identify"}
+    assert spells_by_name["Detect Magic"]["mark"] == "Ritual Book"
+    assert spells_by_name["Detect Magic"]["is_ritual"] is True
+    assert spells_by_name["Detect Magic"]["spell_source_row_id"] == spell_manager["source_row_id"]
+    assert spells_by_name["Identify"]["spell_source_row_id"] == spell_manager["source_row_id"]
+    assert len(source_rows) == 1
+    assert source_rows[0]["source_row_id"] == spell_manager["source_row_id"]
+    assert source_rows[0]["spell_mode"] == "ritual_book"
+    assert source_rows[0]["title"] == "Harbor Ritual Book"
+    assert source_rows[0]["spell_list_class_name"] == "Wizard"
+    assert "Detect Magic (Ritual Book)" in list(context["preview"]["spells"] or [])
+    assert "Identify (Ritual Book)" in list(context["preview"]["spells"] or [])
+
+
+def test_native_level_up_applies_campaign_progression_ritual_book_spell_manager():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    soldier = _systems_entry(
+        "background",
+        "phb-background-soldier",
+        "Soldier",
+        metadata={"skill_proficiencies": [{"athletics": True, "intimidation": True}]},
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    action_surge = _systems_entry("classfeature", "phb-classfeature-action-surge", "Action Surge", metadata={"level": 2})
+    detect_magic = _systems_entry(
+        "spell",
+        "phb-spell-detect-magic",
+        "Detect Magic",
+        metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1, "class_lists": {"PHB": ["Wizard"]}, "ritual": True},
+    )
+    alarm = _systems_entry(
+        "spell",
+        "phb-spell-alarm",
+        "Alarm",
+        metadata={"casting_time": [{"number": 1, "unit": "minute"}], "level": 1, "class_lists": {"PHB": ["Wizard"]}, "ritual": True},
+    )
+    campaign_progression_entry = build_campaign_page_progression_entries(
+        _campaign_page_record(
+            "mechanics/harbor-ritual-book",
+            "Harbor Ritual Book",
+            section="Mechanics",
+            subsection="Class Modifications",
+            metadata={
+                "character_progression": {
+                    "kind": "class",
+                    "class_name": "Fighter",
+                    "level": 2,
+                    "character_option": {
+                        "name": "Harbor Ritual Book",
+                        "description_markdown": "You inherit a warded ritual book from the harbor shrine.",
+                        "activation_type": "special",
+                        "spell_manager": {
+                            "mode": "ritual_book",
+                            "source_row_kind": "feature",
+                            "source_title": "Harbor Ritual Book",
+                            "spell_list_class_name": "Wizard",
+                            "ability_key": "int",
+                            "max_spell_level_formula": "ritual_caster_half_level_rounded_up",
+                            "choice_fields": [
+                                {
+                                    "category": "spell_managed",
+                                    "filter": "level=1|class=Wizard|miscellaneous=ritual",
+                                    "count": 1,
+                                    "label_prefix": "Ritual Spell",
+                                    "help_text": "Choose a ritual for the harbor ritual book.",
+                                    "spell_mark": "Ritual Book",
+                                    "spell_is_ritual": True,
+                                }
+                            ],
+                        },
+                    },
+                }
+            },
+        )
+    )[0]
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [soldier],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [detect_magic, alarm],
+        },
+        class_progression=[
+            {"level": 1, "feature_rows": [{"label": "Second Wind", "entry": second_wind}]},
+            {
+                "level": 2,
+                "feature_rows": [
+                    {"label": "Action Surge", "entry": action_surge},
+                    {"label": "Harbor Ritual Book", "entry": campaign_progression_entry},
+                ],
+            },
+        ],
+    )
+    campaign_page_records = [
+        _campaign_page_record(
+            "mechanics/harbor-ritual-book",
+            "Harbor Ritual Book",
+            section="Mechanics",
+            subsection="Class Modifications",
+            metadata={
+                "character_progression": {
+                    "kind": "class",
+                    "class_name": "Fighter",
+                    "level": 2,
+                    "character_option": {
+                        "name": "Harbor Ritual Book",
+                        "description_markdown": "You inherit a warded ritual book from the harbor shrine.",
+                        "activation_type": "special",
+                        "spell_manager": {
+                            "mode": "ritual_book",
+                            "source_row_kind": "feature",
+                            "source_title": "Harbor Ritual Book",
+                            "spell_list_class_name": "Wizard",
+                            "ability_key": "int",
+                            "max_spell_level_formula": "ritual_caster_half_level_rounded_up",
+                            "choice_fields": [
+                                {
+                                    "category": "spell_managed",
+                                    "filter": "level=1|class=Wizard|miscellaneous=ritual",
+                                    "count": 1,
+                                    "label_prefix": "Ritual Spell",
+                                    "help_text": "Choose a ritual for the harbor ritual book.",
+                                    "spell_mark": "Ritual Book",
+                                    "spell_is_ritual": True,
+                                }
+                            ],
+                        },
+                    },
+                }
+            },
+        )
+    ]
+
+    level_one_form = {
+        "name": "Jory Flint",
+        "character_slug": "jory-flint",
+        "alignment": "Neutral Good",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": human.slug,
+        "background_slug": soldier.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "str": "15",
+        "dex": "12",
+        "con": "14",
+        "int": "14",
+        "wis": "10",
+        "cha": "8",
+    }
+    level_one_context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        level_one_form,
+        campaign_page_records=campaign_page_records,
+    )
+    level_one_definition, _ = build_level_one_character_definition("linden-pass", level_one_context, level_one_form)
+
+    level_up_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        level_one_definition,
+        {"hp_gain": "8"},
+        campaign_page_records=campaign_page_records,
+    )
+    ritual_field = _field_name_for_label(level_up_context, "Harbor Ritual Book Ritual Spell 1")
+    level_up_form = {
+        "hp_gain": "8",
+        ritual_field: _field_value_for_label(level_up_context, ritual_field, "Detect Magic"),
+    }
+    level_up_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        level_one_definition,
+        level_up_form,
+        campaign_page_records=campaign_page_records,
+    )
+    leveled_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        level_one_definition,
+        level_up_context,
+        level_up_form,
+    )
+
+    harbor_ritual_book = next(feature for feature in leveled_definition.features if feature["name"] == "Harbor Ritual Book")
+    spell_manager = dict(harbor_ritual_book.get("spell_manager") or {})
+    spells_by_name = {spell["name"]: spell for spell in leveled_definition.spellcasting["spells"]}
+
+    assert spell_manager["mode"] == "ritual_book"
+    assert spell_manager["title"] == "Harbor Ritual Book"
+    assert spell_manager["spell_list_class_name"] == "Wizard"
+    assert spells_by_name["Detect Magic"]["mark"] == "Ritual Book"
+    assert spells_by_name["Detect Magic"]["spell_source_row_id"] == spell_manager["source_row_id"]
+    assert any("Detect Magic" in spell_name for spell_name in list(level_up_context["preview"]["new_spells"] or []))
+
+
 def test_level_one_builder_applies_campaign_feat_spell_support_for_noncasters():
     fighter = _systems_entry(
         "class",

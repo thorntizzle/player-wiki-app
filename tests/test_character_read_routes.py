@@ -769,6 +769,117 @@ def test_spellcasting_subpage_can_manage_ritual_caster_ritual_book(app, client, 
     assert "No spells recorded yet for this class row." in removed_html
 
 
+def test_spellcasting_subpage_can_manage_campaign_feature_ritual_book(app, client, sign_in, users):
+    _seed_systems_spell_entries(
+        app,
+        [
+            {"slug": "phb-spell-detect-magic", "title": "Detect Magic", "level": 1, "class_lists": {"PHB": ["Wizard"]}, "ritual": True},
+            {"slug": "phb-spell-alarm", "title": "Alarm", "level": 1, "class_lists": {"PHB": ["Wizard"]}, "ritual": True},
+            {"slug": "phb-spell-find-familiar", "title": "Find Familiar", "level": 1, "class_lists": {"PHB": ["Wizard"]}, "ritual": True},
+            {"slug": "phb-spell-magic-missile", "title": "Magic Missile", "level": 1, "class_lists": {"PHB": ["Wizard"]}},
+        ],
+    )
+
+    source_row_id = "feature-spell-source:mechanics-harbor-ritual-book:mechanics-harbor-ritual-book"
+
+    def _mutate(payload: dict) -> None:
+        profile = dict(payload.get("profile") or {})
+        profile["class_level_text"] = "Fighter 5"
+        profile["classes"] = [{"class_name": "Fighter", "level": 5}]
+        payload["profile"] = profile
+        stats = dict(payload.get("stats") or {})
+        ability_scores = dict(stats.get("ability_scores") or {})
+        ability_scores["int"] = {"score": 14, "modifier": 2, "save_bonus": 2}
+        stats["ability_scores"] = ability_scores
+        stats["proficiency_bonus"] = 3
+        payload["stats"] = stats
+        payload["features"] = [
+            {
+                "id": "harbor-ritual-book-1",
+                "name": "Harbor Ritual Book",
+                "category": "custom_feature",
+                "source": "Campaign",
+                "description_markdown": "",
+                "activation_type": "special",
+                "page_ref": "mechanics/harbor-ritual-book",
+                "spell_manager": {
+                    "source_row_id": source_row_id,
+                    "source_row_kind": "feature",
+                    "title": "Harbor Ritual Book",
+                    "mode": "ritual_book",
+                    "spell_list_class_name": "Wizard",
+                    "spellcasting_ability": "Intelligence",
+                    "spellcasting_ability_key": "int",
+                    "max_spell_level_formula": "ritual_caster_half_level_rounded_up",
+                },
+            }
+        ]
+        payload["spellcasting"] = {
+            "spellcasting_class": "",
+            "spellcasting_ability": "",
+            "spell_save_dc": None,
+            "spell_attack_bonus": None,
+            "slot_progression": [],
+            "class_rows": [],
+            "source_rows": [],
+            "spells": [],
+        }
+
+    _write_character_definition(app, "arden-march", _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    page_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=spellcasting")
+    assert page_response.status_code == 200
+    page_html = page_response.get_data(as_text=True)
+    assert "Harbor Ritual Book" in page_html
+    assert "Ritual book" in page_html
+    assert "Add ritual spell" in page_html
+
+    search_response = client.get(
+        f"/campaigns/linden-pass/characters/arden-march/spellcasting/spells/search?kind=ritual_book&q=alarm&target_class_row_id={source_row_id}"
+    )
+    assert search_response.status_code == 200
+    search_payload = search_response.get_json()
+    assert search_payload["message"] == "Found 1 matching ritual spells."
+    assert [result["entry_slug"] for result in search_payload["results"]] == ["phb-spell-alarm"]
+
+    add_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/add",
+        data={
+            "expected_revision": str(_character_state_revision(app, "arden-march")),
+            "mode": "read",
+            "page": "spellcasting",
+            "kind": "ritual_book",
+            "selected_value": "phb-spell-alarm",
+            "target_class_row_id": source_row_id,
+        },
+        follow_redirects=False,
+    )
+    assert add_response.status_code == 302
+
+    updated_definition = _read_character_definition(app, "arden-march")
+    spells_by_name = {spell["name"]: spell for spell in updated_definition["spellcasting"]["spells"]}
+    assert spells_by_name["Alarm"]["mark"] == "Ritual Book"
+    assert spells_by_name["Alarm"]["spell_source_row_id"] == source_row_id
+
+    remove_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/remove",
+        data={
+            "expected_revision": str(_character_state_revision(app, "arden-march")),
+            "mode": "read",
+            "page": "spellcasting",
+            "spell_key": f"feature:{source_row_id}::phb-spell-alarm",
+            "target_class_row_id": source_row_id,
+        },
+        follow_redirects=False,
+    )
+    assert remove_response.status_code == 302
+
+    removed_definition = _read_character_definition(app, "arden-march")
+    assert removed_definition["spellcasting"]["spells"] == []
+
+
 def test_spellcasting_subpage_can_search_add_and_remove_known_spells(app, client, sign_in, users):
     spell_entries = _seed_systems_spell_entries(
         app,

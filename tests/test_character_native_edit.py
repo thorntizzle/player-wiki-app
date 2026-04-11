@@ -564,6 +564,176 @@ Lantern-keepers pass the lesson down from one storm season to the next.
     )
 
 
+def test_native_character_edits_can_apply_and_remove_campaign_page_spell_manager(
+    app, client, sign_in, users, get_character, set_campaign_visibility
+):
+    ritual_page_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "content"
+        / "mechanics"
+        / "harbor-ritual-book.md"
+    )
+    ritual_page_path.write_text(
+        """---
+title: Harbor Ritual Book
+section: Mechanics
+subsection: Blessings
+published: true
+summary: A warded ritual book copied by the harbor shrine.
+character_option:
+  name: Harbor Ritual Book
+  description_markdown: The shrine scribes entrust you with a small ritual book.
+  activation_type: special
+  spell_manager:
+    mode: ritual_book
+    source_row_kind: feature
+    source_title: Harbor Ritual Book
+    spell_list_class_name: Wizard
+    ability_key: int
+    max_spell_level_formula: ritual_caster_half_level_rounded_up
+    choice_fields:
+      - category: spell_managed
+        filter: level=1|class=Wizard|miscellaneous=ritual
+        count: 1
+        label_prefix: Harbor Ritual
+        help_text: Choose a wizard ritual for the harbor ritual book.
+        spell_mark: Ritual Book
+        spell_is_ritual: true
+---
+The wardens keep the harbor rites bound in salted leather.
+""",
+        encoding="utf-8",
+    )
+
+    with app.app_context():
+        systems_store = app.extensions["systems_store"]
+        systems_store.upsert_library("DND-5E", title="DND 5E", system_code="DND-5E")
+        systems_store.upsert_source(
+            "DND-5E",
+            "PHB",
+            title="Player's Handbook",
+            license_class="srd_cc",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        systems_store.replace_entries_for_source(
+            "DND-5E",
+            "PHB",
+            entry_types=["spell"],
+            entries=[
+                {
+                    "entry_key": "dnd-5e|spell|phb|detect-magic",
+                    "entry_type": "spell",
+                    "slug": "phb-spell-detect-magic",
+                    "title": "Detect Magic",
+                    "source_page": "231",
+                    "source_path": "data/spells/spells-phb.json",
+                    "search_text": "detect magic",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {
+                        "casting_time": [{"number": 1, "unit": "action"}],
+                        "level": 1,
+                        "ritual": True,
+                        "class_lists": {"PHB": ["Wizard"]},
+                    },
+                    "body": {},
+                    "rendered_html": "<p>Detect Magic.</p>",
+                },
+                {
+                    "entry_key": "dnd-5e|spell|phb|alarm",
+                    "entry_type": "spell",
+                    "slug": "phb-spell-alarm",
+                    "title": "Alarm",
+                    "source_page": "211",
+                    "source_path": "data/spells/spells-phb.json",
+                    "search_text": "alarm",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {
+                        "casting_time": [{"number": 1, "unit": "minute"}],
+                        "level": 1,
+                        "ritual": True,
+                        "class_lists": {"PHB": ["Wizard"]},
+                    },
+                    "body": {},
+                    "rendered_html": "<p>Alarm.</p>",
+                },
+            ],
+        )
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    record = get_character("arden-march")
+    assert record is not None
+
+    add_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "",
+            "weapon_proficiencies_text": "Daggers\nLight Crossbows\nQuarterstaffs",
+            "tool_proficiencies_text": "Navigator's Tools",
+            "custom_feature_name_1": "",
+            "custom_feature_page_ref_1": "mechanics/harbor-ritual-book",
+            "custom_feature_activation_type_1": "special",
+            "custom_feature_description_1": "",
+            "custom_feature_spell_manager_1_spell_managed_1_1": "phb-spell-detect-magic",
+        },
+        follow_redirects=False,
+    )
+
+    assert add_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    custom_feature = next(
+        feature
+        for feature in record.definition.features
+        if feature.get("category") == "custom_feature" and feature.get("page_ref") == "mechanics/harbor-ritual-book"
+    )
+    spell_manager = dict(custom_feature.get("spell_manager") or {})
+    spells_by_name = {spell["name"]: spell for spell in record.definition.spellcasting["spells"]}
+
+    assert custom_feature["name"] == "Harbor Ritual Book"
+    assert spell_manager["mode"] == "ritual_book"
+    assert spell_manager["title"] == "Harbor Ritual Book"
+    assert spell_manager["spell_list_class_name"] == "Wizard"
+    assert spells_by_name["Detect Magic"]["mark"] == "Ritual Book"
+    assert spells_by_name["Detect Magic"]["spell_source_row_id"] == spell_manager["source_row_id"]
+    assert spells_by_name["Detect Magic"]["is_ritual"] is True
+
+    remove_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "",
+            "weapon_proficiencies_text": "Daggers\nLight Crossbows\nQuarterstaffs",
+            "tool_proficiencies_text": "Navigator's Tools",
+            "custom_feature_id_1": custom_feature["id"],
+            "custom_feature_name_1": "",
+            "custom_feature_page_ref_1": "",
+            "custom_feature_activation_type_1": "passive",
+            "custom_feature_description_1": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert remove_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    assert "Detect Magic" not in {spell["name"] for spell in record.definition.spellcasting["spells"]}
+    assert all(
+        str(feature.get("page_ref") or "").strip() != "mechanics/harbor-ritual-book"
+        for feature in record.definition.features
+    )
+
+
 def test_native_character_edits_require_complete_spell_support_replacement_pairs(
     app, client, sign_in, users, get_character, set_campaign_visibility
 ):
