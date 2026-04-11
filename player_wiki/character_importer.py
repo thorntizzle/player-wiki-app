@@ -70,6 +70,8 @@ ABILITY_CHOICE_FEATURE_NAMES = {
     "wisdom",
     "charisma",
 }
+NATIVE_MANAGED_CUSTOM_FEATURE_CATEGORY = "custom_feature"
+NATIVE_MANAGED_CUSTOM_EQUIPMENT_SOURCE_KIND = "manual_edit"
 
 
 class CharacterImportError(Exception):
@@ -1377,6 +1379,117 @@ def _clone_link_payload(value: Any) -> Any:
     return value
 
 
+def _merge_existing_native_managed_entries(
+    imported_entries: list[dict[str, Any]],
+    existing_entries: list[dict[str, Any]],
+    *,
+    key_builder,
+    include_entry,
+) -> list[dict[str, Any]]:
+    merged = [dict(entry or {}) for entry in imported_entries]
+    lookup = _build_existing_match_lookup(merged, key_builder)
+    for existing in existing_entries:
+        payload = dict(existing or {})
+        if not include_entry(payload):
+            continue
+        if _matched_existing_entry(payload, lookup, key_builder) is not None:
+            continue
+        merged.append(payload)
+        for key in key_builder(payload):
+            lookup.setdefault(key, payload)
+    return merged
+
+
+def _is_native_managed_feature_overlay(payload: dict[str, Any]) -> bool:
+    return (
+        str(payload.get("category") or "").strip()
+        == NATIVE_MANAGED_CUSTOM_FEATURE_CATEGORY
+    )
+
+
+def _is_native_managed_equipment_overlay(payload: dict[str, Any]) -> bool:
+    return (
+        str(payload.get("source_kind") or "").strip()
+        == NATIVE_MANAGED_CUSTOM_EQUIPMENT_SOURCE_KIND
+    )
+
+
+def _is_native_managed_spell_overlay(payload: dict[str, Any]) -> bool:
+    return bool(
+        str(payload.get("spell_source_row_id") or "").strip()
+        or str(payload.get("grant_source_label") or "").strip()
+        or str(payload.get("spell_access_type") or "").strip()
+        or list(payload.get("campaign_option_sources") or [])
+        or list(payload.get("campaign_option_replaced_by") or [])
+    )
+
+
+def _merge_existing_native_managed_overlays(
+    definition: CharacterDefinition,
+    existing_definition: CharacterDefinition,
+) -> CharacterDefinition:
+    payload = deepcopy(definition.to_dict())
+    existing_payload = deepcopy(existing_definition.to_dict())
+
+    merged_features = _merge_existing_native_managed_entries(
+        list(payload.get("features") or []),
+        list(existing_payload.get("features") or []),
+        key_builder=_feature_match_keys,
+        include_entry=_is_native_managed_feature_overlay,
+    )
+    payload["features"] = merged_features
+
+    payload["equipment_catalog"] = _merge_existing_native_managed_entries(
+        list(payload.get("equipment_catalog") or []),
+        list(existing_payload.get("equipment_catalog") or []),
+        key_builder=_equipment_match_keys,
+        include_entry=_is_native_managed_equipment_overlay,
+    )
+
+    native_feature_tracker_refs = {
+        str(feature.get("tracker_ref") or "").strip()
+        for feature in merged_features
+        if _is_native_managed_feature_overlay(feature)
+        and str(feature.get("tracker_ref") or "").strip()
+    }
+    if native_feature_tracker_refs:
+        resource_templates = [dict(template or {}) for template in list(payload.get("resource_templates") or [])]
+        existing_templates = [dict(template or {}) for template in list(existing_payload.get("resource_templates") or [])]
+        existing_lookup = _build_existing_match_lookup(resource_templates, _resource_template_match_keys)
+        for template in existing_templates:
+            template_payload = dict(template or {})
+            template_id = str(template_payload.get("id") or "").strip()
+            if template_id not in native_feature_tracker_refs:
+                continue
+            if _matched_existing_entry(template_payload, existing_lookup, _resource_template_match_keys) is not None:
+                continue
+            resource_templates.append(template_payload)
+            for key in _resource_template_match_keys(template_payload):
+                existing_lookup.setdefault(key, template_payload)
+        payload["resource_templates"] = resource_templates
+
+    spellcasting = dict(payload.get("spellcasting") or {})
+    existing_spellcasting = dict(existing_payload.get("spellcasting") or {})
+    spellcasting["spells"] = _merge_existing_native_managed_entries(
+        list(spellcasting.get("spells") or []),
+        list(existing_spellcasting.get("spells") or []),
+        key_builder=_spell_match_keys,
+        include_entry=_is_native_managed_spell_overlay,
+    )
+    replacement_bases = _merge_existing_native_managed_entries(
+        list(spellcasting.get("campaign_option_replacement_bases") or []),
+        list(existing_spellcasting.get("campaign_option_replacement_bases") or []),
+        key_builder=_spell_match_keys,
+        include_entry=_is_native_managed_spell_overlay,
+    )
+    if replacement_bases:
+        spellcasting["campaign_option_replacement_bases"] = replacement_bases
+    else:
+        spellcasting.pop("campaign_option_replacement_bases", None)
+    payload["spellcasting"] = spellcasting
+    return CharacterDefinition.from_dict(payload)
+
+
 def _preserve_existing_profile_refs(
     imported_profile: dict[str, Any],
     existing_profile: dict[str, Any],
@@ -1632,6 +1745,11 @@ def converge_imported_definition(
     resolved_species: Any | None = None,
     resolved_background: Any | None = None,
 ) -> CharacterDefinition:
+    if existing_definition is not None:
+        definition = _merge_existing_native_managed_overlays(
+            definition,
+            existing_definition,
+        )
     normalized_definition = normalize_definition_to_native_model(
         definition,
         item_catalog=item_catalog,

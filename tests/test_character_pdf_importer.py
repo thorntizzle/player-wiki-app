@@ -2130,6 +2130,106 @@ def test_import_character_reimport_preserves_spell_links_and_removes_missing_spe
     assert spells_by_name["Beacon Spark"]["systems_ref"]["slug"] == "phb-spell-light"
 
 
+def test_converge_imported_definition_preserves_native_managed_import_overlays():
+    existing_definition = _minimal_imported_definition(
+        features=[
+            {
+                "id": "custom-feature-harbor-ritual-book",
+                "name": "Harbor Ritual Book",
+                "category": "custom_feature",
+                "source": "Campaign",
+                "description_markdown": "The shrine scribes entrust you with a small ritual book.",
+                "activation_type": "special",
+                "page_ref": "mechanics/harbor-ritual-book",
+                "tracker_ref": None,
+                "spell_manager": {
+                    "mode": "ritual_book",
+                    "source_row_id": "feature-spells:harbor-ritual-book",
+                    "title": "Harbor Ritual Book",
+                    "spell_list_class_name": "Wizard",
+                    "source_row_kind": "feature",
+                },
+            }
+        ],
+        spellcasting={
+            "spells": [
+                {
+                    "id": "ritual-book-detect-magic",
+                    "name": "Detect Magic",
+                    "mark": "Ritual Book",
+                    "is_ritual": True,
+                    "spell_source_row_id": "feature-spells:harbor-ritual-book",
+                    "campaign_option_sources": [
+                        {
+                            "source_ref": "mechanics/harbor-ritual-book",
+                            "mode": "spell_manager_choice",
+                            "category": "spell_managed",
+                            "spec_index": 1,
+                            "choice_index": 1,
+                            "mark": "Ritual Book",
+                            "ritual": True,
+                        }
+                    ],
+                }
+            ]
+        },
+        equipment_catalog=[
+            {
+                "id": "manual-item-stormglass-compass",
+                "name": "Stormglass Compass",
+                "default_quantity": 1,
+                "weight": "1 lb.",
+                "notes": "Stamped with blue wax.",
+                "source_kind": "manual_edit",
+                "page_ref": "items/stormglass-compass",
+            }
+        ],
+    )
+    incoming_definition = _minimal_imported_definition(
+        features=[
+            {
+                "id": "arcane-recovery",
+                "name": "Arcane Recovery",
+                "category": "class_feature",
+                "source": "PHB 115",
+                "description_markdown": "Recover spell slots during a short rest.",
+                "activation_type": "special",
+                "tracker_ref": None,
+            }
+        ],
+        spellcasting={"spells": []},
+        equipment_catalog=[],
+    )
+
+    converged = converge_imported_definition(
+        incoming_definition,
+        existing_definition=existing_definition,
+    )
+
+    custom_features = {
+        str(feature.get("page_ref") or "").strip(): feature
+        for feature in converged.features
+        if str(feature.get("category") or "").strip() == "custom_feature"
+    }
+    spells_by_name = {spell["name"]: spell for spell in converged.spellcasting["spells"]}
+    manual_items = {
+        str(item.get("page_ref") or "").strip(): item
+        for item in converged.equipment_catalog
+        if str(item.get("source_kind") or "").strip() == "manual_edit"
+    }
+
+    assert "mechanics/harbor-ritual-book" in custom_features
+    assert custom_features["mechanics/harbor-ritual-book"]["spell_manager"]["source_row_id"] == (
+        "feature-spells:harbor-ritual-book"
+    )
+    assert "Detect Magic" in spells_by_name
+    assert spells_by_name["Detect Magic"]["spell_source_row_id"] == "feature-spells:harbor-ritual-book"
+    assert spells_by_name["Detect Magic"]["campaign_option_sources"][0]["source_ref"] == (
+        "mechanics/harbor-ritual-book"
+    )
+    assert manual_items["items/stormglass-compass"]["name"] == "Stormglass Compass"
+
+
 def test_converged_imported_definitions_keep_profile_refs_but_remain_level_up_ineligible():
     existing_definition = _minimal_imported_definition(
         profile={
