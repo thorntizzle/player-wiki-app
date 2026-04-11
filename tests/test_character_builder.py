@@ -7152,6 +7152,95 @@ def test_normalize_definition_to_native_model_adds_gift_of_the_chromatic_dragon_
     assert resources_by_id["reactive-resistance"]["reset_on"] == "long_rest"
 
 
+def test_normalize_definition_to_native_model_adds_chronal_shift_tracker():
+    definition = _minimal_character_definition("nadi-tempo", "Nadi Tempo")
+    definition.profile["class_level_text"] = "Wizard 2"
+    definition.profile["classes"] = [
+        {
+            "row_id": "class-row-1",
+            "class_name": "Wizard",
+            "subclass_name": "Chronurgy Magic",
+            "level": 2,
+        }
+    ]
+    definition.profile["class_ref"] = None
+    definition.features = [
+        {
+            "id": "chronal-shift-1",
+            "name": "Chronal Shift",
+            "category": "subclass_feature",
+            "source": "EGW",
+            "description_markdown": "",
+            "class_row_id": "class-row-1",
+        }
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+    features_by_name = {feature["name"]: feature for feature in normalized.features}
+    resources_by_id = {resource["id"]: resource for resource in normalized.resource_templates}
+
+    assert features_by_name["Chronal Shift"]["tracker_ref"] == "chronal-shift"
+    assert features_by_name["Chronal Shift"]["activation_type"] == "reaction"
+    assert resources_by_id["chronal-shift"]["class_row_id"] == "class-row-1"
+    assert resources_by_id["chronal-shift"]["max"] == 2
+    assert resources_by_id["chronal-shift"]["reset_on"] == "long_rest"
+
+
+def test_normalize_definition_to_native_model_adds_psionic_power_helper_rows_and_trackers():
+    definition = _minimal_character_definition("cerin-psi", "Cerin Psi")
+    definition.profile["class_level_text"] = "Fighter 3"
+    definition.profile["classes"] = [
+        {
+            "row_id": "class-row-1",
+            "class_name": "Fighter",
+            "subclass_name": "Psi Warrior",
+            "level": 3,
+        }
+    ]
+    definition.features = [
+        {
+            "id": "psionic-power-1",
+            "name": "Psionic Power",
+            "category": "subclass_feature",
+            "source": "TCE",
+            "description_markdown": "",
+            "class_row_id": "class-row-1",
+            "systems_ref": {
+                "entry_type": "subclassfeature",
+                "slug": "tce-subclassfeature-psionic-power",
+                "title": "Psionic Power",
+                "source_id": "TCE",
+            },
+            "page_ref": "mechanics/psi-warrior/psionic-power",
+        }
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+    features_by_name = {feature["name"]: feature for feature in normalized.features}
+    resources_by_id = {resource["id"]: resource for resource in normalized.resource_templates}
+
+    assert features_by_name["Psionic Power"]["tracker_ref"] == "psionic-power-psionic-energy"
+    assert features_by_name["Psionic Power"]["class_row_id"] == "class-row-1"
+    assert features_by_name["Psionic Power: Protective Field"]["activation_type"] == "reaction"
+    assert features_by_name["Psionic Power: Psionic Strike"]["activation_type"] == "special"
+    assert features_by_name["Psionic Power: Telekinetic Movement"]["activation_type"] == "action"
+    assert features_by_name["Psionic Power: Telekinetic Movement"]["tracker_ref"] == "psionic-power-telekinetic-movement"
+    assert features_by_name["Psionic Power: Recovery"]["activation_type"] == "bonus_action"
+    assert features_by_name["Psionic Power: Recovery"]["tracker_ref"] == "psionic-power-recovery"
+    assert features_by_name["Psionic Power: Protective Field"]["class_row_id"] == "class-row-1"
+    assert features_by_name["Psionic Power: Recovery"]["systems_ref"]["slug"] == "tce-subclassfeature-psionic-power"
+    assert features_by_name["Psionic Power: Telekinetic Movement"]["page_ref"] == "mechanics/psi-warrior/psionic-power"
+    assert resources_by_id["psionic-power-psionic-energy"]["class_row_id"] == "class-row-1"
+    assert resources_by_id["psionic-power-psionic-energy"]["max"] == 4
+    assert resources_by_id["psionic-power-psionic-energy"]["reset_on"] == "long_rest"
+    assert resources_by_id["psionic-power-telekinetic-movement"]["class_row_id"] == "class-row-1"
+    assert resources_by_id["psionic-power-telekinetic-movement"]["max"] == 1
+    assert resources_by_id["psionic-power-telekinetic-movement"]["reset_on"] == "short_rest"
+    assert resources_by_id["psionic-power-recovery"]["class_row_id"] == "class-row-1"
+    assert resources_by_id["psionic-power-recovery"]["max"] == 1
+    assert resources_by_id["psionic-power-recovery"]["reset_on"] == "short_rest"
+
+
 def test_level_one_builder_surfaces_and_applies_skilled_feat_choices():
     fighter = _systems_entry(
         "class",
@@ -16024,6 +16113,647 @@ def test_native_level_up_adds_arcane_shot_tracker_on_subclass_selection():
     assert resources_by_id["arcane-shot"]["max"] == 2
     assert resources_by_id["arcane-shot"]["reset_on"] == "short_rest"
     assert merged_resources["arcane-shot"]["current"] == 2
+
+
+def test_native_level_up_adds_chronal_shift_tracker_on_subclass_selection():
+    wizard = _systems_entry(
+        "class",
+        "phb-class-wizard",
+        "Wizard",
+        metadata={
+            "hit_die": {"faces": 6},
+            "proficiency": ["int", "wis"],
+            "subclass_title": "Arcane Tradition",
+        },
+    )
+    chronurgy = _systems_entry(
+        "subclass",
+        "egw-subclass-wizard-chronurgy-magic",
+        "Chronurgy Magic",
+        metadata={"class_name": "Wizard", "class_source": "PHB"},
+        source_id="EGW",
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    spellcasting_feature = _systems_entry(
+        "classfeature",
+        "phb-classfeature-spellcasting",
+        "Spellcasting",
+        metadata={"level": 1},
+    )
+    arcane_recovery = _systems_entry(
+        "classfeature",
+        "phb-classfeature-arcane-recovery",
+        "Arcane Recovery",
+        metadata={"level": 1},
+    )
+    arcane_tradition = _systems_entry(
+        "classfeature",
+        "phb-classfeature-arcane-tradition",
+        "Arcane Tradition",
+        metadata={"level": 2},
+    )
+    chronal_shift = _systems_entry(
+        "subclassfeature",
+        "egw-subclassfeature-chronal-shift",
+        "Chronal Shift",
+        metadata={"level": 2, "class_name": "Wizard", "class_source": "PHB", "subclass_name": "Chronurgy Magic"},
+        source_id="EGW",
+    )
+    light = _systems_entry("spell", "phb-spell-light", "Light", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    mage_hand = _systems_entry("spell", "phb-spell-mage-hand", "Mage Hand", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    message = _systems_entry("spell", "phb-spell-message", "Message", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    detect_magic = _systems_entry("spell", "phb-spell-detect-magic", "Detect Magic", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    find_familiar = _systems_entry("spell", "phb-spell-find-familiar", "Find Familiar", metadata={"casting_time": [{"number": 1, "unit": "hour"}]})
+    mage_armor = _systems_entry("spell", "phb-spell-mage-armor", "Mage Armor", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    magic_missile = _systems_entry("spell", "phb-spell-magic-missile", "Magic Missile", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    shield = _systems_entry("spell", "phb-spell-shield", "Shield", metadata={"casting_time": [{"number": 1, "unit": "reaction"}]})
+    sleep = _systems_entry("spell", "phb-spell-sleep", "Sleep", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    thunderwave = _systems_entry("spell", "phb-spell-thunderwave", "Thunderwave", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    burning_hands = _systems_entry("spell", "phb-spell-burning-hands", "Burning Hands", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [wizard],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [chronurgy],
+            "item": [],
+            "spell": [
+                light,
+                mage_hand,
+                message,
+                detect_magic,
+                find_familiar,
+                mage_armor,
+                magic_missile,
+                shield,
+                sleep,
+                thunderwave,
+                burning_hands,
+            ],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    _progression_row("Spellcasting", entry=spellcasting_feature, option_groups=[]),
+                    _progression_row("Arcane Recovery", entry=arcane_recovery, option_groups=[]),
+                ],
+            },
+            {
+                "level": 2,
+                "level_label": "Level 2",
+                "feature_rows": [
+                    _progression_row("Arcane Tradition", entry=arcane_tradition, option_groups=[]),
+                ],
+            },
+        ],
+        subclass_progression=[
+            {
+                "level": 2,
+                "level_label": "Level 2",
+                "feature_rows": [
+                    _progression_row("Chronal Shift", entry=chronal_shift, option_groups=[]),
+                ],
+            }
+        ],
+    )
+
+    current_definition = _minimal_character_definition("nadi-tempo", "Nadi Tempo")
+    current_definition.profile["class_level_text"] = "Wizard 1"
+    current_definition.profile["classes"][0]["row_id"] = "class-row-1"
+    current_definition.profile["classes"][0]["class_name"] = "Wizard"
+    current_definition.profile["classes"][0]["level"] = 1
+    current_definition.profile["classes"][0]["systems_ref"] = _systems_ref(wizard)
+    current_definition.profile["class_ref"] = _systems_ref(wizard)
+    current_definition.stats["max_hp"] = 8
+    current_definition.stats["ability_scores"]["int"] = {"score": 16, "modifier": 3, "save_bonus": 5}
+    current_definition.stats["ability_scores"]["wis"] = {"score": 12, "modifier": 1, "save_bonus": 3}
+    current_definition.features = [
+        {
+            "id": "spellcasting-1",
+            "name": "Spellcasting",
+            "category": "class_feature",
+            "source": "PHB",
+            "description_markdown": "",
+            "systems_ref": _systems_ref(spellcasting_feature),
+            "class_row_id": "class-row-1",
+        },
+        {
+            "id": "arcane-recovery-1",
+            "name": "Arcane Recovery",
+            "category": "class_feature",
+            "source": "PHB",
+            "description_markdown": "",
+            "systems_ref": _systems_ref(arcane_recovery),
+            "class_row_id": "class-row-1",
+        },
+    ]
+    current_definition.spellcasting = {
+        "spellcasting_class": "Wizard",
+        "spellcasting_ability": "Intelligence",
+        "spell_save_dc": 13,
+        "spell_attack_bonus": 5,
+        "slot_progression": [{"level": 1, "max_slots": 2}],
+        "spells": [
+            {"name": "Light", "mark": "Cantrip", "systems_ref": _systems_ref(light), "class_row_id": "class-row-1"},
+            {"name": "Mage Hand", "mark": "Cantrip", "systems_ref": _systems_ref(mage_hand), "class_row_id": "class-row-1"},
+            {"name": "Message", "mark": "Cantrip", "systems_ref": _systems_ref(message), "class_row_id": "class-row-1"},
+            {
+                "name": "Detect Magic",
+                "mark": "Prepared + Spellbook",
+                "systems_ref": _systems_ref(detect_magic),
+                "class_row_id": "class-row-1",
+            },
+            {"name": "Find Familiar", "mark": "Spellbook", "systems_ref": _systems_ref(find_familiar), "class_row_id": "class-row-1"},
+            {
+                "name": "Mage Armor",
+                "mark": "Prepared + Spellbook",
+                "systems_ref": _systems_ref(mage_armor),
+                "class_row_id": "class-row-1",
+            },
+            {
+                "name": "Magic Missile",
+                "mark": "Prepared + Spellbook",
+                "systems_ref": _systems_ref(magic_missile),
+                "class_row_id": "class-row-1",
+            },
+            {"name": "Shield", "mark": "Prepared + Spellbook", "systems_ref": _systems_ref(shield), "class_row_id": "class-row-1"},
+            {"name": "Sleep", "mark": "Spellbook", "systems_ref": _systems_ref(sleep), "class_row_id": "class-row-1"},
+        ],
+    }
+
+    form_values = {
+        "hp_gain": "4",
+        "subclass_slug": chronurgy.slug,
+        "levelup_wizard_spellbook_1": thunderwave.slug,
+        "levelup_wizard_spellbook_2": burning_hands.slug,
+        "levelup_wizard_prepared_1": thunderwave.slug,
+    }
+
+    level_up_context = build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values)
+    leveled_definition, _, hp_delta = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        level_up_context,
+        form_values,
+    )
+    merged_state = merge_state_with_definition(
+        leveled_definition,
+        build_initial_state(current_definition),
+        hp_delta=hp_delta,
+    )
+
+    chronal_shift_feature = next(feature for feature in leveled_definition.features if feature["name"] == "Chronal Shift")
+    resources_by_id = {resource["id"]: resource for resource in leveled_definition.resource_templates}
+    merged_resources = {resource["id"]: resource for resource in merged_state["resources"]}
+
+    assert "Chronal Shift: 2 / 2 (Long Rest)" in level_up_context["preview"]["resources"]
+    assert leveled_definition.profile["subclass_ref"]["slug"] == chronurgy.slug
+    assert chronal_shift_feature["class_row_id"] == "class-row-1"
+    assert chronal_shift_feature["tracker_ref"] == "chronal-shift"
+    assert chronal_shift_feature["activation_type"] == "reaction"
+    assert resources_by_id["chronal-shift"]["class_row_id"] == "class-row-1"
+    assert resources_by_id["chronal-shift"]["max"] == 2
+    assert resources_by_id["chronal-shift"]["reset_on"] == "long_rest"
+    assert merged_resources["chronal-shift"]["current"] == 2
+
+
+def test_native_level_up_adds_psionic_power_helper_rows_on_subclass_selection():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "proficiency": ["str", "con"], "subclass_title": "Martial Archetype"},
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    psi_warrior = _systems_entry(
+        "subclass",
+        "tce-subclass-psi-warrior",
+        "Psi Warrior",
+        metadata={"class_name": "Fighter", "class_source": "PHB"},
+        source_id="TCE",
+    )
+    martial_archetype = _systems_entry(
+        "classfeature",
+        "phb-classfeature-martial-archetype",
+        "Martial Archetype",
+        metadata={"level": 3},
+    )
+    psionic_power = _systems_entry(
+        "subclassfeature",
+        "tce-subclassfeature-psionic-power",
+        "Psionic Power",
+        metadata={"level": 3, "class_name": "Fighter", "class_source": "PHB", "subclass_name": "Psi Warrior"},
+        source_id="TCE",
+    )
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [psi_warrior],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 3,
+                "level_label": "Level 3",
+                "feature_rows": [
+                    _progression_row("Martial Archetype", entry=martial_archetype, option_groups=[]),
+                ],
+            }
+        ],
+        subclass_progression=[
+            {
+                "level": 3,
+                "level_label": "Level 3",
+                "feature_rows": [
+                    _progression_row("Psionic Power", entry=psionic_power, option_groups=[]),
+                ],
+            }
+        ],
+    )
+
+    current_definition = _minimal_character_definition("psi-vanguard", "Psi Vanguard")
+    current_definition.profile["class_level_text"] = "Fighter 2"
+    current_definition.profile["classes"][0]["row_id"] = "class-row-1"
+    current_definition.profile["classes"][0]["level"] = 2
+    current_definition.profile["classes"][0]["systems_ref"] = _systems_ref(fighter)
+    current_definition.profile["class_ref"] = _systems_ref(fighter)
+    current_definition.stats["max_hp"] = 20
+
+    form_values = {
+        "hp_gain": "8",
+        "subclass_slug": psi_warrior.slug,
+    }
+
+    level_up_context = build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values)
+    leveled_definition, _, hp_delta = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        level_up_context,
+        form_values,
+    )
+    merged_state = merge_state_with_definition(
+        leveled_definition,
+        build_initial_state(current_definition),
+        hp_delta=hp_delta,
+    )
+
+    features_by_name = {feature["name"]: feature for feature in leveled_definition.features}
+    resources_by_id = {resource["id"]: resource for resource in leveled_definition.resource_templates}
+    merged_resources = {resource["id"]: resource for resource in merged_state["resources"]}
+
+    assert "Psionic Power: Psionic Energy: 4 / 4 (Long Rest)" in level_up_context["preview"]["resources"]
+    assert "Psionic Power: Telekinetic Movement: 1 / 1 (Short Rest)" in level_up_context["preview"]["resources"]
+    assert "Psionic Power: Recovery: 1 / 1 (Short Rest)" in level_up_context["preview"]["resources"]
+    assert leveled_definition.profile["subclass_ref"]["slug"] == psi_warrior.slug
+    assert features_by_name["Psionic Power"]["tracker_ref"] == "psionic-power-psionic-energy"
+    assert features_by_name["Psionic Power: Protective Field"]["activation_type"] == "reaction"
+    assert features_by_name["Psionic Power: Psionic Strike"]["activation_type"] == "special"
+    assert features_by_name["Psionic Power: Telekinetic Movement"]["activation_type"] == "action"
+    assert features_by_name["Psionic Power: Telekinetic Movement"]["tracker_ref"] == "psionic-power-telekinetic-movement"
+    assert features_by_name["Psionic Power: Recovery"]["activation_type"] == "bonus_action"
+    assert features_by_name["Psionic Power: Recovery"]["tracker_ref"] == "psionic-power-recovery"
+    assert features_by_name["Psionic Power"]["class_row_id"] == "class-row-1"
+    assert features_by_name["Psionic Power: Recovery"]["class_row_id"] == "class-row-1"
+    assert resources_by_id["psionic-power-psionic-energy"]["max"] == 4
+    assert resources_by_id["psionic-power-psionic-energy"]["reset_on"] == "long_rest"
+    assert resources_by_id["psionic-power-telekinetic-movement"]["max"] == 1
+    assert resources_by_id["psionic-power-telekinetic-movement"]["reset_on"] == "short_rest"
+    assert resources_by_id["psionic-power-recovery"]["max"] == 1
+    assert resources_by_id["psionic-power-recovery"]["reset_on"] == "short_rest"
+    assert merged_resources["psionic-power-psionic-energy"]["current"] == 4
+    assert merged_resources["psionic-power-telekinetic-movement"]["current"] == 1
+    assert merged_resources["psionic-power-recovery"]["current"] == 1
+
+
+def test_native_level_up_refreshes_psionic_power_pool_and_preserves_spent_values():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "proficiency": ["str", "con"], "subclass_title": "Martial Archetype"},
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    psi_warrior = _systems_entry(
+        "subclass",
+        "tce-subclass-psi-warrior",
+        "Psi Warrior",
+        metadata={"class_name": "Fighter", "class_source": "PHB"},
+        source_id="TCE",
+    )
+    psionic_power = _systems_entry(
+        "subclassfeature",
+        "tce-subclassfeature-psionic-power",
+        "Psionic Power",
+        metadata={"level": 3, "class_name": "Fighter", "class_source": "PHB", "subclass_name": "Psi Warrior"},
+        source_id="TCE",
+    )
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [psi_warrior],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[],
+    )
+
+    current_definition = _minimal_character_definition("psi-veteran", "Psi Veteran")
+    current_definition.profile["class_level_text"] = "Fighter 4"
+    current_definition.profile["classes"][0]["row_id"] = "class-row-1"
+    current_definition.profile["classes"][0]["level"] = 4
+    current_definition.profile["classes"][0]["class_name"] = "Fighter"
+    current_definition.profile["classes"][0]["subclass_name"] = "Psi Warrior"
+    current_definition.profile["classes"][0]["systems_ref"] = _systems_ref(fighter)
+    current_definition.profile["classes"][0]["subclass_ref"] = _systems_ref(psi_warrior)
+    current_definition.profile["class_ref"] = _systems_ref(fighter)
+    current_definition.profile["subclass_ref"] = _systems_ref(psi_warrior)
+    current_definition.stats["max_hp"] = 36
+    current_definition.features = [
+        {
+            "id": "psionic-power-1",
+            "name": "Psionic Power",
+            "category": "subclass_feature",
+            "source": "TCE",
+            "description_markdown": "",
+            "activation_type": "passive",
+            "tracker_ref": "psionic-power-psionic-energy",
+            "class_row_id": "class-row-1",
+            "systems_ref": _systems_ref(psionic_power),
+        },
+        {
+            "id": "psionic-power-1-protective-field",
+            "name": "Psionic Power: Protective Field",
+            "category": "subclass_feature",
+            "source": "TCE",
+            "description_markdown": "",
+            "activation_type": "reaction",
+            "class_row_id": "class-row-1",
+        },
+        {
+            "id": "psionic-power-1-psionic-strike",
+            "name": "Psionic Power: Psionic Strike",
+            "category": "subclass_feature",
+            "source": "TCE",
+            "description_markdown": "",
+            "activation_type": "special",
+            "class_row_id": "class-row-1",
+        },
+        {
+            "id": "psionic-power-1-telekinetic-movement",
+            "name": "Psionic Power: Telekinetic Movement",
+            "category": "subclass_feature",
+            "source": "TCE",
+            "description_markdown": "",
+            "activation_type": "action",
+            "class_row_id": "class-row-1",
+        },
+        {
+            "id": "psionic-power-1-recovery",
+            "name": "Psionic Power: Recovery",
+            "category": "subclass_feature",
+            "source": "TCE",
+            "description_markdown": "",
+            "activation_type": "bonus_action",
+            "class_row_id": "class-row-1",
+        },
+    ]
+    current_definition.resource_templates = [
+        {
+            "id": "psionic-power-psionic-energy",
+            "label": "Psionic Power: Psionic Energy",
+            "category": "subclass_feature",
+            "initial_current": 4,
+            "max": 4,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Psionic Power",
+            "display_order": 0,
+            "class_row_id": "class-row-1",
+        }
+    ]
+
+    form_values = {"hp_gain": "8"}
+    level_up_context = build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values)
+    leveled_definition, _, hp_delta = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        level_up_context,
+        form_values,
+    )
+
+    state = build_initial_state(current_definition)
+    state["resources"] = [
+        {
+            "id": "psionic-power-psionic-energy",
+            "label": "Psionic Power: Psionic Energy",
+            "category": "subclass_feature",
+            "current": 1,
+            "max": 4,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Psionic Power",
+            "display_order": 0,
+            "class_row_id": "class-row-1",
+        }
+    ]
+    merged_state = merge_state_with_definition(leveled_definition, state, hp_delta=hp_delta)
+
+    features_by_name = {feature["name"]: feature for feature in leveled_definition.features}
+    resources_by_id = {resource["id"]: resource for resource in leveled_definition.resource_templates}
+    merged_resources = {resource["id"]: resource for resource in merged_state["resources"]}
+
+    assert "Psionic Power: Psionic Energy: 6 / 6 (Long Rest)" in level_up_context["preview"]["resources"]
+    assert features_by_name["Psionic Power: Telekinetic Movement"]["tracker_ref"] == "psionic-power-telekinetic-movement"
+    assert features_by_name["Psionic Power: Recovery"]["tracker_ref"] == "psionic-power-recovery"
+    assert resources_by_id["psionic-power-psionic-energy"]["max"] == 6
+    assert resources_by_id["psionic-power-telekinetic-movement"]["max"] == 1
+    assert resources_by_id["psionic-power-recovery"]["max"] == 1
+    assert merged_resources["psionic-power-psionic-energy"]["current"] == 1
+    assert merged_resources["psionic-power-psionic-energy"]["max"] == 6
+    assert merged_resources["psionic-power-telekinetic-movement"]["current"] == 1
+    assert merged_resources["psionic-power-telekinetic-movement"]["max"] == 1
+    assert merged_resources["psionic-power-recovery"]["current"] == 1
+    assert merged_resources["psionic-power-recovery"]["max"] == 1
+
+
+def test_native_level_up_keeps_psionic_power_scaling_bound_to_each_class_row():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "proficiency": ["str", "con"], "subclass_title": "Martial Archetype"},
+    )
+    rogue = _systems_entry(
+        "class",
+        "phb-class-rogue",
+        "Rogue",
+        metadata={"hit_die": {"faces": 8}, "proficiency": ["dex", "int"]},
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    psi_warrior = _systems_entry(
+        "subclass",
+        "tce-subclass-psi-warrior",
+        "Psi Warrior",
+        metadata={"class_name": "Fighter", "class_source": "PHB"},
+        source_id="TCE",
+    )
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter, rogue],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [psi_warrior],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[],
+    )
+    _set_progressions(systems_service, class_by_slug={fighter.slug: [], rogue.slug: []})
+
+    definition = _minimal_character_definition("psi-split", "Psi Split")
+    definition.profile["classes"] = [
+        {
+            "row_id": "class-row-1",
+            "class_name": "Fighter",
+            "subclass_name": "Psi Warrior",
+            "level": 4,
+            "systems_ref": _systems_ref(fighter),
+            "subclass_ref": _systems_ref(psi_warrior),
+        },
+        {
+            "row_id": "class-row-2",
+            "class_name": "Rogue",
+            "subclass_name": "",
+            "level": 1,
+            "systems_ref": _systems_ref(rogue),
+        },
+    ]
+    definition.profile["class_ref"] = _systems_ref(fighter)
+    definition.profile["subclass_ref"] = _systems_ref(psi_warrior)
+    definition.profile["class_level_text"] = "Fighter 4 / Rogue 1"
+    definition.stats["max_hp"] = 34
+    definition.features = [
+        {
+            "id": "psionic-power-1",
+            "name": "Psionic Power",
+            "category": "subclass_feature",
+            "source": "TCE",
+            "description_markdown": "",
+            "activation_type": "passive",
+            "tracker_ref": "psionic-power-psionic-energy",
+            "class_row_id": "class-row-1",
+        }
+    ]
+    definition.resource_templates = [
+        {
+            "id": "psionic-power-psionic-energy",
+            "label": "Psionic Power: Psionic Energy",
+            "category": "subclass_feature",
+            "initial_current": 4,
+            "max": 4,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Psionic Power",
+            "display_order": 0,
+            "class_row_id": "class-row-1",
+        }
+    ]
+
+    context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        definition,
+        {
+            "advancement_mode": "advance_existing",
+            "target_class_row_id": "class-row-2",
+            "hp_gain": "5",
+        },
+    )
+
+    assert "Psionic Power: Psionic Energy: 4 / 4 (Long Rest)" in context["preview"]["resources"]
+
+    leveled_definition, _, hp_delta = build_native_level_up_character_definition(
+        "linden-pass",
+        definition,
+        context,
+        context["values"],
+    )
+    state = build_initial_state(definition)
+    state["resources"] = [
+        {
+            "id": "psionic-power-psionic-energy",
+            "label": "Psionic Power: Psionic Energy",
+            "category": "subclass_feature",
+            "current": 2,
+            "max": 4,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Psionic Power",
+            "display_order": 0,
+            "class_row_id": "class-row-1",
+        }
+    ]
+    merged_state = merge_state_with_definition(leveled_definition, state, hp_delta=hp_delta)
+    resources_by_id = {resource["id"]: resource for resource in leveled_definition.resource_templates}
+    merged_resources = {resource["id"]: resource for resource in merged_state["resources"]}
+
+    assert [row["level"] for row in leveled_definition.profile["classes"]] == [4, 2]
+    assert resources_by_id["psionic-power-psionic-energy"]["max"] == 4
+    assert merged_resources["psionic-power-psionic-energy"]["current"] == 2
+    assert merged_resources["psionic-power-psionic-energy"]["max"] == 4
 
 
 def test_dm_roster_shows_create_character_link(client, sign_in, users):

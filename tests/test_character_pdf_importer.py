@@ -1795,6 +1795,10 @@ def test_converge_imported_definition_preserves_existing_spell_links_when_duplic
 
 def test_converge_imported_definition_preserves_feature_tracker_identity():
     existing_definition = _minimal_imported_definition(
+        profile={
+            "class_level_text": "Fighter 3",
+            "classes": [{"class_name": "Fighter", "subclass_name": "Psi Warrior", "level": 3}],
+        },
         features=[
             {
                 "id": "psi-power",
@@ -1822,6 +1826,10 @@ def test_converge_imported_definition_preserves_feature_tracker_identity():
         ],
     )
     incoming_definition = _minimal_imported_definition(
+        profile={
+            "class_level_text": "Fighter 5",
+            "classes": [{"class_name": "Fighter", "subclass_name": "Psi Warrior", "level": 5}],
+        },
         features=[
             {
                 "id": "psi-power-new",
@@ -1838,8 +1846,8 @@ def test_converge_imported_definition_preserves_feature_tracker_identity():
                 "id": "psionic-power-energy",
                 "label": "Harbor Energy",
                 "category": "class_feature",
-                "initial_current": 5,
-                "max": 5,
+                "initial_current": 6,
+                "max": 6,
                 "reset_on": "long_rest",
                 "reset_to": "max",
                 "rest_behavior": "confirm_before_reset",
@@ -1857,7 +1865,7 @@ def test_converge_imported_definition_preserves_feature_tracker_identity():
     assert converged.features[0]["id"] == "psi-power"
     assert converged.features[0]["tracker_ref"] == "harbor-energy"
     assert converged.resource_templates[0]["id"] == "harbor-energy"
-    assert converged.resource_templates[0]["max"] == 5
+    assert converged.resource_templates[0]["max"] == 6
 
 
 def test_apply_systems_links_to_definition_merges_alias_equipment_rows_with_quantity():

@@ -1317,6 +1317,15 @@ def _feature_match_keys(payload: dict[str, Any]) -> list[tuple[Any, ...]]:
             _normalize_import_match_text(payload.get("activation_type")),
         )
     )
+    keys.append(
+        (
+            "feature-core",
+            _normalize_import_match_text(payload.get("category")),
+            _normalize_import_match_text(payload.get("name")),
+            _normalize_import_match_text(payload.get("source")),
+            _normalize_import_match_text(payload.get("description_markdown")),
+        )
+    )
     return keys
 
 

@@ -12355,7 +12355,8 @@ def _apply_tracker_templates_to_feature_payloads(
 
     def append_tracker_template(feature_payload: dict[str, Any], tracker_template: dict[str, Any]) -> None:
         nonlocal display_order
-        tracker_id = str(tracker_template.get("id") or "").strip()
+        template_tracker_id = str(tracker_template.get("id") or "").strip()
+        tracker_id = str(feature_payload.get("tracker_ref") or "").strip() or template_tracker_id
         if tracker_id:
             feature_payload["tracker_ref"] = tracker_id
         feature_payload["activation_type"] = str(
@@ -12363,6 +12364,8 @@ def _apply_tracker_templates_to_feature_payloads(
         )
         normalized_tracker = dict(tracker_template)
         normalized_tracker.pop("activation_type", None)
+        if tracker_id:
+            normalized_tracker["id"] = tracker_id
         if str(feature_payload.get("class_row_id") or "").strip():
             normalized_tracker["class_row_id"] = str(feature_payload.get("class_row_id") or "").strip()
         if not tracker_id or tracker_id not in seen_template_ids:
@@ -12396,13 +12399,16 @@ def _apply_tracker_templates_to_feature_payloads(
         for derived_feature_payload, derived_tracker_template in _build_additional_feature_tracker_payloads(
             feature_payload,
             ability_scores=ability_scores,
-            current_level=current_level,
+            current_level=feature_current_level,
             display_order=display_order,
         ):
             feature_identity = _feature_identity_key(derived_feature_payload)
             if feature_identity[0] and feature_identity in seen_feature_identities:
+                if derived_tracker_template is not None:
+                    append_tracker_template(dict(derived_feature_payload), derived_tracker_template)
                 continue
-            append_tracker_template(derived_feature_payload, derived_tracker_template)
+            if derived_tracker_template is not None:
+                append_tracker_template(derived_feature_payload, derived_tracker_template)
             updated_features.append(derived_feature_payload)
             if feature_identity[0]:
                 seen_feature_identities.add(feature_identity)
@@ -12440,8 +12446,112 @@ def _build_additional_feature_tracker_payloads(
     ability_scores: dict[str, int],
     current_level: int,
     display_order: int,
-) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+) -> list[tuple[dict[str, Any], dict[str, Any] | None]]:
     del ability_scores
+    normalized_name = normalize_lookup(str(feature_payload.get("name") or "").strip())
+    feature_id = str(feature_payload.get("id") or slugify(str(feature_payload.get("name") or "feature"))).strip() or "feature"
+    shared_payload = {
+        "category": str(feature_payload.get("category") or "class_feature").strip() or "class_feature",
+        "source": str(feature_payload.get("source") or "").strip(),
+        "systems_ref": dict(feature_payload.get("systems_ref") or {}) or None,
+        "page_ref": str(feature_payload.get("page_ref") or "").strip() or None,
+    }
+    class_row_id = str(feature_payload.get("class_row_id") or "").strip()
+
+    def build_derived_feature(
+        *,
+        suffix: str,
+        name: str,
+        description_markdown: str,
+        activation_type: str,
+    ) -> dict[str, Any]:
+        payload = {
+            "id": f"{feature_id}-{suffix}",
+            "name": name,
+            "category": shared_payload["category"],
+            "source": shared_payload["source"],
+            "description_markdown": description_markdown,
+            "activation_type": activation_type,
+            "tracker_ref": None,
+        }
+        if class_row_id:
+            payload["class_row_id"] = class_row_id
+        if shared_payload["systems_ref"] is not None:
+            payload["systems_ref"] = dict(shared_payload["systems_ref"])
+        if shared_payload["page_ref"]:
+            payload["page_ref"] = shared_payload["page_ref"]
+        return payload
+
+    if normalized_name == normalize_lookup("Psionic Power"):
+        return [
+            (
+                build_derived_feature(
+                    suffix="protective-field",
+                    name="Psionic Power: Protective Field",
+                    description_markdown=(
+                        "Reaction to shield yourself or another creature you can see within 30 feet, "
+                        "reducing the damage taken."
+                    ),
+                    activation_type="reaction",
+                ),
+                None,
+            ),
+            (
+                build_derived_feature(
+                    suffix="psionic-strike",
+                    name="Psionic Power: Psionic Strike",
+                    description_markdown=(
+                        "When you hit a target with a weapon attack, expend one Psionic Energy die "
+                        "to deal extra force damage."
+                    ),
+                    activation_type="special",
+                ),
+                None,
+            ),
+            (
+                build_derived_feature(
+                    suffix="telekinetic-movement",
+                    name="Psionic Power: Telekinetic Movement",
+                    description_markdown="You can move an object or a creature with your mind.",
+                    activation_type="action",
+                ),
+                {
+                    "id": "psionic-power-telekinetic-movement",
+                    "label": "Psionic Power: Telekinetic Movement",
+                    "category": shared_payload["category"],
+                    "initial_current": 1,
+                    "max": 1,
+                    "reset_on": "short_rest",
+                    "reset_to": "max",
+                    "rest_behavior": "confirm_before_reset",
+                    "notes": "Psionic Power: Telekinetic Movement",
+                    "display_order": display_order,
+                    "activation_type": "action",
+                },
+            ),
+            (
+                build_derived_feature(
+                    suffix="recovery",
+                    name="Psionic Power: Recovery",
+                    description_markdown="As a bonus action, you can regain one expended Psionic Energy die.",
+                    activation_type="bonus_action",
+                ),
+                {
+                    "id": "psionic-power-recovery",
+                    "label": "Psionic Power: Recovery",
+                    "category": shared_payload["category"],
+                    "initial_current": 1,
+                    "max": 1,
+                    "reset_on": "short_rest",
+                    "reset_to": "max",
+                    "rest_behavior": "confirm_before_reset",
+                    "notes": "Psionic Power: Recovery",
+                    "display_order": display_order + 1,
+                    "activation_type": "bonus_action",
+                },
+            ),
+        ]
+
     category = normalize_lookup(str(feature_payload.get("category") or "").strip())
     systems_ref = dict(feature_payload.get("systems_ref") or {})
     entry_type = normalize_lookup(str(systems_ref.get("entry_type") or "").strip())
@@ -12454,31 +12564,15 @@ def _build_additional_feature_tracker_payloads(
     }
     if not _feature_has_effect(effect_keys, "Gift of the Chromatic Dragon"):
         return []
-    feature_id = str(feature_payload.get("id") or slugify(str(feature_payload.get("name") or "feat"))).strip() or "feat"
-    shared_payload = {
-        "category": str(feature_payload.get("category") or "feat").strip() or "feat",
-        "source": str(feature_payload.get("source") or "").strip(),
-        "systems_ref": dict(systems_ref) if systems_ref else None,
-        "page_ref": str(feature_payload.get("page_ref") or "").strip() or None,
-    }
-    class_row_id = str(feature_payload.get("class_row_id") or "").strip()
-    derived_payloads: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    shared_payload["category"] = str(feature_payload.get("category") or "feat").strip() or "feat"
+    derived_payloads: list[tuple[dict[str, Any], dict[str, Any] | None]] = []
 
-    chromatic_infusion_feature = {
-        "id": f"{feature_id}-chromatic-infusion",
-        "name": "Gift of the Chromatic Dragon: Chromatic Infusion",
-        "category": shared_payload["category"],
-        "source": shared_payload["source"],
-        "description_markdown": "Bonus action to infuse a simple or martial weapon for 1 minute; once per long rest.",
-        "activation_type": "bonus_action",
-        "tracker_ref": None,
-    }
-    if class_row_id:
-        chromatic_infusion_feature["class_row_id"] = class_row_id
-    if shared_payload["systems_ref"] is not None:
-        chromatic_infusion_feature["systems_ref"] = shared_payload["systems_ref"]
-    if shared_payload["page_ref"]:
-        chromatic_infusion_feature["page_ref"] = shared_payload["page_ref"]
+    chromatic_infusion_feature = build_derived_feature(
+        suffix="chromatic-infusion",
+        name="Gift of the Chromatic Dragon: Chromatic Infusion",
+        description_markdown="Bonus action to infuse a simple or martial weapon for 1 minute; once per long rest.",
+        activation_type="bonus_action",
+    )
     derived_payloads.append(
         (
             chromatic_infusion_feature,
@@ -12499,24 +12593,15 @@ def _build_additional_feature_tracker_payloads(
     )
 
     reactive_resistance_uses = _proficiency_bonus_for_level(current_level)
-    reactive_resistance_feature = {
-        "id": f"{feature_id}-reactive-resistance",
-        "name": "Gift of the Chromatic Dragon: Reactive Resistance",
-        "category": shared_payload["category"],
-        "source": shared_payload["source"],
-        "description_markdown": (
+    reactive_resistance_feature = build_derived_feature(
+        suffix="reactive-resistance",
+        name="Gift of the Chromatic Dragon: Reactive Resistance",
+        description_markdown=(
             "Reaction to gain resistance against acid, cold, fire, lightning, or poison damage; "
             "uses equal to proficiency bonus per long rest."
         ),
-        "activation_type": "reaction",
-        "tracker_ref": None,
-    }
-    if class_row_id:
-        reactive_resistance_feature["class_row_id"] = class_row_id
-    if shared_payload["systems_ref"] is not None:
-        reactive_resistance_feature["systems_ref"] = shared_payload["systems_ref"]
-    if shared_payload["page_ref"]:
-        reactive_resistance_feature["page_ref"] = shared_payload["page_ref"]
+        activation_type="reaction",
+    )
     derived_payloads.append(
         (
             reactive_resistance_feature,
@@ -17068,6 +17153,63 @@ def _build_feature_tracker_template(
             "notes": "Arcane Shot",
             "display_order": display_order,
             "activation_type": "special",
+        }
+    if normalized == normalize_lookup("Chronal Shift"):
+        return {
+            "id": "chronal-shift",
+            "label": "Chronal Shift",
+            "category": "subclass_feature",
+            "initial_current": 2,
+            "max": 2,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Chronal Shift",
+            "display_order": display_order,
+            "activation_type": "reaction",
+        }
+    if normalized == normalize_lookup("Psionic Power"):
+        points = _proficiency_bonus_for_level(current_level) * 2
+        return {
+            "id": "psionic-power-psionic-energy",
+            "label": "Psionic Power: Psionic Energy",
+            "category": "subclass_feature",
+            "initial_current": points,
+            "max": points,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Psionic Power",
+            "display_order": display_order,
+            "activation_type": "passive",
+        }
+    if normalized == normalize_lookup("Psionic Power: Telekinetic Movement"):
+        return {
+            "id": "psionic-power-telekinetic-movement",
+            "label": "Psionic Power: Telekinetic Movement",
+            "category": "subclass_feature",
+            "initial_current": 1,
+            "max": 1,
+            "reset_on": "short_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Psionic Power: Telekinetic Movement",
+            "display_order": display_order,
+            "activation_type": "action",
+        }
+    if normalized == normalize_lookup("Psionic Power: Recovery"):
+        return {
+            "id": "psionic-power-recovery",
+            "label": "Psionic Power: Recovery",
+            "category": "subclass_feature",
+            "initial_current": 1,
+            "max": 1,
+            "reset_on": "short_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Psionic Power: Recovery",
+            "display_order": display_order,
+            "activation_type": "bonus_action",
         }
     if normalized == normalize_lookup("Ki"):
         points = max(current_level, 2)
