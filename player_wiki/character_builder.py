@@ -29,12 +29,12 @@ from .character_profile import (
     profile_total_level,
     sync_profile_class_summary,
 )
+from .character_source_matrix import DEFAULT_NATIVE_SOURCE_MATRIX_POLICY, PHB_SOURCE_ID
 from .managed_resource_registry import resolve_managed_resource_family_and_member
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-04-11.01"
-PHB_SOURCE_ID = "PHB"
+CHARACTER_BUILDER_VERSION = "2026-04-11.02"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
 NATIVE_LEVEL_UP_READY = "ready"
@@ -48,8 +48,6 @@ PROFILE_ENTRY_MATCH_SYSTEMS_SOURCE_TITLE = "systems_source_title"
 PROFILE_ENTRY_MATCH_FALLBACK_TITLE = "fallback_title"
 PROFILE_ENTRY_MATCH_UNRESOLVED_SOURCE_LOCKED = "unresolved_source_locked"
 PROFILE_ENTRY_MATCH_UNRESOLVED = "unresolved"
-TCE_FIRST_NATIVE_CLASS_KEYS = frozenset({("TCE", "artificer")})
-NATIVE_SOURCE_MATRIX_NON_PHB_SOURCE_IDS = frozenset({"TCE", "SCAG", "XGE", "EGW"})
 NATIVE_SOURCE_MATRIX_SUBCLASS_ENTRY_TYPES = frozenset({"subclass", "subclassfeature"})
 IMPORTED_CHARACTER_SOURCE_TYPES = frozenset({"markdown_character_sheet", "pdf_character_sheet_annotations"})
 CAMPAIGN_FEATURE_CHOICE_SLOTS = 2
@@ -3130,8 +3128,7 @@ def _native_entry_type(entry: SystemsEntryRecord | None) -> str:
 
 
 def _native_source_matrix_label(source_id: str) -> str:
-    normalized_source_id = str(source_id or "").strip().upper()
-    return normalized_source_id or "non-PHB"
+    return DEFAULT_NATIVE_SOURCE_MATRIX_POLICY.source_label(source_id)
 
 
 def _native_base_class_identity_supported(
@@ -3139,13 +3136,10 @@ def _native_base_class_identity_supported(
     class_name: str,
     class_source: str,
 ) -> bool:
-    normalized_class_name = normalize_lookup(str(class_name or "").strip())
-    normalized_class_source = str(class_source or "").strip().upper()
-    if not normalized_class_name or not normalized_class_source:
-        return False
-    if normalized_class_source == PHB_SOURCE_ID:
-        return True
-    return (normalized_class_source, normalized_class_name) in TCE_FIRST_NATIVE_CLASS_KEYS
+    return DEFAULT_NATIVE_SOURCE_MATRIX_POLICY.supports_base_class_identity(
+        class_name=class_name,
+        class_source=class_source,
+    )
 
 
 def _native_non_phb_class_support_policy(entry: SystemsEntryRecord | None) -> dict[str, str]:
@@ -3159,8 +3153,7 @@ def _native_non_phb_class_support_policy(entry: SystemsEntryRecord | None) -> di
     if source_id == PHB_SOURCE_ID:
         return {"status": NATIVE_CLASS_SUPPORT_SUPPORTED, "reason": ""}
 
-    normalized_title = normalize_lookup(str(entry.title or "").strip())
-    if (source_id, normalized_title) in TCE_FIRST_NATIVE_CLASS_KEYS:
+    if _native_base_class_identity_supported(class_name=str(entry.title or "").strip(), class_source=source_id):
         return {"status": NATIVE_CLASS_SUPPORT_SUPPORTED, "reason": ""}
 
     return {
@@ -3182,7 +3175,7 @@ def _native_subclass_support_policy(
 
     source_id = str(entry.source_id or "").strip().upper()
     source_label = _native_source_matrix_label(source_id)
-    if source_id and source_id not in ({PHB_SOURCE_ID} | NATIVE_SOURCE_MATRIX_NON_PHB_SOURCE_IDS):
+    if source_id and not DEFAULT_NATIVE_SOURCE_MATRIX_POLICY.supports_subclass_source(source_id):
         return {
             "status": NATIVE_CLASS_SUPPORT_BLOCKED,
             "reason": f"This {source_label} subclass is outside the current native source matrix.",
@@ -3917,7 +3910,7 @@ def _profile_link_source_prefix(
     entry: Any = None,
 ) -> str:
     source_id = _systems_ref_source_id(systems_ref) or str(_entry_option_source_id(entry) or "").strip().upper()
-    if source_id not in NATIVE_SOURCE_MATRIX_NON_PHB_SOURCE_IDS:
+    if not DEFAULT_NATIVE_SOURCE_MATRIX_POLICY.should_prefix_profile_link_source(source_id):
         return ""
     return f"{source_id} "
 
