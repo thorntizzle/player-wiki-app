@@ -2989,6 +2989,68 @@ def test_quick_reference_hides_shield_master_helper_row_until_shield_is_equipped
     assert "Bonus action after taking the Attack action; Shield Master shove within 5 feet." not in html
 
 
+def test_quick_reference_renders_shared_defensive_rules_section(app, client, sign_in, users):
+    def _mutate(payload: dict) -> None:
+        stats = dict(payload.get("stats") or {})
+        stats["defensive_state"] = {
+            "armor_state": {
+                "wearing_shield": True,
+                "shield_bonus": 2,
+                "equipped_armor_categories": ["heavy"],
+                "stealth_disadvantage": True,
+                "stealth_disadvantage_suppressed": False,
+            },
+            "rules": [
+                {
+                    "title": "Heavy Armor Master",
+                    "active": True,
+                    "condition": "Applies only while wearing heavy armor.",
+                    "effects": [
+                        {
+                            "kind": "damage_mitigation",
+                            "label": "Mitigation",
+                            "summary": "Reduce nonmagical bludgeoning, piercing, and slashing damage from weapons by 3.",
+                        }
+                    ],
+                },
+                {
+                    "title": "Shield Master",
+                    "active": True,
+                    "condition": "Applies only while a shield is equipped and you are not incapacitated.",
+                    "effects": [
+                        {
+                            "kind": "saving_throw",
+                            "label": "Dex saves",
+                            "summary": "Add +2 to Dexterity saves against spells or other harmful effects that target only you.",
+                        },
+                        {
+                            "kind": "reaction",
+                            "label": "Reaction",
+                            "summary": "If an effect lets you make a Dexterity save for half damage, you can use your reaction to take no damage on a success.",
+                        },
+                    ],
+                },
+            ],
+        }
+        payload["stats"] = stats
+
+    _write_character_definition(app, "arden-march", _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=quick")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+
+    assert "Defensive rules" in html
+    assert "Heavy Armor Master" in html
+    assert "Mitigation:</strong> Reduce nonmagical bludgeoning, piercing, and slashing damage from weapons by 3." in html
+    assert "Shield Master" in html
+    assert "Dex saves:</strong> Add +2 to Dexterity saves against spells or other harmful effects that target only you." in html
+    assert "Reaction:</strong> If an effect lets you make a Dexterity save for half damage, you can use your reaction to take no damage on a success." in html
+    assert html.count(">Active<") >= 2
+
+
 def test_character_sheet_renders_systems_links_when_present(app, client, sign_in, users):
     def _mutate(payload: dict) -> None:
         profile = dict(payload.get("profile") or {})

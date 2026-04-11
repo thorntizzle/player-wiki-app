@@ -125,6 +125,33 @@
         </section>
       {% endif %}
 
+      {% if show_quick_sections and character.defensive_rules %}
+        <section class="read-section">
+          <div class="section-heading">
+            <h2>Defensive rules</h2>
+          </div>
+          <div class="detail-grid">
+            {% for rule in character.defensive_rules %}
+              <article class="detail-card">
+                <div class="section-heading">
+                  <h3>{{ rule.title }}</h3>
+                  <span class="meta">{{ rule.status_label }}</span>
+                </div>
+                {% for effect in rule.effects %}
+                  <p><strong>{{ effect.label }}:</strong> {{ effect.summary }}</p>
+                {% endfor %}
+                {% if rule.condition %}
+                  <p class="meta">{{ rule.condition }}</p>
+                {% endif %}
+                {% if not rule.is_active and rule.inactive_reason %}
+                  <p class="meta">{{ rule.inactive_reason }}</p>
+                {% endif %}
+              </article>
+            {% endfor %}
+          </div>
+        </section>
+      {% endif %}
+
       {% if is_session_mode %}
         {% include "_character_session_panels.html" %}
       {% endif %}

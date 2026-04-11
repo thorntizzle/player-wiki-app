@@ -7297,6 +7297,91 @@ def test_normalize_definition_to_native_model_applies_medium_armor_master_title_
     normalized = normalize_definition_to_native_model(definition)
 
     assert normalized.stats["armor_class"] == 17
+    defensive_state = dict(normalized.stats.get("defensive_state") or {})
+    assert dict(defensive_state.get("armor_state") or {}).get("stealth_disadvantage") is False
+    assert dict(defensive_state.get("armor_state") or {}).get("stealth_disadvantage_suppressed") is True
+    medium_armor_master_rule = next(rule for rule in list(defensive_state.get("rules") or []) if rule["title"] == "Medium Armor Master")
+    assert medium_armor_master_rule["active"] is True
+    assert medium_armor_master_rule["effects"][0]["kind"] == "armor_state"
+
+
+def test_normalize_definition_to_native_model_derives_heavy_armor_master_and_shield_master_defensive_rules():
+    definition = _minimal_character_definition("shield-wall", "Shield Wall")
+    definition.features = [
+        {
+            "id": "heavy-armor-master-1",
+            "name": "Heavy Armor Master",
+            "category": "feat",
+            "source": "PHB",
+            "description_markdown": "",
+            "systems_ref": {
+                "entry_type": "feat",
+                "slug": "phb-feat-heavy-armor-master",
+                "title": "Heavy Armor Master",
+                "source_id": "PHB",
+            },
+        },
+        {
+            "id": "shield-master-1",
+            "name": "Shield Master",
+            "category": "feat",
+            "source": "PHB",
+            "description_markdown": "",
+            "systems_ref": {
+                "entry_type": "feat",
+                "slug": "phb-feat-shield-master",
+                "title": "Shield Master",
+                "source_id": "PHB",
+            },
+        },
+    ]
+    definition.equipment_catalog = [
+        {
+            "id": "chain-mail-1",
+            "name": "Chain Mail",
+            "default_quantity": 1,
+            "weight": "55 lb.",
+            "notes": "",
+            "is_equipped": True,
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-chain-mail",
+                "title": "Chain Mail",
+                "source_id": "PHB",
+            },
+        },
+        {
+            "id": "shield-1",
+            "name": "Shield",
+            "default_quantity": 1,
+            "weight": "6 lb.",
+            "notes": "",
+            "is_equipped": True,
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-shield",
+                "title": "Shield",
+                "source_id": "PHB",
+            },
+        },
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+
+    defensive_state = dict(normalized.stats.get("defensive_state") or {})
+    armor_state = dict(defensive_state.get("armor_state") or {})
+    rules_by_title = {rule["title"]: rule for rule in list(defensive_state.get("rules") or [])}
+
+    assert armor_state["wearing_shield"] is True
+    assert armor_state["shield_bonus"] == 2
+    assert "heavy" in armor_state["equipped_armor_categories"]
+    assert rules_by_title["Heavy Armor Master"]["active"] is True
+    assert rules_by_title["Heavy Armor Master"]["effects"][0]["kind"] == "damage_mitigation"
+    assert rules_by_title["Shield Master"]["active"] is True
+    assert rules_by_title["Shield Master"]["effects"][0]["summary"].startswith(
+        "Add +2 to Dexterity saves"
+    )
+    assert rules_by_title["Shield Master"]["effects"][1]["kind"] == "reaction"
 
 
 def test_normalize_definition_to_native_model_preserves_imported_armor_class_when_only_shield_is_known():
@@ -10142,6 +10227,8 @@ def test_level_one_builder_applies_medium_armor_master_to_starting_medium_armor(
     definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
 
     assert definition.stats["armor_class"] == 17
+    defensive_state = dict(definition.stats.get("defensive_state") or {})
+    assert dict(defensive_state.get("armor_state") or {}).get("stealth_disadvantage_suppressed") is True
 
 
 def test_level_one_builder_applies_dueling_damage_bonus_to_one_handed_melee_weapon():
@@ -11004,6 +11091,8 @@ def test_level_one_builder_adds_shield_master_helper_row():
     definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
     shield_id = next(item["id"] for item in definition.equipment_catalog if item["name"] == "Shield")
     shield_shove = next(attack for attack in definition.attacks if attack["name"] == "Shield Shove")
+    defensive_state = dict(definition.stats.get("defensive_state") or {})
+    shield_master_rule = next(rule for rule in list(defensive_state.get("rules") or []) if rule["title"] == "Shield Master")
 
     assert "Shield Shove (special action)" in context["preview"]["attacks"]
     assert shield_shove["attack_bonus"] is None
@@ -11011,6 +11100,8 @@ def test_level_one_builder_adds_shield_master_helper_row():
     assert shield_shove["notes"] == "Bonus action after taking the Attack action; Shield Master shove within 5 feet."
     assert shield_shove["mode_key"] == "feat:phb-feat-shield-master:shove"
     assert shield_shove["equipment_refs"] == [shield_id]
+    assert shield_master_rule["active"] is True
+    assert shield_master_rule["effects"][0]["summary"].startswith("Add +2 to Dexterity saves")
 
 
 def test_level_one_builder_populates_starting_equipment_spells_and_currency():
@@ -20380,6 +20471,8 @@ def test_native_level_up_applies_medium_armor_master_to_equipped_medium_armor():
 
     assert "Medium Armor Master" in level_up_context["preview"]["gained_features"]
     assert leveled_definition.stats["armor_class"] == 17
+    defensive_state = dict(leveled_definition.stats.get("defensive_state") or {})
+    assert dict(defensive_state.get("armor_state") or {}).get("stealth_disadvantage_suppressed") is True
 
 
 def test_native_level_up_applies_fighting_initiate_optionalfeature_choice_to_attacks():

@@ -5043,7 +5043,7 @@ def _infer_attack_mode_key_from_payload(payload: dict[str, Any]) -> str:
     )
 
 
-def _extract_attack_feature_slugs(features: list[dict[str, Any]] | None) -> set[str]:
+def _extract_feature_slugs(features: list[dict[str, Any]] | None) -> set[str]:
     slugs: set[str] = set()
     for feature in list(features or []):
         systems_ref = dict(feature.get("systems_ref") or {})
@@ -5054,7 +5054,7 @@ def _extract_attack_feature_slugs(features: list[dict[str, Any]] | None) -> set[
 
 
 def _collect_attack_support_flags(features: list[dict[str, Any]] | None) -> dict[str, bool]:
-    feature_slugs = _extract_attack_feature_slugs(features)
+    feature_slugs = _extract_feature_slugs(features)
     effect_keys = {
         normalize_lookup(str(value or "").strip())
         for value in _extract_character_effect_keys(features)
@@ -5080,6 +5080,27 @@ def _collect_attack_support_flags(features: list[dict[str, Any]] | None) -> dict
         "sharpshooter": has_slug("phb-feat-sharpshooter") or has_effect("Sharpshooter"),
         "shield_master": has_slug("phb-feat-shield-master") or has_effect("Shield Master"),
         "tavern_brawler": has_slug("phb-feat-tavern-brawler", "xphb-feat-tavern-brawler") or has_effect("Tavern Brawler"),
+    }
+
+
+def _collect_defensive_support_flags(features: list[dict[str, Any]] | None) -> dict[str, bool]:
+    feature_slugs = _extract_feature_slugs(features)
+    effect_keys = {
+        normalize_lookup(str(value or "").strip())
+        for value in _extract_character_effect_keys(features)
+        if str(value or "").strip()
+    }
+
+    def has_slug(*raw_slugs: str) -> bool:
+        return any(normalize_lookup(raw_slug) in feature_slugs for raw_slug in raw_slugs if str(raw_slug or "").strip())
+
+    def has_effect(*raw_effects: str) -> bool:
+        return any(normalize_lookup(raw_effect) in effect_keys for raw_effect in raw_effects if str(raw_effect or "").strip())
+
+    return {
+        "heavy_armor_master": has_slug("phb-feat-heavy-armor-master") or has_effect("Heavy Armor Master"),
+        "medium_armor_master": has_slug("phb-feat-medium-armor-master") or has_effect("Medium Armor Master"),
+        "shield_master": has_slug("phb-feat-shield-master") or has_effect("Shield Master"),
     }
 
 
@@ -5260,6 +5281,11 @@ def _derive_definition_stats(
     )
     if derived_armor_class is not None:
         stats["armor_class"] = derived_armor_class
+    stats["defensive_state"] = _derive_defensive_state_from_character_inputs(
+        equipment_catalog=list(definition.equipment_catalog or []),
+        features=features,
+        item_catalog=item_catalog,
+    )
     derived_speed = ""
     if selected_species is not None:
         derived_speed = _apply_speed_bonus_to_label(
@@ -9269,6 +9295,19 @@ def _resolve_armor_profile(
     return None
 
 
+def _equipped_armor_profiles(
+    equipment_catalog: list[dict[str, Any]],
+    *,
+    item_catalog: dict[str, Any] | None = None,
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    return [
+        (dict(item or {}), profile)
+        for item in list(equipment_catalog or [])
+        if bool(dict(item or {}).get("is_equipped"))
+        if (profile := _resolve_armor_profile(dict(item or {}), item_catalog)) is not None
+    ]
+
+
 def _character_profile_class_names(
     definition: CharacterDefinition,
     *,
@@ -9340,11 +9379,7 @@ def _derive_armor_class_from_character_inputs(
 
     all_items = [dict(item or {}) for item in list(equipment_catalog or [])]
     equipped_items = [item for item in all_items if bool(item.get("is_equipped"))]
-    equipped_armor_profiles = [
-        (item, profile)
-        for item in equipped_items
-        if (profile := _resolve_armor_profile(item, item_catalog)) is not None
-    ]
+    equipped_armor_profiles = _equipped_armor_profiles(equipment_catalog, item_catalog=item_catalog)
     if allow_plain_unarmored_base:
         armor_items = equipped_items
     else:
@@ -9409,6 +9444,135 @@ def _derive_armor_class_from_character_inputs(
     return max(candidate_values)
 
 
+def _derive_defensive_state_from_character_inputs(
+    *,
+    equipment_catalog: list[dict[str, Any]],
+    features: list[dict[str, Any]] | None,
+    item_catalog: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    support_flags = _collect_defensive_support_flags(features)
+    equipped_profiles = _equipped_armor_profiles(equipment_catalog, item_catalog=item_catalog)
+    armor_profiles = [
+        (item, profile)
+        for item, profile in equipped_profiles
+        if not bool(profile.get("is_shield"))
+    ]
+    shield_profiles = [
+        (item, profile)
+        for item, profile in equipped_profiles
+        if bool(profile.get("is_shield"))
+    ]
+    shield_bonus = max(
+        (
+            int(profile.get("base_ac") or 0) + int(profile.get("bonus_ac") or 0)
+            for _, profile in shield_profiles
+        ),
+        default=0,
+    )
+    raw_stealth_disadvantage = any(bool(profile.get("stealth_disadvantage")) for _, profile in armor_profiles)
+    stealth_disadvantage = any(
+        bool(profile.get("stealth_disadvantage"))
+        and not (
+            support_flags.get("medium_armor_master")
+            and str(profile.get("armor_category") or "").strip().lower() == "medium"
+        )
+        for _, profile in armor_profiles
+    )
+    armor_state = {
+        "equipped_armor_names": [
+            str(item.get("name") or profile.get("title") or "").strip()
+            for item, profile in armor_profiles
+            if str(item.get("name") or profile.get("title") or "").strip()
+        ],
+        "equipped_armor_categories": _dedupe_preserve_order(
+            [
+                str(profile.get("armor_category") or "").strip().lower()
+                for _, profile in armor_profiles
+                if str(profile.get("armor_category") or "").strip()
+            ]
+        ),
+        "shield_names": [
+            str(item.get("name") or profile.get("title") or "").strip()
+            for item, profile in shield_profiles
+            if str(item.get("name") or profile.get("title") or "").strip()
+        ],
+        "wearing_shield": bool(shield_profiles),
+        "shield_bonus": shield_bonus,
+        "stealth_disadvantage": stealth_disadvantage,
+        "stealth_disadvantage_suppressed": raw_stealth_disadvantage and not stealth_disadvantage,
+    }
+    rules: list[dict[str, Any]] = []
+    if support_flags.get("medium_armor_master"):
+        active = "medium" in set(armor_state.get("equipped_armor_categories") or [])
+        rules.append(
+            {
+                "id": "feat:phb-feat-medium-armor-master",
+                "title": "Medium Armor Master",
+                "active": active,
+                "condition": "Applies only while wearing medium armor.",
+                "inactive_reason": "" if active else "Equip medium armor to activate this defensive rule.",
+                "effects": [
+                    {
+                        "kind": "armor_state",
+                        "label": "Armor state",
+                        "summary": "Medium armor can add up to +3 Dexterity to Armor Class and does not impose Stealth disadvantage.",
+                    }
+                ],
+            }
+        )
+    if support_flags.get("heavy_armor_master"):
+        active = "heavy" in set(armor_state.get("equipped_armor_categories") or [])
+        rules.append(
+            {
+                "id": "feat:phb-feat-heavy-armor-master",
+                "title": "Heavy Armor Master",
+                "active": active,
+                "condition": "Applies only while wearing heavy armor.",
+                "inactive_reason": "" if active else "Equip heavy armor to activate this defensive rule.",
+                "effects": [
+                    {
+                        "kind": "damage_mitigation",
+                        "label": "Mitigation",
+                        "summary": "Reduce nonmagical bludgeoning, piercing, and slashing damage from weapons by 3.",
+                    }
+                ],
+            }
+        )
+    if support_flags.get("shield_master"):
+        active = bool(armor_state.get("wearing_shield"))
+        shield_bonus_value = int(armor_state.get("shield_bonus") or 0)
+        shield_bonus_text = (
+            f"{shield_bonus_value:+d}"
+            if shield_bonus_value
+            else "your shield's AC bonus"
+        )
+        rules.append(
+            {
+                "id": "feat:phb-feat-shield-master",
+                "title": "Shield Master",
+                "active": active,
+                "condition": "Applies only while a shield is equipped and you are not incapacitated.",
+                "inactive_reason": "" if active else "Equip a shield to activate these defensive rules.",
+                "effects": [
+                    {
+                        "kind": "saving_throw",
+                        "label": "Dex saves",
+                        "summary": f"Add {shield_bonus_text} to Dexterity saves against spells or other harmful effects that target only you.",
+                    },
+                    {
+                        "kind": "reaction",
+                        "label": "Reaction",
+                        "summary": "If an effect lets you make a Dexterity save for half damage, you can use your reaction to take no damage on a success.",
+                    },
+                ],
+            }
+        )
+    return {
+        "armor_state": armor_state,
+        "rules": rules,
+    }
+
+
 def _recalculate_definition_armor_class(
     definition: CharacterDefinition,
     *,
@@ -9432,9 +9596,13 @@ def _recalculate_definition_armor_class(
         item_catalog=item_catalog or {},
         allow_plain_unarmored_base=_character_source_type(definition) == "native_character_builder",
     )
-    if derived_armor_class is None:
-        return dict(definition.stats or {})
-    stats["armor_class"] = derived_armor_class
+    if derived_armor_class is not None:
+        stats["armor_class"] = derived_armor_class
+    stats["defensive_state"] = _derive_defensive_state_from_character_inputs(
+        equipment_catalog=list(definition.equipment_catalog or []),
+        features=list(definition.features or []),
+        item_catalog=item_catalog or {},
+    )
     stats = apply_stat_adjustments(stats, campaign_option_adjustments)
     return apply_manual_stat_adjustments(stats, manual_adjustments)
 
@@ -12784,6 +12952,11 @@ def _build_level_one_stats(
             }
             for ability_key, score in ability_scores.items()
         },
+        "defensive_state": _derive_defensive_state_from_character_inputs(
+            equipment_catalog=equipment_catalog or [],
+            features=features or [],
+            item_catalog=item_catalog or {},
+        ),
     }
     stats.update(
         _derive_carrying_capacity_stats(
@@ -12951,6 +13124,11 @@ def _build_leveled_stats(
         ),
         item_catalog=item_catalog or {},
         allow_plain_unarmored_base=True,
+    )
+    stats["defensive_state"] = _derive_defensive_state_from_character_inputs(
+        equipment_catalog=equipment_catalog or list(current_definition.equipment_catalog or []),
+        features=features or list(current_definition.features or []),
+        item_catalog=item_catalog or {},
     )
     stats["initiative_bonus"] = _ability_modifier(ability_scores["dex"]) + _feat_initiative_bonus(feat_selections)
     stats["speed"] = _apply_speed_bonus_to_label(str(stats.get("speed") or ""), _feat_speed_bonus(feat_selections))

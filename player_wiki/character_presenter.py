@@ -157,6 +157,35 @@ def present_character_detail(
                 "value": _format_weight_value(stats.get("push_drag_lift")) or "--",
             }
         )
+    defensive_state = dict(stats.get("defensive_state") or {})
+    defensive_rules = []
+    for rule in list(defensive_state.get("rules") or []):
+        rule_payload = dict(rule or {})
+        effects = []
+        for effect in list(rule_payload.get("effects") or []):
+            effect_payload = dict(effect or {})
+            summary = str(effect_payload.get("summary") or "").strip()
+            if not summary:
+                continue
+            effects.append(
+                {
+                    "kind": str(effect_payload.get("kind") or "").strip(),
+                    "label": str(effect_payload.get("label") or "Rule").strip() or "Rule",
+                    "summary": summary,
+                }
+            )
+        if not effects:
+            continue
+        defensive_rules.append(
+            {
+                "title": str(rule_payload.get("title") or "Defensive rule").strip() or "Defensive rule",
+                "is_active": bool(rule_payload.get("active")),
+                "status_label": "Active" if bool(rule_payload.get("active")) else "Inactive",
+                "condition": str(rule_payload.get("condition") or "").strip(),
+                "inactive_reason": str(rule_payload.get("inactive_reason") or "").strip(),
+                "effects": effects,
+            }
+        )
 
     death_saves = dict(vitals.get("death_saves") or {})
     death_save_summary = None
@@ -667,6 +696,7 @@ def present_character_detail(
             {"label": "Experience", "value": str(profile.get("experience_model") or "").strip()},
         ],
         "overview_stats": overview_stats,
+        "defensive_rules": defensive_rules,
         "death_save_summary": death_save_summary,
         "abilities": abilities,
         "skills": skills,
