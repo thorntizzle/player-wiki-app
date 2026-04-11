@@ -11736,6 +11736,13 @@ def _build_feature_payloads(
     )
 
 
+def _feature_identity_key(feature: dict[str, Any]) -> tuple[str, str]:
+    return (
+        normalize_lookup(str(feature.get("name") or "").strip()),
+        str(feature.get("class_row_id") or "").strip(),
+    )
+
+
 def _resolve_choice_label(
     choice_sections: list[dict[str, Any]],
     group_key: str,
@@ -12335,7 +12342,30 @@ def _apply_tracker_templates_to_feature_payloads(
     updated_features: list[dict[str, Any]] = []
     resource_templates: list[dict[str, Any]] = []
     seen_template_ids: set[str] = set()
+    seen_feature_identities = {
+        feature_identity
+        for feature_identity in (_feature_identity_key(feature) for feature in list(features or []))
+        if feature_identity[0]
+    }
     display_order = 0
+
+    def append_tracker_template(feature_payload: dict[str, Any], tracker_template: dict[str, Any]) -> None:
+        nonlocal display_order
+        tracker_id = str(tracker_template.get("id") or "").strip()
+        if tracker_id:
+            feature_payload["tracker_ref"] = tracker_id
+        feature_payload["activation_type"] = str(
+            tracker_template.get("activation_type") or feature_payload.get("activation_type") or "passive"
+        )
+        normalized_tracker = dict(tracker_template)
+        normalized_tracker.pop("activation_type", None)
+        if str(feature_payload.get("class_row_id") or "").strip():
+            normalized_tracker["class_row_id"] = str(feature_payload.get("class_row_id") or "").strip()
+        if not tracker_id or tracker_id not in seen_template_ids:
+            resource_templates.append(normalized_tracker)
+            if tracker_id:
+                seen_template_ids.add(tracker_id)
+            display_order += 1
 
     for feature in features:
         feature_payload = dict(feature)
@@ -12352,24 +12382,127 @@ def _apply_tracker_templates_to_feature_payloads(
                 display_order=display_order,
             )
         if tracker_template is not None:
-            tracker_id = str(tracker_template.get("id") or "").strip()
-            if tracker_id:
-                feature_payload["tracker_ref"] = tracker_id
-            feature_payload["activation_type"] = str(
-                tracker_template.get("activation_type") or feature_payload.get("activation_type") or "passive"
-            )
-            normalized_tracker = dict(tracker_template)
-            normalized_tracker.pop("activation_type", None)
-            if str(feature_payload.get("class_row_id") or "").strip():
-                normalized_tracker["class_row_id"] = str(feature_payload.get("class_row_id") or "").strip()
-            if not tracker_id or tracker_id not in seen_template_ids:
-                resource_templates.append(normalized_tracker)
-                if tracker_id:
-                    seen_template_ids.add(tracker_id)
-                display_order += 1
+            append_tracker_template(feature_payload, tracker_template)
         updated_features.append(feature_payload)
+        for derived_feature_payload, derived_tracker_template in _build_additional_feature_tracker_payloads(
+            feature_payload,
+            ability_scores=ability_scores,
+            current_level=current_level,
+            display_order=display_order,
+        ):
+            feature_identity = _feature_identity_key(derived_feature_payload)
+            if feature_identity[0] and feature_identity in seen_feature_identities:
+                continue
+            append_tracker_template(derived_feature_payload, derived_tracker_template)
+            updated_features.append(derived_feature_payload)
+            if feature_identity[0]:
+                seen_feature_identities.add(feature_identity)
 
     return updated_features, resource_templates
+
+
+def _build_additional_feature_tracker_payloads(
+    feature_payload: dict[str, Any],
+    *,
+    ability_scores: dict[str, int],
+    current_level: int,
+    display_order: int,
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    del ability_scores
+    category = normalize_lookup(str(feature_payload.get("category") or "").strip())
+    systems_ref = dict(feature_payload.get("systems_ref") or {})
+    entry_type = normalize_lookup(str(systems_ref.get("entry_type") or "").strip())
+    if category != normalize_lookup("feat") and entry_type != normalize_lookup("feat"):
+        return []
+    effect_keys = {
+        normalize_lookup(value)
+        for value in _feat_effect_keys_for_feature(feature_payload)
+        if str(value or "").strip()
+    }
+    if not _feature_has_effect(effect_keys, "Gift of the Chromatic Dragon"):
+        return []
+    feature_id = str(feature_payload.get("id") or slugify(str(feature_payload.get("name") or "feat"))).strip() or "feat"
+    shared_payload = {
+        "category": str(feature_payload.get("category") or "feat").strip() or "feat",
+        "source": str(feature_payload.get("source") or "").strip(),
+        "systems_ref": dict(systems_ref) if systems_ref else None,
+        "page_ref": str(feature_payload.get("page_ref") or "").strip() or None,
+    }
+    class_row_id = str(feature_payload.get("class_row_id") or "").strip()
+    derived_payloads: list[tuple[dict[str, Any], dict[str, Any]]] = []
+
+    chromatic_infusion_feature = {
+        "id": f"{feature_id}-chromatic-infusion",
+        "name": "Gift of the Chromatic Dragon: Chromatic Infusion",
+        "category": shared_payload["category"],
+        "source": shared_payload["source"],
+        "description_markdown": "Bonus action to infuse a simple or martial weapon for 1 minute; once per long rest.",
+        "activation_type": "bonus_action",
+        "tracker_ref": None,
+    }
+    if class_row_id:
+        chromatic_infusion_feature["class_row_id"] = class_row_id
+    if shared_payload["systems_ref"] is not None:
+        chromatic_infusion_feature["systems_ref"] = shared_payload["systems_ref"]
+    if shared_payload["page_ref"]:
+        chromatic_infusion_feature["page_ref"] = shared_payload["page_ref"]
+    derived_payloads.append(
+        (
+            chromatic_infusion_feature,
+            {
+                "id": "chromatic-infusion",
+                "label": "Chromatic Infusion",
+                "category": "feat",
+                "initial_current": 1,
+                "max": 1,
+                "reset_on": "long_rest",
+                "reset_to": "max",
+                "rest_behavior": "confirm_before_reset",
+                "notes": "Chromatic Infusion",
+                "display_order": display_order,
+                "activation_type": "bonus_action",
+            },
+        )
+    )
+
+    reactive_resistance_uses = _proficiency_bonus_for_level(current_level)
+    reactive_resistance_feature = {
+        "id": f"{feature_id}-reactive-resistance",
+        "name": "Gift of the Chromatic Dragon: Reactive Resistance",
+        "category": shared_payload["category"],
+        "source": shared_payload["source"],
+        "description_markdown": (
+            "Reaction to gain resistance against acid, cold, fire, lightning, or poison damage; "
+            "uses equal to proficiency bonus per long rest."
+        ),
+        "activation_type": "reaction",
+        "tracker_ref": None,
+    }
+    if class_row_id:
+        reactive_resistance_feature["class_row_id"] = class_row_id
+    if shared_payload["systems_ref"] is not None:
+        reactive_resistance_feature["systems_ref"] = shared_payload["systems_ref"]
+    if shared_payload["page_ref"]:
+        reactive_resistance_feature["page_ref"] = shared_payload["page_ref"]
+    derived_payloads.append(
+        (
+            reactive_resistance_feature,
+            {
+                "id": "reactive-resistance",
+                "label": "Reactive Resistance",
+                "category": "feat",
+                "initial_current": reactive_resistance_uses,
+                "max": reactive_resistance_uses,
+                "reset_on": "long_rest",
+                "reset_to": "max",
+                "rest_behavior": "confirm_before_reset",
+                "notes": "Reactive Resistance",
+                "display_order": display_order + 1,
+                "activation_type": "reaction",
+            },
+        )
+    )
+    return derived_payloads
 
 
 def _build_campaign_option_tracker_template(
@@ -17004,6 +17137,35 @@ def _build_feature_tracker_template(
             "reset_to": "max",
             "rest_behavior": "confirm_before_reset",
             "notes": "Protective Wings",
+            "display_order": display_order,
+            "activation_type": "reaction",
+        }
+    if normalized == normalize_lookup("Gift of the Chromatic Dragon: Chromatic Infusion"):
+        return {
+            "id": "chromatic-infusion",
+            "label": "Chromatic Infusion",
+            "category": "feat",
+            "initial_current": 1,
+            "max": 1,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Chromatic Infusion",
+            "display_order": display_order,
+            "activation_type": "bonus_action",
+        }
+    if normalized == normalize_lookup("Gift of the Chromatic Dragon: Reactive Resistance"):
+        uses = _proficiency_bonus_for_level(current_level)
+        return {
+            "id": "reactive-resistance",
+            "label": "Reactive Resistance",
+            "category": "feat",
+            "initial_current": uses,
+            "max": uses,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Reactive Resistance",
             "display_order": display_order,
             "activation_type": "reaction",
         }

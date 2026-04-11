@@ -6930,6 +6930,41 @@ def test_normalize_definition_to_native_model_adds_single_use_short_rest_feat_tr
     assert resources_by_id["second-chance"]["reset_on"] == "short_rest"
 
 
+def test_normalize_definition_to_native_model_adds_gift_of_the_chromatic_dragon_trackers():
+    definition = _minimal_character_definition("vesper-drake", "Vesper Drake")
+    definition.profile["class_level_text"] = "Fighter 5"
+    definition.profile["classes"] = [{"class_name": "Fighter", "subclass_name": "", "level": 5}]
+    definition.features = [
+        {
+            "id": "gift-chromatic-dragon-1",
+            "name": "Gift of the Chromatic Dragon",
+            "category": "feat",
+            "source": "FTD",
+            "description_markdown": "",
+        }
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+    features_by_name = {feature["name"]: feature for feature in normalized.features}
+    resources_by_id = {resource["id"]: resource for resource in normalized.resource_templates}
+
+    assert not features_by_name["Gift of the Chromatic Dragon"].get("tracker_ref")
+    assert (
+        features_by_name["Gift of the Chromatic Dragon: Chromatic Infusion"]["tracker_ref"]
+        == "chromatic-infusion"
+    )
+    assert (
+        features_by_name["Gift of the Chromatic Dragon: Reactive Resistance"]["tracker_ref"]
+        == "reactive-resistance"
+    )
+    assert features_by_name["Gift of the Chromatic Dragon: Chromatic Infusion"]["activation_type"] == "bonus_action"
+    assert features_by_name["Gift of the Chromatic Dragon: Reactive Resistance"]["activation_type"] == "reaction"
+    assert resources_by_id["chromatic-infusion"]["max"] == 1
+    assert resources_by_id["chromatic-infusion"]["reset_on"] == "long_rest"
+    assert resources_by_id["reactive-resistance"]["max"] == 3
+    assert resources_by_id["reactive-resistance"]["reset_on"] == "long_rest"
+
+
 def test_level_one_builder_surfaces_and_applies_skilled_feat_choices():
     fighter = _systems_entry(
         "class",
@@ -8019,6 +8054,110 @@ def test_level_one_builder_applies_gift_of_the_gem_dragon_tracker():
     assert gem_feature["tracker_ref"] == "telekinetic-reprisal"
     assert resources_by_id["telekinetic-reprisal"]["max"] == 2
     assert resources_by_id["telekinetic-reprisal"]["reset_on"] == "long_rest"
+
+
+def test_level_one_builder_applies_gift_of_the_chromatic_dragon_trackers():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    variant_human = _systems_entry(
+        "race",
+        "phb-race-variant-human",
+        "Variant Human",
+        metadata={
+            "size": ["M"],
+            "speed": 30,
+            "languages": [{"common": True}],
+            "feats": [{"any": 1}],
+        },
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    gift_of_the_chromatic_dragon = _systems_entry(
+        "feat",
+        "ftd-feat-gift-of-the-chromatic-dragon",
+        "Gift of the Chromatic Dragon",
+        source_id="FTD",
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [variant_human],
+            "background": [acolyte],
+            "feat": [gift_of_the_chromatic_dragon],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    form_values = {
+        "name": "Iris Scale",
+        "character_slug": "iris-scale",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": variant_human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "species_feat_1": gift_of_the_chromatic_dragon.slug,
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "13",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+
+    feature_names = {feature["name"] for feature in definition.features}
+    features_by_name = {feature["name"]: feature for feature in definition.features}
+    resources_by_id = {resource["id"]: resource for resource in definition.resource_templates}
+
+    assert "Gift of the Chromatic Dragon" in context["preview"]["features"]
+    assert "Gift of the Chromatic Dragon: Chromatic Infusion" in context["preview"]["features"]
+    assert "Gift of the Chromatic Dragon: Reactive Resistance" in context["preview"]["features"]
+    assert "Chromatic Infusion: 1 / 1 (Long Rest)" in context["preview"]["resources"]
+    assert "Reactive Resistance: 2 / 2 (Long Rest)" in context["preview"]["resources"]
+    assert {
+        "Gift of the Chromatic Dragon",
+        "Gift of the Chromatic Dragon: Chromatic Infusion",
+        "Gift of the Chromatic Dragon: Reactive Resistance",
+    } <= feature_names
+    assert not features_by_name["Gift of the Chromatic Dragon"].get("tracker_ref")
+    assert features_by_name["Gift of the Chromatic Dragon: Chromatic Infusion"]["tracker_ref"] == "chromatic-infusion"
+    assert features_by_name["Gift of the Chromatic Dragon: Reactive Resistance"]["tracker_ref"] == "reactive-resistance"
+    assert resources_by_id["chromatic-infusion"]["max"] == 1
+    assert resources_by_id["reactive-resistance"]["max"] == 2
 
 
 @pytest.mark.parametrize(
@@ -15308,6 +15447,163 @@ def test_native_level_up_refreshes_scaling_fighter_resource_templates():
     assert merged_resources["action-surge"]["max"] == 2
     assert merged_resources["indomitable"]["current"] == 1
     assert merged_resources["indomitable"]["max"] == 3
+
+
+def test_native_level_up_refreshes_gift_of_the_chromatic_dragon_reactive_resistance():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[],
+    )
+
+    current_definition = _minimal_character_definition("chromatic-veteran", "Chromatic Veteran")
+    current_definition.profile["class_level_text"] = "Fighter 4"
+    current_definition.profile["classes"][0]["level"] = 4
+    current_definition.stats["max_hp"] = 36
+    current_definition.features = [
+        {
+            "id": "gift-chromatic-dragon-1",
+            "name": "Gift of the Chromatic Dragon",
+            "category": "feat",
+            "source": "FTD",
+            "description_markdown": "",
+            "activation_type": "passive",
+            "tracker_ref": None,
+            "systems_ref": {
+                "entry_type": "feat",
+                "slug": "ftd-feat-gift-of-the-chromatic-dragon",
+                "title": "Gift of the Chromatic Dragon",
+                "source_id": "FTD",
+            },
+        },
+        {
+            "id": "gift-chromatic-dragon-1-chromatic-infusion",
+            "name": "Gift of the Chromatic Dragon: Chromatic Infusion",
+            "category": "feat",
+            "source": "FTD",
+            "description_markdown": "",
+            "activation_type": "bonus_action",
+            "tracker_ref": "chromatic-infusion",
+        },
+        {
+            "id": "gift-chromatic-dragon-1-reactive-resistance",
+            "name": "Gift of the Chromatic Dragon: Reactive Resistance",
+            "category": "feat",
+            "source": "FTD",
+            "description_markdown": "",
+            "activation_type": "reaction",
+            "tracker_ref": "reactive-resistance",
+        },
+    ]
+    current_definition.resource_templates = [
+        {
+            "id": "chromatic-infusion",
+            "label": "Chromatic Infusion",
+            "category": "feat",
+            "initial_current": 1,
+            "max": 1,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Chromatic Infusion",
+            "display_order": 0,
+        },
+        {
+            "id": "reactive-resistance",
+            "label": "Reactive Resistance",
+            "category": "feat",
+            "initial_current": 2,
+            "max": 2,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Reactive Resistance",
+            "display_order": 1,
+        },
+    ]
+
+    form_values = {"hp_gain": "9"}
+    level_up_context = build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values)
+    leveled_definition, _, hp_delta = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        level_up_context,
+        form_values,
+    )
+
+    state = build_initial_state(current_definition)
+    state["resources"] = [
+        {
+            "id": "chromatic-infusion",
+            "label": "Chromatic Infusion",
+            "category": "feat",
+            "current": 0,
+            "max": 1,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Chromatic Infusion",
+            "display_order": 0,
+        },
+        {
+            "id": "reactive-resistance",
+            "label": "Reactive Resistance",
+            "category": "feat",
+            "current": 1,
+            "max": 2,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Reactive Resistance",
+            "display_order": 1,
+        },
+    ]
+    merged_state = merge_state_with_definition(leveled_definition, state, hp_delta=hp_delta)
+    resources_by_id = {resource["id"]: resource for resource in leveled_definition.resource_templates}
+    merged_resources = {resource["id"]: resource for resource in merged_state["resources"]}
+
+    assert "Chromatic Infusion: 1 / 1 (Long Rest)" in level_up_context["preview"]["resources"]
+    assert "Reactive Resistance: 3 / 3 (Long Rest)" in level_up_context["preview"]["resources"]
+    assert resources_by_id["chromatic-infusion"]["max"] == 1
+    assert resources_by_id["reactive-resistance"]["max"] == 3
+    assert merged_resources["chromatic-infusion"]["current"] == 0
+    assert merged_resources["chromatic-infusion"]["max"] == 1
+    assert merged_resources["reactive-resistance"]["current"] == 1
+    assert merged_resources["reactive-resistance"]["max"] == 3
 
 
 def test_native_level_up_refreshes_scaling_rage_resource():
