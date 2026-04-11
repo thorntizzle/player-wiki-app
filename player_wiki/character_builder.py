@@ -5069,6 +5069,7 @@ def _collect_attack_support_flags(features: list[dict[str, Any]] | None) -> dict
         "dual_wielder": has_slug("phb-feat-dual-wielder") or has_effect("Dual Wielder"),
         "great_weapon_master": has_slug("phb-feat-great-weapon-master") or has_effect("Great Weapon Master"),
         "grappler_phb": has_slug("phb-feat-grappler") or normalize_lookup("grappler-phb") in effect_keys,
+        "mounted_combatant_phb": has_slug("phb-feat-mounted-combatant") or normalize_lookup("mounted-combatant-phb") in effect_keys,
         "gunner": has_slug("tce-feat-gunner") or has_effect("Gunner"),
         "martial_adept": has_slug("phb-feat-martial-adept") or has_effect("Martial Adept"),
         "polearm_master": has_slug("phb-feat-polearm-master") or has_effect("Polearm Master"),
@@ -8230,6 +8231,7 @@ def _build_level_one_attacks(
     has_dual_wielder = bool(attack_support_flags.get("dual_wielder"))
     has_great_weapon_master = bool(attack_support_flags.get("great_weapon_master"))
     has_grappler_phb = bool(attack_support_flags.get("grappler_phb"))
+    has_mounted_combatant_phb = bool(attack_support_flags.get("mounted_combatant_phb"))
     has_gunner = bool(attack_support_flags.get("gunner"))
     has_martial_adept = bool(attack_support_flags.get("martial_adept"))
     has_polearm_master = bool(attack_support_flags.get("polearm_master"))
@@ -8289,6 +8291,7 @@ def _build_level_one_attacks(
                 has_great_weapon_master=has_great_weapon_master,
                 has_gunner=has_gunner,
                 has_martial_adept=has_martial_adept,
+                has_mounted_combatant_phb=has_mounted_combatant_phb,
                 has_polearm_master=has_polearm_master,
                 has_savage_attacker=has_savage_attacker,
                 has_sharpshooter=has_sharpshooter,
@@ -8327,6 +8330,7 @@ def _build_level_one_attacks(
                         has_great_weapon_master=has_great_weapon_master,
                         has_gunner=has_gunner,
                         has_martial_adept=has_martial_adept,
+                        has_mounted_combatant_phb=has_mounted_combatant_phb,
                         has_polearm_master=has_polearm_master,
                         has_savage_attacker=has_savage_attacker,
                         has_sharpshooter=has_sharpshooter,
@@ -8365,6 +8369,7 @@ def _build_level_one_attacks(
                         has_great_weapon_master=has_great_weapon_master,
                         has_gunner=has_gunner,
                         has_martial_adept=has_martial_adept,
+                        has_mounted_combatant_phb=has_mounted_combatant_phb,
                         has_polearm_master=has_polearm_master,
                         has_savage_attacker=has_savage_attacker,
                         has_sharpshooter=has_sharpshooter,
@@ -8404,6 +8409,7 @@ def _build_level_one_attacks(
                             has_great_weapon_master=has_great_weapon_master,
                             has_gunner=has_gunner,
                             has_martial_adept=has_martial_adept,
+                            has_mounted_combatant_phb=has_mounted_combatant_phb,
                             has_polearm_master=has_polearm_master,
                             has_savage_attacker=has_savage_attacker,
                             has_sharpshooter=has_sharpshooter,
@@ -8440,6 +8446,7 @@ def _build_level_one_attacks(
                         has_great_weapon_master=has_great_weapon_master,
                         has_gunner=has_gunner,
                         has_martial_adept=has_martial_adept,
+                        has_mounted_combatant_phb=has_mounted_combatant_phb,
                         has_polearm_master=has_polearm_master,
                         has_savage_attacker=has_savage_attacker,
                         has_sharpshooter=has_sharpshooter,
@@ -8472,6 +8479,7 @@ def _build_level_one_attacks(
                         has_great_weapon_master=has_great_weapon_master,
                         has_gunner=has_gunner,
                         has_martial_adept=has_martial_adept,
+                        has_mounted_combatant_phb=has_mounted_combatant_phb,
                         has_polearm_master=has_polearm_master,
                         has_savage_attacker=has_savage_attacker,
                         has_sharpshooter=has_sharpshooter,
@@ -8511,6 +8519,7 @@ def _build_level_one_attacks(
                         has_great_weapon_master=has_great_weapon_master,
                         has_gunner=has_gunner,
                         has_martial_adept=has_martial_adept,
+                        has_mounted_combatant_phb=has_mounted_combatant_phb,
                         has_polearm_master=has_polearm_master,
                         has_savage_attacker=has_savage_attacker,
                         has_sharpshooter=has_sharpshooter,
@@ -8545,6 +8554,7 @@ def _build_level_one_attacks(
                         has_great_weapon_master=has_great_weapon_master,
                         has_gunner=has_gunner,
                         has_martial_adept=has_martial_adept,
+                        has_mounted_combatant_phb=has_mounted_combatant_phb,
                         has_polearm_master=has_polearm_master,
                         has_savage_attacker=has_savage_attacker,
                         has_sharpshooter=has_sharpshooter,
@@ -8580,6 +8590,7 @@ def _build_level_one_attacks(
                         has_great_weapon_master=has_great_weapon_master,
                         has_gunner=has_gunner,
                         has_martial_adept=has_martial_adept,
+                        has_mounted_combatant_phb=has_mounted_combatant_phb,
                         has_polearm_master=has_polearm_master,
                         has_savage_attacker=has_savage_attacker,
                         has_sharpshooter=has_sharpshooter,
@@ -8622,6 +8633,7 @@ def _build_level_one_attacks(
                     has_great_weapon_master=has_great_weapon_master,
                     has_gunner=has_gunner,
                     has_martial_adept=has_martial_adept,
+                    has_mounted_combatant_phb=has_mounted_combatant_phb,
                     has_polearm_master=has_polearm_master,
                     has_savage_attacker=has_savage_attacker,
                     has_sharpshooter=has_sharpshooter,
@@ -8648,6 +8660,7 @@ def _build_level_one_attacks(
             has_great_weapon_master=has_great_weapon_master,
             has_gunner=has_gunner,
             has_martial_adept=has_martial_adept,
+            has_mounted_combatant_phb=has_mounted_combatant_phb,
             has_polearm_master=has_polearm_master,
             has_savage_attacker=has_savage_attacker,
             has_sharpshooter=has_sharpshooter,
@@ -8750,6 +8763,8 @@ def _effect_keys_for_feature(feature: dict[str, Any]) -> list[str]:
             effect_keys.append("charger-xphb" if source_id == "XPHB" else "charger-phb")
         if normalized_name == normalize_lookup("Grappler"):
             effect_keys.append("grappler-xphb" if source_id == "XPHB" else "grappler-phb")
+        if normalized_name == normalize_lookup("Mounted Combatant"):
+            effect_keys.append("mounted-combatant-xphb" if source_id == "XPHB" else "mounted-combatant-phb")
         if normalized_name == normalize_lookup("Alert"):
             effect_keys.append("initiative-bonus:5")
         if normalized_name == normalize_lookup("Mobile"):
@@ -8805,6 +8820,17 @@ def _qualifies_for_gunner(context: dict[str, Any]) -> bool:
 def _qualifies_for_charger(context: dict[str, Any]) -> bool:
     profile = dict(context.get("profile") or {})
     return bool(context.get("is_proficient")) and str(profile.get("type") or "").strip().upper() == "M"
+
+
+def _qualifies_for_mounted_combatant(
+    context: dict[str, Any],
+    *,
+    ranged_attack: bool,
+) -> bool:
+    if ranged_attack:
+        return False
+    profile = dict(context.get("profile") or {})
+    return str(profile.get("type") or "").strip().upper() == "M"
 
 
 def _qualifies_for_crossbow_expert_bonus_attack(context: dict[str, Any]) -> bool:
@@ -8895,6 +8921,7 @@ def _base_attack_feat_notes(
     has_great_weapon_master: bool,
     has_gunner: bool = False,
     has_martial_adept: bool,
+    has_mounted_combatant_phb: bool = False,
     has_polearm_master: bool,
     has_savage_attacker: bool,
     has_sharpshooter: bool,
@@ -8910,6 +8937,8 @@ def _base_attack_feat_notes(
         notes.append("Great Weapon Master (bonus attack on crit or kill)")
     if has_martial_adept and not ranged_attack:
         notes.append("Martial Adept maneuvers available")
+    if has_mounted_combatant_phb and _qualifies_for_mounted_combatant(context, ranged_attack=ranged_attack):
+        notes.append("Mounted Combatant (while mounted, advantage against unmounted creatures smaller than your mount)")
     if (
         has_polearm_master
         and include_polearm_master_note

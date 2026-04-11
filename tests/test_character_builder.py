@@ -7525,6 +7525,91 @@ def test_normalize_definition_to_native_model_keeps_xphb_grappler_out_of_phb_hel
     assert normalized.attacks == []
 
 
+def test_normalize_definition_to_native_model_adds_phb_mounted_combatant_note_only_to_melee_rows():
+    definition = _minimal_character_definition("mounted-marshal", "Mounted Marshal")
+    definition.features = [
+        {
+            "id": "mounted-combatant-1",
+            "name": "Mounted Combatant",
+            "category": "feat",
+            "source": "PHB",
+            "description_markdown": "",
+            "systems_ref": {
+                "entry_type": "feat",
+                "slug": "phb-feat-mounted-combatant",
+                "title": "Mounted Combatant",
+                "source_id": "PHB",
+            },
+        }
+    ]
+    definition.proficiencies["weapons"] = ["Simple Weapons"]
+    definition.equipment_catalog = [
+        {
+            "id": "handaxe-1",
+            "name": "Handaxe",
+            "default_quantity": 1,
+            "weight": "2 lb.",
+            "notes": "",
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-handaxe",
+                "title": "Handaxe",
+                "source_id": "PHB",
+            },
+        }
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+    attacks_by_name = {attack["name"]: attack for attack in normalized.attacks}
+
+    assert (
+        attacks_by_name["Handaxe"]["notes"]
+        == "Mounted Combatant (while mounted, advantage against unmounted creatures smaller than your mount)."
+    )
+    assert attacks_by_name["Handaxe (thrown)"]["notes"] == "range 20/60."
+
+
+def test_normalize_definition_to_native_model_keeps_xphb_mounted_combatant_out_of_phb_note_slice():
+    definition = _minimal_character_definition("xphb-mounted-combatant", "XPHB Mounted Combatant")
+    definition.features = [
+        {
+            "id": "mounted-combatant-1",
+            "name": "Mounted Combatant",
+            "category": "feat",
+            "source": "XPHB",
+            "description_markdown": "",
+            "systems_ref": {
+                "entry_type": "feat",
+                "slug": "xphb-feat-mounted-combatant",
+                "title": "Mounted Combatant",
+                "source_id": "XPHB",
+            },
+        }
+    ]
+    definition.proficiencies["weapons"] = ["Simple Weapons"]
+    definition.equipment_catalog = [
+        {
+            "id": "handaxe-1",
+            "name": "Handaxe",
+            "default_quantity": 1,
+            "weight": "2 lb.",
+            "notes": "",
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-handaxe",
+                "title": "Handaxe",
+                "source_id": "PHB",
+            },
+        }
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+    attacks_by_name = {attack["name"]: attack for attack in normalized.attacks}
+
+    assert attacks_by_name["Handaxe"]["notes"] == ""
+    assert attacks_by_name["Handaxe (thrown)"]["notes"] == "range 20/60."
+
+
 def test_normalize_definition_to_native_model_derives_barbarian_unarmored_defense_for_imported_character():
     definition = _minimal_imported_character_definition("bryn-coal", "Bryn Coal")
     definition.profile["class_level_text"] = "Barbarian 3"
@@ -10784,6 +10869,94 @@ def test_level_one_builder_generates_xphb_charger_attack_profile():
     assert attacks_by_name["Greatsword (charger)"]["notes"] == "Charger (move 10 feet straight, +1d8 damage, once per turn)."
     assert attacks_by_name["Greatsword (charger)"]["mode_key"] == "feat:xphb-feat-charger"
     assert attacks_by_name["Greatsword (charger)"]["variant_label"] == "charger"
+
+
+def test_level_one_builder_adds_phb_mounted_combatant_note_only_to_melee_attacks():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+            "starting_equipment": {
+                "defaultData": [
+                    {"_": ["handaxe|phb"]},
+                ]
+            },
+        },
+    )
+    variant_human = _systems_entry(
+        "race",
+        "phb-race-variant-human",
+        "Variant Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}], "feats": [{"any": 1}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    mounted_combatant = _systems_entry("feat", "phb-feat-mounted-combatant", "Mounted Combatant", source_id="PHB")
+    handaxe = _systems_entry("item", "phb-item-handaxe", "Handaxe", metadata={"weight": 2})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [variant_human],
+            "background": [acolyte],
+            "feat": [mounted_combatant],
+            "subclass": [],
+            "item": [handaxe],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+    form_values = {
+        "name": "Mira Vale",
+        "character_slug": "mira-vale",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": variant_human.slug,
+        "background_slug": acolyte.slug,
+        "species_feat_1": mounted_combatant.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+    attacks_by_name = {attack["name"]: attack for attack in definition.attacks}
+
+    assert "Handaxe (+5, 1d6+3 slashing)" in context["preview"]["attacks"]
+    assert "Handaxe (thrown) (+5, 1d6+3 slashing)" in context["preview"]["attacks"]
+    assert (
+        attacks_by_name["Handaxe"]["notes"]
+        == "Mounted Combatant (while mounted, advantage against unmounted creatures smaller than your mount)."
+    )
+    assert attacks_by_name["Handaxe (thrown)"]["notes"] == "range 20/60."
 
 
 def test_level_one_builder_applies_structured_attack_modes_to_firearm_attacks():
@@ -20627,6 +20800,135 @@ def test_native_level_up_adds_campaign_grappler_helper_row():
     )
     assert grapple_helper["mode_key"] == "feat:phb-feat-grappler:pin"
     assert "equipment_refs" not in grapple_helper
+
+
+def test_native_level_up_adds_campaign_mounted_combatant_note_only_to_melee_attacks():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    ability_score_improvement = _systems_entry(
+        "classfeature",
+        "phb-classfeature-ability-score-improvement",
+        "Ability Score Improvement",
+        metadata={"level": 4},
+    )
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 4,
+                "level_label": "Level 4",
+                "feature_rows": [
+                    {
+                        "label": "Ability Score Improvement",
+                        "entry": ability_score_improvement,
+                        "embedded_card": {"option_groups": []},
+                    }
+                ],
+            }
+        ],
+    )
+    campaign_page_records = [
+        _campaign_page_record(
+            "mechanics/cavalier-drill",
+            "Cavalier Drill",
+            section="Mechanics",
+            subsection="Feats",
+            metadata={
+                "character_option": {
+                    "kind": "feat",
+                    "name": "Cavalier Drill",
+                    "modeled_effects": ["mounted-combatant-phb"],
+                }
+            },
+        )
+    ]
+
+    current_definition = _minimal_character_definition("cavalier-veteran", "Cavalier Veteran")
+    current_definition.profile["class_level_text"] = "Fighter 3"
+    current_definition.profile["classes"][0]["level"] = 3
+    current_definition.stats["max_hp"] = 28
+    current_definition.proficiencies["weapons"] = ["Simple Weapons", "Martial Weapons"]
+    current_definition.equipment_catalog = [
+        {
+            "id": "handaxe-1",
+            "name": "Handaxe",
+            "default_quantity": 1,
+            "weight": "2 lb.",
+            "notes": "",
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-handaxe",
+                "title": "Handaxe",
+                "source_id": "PHB",
+            },
+        }
+    ]
+
+    form_values = {
+        "hp_gain": "8",
+        "levelup_asi_mode_1": "feat",
+    }
+
+    context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        current_definition,
+        form_values,
+        campaign_page_records=campaign_page_records,
+    )
+    form_values["levelup_feat_1"] = _field_value_for_label(context, "levelup_feat_1", "Cavalier Drill")
+
+    level_up_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        current_definition,
+        form_values,
+        campaign_page_records=campaign_page_records,
+    )
+    leveled_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        level_up_context,
+        form_values,
+    )
+    cavalier_drill = next(feature for feature in leveled_definition.features if feature["name"] == "Cavalier Drill")
+    attacks_by_name = {attack["name"]: attack for attack in leveled_definition.attacks}
+
+    assert "Cavalier Drill" in level_up_context["preview"]["gained_features"]
+    assert cavalier_drill["page_ref"] == "mechanics/cavalier-drill"
+    assert (
+        attacks_by_name["Handaxe"]["notes"]
+        == "Mounted Combatant (while mounted, advantage against unmounted creatures smaller than your mount)."
+    )
+    assert attacks_by_name["Handaxe (thrown)"]["notes"] == "range 20/60."
 
 
 def test_native_level_up_applies_medium_armor_master_to_equipped_medium_armor():

@@ -2960,6 +2960,43 @@ def test_quick_reference_renders_grappler_helper_row_without_placeholder_math(ap
     assert "<strong>--</strong>" not in html
 
 
+def test_quick_reference_renders_mounted_combatant_note_on_melee_attack_card(app, client, sign_in, users):
+    def _mutate(payload: dict) -> None:
+        payload["attacks"] = [
+            {
+                "id": "handaxe-1",
+                "name": "Handaxe",
+                "category": "melee weapon",
+                "attack_bonus": 5,
+                "damage": "1d6+3 slashing",
+                "damage_type": "Slashing",
+                "notes": "Mounted Combatant (while mounted, advantage against unmounted creatures smaller than your mount).",
+            },
+            {
+                "id": "handaxe-thrown-2",
+                "name": "Handaxe (thrown)",
+                "category": "ranged weapon",
+                "attack_bonus": 5,
+                "damage": "1d6+3 slashing",
+                "damage_type": "Slashing",
+                "notes": "range 20/60.",
+            },
+        ]
+
+    _write_character_definition(app, "arden-march", _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=quick")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+
+    assert "Handaxe" in html
+    assert "Mounted Combatant (while mounted, advantage against unmounted creatures smaller than your mount)." in html
+    assert "Handaxe (thrown)" in html
+    assert "range 20/60." in html
+
+
 def test_quick_reference_hides_shield_master_helper_row_until_shield_is_equipped(app, client, sign_in, users):
     def _mutate(payload: dict) -> None:
         payload["equipment_catalog"] = [
