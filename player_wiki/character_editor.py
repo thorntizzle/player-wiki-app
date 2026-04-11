@@ -15,6 +15,7 @@ from .character_builder import (
     _add_bonus_known_spell_to_payloads,
     _add_spell_to_payloads,
     _apply_campaign_feature_spell_manager_payloads,
+    _campaign_option_feat_selections_from_features,
     _automatic_innate_spell_values,
     _automatic_known_spell_values,
     _automatic_prepared_spell_values,
@@ -27,8 +28,12 @@ from .character_builder import (
     _build_spell_support_choice_fields,
     _build_spell_support_replacement_fields,
     _extract_additional_known_choice_specs,
+    _extract_feat_armor_proficiencies,
     _extract_feat_innate_choice_specs,
+    _extract_feat_language_proficiencies,
     _extract_feat_prepared_choice_specs,
+    _extract_feat_tool_proficiencies,
+    _extract_feat_weapon_proficiencies,
     _feat_optionalfeature_sections,
     _merge_spell_mark,
     _prepared_spell_count_for_level,
@@ -1950,9 +1955,11 @@ def apply_native_character_edits(
         manual_features,
         manual_items,
     )
+    campaign_feat_selections = _campaign_option_feat_selections_from_features(manual_features)
     proficiencies = _merge_editor_proficiencies(
         manual_proficiencies,
         selected_campaign_option_payloads,
+        feat_selections=campaign_feat_selections,
     )
     stats = apply_manual_stat_adjustments(base_stats, stat_adjustments)
     campaign_stat_adjustments = collect_campaign_option_stat_adjustments(selected_campaign_option_payloads)
@@ -2080,14 +2087,25 @@ def _display_proficiency_lists_for_editor(definition: CharacterDefinition) -> di
         key: list((definition.proficiencies or {}).get(key) or [])
         for key in ("languages", "armor", "weapons", "tools")
     }
+    manual_features = _manual_custom_features(definition)
     campaign_grants = collect_campaign_option_proficiency_grants(
         _campaign_option_payloads_from_entries(
-            _manual_custom_features(definition),
+            manual_features,
             _manual_equipment_entries(definition),
         )
     )
+    campaign_feat_selections = _campaign_option_feat_selections_from_features(manual_features)
+    campaign_feat_proficiencies = {
+        "armor": _extract_feat_armor_proficiencies(campaign_feat_selections, {}),
+        "weapons": _extract_feat_weapon_proficiencies(campaign_feat_selections, {}),
+        "tools": _extract_feat_tool_proficiencies(campaign_feat_selections, {}),
+        "languages": _extract_feat_language_proficiencies(campaign_feat_selections, {}),
+    }
     return {
-        key: _subtract_casefold_values(proficiencies[key], campaign_grants.get(key) or [])
+        key: _subtract_casefold_values(
+            _subtract_casefold_values(proficiencies[key], campaign_grants.get(key) or []),
+            campaign_feat_proficiencies.get(key) or [],
+        )
         for key in proficiencies
     }
 
@@ -2126,10 +2144,23 @@ def _editable_campaign_feat_entry_for_page_ref(
 def _merge_editor_proficiencies(
     manual_proficiencies: dict[str, list[str]],
     option_payloads: list[dict[str, Any]],
+    *,
+    feat_selections: list[dict[str, Any]] | None = None,
 ) -> dict[str, list[str]]:
     campaign_grants = collect_campaign_option_proficiency_grants(option_payloads)
+    campaign_feat_selections = list(feat_selections or [])
+    campaign_feat_proficiencies = {
+        "armor": _extract_feat_armor_proficiencies(campaign_feat_selections, {}),
+        "weapons": _extract_feat_weapon_proficiencies(campaign_feat_selections, {}),
+        "tools": _extract_feat_tool_proficiencies(campaign_feat_selections, {}),
+        "languages": _extract_feat_language_proficiencies(campaign_feat_selections, {}),
+    }
     return {
-        key: _dedupe_casefold_values(list(manual_proficiencies.get(key) or []) + list(campaign_grants.get(key) or []))
+        key: _dedupe_casefold_values(
+            list(manual_proficiencies.get(key) or [])
+            + list(campaign_grants.get(key) or [])
+            + list(campaign_feat_proficiencies.get(key) or [])
+        )
         for key in ("languages", "armor", "weapons", "tools")
     }
 

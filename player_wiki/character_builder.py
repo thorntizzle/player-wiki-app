@@ -3569,25 +3569,49 @@ def _build_campaign_page_entry(
         record,
         default_kind="item" if section == CAMPAIGN_ITEMS_SECTION else "feature",
     )
-    if not isinstance(campaign_option, dict):
-        return None
-    if str(campaign_option.get("kind") or "").strip() != kind:
-        return None
     if not _campaign_page_option_allowed_for_mixed_source(
         record,
         kind=kind,
     ):
         return None
 
-    title = str(campaign_option.get("display_name") or getattr(page, "title", "") or page_ref).strip() or page_ref
+    return _build_campaign_option_entry(
+        campaign_option=campaign_option,
+        page_ref=page_ref,
+        title=str(getattr(page, "title", "") or ""),
+        summary=str(getattr(page, "summary", "") or ""),
+        section=section,
+        subsection=str(getattr(page, "subsection", "") or ""),
+        kind=kind,
+    )
+
+
+def _build_campaign_option_entry(
+    *,
+    campaign_option: Any,
+    page_ref: str,
+    title: str,
+    summary: str,
+    section: str,
+    subsection: str,
+    kind: str,
+) -> SystemsEntryRecord | None:
+    option = dict(campaign_option or {}) if isinstance(campaign_option, dict) else {}
+    if not option:
+        return None
+    if str(option.get("kind") or "").strip() != kind:
+        return None
+
+    clean_page_ref = str(page_ref or "").strip()
+    clean_title = str(option.get("display_name") or title or clean_page_ref).strip() or clean_page_ref
     entry_type = {
         "feat": "feat",
         "species": "race",
         "background": "background",
     }.get(kind, kind)
     metadata: dict[str, Any] = {
-        "page_ref": page_ref,
-        "campaign_option": deepcopy(campaign_option),
+        "page_ref": clean_page_ref,
+        "campaign_option": deepcopy(option),
     }
     if kind == "feat":
         for key in (
@@ -3605,35 +3629,35 @@ def _build_campaign_page_entry(
             "spell_support",
             "modeled_effects",
         ):
-            if key in campaign_option:
-                metadata[key] = deepcopy(campaign_option.get(key))
+            if key in option:
+                metadata[key] = deepcopy(option.get(key))
     elif kind == "species":
         for key in ("size", "speed", "languages", "skill_proficiencies", "tool_proficiencies", "feats", "spell_support"):
-            if key in campaign_option:
-                metadata[key] = deepcopy(campaign_option.get(key))
+            if key in option:
+                metadata[key] = deepcopy(option.get(key))
     elif kind == "background":
         for key in ("skill_proficiencies", "language_proficiencies", "tool_proficiencies", "spell_support"):
-            if key in campaign_option:
-                metadata[key] = deepcopy(campaign_option.get(key))
+            if key in option:
+                metadata[key] = deepcopy(option.get(key))
 
     now = utcnow()
     return SystemsEntryRecord(
         id=0,
         library_slug="campaign-pages",
         source_id=CAMPAIGN_PAGE_SOURCE_ID,
-        entry_key=f"campaign-page|{entry_type}|{page_ref}",
+        entry_key=f"campaign-page|{entry_type}|{clean_page_ref}",
         entry_type=entry_type,
-        slug=f"campaign-page-{slugify(page_ref)}",
-        title=title,
+        slug=f"campaign-page-{slugify(clean_page_ref or clean_title)}",
+        title=clean_title,
         source_page="",
-        source_path=page_ref,
+        source_path=clean_page_ref,
         search_text=" ".join(
             part
             for part in (
-                title,
-                str(getattr(page, "summary", "") or "").strip(),
-                section,
-                str(getattr(page, "subsection", "") or "").strip(),
+                clean_title,
+                str(summary or "").strip(),
+                str(section or "").strip(),
+                str(subsection or "").strip(),
             )
             if part
         ).casefold(),
@@ -3645,6 +3669,46 @@ def _build_campaign_page_entry(
         created_at=now,
         updated_at=now,
     )
+
+
+def _campaign_option_feat_selections_from_features(
+    features: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    selections: list[dict[str, Any]] = []
+    for index, feature in enumerate(list(features or []), start=1):
+        feature_payload = dict(feature or {})
+        campaign_option = dict(feature_payload.get("campaign_option") or {})
+        raw_page_ref = feature_payload.get("page_ref")
+        page_ref = (
+            str(raw_page_ref.get("page_ref") or raw_page_ref.get("slug") or "").strip()
+            if isinstance(raw_page_ref, dict)
+            else str(raw_page_ref or "").strip()
+        ) or str(campaign_option.get("page_ref") or "").strip()
+        entry = _build_campaign_option_entry(
+            campaign_option=campaign_option,
+            page_ref=page_ref,
+            title=str(
+                campaign_option.get("display_name")
+                or campaign_option.get("feat_name")
+                or feature_payload.get("name")
+                or campaign_option.get("title")
+                or page_ref
+            ),
+            summary=str(campaign_option.get("summary") or feature_payload.get("description_markdown") or ""),
+            section="Mechanics",
+            subsection="Feats",
+            kind="feat",
+        )
+        if not isinstance(entry, SystemsEntryRecord):
+            continue
+        feature_id = str(feature_payload.get("id") or "").strip() or f"campaign-feat-{index}"
+        selections.append(
+            {
+                "entry": entry,
+                "instance_key": f"campaign-option-feat-{slugify(feature_id) or index}",
+            }
+        )
+    return selections
 
 
 def _campaign_page_option_allowed_for_mixed_source(
@@ -4896,6 +4960,8 @@ def _derive_definition_skills(
     existing_rows = [dict(row or {}) for row in list(definition.skills or [])]
     if not existing_rows:
         return []
+    campaign_feat_selections = _campaign_option_feat_selections_from_features(list(definition.features or []))
+    feat_selected_choices: dict[str, list[str]] = {}
     proficiency_levels = _skill_proficiency_levels_from_rows(
         existing_rows,
         ability_scores=ability_scores,
@@ -4912,6 +4978,19 @@ def _derive_definition_skills(
             proficiency_levels.get(normalized_skill),
             "proficient",
         )
+    for skill_name in _extract_feat_skill_proficiencies(campaign_feat_selections, feat_selected_choices):
+        normalized_skill = normalize_lookup(skill_name)
+        if normalized_skill not in SKILL_LABELS:
+            continue
+        proficiency_levels[normalized_skill] = _max_skill_proficiency_level(
+            proficiency_levels.get(normalized_skill),
+            "proficient",
+        )
+    proficiency_levels = _apply_feat_expertise_to_skill_proficiency_levels(
+        proficiency_levels,
+        feat_selections=campaign_feat_selections,
+        selected_choices=feat_selected_choices,
+    )
     effect_keys = _extract_character_effect_keys(list(definition.features or []))
     for effect_key in effect_keys:
         for normalized_skill in _skill_targets_for_effect_key(effect_key):
@@ -4948,11 +5027,15 @@ def _derive_definition_stats(
             stats,
             {key: -int(value) for key, value in campaign_option_adjustments.items()},
         )
+    campaign_feat_selections = _campaign_option_feat_selections_from_features(features)
     save_proficiencies = _infer_definition_save_proficiencies(
         definition,
         ability_scores=ability_scores,
         proficiency_bonus=proficiency_bonus,
         selected_class=selected_class,
+    )
+    save_proficiencies.update(
+        _extract_feat_saving_throw_proficiencies(campaign_feat_selections, {})
     )
     effect_keys = _extract_character_effect_keys(features)
     save_bonus_map = _effect_save_bonus_map(effect_keys)

@@ -1340,6 +1340,100 @@ The harbor masters insist on repetition until every motion is clean.
     assert "phb-optionalfeature-dueling" in feature_slugs
 
 
+def test_native_character_edits_apply_fixed_page_backed_feat_metadata(
+    app, client, sign_in, users, get_character, set_campaign_visibility
+):
+    feat_page_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "content"
+        / "mechanics"
+        / "harbor-veteran-rite.md"
+    )
+    feat_page_path.write_text(
+        """---
+title: Harbor Veteran Rite
+section: Mechanics
+subsection: Feats
+published: true
+summary: A rite that teaches hard-earned harbor reflexes.
+character_option:
+  kind: feat
+  name: Harbor Veteran Rite
+  description_markdown: Veteran wardens teach you the reflexes needed to survive the piers in a storm.
+  skill_proficiencies:
+    - athletics: true
+  expertise:
+    - perception: true
+  language_proficiencies:
+    - primordial: true
+  tool_proficiencies:
+    - smith's tools: true
+  weapon_proficiencies:
+    - martial: true
+  armor_proficiencies:
+    - shield: true
+  saving_throw_proficiencies:
+    - wis: true
+---
+The harbor veterans insist on quick eyes, a steady shield, and a practiced hand.
+""",
+        encoding="utf-8",
+    )
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    record = get_character("arden-march")
+    assert record is not None
+
+    response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "",
+            "weapon_proficiencies_text": "Daggers\nLight Crossbows\nQuarterstaffs",
+            "tool_proficiencies_text": "Navigator's Tools",
+            "custom_feature_name_1": "",
+            "custom_feature_page_ref_1": "mechanics/harbor-veteran-rite",
+            "custom_feature_activation_type_1": "passive",
+            "custom_feature_description_1": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+
+    veteran_rite = next(
+        feature
+        for feature in record.definition.features
+        if feature.get("category") == "custom_feature" and feature.get("page_ref") == "mechanics/harbor-veteran-rite"
+    )
+    assert veteran_rite["name"] == "Harbor Veteran Rite"
+    assert (
+        veteran_rite["description_markdown"]
+        == "Veteran wardens teach you the reflexes needed to survive the piers in a storm."
+    )
+
+    assert "Primordial" in record.definition.proficiencies["languages"]
+    assert any(tool.casefold() == "smith's tools" for tool in record.definition.proficiencies["tools"])
+    assert "Martial Weapons" in record.definition.proficiencies["weapons"]
+    assert "Shields" in record.definition.proficiencies["armor"]
+
+    skills_by_name = {skill["name"]: skill for skill in record.definition.skills}
+    assert skills_by_name["Athletics"]["proficiency_level"] == "proficient"
+    assert skills_by_name["Athletics"]["bonus"] == 3
+    assert skills_by_name["Perception"]["proficiency_level"] == "expertise"
+    assert skills_by_name["Perception"]["bonus"] == 7
+
+    assert record.definition.stats["passive_perception"] == 17
+    assert record.definition.stats["ability_scores"]["wis"]["save_bonus"] == 4
+
+
 def test_owner_player_can_open_native_character_edit_page(
     client, sign_in, users, set_campaign_visibility
 ):
