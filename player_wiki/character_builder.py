@@ -281,6 +281,70 @@ SUPPORTED_FREE_CAST_FEAT_SPELLS = {
             },
         ],
     },
+    ("phb", "phbfeatritualcaster"): {
+        "source_title": "Ritual Caster",
+        "source_field_label": "Ritual Caster Spell List",
+        "source_field_help_text": "Choose the class spell list your ritual book uses.",
+        "source_options": [
+            {
+                "value": "bard",
+                "label": "Bard Spells",
+                "class_name": "Bard",
+                "source_title": "Ritual Caster (Bard)",
+                "ability_key": "cha",
+            },
+            {
+                "value": "cleric",
+                "label": "Cleric Spells",
+                "class_name": "Cleric",
+                "source_title": "Ritual Caster (Cleric)",
+                "ability_key": "wis",
+            },
+            {
+                "value": "druid",
+                "label": "Druid Spells",
+                "class_name": "Druid",
+                "source_title": "Ritual Caster (Druid)",
+                "ability_key": "wis",
+            },
+            {
+                "value": "sorcerer",
+                "label": "Sorcerer Spells",
+                "class_name": "Sorcerer",
+                "source_title": "Ritual Caster (Sorcerer)",
+                "ability_key": "cha",
+            },
+            {
+                "value": "warlock",
+                "label": "Warlock Spells",
+                "class_name": "Warlock",
+                "source_title": "Ritual Caster (Warlock)",
+                "ability_key": "cha",
+            },
+            {
+                "value": "wizard",
+                "label": "Wizard Spells",
+                "class_name": "Wizard",
+                "source_title": "Ritual Caster (Wizard)",
+                "ability_key": "int",
+            },
+        ],
+        "choice_fields": [
+            {
+                "category": "spell_managed",
+                "kind": "feat_spell_managed",
+                "filter": "level=1|class={class_name}|miscellaneous=ritual",
+                "count": 2,
+                "label_prefix": "Ritual Spell",
+                "help_text": "Choose a 1st-level ritual spell from the selected class list for your ritual book.",
+                "spell_mark": "Ritual Book",
+                "spell_is_ritual": True,
+            }
+        ],
+        "automatic_grants": [],
+        "manager_mode": "ritual_book",
+        "max_spell_level_formula": "ritual_caster_half_level_rounded_up",
+    },
 }
 SKILL_LABELS = {
     "acrobatics": "Acrobatics",
@@ -4194,6 +4258,8 @@ def _derive_spell_source_rows(
                 or str(payload.get("grant_source_label") or "").strip()
                 or "Feature spells"
             ),
+            "spell_mode": str(payload.get("spell_source_mode") or "").strip(),
+            "spell_list_class_name": str(payload.get("spell_source_spell_list_class_name") or "").strip(),
             "spellcasting_ability": str(ABILITY_LABELS.get(ability_key, "")).strip(),
             "spell_save_dc": 8 + proficiency_bonus + modifier if ability_key else None,
             "spell_attack_bonus": proficiency_bonus + modifier if ability_key else None,
@@ -4204,7 +4270,15 @@ def _derive_spell_source_rows(
             source_rows.append(row_payload)
             continue
         existing_payload = source_rows[existing_index]
-        for key in ("source_row_kind", "title", "spellcasting_ability", "spell_save_dc", "spell_attack_bonus"):
+        for key in (
+            "source_row_kind",
+            "title",
+            "spell_mode",
+            "spell_list_class_name",
+            "spellcasting_ability",
+            "spell_save_dc",
+            "spell_attack_bonus",
+        ):
             if existing_payload.get(key) in {"", None} and row_payload.get(key) not in {"", None}:
                 existing_payload[key] = row_payload.get(key)
     return source_rows
@@ -6111,22 +6185,25 @@ def _resolve_level_up_ability_score_choices(
                 None,
             )
             feat_entries.append(
-                {
-                    "kind": "feat",
-                    "entry": None,
-                    "name": feat_title,
-                    "label": feat_title,
-                    "slug": _entry_option_slug(feat_entry)
-                    or (
-                        feat_slug[len(SYSTEMS_OPTION_PREFIX):]
-                        if feat_slug.startswith(SYSTEMS_OPTION_PREFIX)
-                        else feat_slug
-                    ),
-                    "systems_entry": feat_entry if isinstance(feat_entry, SystemsEntryRecord) else None,
-                    "page_ref": _entry_page_ref(feat_entry),
-                    "source_id": _entry_option_source_id(feat_entry) or PHB_SOURCE_ID,
-                    "campaign_option": _entry_campaign_option(feat_entry) or None,
-                }
+                _build_feat_feature_entry(
+                    selection={
+                        "instance_key": feat_field_name,
+                        "selection_value": feat_slug,
+                        "slug": _entry_option_slug(feat_entry)
+                        or (
+                            feat_slug[len(SYSTEMS_OPTION_PREFIX):]
+                            if feat_slug.startswith(SYSTEMS_OPTION_PREFIX)
+                            else feat_slug
+                        ),
+                        "entry": feat_entry,
+                        "label": feat_title,
+                        "page_ref": _entry_page_ref(feat_entry),
+                        "source_id": _entry_option_source_id(feat_entry) or PHB_SOURCE_ID,
+                        "campaign_option": _entry_campaign_option(feat_entry) or None,
+                    },
+                    values=values,
+                    fallback_title=feat_title,
+                )
             )
             summaries.append(feat_title)
             continue
@@ -7046,8 +7123,24 @@ def _build_feat_spell_source_field(
     instance_key = str(selection.get("instance_key") or "").strip()
     if not isinstance(feat_entry, SystemsEntryRecord) or not instance_key:
         return None
-    if _supported_feat_spell_config(selection):
-        return None
+    support_config = _supported_feat_spell_config(selection)
+    if support_config:
+        options = _supported_feat_spell_source_options(support_config)
+        if not options:
+            return None
+        field_name = _feat_field_name(instance_key, "spell_source", 1)
+        return {
+            "name": field_name,
+            "label": str(support_config.get("source_field_label") or f"{feat_entry.title} Spell List").strip(),
+            "help_text": str(
+                support_config.get("source_field_help_text")
+                or f"Choose the spell list used by {feat_entry.title}."
+            ).strip(),
+            "options": options,
+            "selected": str(values.get(field_name) or "").strip(),
+            "group_key": field_name,
+            "kind": "feat_spell_source",
+        }
     options = _feat_spell_block_options(feat_entry)
     if not options:
         return None
@@ -7093,19 +7186,99 @@ def _selected_feat_additional_spell_blocks(
 
 
 def _supported_feat_spell_config(selection: dict[str, Any]) -> dict[str, Any]:
-    feat_entry = selection.get("entry")
-    if not isinstance(feat_entry, SystemsEntryRecord):
+    feat_entry = selection.get("entry") or selection.get("systems_entry")
+    feat_source_id = ""
+    feat_slug = ""
+    if isinstance(feat_entry, SystemsEntryRecord):
+        feat_source_id = str(feat_entry.source_id or "").strip()
+        feat_slug = str(feat_entry.slug or "").strip()
+    else:
+        feat_source_id = str(
+            selection.get("source_id")
+            or _entry_option_source_id(feat_entry)
+            or ""
+        ).strip()
+        feat_slug = str(
+            selection.get("slug")
+            or selection.get("selection_value")
+            or _entry_option_slug(feat_entry)
+            or ""
+        ).strip()
+        if feat_slug.startswith(SYSTEMS_OPTION_PREFIX):
+            feat_slug = feat_slug[len(SYSTEMS_OPTION_PREFIX):]
+    if not feat_slug:
         return {}
-    feat_slug = normalize_lookup(str(feat_entry.slug or "").strip())
     return dict(
         SUPPORTED_FREE_CAST_FEAT_SPELLS.get(
             (
-                normalize_lookup(str(feat_entry.source_id or "").strip()),
-                feat_slug,
+                normalize_lookup(feat_source_id),
+                normalize_lookup(feat_slug),
             ),
             {},
         )
     )
+
+
+def _supported_feat_spell_source_options(
+    support_config: dict[str, Any],
+) -> list[dict[str, str]]:
+    options: list[dict[str, str]] = []
+    for index, raw_option in enumerate(list(support_config.get("source_options") or []), start=1):
+        option = dict(raw_option or {})
+        value = str(
+            option.get("value")
+            or option.get("class_name")
+            or option.get("source_title")
+            or index
+        ).strip()
+        label = str(
+            option.get("label")
+            or option.get("source_title")
+            or option.get("class_name")
+            or f"Spell List {index}"
+        ).strip()
+        if not value or not label:
+            continue
+        options.append(_choice_option(label, value))
+    return options
+
+
+def _selected_supported_feat_spell_config(
+    *,
+    selection: dict[str, Any],
+    support_config: dict[str, Any],
+    values: dict[str, str],
+) -> dict[str, Any]:
+    source_options = [dict(option or {}) for option in list(support_config.get("source_options") or [])]
+    if not source_options:
+        return dict(support_config)
+    instance_key = str(selection.get("instance_key") or "").strip()
+    if not instance_key:
+        return {}
+    field_name = _feat_field_name(instance_key, "spell_source", 1)
+    selected_value = str(values.get(field_name) or "").strip()
+    if not selected_value:
+        return {}
+    selected_option = next(
+        (
+            option
+            for option in source_options
+            if selected_value
+            == str(
+                option.get("value")
+                or option.get("class_name")
+                or option.get("source_title")
+                or ""
+            ).strip()
+        ),
+        None,
+    )
+    if selected_option is None:
+        return {}
+    return {
+        **dict(support_config or {}),
+        **selected_option,
+    }
 
 
 def _supported_feat_spell_source_row_payload(
@@ -7132,6 +7305,12 @@ def _supported_feat_spell_source_row_payload(
         "spell_source_row_kind": "feat",
         "spell_source_row_title": source_title,
         "spell_source_ability_key": ability_key,
+        "spell_source_mode": str(support_config.get("manager_mode") or "").strip(),
+        "spell_source_spell_list_class_name": str(
+            support_config.get("spell_list_class_name")
+            or support_config.get("class_name")
+            or ""
+        ).strip(),
         "grant_source_label": source_title,
     }
 
@@ -7146,12 +7325,19 @@ def _supported_feat_spell_automatic_grants(
         support_config = _supported_feat_spell_config(selection)
         if not support_config:
             continue
-        source_row_payload = _supported_feat_spell_source_row_payload(
+        resolved_support_config = _selected_supported_feat_spell_config(
             selection=selection,
             support_config=support_config,
+            values={},
+        )
+        if list(support_config.get("source_options") or []) and not resolved_support_config:
+            continue
+        source_row_payload = _supported_feat_spell_source_row_payload(
+            selection=selection,
+            support_config=resolved_support_config or support_config,
         )
         source_row_id = str(source_row_payload.get("spell_source_row_id") or "").strip()
-        for raw_grant in list(support_config.get("automatic_grants") or []):
+        for raw_grant in list((resolved_support_config or support_config).get("automatic_grants") or []):
             grant = dict(raw_grant or {})
             spell_name = str(grant.get("spell") or "").strip()
             if not spell_name:
@@ -7171,6 +7357,81 @@ def _supported_feat_spell_automatic_grants(
                 }
             )
     return grants
+
+
+def _supported_feat_spell_manager_payload(
+    *,
+    selection: dict[str, Any],
+    values: dict[str, str],
+) -> dict[str, Any] | None:
+    support_config = _supported_feat_spell_config(selection)
+    if not support_config:
+        return None
+    resolved_support_config = _selected_supported_feat_spell_config(
+        selection=selection,
+        support_config=support_config,
+        values=values,
+    )
+    if list(support_config.get("source_options") or []) and not resolved_support_config:
+        return None
+    effective_support_config = resolved_support_config or support_config
+    manager_mode = str(effective_support_config.get("manager_mode") or "").strip()
+    if not manager_mode:
+        return None
+    source_row_payload = _supported_feat_spell_source_row_payload(
+        selection=selection,
+        support_config=effective_support_config,
+    )
+    ability_key = _prepared_spell_formula_ability_key(str(effective_support_config.get("ability_key") or "").strip())
+    ability_label = str(ABILITY_LABELS.get(ability_key, "")).strip()
+    return {
+        "source_row_id": str(source_row_payload.get("spell_source_row_id") or "").strip(),
+        "source_row_kind": str(source_row_payload.get("spell_source_row_kind") or "feat").strip() or "feat",
+        "title": str(source_row_payload.get("spell_source_row_title") or "").strip(),
+        "mode": manager_mode,
+        "spell_list_class_name": str(
+            effective_support_config.get("spell_list_class_name")
+            or effective_support_config.get("class_name")
+            or ""
+        ).strip(),
+        "spellcasting_ability": ability_label,
+        "spellcasting_ability_key": ability_key,
+        "max_spell_level_formula": str(effective_support_config.get("max_spell_level_formula") or "").strip(),
+    }
+
+
+def _build_feat_feature_entry(
+    *,
+    selection: dict[str, Any],
+    values: dict[str, str],
+    fallback_title: str = "",
+) -> dict[str, Any]:
+    feat_entry = selection.get("entry") or selection.get("systems_entry")
+    feat_slug = str(selection.get("slug") or selection.get("selection_value") or "").strip()
+    feat_title = (
+        str(selection.get("label") or selection.get("title") or "").strip()
+        or (feat_entry.title if isinstance(feat_entry, SystemsEntryRecord) else "")
+        or fallback_title
+        or feat_slug
+    )
+    feature_entry: dict[str, Any] = {
+        "kind": "feat",
+        "entry": None,
+        "name": feat_title,
+        "title": feat_title,
+        "label": feat_title,
+        "slug": feat_slug,
+        "systems_entry": feat_entry if isinstance(feat_entry, SystemsEntryRecord) else None,
+        "page_ref": str(selection.get("page_ref") or "").strip(),
+        "campaign_option": dict(selection.get("campaign_option") or {}) or None,
+    }
+    spell_manager = _supported_feat_spell_manager_payload(selection=selection, values=values)
+    if spell_manager:
+        feature_entry["spell_manager"] = spell_manager
+    source_id = str(selection.get("source_id") or "").strip()
+    if source_id:
+        feature_entry["source_id"] = source_id
+    return feature_entry
 
 
 def _build_equipment_groups(
@@ -11433,6 +11694,7 @@ def _collect_level_one_feature_entries(
 ) -> list[dict[str, Any]]:
     del selected_class
     feature_entries: list[dict[str, Any]] = []
+    selected_values = _values_from_selected_choices(choice_sections, selected_choices)
 
     feature_entries.extend(
         _collect_progression_feature_entries(
@@ -11496,16 +11758,11 @@ def _collect_level_one_feature_entries(
             )
         )
         feature_entries.append(
-            {
-                "kind": "feat",
-                "entry": None,
-                "name": feat_title,
-                "label": feat_title,
-                "slug": feat_slug,
-                "systems_entry": feat_entry if isinstance(feat_entry, SystemsEntryRecord) else None,
-                "page_ref": str(selection.get("page_ref") or "").strip(),
-                "campaign_option": dict(selection.get("campaign_option") or {}) or None,
-            }
+            _build_feat_feature_entry(
+                selection=selection,
+                values=selected_values,
+                fallback_title=feat_title,
+            )
         )
 
     feature_entries.extend(
@@ -11926,6 +12183,9 @@ def _build_feature_payload(
             feature_payload["page_ref"] = page_ref
         if campaign_option:
             feature_payload["campaign_option"] = campaign_option
+        spell_manager = dict(feature_entry.get("spell_manager") or {})
+        if spell_manager:
+            feature_payload["spell_manager"] = spell_manager
         return feature_payload
 
     if kind == "campaign_page_feature":
@@ -13657,6 +13917,10 @@ def _spell_payload_support_kwargs(raw_value: Any) -> dict[str, Any]:
         )
         support_kwargs["spell_source_row_title"] = str(payload.get("spell_source_row_title") or "").strip()
         support_kwargs["spell_source_ability_key"] = str(payload.get("spell_source_ability_key") or "").strip()
+        support_kwargs["spell_source_mode"] = str(payload.get("spell_source_mode") or "").strip()
+        support_kwargs["spell_source_spell_list_class_name"] = str(
+            payload.get("spell_source_spell_list_class_name") or ""
+        ).strip()
     grant_source_label = str(payload.get("grant_source_label") or "").strip()
     if grant_source_label:
         support_kwargs["grant_source_label"] = grant_source_label
@@ -13682,6 +13946,14 @@ def _apply_spell_payload_support_metadata(
         )
         if spell_source_ability_key:
             spell_payload["spell_source_ability_key"] = spell_source_ability_key
+        spell_source_mode = str(support_payload.get("spell_source_mode") or "").strip()
+        if spell_source_mode:
+            spell_payload["spell_source_mode"] = spell_source_mode
+        spell_source_spell_list_class_name = str(
+            support_payload.get("spell_source_spell_list_class_name") or ""
+        ).strip()
+        if spell_source_spell_list_class_name:
+            spell_payload["spell_source_spell_list_class_name"] = spell_source_spell_list_class_name
         spell_payload.pop("class_row_id", None)
     grant_source_label = str(support_payload.get("grant_source_label") or "").strip()
     if grant_source_label:
@@ -13777,7 +14049,7 @@ def _selected_feat_spell_field_values(
     for section in choice_sections:
         for field in list(section.get("fields") or []):
             kind = str(field.get("kind") or "").strip()
-            if kind not in {"feat_spell_known", "feat_spell_prepared", "feat_spell_granted"}:
+            if kind not in {"feat_spell_known", "feat_spell_prepared", "feat_spell_granted", "feat_spell_managed"}:
                 continue
             group_key = str(field.get("group_key") or field.get("name") or "").strip()
             for selected_value in list(selected_choices.get(group_key) or []):
@@ -14347,29 +14619,43 @@ def _build_feat_spell_choice_fields_for_selection(
     fields: list[dict[str, Any]] = []
     support_config = _supported_feat_spell_config(selection)
     if support_config:
-        source_row_payload = _supported_feat_spell_source_row_payload(
+        resolved_support_config = _selected_supported_feat_spell_config(
             selection=selection,
             support_config=support_config,
+            values=values,
         )
-        for spec_index, spec in enumerate(list(support_config.get("choice_fields") or []), start=1):
+        if list(support_config.get("source_options") or []) and not resolved_support_config:
+            return []
+        source_row_payload = _supported_feat_spell_source_row_payload(
+            selection=selection,
+            support_config=resolved_support_config or support_config,
+        )
+        for spec_index, raw_spec in enumerate(list((resolved_support_config or support_config).get("choice_fields") or []), start=1):
+            spec = dict(raw_spec or {})
+            filter_expression = str(spec.get("filter") or "").strip()
+            if filter_expression and "{" in filter_expression:
+                try:
+                    spec["filter"] = filter_expression.format(**(resolved_support_config or support_config))
+                except (IndexError, KeyError, ValueError):
+                    spec["filter"] = filter_expression
             fields.extend(
                 _build_feat_spell_fields_from_spec(
                     feat_title=feat_entry.title,
                     instance_key=instance_key,
-                    category=str(dict(spec or {}).get("category") or "spell_known").strip() or "spell_known",
+                    category=str(spec.get("category") or "spell_known").strip() or "spell_known",
                     spec_index=spec_index,
                     spec={
-                        **dict(spec or {}),
+                        **spec,
                         **source_row_payload,
-                        "spell_access_type": str(dict(spec or {}).get("access_type") or "").strip(),
-                        "spell_access_uses": dict(spec or {}).get("access_uses"),
-                        "spell_access_reset_on": str(dict(spec or {}).get("access_reset_on") or "").strip(),
+                        "spell_access_type": str(spec.get("access_type") or "").strip(),
+                        "spell_access_uses": spec.get("access_uses"),
+                        "spell_access_reset_on": str(spec.get("access_reset_on") or "").strip(),
                     },
                     spell_catalog=spell_catalog,
                     values=values,
                     default_label_prefix="Granted Spell",
                     default_help_text="Choose a feat-granted spell.",
-                    kind="feat_spell_known",
+                    kind=str(spec.get("kind") or "feat_spell_known").strip() or "feat_spell_known",
                 )
             )
         return fields
@@ -14477,6 +14763,10 @@ def _build_feat_spell_fields_from_spec(
                 "spell_source_row_kind": str(spec.get("spell_source_row_kind") or "").strip(),
                 "spell_source_row_title": str(spec.get("spell_source_row_title") or "").strip(),
                 "spell_source_ability_key": str(spec.get("spell_source_ability_key") or "").strip(),
+                "spell_source_mode": str(spec.get("spell_source_mode") or "").strip(),
+                "spell_source_spell_list_class_name": str(
+                    spec.get("spell_source_spell_list_class_name") or ""
+                ).strip(),
                 "grant_source_label": str(spec.get("grant_source_label") or "").strip(),
                 "spell_access_type": str(
                     spec.get("spell_access_type")
@@ -15545,6 +15835,8 @@ def _add_spell_to_payloads(
     spell_source_row_kind: str = "",
     spell_source_row_title: str = "",
     spell_source_ability_key: str = "",
+    spell_source_mode: str = "",
+    spell_source_spell_list_class_name: str = "",
     grant_source_label: str = "",
     spell_access_type: str = "",
     spell_access_uses: Any = None,
@@ -15558,6 +15850,8 @@ def _add_spell_to_payloads(
             "spell_source_row_kind": spell_source_row_kind,
             "spell_source_row_title": spell_source_row_title,
             "spell_source_ability_key": spell_source_ability_key,
+            "spell_source_mode": spell_source_mode,
+            "spell_source_spell_list_class_name": spell_source_spell_list_class_name,
             "grant_source_label": grant_source_label,
             "spell_access_type": spell_access_type,
             "spell_access_uses": spell_access_uses,
@@ -15619,6 +15913,8 @@ def _add_bonus_known_spell_to_payloads(
     spell_source_row_kind: str = "",
     spell_source_row_title: str = "",
     spell_source_ability_key: str = "",
+    spell_source_mode: str = "",
+    spell_source_spell_list_class_name: str = "",
     grant_source_label: str = "",
     spell_access_type: str = "",
     spell_access_uses: Any = None,
@@ -15641,6 +15937,8 @@ def _add_bonus_known_spell_to_payloads(
         spell_source_row_kind=spell_source_row_kind,
         spell_source_row_title=spell_source_row_title,
         spell_source_ability_key=spell_source_ability_key,
+        spell_source_mode=spell_source_mode,
+        spell_source_spell_list_class_name=spell_source_spell_list_class_name,
         grant_source_label=grant_source_label,
         spell_access_type=spell_access_type,
         spell_access_uses=spell_access_uses,
@@ -15772,12 +16070,24 @@ def _normalize_spell_payloads(
                 payload["spell_source_ability_key"] = source_ability_key
             else:
                 payload.pop("spell_source_ability_key", None)
+            source_mode = str(payload.get("spell_source_mode") or "").strip()
+            if source_mode:
+                payload["spell_source_mode"] = source_mode
+            else:
+                payload.pop("spell_source_mode", None)
+            source_spell_list_class_name = str(payload.get("spell_source_spell_list_class_name") or "").strip()
+            if source_spell_list_class_name:
+                payload["spell_source_spell_list_class_name"] = source_spell_list_class_name
+            else:
+                payload.pop("spell_source_spell_list_class_name", None)
             payload.pop("class_row_id", None)
         else:
             payload.pop("spell_source_row_id", None)
             payload.pop("spell_source_row_kind", None)
             payload.pop("spell_source_row_title", None)
             payload.pop("spell_source_ability_key", None)
+            payload.pop("spell_source_mode", None)
+            payload.pop("spell_source_spell_list_class_name", None)
         grant_source_label = str(payload.get("grant_source_label") or "").strip()
         if grant_source_label:
             payload["grant_source_label"] = grant_source_label
@@ -15921,6 +16231,11 @@ def _normalize_feature_payloads(
             payload["campaign_option"] = campaign_option
         else:
             payload.pop("campaign_option", None)
+        spell_manager = dict(payload.get("spell_manager") or {})
+        if spell_manager:
+            payload["spell_manager"] = spell_manager
+        else:
+            payload.pop("spell_manager", None)
         normalized_features.append(payload)
     return normalized_features
 

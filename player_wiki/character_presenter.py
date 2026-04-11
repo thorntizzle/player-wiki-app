@@ -6,7 +6,7 @@ from typing import Any
 
 import markdown
 
-from .character_builder import _spell_access_badge_label
+from .character_builder import _spell_access_badge_label, _spell_payload_map_key
 from .character_models import CharacterRecord
 from .character_profile import (
     profile_class_level_text,
@@ -49,6 +49,18 @@ REDUNDANT_PASSIVE_FEATURE_NAMES = {
     "psi warrior",
 }
 ATTACK_NAME_SUFFIX_PATTERN = re.compile(r"\s*\([^)]*\)\s*$")
+
+
+def _presented_spell_remove_label(*, mode: str, is_cantrip: bool, is_prepared: bool) -> str:
+    if is_cantrip:
+        return "Remove cantrip"
+    if mode == "prepared" and is_prepared:
+        return "Unprepare spell"
+    if mode == "wizard":
+        return "Remove from spellbook"
+    if mode == "ritual_book":
+        return "Remove from ritual book"
+    return "Remove spell"
 
 
 def present_character_roster(records: list[CharacterRecord]) -> list[dict[str, Any]]:
@@ -243,7 +255,7 @@ def present_character_detail(
                 "spellcasting_ability": str(dict(row or {}).get("spellcasting_ability") or "").strip(),
                 "spell_save_dc": dict(row or {}).get("spell_save_dc"),
                 "spell_attack_bonus": dict(row or {}).get("spell_attack_bonus"),
-                "spell_mode": "",
+                "spell_mode": str(dict(row or {}).get("spell_mode") or "").strip(),
                 "row_kind": str(dict(row or {}).get("source_row_kind") or "source").strip() or "source",
             }
             for row in list(spellcasting_payload.get("source_rows") or [])
@@ -264,6 +276,11 @@ def present_character_detail(
                 }
             ]
         spell_rows = class_spell_rows + source_spell_rows
+        spell_rows_by_id = {
+            str(row.get("class_row_id") or "").strip(): dict(row or {})
+            for row in spell_rows
+            if str(row.get("class_row_id") or "").strip()
+        }
         if len(class_spell_rows) > 1 and len(slot_pools) == 1 and not bool((slot_pools[0] or {}).get("shared")):
             slot_pools[0]["shared"] = True
             slot_pools[0]["title"] = "Shared spell slots"
@@ -322,6 +339,37 @@ def present_character_detail(
                 }
             )
             target_row_id = str(presented_spell.get("class_row_id") or "").strip()
+            row_payload = dict(spell_rows_by_id.get(target_row_id) or {})
+            row_mode = str(row_payload.get("spell_mode") or "").strip()
+            row_kind = str(row_payload.get("row_kind") or "class").strip() or "class"
+            normalized_mark = normalize_lookup(mark)
+            is_cantrip = "cantrip" in normalized_mark
+            is_prepared = bool(
+                not is_cantrip
+                and (
+                    bool(spell.get("is_always_prepared"))
+                    or "prepared" in normalized_mark
+                )
+            )
+            in_spellbook = bool(not is_cantrip and "spellbook" in normalized_mark)
+            is_fixed = bool(spell.get("is_always_prepared") or spell.get("is_bonus_known"))
+            can_toggle_prepared = bool(
+                row_kind == "class"
+                and row_mode == "wizard"
+                and not is_cantrip
+                and in_spellbook
+                and not bool(spell.get("is_always_prepared"))
+            )
+            can_remove = bool((row_kind == "class" or row_mode == "ritual_book") and not is_fixed)
+            presented_spell["spell_key"] = _spell_payload_map_key(dict(spell or {}))
+            presented_spell["is_prepared"] = is_prepared
+            presented_spell["can_toggle_prepared"] = can_toggle_prepared
+            presented_spell["can_remove"] = can_remove
+            presented_spell["remove_label"] = _presented_spell_remove_label(
+                mode=row_mode,
+                is_cantrip=is_cantrip,
+                is_prepared=is_prepared,
+            )
             if target_row_id and target_row_id in spells_by_row_id:
                 spells_by_row_id[target_row_id].append(presented_spell)
             else:
@@ -335,11 +383,14 @@ def present_character_detail(
             cantrip_count = sum(1 for spell in row_spells if "Cantrip" in list(spell.get("badges") or []))
             prepared_count = sum(1 for spell in row_spells if any("Prepared" in badge for badge in list(spell.get("badges") or [])))
             spellbook_count = sum(1 for spell in row_spells if any("Spellbook" in badge for badge in list(spell.get("badges") or [])))
+            ritual_book_count = sum(1 for spell in row_spells if any("Ritual book" in badge for badge in list(spell.get("badges") or [])))
             known_count = sum(1 for spell in row_spells if "Known" in list(spell.get("badges") or []))
             if cantrip_count:
                 counts.append({"label": "Cantrips", "value": str(cantrip_count)})
             if str(row.get("row_kind") or "class").strip() != "class":
-                if row_spells:
+                if str(row.get("spell_mode") or "").strip() == "ritual_book":
+                    counts.append({"label": "Ritual book spells", "value": str(ritual_book_count or len(row_spells))})
+                elif row_spells:
                     counts.append({"label": "Feature spells", "value": str(len(row_spells))})
             elif str(row.get("spell_mode") or "").strip() == "known" and known_count:
                 counts.append({"label": "Known spells", "value": str(known_count)})
@@ -350,6 +401,8 @@ def present_character_detail(
                     counts.append({"label": "Prepared spells", "value": str(prepared_count)})
                 if spellbook_count:
                     counts.append({"label": "Spellbook spells", "value": str(spellbook_count)})
+            elif str(row.get("spell_mode") or "").strip() == "ritual_book":
+                counts.append({"label": "Ritual book spells", "value": str(ritual_book_count)})
             row_sections.append(
                 {
                     "class_row_id": row_id,

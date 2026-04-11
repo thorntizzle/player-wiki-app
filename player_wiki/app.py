@@ -72,6 +72,7 @@ from .character_service import CharacterStateValidationError, build_initial_stat
 from .combat_presenter import DND_5E_CONDITION_OPTIONS, present_combat_tracker
 from .character_presenter import (
     build_character_entry_href,
+    format_signed,
     present_character_detail,
     present_character_roster,
     render_campaign_markdown,
@@ -1027,6 +1028,8 @@ def create_app() -> Flask:
         sections: list[dict[str, object]] = []
         for section in list(manager.get("sections") or []):
             section_payload = dict(section or {})
+            if section_payload.get("spell_attack_bonus") not in {"", None}:
+                section_payload["spell_attack_bonus"] = format_signed(section_payload.get("spell_attack_bonus"))
             rows: list[dict[str, object]] = []
             for row in list(section_payload.get("rows") or []):
                 payload = dict(row.get("payload") or {})
@@ -1073,6 +1076,36 @@ def create_app() -> Flask:
                 campaign_slug=campaign_slug,
                 character_slug=record.definition.character_slug,
             ),
+        }
+
+    def build_character_spellcasting_placeholder(spell_manager: dict[str, object]) -> dict[str, object] | None:
+        sections = [dict(section or {}) for section in list(spell_manager.get("sections") or []) if isinstance(section, dict)]
+        if not sections:
+            return None
+        primary_section = dict(sections[0] or {})
+        row_sections = [
+            {
+                "class_row_id": str(section.get("class_row_id") or "").strip(),
+                "title": str(section.get("title") or "Spellcasting").strip() or "Spellcasting",
+                "spellcasting_ability": str(section.get("spellcasting_ability") or "").strip(),
+                "spell_save_dc": section.get("spell_save_dc"),
+                "spell_attack_bonus": str(section.get("spell_attack_bonus") or "").strip(),
+                "counts": list(section.get("counts") or []),
+                "spells": [],
+            }
+            for section in sections
+        ]
+        return {
+            "spellcasting_class": str(primary_section.get("title") or "Spellcasting").strip() or "Spellcasting",
+            "spellcasting_ability": str(primary_section.get("spellcasting_ability") or "").strip(),
+            "spell_save_dc": primary_section.get("spell_save_dc"),
+            "spell_attack_bonus": str(primary_section.get("spell_attack_bonus") or "").strip(),
+            "slots": [],
+            "slots_title": "",
+            "slot_pools": [],
+            "multiclass_summary": "",
+            "row_sections": row_sections,
+            "is_multiclass": len(row_sections) > 1,
         }
 
     def build_character_portrait_asset_ref(character_slug: str, filename: str) -> str:
@@ -1822,6 +1855,11 @@ def create_app() -> Flask:
         if background_draft is not None:
             character["personal_background_markdown"] = background_draft
         character["portrait"] = build_character_portrait_context(campaign, record.definition)
+        spell_manager = build_character_spell_manager_context(campaign_slug, campaign, record)
+        if not character.get("spellcasting") and spell_manager is not None:
+            spellcasting_placeholder = build_character_spellcasting_placeholder(spell_manager)
+            if spellcasting_placeholder is not None:
+                character["spellcasting"] = spellcasting_placeholder
         include_spellcasting_subpage = bool(character.get("spellcasting"))
         available_character_subpages = get_character_read_subpage_labels(
             include_spellcasting=include_spellcasting_subpage,
@@ -1853,7 +1891,6 @@ def create_app() -> Flask:
             campaign,
             record,
         )
-        spell_manager = build_character_spell_manager_context(campaign_slug, campaign, record)
         character_subpages = [
             {
                 "slug": slug,

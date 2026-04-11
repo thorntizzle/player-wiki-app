@@ -171,6 +171,7 @@ def _seed_systems_spell_entries(app, entries: list[dict[str, object]]) -> dict[s
                     "metadata": {
                         "level": int(entry.get("level") or 0),
                         "class_lists": dict(entry.get("class_lists") or {"PHB": []}),
+                        "ritual": bool(entry.get("ritual")),
                         "casting_time": list(entry.get("casting_time") or [{"number": 1, "unit": "action"}]),
                         "range": dict(entry.get("range") or {"type": "point", "distance": {"type": "feet", "amount": 60}}),
                         "duration": list(entry.get("duration") or [{"type": "timed", "duration": {"type": "round", "amount": 1}}]),
@@ -202,6 +203,7 @@ def _seed_systems_spell_entries(app, entries: list[dict[str, object]]) -> dict[s
                         "metadata": {
                             "level": int(entry.get("level") or 0),
                             "class_lists": dict(entry.get("class_lists") or {"PHB": []}),
+                            "ritual": bool(entry.get("ritual")),
                             "casting_time": list(entry.get("casting_time") or [{"number": 1, "unit": "action"}]),
                             "range": dict(entry.get("range") or {"type": "point", "distance": {"type": "feet", "amount": 60}}),
                             "duration": list(entry.get("duration") or [{"type": "timed", "duration": {"type": "round", "amount": 1}}]),
@@ -635,6 +637,136 @@ def test_spellcasting_subpage_shows_supported_feat_spell_rows_as_read_only_secti
     assert "Prepare spell" not in html
     assert "Add spellbook spell" not in html
     assert "Remove cantrip" not in html
+
+
+def test_spellcasting_subpage_can_manage_ritual_caster_ritual_book(app, client, sign_in, users):
+    spell_entries = _seed_systems_spell_entries(
+        app,
+        [
+            {"slug": "phb-spell-detect-magic", "title": "Detect Magic", "level": 1, "class_lists": {"PHB": ["Wizard"]}, "ritual": True},
+            {"slug": "phb-spell-find-familiar", "title": "Find Familiar", "level": 1, "class_lists": {"PHB": ["Wizard"]}, "ritual": True},
+            {"slug": "phb-spell-alarm", "title": "Alarm", "level": 1, "class_lists": {"PHB": ["Wizard"]}, "ritual": True},
+            {"slug": "phb-spell-magic-missile", "title": "Magic Missile", "level": 1, "class_lists": {"PHB": ["Wizard"]}},
+        ],
+    )
+
+    source_row_id = "feat-spell-source:phb-feat-ritual-caster:species-feat-1"
+
+    def _mutate(payload: dict) -> None:
+        profile = dict(payload.get("profile") or {})
+        profile["class_level_text"] = "Fighter 5"
+        profile["classes"] = [{"class_name": "Fighter", "level": 5}]
+        payload["profile"] = profile
+        stats = dict(payload.get("stats") or {})
+        ability_scores = dict(stats.get("ability_scores") or {})
+        ability_scores["int"] = {"score": 14, "modifier": 2, "save_bonus": 2}
+        stats["ability_scores"] = ability_scores
+        stats["proficiency_bonus"] = 3
+        payload["stats"] = stats
+        payload["features"] = [
+            {
+                "id": "ritual-caster-1",
+                "name": "Ritual Caster",
+                "category": "feat",
+                "source": "PHB",
+                "description_markdown": "",
+                "activation_type": "passive",
+                "systems_ref": {
+                    "entry_key": "dnd-5e|feat|phb|ritual-caster",
+                    "entry_type": "feat",
+                    "title": "Ritual Caster",
+                    "slug": "phb-feat-ritual-caster",
+                    "source_id": "PHB",
+                },
+                "spell_manager": {
+                    "source_row_id": source_row_id,
+                    "source_row_kind": "feat",
+                    "title": "Ritual Caster (Wizard)",
+                    "mode": "ritual_book",
+                    "spell_list_class_name": "Wizard",
+                    "spellcasting_ability": "Intelligence",
+                    "spellcasting_ability_key": "int",
+                    "max_spell_level_formula": "ritual_caster_half_level_rounded_up",
+                },
+            }
+        ]
+        payload["spellcasting"] = {
+            "spellcasting_class": "",
+            "spellcasting_ability": "",
+            "spell_save_dc": None,
+            "spell_attack_bonus": None,
+            "slot_progression": [],
+            "class_rows": [],
+            "source_rows": [],
+            "spells": [],
+        }
+
+    _write_character_definition(app, "arden-march", _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    page_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=spellcasting")
+    assert page_response.status_code == 200
+    page_html = page_response.get_data(as_text=True)
+    assert "Ritual Caster (Wizard)" in page_html
+    assert "Ritual book" in page_html
+    assert "Add ritual spell" in page_html
+    assert "No spells recorded yet for this class row." in page_html
+
+    search_response = client.get(
+        f"/campaigns/linden-pass/characters/arden-march/spellcasting/spells/search?kind=ritual_book&q=detect&target_class_row_id={source_row_id}"
+    )
+    assert search_response.status_code == 200
+    search_payload = search_response.get_json()
+    assert search_payload["message"] == "Found 1 matching ritual spells."
+    assert [result["entry_slug"] for result in search_payload["results"]] == ["phb-spell-detect-magic"]
+
+    add_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/add",
+        data={
+            "expected_revision": str(_character_state_revision(app, "arden-march")),
+            "mode": "read",
+            "page": "spellcasting",
+            "kind": "ritual_book",
+            "selected_value": "phb-spell-detect-magic",
+            "target_class_row_id": source_row_id,
+        },
+        follow_redirects=False,
+    )
+    assert add_response.status_code == 302
+
+    updated_definition = _read_character_definition(app, "arden-march")
+    spells_by_name = {spell["name"]: spell for spell in updated_definition["spellcasting"]["spells"]}
+    assert spells_by_name["Detect Magic"]["mark"] == "Ritual Book"
+    assert spells_by_name["Detect Magic"]["is_ritual"] is True
+    assert spells_by_name["Detect Magic"]["spell_source_row_id"] == source_row_id
+
+    updated_page = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=spellcasting")
+    updated_html = updated_page.get_data(as_text=True)
+    assert "Detect Magic" in updated_html
+    assert "Ritual Book" in updated_html
+    assert "Remove from ritual book" in updated_html
+
+    remove_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/remove",
+        data={
+            "expected_revision": str(_character_state_revision(app, "arden-march")),
+            "mode": "read",
+            "page": "spellcasting",
+            "spell_key": f"feat:{source_row_id}::phb-spell-detect-magic",
+            "target_class_row_id": source_row_id,
+        },
+        follow_redirects=False,
+    )
+    assert remove_response.status_code == 302
+
+    removed_definition = _read_character_definition(app, "arden-march")
+    assert removed_definition["spellcasting"]["spells"] == []
+    removed_page = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=spellcasting")
+    removed_html = removed_page.get_data(as_text=True)
+    assert "Ritual Caster (Wizard)" in removed_html
+    assert "Add ritual spell" in removed_html
+    assert "No spells recorded yet for this class row." in removed_html
 
 
 def test_spellcasting_subpage_can_search_add_and_remove_known_spells(app, client, sign_in, users):

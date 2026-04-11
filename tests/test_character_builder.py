@@ -3701,6 +3701,123 @@ def _build_free_cast_feat_test_fixture() -> dict[str, object]:
     }
 
 
+def _build_ritual_caster_test_fixture() -> dict[str, object]:
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    variant_human = _systems_entry(
+        "race",
+        "phb-race-variant-human",
+        "Variant Human",
+        metadata={
+            "size": ["M"],
+            "speed": 30,
+            "languages": [{"common": True}],
+            "feats": [{"any": 1}],
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    ability_score_improvement = _systems_entry(
+        "classfeature",
+        "phb-classfeature-ability-score-improvement",
+        "Ability Score Improvement",
+        metadata={"level": 4},
+    )
+    ritual_caster = _systems_entry("feat", "phb-feat-ritual-caster", "Ritual Caster", source_id="PHB")
+    detect_magic = _systems_entry(
+        "spell",
+        "phb-spell-detect-magic",
+        "Detect Magic",
+        metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1, "class_lists": {"PHB": ["Wizard"]}, "ritual": True},
+    )
+    find_familiar = _systems_entry(
+        "spell",
+        "phb-spell-find-familiar",
+        "Find Familiar",
+        metadata={"casting_time": [{"number": 1, "unit": "hour"}], "level": 1, "class_lists": {"PHB": ["Wizard"]}, "ritual": True},
+    )
+    identify = _systems_entry(
+        "spell",
+        "phb-spell-identify",
+        "Identify",
+        metadata={"casting_time": [{"number": 1, "unit": "minute"}], "level": 1, "class_lists": {"PHB": ["Wizard"]}, "ritual": True},
+    )
+    magic_missile = _systems_entry(
+        "spell",
+        "phb-spell-magic-missile",
+        "Magic Missile",
+        metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1, "class_lists": {"PHB": ["Wizard"]}},
+    )
+    alarm = _systems_entry(
+        "spell",
+        "phb-spell-alarm",
+        "Alarm",
+        metadata={"casting_time": [{"number": 1, "unit": "minute"}], "level": 1, "class_lists": {"PHB": ["Wizard"]}, "ritual": True},
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [variant_human, human],
+            "background": [acolyte],
+            "feat": [ritual_caster],
+            "subclass": [],
+            "item": [],
+            "spell": [detect_magic, find_familiar, identify, magic_missile, alarm],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            },
+            {
+                "level": 4,
+                "level_label": "Level 4",
+                "feature_rows": [
+                    {
+                        "label": "Ability Score Improvement",
+                        "entry": ability_score_improvement,
+                        "embedded_card": {"option_groups": []},
+                    },
+                ],
+            },
+        ],
+    )
+    return {
+        "systems_service": systems_service,
+        "fighter": fighter,
+        "variant_human": variant_human,
+        "human": human,
+        "acolyte": acolyte,
+        "ritual_caster": ritual_caster,
+    }
+
+
 def _apply_free_cast_test_ability_scores(definition: CharacterDefinition) -> None:
     definition.stats["ability_scores"]["int"].update({"score": 14, "modifier": 2, "save_bonus": 2})
     definition.stats["ability_scores"]["wis"].update({"score": 13, "modifier": 1, "save_bonus": 1})
@@ -7814,6 +7931,85 @@ def test_level_one_builder_applies_supported_free_cast_feat_spells(case: dict[st
     _assert_free_cast_feat_spellcasting(definition.spellcasting, case)
     for preview_entry in list(case.get("expected_preview") or []):
         assert preview_entry in list(context["preview"]["spells"] or [])
+
+
+def test_level_one_builder_applies_ritual_caster_with_ritual_book_manager():
+    fixture = _build_ritual_caster_test_fixture()
+    systems_service = fixture["systems_service"]
+    fighter = fixture["fighter"]
+    variant_human = fixture["variant_human"]
+    acolyte = fixture["acolyte"]
+
+    form_values = {
+        "name": "Ritual Keeper",
+        "character_slug": "ritual-keeper",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": variant_human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "species_feat_1": fixture["ritual_caster"].slug,
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "14",
+        "wis": "12",
+        "cha": "10",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    assert _find_builder_field(context, "feat_species_feat_1_spell_source_1")["label"] == "Ritual Caster Spell List"
+
+    form_values["feat_species_feat_1_spell_source_1"] = _field_value_for_label(
+        context,
+        "feat_species_feat_1_spell_source_1",
+        "Wizard Spells",
+    )
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+
+    first_ritual_field = _find_builder_field(context, "feat_species_feat_1_spell_managed_1_1")
+    ritual_options = {option["label"] for option in list(first_ritual_field.get("options") or [])}
+    assert {"Alarm", "Detect Magic", "Find Familiar", "Identify"} <= ritual_options
+    assert "Magic Missile" not in ritual_options
+
+    form_values["feat_species_feat_1_spell_managed_1_1"] = _field_value_for_label(
+        context,
+        "feat_species_feat_1_spell_managed_1_1",
+        "Detect Magic",
+    )
+    form_values["feat_species_feat_1_spell_managed_1_2"] = _field_value_for_label(
+        context,
+        "feat_species_feat_1_spell_managed_1_2",
+        "Identify",
+    )
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+
+    ritual_caster_feature = next(feature for feature in definition.features if feature["name"] == "Ritual Caster")
+    spell_manager = dict(ritual_caster_feature.get("spell_manager") or {})
+    spells_by_name = {spell["name"]: spell for spell in definition.spellcasting["spells"]}
+    source_rows = [dict(row or {}) for row in list(definition.spellcasting.get("source_rows") or []) if isinstance(row, dict)]
+
+    assert spell_manager["mode"] == "ritual_book"
+    assert spell_manager["spell_list_class_name"] == "Wizard"
+    assert spell_manager["title"] == "Ritual Caster (Wizard)"
+    assert spell_manager["spellcasting_ability"] == "Intelligence"
+    assert spell_manager["max_spell_level_formula"] == "ritual_caster_half_level_rounded_up"
+    assert {spell["name"] for spell in definition.spellcasting["spells"]} == {"Detect Magic", "Identify"}
+    assert spells_by_name["Detect Magic"]["mark"] == "Ritual Book"
+    assert spells_by_name["Detect Magic"]["is_ritual"] is True
+    assert spells_by_name["Detect Magic"].get("is_bonus_known") in {False, None}
+    assert spells_by_name["Detect Magic"]["spell_source_row_id"] == spell_manager["source_row_id"]
+    assert spells_by_name["Identify"]["spell_source_row_id"] == spell_manager["source_row_id"]
+    assert len(source_rows) == 1
+    assert source_rows[0]["spell_mode"] == "ritual_book"
+    assert source_rows[0]["spell_list_class_name"] == "Wizard"
+    assert source_rows[0]["spell_save_dc"] == 12
+    assert source_rows[0]["spell_attack_bonus"] == 4
+    assert "Detect Magic (Ritual Book)" in list(context["preview"]["spells"] or [])
+    assert "Identify (Ritual Book)" in list(context["preview"]["spells"] or [])
 
 
 def test_level_one_builder_clears_stale_species_feat_and_spell_fields_after_species_change():
@@ -13414,6 +13610,63 @@ def test_native_level_up_clears_stale_supported_feat_spell_fields_after_switchin
     assert leveled_definition.spellcasting["spells"] == []
     assert list(leveled_definition.spellcasting.get("source_rows") or []) == []
     assert all(feature["name"] != "Artificer Initiate" for feature in leveled_definition.features)
+
+
+def test_native_level_up_can_add_ritual_caster_with_ritual_book_manager():
+    fixture = _build_ritual_caster_test_fixture()
+    systems_service = fixture["systems_service"]
+    fighter = fixture["fighter"]
+
+    current_definition = _minimal_character_definition("ritual-leveler", "Ritual Leveler")
+    _apply_primary_class(current_definition, fighter, level=3)
+    _apply_free_cast_test_ability_scores(current_definition)
+
+    form_values = {
+        "hp_gain": "8",
+        "levelup_asi_mode_1": "feat",
+    }
+    context = build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values)
+    form_values["levelup_feat_1"] = _field_value_for_label(context, "levelup_feat_1", "Ritual Caster")
+    context = build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values)
+    form_values["feat_levelup_feat_1_spell_source_1"] = _field_value_for_label(
+        context,
+        "feat_levelup_feat_1_spell_source_1",
+        "Wizard Spells",
+    )
+    context = build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values)
+    form_values["feat_levelup_feat_1_spell_managed_1_1"] = _field_value_for_label(
+        context,
+        "feat_levelup_feat_1_spell_managed_1_1",
+        "Detect Magic",
+    )
+    form_values["feat_levelup_feat_1_spell_managed_1_2"] = _field_value_for_label(
+        context,
+        "feat_levelup_feat_1_spell_managed_1_2",
+        "Find Familiar",
+    )
+    context = build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values)
+    leveled_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        context,
+        form_values,
+    )
+
+    ritual_caster_feature = next(feature for feature in leveled_definition.features if feature["name"] == "Ritual Caster")
+    spell_manager = dict(ritual_caster_feature.get("spell_manager") or {})
+    spells_by_name = {spell["name"]: spell for spell in leveled_definition.spellcasting["spells"]}
+    source_rows = [dict(row or {}) for row in list(leveled_definition.spellcasting.get("source_rows") or []) if isinstance(row, dict)]
+
+    assert spell_manager["mode"] == "ritual_book"
+    assert spell_manager["spell_list_class_name"] == "Wizard"
+    assert {spell["name"] for spell in leveled_definition.spellcasting["spells"]} == {"Detect Magic", "Find Familiar"}
+    assert spells_by_name["Detect Magic"]["mark"] == "Ritual Book"
+    assert spells_by_name["Find Familiar"]["mark"] == "Ritual Book"
+    assert spells_by_name["Detect Magic"]["spell_source_row_id"] == spell_manager["source_row_id"]
+    assert len(source_rows) == 1
+    assert source_rows[0]["spell_mode"] == "ritual_book"
+    assert source_rows[0]["spell_save_dc"] == 12
+    assert source_rows[0]["spell_attack_bonus"] == 4
 
 
 def test_native_level_up_can_replace_known_spell():

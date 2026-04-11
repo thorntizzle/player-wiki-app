@@ -101,8 +101,6 @@ def build_character_spell_management_context(
     selected_class_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     spellcasting = dict(definition.spellcasting or {})
-    if not spellcasting:
-        return None
 
     spell_catalog = dict(spell_catalog or {})
     class_row_payloads = _spell_management_class_rows(
@@ -146,6 +144,47 @@ def build_character_spell_management_context(
     }
 
 
+def _feature_spell_management_rows(
+    definition: CharacterDefinition,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    ability_scores = _spell_management_ability_scores(definition)
+    proficiency_bonus = int((definition.stats or {}).get("proficiency_bonus") or 0)
+    current_level = max(int(profile_total_level(definition.profile) or 0), 1)
+
+    for feature in list(definition.features or []):
+        spell_manager = dict(feature.get("spell_manager") or {})
+        source_row_id = str(spell_manager.get("source_row_id") or "").strip()
+        if not source_row_id:
+            continue
+        ability_key = normalize_lookup(str(spell_manager.get("spellcasting_ability_key") or "").strip())
+        ability_score = int(ability_scores.get(ability_key, 10) or 10) if ability_key else 10
+        ability_modifier = (ability_score - 10) // 2 if ability_key else 0
+        max_spell_level_override = None
+        formula = str(spell_manager.get("max_spell_level_formula") or "").strip()
+        if formula == "ritual_caster_half_level_rounded_up":
+            max_spell_level_override = max((current_level + 1) // 2, 1)
+        rows.append(
+            {
+                "class_row_id": source_row_id,
+                "class_name": str(spell_manager.get("title") or feature.get("name") or "Feature spells").strip() or "Feature spells",
+                "spell_list_class_name": str(spell_manager.get("spell_list_class_name") or "").strip(),
+                "level": 0,
+                "mode": str(spell_manager.get("mode") or "").strip(),
+                "spellcasting_ability": str(spell_manager.get("spellcasting_ability") or "").strip(),
+                "spellcasting_ability_key": ability_key,
+                "spell_save_dc": 8 + proficiency_bonus + ability_modifier if ability_key else None,
+                "spell_attack_bonus": proficiency_bonus + ability_modifier if ability_key else None,
+                "selected_class": None,
+                "selected_subclass": None,
+                "slot_lane_id": "",
+                "row_kind": str(spell_manager.get("source_row_kind") or "source").strip() or "source",
+                "max_spell_level_override": max_spell_level_override,
+            }
+        )
+    return rows
+
+
 def _spell_management_class_rows(
     definition: CharacterDefinition,
     *,
@@ -185,6 +224,7 @@ def _spell_management_class_rows(
                     "level": int(row.get("level") or 0),
                     "mode": str(row.get("spell_mode") or "").strip(),
                     "spellcasting_ability": str(row.get("spellcasting_ability") or "").strip(),
+                    "spellcasting_ability_key": "",
                     "spell_save_dc": row.get("spell_save_dc"),
                     "spell_attack_bonus": row.get("spell_attack_bonus"),
                     "selected_class": resolved_class,
@@ -227,6 +267,7 @@ def _spell_management_class_rows(
                     "level": current_level,
                     "mode": mode,
                     "spellcasting_ability": str(spellcasting.get("spellcasting_ability") or "").strip(),
+                    "spellcasting_ability_key": "",
                     "spell_save_dc": spellcasting.get("spell_save_dc"),
                     "spell_attack_bonus": spellcasting.get("spell_attack_bonus"),
                     "selected_class": selected_class if isinstance(selected_class, SystemsEntryRecord) else None,
@@ -245,18 +286,51 @@ def _spell_management_class_rows(
             {
                 "class_row_id": source_row_id,
                 "class_name": str(payload.get("title") or "").strip() or "Feature spells",
-                "spell_list_class_name": "",
+                "spell_list_class_name": str(payload.get("spell_list_class_name") or "").strip(),
                 "level": 0,
-                "mode": "",
+                "mode": str(payload.get("spell_mode") or "").strip(),
                 "spellcasting_ability": str(payload.get("spellcasting_ability") or "").strip(),
+                "spellcasting_ability_key": "",
                 "spell_save_dc": payload.get("spell_save_dc"),
                 "spell_attack_bonus": payload.get("spell_attack_bonus"),
                 "selected_class": None,
                 "selected_subclass": None,
                 "slot_lane_id": "",
                 "row_kind": str(payload.get("source_row_kind") or "source").strip() or "source",
+                "max_spell_level_override": payload.get("max_spell_level_override"),
             }
         )
+    row_index_by_id = {
+        str(row.get("class_row_id") or "").strip(): index
+        for index, row in enumerate(results)
+        if str(row.get("class_row_id") or "").strip()
+    }
+    for row_payload in _feature_spell_management_rows(definition):
+        row_id = str(row_payload.get("class_row_id") or "").strip()
+        if not row_id:
+            continue
+        existing_index = row_index_by_id.get(row_id)
+        if existing_index is None:
+            row_index_by_id[row_id] = len(results)
+            results.append(row_payload)
+            continue
+        existing_payload = results[existing_index]
+        if str(existing_payload.get("row_kind") or "source").strip() == "source" and str(
+            row_payload.get("row_kind") or ""
+        ).strip():
+            existing_payload["row_kind"] = str(row_payload.get("row_kind") or "").strip()
+        for key in (
+            "class_name",
+            "spell_list_class_name",
+            "mode",
+            "spellcasting_ability",
+            "spellcasting_ability_key",
+            "spell_save_dc",
+            "spell_attack_bonus",
+            "max_spell_level_override",
+        ):
+            if existing_payload.get(key) in {"", None} and row_payload.get(key) not in {"", None}:
+                existing_payload[key] = row_payload.get(key)
     return results
 
 
@@ -277,9 +351,14 @@ def _build_spell_management_section(
     selected_subclass = row_payload.get("selected_subclass")
     class_row_id = str(row_payload.get("class_row_id") or "").strip()
     slot_progression = [dict(slot or {}) for slot in list(slot_lane.get("slot_progression") or [])]
-    max_spell_level = max((int(slot.get("level") or 0) for slot in slot_progression), default=0)
+    max_spell_level = int(row_payload.get("max_spell_level_override") or 0)
+    if max_spell_level <= 0:
+        max_spell_level = max((int(slot.get("level") or 0) for slot in slot_progression), default=0)
     unavailable_message = ""
-    if row_kind != "class":
+    if mode == "ritual_book":
+        if not spell_list_class_name:
+            unavailable_message = "This ritual book does not currently have a valid class spell list to manage."
+    elif row_kind != "class":
         unavailable_message = "Feat-granted spells stay read-only here in this slice."
     elif not class_name or not mode:
         unavailable_message = "This sheet does not currently have a supported class spellcasting model to edit here."
@@ -298,6 +377,7 @@ def _build_spell_management_section(
     mutable_known_count = sum(1 for row in rows if row["counts_against_known_limit"])
     mutable_prepared_count = sum(1 for row in rows if row["counts_against_prepared_limit"])
     mutable_spellbook_count = sum(1 for row in rows if row["counts_against_spellbook_total"])
+    mutable_ritual_book_count = sum(1 for row in rows if row["counts_against_ritual_book_total"])
     fixed_spell_count = sum(1 for row in rows if row["is_fixed"])
 
     ability_scores = _spell_management_ability_scores(definition)
@@ -345,15 +425,20 @@ def _build_spell_management_section(
     elif mode == "wizard":
         counts.append({"label": "Prepared spells", "value": f"{mutable_prepared_count} / {target_prepared_count}"})
         counts.append({"label": "Spellbook spells", "value": str(mutable_spellbook_count)})
+    elif mode == "ritual_book":
+        counts.append({"label": "Ritual book spells", "value": str(mutable_ritual_book_count)})
     if fixed_spell_count:
         counts.append({"label": "Fixed feature spells", "value": str(fixed_spell_count)})
 
     can_manage = bool(
-        row_kind == "class"
-        and mode
-        and class_name
+        mode
+        and (class_name or spell_list_class_name)
         and not unavailable_message
         and list(spell_catalog.get("entries") or [])
+        and (
+            row_kind == "class"
+            or mode == "ritual_book"
+        )
     )
     if not can_manage and not unavailable_message and mode:
         unavailable_message = "Enable Systems spell entries in this campaign to manage spells from the character sheet."
@@ -362,6 +447,7 @@ def _build_spell_management_section(
         "known": "Add known spell",
         "prepared": "Prepare spell",
         "wizard": "Add spellbook spell",
+        "ritual_book": "Add ritual spell",
     }.get(mode, "Add spell")
     rules_note = {
         "known": (
@@ -376,10 +462,16 @@ def _build_spell_management_section(
             "Wizards prepare spells from their spellbook. Add new spells to the spellbook here, "
             "then mark which spellbook spells are currently prepared."
         ),
+        "ritual_book": (
+            f"This ritual book draws from the {spell_list_class_name} ritual list. "
+            f"Add ritual spells up through level {max_spell_level} as the character earns or finds them."
+            if spell_list_class_name and max_spell_level > 0
+            else "This ritual book holds ritual spells from one chosen class list."
+        ),
     }.get(mode, "")
-    if row_kind == "feat":
+    if row_kind == "feat" and mode != "ritual_book":
         rules_note = "Feat-granted spell packages are preserved on the sheet here, but stay read-only in this slice."
-    elif row_kind != "class":
+    elif row_kind != "class" and mode != "ritual_book":
         rules_note = "Feature-granted spell packages are preserved on the sheet here, but stay read-only in this slice."
 
     return {
@@ -387,17 +479,22 @@ def _build_spell_management_section(
         "class_name": class_name,
         "spell_list_class_name": spell_list_class_name,
         "mode": mode,
+        "row_kind": row_kind,
         "mode_label": (
-            "Feat spells"
-            if row_kind == "feat"
+            "Ritual book"
+            if mode == "ritual_book"
             else (
-                "Feature spells"
-                if row_kind != "class"
-                else {
-                    "known": "Known spells",
-                    "prepared": "Prepared spells",
-                    "wizard": "Wizard spellbook",
-                }.get(mode, "Spellcasting")
+                "Feat spells"
+                if row_kind == "feat"
+                else (
+                    "Feature spells"
+                    if row_kind != "class"
+                    else {
+                        "known": "Known spells",
+                        "prepared": "Prepared spells",
+                        "wizard": "Wizard spellbook",
+                    }.get(mode, "Spellcasting")
+                )
             )
         ),
         "title": f"{class_name} {current_level}" if class_name and current_level > 0 else class_name or "Spellcasting",
@@ -410,6 +507,7 @@ def _build_spell_management_section(
         "current_known_count": mutable_known_count,
         "current_prepared_count": mutable_prepared_count,
         "current_spellbook_count": mutable_spellbook_count,
+        "current_ritual_book_count": mutable_ritual_book_count,
         "counts": counts,
         "rows": rows,
         "can_manage": can_manage,
@@ -422,14 +520,19 @@ def _build_spell_management_section(
             can_manage
             and max_spell_level > 0
             and (
-                mode == "wizard"
+                mode in {"wizard", "ritual_book"}
                 or (mode == "known" and mutable_known_count < target_known_count)
                 or (mode == "prepared" and mutable_prepared_count < target_prepared_count)
             )
         ),
-        "spell_add_kind": "spellbook" if mode == "wizard" else "spell",
+        "spell_add_kind": (
+            "spellbook"
+            if mode == "wizard"
+            else ("ritual_book" if mode == "ritual_book" else "spell")
+        ),
         "spell_add_label": spell_add_label,
         "spellcasting_ability": str(row_payload.get("spellcasting_ability") or "").strip(),
+        "spellcasting_ability_key": str(row_payload.get("spellcasting_ability_key") or "").strip(),
         "spell_save_dc": row_payload.get("spell_save_dc"),
         "spell_attack_bonus": row_payload.get("spell_attack_bonus"),
     }
@@ -461,14 +564,16 @@ def search_character_spell_management_options(
         return [], str(section.get("unavailable_message") or "This sheet cannot manage spells here yet.")
 
     clean_kind = str(kind or "").strip().lower()
-    if clean_kind not in {"cantrip", "spell", "spellbook"}:
+    if clean_kind not in {"cantrip", "spell", "spellbook", "ritual_book"}:
         return [], "Choose a valid spell search type."
     if clean_kind == "spellbook" and section.get("mode") != "wizard":
         return [], "Only wizard sheets use spellbook additions."
+    if clean_kind == "ritual_book" and section.get("mode") != "ritual_book":
+        return [], "Only ritual-book sheets use ritual spell additions."
 
     clean_query = normalize_lookup(query)
     if len(clean_query) < SPELL_MANAGEMENT_QUERY_MIN_LENGTH:
-        return [], "Type at least 2 letters to search eligible class spells."
+        return [], "Type at least 2 letters to search eligible spells."
 
     class_name = str(section.get("spell_list_class_name") or section.get("class_name") or "").strip()
     max_spell_level = int(section.get("max_spell_level") or 0)
@@ -492,6 +597,8 @@ def search_character_spell_management_options(
         else:
             if level <= 0 or level > max_spell_level:
                 continue
+        if clean_kind == "ritual_book" and not bool(dict(getattr(entry, "metadata", {}) or {}).get("ritual")):
+            continue
         if str(entry.slug or "").strip() in existing_keys:
             continue
         searchable_text = normalize_lookup(f"{entry.title} {entry.search_text}")
@@ -513,8 +620,10 @@ def search_character_spell_management_options(
             break
 
     if results:
-        label = "cantrips" if clean_kind == "cantrip" else "spells"
+        label = "cantrips" if clean_kind == "cantrip" else ("ritual spells" if clean_kind == "ritual_book" else "spells")
         return results, f"Found {len(results)} matching {label}."
+    if clean_kind == "ritual_book":
+        return [], "No eligible ritual spells matched that search."
     return [], "No eligible class spells matched that search."
 
 
@@ -571,6 +680,7 @@ def apply_character_spell_management_edit(
     clean_selected_value = str(selected_value or "").strip()
     clean_mode = str(section.get("mode") or "").strip()
     clean_target_class_row_id = str(section.get("class_row_id") or target_class_row_id or "").strip()
+    support_kwargs = _spell_management_section_support_kwargs(section)
     if clean_spell_key and clean_spell_key not in rows_by_key and clean_target_class_row_id and "::" not in clean_spell_key:
         fallback_key = f"{clean_target_class_row_id}::{clean_spell_key}"
         if fallback_key in rows_by_key:
@@ -624,6 +734,18 @@ def apply_character_spell_management_edit(
                 spell_catalog=dict(spell_catalog or {}),
                 mark="Spellbook",
                 class_row_id=clean_target_class_row_id,
+            )
+        elif clean_kind == "ritual_book" and clean_mode == "ritual_book":
+            if not bool(section.get("can_add_spell")):
+                raise CharacterEditValidationError("This ritual book cannot add more spells right now.")
+            _add_spell_to_payloads(
+                spells_by_key,
+                selected_value=clean_selected_value,
+                spell_catalog=dict(spell_catalog or {}),
+                mark="Ritual Book",
+                is_ritual=True,
+                class_row_id=clean_target_class_row_id,
+                **support_kwargs,
             )
         else:
             raise CharacterEditValidationError("Choose a valid spell-management action.")
@@ -685,6 +807,29 @@ def apply_character_spell_management_edit(
         current_import_metadata,
     )
     return definition, import_metadata, {}
+
+
+def _spell_management_section_support_kwargs(section: dict[str, Any]) -> dict[str, Any]:
+    row_kind = str(section.get("row_kind") or "class").strip() or "class"
+    if row_kind == "class":
+        return {}
+    source_row_id = str(section.get("class_row_id") or "").strip()
+    if not source_row_id:
+        return {}
+    support_kwargs = {
+        "spell_source_row_id": source_row_id,
+        "spell_source_row_kind": row_kind,
+        "spell_source_row_title": str(section.get("class_name") or "").strip(),
+        "spell_source_ability_key": str(section.get("spellcasting_ability_key") or "").strip(),
+        "spell_source_mode": str(section.get("mode") or "").strip(),
+        "spell_source_spell_list_class_name": str(section.get("spell_list_class_name") or "").strip(),
+        "grant_source_label": str(section.get("class_name") or "").strip(),
+    }
+    return {
+        key: value
+        for key, value in support_kwargs.items()
+        if value not in {"", None}
+    }
 
 
 def _resolve_spell_management_section(
@@ -768,6 +913,13 @@ def _build_spell_management_rows(
             )
         )
         in_spellbook = bool(not is_cantrip and "spellbook" in normalized_mark)
+        in_ritual_book = bool(
+            not is_cantrip
+            and (
+                "ritual book" in normalized_mark
+                or mode == "ritual_book"
+            )
+        )
         is_fixed = bool(normalized_payload.get("is_always_prepared") or normalized_payload.get("is_bonus_known"))
 
         managed_group = ""
@@ -779,12 +931,16 @@ def _build_spell_management_rows(
             managed_group = "prepared"
         elif mode == "wizard":
             managed_group = "spellbook"
+        elif mode == "ritual_book":
+            managed_group = "ritual_book"
 
         badges: list[str] = []
         if is_cantrip:
             badges.append("Cantrip")
         elif mode == "wizard" and in_spellbook:
             badges.append("Spellbook")
+        elif mode == "ritual_book" and in_ritual_book:
+            badges.append("Ritual book")
         elif mode == "known":
             badges.append("Known")
         elif mode == "prepared" or is_prepared:
@@ -838,7 +994,8 @@ def _build_spell_management_rows(
                     and not bool(normalized_payload.get("is_always_prepared"))
                 ),
                 "counts_against_spellbook_total": bool(not is_cantrip and in_spellbook),
-                "can_remove": bool(row_kind == "class" and not is_fixed),
+                "counts_against_ritual_book_total": bool(not is_cantrip and in_ritual_book),
+                "can_remove": bool((row_kind == "class" or mode == "ritual_book") and not is_fixed),
                 "can_toggle_prepared": bool(
                     row_kind == "class"
                     and mode == "wizard"
@@ -908,6 +1065,12 @@ def _normalize_spell_management_payload(
             payload["mark"] = "Spellbook"
         if always_prepared and "prepared" not in normalize_lookup(str(payload.get("mark") or "")):
             payload["mark"] = "Prepared + Spellbook"
+        return payload, spell_entry, spell_level
+
+    if mode == "ritual_book":
+        payload["mark"] = "Ritual Book"
+        if spell_level > 0:
+            payload["is_ritual"] = bool(payload.get("is_ritual") or dict((spell_entry.metadata if spell_entry is not None else {}) or {}).get("ritual"))
         return payload, spell_entry, spell_level
 
     if mode == "prepared":
@@ -1003,6 +1166,8 @@ def _spell_management_remove_label(*, mode: str, is_cantrip: bool, is_prepared: 
         return "Unprepare spell"
     if mode == "wizard":
         return "Remove from spellbook"
+    if mode == "ritual_book":
+        return "Remove from ritual book"
     return "Remove spell"
 
 

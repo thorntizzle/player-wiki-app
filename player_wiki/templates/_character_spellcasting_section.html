@@ -139,9 +139,15 @@
             </div>
             <p class="meta">
               {% if manager_section.can_add_spell %}
-                Search enabled Systems spells from this class list and add them to the sheet.
+                {% if manager_section.mode == 'ritual_book' %}
+                  Search enabled Systems ritual spells from this class list and add them to the ritual book.
+                {% else %}
+                  Search enabled Systems spells from this class list and add them to the sheet.
+                {% endif %}
               {% elif manager_section.mode == 'wizard' %}
                 Search enabled Systems spells from this class list and add them to the spellbook.
+              {% elif manager_section.mode == 'ritual_book' %}
+                This ritual book cannot add more spells right now.
               {% else %}
                 This class row is already at its current spell count. Remove or unprepare one first.
               {% endif %}
@@ -154,7 +160,7 @@
               data-character-spell-search-url="{{ spell_manager.search_url }}"
               data-character-spell-search-kind="{{ manager_section.spell_add_kind }}"
               data-character-spell-search-empty-label="Search to load matching spells"
-              data-character-spell-search-prompt="Type at least 2 letters to search eligible class spells."
+              data-character-spell-search-prompt="{% if manager_section.mode == 'ritual_book' %}Type at least 2 letters to search eligible ritual spells.{% else %}Type at least 2 letters to search eligible class spells.{% endif %}"
               data-character-spell-search-target-row="{{ manager_section.class_row_id }}"
             >
               <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
@@ -183,9 +189,17 @@
               </label>
               <p class="meta" data-character-spell-status>
                 {% if manager_section.can_add_spell %}
-                  Type at least 2 letters to search eligible class spells.
+                  {% if manager_section.mode == 'ritual_book' %}
+                    Type at least 2 letters to search eligible ritual spells.
+                  {% else %}
+                    Type at least 2 letters to search eligible class spells.
+                  {% endif %}
                 {% else %}
-                  This class row is already at its current spell count. Remove or unprepare one first.
+                  {% if manager_section.mode == 'ritual_book' %}
+                    This ritual book cannot add more spells right now.
+                  {% else %}
+                    This class row is already at its current spell count. Remove or unprepare one first.
+                  {% endif %}
                 {% endif %}
               </p>
               <button type="submit" {% if not manager_section.can_add_spell %}disabled{% endif %}>{{ manager_section.spell_add_label }}</button>
