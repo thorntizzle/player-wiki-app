@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 import yaml
 
@@ -1432,6 +1433,299 @@ The harbor veterans insist on quick eyes, a steady shield, and a practiced hand.
 
     assert record.definition.stats["passive_perception"] == 17
     assert record.definition.stats["ability_scores"]["wis"]["save_bonus"] == 4
+
+
+def test_native_character_edits_persist_page_backed_feat_choice_metadata(
+    app, client, sign_in, users, get_character, set_campaign_visibility
+):
+    feat_page_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "content"
+        / "mechanics"
+        / "harbor-honors.md"
+    )
+    feat_page_path.write_text(
+        """---
+title: Harbor Honors
+section: Mechanics
+subsection: Feats
+published: true
+summary: A ceremonial reward that deepens a warden's training.
+character_option:
+  kind: feat
+  name: Harbor Honors
+  description_markdown: Harbor captains mark your service with a focused reward.
+  ability:
+    - choose:
+        from:
+          - str
+          - dex
+          - con
+          - int
+          - wis
+          - cha
+        count: 1
+  skill_proficiencies:
+    - any: 1
+  language_proficiencies:
+    - anyStandard: 1
+  saving_throw_proficiencies:
+    - choose:
+        from:
+          - str
+          - dex
+          - con
+          - int
+          - wis
+          - cha
+        count: 1
+---
+Harbor captains honor proven wardens with a deeper round of training.
+""",
+        encoding="utf-8",
+    )
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    record = get_character("arden-march")
+    assert record is not None
+    base_stats = dict(record.definition.stats or {})
+    base_skills = {
+        skill["name"]: dict(skill)
+        for skill in list(record.definition.skills or [])
+    }
+    base_languages = set(record.definition.proficiencies["languages"])
+    proficiency_bonus = int(base_stats["proficiency_bonus"])
+    ability_scores = dict(base_stats["ability_scores"] or {})
+
+    available_save_choices = [
+        ability_key
+        for ability_key, payload in ability_scores.items()
+        if int(payload["save_bonus"]) == int(payload["modifier"])
+    ]
+    assert len(available_save_choices) >= 2
+    first_ability = available_save_choices[0]
+    second_ability = available_save_choices[1]
+
+    skill_candidates = [
+        skill_name
+        for skill_name, payload in base_skills.items()
+        if str(payload.get("proficiency_level") or "") == "none"
+    ]
+    assert skill_candidates
+    first_skill = skill_candidates[0]
+
+    def skill_token(skill_name: str) -> str:
+        return "".join(character for character in skill_name.casefold() if character.isalnum())
+
+    language_candidates = [
+        language
+        for language in (
+            "Dwarvish",
+            "Giant",
+            "Gnomish",
+            "Goblin",
+            "Halfling",
+            "Orc",
+        )
+        if language not in base_languages
+    ]
+    assert len(language_candidates) >= 2
+    first_language = language_candidates[0]
+    second_language = language_candidates[1]
+
+    instance_key = "campaign-option-feat-custom-feature-harbor-honors"
+    ability_field = f"feat_{instance_key}_ability_1"
+    skill_field = f"feat_{instance_key}_skills_1"
+    language_field = f"feat_{instance_key}_languages_1"
+    save_field = f"feat_{instance_key}_saving_throws_1"
+
+    add_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "",
+            "weapon_proficiencies_text": "Daggers\nLight Crossbows\nQuarterstaffs",
+            "tool_proficiencies_text": "Navigator's Tools",
+            "custom_feature_name_1": "",
+            "custom_feature_page_ref_1": "mechanics/harbor-honors",
+            "custom_feature_activation_type_1": "passive",
+            "custom_feature_description_1": "",
+            ability_field: first_ability,
+            skill_field: skill_token(first_skill),
+            language_field: first_language,
+            save_field: first_ability,
+        },
+        follow_redirects=False,
+    )
+
+    assert add_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    harbor_honors = next(
+        feature
+        for feature in record.definition.features
+        if feature.get("category") == "custom_feature"
+        and feature.get("page_ref") == "mechanics/harbor-honors"
+    )
+    assert harbor_honors["name"] == "Harbor Honors"
+    assert harbor_honors["campaign_option"]["selected_choices"] == {
+        "ability": [first_ability],
+        "skills": [skill_token(first_skill)],
+        "languages": [first_language],
+        "saving_throws": [first_ability],
+    }
+
+    updated_skills = {
+        skill["name"]: dict(skill)
+        for skill in list(record.definition.skills or [])
+    }
+    assert updated_skills[first_skill]["proficiency_level"] == "proficient"
+    assert first_language in record.definition.proficiencies["languages"]
+    assert record.definition.stats["ability_scores"][first_ability]["score"] == int(
+        base_stats["ability_scores"][first_ability]["score"]
+    ) + 1
+    assert record.definition.stats["ability_scores"][first_ability]["save_bonus"] == (
+        ((int(base_stats["ability_scores"][first_ability]["score"]) + 1) - 10) // 2
+        + proficiency_bonus
+    )
+
+    edit_response = client.get("/campaigns/linden-pass/characters/arden-march/edit")
+    assert edit_response.status_code == 200
+    edit_html = edit_response.get_data(as_text=True)
+    assert "Harbor Honors Ability" in edit_html
+    saved_ability_field = re.search(r'name="(feat_[^"]+_ability_1)"', edit_html)
+    saved_skill_field = re.search(r'name="(feat_[^"]+_skills_1)"', edit_html)
+    saved_language_field = re.search(r'name="(feat_[^"]+_languages_1)"', edit_html)
+    saved_save_field = re.search(r'name="(feat_[^"]+_saving_throws_1)"', edit_html)
+    assert saved_ability_field is not None
+    assert saved_skill_field is not None
+    assert saved_language_field is not None
+    assert saved_save_field is not None
+    saved_ability_field_name = saved_ability_field.group(1)
+    saved_skill_field_name = saved_skill_field.group(1)
+    saved_language_field_name = saved_language_field.group(1)
+    saved_save_field_name = saved_save_field.group(1)
+
+    def selected_option_value(html: str, field_name: str) -> str:
+        field_match = re.search(
+            rf'<select name="{re.escape(field_name)}">(?P<body>.*?)</select>',
+            html,
+            re.S,
+        )
+        assert field_match is not None
+        selected_match = re.search(r'<option value="([^"]*)" selected>', field_match.group("body"))
+        assert selected_match is not None
+        return selected_match.group(1)
+
+    assert selected_option_value(edit_html, saved_ability_field_name) == first_ability
+    assert selected_option_value(edit_html, saved_skill_field_name) == skill_token(first_skill)
+    assert selected_option_value(edit_html, saved_language_field_name) == first_language
+    assert selected_option_value(edit_html, saved_save_field_name) == first_ability
+
+    swap_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "",
+            "weapon_proficiencies_text": "Daggers\nLight Crossbows\nQuarterstaffs",
+            "tool_proficiencies_text": "Navigator's Tools",
+            "custom_feature_id_1": harbor_honors["id"],
+            "custom_feature_name_1": "",
+            "custom_feature_page_ref_1": "mechanics/harbor-honors",
+            "custom_feature_activation_type_1": "passive",
+            "custom_feature_description_1": "",
+            saved_ability_field_name: second_ability,
+            saved_skill_field_name: skill_token(first_skill),
+            saved_language_field_name: second_language,
+            saved_save_field_name: second_ability,
+        },
+        follow_redirects=False,
+    )
+
+    assert swap_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    updated_skills = {
+        skill["name"]: dict(skill)
+        for skill in list(record.definition.skills or [])
+    }
+    assert updated_skills[first_skill]["proficiency_level"] == "proficient"
+    assert first_language not in record.definition.proficiencies["languages"]
+    assert second_language in record.definition.proficiencies["languages"]
+    assert record.definition.stats["ability_scores"][first_ability]["score"] == int(
+        base_stats["ability_scores"][first_ability]["score"]
+    )
+    assert record.definition.stats["ability_scores"][first_ability]["save_bonus"] == int(
+        base_stats["ability_scores"][first_ability]["save_bonus"]
+    )
+    assert record.definition.stats["ability_scores"][second_ability]["score"] == int(
+        base_stats["ability_scores"][second_ability]["score"]
+    ) + 1
+    assert record.definition.stats["ability_scores"][second_ability]["save_bonus"] == (
+        ((int(base_stats["ability_scores"][second_ability]["score"]) + 1) - 10) // 2
+        + proficiency_bonus
+    )
+
+    harbor_honors = next(
+        feature
+        for feature in record.definition.features
+        if feature.get("category") == "custom_feature"
+        and feature.get("page_ref") == "mechanics/harbor-honors"
+    )
+    assert harbor_honors["campaign_option"]["selected_choices"] == {
+        "ability": [second_ability],
+        "skills": [skill_token(first_skill)],
+        "languages": [second_language],
+        "saving_throws": [second_ability],
+    }
+
+    remove_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "",
+            "weapon_proficiencies_text": "Daggers\nLight Crossbows\nQuarterstaffs",
+            "tool_proficiencies_text": "Navigator's Tools",
+            "custom_feature_id_1": harbor_honors["id"],
+            "custom_feature_name_1": "",
+            "custom_feature_page_ref_1": "",
+            "custom_feature_activation_type_1": "passive",
+            "custom_feature_description_1": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert remove_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    final_skills = {
+        skill["name"]: dict(skill)
+        for skill in list(record.definition.skills or [])
+    }
+    assert first_language not in record.definition.proficiencies["languages"]
+    assert second_language not in record.definition.proficiencies["languages"]
+    assert final_skills[first_skill]["proficiency_level"] == base_skills[first_skill]["proficiency_level"]
+    assert record.definition.stats["ability_scores"][first_ability]["score"] == int(
+        base_stats["ability_scores"][first_ability]["score"]
+    )
+    assert record.definition.stats["ability_scores"][first_ability]["save_bonus"] == int(
+        base_stats["ability_scores"][first_ability]["save_bonus"]
+    )
+    assert record.definition.stats["ability_scores"][second_ability]["score"] == int(
+        base_stats["ability_scores"][second_ability]["score"]
+    )
+    assert record.definition.stats["ability_scores"][second_ability]["save_bonus"] == int(
+        base_stats["ability_scores"][second_ability]["save_bonus"]
+    )
 
 
 def test_owner_player_can_open_native_character_edit_page(

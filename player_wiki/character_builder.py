@@ -3711,6 +3711,38 @@ def _campaign_option_feat_selections_from_features(
     return selections
 
 
+def _campaign_option_feat_selected_choices_from_features(
+    features: list[dict[str, Any]] | None,
+) -> dict[str, list[str]]:
+    selected_choices: dict[str, list[str]] = {}
+    for feature in list(features or []):
+        feature_payload = dict(feature or {})
+        selection_list = _campaign_option_feat_selections_from_features([feature_payload])
+        if not selection_list:
+            continue
+        selection = dict(selection_list[0] or {})
+        instance_key = str(selection.get("instance_key") or "").strip()
+        if not instance_key:
+            continue
+        campaign_option = dict(feature_payload.get("campaign_option") or {})
+        raw_selected_choices = dict(campaign_option.get("selected_choices") or {})
+        if not raw_selected_choices:
+            continue
+        for raw_category, raw_values in raw_selected_choices.items():
+            category = str(raw_category or "").strip()
+            if not category:
+                continue
+            values = [
+                str(raw_value).strip()
+                for raw_value in list(raw_values or [])
+                if str(raw_value or "").strip()
+            ]
+            if not values:
+                continue
+            selected_choices[_feat_group_key(instance_key, category)] = _dedupe_preserve_order(values)
+    return selected_choices
+
+
 def _campaign_page_option_allowed_for_mixed_source(
     record: Any,
     *,
@@ -4404,6 +4436,95 @@ def _definition_base_stats_without_adjustments(definition: CharacterDefinition) 
     return stats
 
 
+def _strip_definition_campaign_feat_effects(
+    definition: CharacterDefinition,
+    *,
+    selected_class: SystemsEntryRecord | None = None,
+) -> CharacterDefinition:
+    features = [dict(feature or {}) for feature in list(definition.features or [])]
+    feat_selections = _campaign_option_feat_selections_from_features(features)
+    if not feat_selections:
+        return definition
+    feat_selected_choices = _campaign_option_feat_selected_choices_from_features(features)
+    payload = deepcopy(definition.to_dict())
+    stats = deepcopy(payload.get("stats") or {})
+    ability_payloads = dict(stats.get("ability_scores") or {})
+    stripped_scores = _strip_feat_ability_score_bonuses(
+        _ability_scores_from_definition(definition),
+        feat_selections=feat_selections,
+        selected_choices=feat_selected_choices,
+    )
+    for ability_key in ABILITY_KEYS:
+        payload_key = ability_key
+        legacy_key = str(ABILITY_LABELS.get(ability_key, "")).lower()
+        ability_payload = dict(
+            ability_payloads.get(payload_key)
+            or ability_payloads.get(legacy_key)
+            or {}
+        )
+        stripped_score = int(stripped_scores.get(ability_key, DEFAULT_ABILITY_SCORE) or DEFAULT_ABILITY_SCORE)
+        ability_payload["score"] = stripped_score
+        ability_payload["modifier"] = _ability_modifier(stripped_score)
+        ability_payloads[payload_key] = ability_payload
+    proficiency_bonus = int(
+        stats.get("proficiency_bonus")
+        or _proficiency_bonus_for_level(_resolve_native_character_level(definition))
+        or 2
+    )
+    class_save_proficiencies = set(_class_save_proficiencies(selected_class))
+    for ability_key in _extract_feat_saving_throw_proficiencies(
+        feat_selections,
+        feat_selected_choices,
+    ):
+        if ability_key in class_save_proficiencies:
+            continue
+        ability_payload = dict(ability_payloads.get(ability_key) or {})
+        base_modifier = _ability_modifier(int(stripped_scores.get(ability_key, DEFAULT_ABILITY_SCORE) or DEFAULT_ABILITY_SCORE))
+        try:
+            current_save_bonus = int(ability_payload.get("save_bonus"))
+        except (TypeError, ValueError):
+            current_save_bonus = base_modifier
+        if current_save_bonus - base_modifier < proficiency_bonus:
+            ability_payload["save_bonus"] = base_modifier
+        else:
+            ability_payload["save_bonus"] = current_save_bonus - proficiency_bonus
+        ability_payloads[ability_key] = ability_payload
+    stats["ability_scores"] = ability_payloads
+    feat_skill_proficiencies = {
+        normalize_lookup(skill_name)
+        for skill_name in _extract_feat_skill_proficiencies(
+            feat_selections,
+            feat_selected_choices,
+        )
+        if normalize_lookup(skill_name) in SKILL_LABELS
+    }
+    feat_expertise_skills = {
+        normalize_lookup(skill_name)
+        for skill_name in _extract_feat_expertise_skills(
+            feat_selections,
+            feat_selected_choices,
+        )
+        if normalize_lookup(skill_name) in SKILL_LABELS
+    }
+    stripped_skill_rows: list[dict[str, Any]] = []
+    for row in list(payload.get("skills") or []):
+        row_payload = dict(row or {})
+        normalized_skill = normalize_lookup(row_payload.get("name"))
+        proficiency_level = _normalize_skill_proficiency_level(
+            row_payload.get("proficiency_level")
+        )
+        if normalized_skill in feat_expertise_skills and proficiency_level == "expertise":
+            row_payload["proficiency_level"] = "proficient"
+            row_payload.pop("bonus", None)
+        elif normalized_skill in feat_skill_proficiencies and proficiency_level == "proficient":
+            row_payload["proficiency_level"] = "none"
+            row_payload.pop("bonus", None)
+        stripped_skill_rows.append(row_payload)
+    payload["stats"] = stats
+    payload["skills"] = stripped_skill_rows
+    return CharacterDefinition.from_dict(payload)
+
+
 def _extract_character_effect_keys(features: list[dict[str, Any]] | None) -> list[str]:
     results: list[str] = []
     for feature in list(features or []):
@@ -4961,7 +5082,9 @@ def _derive_definition_skills(
     if not existing_rows:
         return []
     campaign_feat_selections = _campaign_option_feat_selections_from_features(list(definition.features or []))
-    feat_selected_choices: dict[str, list[str]] = {}
+    feat_selected_choices = _campaign_option_feat_selected_choices_from_features(
+        list(definition.features or [])
+    )
     proficiency_levels = _skill_proficiency_levels_from_rows(
         existing_rows,
         ability_scores=ability_scores,
@@ -5028,6 +5151,7 @@ def _derive_definition_stats(
             {key: -int(value) for key, value in campaign_option_adjustments.items()},
         )
     campaign_feat_selections = _campaign_option_feat_selections_from_features(features)
+    feat_selected_choices = _campaign_option_feat_selected_choices_from_features(features)
     save_proficiencies = _infer_definition_save_proficiencies(
         definition,
         ability_scores=ability_scores,
@@ -5035,7 +5159,7 @@ def _derive_definition_stats(
         selected_class=selected_class,
     )
     save_proficiencies.update(
-        _extract_feat_saving_throw_proficiencies(campaign_feat_selections, {})
+        _extract_feat_saving_throw_proficiencies(campaign_feat_selections, feat_selected_choices)
     )
     effect_keys = _extract_character_effect_keys(features)
     save_bonus_map = _effect_save_bonus_map(effect_keys)
@@ -5199,7 +5323,6 @@ def _derive_definition_core_sheet_payloads(
     resolved_species: SystemsEntryRecord | None = None,
     resolved_background: SystemsEntryRecord | None = None,
 ) -> dict[str, Any]:
-    del spell_catalog
     resolved_entries = _resolve_definition_sheet_entries(
         definition,
         systems_service=systems_service,
@@ -5209,27 +5332,44 @@ def _derive_definition_core_sheet_payloads(
         resolved_species=resolved_species,
         resolved_background=resolved_background,
     )
-    effective_item_catalog = _effective_item_catalog_for_definition(
+    sanitized_definition = _strip_definition_campaign_feat_effects(
         definition,
+        selected_class=resolved_entries.get("selected_class"),
+    )
+    del spell_catalog
+    effective_item_catalog = _effective_item_catalog_for_definition(
+        sanitized_definition,
         item_catalog=item_catalog,
         systems_service=systems_service,
         campaign_page_records=campaign_page_records,
     )
-    ability_scores = _ability_scores_from_definition(definition)
-    current_level = _resolve_native_character_level(definition)
+    ability_scores = _ability_scores_from_definition(sanitized_definition)
+    campaign_feat_selections = _campaign_option_feat_selections_from_features(
+        list(sanitized_definition.features or [])
+    )
+    feat_selected_choices = _campaign_option_feat_selected_choices_from_features(
+        list(sanitized_definition.features or [])
+    )
+    ability_scores = _apply_feat_ability_score_bonuses(
+        ability_scores,
+        feat_selections=campaign_feat_selections,
+        selected_choices=feat_selected_choices,
+        strict=False,
+    )
+    current_level = _resolve_native_character_level(sanitized_definition)
     proficiency_bonus = (
         _proficiency_bonus_for_level(current_level)
         if current_level > 0
-        else int((definition.stats or {}).get("proficiency_bonus") or 2)
+        else int((sanitized_definition.stats or {}).get("proficiency_bonus") or 2)
     )
     normalized_features, derived_resource_templates = _apply_tracker_templates_to_feature_payloads(
-        _normalize_feature_payloads(list(definition.features or [])),
+        _normalize_feature_payloads(list(sanitized_definition.features or [])),
         ability_scores=ability_scores,
         current_level=max(current_level, 1),
-        class_row_levels=_profile_class_row_level_map(definition.profile),
+        class_row_levels=_profile_class_row_level_map(sanitized_definition.profile),
     )
-    normalized_equipment = _normalize_equipment_payloads(list(definition.equipment_catalog or []))
-    normalized_payload = deepcopy(definition.to_dict())
+    normalized_equipment = _normalize_equipment_payloads(list(sanitized_definition.equipment_catalog or []))
+    normalized_payload = deepcopy(sanitized_definition.to_dict())
     normalized_payload["features"] = normalized_features
     normalized_payload["equipment_catalog"] = normalized_equipment
     normalized_definition = CharacterDefinition.from_dict(normalized_payload)
@@ -5271,7 +5411,7 @@ def _derive_definition_core_sheet_payloads(
         ),
         "resource_templates": _normalize_resource_template_payloads(
             _merge_resource_templates(
-                list(definition.resource_templates or []),
+                list(sanitized_definition.resource_templates or []),
                 derived_resource_templates,
             )
         ),
@@ -11391,6 +11531,52 @@ def _apply_feat_ability_score_bonuses(
     return updated_scores
 
 
+def _strip_feat_ability_score_bonuses(
+    current_scores: dict[str, int],
+    *,
+    feat_selections: list[dict[str, Any]],
+    selected_choices: dict[str, list[str]],
+) -> dict[str, int]:
+    updated_scores = {
+        ability_key: int(current_scores.get(ability_key, DEFAULT_ABILITY_SCORE) or DEFAULT_ABILITY_SCORE)
+        for ability_key in ABILITY_KEYS
+    }
+    for selection in feat_selections:
+        feat_entry = selection.get("entry")
+        instance_key = str(selection.get("instance_key") or "").strip()
+        if not isinstance(feat_entry, SystemsEntryRecord) or not instance_key:
+            continue
+        metadata = dict(feat_entry.metadata or {})
+        chosen_values = _feat_selected_values(selected_choices, instance_key, "ability")
+        chosen_index = 0
+        for block in list(metadata.get("ability") or []):
+            if not isinstance(block, dict):
+                continue
+            for ability_key in ABILITY_KEYS:
+                raw_bonus = block.get(ability_key)
+                if isinstance(raw_bonus, (int, float)) and int(raw_bonus):
+                    updated_scores[ability_key] = max(
+                        int(updated_scores.get(ability_key, DEFAULT_ABILITY_SCORE)) - int(raw_bonus),
+                        1,
+                    )
+            choose = dict(block.get("choose") or {})
+            options = [str(option) for option in list(choose.get("from") or []) if str(option) in ABILITY_KEYS]
+            count = max(int(choose.get("count") or 1), 0)
+            amount = max(int(choose.get("amount") or 1), 1)
+            if not options or count <= 0:
+                continue
+            selected_values = chosen_values[chosen_index : chosen_index + count]
+            chosen_index += count
+            for ability_key in selected_values:
+                if ability_key not in options:
+                    continue
+                updated_scores[ability_key] = max(
+                    int(updated_scores.get(ability_key, DEFAULT_ABILITY_SCORE)) - amount,
+                    1,
+                )
+    return updated_scores
+
+
 def _extract_feat_skill_proficiencies(
     feat_selections: list[dict[str, Any]],
     selected_choices: dict[str, list[str]],
@@ -11490,6 +11676,36 @@ def _apply_feat_expertise_to_skill_proficiency_levels(
                 strict=strict,
             )
     return updated_levels
+
+
+def _extract_feat_expertise_skills(
+    feat_selections: list[dict[str, Any]],
+    selected_choices: dict[str, list[str]] | None = None,
+) -> list[str]:
+    results: list[str] = []
+    choice_map = dict(selected_choices or {})
+    for selection in feat_selections:
+        feat_entry = selection.get("entry")
+        if not isinstance(feat_entry, SystemsEntryRecord):
+            continue
+        metadata = dict(feat_entry.metadata or {})
+        for block in list(metadata.get("expertise") or []):
+            if not isinstance(block, dict):
+                continue
+            for key, value in block.items():
+                if key == "anyProficientSkill" or value is not True:
+                    continue
+                normalized_skill = normalize_lookup(key)
+                if normalized_skill in SKILL_LABELS:
+                    results.append(SKILL_LABELS[normalized_skill])
+        instance_key = str(selection.get("instance_key") or "").strip()
+        if not instance_key:
+            continue
+        for selected_skill in _feat_selected_values(choice_map, instance_key, "expertise"):
+            normalized_skill = normalize_lookup(selected_skill)
+            if normalized_skill in SKILL_LABELS:
+                results.append(SKILL_LABELS[normalized_skill])
+    return _dedupe_preserve_order(results)
 
 
 def _extract_feat_language_proficiencies(

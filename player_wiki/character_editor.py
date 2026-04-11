@@ -14,6 +14,8 @@ from .character_adjustments import (
 from .character_builder import (
     _add_bonus_known_spell_to_payloads,
     _add_spell_to_payloads,
+    _ability_scores_from_definition,
+    _apply_feat_ability_score_bonuses,
     _apply_campaign_feature_spell_manager_payloads,
     _campaign_option_feat_selections_from_features,
     _automatic_innate_spell_values,
@@ -21,17 +23,21 @@ from .character_builder import (
     _automatic_prepared_spell_values,
     _automatic_campaign_feature_spell_manager_grants,
     _automatic_spell_support_grants,
+    _build_feat_choice_fields_for_selection,
     _build_campaign_feature_spell_manager_fields,
     _build_campaign_page_entry,
     _build_additional_spell_filter_options,
     _build_feature_payload,
+    _build_item_catalog,
     _build_spell_support_choice_fields,
     _build_spell_support_replacement_fields,
+    _campaign_option_feat_selected_choices_from_features,
     _extract_additional_known_choice_specs,
     _extract_feat_armor_proficiencies,
     _extract_feat_innate_choice_specs,
     _extract_feat_language_proficiencies,
     _extract_feat_prepared_choice_specs,
+    _extract_feat_saving_throw_proficiencies,
     _extract_feat_tool_proficiencies,
     _extract_feat_weapon_proficiencies,
     _feat_optionalfeature_sections,
@@ -51,6 +57,7 @@ from .character_builder import (
     _spell_options_are_cantrips,
     _spell_payload_support_kwargs,
     _spellcasting_mode_for_class,
+    _strip_definition_campaign_feat_effects,
     normalize_definition_to_native_model,
 )
 from .character_campaign_options import (
@@ -1435,10 +1442,12 @@ def build_native_character_edit_context(
     form_values: dict[str, str] | None = None,
     optionalfeature_catalog: dict[str, SystemsEntryRecord] | None = None,
     spell_catalog: dict[str, Any] | None = None,
+    item_catalog: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     values = dict(form_values or {})
     optionalfeature_catalog = dict(optionalfeature_catalog or {})
     spell_catalog = dict(spell_catalog or {})
+    item_catalog = dict(item_catalog or _build_item_catalog([]))
     proficiency_lists = _display_proficiency_lists_for_editor(definition)
     manual_features = _manual_custom_features(definition)
     manual_items = _manual_equipment_entries(definition)
@@ -1554,16 +1563,28 @@ def build_native_character_edit_context(
     for index in range(1, feature_row_count + 1):
         existing = manual_features[index - 1] if index - 1 < len(manual_features) else {}
         tracker = resource_template_lookup.get(str(existing.get("tracker_ref") or "").strip(), {})
+        page_ref = str(
+            values.get(f"custom_feature_page_ref_{index}")
+            or _extract_page_ref_value(existing.get("page_ref"))
+            or ""
+        ).strip()
+        campaign_option = dict(
+            _editable_campaign_option_for_page_ref(
+                page_ref,
+                campaign_page_lookup,
+                default_kind="feature",
+            )
+            or {}
+        )
+        stored_selected_choices = dict(dict(existing.get("campaign_option") or {}).get("selected_choices") or {})
+        if stored_selected_choices:
+            campaign_option["selected_choices"] = stored_selected_choices
         feature_rows.append(
             {
                 "index": index,
                 "id": str(values.get(f"custom_feature_id_{index}") or existing.get("id") or "").strip(),
                 "name": str(values.get(f"custom_feature_name_{index}") or existing.get("name") or "").strip(),
-                "page_ref": str(
-                    values.get(f"custom_feature_page_ref_{index}")
-                    or _extract_page_ref_value(existing.get("page_ref"))
-                    or ""
-                ).strip(),
+                "page_ref": page_ref,
                 "activation_type": _normalize_activation_type(
                     values.get(f"custom_feature_activation_type_{index}")
                     or existing.get("activation_type")
@@ -1585,15 +1606,7 @@ def build_native_character_edit_context(
                     or "manual"
                 ),
                 "spell_manager": dict(existing.get("spell_manager") or {}),
-                "campaign_option": dict(_editable_campaign_option_for_page_ref(
-                    str(
-                        values.get(f"custom_feature_page_ref_{index}")
-                        or _extract_page_ref_value(existing.get("page_ref"))
-                        or ""
-                    ).strip(),
-                    campaign_page_lookup,
-                    default_kind="feature",
-                ) or {}),
+                "campaign_option": campaign_option,
             }
         )
 
@@ -1644,6 +1657,11 @@ def build_native_character_edit_context(
     )
     for row in feature_rows:
         existing_selection_map = generated_optionalfeature_selections.get(str(row.get("id") or "").strip(), {})
+        feat_choice_fields = _build_editor_feat_choice_fields_for_row(
+            row=row,
+            values=values,
+            item_catalog=item_catalog,
+        )
         optionalfeature_fields = _build_editor_optionalfeature_fields_for_row(
             row=row,
             campaign_page_lookup=campaign_page_lookup,
@@ -1651,7 +1669,11 @@ def build_native_character_edit_context(
             values=values,
             selected_choices=existing_selection_map,
         )
-        row["choice_fields"] = optionalfeature_fields + list(row.get("spell_fields") or [])
+        row["choice_fields"] = (
+            feat_choice_fields
+            + optionalfeature_fields
+            + list(row.get("spell_fields") or [])
+        )
 
     return {
         "values": values,
@@ -1691,10 +1713,12 @@ def apply_native_character_edits(
     form_values: dict[str, str] | None = None,
     optionalfeature_catalog: dict[str, SystemsEntryRecord] | None = None,
     spell_catalog: dict[str, Any] | None = None,
+    item_catalog: dict[str, Any] | None = None,
     systems_service: Any | None = None,
 ) -> tuple[CharacterDefinition, CharacterImportMetadata, dict[str, int]]:
     values = dict(form_values or {})
     optionalfeature_catalog = dict(optionalfeature_catalog or {})
+    item_catalog = dict(item_catalog or _build_item_catalog([]))
     campaign_page_lookup = _build_campaign_page_lookup(campaign_page_records or [])
     equipment_linked_page_refs = {
         _extract_page_ref_value(item.get("page_ref"))
@@ -1732,6 +1756,10 @@ def apply_native_character_edits(
     )
     spell_catalog = dict(spell_catalog or {})
     current_level = _character_total_level(current_definition)
+    stripped_definition = _strip_definition_campaign_feat_effects(
+        current_definition,
+        selected_class=None,
+    )
 
     manual_proficiencies = {
         "languages": _parse_multiline_values(values.get("languages_text", "")),
@@ -1745,7 +1773,7 @@ def apply_native_character_edits(
     profile = dict(current_definition.profile or {})
     profile["biography_markdown"] = str(values.get("biography_markdown") or "")
     profile["personality_markdown"] = str(values.get("personality_markdown") or "")
-    base_stats, _ = strip_manual_stat_adjustments(dict(current_definition.stats or {}))
+    base_stats, _ = strip_manual_stat_adjustments(dict(stripped_definition.stats or {}))
     existing_campaign_stat_adjustments = collect_campaign_option_stat_adjustments(existing_campaign_option_payloads)
     if existing_campaign_stat_adjustments:
         base_stats = apply_stat_adjustments(
@@ -1762,6 +1790,7 @@ def apply_native_character_edits(
     selected_spell_support_entries: list[dict[str, Any]] = []
     selected_spell_manager_entries: list[dict[str, Any]] = []
     seen_feature_names: set[str] = set()
+    feat_selected_choices: dict[str, list[str]] = {}
     for index in range(1, max(_max_row_index(values, "custom_feature"), MIN_CUSTOM_FEATURE_ROWS) + 1):
         raw_id = str(values.get(f"custom_feature_id_{index}") or "").strip()
         page_ref = _normalize_selected_campaign_page_ref(
@@ -1825,6 +1854,28 @@ def apply_native_character_edits(
                 "campaign_option": dict(campaign_option or {}) or None,
             }
         )
+        feat_choice_fields = _build_editor_feat_choice_fields_for_row(
+            row=existing,
+            values=values,
+            item_catalog=item_catalog,
+        )
+        if feat_choice_fields:
+            _unused_fixed_proficiencies, selected_feat_choices = _resolve_builder_choices(
+                [{"fields": feat_choice_fields}],
+                values,
+            )
+            serialized_feat_choices = _serialize_editor_feat_selected_choices(
+                selection=_editor_feat_choice_selection(existing),
+                selected_choices=selected_feat_choices,
+            )
+            if dict(existing.get("campaign_option") or {}) is not None:
+                campaign_option_payload = dict(existing.get("campaign_option") or {})
+                if serialized_feat_choices:
+                    campaign_option_payload["selected_choices"] = serialized_feat_choices
+                else:
+                    campaign_option_payload.pop("selected_choices", None)
+                existing["campaign_option"] = campaign_option_payload or None
+            feat_selected_choices.update(selected_feat_choices)
         resource_reset_on = _normalize_resource_reset_on(
             values.get(f"custom_feature_resource_reset_on_{index}")
             or ((campaign_option or {}).get("resource") or {}).get("reset_on")
@@ -1960,11 +2011,43 @@ def apply_native_character_edits(
         manual_proficiencies,
         selected_campaign_option_payloads,
         feat_selections=campaign_feat_selections,
+        feat_selected_choices=feat_selected_choices,
     )
     stats = apply_manual_stat_adjustments(base_stats, stat_adjustments)
     campaign_stat_adjustments = collect_campaign_option_stat_adjustments(selected_campaign_option_payloads)
     if campaign_stat_adjustments:
         stats = apply_stat_adjustments(stats, campaign_stat_adjustments)
+    updated_ability_scores = _apply_feat_ability_score_bonuses(
+        _ability_scores_from_definition(stripped_definition),
+        feat_selections=campaign_feat_selections,
+        selected_choices=feat_selected_choices,
+        strict=False,
+    )
+    ability_payloads = dict(stats.get("ability_scores") or {})
+    for ability_key, score in updated_ability_scores.items():
+        ability_payload = dict(ability_payloads.get(ability_key) or {})
+        modifier = (int(score) - 10) // 2
+        ability_payload["score"] = int(score)
+        ability_payload["modifier"] = modifier
+        ability_payloads[ability_key] = ability_payload
+    proficiency_bonus = int(stats.get("proficiency_bonus") or 0)
+    for ability_key in _extract_feat_saving_throw_proficiencies(
+        campaign_feat_selections,
+        feat_selected_choices,
+    ):
+        ability_payload = dict(ability_payloads.get(ability_key) or {})
+        modifier = int(ability_payload.get("modifier") or 0)
+        try:
+            current_save_bonus = int(ability_payload.get("save_bonus"))
+        except (TypeError, ValueError):
+            current_save_bonus = modifier
+        if proficiency_bonus > 0 and current_save_bonus - modifier < proficiency_bonus:
+            ability_payload["save_bonus"] = modifier + proficiency_bonus
+        else:
+            ability_payload["save_bonus"] = current_save_bonus
+        ability_payloads[ability_key] = ability_payload
+    if ability_payloads:
+        stats["ability_scores"] = ability_payloads
     spellcasting = _apply_campaign_option_spells_to_spellcasting(
         current_definition.spellcasting,
         existing_campaign_option_payloads=existing_campaign_option_payloads,
@@ -1983,6 +2066,7 @@ def apply_native_character_edits(
     payload["profile"] = profile
     payload["stats"] = stats
     payload["proficiencies"] = proficiencies
+    payload["skills"] = [dict(row or {}) for row in list(stripped_definition.skills or [])]
     payload["spellcasting"] = spellcasting
     payload["reference_notes"] = reference_notes
     payload["features"] = [
@@ -2095,11 +2179,12 @@ def _display_proficiency_lists_for_editor(definition: CharacterDefinition) -> di
         )
     )
     campaign_feat_selections = _campaign_option_feat_selections_from_features(manual_features)
+    feat_selected_choices = _campaign_option_feat_selected_choices_from_features(manual_features)
     campaign_feat_proficiencies = {
-        "armor": _extract_feat_armor_proficiencies(campaign_feat_selections, {}),
-        "weapons": _extract_feat_weapon_proficiencies(campaign_feat_selections, {}),
-        "tools": _extract_feat_tool_proficiencies(campaign_feat_selections, {}),
-        "languages": _extract_feat_language_proficiencies(campaign_feat_selections, {}),
+        "armor": _extract_feat_armor_proficiencies(campaign_feat_selections, feat_selected_choices),
+        "weapons": _extract_feat_weapon_proficiencies(campaign_feat_selections, feat_selected_choices),
+        "tools": _extract_feat_tool_proficiencies(campaign_feat_selections, feat_selected_choices),
+        "languages": _extract_feat_language_proficiencies(campaign_feat_selections, feat_selected_choices),
     }
     return {
         key: _subtract_casefold_values(
@@ -2146,14 +2231,16 @@ def _merge_editor_proficiencies(
     option_payloads: list[dict[str, Any]],
     *,
     feat_selections: list[dict[str, Any]] | None = None,
+    feat_selected_choices: dict[str, list[str]] | None = None,
 ) -> dict[str, list[str]]:
     campaign_grants = collect_campaign_option_proficiency_grants(option_payloads)
     campaign_feat_selections = list(feat_selections or [])
+    selected_choices = dict(feat_selected_choices or {})
     campaign_feat_proficiencies = {
-        "armor": _extract_feat_armor_proficiencies(campaign_feat_selections, {}),
-        "weapons": _extract_feat_weapon_proficiencies(campaign_feat_selections, {}),
-        "tools": _extract_feat_tool_proficiencies(campaign_feat_selections, {}),
-        "languages": _extract_feat_language_proficiencies(campaign_feat_selections, {}),
+        "armor": _extract_feat_armor_proficiencies(campaign_feat_selections, selected_choices),
+        "weapons": _extract_feat_weapon_proficiencies(campaign_feat_selections, selected_choices),
+        "tools": _extract_feat_tool_proficiencies(campaign_feat_selections, selected_choices),
+        "languages": _extract_feat_language_proficiencies(campaign_feat_selections, selected_choices),
     }
     return {
         key: _dedupe_casefold_values(
@@ -2253,6 +2340,79 @@ def _editor_optionalfeature_field_name(
     choice_index: int,
 ) -> str:
     return f"custom_feature_optionalfeature_{row_index}_{section_index}_{choice_index}"
+
+
+def _editor_feat_choice_selection(row: dict[str, Any]) -> dict[str, Any] | None:
+    feature_payload = dict(row or {})
+    if not str(feature_payload.get("id") or "").strip():
+        provisional_name = str(feature_payload.get("name") or "").strip()
+        provisional_slug = slugify(provisional_name)
+        if provisional_slug:
+            feature_payload["id"] = f"custom-feature-{provisional_slug}"
+    selections = _campaign_option_feat_selections_from_features([feature_payload])
+    return dict(selections[0] or {}) if selections else None
+
+
+def _build_editor_feat_choice_fields_for_row(
+    *,
+    row: dict[str, Any],
+    values: dict[str, str],
+    item_catalog: dict[str, Any],
+) -> list[dict[str, Any]]:
+    selection = _editor_feat_choice_selection(row)
+    if not selection:
+        return []
+    stored_choice_map = _campaign_option_feat_selected_choices_from_features([dict(row or {})])
+    raw_fields = _build_feat_choice_fields_for_selection(
+        selection=selection,
+        values={},
+        optionalfeature_catalog={},
+        item_catalog=item_catalog,
+    )
+    fields = [
+        dict(field)
+        for field in raw_fields
+        if str(field.get("kind") or "").strip()
+        not in {"feat_optionalfeature", "feat_spell_source"}
+    ]
+    group_positions: dict[str, int] = {}
+    for field in fields:
+        field_name = str(field.get("name") or "").strip()
+        selected_value = str(values.get(field_name) or "").strip()
+        if not selected_value:
+            group_key = str(field.get("group_key") or field_name).strip()
+            choice_index = int(group_positions.get(group_key) or 0)
+            selected_values = list(stored_choice_map.get(group_key) or [])
+            if choice_index < len(selected_values):
+                selected_value = str(selected_values[choice_index] or "").strip()
+            group_positions[group_key] = choice_index + 1
+        field["selected"] = selected_value
+    return fields
+
+
+def _serialize_editor_feat_selected_choices(
+    *,
+    selection: dict[str, Any] | None,
+    selected_choices: dict[str, list[str]],
+) -> dict[str, list[str]]:
+    instance_key = str((selection or {}).get("instance_key") or "").strip()
+    if not instance_key:
+        return {}
+    prefix = f"feat:{instance_key}:"
+    serialized: dict[str, list[str]] = {}
+    for raw_group_key, raw_values in dict(selected_choices or {}).items():
+        group_key = str(raw_group_key or "").strip()
+        if not group_key.startswith(prefix):
+            continue
+        category = group_key[len(prefix) :].strip()
+        values = [
+            str(raw_value).strip()
+            for raw_value in list(raw_values or [])
+            if str(raw_value or "").strip()
+        ]
+        if category and values:
+            serialized[category] = values
+    return serialized
 
 
 def _build_editor_optionalfeature_fields_for_row(
