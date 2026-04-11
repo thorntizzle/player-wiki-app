@@ -7,7 +7,7 @@ from pathlib import Path
 import yaml
 
 from player_wiki.app import create_app
-from player_wiki.character_builder import supports_native_level_up
+from player_wiki.character_builder import normalize_definition_to_native_model, supports_native_level_up
 from player_wiki.character_importer import (
     converge_imported_definition,
     extract_trackers_from_text,
@@ -600,6 +600,99 @@ Attack
     assert lucky["tracker_ref"] == "lucky"
     assert resources_by_id["lucky"]["max"] == 3
     assert resources_by_id["lucky"]["reset_on"] == "long_rest"
+
+
+def test_parse_character_sheet_text_normalizes_arcane_ward_through_managed_resource_registry():
+    markdown = """
+## Sheet Summary
+| Field | Value |
+| --- | --- |
+| Sheet Name | Tobin Slate |
+| Class & Level | Wizard 10 |
+| Species | Human |
+| Background | Sage |
+
+## Defenses And Core Stats
+| Metric | Value |
+| --- | --- |
+| Armor Class | 15 |
+| Initiative | +2 |
+| Speed | 30 ft. |
+| Max HP | 42 |
+| Proficiency Bonus | +4 |
+
+## Ability Scores
+| Ability | Score | Modifier | Save |
+| --- | --- | --- | --- |
+| Strength | 8 | -1 | -1 |
+| Dexterity | 14 | +2 | +2 |
+| Constitution | 14 | +2 | +2 |
+| Intelligence | 16 | +3 | +7 |
+| Wisdom | 12 | +1 | +1 |
+| Charisma | 10 | +0 | +0 |
+
+## Skills
+| Skill | Bonus | Proficiency |
+| --- | --- | --- |
+| Arcana | +7 | Proficient |
+
+## Proficiencies And Languages
+- Languages: Common
+
+## Features And Traits
+### Wizard Features
+
+- Arcane Ward - PHB 115
+Your ward has a hit point maximum equal to twice your wizard level plus your Intelligence modifier.
+
+## Actions
+### Actions
+Cast a spell
+
+## Personality And Story
+
+## Spellcasting
+| Field | Value |
+| --- | --- |
+| Spellcasting Class | Wizard |
+| Spellcasting Ability | Intelligence |
+| Spell Save DC | 15 |
+| Spell Attack Bonus | +7 |
+
+## Equipment
+| Item | Qty | Weight |
+| --- | --- | --- |
+| Spellbook | 1 | 3 lb. |
+""".strip()
+
+    definition, _ = parse_character_sheet_text(
+        "linden-pass",
+        markdown,
+        source_path="Tobin.pdf",
+        source_type="pdf_character_sheet_annotations",
+        imported_from="Tobin.pdf",
+        parser_version="test",
+    )
+
+    feature = next(feature for feature in definition.features if feature["name"] == "Arcane Ward")
+    feature["category"] = "subclass_feature"
+    feature["source"] = "PHB"
+    feature["systems_ref"] = {
+        "entry_type": "subclassfeature",
+        "slug": "phb-subclassfeature-arcaneward-wizard-phb-abjuration-phb-2",
+        "title": "Arcane Ward",
+        "source_id": "PHB",
+    }
+
+    normalized = normalize_definition_to_native_model(definition)
+    feature = next(feature for feature in normalized.features if feature["name"] == "Arcane Ward")
+    resources_by_id = {resource["id"]: resource for resource in normalized.resource_templates}
+
+    assert feature["tracker_ref"] == "arcane-ward"
+    assert feature["activation_type"] == "passive"
+    assert resources_by_id["arcane-ward"]["max"] == 23
+    assert resources_by_id["arcane-ward"]["reset_on"] == "manual"
+    assert resources_by_id["arcane-ward"]["reset_to"] == "unchanged"
 
 
 def test_extract_trackers_from_text_skips_invalid_progress_lines_that_look_like_dates():

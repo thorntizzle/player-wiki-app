@@ -27,6 +27,7 @@ from player_wiki.character_builder import (
 from player_wiki.character_adjustments import apply_manual_stat_adjustments
 from player_wiki.character_service import build_initial_state, merge_state_with_definition
 from player_wiki.character_models import CharacterDefinition, CharacterImportMetadata
+from player_wiki.managed_resource_registry import MANAGED_RESOURCE_TRACKER_INVENTORY
 from player_wiki.systems_models import SystemsEntryRecord
 
 
@@ -308,6 +309,65 @@ def _minimal_character_definition(character_slug: str = "new-hero", name: str = 
             "parse_warnings": [],
         },
     )
+
+
+def _managed_resource_definition(
+    *,
+    slug: str,
+    title: str,
+    category: str,
+    source_id: str,
+    class_name: str = "Fighter",
+    class_slug: str = "phb-class-fighter",
+    class_source_id: str = "PHB",
+    class_level: int = 1,
+    ability_scores: dict[str, int] | None = None,
+    page_ref: str | None = None,
+) -> CharacterDefinition:
+    definition = _minimal_character_definition(character_slug=slug.replace("-", "_"), name=title)
+    definition.profile["class_level_text"] = f"{class_name} {class_level}"
+    definition.profile["classes"] = [
+        {
+            "row_id": "class-row-1",
+            "class_name": class_name,
+            "subclass_name": "",
+            "level": class_level,
+            "systems_ref": {
+                "entry_key": f"dnd-5e|class|{class_source_id.lower()}|{class_slug}",
+                "entry_type": "class",
+                "title": class_name,
+                "slug": class_slug,
+                "source_id": class_source_id,
+            },
+        }
+    ]
+    definition.profile["class_ref"] = dict(definition.profile["classes"][0]["systems_ref"])
+    for ability_key, score in dict(ability_scores or {}).items():
+        definition.stats["ability_scores"][ability_key] = {
+            "score": int(score),
+            "modifier": (int(score) - 10) // 2,
+            "save_bonus": (int(score) - 10) // 2,
+        }
+    feature_payload = {
+        "id": f"{slug}-feature",
+        "name": title,
+        "category": category,
+        "source": source_id,
+        "description_markdown": "",
+        "activation_type": "passive",
+        "class_row_id": "class-row-1",
+        "systems_ref": {
+            "entry_key": f"dnd-5e|feature|{source_id.lower()}|{slug}",
+            "entry_type": "subclassfeature" if category == "subclass_feature" else "classfeature",
+            "title": title,
+            "slug": slug,
+            "source_id": source_id,
+        },
+    }
+    if page_ref:
+        feature_payload["page_ref"] = page_ref
+    definition.features = [feature_payload]
+    return definition
 
 
 def _minimal_import_metadata(character_slug: str = "new-hero") -> CharacterImportMetadata:
@@ -16754,6 +16814,227 @@ def test_native_level_up_keeps_psionic_power_scaling_bound_to_each_class_row():
     assert resources_by_id["psionic-power-psionic-energy"]["max"] == 4
     assert merged_resources["psionic-power-psionic-energy"]["current"] == 2
     assert merged_resources["psionic-power-psionic-energy"]["max"] == 4
+
+
+@pytest.mark.parametrize(
+    "slug,title,status",
+    [
+        pytest.param(slug, entry["title"], entry["status"], id=slug)
+        for slug, entry in sorted(MANAGED_RESOURCE_TRACKER_INVENTORY.items())
+    ],
+)
+def test_managed_resource_inventory_entries_attach_or_stay_excluded(slug: str, title: str, status: str):
+    category = "subclass_feature" if "-subclassfeature-" in slug else "class_feature"
+    source_id = slug.split("-", 1)[0].upper()
+    definition = _managed_resource_definition(
+        slug=slug,
+        title=title,
+        category=category,
+        source_id=source_id,
+        class_level=20,
+    )
+    normalized = normalize_definition_to_native_model(definition)
+    features_by_name = {feature["name"]: feature for feature in normalized.features}
+
+    if status == "supported":
+        assert normalized.resource_templates, slug
+        assert next(iter(features_by_name.values())).get("tracker_ref"), slug
+        return
+
+    assert normalized.resource_templates == []
+    assert not next(iter(features_by_name.values())).get("tracker_ref")
+
+
+def test_managed_resource_registry_supports_page_ref_identity_for_psi_warrior():
+    definition = _managed_resource_definition(
+        slug="campaign-psi-warrior",
+        title="Psionic Power",
+        category="subclass_feature",
+        source_id="Campaign",
+        class_level=7,
+        page_ref="mechanics/psi-warrior/psionic-power",
+    )
+    definition.features[0].pop("systems_ref", None)
+
+    normalized = normalize_definition_to_native_model(definition)
+    features_by_name = {feature["name"]: feature for feature in normalized.features}
+    resources_by_id = {resource["id"]: resource for resource in normalized.resource_templates}
+
+    assert features_by_name["Psionic Power"]["tracker_ref"] == "psionic-power-psionic-energy"
+    assert features_by_name["Psionic Power: Telekinetic Movement"]["tracker_ref"] == "psionic-power-telekinetic-movement"
+    assert features_by_name["Psionic Power: Recovery"]["tracker_ref"] == "psionic-power-recovery"
+    assert "Psionic Power: Protective Field" in features_by_name
+    assert "Psionic Power: Psionic Strike" in features_by_name
+    assert resources_by_id["psionic-power-psionic-energy"]["max"] == 6
+
+
+def test_managed_resource_registry_keeps_rogue_psionic_power_distinct_from_psi_warrior():
+    definition = _managed_resource_definition(
+        slug="tce-subclassfeature-psionicpower-rogue-phb-soulknife-tce-3",
+        title="Psionic Power",
+        category="subclass_feature",
+        source_id="TCE",
+        class_name="Rogue",
+        class_slug="phb-class-rogue",
+        class_level=5,
+    )
+
+    normalized = normalize_definition_to_native_model(definition)
+    feature_names = {feature["name"] for feature in normalized.features}
+    resources_by_id = {resource["id"]: resource for resource in normalized.resource_templates}
+
+    assert "Psionic Power: Recovery" in feature_names
+    assert "Psionic Power: Protective Field" not in feature_names
+    assert "Psionic Power: Psionic Strike" not in feature_names
+    assert "Psionic Power: Telekinetic Movement" not in feature_names
+    assert resources_by_id["psionic-power-psionic-energy"]["max"] == 6
+    assert resources_by_id["psionic-power-recovery"]["max"] == 1
+
+
+@pytest.mark.parametrize(
+    ("slug", "title", "class_level", "ability_scores", "expected"),
+    [
+        pytest.param(
+            "tce-classfeature-flashofgenius-artificer-tce-7",
+            "Flash of Genius",
+            7,
+            {"int": 18},
+            {"id": "flash-of-genius", "max": 4, "reset_on": "long_rest", "activation_type": "reaction"},
+            id="ability-mod",
+        ),
+        pytest.param(
+            "tce-subclassfeature-experimentalelixir-artificer-tce-alchemist-tce-3",
+            "Experimental Elixir",
+            15,
+            {},
+            {"id": "experimental-elixir", "max": 3, "reset_on": "long_rest", "activation_type": "action"},
+            id="threshold",
+        ),
+        pytest.param(
+            "xge-subclassfeature-healinglight-warlock-phb-celestial-xge-1",
+            "Healing Light",
+            6,
+            {},
+            {"id": "healing-light", "max": 7, "reset_on": "long_rest", "activation_type": "bonus_action"},
+            id="level-pool",
+        ),
+        pytest.param(
+            "phb-subclassfeature-arcaneward-wizard-phb-abjuration-phb-2",
+            "Arcane Ward",
+            10,
+            {"int": 16},
+            {"id": "arcane-ward", "max": 23, "reset_on": "manual", "reset_to": "unchanged", "activation_type": "passive"},
+            id="manual-pool",
+        ),
+        pytest.param(
+            "xge-subclassfeature-powersurge-wizard-phb-war-xge-6",
+            "Power Surge",
+            10,
+            {"int": 18},
+            {"id": "power-surge", "max": 4, "reset_on": "long_rest", "reset_to": "1", "activation_type": "special"},
+            id="fixed-reset-to",
+        ),
+    ],
+)
+def test_managed_resource_registry_representative_scaling_cases(
+    slug: str,
+    title: str,
+    class_level: int,
+    ability_scores: dict[str, int],
+    expected: dict[str, object],
+):
+    category = "subclass_feature" if "-subclassfeature-" in slug else "class_feature"
+    definition = _managed_resource_definition(
+        slug=slug,
+        title=title,
+        category=category,
+        source_id=slug.split("-", 1)[0].upper(),
+        class_level=class_level,
+        ability_scores=ability_scores,
+    )
+
+    normalized = normalize_definition_to_native_model(definition)
+    feature = normalized.features[0]
+    resource = normalized.resource_templates[0]
+
+    assert feature["tracker_ref"] == expected["id"]
+    assert feature["activation_type"] == expected["activation_type"]
+    assert resource["id"] == expected["id"]
+    assert resource["max"] == expected["max"]
+    assert resource["reset_on"] == expected["reset_on"]
+    if "reset_to" in expected:
+        assert resource["reset_to"] == expected["reset_to"]
+
+
+def test_managed_resource_registry_scales_from_class_row_level_on_multiclass_definition():
+    definition = _managed_resource_definition(
+        slug="xge-subclassfeature-healinglight-warlock-phb-celestial-xge-1",
+        title="Healing Light",
+        category="subclass_feature",
+        source_id="XGE",
+        class_name="Warlock",
+        class_slug="phb-class-warlock",
+        class_level=3,
+    )
+    definition.profile["classes"] = [
+        {
+            "row_id": "class-row-1",
+            "class_name": "Warlock",
+            "subclass_name": "The Celestial",
+            "level": 3,
+            "systems_ref": _systems_ref(_systems_entry("class", "phb-class-warlock", "Warlock")),
+        },
+        {
+            "row_id": "class-row-2",
+            "class_name": "Fighter",
+            "subclass_name": "",
+            "level": 7,
+            "systems_ref": _systems_ref(_systems_entry("class", "phb-class-fighter", "Fighter")),
+        },
+    ]
+    definition.profile["class_level_text"] = "Warlock 3 / Fighter 7"
+
+    normalized = normalize_definition_to_native_model(definition)
+
+    assert normalized.resource_templates[0]["max"] == 4
+
+
+def test_managed_resource_registry_preserves_spent_values_when_level_pool_max_grows():
+    definition = _managed_resource_definition(
+        slug="xge-subclassfeature-healinglight-warlock-phb-celestial-xge-1",
+        title="Healing Light",
+        category="subclass_feature",
+        source_id="XGE",
+        class_name="Warlock",
+        class_slug="phb-class-warlock",
+        class_level=3,
+    )
+    normalized = normalize_definition_to_native_model(definition)
+    state = build_initial_state(normalized)
+    state["resources"] = [
+        {
+            "id": "healing-light",
+            "label": "Healing Light",
+            "category": "subclass_feature",
+            "current": 2,
+            "max": 4,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Healing Light",
+            "display_order": 0,
+            "class_row_id": "class-row-1",
+        }
+    ]
+
+    definition.profile["classes"][0]["level"] = 4
+    definition.profile["class_level_text"] = "Warlock 4"
+    leveled = normalize_definition_to_native_model(definition)
+    merged_state = merge_state_with_definition(leveled, state)
+
+    assert leveled.resource_templates[0]["max"] == 5
+    assert merged_state["resources"][0]["current"] == 2
+    assert merged_state["resources"][0]["max"] == 5
 
 
 def test_dm_roster_shows_create_character_link(client, sign_in, users):

@@ -29,6 +29,7 @@ from .character_profile import (
     profile_total_level,
     sync_profile_class_summary,
 )
+from .managed_resource_registry import resolve_managed_resource_family_and_member
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
@@ -12343,12 +12344,18 @@ def _apply_tracker_templates_to_feature_payloads(
     current_level: int,
     class_row_levels: dict[str, int] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    base_features = [dict(feature or {}) for feature in list(features or [])]
     updated_features: list[dict[str, Any]] = []
     resource_templates: list[dict[str, Any]] = []
     seen_template_ids: set[str] = set()
+    feature_payloads_by_identity: dict[tuple[str, str], dict[str, Any]] = {}
+    for feature_payload in base_features:
+        feature_identity = _feature_identity_key(feature_payload)
+        if feature_identity[0]:
+            feature_payloads_by_identity.setdefault(feature_identity, feature_payload)
     seen_feature_identities = {
         feature_identity
-        for feature_identity in (_feature_identity_key(feature) for feature in list(features or []))
+        for feature_identity in (_feature_identity_key(feature) for feature in base_features)
         if feature_identity[0]
     }
     display_order = 0
@@ -12374,8 +12381,8 @@ def _apply_tracker_templates_to_feature_payloads(
                 seen_template_ids.add(tracker_id)
             display_order += 1
 
-    for feature in features:
-        feature_payload = dict(feature)
+    for feature_payload in base_features:
+        managed_resource_family, managed_resource_member = _apply_managed_resource_member_defaults(feature_payload)
         feature_current_level = _feature_tracker_current_level(
             feature_payload,
             current_level=current_level,
@@ -12392,6 +12399,7 @@ def _apply_tracker_templates_to_feature_payloads(
                 ability_scores=ability_scores,
                 current_level=feature_current_level,
                 display_order=display_order,
+                managed_resource_member=managed_resource_member,
             )
         if tracker_template is not None:
             append_tracker_template(feature_payload, tracker_template)
@@ -12401,17 +12409,30 @@ def _apply_tracker_templates_to_feature_payloads(
             ability_scores=ability_scores,
             current_level=feature_current_level,
             display_order=display_order,
+            managed_resource_family=managed_resource_family,
+            managed_resource_member=managed_resource_member,
         ):
             feature_identity = _feature_identity_key(derived_feature_payload)
             if feature_identity[0] and feature_identity in seen_feature_identities:
+                existing_feature_payload = feature_payloads_by_identity.get(feature_identity)
+                if existing_feature_payload is not None:
+                    if not str(existing_feature_payload.get("description_markdown") or "").strip():
+                        description_markdown = str(derived_feature_payload.get("description_markdown") or "").strip()
+                        if description_markdown:
+                            existing_feature_payload["description_markdown"] = description_markdown
+                    if not existing_feature_payload.get("systems_ref") and derived_feature_payload.get("systems_ref"):
+                        existing_feature_payload["systems_ref"] = dict(derived_feature_payload.get("systems_ref") or {})
+                    if not existing_feature_payload.get("page_ref") and derived_feature_payload.get("page_ref"):
+                        existing_feature_payload["page_ref"] = derived_feature_payload.get("page_ref")
                 if derived_tracker_template is not None:
-                    append_tracker_template(dict(derived_feature_payload), derived_tracker_template)
+                    append_tracker_template(existing_feature_payload or dict(derived_feature_payload), derived_tracker_template)
                 continue
             if derived_tracker_template is not None:
                 append_tracker_template(derived_feature_payload, derived_tracker_template)
             updated_features.append(derived_feature_payload)
             if feature_identity[0]:
                 seen_feature_identities.add(feature_identity)
+                feature_payloads_by_identity[feature_identity] = derived_feature_payload
 
     return updated_features, resource_templates
 
@@ -12446,9 +12467,11 @@ def _build_additional_feature_tracker_payloads(
     ability_scores: dict[str, int],
     current_level: int,
     display_order: int,
+    managed_resource_family: dict[str, Any] | None = None,
+    managed_resource_member: dict[str, Any] | None = None,
 ) -> list[tuple[dict[str, Any], dict[str, Any] | None]]:
-    del ability_scores
-    normalized_name = normalize_lookup(str(feature_payload.get("name") or "").strip())
+    managed_resource_family = dict(managed_resource_family or {})
+    managed_resource_member = dict(managed_resource_member or {})
     feature_id = str(feature_payload.get("id") or slugify(str(feature_payload.get("name") or "feature"))).strip() or "feature"
     shared_payload = {
         "category": str(feature_payload.get("category") or "class_feature").strip() or "class_feature",
@@ -12482,75 +12505,28 @@ def _build_additional_feature_tracker_payloads(
             payload["page_ref"] = shared_payload["page_ref"]
         return payload
 
-    if normalized_name == normalize_lookup("Psionic Power"):
-        return [
-            (
-                build_derived_feature(
-                    suffix="protective-field",
-                    name="Psionic Power: Protective Field",
-                    description_markdown=(
-                        "Reaction to shield yourself or another creature you can see within 30 feet, "
-                        "reducing the damage taken."
-                    ),
-                    activation_type="reaction",
-                ),
-                None,
-            ),
-            (
-                build_derived_feature(
-                    suffix="psionic-strike",
-                    name="Psionic Power: Psionic Strike",
-                    description_markdown=(
-                        "When you hit a target with a weapon attack, expend one Psionic Energy die "
-                        "to deal extra force damage."
-                    ),
-                    activation_type="special",
-                ),
-                None,
-            ),
-            (
-                build_derived_feature(
-                    suffix="telekinetic-movement",
-                    name="Psionic Power: Telekinetic Movement",
-                    description_markdown="You can move an object or a creature with your mind.",
-                    activation_type="action",
-                ),
-                {
-                    "id": "psionic-power-telekinetic-movement",
-                    "label": "Psionic Power: Telekinetic Movement",
-                    "category": shared_payload["category"],
-                    "initial_current": 1,
-                    "max": 1,
-                    "reset_on": "short_rest",
-                    "reset_to": "max",
-                    "rest_behavior": "confirm_before_reset",
-                    "notes": "Psionic Power: Telekinetic Movement",
-                    "display_order": display_order,
-                    "activation_type": "action",
-                },
-            ),
-            (
-                build_derived_feature(
-                    suffix="recovery",
-                    name="Psionic Power: Recovery",
-                    description_markdown="As a bonus action, you can regain one expended Psionic Energy die.",
-                    activation_type="bonus_action",
-                ),
-                {
-                    "id": "psionic-power-recovery",
-                    "label": "Psionic Power: Recovery",
-                    "category": shared_payload["category"],
-                    "initial_current": 1,
-                    "max": 1,
-                    "reset_on": "short_rest",
-                    "reset_to": "max",
-                    "rest_behavior": "confirm_before_reset",
-                    "notes": "Psionic Power: Recovery",
-                    "display_order": display_order + 1,
-                    "activation_type": "bonus_action",
-                },
-            ),
-        ]
+    if managed_resource_family and str(managed_resource_member.get("key") or "").strip() == str(dict(managed_resource_family.get("primary") or {}).get("key") or "").strip():
+        derived_payloads: list[tuple[dict[str, Any], dict[str, Any] | None]] = []
+        for member in list(managed_resource_family.get("members") or []):
+            if not bool(member.get("generate_from_primary")):
+                continue
+            member_key = str(member.get("key") or slugify(str(member.get("name") or "member"))).strip() or "member"
+            derived_feature_payload = build_derived_feature(
+                suffix=member_key,
+                name=str(member.get("name") or "").strip(),
+                description_markdown=str(member.get("description_markdown") or "").strip(),
+                activation_type=str(member.get("activation_type") or "passive").strip() or "passive",
+            )
+            derived_tracker_template = _build_managed_resource_tracker_template(
+                dict(member),
+                derived_feature_payload,
+                ability_scores=ability_scores,
+                current_level=current_level,
+                display_order=display_order + len(derived_payloads),
+            )
+            derived_payloads.append((derived_feature_payload, derived_tracker_template))
+        if derived_payloads:
+            return derived_payloads
 
     category = normalize_lookup(str(feature_payload.get("category") or "").strip())
     systems_ref = dict(feature_payload.get("systems_ref") or {})
@@ -16979,6 +16955,96 @@ def _resource_value_by_level(current_level: int, thresholds: list[tuple[int, int
     return value
 
 
+def _resolve_managed_resource_formula_value(
+    formula: dict[str, Any],
+    *,
+    ability_scores: dict[str, int],
+    current_level: int,
+) -> int:
+    kind = str(formula.get("kind") or "").strip().lower()
+    minimum_value = formula.get("minimum")
+    value = 0
+    if kind == "fixed":
+        value = int(formula.get("value") or 0)
+    elif kind == "level":
+        value = int(current_level) * int(formula.get("multiplier") or 1) + int(formula.get("bonus") or 0)
+    elif kind == "proficiency_bonus":
+        value = _proficiency_bonus_for_level(current_level) * int(formula.get("multiplier") or 1) + int(formula.get("bonus") or 0)
+    elif kind == "ability_modifier":
+        ability_key = str(formula.get("ability") or "").strip().lower()
+        value = _ability_modifier(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE)) + int(formula.get("bonus") or 0)
+    elif kind == "threshold":
+        value = _resource_value_by_level(
+            current_level,
+            [(int(level), int(scaled_value)) for level, scaled_value in list(formula.get("thresholds") or [])],
+        )
+    elif kind == "sum":
+        value = sum(
+            _resolve_managed_resource_formula_value(
+                dict(part or {}),
+                ability_scores=ability_scores,
+                current_level=current_level,
+            )
+            for part in list(formula.get("parts") or [])
+            if isinstance(part, dict)
+        )
+    if minimum_value not in {"", None}:
+        value = max(value, int(minimum_value))
+    return max(value, 0)
+
+
+def _apply_managed_resource_member_defaults(feature_payload: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    family, member = resolve_managed_resource_family_and_member(feature_payload)
+    if member is None:
+        return family, member
+    activation_type = str(member.get("activation_type") or "").strip()
+    if activation_type:
+        feature_payload["activation_type"] = activation_type
+    if not str(feature_payload.get("description_markdown") or "").strip():
+        description = str(member.get("description_markdown") or "").strip()
+        if description:
+            feature_payload["description_markdown"] = description
+    return family, member
+
+
+def _build_managed_resource_tracker_template(
+    member: dict[str, Any],
+    feature_payload: dict[str, Any],
+    *,
+    ability_scores: dict[str, int],
+    current_level: int,
+    display_order: int,
+) -> dict[str, Any] | None:
+    tracker = dict(member.get("tracker") or {})
+    if not tracker:
+        return None
+    max_value = _resolve_managed_resource_formula_value(
+        dict(tracker.get("max_formula") or {}),
+        ability_scores=ability_scores,
+        current_level=current_level,
+    )
+    if max_value <= 0:
+        return None
+    reset_on = str(tracker.get("reset_on") or "manual").strip() or "manual"
+    reset_to = tracker.get("reset_to", "max" if reset_on in {"short_rest", "long_rest"} else "unchanged")
+    rest_behavior = str(tracker.get("rest_behavior") or "").strip()
+    if not rest_behavior:
+        rest_behavior = "confirm_before_reset" if reset_on in {"short_rest", "long_rest"} else "manual_only"
+    return {
+        "id": str(tracker.get("id") or "").strip(),
+        "label": str(tracker.get("label") or feature_payload.get("name") or "").strip(),
+        "category": str(feature_payload.get("category") or "class_feature").strip() or "class_feature",
+        "initial_current": max_value,
+        "max": max_value,
+        "reset_on": reset_on,
+        "reset_to": reset_to,
+        "rest_behavior": rest_behavior,
+        "notes": str(tracker.get("notes") or feature_payload.get("name") or "").strip(),
+        "display_order": display_order,
+        "activation_type": str(tracker.get("activation_type") or member.get("activation_type") or "passive").strip() or "passive",
+    }
+
+
 def _feature_has_effect(effect_keys: set[str], *values: str) -> bool:
     return any(normalize_lookup(value) in effect_keys for value in values if str(value or "").strip())
 
@@ -16989,288 +17055,23 @@ def _build_feature_tracker_template(
     ability_scores: dict[str, int],
     current_level: int,
     display_order: int,
+    managed_resource_member: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    feature_name = str(feature_payload.get("name") or "").strip()
-    normalized = normalize_lookup(feature_name)
+    if managed_resource_member is not None:
+        managed_template = _build_managed_resource_tracker_template(
+            dict(managed_resource_member),
+            feature_payload,
+            ability_scores=ability_scores,
+            current_level=current_level,
+            display_order=display_order,
+        )
+        if managed_template is not None:
+            if normalize_lookup(str(feature_payload.get("name") or "").strip()) == normalize_lookup("Bardic Inspiration") and current_level >= 5:
+                managed_template["reset_on"] = "short_rest"
+            return managed_template
+
+    normalized = normalize_lookup(str(feature_payload.get("name") or "").strip())
     effect_keys = {normalize_lookup(value) for value in _feat_effect_keys_for_feature(feature_payload) if str(value or "").strip()}
-    if normalized == normalize_lookup("Second Wind"):
-        return {
-            "id": "second-wind",
-            "label": "Second Wind",
-            "category": "class_feature",
-            "initial_current": 1,
-            "max": 1,
-            "reset_on": "short_rest",
-            "reset_to": "max",
-            "rest_behavior": "confirm_before_reset",
-            "notes": "Second Wind",
-            "display_order": display_order,
-            "activation_type": "bonus_action",
-        }
-    if normalized == normalize_lookup("Rage"):
-        uses = _resource_value_by_level(current_level, [(1, 2), (3, 3), (6, 4), (12, 5), (17, 6)]) or 2
-        return {
-            "id": "rage",
-            "label": "Rage",
-            "category": "class_feature",
-            "initial_current": uses,
-            "max": uses,
-            "reset_on": "long_rest",
-            "reset_to": "max",
-            "rest_behavior": "confirm_before_reset",
-            "notes": "Rage",
-            "display_order": display_order,
-            "activation_type": "bonus_action",
-        }
-    if normalized == normalize_lookup("Bardic Inspiration"):
-        uses = max(_ability_modifier(ability_scores.get("cha", DEFAULT_ABILITY_SCORE)), 1)
-        return {
-            "id": "bardic-inspiration",
-            "label": "Bardic Inspiration",
-            "category": "class_feature",
-            "initial_current": uses,
-            "max": uses,
-            "reset_on": "short_rest" if current_level >= 5 else "long_rest",
-            "reset_to": "max",
-            "rest_behavior": "confirm_before_reset",
-            "notes": "Bardic Inspiration",
-            "display_order": display_order,
-            "activation_type": "bonus_action",
-        }
-    if normalized == normalize_lookup("Action Surge"):
-        uses = _resource_value_by_level(current_level, [(2, 1), (17, 2)]) or 1
-        return {
-            "id": "action-surge",
-            "label": "Action Surge",
-            "category": "class_feature",
-            "initial_current": uses,
-            "max": uses,
-            "reset_on": "short_rest",
-            "reset_to": "max",
-            "rest_behavior": "confirm_before_reset",
-            "notes": "Action Surge",
-            "display_order": display_order,
-            "activation_type": "special",
-        }
-    if normalized == normalize_lookup("Arcane Recovery"):
-        return {
-            "id": "arcane-recovery",
-            "label": "Arcane Recovery",
-            "category": "class_feature",
-            "initial_current": 1,
-            "max": 1,
-            "reset_on": "long_rest",
-            "reset_to": "max",
-            "rest_behavior": "confirm_before_reset",
-            "notes": "Arcane Recovery",
-            "display_order": display_order,
-            "activation_type": "special",
-        }
-    if normalized == normalize_lookup("Divine Sense"):
-        uses = max(1 + _ability_modifier(ability_scores.get("cha", DEFAULT_ABILITY_SCORE)), 1)
-        return {
-            "id": "divine-sense",
-            "label": "Divine Sense",
-            "category": "class_feature",
-            "initial_current": uses,
-            "max": uses,
-            "reset_on": "long_rest",
-            "reset_to": "max",
-            "rest_behavior": "confirm_before_reset",
-            "notes": "Divine Sense",
-            "display_order": display_order,
-            "activation_type": "action",
-        }
-    if normalized == normalize_lookup("Lay on Hands"):
-        pool = max(current_level * 5, 5)
-        return {
-            "id": "lay-on-hands",
-            "label": "Lay on Hands",
-            "category": "class_feature",
-            "initial_current": pool,
-            "max": pool,
-            "reset_on": "long_rest",
-            "reset_to": "max",
-            "rest_behavior": "confirm_before_reset",
-            "notes": "Lay on Hands pool",
-            "display_order": display_order,
-            "activation_type": "action",
-        }
-    if normalized == normalize_lookup("Channel Divinity"):
-        uses = _resource_value_by_level(current_level, [(2, 1), (6, 2), (18, 3)]) or 1
-        return {
-            "id": "channel-divinity",
-            "label": "Channel Divinity",
-            "category": "class_feature",
-            "initial_current": uses,
-            "max": uses,
-            "reset_on": "short_rest",
-            "reset_to": "max",
-            "rest_behavior": "confirm_before_reset",
-            "notes": "Channel Divinity",
-            "display_order": display_order,
-            "activation_type": "passive",
-        }
-    if normalized == normalize_lookup("Wild Shape"):
-        return {
-            "id": "wild-shape",
-            "label": "Wild Shape",
-            "category": "class_feature",
-            "initial_current": 2,
-            "max": 2,
-            "reset_on": "short_rest",
-            "reset_to": "max",
-            "rest_behavior": "confirm_before_reset",
-            "notes": "Wild Shape",
-            "display_order": display_order,
-            "activation_type": "action",
-        }
-    if normalized == normalize_lookup("War Priest"):
-        uses = max(_ability_modifier(ability_scores.get("wis", DEFAULT_ABILITY_SCORE)), 1)
-        return {
-            "id": "war-priest",
-            "label": "War Priest",
-            "category": "subclass_feature",
-            "initial_current": uses,
-            "max": uses,
-            "reset_on": "long_rest",
-            "reset_to": "max",
-            "rest_behavior": "confirm_before_reset",
-            "notes": "War Priest",
-            "display_order": display_order,
-            "activation_type": "bonus_action",
-        }
-    if normalized == normalize_lookup("Arcane Shot"):
-        return {
-            "id": "arcane-shot",
-            "label": "Arcane Shot",
-            "category": "subclass_feature",
-            "initial_current": 2,
-            "max": 2,
-            "reset_on": "short_rest",
-            "reset_to": "max",
-            "rest_behavior": "confirm_before_reset",
-            "notes": "Arcane Shot",
-            "display_order": display_order,
-            "activation_type": "special",
-        }
-    if normalized == normalize_lookup("Chronal Shift"):
-        return {
-            "id": "chronal-shift",
-            "label": "Chronal Shift",
-            "category": "subclass_feature",
-            "initial_current": 2,
-            "max": 2,
-            "reset_on": "long_rest",
-            "reset_to": "max",
-            "rest_behavior": "confirm_before_reset",
-            "notes": "Chronal Shift",
-            "display_order": display_order,
-            "activation_type": "reaction",
-        }
-    if normalized == normalize_lookup("Psionic Power"):
-        points = _proficiency_bonus_for_level(current_level) * 2
-        return {
-            "id": "psionic-power-psionic-energy",
-            "label": "Psionic Power: Psionic Energy",
-            "category": "subclass_feature",
-            "initial_current": points,
-            "max": points,
-            "reset_on": "long_rest",
-            "reset_to": "max",
-            "rest_behavior": "confirm_before_reset",
-            "notes": "Psionic Power",
-            "display_order": display_order,
-            "activation_type": "passive",
-        }
-    if normalized == normalize_lookup("Psionic Power: Telekinetic Movement"):
-        return {
-            "id": "psionic-power-telekinetic-movement",
-            "label": "Psionic Power: Telekinetic Movement",
-            "category": "subclass_feature",
-            "initial_current": 1,
-            "max": 1,
-            "reset_on": "short_rest",
-            "reset_to": "max",
-            "rest_behavior": "confirm_before_reset",
-            "notes": "Psionic Power: Telekinetic Movement",
-            "display_order": display_order,
-            "activation_type": "action",
-        }
-    if normalized == normalize_lookup("Psionic Power: Recovery"):
-        return {
-            "id": "psionic-power-recovery",
-            "label": "Psionic Power: Recovery",
-            "category": "subclass_feature",
-            "initial_current": 1,
-            "max": 1,
-            "reset_on": "short_rest",
-            "reset_to": "max",
-            "rest_behavior": "confirm_before_reset",
-            "notes": "Psionic Power: Recovery",
-            "display_order": display_order,
-            "activation_type": "bonus_action",
-        }
-    if normalized == normalize_lookup("Ki"):
-        points = max(current_level, 2)
-        return {
-            "id": "ki",
-            "label": "Ki",
-            "category": "class_feature",
-            "initial_current": points,
-            "max": points,
-            "reset_on": "short_rest",
-            "reset_to": "max",
-            "rest_behavior": "confirm_before_reset",
-            "notes": "Ki",
-            "display_order": display_order,
-            "activation_type": "passive",
-        }
-    if normalized == normalize_lookup("Font of Magic"):
-        points = max(current_level, 2)
-        return {
-            "id": "sorcery-points",
-            "label": "Sorcery Points",
-            "category": "class_feature",
-            "initial_current": points,
-            "max": points,
-            "reset_on": "long_rest",
-            "reset_to": "max",
-            "rest_behavior": "confirm_before_reset",
-            "notes": "Sorcery Points",
-            "display_order": display_order,
-            "activation_type": "passive",
-        }
-    if normalized == normalize_lookup("Combat Superiority"):
-        dice = _resource_value_by_level(current_level, [(3, 4), (7, 5), (15, 6)]) or 4
-        return {
-            "id": "superiority-dice",
-            "label": "Superiority Dice",
-            "category": "class_feature",
-            "initial_current": dice,
-            "max": dice,
-            "reset_on": "short_rest",
-            "reset_to": "max",
-            "rest_behavior": "confirm_before_reset",
-            "notes": "Combat Superiority",
-            "display_order": display_order,
-            "activation_type": "special",
-        }
-    if normalized == normalize_lookup("Indomitable"):
-        uses = _resource_value_by_level(current_level, [(9, 1), (13, 2), (17, 3)]) or 1
-        return {
-            "id": "indomitable",
-            "label": "Indomitable",
-            "category": "class_feature",
-            "initial_current": uses,
-            "max": uses,
-            "reset_on": "long_rest",
-            "reset_to": "max",
-            "rest_behavior": "confirm_before_reset",
-            "notes": "Indomitable",
-            "display_order": display_order,
-            "activation_type": "special",
-        }
     if _feature_has_effect(effect_keys, "Chef"):
         uses = _proficiency_bonus_for_level(current_level)
         return {
