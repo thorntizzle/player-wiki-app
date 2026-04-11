@@ -2226,11 +2226,20 @@ def build_native_level_up_character_definition(
         current_level=row_target_level,
         class_row_id=target_class_row_id,
     )
+    resulting_profile = _build_resulting_level_up_profile(
+        current_definition,
+        action=advancement_mode,
+        target_class_row_id=target_class_row_id,
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        row_target_level=row_target_level,
+    )
     merged_features = _merge_feature_payloads(list(current_definition.features or []), new_features)
     merged_features, derived_resource_templates = _apply_tracker_templates_to_feature_payloads(
         merged_features,
         ability_scores=ability_scores,
         current_level=target_level,
+        class_row_levels=_profile_class_row_level_map(resulting_profile),
     )
 
     combined_selected_choices = _merge_selected_choice_maps(
@@ -2255,14 +2264,6 @@ def build_native_level_up_character_definition(
     total_hp_delta = hp_gain + _feat_hit_point_bonus(
         feat_selections,
         current_level=target_level,
-    )
-    resulting_profile = _build_resulting_level_up_profile(
-        current_definition,
-        action=advancement_mode,
-        target_class_row_id=target_class_row_id,
-        selected_class=selected_class,
-        selected_subclass=selected_subclass,
-        row_target_level=row_target_level,
     )
     definition = CharacterDefinition(
         campaign_slug=campaign_slug,
@@ -2725,18 +2726,6 @@ def apply_imported_progression_repairs(
             }
         )
 
-    repaired_features, _unused_templates = _build_feature_payloads(
-        repaired_feature_entries,
-        ability_scores=ability_scores,
-        current_level=current_level,
-    )
-    merged_features = _merge_feature_payloads(list(current_definition.features or []), repaired_features)
-    merged_features, derived_resource_templates = _apply_tracker_templates_to_feature_payloads(
-        merged_features,
-        ability_scores=ability_scores,
-        current_level=current_level,
-    )
-
     profile = dict(current_definition.profile or {})
     classes = ensure_profile_class_rows(profile)
     updated_classes: list[dict[str, Any]] = []
@@ -2770,6 +2759,19 @@ def apply_imported_progression_repairs(
     profile["background"] = selected_background.title
     profile["background_ref"] = None if background_page_ref else _systems_ref_from_entry(selected_background)
     profile["background_page_ref"] = background_page_ref or None
+
+    repaired_features, _unused_templates = _build_feature_payloads(
+        repaired_feature_entries,
+        ability_scores=ability_scores,
+        current_level=current_level,
+    )
+    merged_features = _merge_feature_payloads(list(current_definition.features or []), repaired_features)
+    merged_features, derived_resource_templates = _apply_tracker_templates_to_feature_payloads(
+        merged_features,
+        ability_scores=ability_scores,
+        current_level=current_level,
+        class_row_levels=_profile_class_row_level_map(profile),
+    )
 
     spellcasting = dict(current_definition.spellcasting or {})
     repaired_spells = [dict(payload or {}) for payload in list(spellcasting.get("spells") or [])]
@@ -5056,6 +5058,7 @@ def _derive_definition_core_sheet_payloads(
         _normalize_feature_payloads(list(definition.features or [])),
         ability_scores=ability_scores,
         current_level=max(current_level, 1),
+        class_row_levels=_profile_class_row_level_map(definition.profile),
     )
     normalized_equipment = _normalize_equipment_payloads(list(definition.equipment_catalog or []))
     normalized_payload = deepcopy(definition.to_dict())
@@ -12338,6 +12341,7 @@ def _apply_tracker_templates_to_feature_payloads(
     *,
     ability_scores: dict[str, int],
     current_level: int,
+    class_row_levels: dict[str, int] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     updated_features: list[dict[str, Any]] = []
     resource_templates: list[dict[str, Any]] = []
@@ -12369,16 +12373,21 @@ def _apply_tracker_templates_to_feature_payloads(
 
     for feature in features:
         feature_payload = dict(feature)
+        feature_current_level = _feature_tracker_current_level(
+            feature_payload,
+            current_level=current_level,
+            class_row_levels=class_row_levels,
+        )
         tracker_template = _build_campaign_option_tracker_template(
             feature_payload,
             display_order=display_order,
-            current_level=current_level,
+            current_level=feature_current_level,
         )
         if tracker_template is None:
             tracker_template = _build_feature_tracker_template(
                 feature_payload,
                 ability_scores=ability_scores,
-                current_level=current_level,
+                current_level=feature_current_level,
                 display_order=display_order,
             )
         if tracker_template is not None:
@@ -12399,6 +12408,30 @@ def _apply_tracker_templates_to_feature_payloads(
                 seen_feature_identities.add(feature_identity)
 
     return updated_features, resource_templates
+
+
+def _profile_class_row_level_map(profile: dict[str, Any] | None) -> dict[str, int]:
+    row_levels: dict[str, int] = {}
+    for row in ensure_profile_class_rows(profile):
+        row_id = str(row.get("row_id") or "").strip()
+        if not row_id:
+            continue
+        row_levels[row_id] = max(int(row.get("level") or 0), 0)
+    return row_levels
+
+
+def _feature_tracker_current_level(
+    feature_payload: dict[str, Any],
+    *,
+    current_level: int,
+    class_row_levels: dict[str, int] | None = None,
+) -> int:
+    class_row_id = str(feature_payload.get("class_row_id") or "").strip()
+    if class_row_id:
+        row_level = int(dict(class_row_levels or {}).get(class_row_id) or 0)
+        if row_level > 0:
+            return row_level
+    return current_level
 
 
 def _build_additional_feature_tracker_payloads(
@@ -12752,6 +12785,7 @@ def _build_native_level_up_preview(
         merged_features,
         ability_scores=ability_scores,
         current_level=total_character_level,
+        class_row_levels=_profile_class_row_level_map(preview_profile),
     )
     merged_resource_templates = _merge_resource_templates(
         list(definition.resource_templates or []),

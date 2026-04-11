@@ -2065,6 +2065,130 @@ def test_native_level_up_advances_selected_multiclass_row_only():
     assert latest_event["row_to_level"] == 2
 
 
+def test_native_level_up_keeps_multiclass_resource_scaling_bound_to_each_class_row():
+    sorcerer = _systems_entry(
+        "class",
+        "phb-class-sorcerer",
+        "Sorcerer",
+        metadata={"hit_die": {"faces": 6}, "proficiency": ["con", "cha"]},
+    )
+    rogue = _systems_entry(
+        "class",
+        "phb-class-rogue",
+        "Rogue",
+        metadata={"hit_die": {"faces": 8}, "proficiency": ["dex", "int"]},
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [sorcerer, rogue],
+            "race": [human],
+            "background": [acolyte],
+            "subclass": [],
+        },
+        class_progression=[],
+    )
+    _set_progressions(systems_service, class_by_slug={sorcerer.slug: [], rogue.slug: []})
+
+    definition = _minimal_character_definition("spell-split", "Spell Split")
+    definition.profile["classes"] = [
+        {
+            "row_id": "class-row-1",
+            "class_name": "Sorcerer",
+            "subclass_name": "",
+            "level": 4,
+            "systems_ref": _systems_ref(sorcerer),
+        },
+        {
+            "row_id": "class-row-2",
+            "class_name": "Rogue",
+            "subclass_name": "",
+            "level": 1,
+            "systems_ref": _systems_ref(rogue),
+        },
+    ]
+    definition.profile["class_ref"] = _systems_ref(sorcerer)
+    definition.profile["class_level_text"] = "Sorcerer 4 / Rogue 1"
+    definition.stats["max_hp"] = 26
+    definition.stats["ability_scores"]["cha"] = {"score": 16, "modifier": 3, "save_bonus": 6}
+    definition.features = [
+        {
+            "id": "font-of-magic-1",
+            "name": "Font of Magic",
+            "category": "class_feature",
+            "source": "PHB",
+            "description_markdown": "",
+            "activation_type": "passive",
+            "tracker_ref": "sorcery-points",
+            "class_row_id": "class-row-1",
+            "systems_ref": {
+                "entry_type": "classfeature",
+                "slug": "phb-classfeature-font-of-magic",
+                "title": "Font of Magic",
+                "source_id": "PHB",
+            },
+        }
+    ]
+    definition.resource_templates = [
+        {
+            "id": "sorcery-points",
+            "label": "Sorcery Points",
+            "category": "class_feature",
+            "initial_current": 4,
+            "max": 4,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Sorcery Points",
+            "display_order": 0,
+        }
+    ]
+
+    context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        definition,
+        {
+            "advancement_mode": "advance_existing",
+            "target_class_row_id": "class-row-2",
+            "hp_gain": "4",
+        },
+    )
+
+    assert "Sorcery Points: 4 / 4 (Long Rest)" in context["preview"]["resources"]
+
+    leveled_definition, _import_metadata, hp_delta = build_native_level_up_character_definition(
+        "linden-pass",
+        definition,
+        context,
+        context["values"],
+    )
+    state = build_initial_state(definition)
+    state["resources"] = [
+        {
+            "id": "sorcery-points",
+            "label": "Sorcery Points",
+            "category": "class_feature",
+            "current": 2,
+            "max": 4,
+            "reset_on": "long_rest",
+            "reset_to": "max",
+            "rest_behavior": "confirm_before_reset",
+            "notes": "Sorcery Points",
+            "display_order": 0,
+        }
+    ]
+    merged_state = merge_state_with_definition(leveled_definition, state, hp_delta=hp_delta)
+    resources_by_id = {resource["id"]: resource for resource in leveled_definition.resource_templates}
+    merged_resources = {resource["id"]: resource for resource in merged_state["resources"]}
+
+    assert [row["level"] for row in leveled_definition.profile["classes"]] == [4, 2]
+    assert resources_by_id["sorcery-points"]["max"] == 4
+    assert merged_resources["sorcery-points"]["current"] == 2
+    assert merged_resources["sorcery-points"]["max"] == 4
+
+
 def test_native_level_up_surfaces_and_applies_eldritch_knight_spell_choices():
     fighter = _systems_entry(
         "class",
@@ -5747,6 +5871,69 @@ def test_normalize_definition_to_native_model_updates_bardic_inspiration_to_shor
 
     assert tracker["max"] == 3
     assert tracker["reset_on"] == "short_rest"
+
+
+def test_normalize_definition_to_native_model_scales_multiclass_trackers_by_owning_class_row():
+    bard = _systems_entry(
+        "class",
+        "phb-class-bard",
+        "Bard",
+        metadata={"hit_die": {"faces": 8}, "proficiency": ["dex", "cha"]},
+    )
+    sorcerer = _systems_entry(
+        "class",
+        "phb-class-sorcerer",
+        "Sorcerer",
+        metadata={"hit_die": {"faces": 6}, "proficiency": ["con", "cha"]},
+    )
+    definition = _minimal_character_definition("lyra-split", "Lyra Split")
+    definition.profile["classes"] = [
+        {
+            "row_id": "class-row-1",
+            "class_name": "Bard",
+            "subclass_name": "",
+            "level": 1,
+            "systems_ref": _systems_ref(bard),
+        },
+        {
+            "row_id": "class-row-2",
+            "class_name": "Sorcerer",
+            "subclass_name": "",
+            "level": 4,
+            "systems_ref": _systems_ref(sorcerer),
+        },
+    ]
+    definition.profile["class_ref"] = _systems_ref(bard)
+    definition.profile["class_level_text"] = "Bard 1 / Sorcerer 4"
+    definition.stats["ability_scores"]["cha"] = {"score": 16, "modifier": 3, "save_bonus": 6}
+    definition.features = [
+        {
+            "id": "bardic-inspiration-1",
+            "name": "Bardic Inspiration",
+            "category": "class_feature",
+            "source": "PHB",
+            "description_markdown": "",
+            "activation_type": "bonus_action",
+            "class_row_id": "class-row-1",
+        },
+        {
+            "id": "font-of-magic-1",
+            "name": "Font of Magic",
+            "category": "class_feature",
+            "source": "PHB",
+            "description_markdown": "",
+            "activation_type": "passive",
+            "class_row_id": "class-row-2",
+        },
+    ]
+    definition.resource_templates = []
+
+    normalized = normalize_definition_to_native_model(definition)
+    resources_by_id = {resource["id"]: resource for resource in normalized.resource_templates}
+
+    assert resources_by_id["bardic-inspiration"]["max"] == 3
+    assert resources_by_id["bardic-inspiration"]["reset_on"] == "long_rest"
+    assert resources_by_id["sorcery-points"]["max"] == 4
 
 
 def test_normalize_definition_to_native_model_merges_duplicate_attack_and_equipment_rows_ignoring_case():
