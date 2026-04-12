@@ -4678,6 +4678,65 @@ def test_vgm_monster_lore_wrappers_surface_related_monster_family_entries(
             )
 
 
+def test_vgm_character_race_wrappers_surface_related_race_entries(client, sign_in, users, app, tmp_path):
+    data_root = build_vgm_book_data_root(tmp_path / "dnd5e-source-vgm-character-race-links")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("VGM", entry_types=["book", "race"])
+
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="VGM",
+            is_enabled=True,
+            default_visibility="dm",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in service.list_entries_for_campaign_source(
+                "linden-pass",
+                "VGM",
+                entry_type="book",
+                limit=None,
+            )
+        }
+        race_entries = {
+            entry.title: entry
+            for entry in store.list_entries_for_source("DND-5E", "VGM", entry_type="race", limit=None)
+        }
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    page_expectations = {
+        "Aasimar": ("Aasimar", "Protector Aasimar", "Scourge Aasimar", "Fallen Aasimar"),
+        "Firbolg": ("Firbolg",),
+        "Goliath": ("Goliath",),
+        "Kenku": ("Kenku",),
+        "Lizardfolk": ("Lizardfolk",),
+        "Tabaxi": ("Tabaxi",),
+        "Triton": ("Triton",),
+        "Monstrous Adventurers": ("Bugbear", "Goblin", "Hobgoblin", "Kobold", "Orc", "Yuan-ti Pureblood"),
+        "Height and Weight": ("Aasimar", "Firbolg", "Triton", "Bugbear", "Yuan-ti Pureblood"),
+    }
+
+    for title, race_titles in page_expectations.items():
+        response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries[title].slug}")
+        assert response.status_code == 200
+        body = response.get_data(as_text=True)
+        assert "Related Races" in body
+        for race_title in race_titles:
+            assert race_title in body
+            assert (
+                f'href="/campaigns/linden-pass/systems/entries/{race_entries[race_title].slug}"' in body
+            )
+
+
 def test_mm_book_pages_surface_related_monsters_and_monster_rules(
     client, sign_in, users, app, tmp_path
 ):

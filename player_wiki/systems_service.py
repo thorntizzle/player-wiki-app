@@ -268,6 +268,57 @@ VGM_MONSTER_LORE_WRAPPER_MONSTER_MATCHERS = {
         "title_suffix_keys": (),
     },
 }
+VGM_CHARACTER_RACE_WRAPPER_RACE_MATCHERS = {
+    normalize_lookup("Aasimar"): {
+        "title_keys": _normalized_nonempty_tuple("Aasimar"),
+        "base_race_keys": _normalized_nonempty_tuple("Aasimar"),
+    },
+    normalize_lookup("Firbolg"): {
+        "title_keys": _normalized_nonempty_tuple("Firbolg"),
+        "base_race_keys": (),
+    },
+    normalize_lookup("Goliath"): {
+        "title_keys": _normalized_nonempty_tuple("Goliath"),
+        "base_race_keys": (),
+    },
+    normalize_lookup("Kenku"): {
+        "title_keys": _normalized_nonempty_tuple("Kenku"),
+        "base_race_keys": (),
+    },
+    normalize_lookup("Lizardfolk"): {
+        "title_keys": _normalized_nonempty_tuple("Lizardfolk"),
+        "base_race_keys": (),
+    },
+    normalize_lookup("Tabaxi"): {
+        "title_keys": _normalized_nonempty_tuple("Tabaxi"),
+        "base_race_keys": (),
+    },
+    normalize_lookup("Triton"): {
+        "title_keys": _normalized_nonempty_tuple("Triton"),
+        "base_race_keys": (),
+    },
+    normalize_lookup("Monstrous Adventurers"): {
+        "title_keys": _normalized_nonempty_tuple(
+            "Bugbear",
+            "Goblin",
+            "Hobgoblin",
+            "Kobold",
+            "Orc",
+            "Yuan-ti Pureblood",
+        ),
+        "base_race_keys": (),
+    },
+    normalize_lookup("Height and Weight"): {
+        "title_keys": _normalized_nonempty_tuple(
+            "Aasimar",
+            "Firbolg",
+            "Triton",
+            "Bugbear",
+            "Yuan-ti Pureblood",
+        ),
+        "base_race_keys": (),
+    },
+}
 
 
 def _systems_service_request_cache() -> dict[tuple[object, ...], object] | None:
@@ -930,6 +981,49 @@ class SystemsService:
             build_value,
         )
 
+    def build_related_races_for_entry(
+        self,
+        campaign_slug: str,
+        entry: SystemsEntryRecord,
+    ) -> list[SystemsEntryRecord]:
+        if entry.entry_type != "book":
+            return []
+        if str(entry.source_id or "").strip().upper() != "VGM":
+            return []
+        matcher = VGM_CHARACTER_RACE_WRAPPER_RACE_MATCHERS.get(normalize_lookup(entry.title))
+        if not matcher:
+            return []
+
+        def build_value() -> list[SystemsEntryRecord]:
+            related_entries: list[SystemsEntryRecord] = []
+            seen_entry_keys: set[str] = set()
+            for candidate in self.list_enabled_entries_for_campaign(
+                campaign_slug,
+                entry_type="race",
+                limit=None,
+            ):
+                if str(candidate.source_id or "").strip().upper() != "VGM":
+                    continue
+                if candidate.entry_key in seen_entry_keys:
+                    continue
+                if not self._race_entry_matches_wrapper(candidate, matcher):
+                    continue
+                seen_entry_keys.add(candidate.entry_key)
+                related_entries.append(candidate)
+            return sorted(
+                related_entries,
+                key=lambda candidate: (
+                    self._coerce_int(candidate.source_page, default=10_000),
+                    candidate.title.lower(),
+                    candidate.id,
+                ),
+            )
+
+        return _systems_service_cache_get(
+            ("related_races_for_entry", campaign_slug, entry.entry_key),
+            build_value,
+        )
+
     def build_related_rules_for_book_sections(
         self,
         campaign_slug: str,
@@ -1072,6 +1166,24 @@ class SystemsService:
         if type_keys.intersection(matcher.get("type_keys", ())):
             return True
         if tag_keys.intersection(matcher.get("tag_keys", ())):
+            return True
+        return False
+
+    def _race_entry_matches_wrapper(
+        self,
+        entry: SystemsEntryRecord,
+        matcher: dict[str, tuple[str, ...]],
+    ) -> bool:
+        if entry.entry_type != "race":
+            return False
+
+        title_key = normalize_lookup(entry.title)
+        if title_key and title_key in matcher.get("title_keys", ()):
+            return True
+
+        metadata = dict(entry.metadata or {})
+        base_race_key = normalize_lookup(str(metadata.get("base_race_name") or ""))
+        if base_race_key and base_race_key in matcher.get("base_race_keys", ()):
             return True
         return False
 
