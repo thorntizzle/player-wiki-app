@@ -4146,6 +4146,7 @@ XGE_RULES_REFERENCE_TEST_TITLES = (
     "Spellcasting",
     "Identifying a Spell",
     "Encounter Building",
+    "Random Encounters: A World of Possibilities",
     "Downtime Revisited",
     "Variant Rules",
 )
@@ -4392,7 +4393,17 @@ def build_xge_book_data_root(root: Path) -> Path:
                             "type": "entries",
                             "name": "Random Encounters: A World of Possibilities",
                             "page": 92,
-                            "entries": ["Random encounters can do more than trigger a fight."],
+                            "entries": [
+                                "Random encounters can do more than trigger a fight.",
+                                {
+                                    "type": "entries",
+                                    "name": "Flight, or Fight, or..?",
+                                    "page": 92,
+                                    "entries": [
+                                        "Some random encounters should invite caution, negotiation, or retreat instead of an immediate battle."
+                                    ],
+                                },
+                            ],
                         },
                         {
                             "type": "entries",
@@ -6862,6 +6873,9 @@ def test_xge_book_entries_are_imported_for_player_browse(
     encounter_building_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Encounter Building'].slug}"
     )
+    random_encounters_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Random Encounters: A World of Possibilities'].slug}"
+    )
     downtime_revisited_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Downtime Revisited'].slug}"
     )
@@ -6925,6 +6939,14 @@ def test_xge_book_entries_are_imported_for_player_browse(
         in encounter_building_body
     )
 
+    assert random_encounters_response.status_code == 200
+    random_encounters_body = random_encounters_response.get_data(as_text=True)
+    assert "Chapter 2" in random_encounters_body
+    assert "Dungeon Master&#39;s Tools" in random_encounters_body
+    assert "Flight, or Fight, or..?" in random_encounters_body
+    assert 'href="#flight-or-fight-or"' in random_encounters_body
+    assert 'id="flight-or-fight-or"' in random_encounters_body
+
     assert downtime_revisited_response.status_code == 200
     downtime_revisited_body = downtime_revisited_response.get_data(as_text=True)
     assert "Chapter 2" in downtime_revisited_body
@@ -6973,7 +6995,7 @@ def test_xge_book_entries_follow_source_visibility(client, sign_in, users, app, 
     player_source_response = client.get("/campaigns/linden-pass/systems/sources/XGE")
     player_category_response = client.get("/campaigns/linden-pass/systems/sources/XGE/types/book")
     player_entry_response = client.get(
-        f"/campaigns/linden-pass/systems/entries/{book_entries['Downtime Revisited'].slug}"
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Random Encounters: A World of Possibilities'].slug}"
     )
 
     assert player_source_response.status_code == 404
@@ -6986,21 +7008,21 @@ def test_xge_book_entries_follow_source_visibility(client, sign_in, users, app, 
     dm_source_response = client.get("/campaigns/linden-pass/systems/sources/XGE")
     dm_category_response = client.get("/campaigns/linden-pass/systems/sources/XGE/types/book")
     dm_entry_response = client.get(
-        f"/campaigns/linden-pass/systems/entries/{book_entries['Downtime Revisited'].slug}"
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Random Encounters: A World of Possibilities'].slug}"
     )
 
     assert dm_source_response.status_code == 200
     assert "Book Chapters" in dm_source_response.get_data(as_text=True)
     assert dm_category_response.status_code == 200
-    assert "Downtime Revisited" in dm_category_response.get_data(as_text=True)
+    assert "Random Encounters: A World of Possibilities" in dm_category_response.get_data(as_text=True)
     assert dm_entry_response.status_code == 200
     dm_body = dm_entry_response.get_data(as_text=True)
     assert "Chapter 2" in dm_body
     assert "Dungeon Master&#39;s Tools" in dm_body
-    assert "Downtime Activities" in dm_body
+    assert "Flight, or Fight, or..?" in dm_body
 
 
-def test_xge_book_slice_excludes_other_pending_section_pages(app, tmp_path):
+def test_xge_book_slice_excludes_remaining_pending_section_pages(app, tmp_path):
     data_root = build_xge_book_data_root(
         tmp_path / "dnd5e-source-xge-book-boundary"
     )
@@ -7021,7 +7043,6 @@ def test_xge_book_slice_excludes_other_pending_section_pages(app, tmp_path):
     assert result.imported_by_type == {"book": len(XGE_RULES_REFERENCE_TEST_TITLES)}
     book_titles = {entry.title for entry in book_entries}
     assert book_titles == set(XGE_RULES_REFERENCE_TEST_TITLES)
-    assert "Random Encounters: A World of Possibilities" not in book_titles
     assert "Traps Revisited" not in book_titles
     assert "Awarding Magic Items" not in book_titles
     assert "Shared Campaigns" not in book_titles
