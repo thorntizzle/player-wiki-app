@@ -2,12 +2,13 @@
 .pytest_cache/
 __pycache__/
 *.pyc
-/.pytest-tmp/
+/.pytest-tmp*/
 /.tmp-*/
 /codex*/
+/pytest-cache-files-*/
 /pytesttmp*/
 /tmp*/
-/python_probe_write.txt
+/python_probe*
 campaigns/*
 !campaigns/.gitkeep
 !campaigns/README.md
