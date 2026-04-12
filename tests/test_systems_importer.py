@@ -4665,6 +4665,94 @@ def test_vgm_character_race_wrappers_are_imported_for_dm_browse(client, sign_in,
     assert 'href="#height-and-weight"' not in height_body
 
 
+def test_vgm_monster_lore_wrappers_are_imported_for_dm_browse(client, sign_in, users, app, tmp_path):
+    data_root = build_vgm_monster_lore_data_root(tmp_path / "dnd5e-source-vgm-monster-lore-browse")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("VGM", entry_types=["book"])
+
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="VGM",
+            is_enabled=True,
+            default_visibility="dm",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in service.list_entries_for_campaign_source(
+                "linden-pass",
+                "VGM",
+                entry_type="book",
+                limit=None,
+            )
+        }
+
+    assert list(book_entries) == [
+        "Beholders: Bad Dreams Come True",
+        "Giants: World Shakers",
+        "Gnolls: The Insatiable Hunger",
+        "Goblinoids: The Conquering Host",
+        "Hags: Dark Sisterhood",
+        "Kobolds: Little Dragons",
+        "Mind Flayers: Scourge of Worlds",
+        "Orcs: The Godsworn",
+        "Yuan-ti: Snake People",
+    ]
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    source_response = client.get("/campaigns/linden-pass/systems/sources/VGM")
+    category_response = client.get("/campaigns/linden-pass/systems/sources/VGM/types/book")
+    beholders_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Beholders: Bad Dreams Come True'].slug}"
+    )
+
+    assert source_response.status_code == 200
+    source_body = source_response.get_data(as_text=True)
+    assert "Book Chapters" in source_body
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/'
+        f"{book_entries['Beholders: Bad Dreams Come True'].slug}\""
+        in source_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/'
+        f"{book_entries['Yuan-ti: Snake People'].slug}\""
+        in source_body
+    )
+    assert source_body.index("Beholders: Bad Dreams Come True") < source_body.index("Giants: World Shakers")
+    assert source_body.index("Kobolds: Little Dragons") < source_body.index("Mind Flayers: Scourge of Worlds")
+    assert source_body.index("Orcs: The Godsworn") < source_body.index("Yuan-ti: Snake People")
+
+    assert category_response.status_code == 200
+    category_body = category_response.get_data(as_text=True)
+    assert "Beholders: Bad Dreams Come True" in category_body
+    assert "Mind Flayers: Scourge of Worlds" in category_body
+    assert "Yuan-ti: Snake People" in category_body
+    assert category_body.index("Beholders: Bad Dreams Come True") < category_body.index("Giants: World Shakers")
+    assert category_body.index("Kobolds: Little Dragons") < category_body.index("Mind Flayers: Scourge of Worlds")
+    assert category_body.index("Orcs: The Godsworn") < category_body.index("Yuan-ti: Snake People")
+
+    assert beholders_response.status_code == 200
+    beholders_body = beholders_response.get_data(as_text=True)
+    assert "Chapter 1" in beholders_body
+    assert "Monster Lore" in beholders_body
+    assert "Chapter Navigation" in beholders_body
+    assert "Roleplaying a Beholder" in beholders_body
+    assert "Battle Tactics" in beholders_body
+    assert "Variant Abilities" in beholders_body
+    assert 'href="#roleplaying-a-beholder"' in beholders_body
+    assert 'href="#battle-tactics"' in beholders_body
+    assert 'id="variant-abilities"' in beholders_body
+
+
 def test_vgm_monster_lore_wrappers_surface_related_monster_family_entries(
     client, sign_in, users, app, tmp_path
 ):

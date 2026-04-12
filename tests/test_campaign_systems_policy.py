@@ -407,6 +407,82 @@ def test_vgm_character_race_book_entries_stay_dm_only(client, sign_in, users, ap
         assert "Character Races" in dm_body
 
 
+def test_vgm_book_entries_stay_hidden_when_source_visibility_is_lowered_for_other_vgm_content(
+    client, sign_in, users, app, tmp_path
+):
+    data_root = build_vgm_book_data_root(tmp_path / "dnd5e-source-vgm-book-policy-lowered")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("VGM", entry_types=["book", "race"])
+
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="VGM",
+            is_enabled=True,
+            default_visibility="players",
+        )
+        monstrous_entry = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "VGM", entry_type="book", limit=20)
+            if entry.title == "Monstrous Adventurers"
+        )
+        bugbear_entry = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "VGM", entry_type="race", limit=20)
+            if entry.title == "Bugbear"
+        )
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    source_response = client.get("/campaigns/linden-pass/systems/sources/VGM")
+    book_category_response = client.get("/campaigns/linden-pass/systems/sources/VGM/types/book")
+    player_book_response = client.get(f"/campaigns/linden-pass/systems/entries/{monstrous_entry.slug}")
+    player_race_response = client.get(f"/campaigns/linden-pass/systems/entries/{bugbear_entry.slug}")
+    search_response = client.get("/campaigns/linden-pass/systems?q=monstrous")
+
+    assert source_response.status_code == 200
+    source_body = source_response.get_data(as_text=True)
+    assert "Book Chapters" not in source_body
+    assert "Monstrous Adventurers" not in source_body
+    assert "Races" in source_body
+    assert "default to DM visibility" in source_body
+
+    assert book_category_response.status_code == 404
+    assert player_book_response.status_code == 404
+
+    assert player_race_response.status_code == 200
+    assert "Bugbear" in player_race_response.get_data(as_text=True)
+
+    assert search_response.status_code == 200
+    assert "Monstrous Adventurers" not in search_response.get_data(as_text=True)
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    dm_source_response = client.get("/campaigns/linden-pass/systems/sources/VGM")
+    dm_book_category_response = client.get("/campaigns/linden-pass/systems/sources/VGM/types/book")
+    dm_book_response = client.get(f"/campaigns/linden-pass/systems/entries/{monstrous_entry.slug}")
+
+    assert dm_source_response.status_code == 200
+    dm_source_body = dm_source_response.get_data(as_text=True)
+    assert "Book Chapters" in dm_source_body
+    assert "Monstrous Adventurers" in dm_source_body
+    assert "default to DM visibility" in dm_source_body
+
+    assert dm_book_category_response.status_code == 200
+    assert "Monstrous Adventurers" in dm_book_category_response.get_data(as_text=True)
+
+    assert dm_book_response.status_code == 200
+    assert "Policy default visibility: DM" in dm_book_response.get_data(as_text=True)
+
+
 def test_dmg_book_entries_stay_hidden_when_source_visibility_is_lowered_for_other_dmg_content(
     client, sign_in, users, app, tmp_path
 ):

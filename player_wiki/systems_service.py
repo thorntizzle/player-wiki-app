@@ -397,6 +397,12 @@ DND_5E_SOURCE_CATALOG = (
         "public_visibility_allowed": False,
         "requires_unofficial_notice": True,
         "default_visibility": VISIBILITY_DM,
+        "book_entry_default_visibility": VISIBILITY_DM,
+        "book_entry_policy_note": (
+            "VGM wrapper pages default to DM visibility even if a campaign lowers the broader "
+            "VGM source to surface specific player-facing VGM rows. Use entry overrides only "
+            "when a wrapper page should be intentionally exposed more broadly."
+        ),
     },
     {
         "source_id": "SCAG",
