@@ -1583,7 +1583,15 @@ def build_mm_book_data_root(root: Path) -> Path:
                                 "Half-Dragon Template",
                                 "Spore Servant Template",
                             ],
-                        }
+                        },
+                        {
+                            "name": "Nonplayer Characters",
+                            "headers": [
+                                "Customizing NPCs",
+                                "NPC Descriptions",
+                            ],
+                            "ordinal": {"type": "appendix", "identifier": "B"},
+                        },
                     ],
                 }
             ]
@@ -1924,6 +1932,56 @@ def build_mm_book_data_root(root: Path) -> Path:
                         },
                     ],
                     "id": "mm-introduction",
+                },
+                {
+                    "type": "section",
+                    "name": "Appendix B: Nonplayer Characters",
+                    "page": 342,
+                    "entries": [
+                        "This appendix contains statistics for humanoid nonplayer characters that adventurers might encounter during a campaign.",
+                        {
+                            "type": "entries",
+                            "name": "Customizing NPCs",
+                            "page": 342,
+                            "entries": [
+                                "There are many easy ways to customize the NPCs in this appendix for a home campaign.",
+                                {
+                                    "type": "entries",
+                                    "name": "Racial Traits",
+                                    "page": 342,
+                                    "entries": [
+                                        "You can add racial traits to an NPC without changing its challenge rating.",
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Spell Swaps",
+                                    "page": 342,
+                                    "entries": [
+                                        "Swap a spell on an NPC's spell list with another spell of the same level from the same spell list.",
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Armor and Weapon Swaps",
+                                    "page": 342,
+                                    "entries": [
+                                        "You can upgrade or downgrade an NPC's armor, or swap weapons, and adjust Armor Class and attack damage accordingly.",
+                                    ],
+                                },
+                            ],
+                            "id": "mm-customizing-npcs",
+                        },
+                        {
+                            "type": "entries",
+                            "name": "NPC Descriptions",
+                            "page": 343,
+                            "entries": [
+                                "Use these stat blocks as the basis for guards, sages, priests, assassins, and other recurring characters.",
+                            ],
+                        },
+                    ],
+                    "id": "mm-appendix-b-npcs",
                 }
             ]
         },
@@ -3456,6 +3514,7 @@ def test_mm_intro_book_sections_are_imported_for_dm_browse(client, sign_in, user
         shadow_dragon_template = next(entry for entry in book_entries if entry.title == "Shadow Dragon Template")
         half_dragon_template = next(entry for entry in book_entries if entry.title == "Half-Dragon Template")
         spore_servant_template = next(entry for entry in book_entries if entry.title == "Spore Servant Template")
+        customizing_npcs = next(entry for entry in book_entries if entry.title == "Customizing NPCs")
 
     assert titles == [
         "Statistics",
@@ -3463,6 +3522,7 @@ def test_mm_intro_book_sections_are_imported_for_dm_browse(client, sign_in, user
         "Shadow Dragon Template",
         "Half-Dragon Template",
         "Spore Servant Template",
+        "Customizing NPCs",
     ]
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
@@ -3478,10 +3538,12 @@ def test_mm_intro_book_sections_are_imported_for_dm_browse(client, sign_in, user
     assert "Shadow Dragon Template" in source_body
     assert "Half-Dragon Template" in source_body
     assert "Spore Servant Template" in source_body
+    assert "Customizing NPCs" in source_body
     assert source_body.index("Statistics") < source_body.index("Legendary Creatures")
     assert source_body.index("Legendary Creatures") < source_body.index("Shadow Dragon Template")
     assert source_body.index("Shadow Dragon Template") < source_body.index("Half-Dragon Template")
     assert source_body.index("Half-Dragon Template") < source_body.index("Spore Servant Template")
+    assert source_body.index("Spore Servant Template") < source_body.index("Customizing NPCs")
 
     assert category_response.status_code == 200
     category_body = category_response.get_data(as_text=True)
@@ -3490,10 +3552,12 @@ def test_mm_intro_book_sections_are_imported_for_dm_browse(client, sign_in, user
     assert "Shadow Dragon Template" in category_body
     assert "Half-Dragon Template" in category_body
     assert "Spore Servant Template" in category_body
+    assert "Customizing NPCs" in category_body
     assert category_body.index("Statistics") < category_body.index("Legendary Creatures")
     assert category_body.index("Legendary Creatures") < category_body.index("Shadow Dragon Template")
     assert category_body.index("Shadow Dragon Template") < category_body.index("Half-Dragon Template")
     assert category_body.index("Half-Dragon Template") < category_body.index("Spore Servant Template")
+    assert category_body.index("Spore Servant Template") < category_body.index("Customizing NPCs")
 
     assert statistics_response.status_code == 200
     statistics_body = statistics_response.get_data(as_text=True)
@@ -3589,6 +3653,21 @@ def test_mm_intro_book_sections_are_imported_for_dm_browse(client, sign_in, user
     assert 'id="senses"' in spore_servant_body
     assert 'href="#condition-immunities"' in spore_servant_body
     assert 'id="attacks"' in spore_servant_body
+
+    customizing_npcs_response = client.get(f"/campaigns/linden-pass/systems/entries/{customizing_npcs.slug}")
+    assert customizing_npcs_response.status_code == 200
+    customizing_npcs_body = customizing_npcs_response.get_data(as_text=True)
+    assert "Appendix B" in customizing_npcs_body
+    assert "From Appendix B: Nonplayer Characters" in customizing_npcs_body
+    assert "Chapter Navigation" in customizing_npcs_body
+    assert "Racial Traits" in customizing_npcs_body
+    assert "Spell Swaps" in customizing_npcs_body
+    assert "Armor and Weapon Swaps" in customizing_npcs_body
+    assert "NPC Descriptions" not in customizing_npcs_body
+    assert 'href="#racial-traits"' in customizing_npcs_body
+    assert 'id="racial-traits"' in customizing_npcs_body
+    assert 'href="#armor-and-weapon-swaps"' in customizing_npcs_body
+    assert 'id="armor-and-weapon-swaps"' in customizing_npcs_body
 
 
 def test_dmg_book_chapters_surface_related_imported_entities(client, sign_in, users, app, tmp_path):

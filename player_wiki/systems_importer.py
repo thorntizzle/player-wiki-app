@@ -164,6 +164,7 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         ("Introduction", "Shadow Dragon Template"),
         ("Introduction", "Half-Dragon Template"),
         ("Introduction", "Spore Servant Template"),
+        ("Appendix B: Nonplayer Characters", "Customizing NPCs"),
     ),
 }
 
@@ -967,11 +968,20 @@ class Dnd5eSystemsImporter:
             for item in contents:
                 if not isinstance(item, dict):
                     continue
-                chapter_name = str(item.get("name", "") or "").strip()
-                if chapter_name:
+                for chapter_name in self._book_contents_lookup_keys(item):
                     lookup[chapter_name] = item
             return lookup
         return {}
+
+    def _book_contents_lookup_keys(self, item: dict[str, Any]) -> tuple[str, ...]:
+        chapter_name = self._clean_text(str(item.get("name", "") or ""))
+        if not chapter_name:
+            return ()
+        keys = [chapter_name]
+        section_label = self._format_book_section_label(item.get("ordinal"))
+        if section_label and not chapter_name.startswith(f"{section_label}:"):
+            keys.append(f"{section_label}: {chapter_name}")
+        return tuple(dict.fromkeys(keys))
 
     def _build_entry(
         self,

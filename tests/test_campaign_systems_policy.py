@@ -321,6 +321,7 @@ def test_mm_book_entries_stay_dm_only(client, sign_in, users, app, tmp_path):
         "Shadow Dragon Template",
         "Half-Dragon Template",
         "Spore Servant Template",
+        "Customizing NPCs",
     ):
         player_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries[title].slug}")
         assert player_response.status_code == 404
@@ -333,12 +334,17 @@ def test_mm_book_entries_stay_dm_only(client, sign_in, users, app, tmp_path):
         "Shadow Dragon Template",
         "Half-Dragon Template",
         "Spore Servant Template",
+        "Customizing NPCs",
     ):
         dm_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries[title].slug}")
         assert dm_response.status_code == 200
         dm_body = dm_response.get_data(as_text=True)
         assert title in dm_body
-        assert "Introduction" in dm_body
+        if title == "Customizing NPCs":
+            assert "Appendix B" in dm_body
+            assert "Appendix B: Nonplayer Characters" in dm_body
+        else:
+            assert "Introduction" in dm_body
 
 
 def test_dmg_book_entries_stay_hidden_when_source_visibility_is_lowered_for_other_dmg_content(
