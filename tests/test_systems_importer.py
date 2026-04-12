@@ -1564,6 +1564,246 @@ def build_scag_background_data_root(root: Path) -> Path:
 def build_mm_book_data_root(root: Path) -> Path:
     data_root = build_test_data_root(root)
     write_json(
+        root / "data/actions.json",
+        {
+            "action": [
+                {
+                    "name": "Help",
+                    "source": "PHB",
+                    "page": 192,
+                    "time": [{"number": 1, "unit": "action"}],
+                    "entries": ["You can lend your aid to another creature in the completion of a task."],
+                },
+                {
+                    "name": "Hide",
+                    "source": "PHB",
+                    "page": 192,
+                    "time": [{"number": 1, "unit": "action"}],
+                    "entries": ["You make a Dexterity (Stealth) check in an attempt to conceal yourself."],
+                },
+            ]
+        },
+    )
+    write_json(
+        root / "data/conditionsdiseases.json",
+        {
+            "condition": [
+                {
+                    "name": "Blinded",
+                    "source": "PHB",
+                    "page": 290,
+                    "entries": ["A blinded creature can't see."],
+                },
+                {
+                    "name": "Charmed",
+                    "source": "PHB",
+                    "page": 290,
+                    "entries": ["A charmed creature can't attack the charmer or target the charmer with harmful abilities."],
+                },
+                {
+                    "name": "Frightened",
+                    "source": "PHB",
+                    "page": 290,
+                    "entries": ["A frightened creature has disadvantage on ability checks and attack rolls while the source of its fear is in sight."],
+                },
+                {
+                    "name": "Incapacitated",
+                    "source": "PHB",
+                    "page": 290,
+                    "entries": ["An incapacitated creature can't take actions or reactions."],
+                },
+                {
+                    "name": "Invisible",
+                    "source": "PHB",
+                    "page": 291,
+                    "entries": ["An invisible creature is impossible to see without the aid of magic or a special sense."],
+                },
+                {
+                    "name": "Paralyzed",
+                    "source": "PHB",
+                    "page": 291,
+                    "entries": ["A paralyzed creature is incapacitated and can't move or speak."],
+                },
+            ],
+            "disease": [],
+            "status": [
+                {
+                    "name": "Concentration",
+                    "source": "PHB",
+                    "page": 203,
+                    "entries": ["You can concentrate on only one spell at a time."],
+                },
+                {
+                    "name": "Surprised",
+                    "source": "PHB",
+                    "page": 189,
+                    "entries": ["If you're surprised, you can't move or take an action on your first turn of the combat."],
+                },
+            ],
+        },
+    )
+    write_json(
+        root / "data/skills.json",
+        {
+            "skill": [
+                {
+                    "name": "Athletics",
+                    "source": "PHB",
+                    "page": 175,
+                    "ability": "str",
+                    "entries": ["Your Strength check covers difficult situations you encounter while climbing, jumping, or swimming."],
+                },
+                {
+                    "name": "Acrobatics",
+                    "source": "PHB",
+                    "page": 176,
+                    "ability": "dex",
+                    "entries": ["Your Dexterity check covers your attempt to stay on your feet in a tricky situation."],
+                },
+                {
+                    "name": "Perception",
+                    "source": "PHB",
+                    "page": 178,
+                    "ability": "wis",
+                    "entries": ["Your Wisdom check lets you spot, hear, or otherwise detect the presence of something."],
+                },
+                {
+                    "name": "Stealth",
+                    "source": "PHB",
+                    "page": 177,
+                    "ability": "dex",
+                    "entries": ["Your Dexterity check covers your attempt to conceal yourself."],
+                },
+            ]
+        },
+    )
+    write_json(
+        root / "data/senses.json",
+        {
+            "sense": [
+                {
+                    "name": "Blindsight",
+                    "source": "PHB",
+                    "page": 183,
+                    "entries": ["A creature with blindsight can perceive its surroundings without relying on sight."],
+                },
+                {
+                    "name": "Darkvision",
+                    "source": "PHB",
+                    "page": 183,
+                    "entries": ["A creature with darkvision can see in dim light within a specified radius as if it were bright light."],
+                },
+                {
+                    "name": "Tremorsense",
+                    "source": "MM",
+                    "page": 9,
+                    "entries": ["A creature with tremorsense can detect and pinpoint the origin of vibrations within a specific radius."],
+                },
+                {
+                    "name": "Truesight",
+                    "source": "PHB",
+                    "page": 183,
+                    "entries": ["A creature with truesight can, out to a specific range, see in normal and magical darkness and see invisible creatures and objects."],
+                },
+            ]
+        },
+    )
+    write_json(
+        root / "data/bestiary/bestiary-mm.json",
+        {
+            "monster": [
+                {
+                    "name": "Goblin",
+                    "source": "MM",
+                    "page": 166,
+                    "size": ["S"],
+                    "type": "humanoid",
+                    "alignment": ["N", "E"],
+                    "ac": [{"ac": 15, "from": ["leather armor", "shield"]}],
+                    "hp": {"average": 7, "formula": "2d6"},
+                    "speed": {"walk": 30},
+                    "str": 8,
+                    "dex": 14,
+                    "con": 10,
+                    "int": 10,
+                    "wis": 8,
+                    "cha": 8,
+                    "skill": {"stealth": "+6"},
+                    "senses": ["darkvision 60 ft."],
+                    "passive": 9,
+                    "languages": ["Common", "Goblin"],
+                    "cr": "1/4",
+                    "trait": [
+                        {
+                            "name": "Nimble Escape",
+                            "entries": ["The goblin can take the Disengage or Hide action as a bonus action."],
+                        }
+                    ],
+                    "action": [
+                        {
+                            "name": "Scimitar",
+                            "entries": ["{@atk mw} {@hit 4} to hit, reach 5 ft., one target. {@h}5 ({@damage 1d6 + 2}) slashing damage."],
+                        }
+                    ],
+                },
+                {
+                    "name": "Guard",
+                    "source": "MM",
+                    "page": 347,
+                    "size": ["M"],
+                    "type": "humanoid",
+                    "alignment": ["L", "N"],
+                    "ac": [{"ac": 16, "from": ["chain shirt", "shield"]}],
+                    "hp": {"average": 11, "formula": "2d8 + 2"},
+                    "speed": {"walk": 30},
+                    "str": 13,
+                    "dex": 12,
+                    "con": 12,
+                    "int": 10,
+                    "wis": 11,
+                    "cha": 10,
+                    "skill": {"perception": "+2"},
+                    "passive": 12,
+                    "languages": ["Common"],
+                    "cr": "1/8",
+                    "action": [
+                        {
+                            "name": "Spear",
+                            "entries": ["{@atk mw,rw} {@hit 3} to hit, reach 5 ft. or range 20/60 ft., one target. {@h}4 ({@damage 1d6 + 1}) piercing damage."],
+                        }
+                    ],
+                },
+                {
+                    "name": "Veteran",
+                    "source": "MM",
+                    "page": 350,
+                    "size": ["M"],
+                    "type": "humanoid",
+                    "alignment": ["N"],
+                    "ac": [{"ac": 17, "from": ["splint"]}],
+                    "hp": {"average": 58, "formula": "9d8 + 18"},
+                    "speed": {"walk": 30},
+                    "str": 16,
+                    "dex": 13,
+                    "con": 14,
+                    "int": 10,
+                    "wis": 11,
+                    "cha": 10,
+                    "skill": {"athletics": "+5", "perception": "+2"},
+                    "passive": 12,
+                    "languages": ["Common"],
+                    "cr": "3",
+                    "action": [
+                        {
+                            "name": "Longsword",
+                            "entries": ["{@atk mw} {@hit 5} to hit, reach 5 ft., one target. {@h}7 ({@damage 1d8 + 3}) slashing damage."],
+                        }
+                    ],
+                },
+            ]
+        },
+    )
+    write_json(
         root / "data/books.json",
         {
             "book": [
@@ -1629,8 +1869,8 @@ def build_mm_book_data_root(root: Path) -> Path:
                                             "caption": "Size Categories",
                                             "colLabels": ["Size", "Space", "Examples"],
                                             "rows": [
-                                                ["Tiny", "2 1/2 by 2 1/2 ft.", "Imp, sprite"],
-                                                ["Large", "10 by 10 ft.", "Hippogriff, ogre"],
+                                                ["Small", "5 by 5 ft.", "{@creature Goblin}"],
+                                                ["Medium", "5 by 5 ft.", "{@creature Guard}"],
                                             ],
                                         },
                                     ],
@@ -1665,23 +1905,47 @@ def build_mm_book_data_root(root: Path) -> Path:
                                 },
                                 {
                                     "type": "entries",
+                                    "name": "Skills",
+                                    "page": 8,
+                                    "entries": [
+                                        "A perceptive scout might have bonuses to Wisdom ({@skill Perception}) and Dexterity ({@skill Stealth}) checks.",
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
                                     "name": "Senses",
                                     "page": 8,
                                     "entries": [
-                                        "The Senses entry notes special perception capabilities.",
+                                        "The Senses entry notes a monster's passive Wisdom ({@skill Perception}) score, as well as any special senses the monster might have.",
                                         {
                                             "type": "entries",
                                             "name": "Blindsight",
                                             "page": 8,
                                             "entries": [
-                                                "A monster with blindsight can perceive its surroundings without relying on sight.",
+                                                "A monster with {@sense blindsight} can perceive its surroundings without relying on sight.",
                                             ],
                                         },
                                         {
                                             "type": "entries",
                                             "name": "Darkvision",
                                             "page": 9,
-                                            "entries": ["Darkvision lets a monster see in darkness within a limited radius."],
+                                            "entries": ["A monster with {@sense darkvision} can see in the dark within a specific radius."],
+                                        },
+                                        {
+                                            "type": "entries",
+                                            "name": "Tremorsense",
+                                            "page": 9,
+                                            "entries": [
+                                                "A monster with {@sense tremorsense|MM} can detect and pinpoint the origin of vibrations within a specific radius.",
+                                            ],
+                                        },
+                                        {
+                                            "type": "entries",
+                                            "name": "Truesight",
+                                            "page": 9,
+                                            "entries": [
+                                                "A monster with {@sense truesight} can see {@condition invisible} creatures and objects within a specific range.",
+                                            ],
                                         },
                                     ],
                                 },
@@ -1719,7 +1983,7 @@ def build_mm_book_data_root(root: Path) -> Path:
                                     "name": "Legendary Actions",
                                     "page": 11,
                                     "entries": [
-                                        "A legendary creature can act outside its turn through legendary actions."
+                                        "A legendary creature can act outside its turn through legendary actions. It can't use them while {@condition incapacitated} or otherwise unable to take actions. If {@status surprised}, it can't use them until after its first turn in the combat."
                                     ],
                                 },
                                 {
@@ -1762,14 +2026,16 @@ def build_mm_book_data_root(root: Path) -> Path:
                                     "type": "entries",
                                     "name": "Skills",
                                     "page": 85,
-                                    "entries": ["The dragon's skill proficiencies are unchanged, but its Stealth skill improves in darkness."],
+                                    "entries": [
+                                        "The dragon's proficiency bonus is doubled for its Dexterity ({@skill Stealth}) checks."
+                                    ],
                                 },
                                 {
                                     "type": "entries",
                                     "name": "Living Shadow",
                                     "page": 85,
                                     "entries": [
-                                        "While in dim light or darkness, the dragon has resistance to damage that isn't force, psychic, or radiant.",
+                                        "While in dim light or darkness, the dragon can take the {@action Hide} action as a bonus action.",
                                     ],
                                 },
                                 {
@@ -1801,7 +2067,7 @@ def build_mm_book_data_root(root: Path) -> Path:
                                     "name": "Senses",
                                     "page": 180,
                                     "entries": [
-                                        "The half-dragon gains blindsight out to 10 feet and darkvision out to 60 feet."
+                                        "The half-dragon gains {@sense blindsight} with a radius of 10 feet and {@sense darkvision} with a radius of 60 feet."
                                     ],
                                 },
                                 {
@@ -1901,7 +2167,7 @@ def build_mm_book_data_root(root: Path) -> Path:
                                     "name": "Senses",
                                     "page": 230,
                                     "entries": [
-                                        "The servant has blindsight with a radius of 30 feet, and it is blind beyond this radius."
+                                        "The servant has {@sense blindsight} with a radius of 30 feet, and it is blind beyond this radius."
                                     ],
                                 },
                                 {
@@ -1909,7 +2175,7 @@ def build_mm_book_data_root(root: Path) -> Path:
                                     "name": "Condition Immunities",
                                     "page": 230,
                                     "entries": [
-                                        "The servant can't be blinded, charmed, frightened, or paralyzed."
+                                        "The servant can't be {@condition blinded}, {@condition charmed}, {@condition frightened}, or {@condition paralyzed}."
                                     ],
                                 },
                                 {
@@ -1945,6 +2211,13 @@ def build_mm_book_data_root(root: Path) -> Path:
                             "page": 342,
                             "entries": [
                                 "There are many easy ways to customize the NPCs in this appendix for a home campaign.",
+                                {
+                                    "type": "list",
+                                    "items": [
+                                        "{@creature Guard}",
+                                        "{@creature Veteran}",
+                                    ],
+                                },
                                 {
                                     "type": "entries",
                                     "name": "Racial Traits",
@@ -3668,6 +3941,151 @@ def test_mm_intro_book_sections_are_imported_for_dm_browse(client, sign_in, user
     assert 'id="racial-traits"' in customizing_npcs_body
     assert 'href="#armor-and-weapon-swaps"' in customizing_npcs_body
     assert 'id="armor-and-weapon-swaps"' in customizing_npcs_body
+
+
+def test_mm_book_pages_surface_related_monsters_and_monster_rules(
+    client, sign_in, users, app, tmp_path
+):
+    data_root = build_mm_book_data_root(tmp_path / "dnd5e-source-mm-book-entity-links")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("PHB", entry_types=["action", "condition", "sense", "skill", "status"])
+        importer.import_source("MM", entry_types=["book", "monster", "sense"])
+
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        book_entries = {
+            entry.title: entry
+            for entry in service.list_entries_for_campaign_source(
+                "linden-pass",
+                "MM",
+                entry_type="book",
+                limit=None,
+            )
+        }
+        mm_entries = {
+            (entry.entry_type, entry.title): entry
+            for entry_type in ("monster", "sense")
+            for entry in store.list_entries_for_source("DND-5E", "MM", entry_type=entry_type, limit=None)
+        }
+        phb_entries = {
+            (entry.entry_type, entry.title): entry
+            for entry_type in ("action", "condition", "sense", "skill", "status")
+            for entry in store.list_entries_for_source("DND-5E", "PHB", entry_type=entry_type, limit=None)
+        }
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    statistics_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Statistics'].slug}")
+    legendary_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Legendary Creatures'].slug}"
+    )
+    shadow_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Shadow Dragon Template'].slug}"
+    )
+    half_dragon_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Half-Dragon Template'].slug}"
+    )
+    spore_servant_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Spore Servant Template'].slug}"
+    )
+
+    assert statistics_response.status_code == 200
+    statistics_body = statistics_response.get_data(as_text=True)
+    assert "Monsters:" in statistics_body
+    assert "Skills:" in statistics_body
+    assert "Senses:" in statistics_body
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{mm_entries[("monster", "Goblin")].slug}"'
+        in statistics_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{mm_entries[("monster", "Guard")].slug}"'
+        in statistics_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("skill", "Perception")].slug}"'
+        in statistics_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("sense", "Darkvision")].slug}"'
+        in statistics_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{mm_entries[("sense", "Tremorsense")].slug}"'
+        in statistics_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("condition", "Invisible")].slug}"'
+        in statistics_body
+    )
+
+    assert legendary_response.status_code == 200
+    legendary_body = legendary_response.get_data(as_text=True)
+    assert "Conditions:" in legendary_body
+    assert "Statuses:" in legendary_body
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("condition", "Incapacitated")].slug}"'
+        in legendary_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("status", "Surprised")].slug}"'
+        in legendary_body
+    )
+
+    assert shadow_response.status_code == 200
+    shadow_body = shadow_response.get_data(as_text=True)
+    assert "Skills:" in shadow_body
+    assert "Actions:" in shadow_body
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("skill", "Stealth")].slug}"'
+        in shadow_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("action", "Hide")].slug}"'
+        in shadow_body
+    )
+
+    assert half_dragon_response.status_code == 200
+    half_dragon_body = half_dragon_response.get_data(as_text=True)
+    assert "Senses:" in half_dragon_body
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("sense", "Blindsight")].slug}"'
+        in half_dragon_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("sense", "Darkvision")].slug}"'
+        in half_dragon_body
+    )
+
+    assert spore_servant_response.status_code == 200
+    spore_servant_body = spore_servant_response.get_data(as_text=True)
+    assert "Senses:" in spore_servant_body
+    assert "Conditions:" in spore_servant_body
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("sense", "Blindsight")].slug}"'
+        in spore_servant_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("condition", "Blinded")].slug}"'
+        in spore_servant_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("condition", "Charmed")].slug}"'
+        in spore_servant_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("condition", "Frightened")].slug}"'
+        in spore_servant_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("condition", "Paralyzed")].slug}"'
+        in spore_servant_body
+    )
 
 
 def test_dmg_book_chapters_surface_related_imported_entities(client, sign_in, users, app, tmp_path):

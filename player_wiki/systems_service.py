@@ -87,6 +87,7 @@ BOOK_SECTION_ENTITY_TAG_ENTRY_TYPES = {
     "background": "background",
     "class": "class",
     "condition": "condition",
+    "creature": "monster",
     "disease": "disease",
     "feat": "feat",
     "status": "status",
@@ -135,6 +136,15 @@ BOOK_SECTION_ENTITY_GROUP_LABELS = {
     "subclass": "Subclasses",
     "monster": "Monsters",
     "optionalfeature": "Optional Features",
+}
+BOOK_SECTION_ENTITY_SOURCE_FALLBACKS = {
+    "MM": {
+        "action": ("PHB",),
+        "condition": ("PHB",),
+        "sense": ("PHB",),
+        "skill": ("PHB",),
+        "status": ("PHB",),
+    },
 }
 
 
@@ -948,16 +958,57 @@ class SystemsService:
         normalized_title = str(related_ref.get("title") or "").strip()
         if not normalized_title:
             return None
-        source_id = str(related_ref.get("source_id") or current_source_id or "").strip().upper()
-        if not source_id:
+        explicit_source_id = str(related_ref.get("source_id") or "").strip().upper()
+        entry_type = str(related_ref.get("entry_type") or "").strip().lower() or None
+        source_ids = (
+            (explicit_source_id,)
+            if explicit_source_id
+            else self._candidate_book_section_entity_source_ids(
+                current_source_id=current_source_id,
+                entry_type=entry_type,
+            )
+        )
+        if not source_ids:
             return None
 
-        entry_type = str(related_ref.get("entry_type") or "").strip().lower()
         if entry_type:
-            return entries_by_identity.get((source_id, entry_type, normalized_title))
+            for source_id in source_ids:
+                entry = entries_by_identity.get((source_id, entry_type, normalized_title))
+                if entry is not None:
+                    return entry
+            return None
 
-        candidates = exact_title_lookup.get((source_id, normalized_title), [])
-        return candidates[0] if len(candidates) == 1 else None
+        for source_id in source_ids:
+            candidates = exact_title_lookup.get((source_id, normalized_title), [])
+            if len(candidates) == 1:
+                return candidates[0]
+        return None
+
+    def _candidate_book_section_entity_source_ids(
+        self,
+        *,
+        current_source_id: str,
+        entry_type: str | None,
+    ) -> tuple[str, ...]:
+        normalized_source_id = str(current_source_id or "").strip().upper()
+        if not normalized_source_id:
+            return ()
+
+        candidate_source_ids = [normalized_source_id]
+        fallback_by_type = BOOK_SECTION_ENTITY_SOURCE_FALLBACKS.get(normalized_source_id, {})
+        fallback_types = (entry_type,) if entry_type else BOOK_SECTION_ENTITY_TYPE_ORDER
+        for fallback_type in fallback_types:
+            normalized_fallback_type = str(fallback_type or "").strip().lower()
+            if not normalized_fallback_type:
+                continue
+            for fallback_source_id in fallback_by_type.get(normalized_fallback_type, ()):
+                normalized_fallback_source_id = str(fallback_source_id or "").strip().upper()
+                if (
+                    normalized_fallback_source_id
+                    and normalized_fallback_source_id not in candidate_source_ids
+                ):
+                    candidate_source_ids.append(normalized_fallback_source_id)
+        return tuple(candidate_source_ids)
 
     def _collect_book_section_entity_refs(
         self,
@@ -1005,6 +1056,9 @@ class SystemsService:
         nested_values: list[object] = []
         if value_type == "list":
             nested_values.append(value.get("items"))
+        elif value_type == "table":
+            nested_values.append(value.get("rows"))
+            nested_values.append(value.get("rowsSpellProgression"))
         elif value_type == "options":
             nested_values.append(value.get("entries"))
         else:
