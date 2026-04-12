@@ -4142,6 +4142,7 @@ XGE_RULES_REFERENCE_TEST_TITLES = (
     "Waking Someone",
     "Adamantine Weapons",
     "Tying Knots",
+    "Tool Proficiencies",
     "Spellcasting",
     "Identifying a Spell",
     "Variant Rules",
@@ -6790,6 +6791,9 @@ def test_xge_book_entries_are_imported_for_player_browse(
     source_response = client.get("/campaigns/linden-pass/systems/sources/XGE")
     category_response = client.get("/campaigns/linden-pass/systems/sources/XGE/types/book")
     falling_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Falling'].slug}")
+    tool_proficiencies_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Tool Proficiencies'].slug}"
+    )
     spellcasting_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Spellcasting'].slug}"
     )
@@ -6816,6 +6820,15 @@ def test_xge_book_entries_are_imported_for_player_browse(
     assert "Flying Creatures and Falling" in falling_body
     assert 'href="#rate-of-falling"' in falling_body
     assert 'id="flying-creatures-and-falling"' in falling_body
+
+    assert tool_proficiencies_response.status_code == 200
+    tool_proficiencies_body = tool_proficiencies_response.get_data(as_text=True)
+    assert "Chapter 2" in tool_proficiencies_body
+    assert "Dungeon Master&#39;s Tools" in tool_proficiencies_body
+    assert "Tools and Skills Together" in tool_proficiencies_body
+    assert "Tool Descriptions" in tool_proficiencies_body
+    assert 'href="#tools-and-skills-together"' in tool_proficiencies_body
+    assert 'id="tool-descriptions"' in tool_proficiencies_body
 
     assert spellcasting_response.status_code == 200
     spellcasting_body = spellcasting_response.get_data(as_text=True)
@@ -6865,7 +6878,7 @@ def test_xge_book_entries_follow_source_visibility(client, sign_in, users, app, 
     player_source_response = client.get("/campaigns/linden-pass/systems/sources/XGE")
     player_category_response = client.get("/campaigns/linden-pass/systems/sources/XGE/types/book")
     player_entry_response = client.get(
-        f"/campaigns/linden-pass/systems/entries/{book_entries['Spellcasting'].slug}"
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Tool Proficiencies'].slug}"
     )
 
     assert player_source_response.status_code == 404
@@ -6878,18 +6891,18 @@ def test_xge_book_entries_follow_source_visibility(client, sign_in, users, app, 
     dm_source_response = client.get("/campaigns/linden-pass/systems/sources/XGE")
     dm_category_response = client.get("/campaigns/linden-pass/systems/sources/XGE/types/book")
     dm_entry_response = client.get(
-        f"/campaigns/linden-pass/systems/entries/{book_entries['Spellcasting'].slug}"
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Tool Proficiencies'].slug}"
     )
 
     assert dm_source_response.status_code == 200
     assert "Book Chapters" in dm_source_response.get_data(as_text=True)
     assert dm_category_response.status_code == 200
-    assert "Spellcasting" in dm_category_response.get_data(as_text=True)
+    assert "Tool Proficiencies" in dm_category_response.get_data(as_text=True)
     assert dm_entry_response.status_code == 200
     dm_body = dm_entry_response.get_data(as_text=True)
     assert "Chapter 2" in dm_body
     assert "Dungeon Master&#39;s Tools" in dm_body
-    assert "Perceiving a Caster at Work" in dm_body
+    assert "Tools and Skills Together" in dm_body
 
 
 def test_xge_book_slice_excludes_other_pending_section_pages(app, tmp_path):
@@ -6913,7 +6926,6 @@ def test_xge_book_slice_excludes_other_pending_section_pages(app, tmp_path):
     assert result.imported_by_type == {"book": len(XGE_RULES_REFERENCE_TEST_TITLES)}
     book_titles = {entry.title for entry in book_entries}
     assert book_titles == set(XGE_RULES_REFERENCE_TEST_TITLES)
-    assert "Tool Proficiencies" not in book_titles
     assert "Downtime Revisited" not in book_titles
     assert "Encounter Building" not in book_titles
     assert "Random Encounters: A World of Possibilities" not in book_titles

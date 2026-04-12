@@ -224,9 +224,9 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         "Backgrounds",
     ),
     # Keep the XGE slice reference-first. Standalone atomic wrappers remain,
-    # while the broader Spellcasting section now ships as its own source-backed
-    # page. Tool Proficiencies, Downtime Revisited, and the other remaining
-    # broader chapter slices stay on their own roadmap items.
+    # while the broader Tool Proficiencies and Spellcasting sections now ship
+    # as their own source-backed pages. Downtime Revisited and the other
+    # remaining broader chapter slices stay on their own roadmap items.
     "XGE": (
         ("Dungeon Master's Tools", "Simultaneous Effects"),
         ("Dungeon Master's Tools", "Falling"),
@@ -234,6 +234,7 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         ("Dungeon Master's Tools", "Sleep", "Waking Someone"),
         ("Dungeon Master's Tools", "Adamantine Weapons"),
         ("Dungeon Master's Tools", "Tying Knots"),
+        ("Dungeon Master's Tools", "Tool Proficiencies"),
         ("Dungeon Master's Tools", "Spellcasting"),
         ("Dungeon Master's Tools", "Spellcasting", "Identifying a Spell"),
         ("Shared Campaigns", "Variant Rules"),
