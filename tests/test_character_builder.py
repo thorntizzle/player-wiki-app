@@ -1174,7 +1174,7 @@ def test_multiclass_readiness_allows_supported_subclass_only_spellcasting_rows()
     )
     eldritch_knight = _systems_entry(
         "subclass",
-        "phb-subclass-eldritch-knight",
+        "phb-subclass-eldritchknight-fighter-phb",
         "Eldritch Knight",
         metadata={"class_name": "Fighter", "class_source": "PHB"},
     )
@@ -1582,7 +1582,7 @@ def test_normalize_definition_to_native_model_supports_single_class_eldritch_kni
     )
     eldritch_knight = _systems_entry(
         "subclass",
-        "phb-subclass-eldritch-knight",
+        "phb-subclass-eldritchknight-fighter-phb",
         "Eldritch Knight",
         metadata={"class_name": "Fighter", "class_source": "PHB"},
     )
@@ -1632,7 +1632,7 @@ def test_normalize_definition_to_native_model_shares_slots_for_eldritch_knight_a
     )
     eldritch_knight = _systems_entry(
         "subclass",
-        "phb-subclass-eldritch-knight",
+        "phb-subclass-eldritchknight-fighter-phb",
         "Eldritch Knight",
         metadata={"class_name": "Fighter", "class_source": "PHB"},
     )
@@ -1783,7 +1783,7 @@ def test_normalize_definition_to_native_model_keeps_pact_lane_separate_for_arcan
     )
     arcane_trickster = _systems_entry(
         "subclass",
-        "phb-subclass-arcane-trickster",
+        "phb-subclass-arcanetrickster-rogue-phb",
         "Arcane Trickster",
         metadata={"class_name": "Rogue", "class_source": "PHB"},
     )
@@ -2433,7 +2433,7 @@ def test_native_level_up_surfaces_and_applies_eldritch_knight_spell_choices():
     )
     eldritch_knight = _systems_entry(
         "subclass",
-        "phb-subclass-eldritch-knight",
+        "phb-subclass-eldritchknight-fighter-phb",
         "Eldritch Knight",
         metadata={"class_name": "Fighter", "class_source": "PHB"},
     )

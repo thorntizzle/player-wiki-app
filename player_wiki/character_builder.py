@@ -34,7 +34,7 @@ from .managed_resource_registry import resolve_managed_resource_family_and_membe
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-04-11.02"
+CHARACTER_BUILDER_VERSION = "2026-04-11.03"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
 NATIVE_LEVEL_UP_READY = "ready"
@@ -11286,12 +11286,43 @@ def _class_spell_progression(
     return progression
 
 
+def _phb_subclass_spell_progression_lookup_keys(
+    selected_subclass: SystemsEntryRecord | None,
+) -> list[str]:
+    if not isinstance(selected_subclass, SystemsEntryRecord):
+        return []
+    lookup_keys: list[str] = []
+
+    def _append(candidate: Any) -> None:
+        clean_candidate = str(candidate or "").strip()
+        if clean_candidate and clean_candidate not in lookup_keys:
+            lookup_keys.append(clean_candidate)
+
+    _append(selected_subclass.slug)
+    source_id = str(
+        selected_subclass.source_id
+        or dict(selected_subclass.metadata or {}).get("subclass_source")
+        or dict(selected_subclass.metadata or {}).get("class_source")
+        or ""
+    ).strip()
+    title_slug = slugify(str(selected_subclass.title or "").strip())
+    if source_id and title_slug:
+        _append(f"{source_id.lower()}-subclass-{title_slug}")
+    return lookup_keys
+
+
 def _subclass_spell_progression(
     selected_subclass: SystemsEntryRecord | None,
 ) -> dict[str, Any]:
     if not isinstance(selected_subclass, SystemsEntryRecord):
         return {}
-    progression = dict(_load_phb_subclass_spell_progression().get(str(selected_subclass.slug or "").strip()) or {})
+    progression_reference = _load_phb_subclass_spell_progression()
+    progression: dict[str, Any] = {}
+    for lookup_key in _phb_subclass_spell_progression_lookup_keys(selected_subclass):
+        reference_progression = progression_reference.get(lookup_key)
+        if isinstance(reference_progression, dict):
+            progression = dict(reference_progression)
+            break
     metadata = dict(selected_subclass.metadata or {})
     for key in (
         "spellcasting_ability",
