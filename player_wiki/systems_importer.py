@@ -136,6 +136,7 @@ SUPPORTED_ENTRY_TYPES = (
 
 BOOK_INDEX_RELATIVE_PATH = "data/books.json"
 BOOK_SOURCE_RELATIVE_PATH_TEMPLATE = "data/book/book-{source_slug}.json"
+RACE_FLUFF_RELATIVE_PATH = "data/fluff-races.json"
 BOOK_SECTION_OUTLINE_MAX_DEPTH = 2
 BookImportTarget = str | tuple[str, ...]
 BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
@@ -176,8 +177,53 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         ("Monster Lore", "Mind Flayers: Scourge of Worlds"),
         ("Monster Lore", "Orcs: The Godsworn"),
         ("Monster Lore", "Yuan-ti: Snake People"),
+        ("Character Races", "Height and Weight"),
     ),
 }
+VGM_CHARACTER_RACE_WRAPPER_DEFINITIONS = (
+    {
+        "title": "Aasimar",
+        "fluff_name": "Aasimar",
+        "page_race_names": ("Aasimar",),
+        "subrace_fluff_names": ("Aasimar (Protector)", "Aasimar (Scourge)", "Aasimar (Fallen)"),
+    },
+    {
+        "title": "Firbolg",
+        "fluff_name": "Firbolg",
+        "page_race_names": ("Firbolg",),
+    },
+    {
+        "title": "Goliath",
+        "fluff_name": "Goliath",
+        "page_race_names": ("Goliath",),
+    },
+    {
+        "title": "Kenku",
+        "fluff_name": "Kenku",
+        "page_race_names": ("Kenku",),
+    },
+    {
+        "title": "Lizardfolk",
+        "fluff_name": "Lizardfolk",
+        "page_race_names": ("Lizardfolk",),
+    },
+    {
+        "title": "Tabaxi",
+        "fluff_name": "Tabaxi",
+        "page_race_names": ("Tabaxi",),
+    },
+    {
+        "title": "Triton",
+        "fluff_name": "Triton",
+        "page_race_names": ("Triton",),
+    },
+    {
+        "title": "Monstrous Adventurers",
+        "top_level_fluff_key": "monstrous",
+        "page_race_names": ("Bugbear", "Goblin", "Hobgoblin", "Kobold", "Orc", "Yuan-ti Pureblood"),
+        "page_offset": -1,
+    },
+)
 
 # The supported library catalog currently carries 2014 class sources plus the
 # selected player-safe books. Legacy compatibility aliases that point at
@@ -429,6 +475,15 @@ class Dnd5eSystemsImporter:
         )
         if "book" in entry_types:
             self._load_book_entries_for_source(
+                source_id,
+                source_files=source_files,
+                seen_source_files=seen_source_files,
+                used_entry_keys=used_entry_keys,
+                used_slugs=used_slugs,
+                entries=entries,
+                imported_by_type=imported_by_type,
+            )
+            self._load_race_wrapper_book_entries_for_source(
                 source_id,
                 source_files=source_files,
                 seen_source_files=seen_source_files,
@@ -917,6 +972,325 @@ class Dnd5eSystemsImporter:
                 continue
             entries.append(built_entry)
             imported_by_type[built_entry["entry_type"]] += 1
+
+    def _load_race_wrapper_book_entries_for_source(
+        self,
+        source_id: str,
+        *,
+        source_files: list[str],
+        seen_source_files: set[str],
+        used_entry_keys: set[str],
+        used_slugs: set[str],
+        entries: list[dict[str, Any]],
+        imported_by_type: Counter[str],
+    ) -> None:
+        if source_id != "VGM":
+            return
+
+        book_path = self.data_root / BOOK_SOURCE_RELATIVE_PATH_TEMPLATE.format(source_slug=source_id.lower())
+        fluff_path = self.data_root / RACE_FLUFF_RELATIVE_PATH
+        if not book_path.exists() or not fluff_path.exists():
+            return
+
+        book_index_path = self.data_root / BOOK_INDEX_RELATIVE_PATH
+        chapter_contents_by_name: dict[str, dict[str, Any]] = {}
+        if book_index_path.exists():
+            with book_index_path.open(encoding="utf-8") as handle:
+                book_index_payload = json.load(handle)
+            chapter_contents_by_name = self._build_book_contents_lookup(book_index_payload, source_id)
+            self._append_source_file(
+                str(book_index_path.relative_to(self.data_root)).replace("\\", "/"),
+                source_files=source_files,
+                seen_source_files=seen_source_files,
+            )
+
+        with book_path.open(encoding="utf-8") as handle:
+            book_payload = json.load(handle)
+        raw_chapters = book_payload.get("data", [])
+        if not isinstance(raw_chapters, list):
+            return
+        self._append_source_file(
+            str(book_path.relative_to(self.data_root)).replace("\\", "/"),
+            source_files=source_files,
+            seen_source_files=seen_source_files,
+        )
+
+        chapter_name = "Character Races"
+        chapter_index: int | None = None
+        for index, raw_chapter in enumerate(raw_chapters):
+            if not isinstance(raw_chapter, dict):
+                continue
+            if self._clean_text(str(raw_chapter.get("name", "") or "")) == chapter_name:
+                chapter_index = index
+                break
+        if chapter_index is None:
+            return
+
+        with fluff_path.open(encoding="utf-8") as handle:
+            fluff_payload = json.load(handle)
+        relative_fluff_path = str(fluff_path.relative_to(self.data_root)).replace("\\", "/")
+        self._append_source_file(
+            relative_fluff_path,
+            source_files=source_files,
+            seen_source_files=seen_source_files,
+        )
+
+        race_page_lookup = self._build_source_race_page_lookup(
+            source_id,
+            source_files=source_files,
+            seen_source_files=seen_source_files,
+        )
+        race_fluff_lookup = self._build_source_race_fluff_lookup(fluff_payload, source_id)
+        chapter_contents = chapter_contents_by_name.get(chapter_name, {})
+        for wrapper_definition in VGM_CHARACTER_RACE_WRAPPER_DEFINITIONS:
+            raw_entry = self._build_vgm_character_race_wrapper_book_entry(
+                source_id,
+                chapter_index=chapter_index,
+                chapter_name=chapter_name,
+                chapter_contents=chapter_contents,
+                fluff_payload=fluff_payload,
+                race_fluff_lookup=race_fluff_lookup,
+                race_page_lookup=race_page_lookup,
+                wrapper_definition=wrapper_definition,
+            )
+            if raw_entry is None:
+                continue
+            built_entry = self._build_entry(
+                "book",
+                raw_entry,
+                source_path=relative_fluff_path,
+                used_entry_keys=used_entry_keys,
+                used_slugs=used_slugs,
+            )
+            if built_entry is None:
+                continue
+            entries.append(built_entry)
+            imported_by_type[built_entry["entry_type"]] += 1
+
+    def _build_source_race_page_lookup(
+        self,
+        source_id: str,
+        *,
+        source_files: list[str],
+        seen_source_files: set[str],
+    ) -> dict[str, int]:
+        path = self.data_root / "data/races.json"
+        if not path.exists():
+            return {}
+
+        with path.open(encoding="utf-8") as handle:
+            payload = json.load(handle)
+        self._append_source_file(
+            str(path.relative_to(self.data_root)).replace("\\", "/"),
+            source_files=source_files,
+            seen_source_files=seen_source_files,
+        )
+
+        page_lookup: dict[str, int] = {}
+        race_rows = payload.get("race", [])
+        if isinstance(race_rows, list):
+            for raw_race in race_rows:
+                if not isinstance(raw_race, dict) or str(raw_race.get("source", "")).upper() != source_id:
+                    continue
+                title = self._clean_text(str(raw_race.get("name", "") or ""))
+                page = self._coerce_page_number(raw_race.get("page"))
+                if title and page is not None:
+                    page_lookup[title] = page
+
+        subrace_rows = payload.get("subrace", [])
+        if isinstance(subrace_rows, list):
+            for raw_subrace in subrace_rows:
+                if not isinstance(raw_subrace, dict) or str(raw_subrace.get("source", "")).upper() != source_id:
+                    continue
+                title = self._build_subrace_race_title(
+                    subrace_name=str(raw_subrace.get("name", "") or "").strip(),
+                    race_name=str(raw_subrace.get("raceName", "") or "").strip(),
+                )
+                page = self._coerce_page_number(raw_subrace.get("page"))
+                if title and page is not None:
+                    page_lookup[title] = page
+        return page_lookup
+
+    def _coerce_page_number(self, value: Any) -> int | None:
+        raw_value = str(value or "").strip()
+        if not raw_value:
+            return None
+        try:
+            return int(raw_value)
+        except (TypeError, ValueError):
+            return None
+
+    def _build_source_race_fluff_lookup(
+        self,
+        payload: dict[str, Any],
+        source_id: str,
+    ) -> dict[str, dict[str, Any]]:
+        race_fluff_rows = payload.get("raceFluff", [])
+        if not isinstance(race_fluff_rows, list):
+            return {}
+        return {
+            str(row.get("name", "") or "").strip(): row
+            for row in race_fluff_rows
+            if isinstance(row, dict)
+            and str(row.get("source", "")).upper() == source_id
+            and str(row.get("name", "")).strip()
+        }
+
+    def _build_vgm_character_race_wrapper_book_entry(
+        self,
+        source_id: str,
+        *,
+        chapter_index: int,
+        chapter_name: str,
+        chapter_contents: dict[str, Any],
+        fluff_payload: dict[str, Any],
+        race_fluff_lookup: dict[str, dict[str, Any]],
+        race_page_lookup: dict[str, int],
+        wrapper_definition: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        title = self._clean_text(str(wrapper_definition.get("title", "") or ""))
+        if not title:
+            return None
+
+        entries_value: Any = None
+        top_level_fluff_key = str(wrapper_definition.get("top_level_fluff_key", "") or "").strip()
+        if top_level_fluff_key:
+            top_level_value = fluff_payload.get(top_level_fluff_key)
+            if isinstance(top_level_value, dict):
+                entries_value = copy.deepcopy(top_level_value.get("entries"))
+        else:
+            fluff_name = str(wrapper_definition.get("fluff_name", "") or "").strip()
+            base_fluff_entry = race_fluff_lookup.get(fluff_name)
+            if not isinstance(base_fluff_entry, dict):
+                return None
+            entries_value = self._append_fluff_copy_sections(
+                copy.deepcopy(base_fluff_entry.get("entries")),
+                subrace_fluff_names=tuple(wrapper_definition.get("subrace_fluff_names") or ()),
+                race_fluff_lookup=race_fluff_lookup,
+                race_page_lookup=race_page_lookup,
+            )
+
+        cleaned_entries = self._clean_data(entries_value)
+        if cleaned_entries in (None, "", [], {}):
+            return None
+
+        page_number = self._resolve_wrapper_page_number(
+            race_page_lookup=race_page_lookup,
+            page_race_names=tuple(wrapper_definition.get("page_race_names") or ()),
+            page_offset=wrapper_definition.get("page_offset"),
+        )
+
+        raw_entry: dict[str, Any] = {
+            "name": title,
+            "source": source_id,
+            "entries": cleaned_entries,
+            "_book_chapter_index": chapter_index,
+            "_book_chapter_name": chapter_name,
+            "_book_contents": chapter_contents,
+            "_book_target_path": [chapter_name, title],
+            "_book_is_full_chapter": False,
+        }
+        if page_number is not None:
+            raw_entry["page"] = page_number
+        return raw_entry
+
+    def _append_fluff_copy_sections(
+        self,
+        entries_value: Any,
+        *,
+        subrace_fluff_names: tuple[str, ...],
+        race_fluff_lookup: dict[str, dict[str, Any]],
+        race_page_lookup: dict[str, int],
+    ) -> list[Any]:
+        if isinstance(entries_value, list):
+            combined_entries = copy.deepcopy(entries_value)
+        elif entries_value in (None, "", [], {}):
+            combined_entries = []
+        else:
+            combined_entries = [copy.deepcopy(entries_value)]
+
+        for fluff_name in subrace_fluff_names:
+            raw_fluff_entry = race_fluff_lookup.get(fluff_name)
+            section_entries = self._extract_fluff_copy_section_entries(raw_fluff_entry)
+            if not section_entries:
+                continue
+            section_name = self._format_fluff_copy_section_name(fluff_name)
+            if not section_name:
+                continue
+            section: dict[str, Any] = {
+                "type": "entries",
+                "name": section_name,
+                "entries": section_entries,
+            }
+            page_number = self._resolve_fluff_copy_section_page(fluff_name, race_page_lookup)
+            if page_number is not None:
+                section["page"] = page_number
+            combined_entries.append(section)
+        return combined_entries
+
+    def _extract_fluff_copy_section_entries(self, raw_fluff_entry: dict[str, Any] | None) -> list[Any]:
+        if not isinstance(raw_fluff_entry, dict):
+            return []
+        copy_block = raw_fluff_entry.get("_copy")
+        if not isinstance(copy_block, dict):
+            return []
+        mod_block = copy_block.get("_mod")
+        if not isinstance(mod_block, dict):
+            return []
+        entries_mod = mod_block.get("entries")
+        if not isinstance(entries_mod, dict):
+            return []
+        if str(entries_mod.get("mode", "") or "").strip().lower() != "prependarr":
+            return []
+
+        items = copy.deepcopy(entries_mod.get("items"))
+        if isinstance(items, dict) and items.get("entries") is not None:
+            cleaned = self._clean_data(items.get("entries"))
+        else:
+            cleaned = self._clean_data(items)
+        if isinstance(cleaned, list):
+            return cleaned
+        if cleaned in (None, "", [], {}):
+            return []
+        return [cleaned]
+
+    def _format_fluff_copy_section_name(self, raw_name: str) -> str:
+        match = re.match(r"^(.*?)\s*\((.*?)\)\s*$", str(raw_name or "").strip())
+        if match and match.group(2).strip():
+            return self._clean_text(match.group(2))
+        return self._clean_text(str(raw_name or "").strip())
+
+    def _resolve_fluff_copy_section_page(self, raw_name: str, race_page_lookup: dict[str, int]) -> int | None:
+        match = re.match(r"^(.*?)\s*\((.*?)\)\s*$", str(raw_name or "").strip())
+        if not match:
+            return race_page_lookup.get(str(raw_name or "").strip())
+        race_name = self._clean_text(match.group(1))
+        subrace_name = self._clean_text(match.group(2))
+        if not race_name or not subrace_name:
+            return None
+        return race_page_lookup.get(
+            self._build_subrace_race_title(subrace_name=subrace_name, race_name=race_name)
+        )
+
+    def _resolve_wrapper_page_number(
+        self,
+        *,
+        race_page_lookup: dict[str, int],
+        page_race_names: tuple[str, ...],
+        page_offset: Any,
+    ) -> int | None:
+        page_numbers = [
+            race_page_lookup.get(str(name or "").strip())
+            for name in page_race_names
+            if str(name or "").strip()
+        ]
+        page_numbers = [page for page in page_numbers if isinstance(page, int)]
+        if not page_numbers:
+            return None
+        resolved_page = min(page_numbers)
+        if isinstance(page_offset, int) and resolved_page + page_offset > 0:
+            resolved_page += page_offset
+        return resolved_page
 
     def _normalize_book_import_target_path(self, target: BookImportTarget) -> tuple[str, ...]:
         if isinstance(target, tuple):

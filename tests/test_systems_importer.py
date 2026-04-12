@@ -2262,6 +2262,373 @@ def build_mm_book_data_root(root: Path) -> Path:
     return root
 
 
+def build_vgm_book_data_root(root: Path) -> Path:
+    data_root = build_test_data_root(root)
+    write_json(
+        root / "data/races.json",
+        {
+            "race": [
+                {"name": "Aasimar", "source": "VGM", "page": 104, "entries": ["Celestial-touched wanderers."]},
+                {"name": "Firbolg", "source": "VGM", "page": 107, "entries": ["Reclusive forest guardians."]},
+                {"name": "Goliath", "source": "VGM", "page": 108, "entries": ["Mountain-dwelling competitors."]},
+                {"name": "Kenku", "source": "VGM", "page": 109, "entries": ["Cursed birdfolk mimics."]},
+                {"name": "Lizardfolk", "source": "VGM", "page": 111, "entries": ["Pragmatic reptilian hunters."]},
+                {"name": "Tabaxi", "source": "VGM", "page": 113, "entries": ["Curious cat folk explorers."]},
+                {"name": "Triton", "source": "VGM", "page": 115, "entries": ["Guardians from the ocean depths."]},
+                {"name": "Bugbear", "source": "VGM", "page": 119, "entries": ["A monstrous adventurer option."]},
+                {"name": "Goblin", "source": "VGM", "page": 119, "entries": ["A monstrous adventurer option."]},
+                {"name": "Hobgoblin", "source": "VGM", "page": 119, "entries": ["A monstrous adventurer option."]},
+                {"name": "Kobold", "source": "VGM", "page": 119, "entries": ["A monstrous adventurer option."]},
+                {"name": "Orc", "source": "VGM", "page": 120, "entries": ["A monstrous adventurer option."]},
+                {
+                    "name": "Yuan-ti Pureblood",
+                    "source": "VGM",
+                    "page": 120,
+                    "entries": ["A monstrous adventurer option."],
+                },
+            ],
+            "subrace": [
+                {
+                    "name": "Protector",
+                    "source": "VGM",
+                    "raceName": "Aasimar",
+                    "raceSource": "VGM",
+                    "page": 105,
+                    "entries": ["Protector aasimar are charged with guarding the weak."],
+                },
+                {
+                    "name": "Scourge",
+                    "source": "VGM",
+                    "raceName": "Aasimar",
+                    "raceSource": "VGM",
+                    "page": 105,
+                    "entries": ["Scourge aasimar blaze with divine fury."],
+                },
+                {
+                    "name": "Fallen",
+                    "source": "VGM",
+                    "raceName": "Aasimar",
+                    "raceSource": "VGM",
+                    "page": 105,
+                    "entries": ["Fallen aasimar carry a shadowed celestial spark."],
+                },
+            ],
+        },
+    )
+    write_json(
+        root / "data/books.json",
+        {
+            "book": [
+                {
+                    "name": "Volo's Guide to Monsters",
+                    "id": "VGM",
+                    "source": "VGM",
+                    "contents": [
+                        {
+                            "name": "Character Races",
+                            "headers": ["Height and Weight"],
+                            "ordinal": {"type": "chapter", "identifier": 2},
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    write_json(
+        root / "data/book/book-vgm.json",
+        {
+            "data": [
+                {
+                    "type": "section",
+                    "name": "Character Races",
+                    "page": 103,
+                    "entries": [
+                        "This chapter presents distinctive race options from Volo's Guide to Monsters.",
+                        "It also includes monstrous character options for campaigns that want them.",
+                        {
+                            "type": "section",
+                            "name": "Height and Weight",
+                            "page": 120,
+                            "entries": [
+                                "You can determine a character's size with the Random Height and Weight table.",
+                                {
+                                    "type": "table",
+                                    "colLabels": [
+                                        "Race",
+                                        "Base Height",
+                                        "Base Weight",
+                                        "Height Modifier",
+                                        "Weight Modifier",
+                                    ],
+                                    "colStyles": [
+                                        "col-4",
+                                        "col-2",
+                                        "col-2",
+                                        "col-2",
+                                        "col-2",
+                                    ],
+                                    "rows": [
+                                        ["Aasimar", "4'8\"", "110 lb.", "+{@dice 2d10}", "× ({@dice 2d4}) lb."],
+                                        ["{@race Firbolg|VGM}", "6'2\"", "175 lb.", "+{@dice 2d12}", "× ({@dice 2d6}) lb."],
+                                        ["{@race Triton|VGM}", "4'6\"", "90 lb.", "+{@dice 2d10}", "× ({@dice 2d4}) lb."],
+                                        ["{@race Bugbear|VGM}", "6'0\"", "200 lb.", "+{@dice 2d12}", "× ({@dice 2d6}) lb."],
+                                        [
+                                            "{@race Yuan-ti Pureblood|VGM}",
+                                            "4'8\"",
+                                            "110 lb.",
+                                            "+{@dice 2d10}",
+                                            "× ({@dice 2d4}) lb.",
+                                        ],
+                                    ],
+                                },
+                            ],
+                        },
+                    ],
+                }
+            ]
+        },
+    )
+    write_json(
+        root / "data/fluff-races.json",
+        {
+            "_meta": {},
+            "raceFluff": [
+                {
+                    "name": "Aasimar",
+                    "source": "VGM",
+                    "entries": [
+                        {
+                            "type": "entries",
+                            "entries": [
+                                "Aasimar bear within their souls the light of the heavens.",
+                                {
+                                    "type": "entries",
+                                    "name": "Celestial Champions",
+                                    "page": 104,
+                                    "entries": ["Aasimar are placed in the world to serve as guardians of law and good."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Aasimar Guides",
+                                    "page": 105,
+                                    "entries": ["Each aasimar can count a celestial being as a guide."],
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Aasimar (Protector)",
+                    "source": "VGM",
+                    "_copy": {
+                        "name": "Aasimar",
+                        "source": "VGM",
+                        "_mod": {
+                            "entries": {
+                                "mode": "prependArr",
+                                "items": {
+                                    "type": "section",
+                                    "entries": [
+                                        {
+                                            "type": "entries",
+                                            "entries": ["Protector aasimar stand vigilant against the darkness."],
+                                        }
+                                    ],
+                                },
+                            }
+                        },
+                    },
+                },
+                {
+                    "name": "Aasimar (Scourge)",
+                    "source": "VGM",
+                    "_copy": {
+                        "name": "Aasimar",
+                        "source": "VGM",
+                        "_mod": {
+                            "entries": {
+                                "mode": "prependArr",
+                                "items": {
+                                    "type": "section",
+                                    "entries": [
+                                        {
+                                            "type": "entries",
+                                            "entries": ["Scourge aasimar blaze with divine energy that seeks out evil."],
+                                        }
+                                    ],
+                                },
+                            }
+                        },
+                    },
+                },
+                {
+                    "name": "Aasimar (Fallen)",
+                    "source": "VGM",
+                    "_copy": {
+                        "name": "Aasimar",
+                        "source": "VGM",
+                        "_mod": {
+                            "entries": {
+                                "mode": "prependArr",
+                                "items": {
+                                    "type": "section",
+                                    "entries": [
+                                        {
+                                            "type": "entries",
+                                            "entries": ["A fallen aasimar's inner light has been replaced by shadow."],
+                                        }
+                                    ],
+                                },
+                            }
+                        },
+                    },
+                },
+                {
+                    "name": "Firbolg",
+                    "source": "VGM",
+                    "entries": [
+                        {
+                            "type": "entries",
+                            "entries": [
+                                "Firbolgs are reclusive forest folk who prefer peaceful methods.",
+                                {
+                                    "type": "entries",
+                                    "name": "Outcast Adventurers",
+                                    "page": 107,
+                                    "entries": ["The Firbolg Adventurers table can inspire a reason to leave home."],
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Goliath",
+                    "source": "VGM",
+                    "entries": [
+                        {
+                            "type": "entries",
+                            "entries": [
+                                "Goliaths dwell among the highest mountain peaks.",
+                                {
+                                    "type": "entries",
+                                    "name": "Competition and Conflict",
+                                    "page": 108,
+                                    "entries": ["Goliaths improve themselves by testing their limits."],
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Kenku",
+                    "source": "VGM",
+                    "entries": [
+                        {
+                            "type": "entries",
+                            "entries": [
+                                "Kenku are wingless birdfolk cursed for an ancient betrayal.",
+                                {
+                                    "type": "entries",
+                                    "name": "Kenku Adventurers",
+                                    "page": 109,
+                                    "entries": ["Kenku adventurers often strike out after a flock suffers heavy losses."],
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Lizardfolk",
+                    "source": "VGM",
+                    "entries": [
+                        {
+                            "type": "entries",
+                            "entries": [
+                                "Lizardfolk venture from their swamp homes in search of treasure and glory.",
+                                {
+                                    "type": "entries",
+                                    "name": "Lizardfolk Names",
+                                    "page": 111,
+                                    "entries": ["Lizardfolk names come from notable deeds and the Draconic language."],
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Tabaxi",
+                    "source": "VGM",
+                    "entries": [
+                        {
+                            "type": "entries",
+                            "entries": [
+                                "Tabaxi journey far from home in search of stories and curiosities.",
+                                {
+                                    "type": "entries",
+                                    "name": "Wanderlust",
+                                    "page": 113,
+                                    "entries": ["Curiosity drives most tabaxi found outside their homeland."],
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Triton",
+                    "source": "VGM",
+                    "entries": [
+                        {
+                            "type": "entries",
+                            "entries": [
+                                "Tritons guard the ocean depths and battle threats before they reach the land.",
+                                {
+                                    "type": "entries",
+                                    "name": "Triton Society",
+                                    "page": 115,
+                                    "entries": ["Tritons value duty, order, and service to the wider world."],
+                                },
+                            ],
+                        }
+                    ],
+                },
+            ],
+            "raceFluffMeta": {},
+            "monstrous": {
+                "name": "Monstrous Adventurers",
+                "type": "section",
+                "entries": [
+                    "In some campaigns, humanoids normally regarded as sinister threats can emerge to adventure alongside humans and other folk.",
+                    {
+                        "type": "entries",
+                        "name": "Why a Monstrous Character?",
+                        "page": 118,
+                        "entries": ["A monstrous character gives a player a chance to take on an unusual challenge."],
+                    },
+                    {
+                        "type": "entries",
+                        "name": "Rare or Mundane?",
+                        "page": 118,
+                        "entries": ["Consider how common orc, goblin, and similar adventurers are in your setting."],
+                    },
+                    {
+                        "type": "entries",
+                        "name": "Outcast or Ambassador?",
+                        "page": 118,
+                        "entries": ["Consider how a monstrous character's native culture views the character."],
+                    },
+                    {
+                        "type": "entries",
+                        "name": "Friends or Enemies?",
+                        "page": 119,
+                        "entries": ["Figure out what special ties the character has to other party members."],
+                    },
+                ],
+            },
+        },
+    )
+    return data_root
+
+
 def build_additional_spell_metadata_data_root(root: Path) -> Path:
     write_json(root / "data/class/index.json", {"cleric": "class-cleric.json"})
     write_json(
@@ -3941,6 +4308,114 @@ def test_mm_intro_book_sections_are_imported_for_dm_browse(client, sign_in, user
     assert 'id="racial-traits"' in customizing_npcs_body
     assert 'href="#armor-and-weapon-swaps"' in customizing_npcs_body
     assert 'id="armor-and-weapon-swaps"' in customizing_npcs_body
+
+
+def test_vgm_character_race_wrappers_are_imported_for_dm_browse(client, sign_in, users, app, tmp_path):
+    data_root = build_vgm_book_data_root(tmp_path / "dnd5e-source-vgm-book")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("VGM", entry_types=["book"])
+
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="VGM",
+            is_enabled=True,
+            default_visibility="dm",
+        )
+        book_entries = service.list_entries_for_campaign_source(
+            "linden-pass",
+            "VGM",
+            entry_type="book",
+            limit=None,
+        )
+        titles = [entry.title for entry in book_entries]
+        aasimar = next(entry for entry in book_entries if entry.title == "Aasimar")
+        monstrous = next(entry for entry in book_entries if entry.title == "Monstrous Adventurers")
+        height_and_weight = next(entry for entry in book_entries if entry.title == "Height and Weight")
+
+    assert titles == [
+        "Aasimar",
+        "Firbolg",
+        "Goliath",
+        "Kenku",
+        "Lizardfolk",
+        "Tabaxi",
+        "Triton",
+        "Monstrous Adventurers",
+        "Height and Weight",
+    ]
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    source_response = client.get("/campaigns/linden-pass/systems/sources/VGM")
+    category_response = client.get("/campaigns/linden-pass/systems/sources/VGM/types/book")
+    aasimar_response = client.get(f"/campaigns/linden-pass/systems/entries/{aasimar.slug}")
+    monstrous_response = client.get(f"/campaigns/linden-pass/systems/entries/{monstrous.slug}")
+    height_response = client.get(f"/campaigns/linden-pass/systems/entries/{height_and_weight.slug}")
+
+    assert source_response.status_code == 200
+    source_body = source_response.get_data(as_text=True)
+    assert "Book Chapters" in source_body
+    assert "Aasimar" in source_body
+    assert "Firbolg" in source_body
+    assert "Monstrous Adventurers" in source_body
+    assert "Height and Weight" in source_body
+    assert source_body.index("Aasimar") < source_body.index("Firbolg")
+    assert source_body.index("Triton") < source_body.index("Monstrous Adventurers")
+    assert source_body.index("Monstrous Adventurers") < source_body.index("Height and Weight")
+
+    assert category_response.status_code == 200
+    category_body = category_response.get_data(as_text=True)
+    assert "Aasimar" in category_body
+    assert "Firbolg" in category_body
+    assert "Monstrous Adventurers" in category_body
+    assert "Height and Weight" in category_body
+    assert category_body.index("Aasimar") < category_body.index("Firbolg")
+    assert category_body.index("Triton") < category_body.index("Monstrous Adventurers")
+    assert category_body.index("Monstrous Adventurers") < category_body.index("Height and Weight")
+
+    assert aasimar_response.status_code == 200
+    aasimar_body = aasimar_response.get_data(as_text=True)
+    assert "Chapter 2" in aasimar_body
+    assert "Character Races" in aasimar_body
+    assert "Celestial Champions" in aasimar_body
+    assert "Aasimar Guides" in aasimar_body
+    assert "Protector" in aasimar_body
+    assert "Scourge" in aasimar_body
+    assert "Fallen" in aasimar_body
+    assert 'href="#celestial-champions"' in aasimar_body
+    assert 'id="celestial-champions"' in aasimar_body
+    assert 'href="#protector"' in aasimar_body
+    assert 'id="fallen"' in aasimar_body
+
+    assert monstrous_response.status_code == 200
+    monstrous_body = monstrous_response.get_data(as_text=True)
+    assert "Chapter 2" in monstrous_body
+    assert "Character Races" in monstrous_body
+    assert "Why a Monstrous Character?" in monstrous_body
+    assert "Rare or Mundane?" in monstrous_body
+    assert "Outcast or Ambassador?" in monstrous_body
+    assert "Friends or Enemies?" in monstrous_body
+    assert 'href="#rare-or-mundane"' in monstrous_body
+    assert 'id="friends-or-enemies"' in monstrous_body
+
+    assert height_response.status_code == 200
+    height_body = height_response.get_data(as_text=True)
+    assert "Chapter 2" in height_body
+    assert "Character Races" in height_body
+    assert "Base Height" in height_body
+    assert "Base Weight" in height_body
+    assert "Bugbear" in height_body
+    assert "Triton" in height_body
+    assert "Yuan-ti Pureblood" in height_body
+    assert 'href="#height-and-weight"' not in height_body
 
 
 def test_mm_book_pages_surface_related_monsters_and_monster_rules(

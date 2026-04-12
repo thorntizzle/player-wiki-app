@@ -8,6 +8,7 @@ from tests.test_systems_importer import (
     build_mm_book_data_root,
     build_phb_book_data_root,
     build_test_data_root,
+    build_vgm_book_data_root,
 )
 
 
@@ -345,6 +346,65 @@ def test_mm_book_entries_stay_dm_only(client, sign_in, users, app, tmp_path):
             assert "Appendix B: Nonplayer Characters" in dm_body
         else:
             assert "Introduction" in dm_body
+
+
+def test_vgm_character_race_book_entries_stay_dm_only(client, sign_in, users, app, tmp_path):
+    data_root = build_vgm_book_data_root(tmp_path / "dnd5e-source-vgm-book-policy")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("VGM", entry_types=["book"])
+
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="VGM",
+            is_enabled=True,
+            default_visibility="dm",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in store.list_entries_for_source("DND-5E", "VGM", entry_type="book", limit=20)
+        }
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    for title in (
+        "Aasimar",
+        "Firbolg",
+        "Goliath",
+        "Kenku",
+        "Lizardfolk",
+        "Tabaxi",
+        "Triton",
+        "Monstrous Adventurers",
+        "Height and Weight",
+    ):
+        player_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries[title].slug}")
+        assert player_response.status_code == 404
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    for title in (
+        "Aasimar",
+        "Firbolg",
+        "Goliath",
+        "Kenku",
+        "Lizardfolk",
+        "Tabaxi",
+        "Triton",
+        "Monstrous Adventurers",
+        "Height and Weight",
+    ):
+        dm_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries[title].slug}")
+        assert dm_response.status_code == 200
+        dm_body = dm_response.get_data(as_text=True)
+        assert title in dm_body
+        assert "Character Races" in dm_body
 
 
 def test_dmg_book_entries_stay_hidden_when_source_visibility_is_lowered_for_other_dmg_content(
