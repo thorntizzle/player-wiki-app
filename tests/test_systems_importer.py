@@ -1579,6 +1579,7 @@ def build_mm_book_data_root(root: Path) -> Path:
                                 "What Is a Monster?",
                                 "Statistics",
                                 "Legendary Creatures",
+                                "Shadow Dragon Template",
                             ],
                         }
                     ],
@@ -1731,6 +1732,42 @@ def build_mm_book_data_root(root: Path) -> Path:
                                                 "Regional effects reflect a legendary creature's magical presence."
                                             ],
                                         },
+                                    ],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "entries",
+                            "name": "Shadow Dragon Template",
+                            "page": 84,
+                            "entries": [
+                                "Only a true dragon can transform into a shadow dragon, and only if it is born in the Shadowfell or remains there for several years.",
+                                {
+                                    "type": "entries",
+                                    "name": "Damage Resistances",
+                                    "page": 85,
+                                    "entries": ["The dragon has resistance to necrotic damage."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Skills",
+                                    "page": 85,
+                                    "entries": ["The dragon's skill proficiencies are unchanged, but its Stealth skill improves in darkness."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Living Shadow",
+                                    "page": 85,
+                                    "entries": [
+                                        "While in dim light or darkness, the dragon has resistance to damage that isn't force, psychic, or radiant.",
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Shadow Breath",
+                                    "page": 85,
+                                    "entries": [
+                                        "The dragon's breath weapon deals necrotic damage instead of its normal damage type.",
                                     ],
                                 },
                             ],
@@ -3266,8 +3303,9 @@ def test_mm_intro_book_sections_are_imported_for_dm_browse(client, sign_in, user
         titles = [entry.title for entry in book_entries]
         statistics = next(entry for entry in book_entries if entry.title == "Statistics")
         legendary = next(entry for entry in book_entries if entry.title == "Legendary Creatures")
+        shadow_dragon_template = next(entry for entry in book_entries if entry.title == "Shadow Dragon Template")
 
-    assert titles == ["Statistics", "Legendary Creatures"]
+    assert titles == ["Statistics", "Legendary Creatures", "Shadow Dragon Template"]
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
     source_response = client.get("/campaigns/linden-pass/systems/sources/MM")
@@ -3279,13 +3317,17 @@ def test_mm_intro_book_sections_are_imported_for_dm_browse(client, sign_in, user
     assert "Book Chapters" in source_body
     assert "Statistics" in source_body
     assert "Legendary Creatures" in source_body
+    assert "Shadow Dragon Template" in source_body
     assert source_body.index("Statistics") < source_body.index("Legendary Creatures")
+    assert source_body.index("Legendary Creatures") < source_body.index("Shadow Dragon Template")
 
     assert category_response.status_code == 200
     category_body = category_response.get_data(as_text=True)
     assert "Statistics" in category_body
     assert "Legendary Creatures" in category_body
+    assert "Shadow Dragon Template" in category_body
     assert category_body.index("Statistics") < category_body.index("Legendary Creatures")
+    assert category_body.index("Legendary Creatures") < category_body.index("Shadow Dragon Template")
 
     assert statistics_response.status_code == 200
     statistics_body = statistics_response.get_data(as_text=True)
@@ -3322,6 +3364,21 @@ def test_mm_intro_book_sections_are_imported_for_dm_browse(client, sign_in, user
     assert 'id="legendary-actions"' in legendary_body
     assert 'href="#a-legendary-creatures-lair--lair-actions"' in legendary_body
     assert 'id="a-legendary-creatures-lair--regional-effects"' in legendary_body
+
+    shadow_response = client.get(f"/campaigns/linden-pass/systems/entries/{shadow_dragon_template.slug}")
+    assert shadow_response.status_code == 200
+    shadow_body = shadow_response.get_data(as_text=True)
+    assert "Introduction" in shadow_body
+    assert "Chapter Navigation" in shadow_body
+    assert "Damage Resistances" in shadow_body
+    assert "Skills" in shadow_body
+    assert "Living Shadow" in shadow_body
+    assert "Shadow Breath" in shadow_body
+    assert "Legendary Actions" not in shadow_body
+    assert 'href="#damage-resistances"' in shadow_body
+    assert 'id="damage-resistances"' in shadow_body
+    assert 'href="#living-shadow"' in shadow_body
+    assert 'id="shadow-breath"' in shadow_body
 
 
 def test_dmg_book_chapters_surface_related_imported_entities(client, sign_in, users, app, tmp_path):

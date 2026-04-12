@@ -315,13 +315,13 @@ def test_mm_book_entries_stay_dm_only(client, sign_in, users, app, tmp_path):
         }
 
     sign_in(users["party"]["email"], users["party"]["password"])
-    for title in ("Statistics", "Legendary Creatures"):
+    for title in ("Statistics", "Legendary Creatures", "Shadow Dragon Template"):
         player_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries[title].slug}")
         assert player_response.status_code == 404
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["dm"]["email"], users["dm"]["password"])
-    for title in ("Statistics", "Legendary Creatures"):
+    for title in ("Statistics", "Legendary Creatures", "Shadow Dragon Template"):
         dm_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries[title].slug}")
         assert dm_response.status_code == 200
         dm_body = dm_response.get_data(as_text=True)

@@ -161,6 +161,7 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
     "MM": (
         ("Introduction", "Statistics"),
         ("Introduction", "Legendary Creatures"),
+        ("Introduction", "Shadow Dragon Template"),
     ),
 }
 
