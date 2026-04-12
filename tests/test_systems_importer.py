@@ -4147,6 +4147,7 @@ XGE_RULES_REFERENCE_TEST_TITLES = (
     "Identifying a Spell",
     "Encounter Building",
     "Random Encounters: A World of Possibilities",
+    "Traps Revisited",
     "Downtime Revisited",
     "Variant Rules",
 )
@@ -4409,7 +4410,145 @@ def build_xge_book_data_root(root: Path) -> Path:
                             "type": "entries",
                             "name": "Traps Revisited",
                             "page": 113,
-                            "entries": ["Traps range from quick hazards to elaborate multi-round challenges."],
+                            "entries": [
+                                "Traps range from quick hazards to elaborate multi-round challenges.",
+                                {
+                                    "type": "entries",
+                                    "name": "Simple Traps",
+                                    "page": 113,
+                                    "entries": [
+                                        "Simple traps trigger once and then become harmless or easy to bypass.",
+                                        {
+                                            "type": "entries",
+                                            "name": "Elements of a Simple Trap",
+                                            "page": 113,
+                                            "entries": [
+                                                "Simple traps define their level, trigger, effect, and countermeasures."
+                                            ],
+                                        },
+                                        {
+                                            "type": "entries",
+                                            "name": "Running a Simple Trap",
+                                            "page": 113,
+                                            "entries": [
+                                                "Running a simple trap starts with noticing passive perception and then adjudicating the trigger and effect."
+                                            ],
+                                        },
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Example Simple Traps",
+                                    "page": 114,
+                                    "entries": [
+                                        "Example simple traps offer ready-made hazards such as pits, nets, and poison needles."
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Designing Simple Traps",
+                                    "page": 115,
+                                    "entries": [
+                                        "Designing a simple trap starts with its purpose and expected lethality.",
+                                        {
+                                            "type": "entries",
+                                            "name": "Purpose",
+                                            "page": 115,
+                                            "entries": [
+                                                "A trap's purpose explains why it exists and what behavior it is meant to provoke."
+                                            ],
+                                        },
+                                        {
+                                            "type": "entries",
+                                            "name": "Level and Lethality",
+                                            "page": 116,
+                                            "entries": [
+                                                "Level and lethality set the saving throw DCs, attack bonuses, and damage expectations."
+                                            ],
+                                        },
+                                        {
+                                            "type": "entries",
+                                            "name": "Triggers",
+                                            "page": 116,
+                                            "entries": [
+                                                "Triggers define the event or intrusion that sets the trap off."
+                                            ],
+                                        },
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Complex Traps",
+                                    "page": 117,
+                                    "entries": [
+                                        "Complex traps unfold over multiple rounds and act on initiative.",
+                                        {
+                                            "type": "entries",
+                                            "name": "Describing a Complex Trap",
+                                            "page": 117,
+                                            "entries": [
+                                                "A complex trap description covers its dynamic battlefield behavior."
+                                            ],
+                                        },
+                                        {
+                                            "type": "entries",
+                                            "name": "Running a Complex Trap",
+                                            "page": 117,
+                                            "entries": [
+                                                "Running a complex trap means adjudicating initiative, ongoing elements, and player counterplay."
+                                            ],
+                                        },
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Example Complex Traps",
+                                    "page": 120,
+                                    "entries": [
+                                        "Example complex traps show how a room-sized hazard can evolve across rounds."
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Designing Complex Traps",
+                                    "page": 122,
+                                    "entries": [
+                                        "Complex trap design focuses on moving parts, pacing, and how characters can shut the hazard down.",
+                                        {
+                                            "type": "entries",
+                                            "name": "Map",
+                                            "page": 122,
+                                            "entries": [
+                                                "A trap map clarifies where hazards, cover, and escape routes live."
+                                            ],
+                                        },
+                                        {
+                                            "type": "entries",
+                                            "name": "Active Elements",
+                                            "page": 122,
+                                            "entries": [
+                                                "Active elements are the obvious, turn-by-turn threats the trap presents."
+                                            ],
+                                        },
+                                        {
+                                            "type": "entries",
+                                            "name": "Initiative",
+                                            "page": 123,
+                                            "entries": [
+                                                "Initiative determines when the trap acts in relation to the characters."
+                                            ],
+                                        },
+                                        {
+                                            "type": "entries",
+                                            "name": "Defeating Complex Traps",
+                                            "page": 123,
+                                            "entries": [
+                                                "Characters can defeat complex traps by disabling or surviving their moving parts."
+                                            ],
+                                        },
+                                    ],
+                                },
+                            ],
                         },
                         {
                             "type": "entries",
@@ -6876,6 +7015,9 @@ def test_xge_book_entries_are_imported_for_player_browse(
     random_encounters_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Random Encounters: A World of Possibilities'].slug}"
     )
+    traps_revisited_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Traps Revisited'].slug}"
+    )
     downtime_revisited_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Downtime Revisited'].slug}"
     )
@@ -6946,6 +7088,17 @@ def test_xge_book_entries_are_imported_for_player_browse(
     assert "Flight, or Fight, or..?" in random_encounters_body
     assert 'href="#flight-or-fight-or"' in random_encounters_body
     assert 'id="flight-or-fight-or"' in random_encounters_body
+
+    assert traps_revisited_response.status_code == 200
+    traps_revisited_body = traps_revisited_response.get_data(as_text=True)
+    assert "Chapter 2" in traps_revisited_body
+    assert "Dungeon Master&#39;s Tools" in traps_revisited_body
+    assert "Simple Traps" in traps_revisited_body
+    assert "Complex Traps" in traps_revisited_body
+    assert "Designing Complex Traps" in traps_revisited_body
+    assert 'href="#simple-traps"' in traps_revisited_body
+    assert 'href="#simple-traps--elements-of-a-simple-trap"' in traps_revisited_body
+    assert 'id="complex-traps--running-a-complex-trap"' in traps_revisited_body
 
     assert downtime_revisited_response.status_code == 200
     downtime_revisited_body = downtime_revisited_response.get_data(as_text=True)
@@ -7043,7 +7196,6 @@ def test_xge_book_slice_excludes_remaining_pending_section_pages(app, tmp_path):
     assert result.imported_by_type == {"book": len(XGE_RULES_REFERENCE_TEST_TITLES)}
     book_titles = {entry.title for entry in book_entries}
     assert book_titles == set(XGE_RULES_REFERENCE_TEST_TITLES)
-    assert "Traps Revisited" not in book_titles
     assert "Awarding Magic Items" not in book_titles
     assert "Shared Campaigns" not in book_titles
 
