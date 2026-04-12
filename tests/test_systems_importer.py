@@ -4145,6 +4145,7 @@ XGE_RULES_REFERENCE_TEST_TITLES = (
     "Tool Proficiencies",
     "Spellcasting",
     "Identifying a Spell",
+    "Encounter Building",
     "Downtime Revisited",
     "Variant Rules",
 )
@@ -4325,7 +4326,67 @@ def build_xge_book_data_root(root: Path) -> Path:
                             "type": "entries",
                             "name": "Encounter Building",
                             "page": 88,
-                            "entries": ["Encounter building weighs party size, monster count, and expected difficulty."],
+                            "entries": [
+                                "Encounter building weighs party size, monster count, and expected difficulty.",
+                                {
+                                    "type": "entries",
+                                    "name": "Step 1: Assess the Characters",
+                                    "page": 88,
+                                    "entries": ["Review the party's level, resilience, and damage output before choosing foes."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Step 2: Choose Encounter Size",
+                                    "page": 88,
+                                    "entries": ["Decide whether the battle should feature one foe or multiple monsters."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Step 3: Determine Numbers and Challenge Ratings",
+                                    "page": 88,
+                                    "entries": [
+                                        "Use the encounter math to match challenge ratings to the party and the number of monsters.",
+                                        {
+                                            "type": "entries",
+                                            "name": "Weak Monsters and High-Level Characters",
+                                            "page": 89,
+                                            "entries": ["Very weak foes stop contributing once the party outlevels their impact."],
+                                        },
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Step 4: Select Monsters",
+                                    "page": 90,
+                                    "entries": ["Choose monsters whose actions, durability, and mobility fit the encounter goals."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Step 5: Add Flavor",
+                                    "page": 91,
+                                    "entries": [
+                                        "Encounter details become more memorable when the battlefield and monster behavior matter.",
+                                        {
+                                            "type": "entries",
+                                            "name": "Monster Personality",
+                                            "page": 91,
+                                            "entries": ["A monster's temperament can change how it opens a fight or when it flees."],
+                                        },
+                                        {
+                                            "type": "entries",
+                                            "name": "Terrain and Traps",
+                                            "page": 91,
+                                            "entries": ["Battlefields gain texture when terrain or hazards influence every turn."],
+                                        },
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Quick Matchups",
+                                    "page": 91,
+                                    "entries": ["Quick matchups offer a faster, rougher benchmark for encounter difficulty."],
+                                },
+                            ],
                         },
                         {
                             "type": "entries",
@@ -6798,6 +6859,9 @@ def test_xge_book_entries_are_imported_for_player_browse(
     spellcasting_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Spellcasting'].slug}"
     )
+    encounter_building_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Encounter Building'].slug}"
+    )
     downtime_revisited_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Downtime Revisited'].slug}"
     )
@@ -6844,6 +6908,22 @@ def test_xge_book_entries_are_imported_for_player_browse(
     assert 'href="#perceiving-a-caster-at-work"' in spellcasting_body
     assert 'href="#areas-of-effect-on-a-grid"' in spellcasting_body
     assert 'id="invalid-spell-targets"' in spellcasting_body
+
+    assert encounter_building_response.status_code == 200
+    encounter_building_body = encounter_building_response.get_data(as_text=True)
+    assert "Chapter 2" in encounter_building_body
+    assert "Dungeon Master&#39;s Tools" in encounter_building_body
+    assert "Step 1: Assess the Characters" in encounter_building_body
+    assert "Step 5: Add Flavor" in encounter_building_body
+    assert "Quick Matchups" in encounter_building_body
+    assert 'href="#step-1-assess-the-characters"' in encounter_building_body
+    assert (
+        'href="#step-5-add-flavor--terrain-and-traps"' in encounter_building_body
+    )
+    assert (
+        'id="step-3-determine-numbers-and-challenge-ratings--weak-monsters-and-high-level-characters"'
+        in encounter_building_body
+    )
 
     assert downtime_revisited_response.status_code == 200
     downtime_revisited_body = downtime_revisited_response.get_data(as_text=True)
@@ -6941,7 +7021,6 @@ def test_xge_book_slice_excludes_other_pending_section_pages(app, tmp_path):
     assert result.imported_by_type == {"book": len(XGE_RULES_REFERENCE_TEST_TITLES)}
     book_titles = {entry.title for entry in book_entries}
     assert book_titles == set(XGE_RULES_REFERENCE_TEST_TITLES)
-    assert "Encounter Building" not in book_titles
     assert "Random Encounters: A World of Possibilities" not in book_titles
     assert "Traps Revisited" not in book_titles
     assert "Awarding Magic Items" not in book_titles
