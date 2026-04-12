@@ -3,7 +3,7 @@ from __future__ import annotations
 from player_wiki.dnd5e_rules_reference import DND5E_RULES_REFERENCE_VERSION, build_dnd5e_rules_reference_entries
 from player_wiki.auth_store import AuthStore
 from player_wiki.systems_importer import Dnd5eSystemsImporter
-from tests.test_systems_importer import build_phb_book_data_root, build_test_data_root
+from tests.test_systems_importer import build_dmg_book_data_root, build_phb_book_data_root, build_test_data_root
 
 
 def build_source_form(app, campaign_slug: str = "linden-pass") -> dict[str, str]:
@@ -258,6 +258,38 @@ def test_phb_book_section_rule_links_respect_rules_source_visibility(client, sig
     dm_body = dm_response.get_data(as_text=True)
     assert "Rules:" in dm_body
     assert '<a href="/campaigns/linden-pass/systems/entries/rules-rule-passive-checks">' in dm_body
+
+
+def test_dmg_book_entries_stay_dm_only(client, sign_in, users, app, tmp_path):
+    data_root = build_dmg_book_data_root(tmp_path / "dnd5e-source-dmg-book-visibility")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("DMG", entry_types=["book"])
+
+        store = app.extensions["systems_store"]
+        running_the_game_entry = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "DMG", entry_type="book", limit=20)
+            if entry.title == "Running the Game"
+        )
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    player_response = client.get(f"/campaigns/linden-pass/systems/entries/{running_the_game_entry.slug}")
+    assert player_response.status_code == 404
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    dm_response = client.get(f"/campaigns/linden-pass/systems/entries/{running_the_game_entry.slug}")
+
+    assert dm_response.status_code == 200
+    dm_body = dm_response.get_data(as_text=True)
+    assert "Running the Game" in dm_body
+    assert "Chapter 8" in dm_body
 
 
 def test_builtin_rules_source_reseeds_stale_rows_from_managed_payload(app):

@@ -149,6 +149,11 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         "Spellcasting",
         "Conditions",
     ),
+    "DMG": (
+        "Treasure",
+        "Running the Game",
+        "Dungeon Master's Workshop",
+    ),
 }
 
 # The supported library catalog currently carries 2014 class sources plus the

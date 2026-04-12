@@ -984,6 +984,172 @@ def build_phb_book_data_root(root: Path) -> Path:
     return data_root
 
 
+def build_dmg_book_data_root(root: Path) -> Path:
+    data_root = build_test_data_root(root)
+    write_json(
+        root / "data/books.json",
+        {
+            "book": [
+                {
+                    "name": "Dungeon Master's Guide (2014)",
+                    "id": "DMG",
+                    "source": "DMG",
+                    "contents": [
+                        {
+                            "name": "Creating a Multiverse",
+                            "headers": ["The Planes", "Planar Travel"],
+                            "ordinal": {"type": "chapter", "identifier": 2},
+                        },
+                        {
+                            "name": "Between Adventures",
+                            "headers": ["Linking Adventures", "Downtime Activities"],
+                            "ordinal": {"type": "chapter", "identifier": 6},
+                        },
+                        {
+                            "name": "Treasure",
+                            "headers": ["Random Treasure", "Magic Items", "Artifacts"],
+                            "ordinal": {"type": "chapter", "identifier": 7},
+                        },
+                        {
+                            "name": "Running the Game",
+                            "headers": ["Using Ability Scores", "Combat", "Chases"],
+                            "ordinal": {"type": "chapter", "identifier": 8},
+                        },
+                        {
+                            "name": "Dungeon Master's Workshop",
+                            "headers": ["Combat Options", "Creating a Monster"],
+                            "ordinal": {"type": "chapter", "identifier": 9},
+                        },
+                    ],
+                }
+            ]
+        },
+    )
+    write_json(
+        root / "data/book/book-dmg.json",
+        {
+            "data": [
+                {
+                    "type": "section",
+                    "name": "Creating a Multiverse",
+                    "page": 43,
+                    "entries": [
+                        "The planes form the multiverse that lies beyond the Material Plane.",
+                        {
+                            "type": "section",
+                            "name": "The Planes",
+                            "page": 43,
+                            "entries": ["The multiverse includes transitive, inner, and outer planes."],
+                        },
+                    ],
+                    "id": "dmg-multiverse",
+                },
+                {
+                    "type": "section",
+                    "name": "Between Adventures",
+                    "page": 127,
+                    "entries": [
+                        "Campaigns often pause between major adventures.",
+                        {
+                            "type": "section",
+                            "name": "Downtime Activities",
+                            "page": 127,
+                            "entries": ["Downtime lets characters craft, train, or pursue contacts."],
+                        },
+                    ],
+                    "id": "dmg-between-adventures",
+                },
+                {
+                    "type": "section",
+                    "name": "Treasure",
+                    "page": 133,
+                    "entries": [
+                        "Treasure rewards adventurers with coins, art objects, and magic.",
+                        {
+                            "type": "section",
+                            "name": "Magic Items",
+                            "page": 135,
+                            "entries": [
+                                {
+                                    "type": "entries",
+                                    "name": "Attunement",
+                                    "page": 136,
+                                    "entries": ["Some magic items require a creature to attune to them before they work."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Cursed Items",
+                                    "page": 138,
+                                    "entries": ["Some items carry hidden drawbacks that complicate their use."],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Artifacts",
+                            "page": 219,
+                            "entries": ["Artifacts are unique magic items of legendary power."],
+                        },
+                    ],
+                    "id": "dmg-treasure",
+                },
+                {
+                    "type": "section",
+                    "name": "Running the Game",
+                    "page": 235,
+                    "entries": [
+                        "Running the game means adjudicating uncertain outcomes and pacing scenes.",
+                        {
+                            "type": "section",
+                            "name": "Using Ability Scores",
+                            "page": 237,
+                            "entries": [
+                                "Use ability checks and saving throws when outcomes are uncertain.",
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Combat",
+                            "page": 247,
+                            "entries": [
+                                {
+                                    "type": "entries",
+                                    "name": "Chases",
+                                    "page": 252,
+                                    "entries": ["A chase adds movement pressure and complications to a pursuit scene."],
+                                }
+                            ],
+                        },
+                    ],
+                    "id": "dmg-running-game",
+                },
+                {
+                    "type": "section",
+                    "name": "Dungeon Master's Workshop",
+                    "page": 263,
+                    "entries": [
+                        "The workshop collects optional systems and creation guidance for DMs.",
+                        {
+                            "type": "section",
+                            "name": "Combat Options",
+                            "page": 270,
+                            "entries": ["Optional combat rules can change how tactical play feels at the table."],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Creating a Monster",
+                            "page": 273,
+                            "entries": ["Monster statistics can be tuned by challenge rating and role."],
+                        },
+                    ],
+                    "id": "dmg-workshop",
+                },
+            ]
+        },
+    )
+    return data_root
+
+
 def build_magicvariant_data_root(root: Path) -> Path:
     data_root = build_test_data_root(root)
     write_json(
@@ -2422,6 +2588,76 @@ def test_phb_book_chapters_are_imported_and_browsable_in_book_order(
     assert "Appendix A" in conditions_body
     assert "Conditions alter a creature" in conditions_body
     assert "blinded" in conditions_body
+
+
+def test_dmg_book_chapters_are_imported_for_dm_browse_in_book_order(
+    client, sign_in, users, app, tmp_path
+):
+    data_root = build_dmg_book_data_root(tmp_path / "dnd5e-source-dmg-book")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("DMG", entry_types=["book"])
+
+        service = app.extensions["systems_service"]
+        book_entries = service.list_entries_for_campaign_source(
+            "linden-pass",
+            "DMG",
+            entry_type="book",
+            limit=None,
+        )
+        titles = [entry.title for entry in book_entries]
+        book_entry_links = [f'/campaigns/linden-pass/systems/entries/{entry.slug}' for entry in book_entries]
+        treasure = next(entry for entry in book_entries if entry.title == "Treasure")
+        running_the_game = next(entry for entry in book_entries if entry.title == "Running the Game")
+
+    assert titles == [
+        "Treasure",
+        "Running the Game",
+        "Dungeon Master's Workshop",
+    ]
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    source_response = client.get("/campaigns/linden-pass/systems/sources/DMG")
+    category_response = client.get("/campaigns/linden-pass/systems/sources/DMG/types/book")
+    treasure_response = client.get(f"/campaigns/linden-pass/systems/entries/{treasure.slug}")
+    running_the_game_response = client.get(f"/campaigns/linden-pass/systems/entries/{running_the_game.slug}")
+
+    assert source_response.status_code == 200
+    source_body = source_response.get_data(as_text=True)
+    assert "Book Chapters" in source_body
+    assert "Treasure" in source_body
+    assert "Running the Game" in source_body
+    assert "Dungeon Master&#39;s Workshop" in source_body
+    assert "Between Adventures" not in source_body
+    assert "Creating a Multiverse" not in source_body
+    assert "Searches only this source&#39;s book chapters using curated metadata" in source_body
+
+    assert category_response.status_code == 200
+    category_body = category_response.get_data(as_text=True)
+    assert "Showing all 3 book chapters in this source." in category_body
+    for earlier, later in zip(book_entry_links, book_entry_links[1:]):
+        assert category_body.index(earlier) < category_body.index(later)
+
+    assert treasure_response.status_code == 200
+    treasure_body = treasure_response.get_data(as_text=True)
+    assert "Chapter 7" in treasure_body
+    assert "Magic Items" in treasure_body
+    assert "Attunement" in treasure_body
+    assert 'href="#magic-items"' in treasure_body
+    assert 'id="magic-items"' in treasure_body
+
+    assert running_the_game_response.status_code == 200
+    running_the_game_body = running_the_game_response.get_data(as_text=True)
+    assert "Chapter 8" in running_the_game_body
+    assert "Chapter Navigation" in running_the_game_body
+    assert 'href="#using-ability-scores"' in running_the_game_body
+    assert 'id="using-ability-scores"' in running_the_game_body
+    assert "Chases" in running_the_game_body
 
 
 def test_phb_book_chapters_surface_related_imported_entities(
