@@ -654,6 +654,29 @@ def build_phb_book_data_root(root: Path) -> Path:
                         "Your first step is choosing a race and a class.",
                         {
                             "type": "section",
+                            "name": "5. Choose Equipment",
+                            "page": 14,
+                            "entries": [
+                                {
+                                    "type": "entries",
+                                    "name": "Armor Class",
+                                    "page": 14,
+                                    "entries": [
+                                        "Armor such as {@item chain mail|phb} helps protect you.",
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Weapons",
+                                    "page": 14,
+                                    "entries": [
+                                        "Martial weapons such as {@item longsword|phb} give you strong options in battle.",
+                                    ],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "section",
                             "name": "Beyond 1st Level",
                             "page": 15,
                             "entries": [
@@ -708,6 +731,22 @@ def build_phb_book_data_root(root: Path) -> Path:
                                         "A contest pits two creatures' efforts against each other.",
                                     ],
                                 },
+                                {
+                                    "type": "entries",
+                                    "name": "Skills",
+                                    "page": 174,
+                                    "entries": [
+                                        "Climbing, jumping, or swimming often calls for {@skill Athletics} checks.",
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Working Together",
+                                    "page": 175,
+                                    "entries": [
+                                        "When two or more characters team up, one of them can use the {@action Help} action.",
+                                    ],
+                                },
                             ],
                         },
                         {
@@ -727,9 +766,27 @@ def build_phb_book_data_root(root: Path) -> Path:
                         "Adventuring covers exploration, travel, and rest.",
                         {
                             "type": "section",
-                            "name": "Time",
+                            "name": "Movement",
                             "page": 181,
-                            "entries": ["Time can be tracked in rounds, minutes, hours, or days."],
+                            "entries": [
+                                "Time can be tracked in rounds, minutes, hours, or days.",
+                                {
+                                    "type": "entries",
+                                    "name": "The Environment",
+                                    "page": 183,
+                                    "entries": [
+                                        {
+                                            "type": "entries",
+                                            "name": "Vision and Light",
+                                            "alias": ["Darkvision"],
+                                            "page": 183,
+                                            "entries": [
+                                                "Darkness can leave a creature effectively {@condition blinded}.",
+                                            ],
+                                        },
+                                    ],
+                                },
+                            ],
                         },
                         {
                             "type": "section",
@@ -746,6 +803,14 @@ def build_phb_book_data_root(root: Path) -> Path:
                     "page": 189,
                     "entries": [
                         "Combat unfolds in rounds and turns.",
+                        {
+                            "type": "section",
+                            "name": "Actions in Combat",
+                            "page": 192,
+                            "entries": [
+                                "You can use the {@action Help} action to aid an ally.",
+                            ],
+                        },
                         {
                             "type": "section",
                             "name": "Surprise",
@@ -778,7 +843,7 @@ def build_phb_book_data_root(root: Path) -> Path:
                                     "name": "Components",
                                     "page": 203,
                                     "entries": [
-                                        "Verbal, somatic, and material components define what a caster must provide.",
+                                        "Verbal, somatic, and material components define what a caster must provide for spells such as {@spell mage hand}.",
                                     ],
                                 },
                             ],
@@ -2216,6 +2281,77 @@ def test_phb_book_chapters_are_imported_and_browsable_in_book_order(
     assert 'href="#targets--areas-of-effect"' in spellcasting_body
     assert 'id="casting-a-spell--components"' in spellcasting_body
     assert 'id="targets--areas-of-effect"' in spellcasting_body
+
+
+def test_phb_book_chapters_surface_related_imported_entities(
+    client, sign_in, users, app, tmp_path
+):
+    data_root = build_phb_book_data_root(tmp_path / "dnd5e-source-book-entity-links")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source(
+            "PHB",
+            entry_types=["action", "book", "condition", "item", "sense", "skill", "spell"],
+        )
+
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        book_entries = {
+            entry.title: entry
+            for entry in service.list_entries_for_campaign_source(
+                "linden-pass",
+                "PHB",
+                entry_type="book",
+                limit=None,
+            )
+        }
+        phb_entries = {
+            (entry.entry_type, entry.title): entry
+            for entry_type in ("action", "condition", "item", "sense", "skill", "spell")
+            for entry in store.list_entries_for_source("DND-5E", "PHB", entry_type=entry_type, limit=None)
+        }
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    step_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Step-by-Step Characters'].slug}")
+    ability_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Using Ability Scores'].slug}")
+    adventuring_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Adventuring'].slug}")
+    combat_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Combat'].slug}")
+    spellcasting_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Spellcasting'].slug}")
+
+    assert step_response.status_code == 200
+    step_body = step_response.get_data(as_text=True)
+    assert "Equipment:" in step_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("item", "Chain Mail")].slug}"' in step_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("item", "Longsword")].slug}"' in step_body
+
+    assert ability_response.status_code == 200
+    ability_body = ability_response.get_data(as_text=True)
+    assert "Skills:" in ability_body
+    assert "Actions:" in ability_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("skill", "Athletics")].slug}"' in ability_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("action", "Help")].slug}"' in ability_body
+
+    assert adventuring_response.status_code == 200
+    adventuring_body = adventuring_response.get_data(as_text=True)
+    assert "Conditions:" in adventuring_body
+    assert "Senses:" in adventuring_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("condition", "Blinded")].slug}"' in adventuring_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("sense", "Darkvision")].slug}"' in adventuring_body
+
+    assert combat_response.status_code == 200
+    combat_body = combat_response.get_data(as_text=True)
+    assert "Actions:" in combat_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("action", "Help")].slug}"' in combat_body
+
+    assert spellcasting_response.status_code == 200
+    spellcasting_body = spellcasting_response.get_data(as_text=True)
+    assert "Spells:" in spellcasting_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("spell", "Mage Hand")].slug}"' in spellcasting_body
 
 
 def test_rules_reference_search_uses_curated_metadata_without_full_body_search(

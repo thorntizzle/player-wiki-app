@@ -269,6 +269,16 @@
                     {% endfor %}
                   </p>
                 {% endif %}
+                {% if section.related_entity_groups %}
+                  {% for group in section.related_entity_groups %}
+                    <p class="meta systems-book-outline__related-rules">
+                      {{ group.label }}:
+                      {% for related_entry in group.entries %}
+                        <a href="{{ url_for('campaign_systems_entry_detail', campaign_slug=campaign.slug, entry_slug=related_entry.slug) }}">{{ related_entry.title }}</a>{% if not loop.last %}, {% endif %}
+                      {% endfor %}
+                    </p>
+                  {% endfor %}
+                {% endif %}
               </li>
             {% endfor %}
           </ul>

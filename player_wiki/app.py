@@ -3407,6 +3407,10 @@ def create_app() -> Flask:
                 campaign_slug,
                 entry,
             )
+            book_related_entities_by_anchor = systems_service.build_related_entities_for_book_sections(
+                campaign_slug,
+                entry,
+            )
             raw_headers = (entry.metadata or {}).get("headers")
             if isinstance(raw_headers, list):
                 book_headers = [str(item).strip() for item in raw_headers if str(item).strip()]
@@ -3427,6 +3431,26 @@ def create_app() -> Flask:
                         for candidate in book_related_rules_by_anchor.get(anchor, [])
                         if can_access_campaign_systems_entry(campaign_slug, candidate.slug)
                     ]
+                    section_related_entity_groups = []
+                    for group in book_related_entities_by_anchor.get(anchor, []):
+                        if not isinstance(group, dict):
+                            continue
+                        group_entries = group.get("entries")
+                        if not isinstance(group_entries, list):
+                            continue
+                        accessible_group_entries = [
+                            candidate
+                            for candidate in group_entries
+                            if can_access_campaign_systems_entry(campaign_slug, candidate.slug)
+                        ]
+                        if not accessible_group_entries:
+                            continue
+                        section_related_entity_groups.append(
+                            {
+                                "label": str(group.get("label") or "").strip(),
+                                "entries": accessible_group_entries,
+                            }
+                        )
                     book_section_outline.append(
                         {
                             "title": title,
@@ -3434,6 +3458,7 @@ def create_app() -> Flask:
                             "depth": depth,
                             "page": page,
                             "related_rule_entries": section_related_rule_entries,
+                            "related_entity_groups": section_related_entity_groups,
                         }
                     )
         return {

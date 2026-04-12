@@ -25,7 +25,7 @@ from .dnd5e_rules_reference import (
     DND5E_RULES_REFERENCE_VERSION,
     build_dnd5e_rules_reference_entries,
 )
-from .repository import normalize_lookup
+from .repository import normalize_lookup, slugify
 from .repository_store import RepositoryStore
 from .systems_models import (
     CampaignSystemsPolicyRecord,
@@ -78,6 +78,33 @@ PHB_BOOK_SECTION_RULE_KEY_MAP = {
     "damage-and-healing--temporary-hit-points": ("hit-points-and-hit-dice",),
     "casting-a-spell--saving-throws": ("spell-attacks-and-save-dcs",),
     "casting-a-spell--attack-rolls": ("spell-attacks-and-save-dcs",),
+}
+PHB_BOOK_SECTION_ENTITY_TAG_ENTRY_TYPES = {
+    "action": "action",
+    "condition": "condition",
+    "status": "status",
+    "skill": "skill",
+    "sense": "sense",
+    "spell": "spell",
+    "item": "item",
+}
+PHB_BOOK_SECTION_ENTITY_TYPE_ORDER = (
+    "condition",
+    "status",
+    "action",
+    "skill",
+    "sense",
+    "spell",
+    "item",
+)
+PHB_BOOK_SECTION_ENTITY_GROUP_LABELS = {
+    "condition": "Conditions",
+    "status": "Statuses",
+    "action": "Actions",
+    "skill": "Skills",
+    "sense": "Senses",
+    "spell": "Spells",
+    "item": "Equipment",
 }
 
 
@@ -721,6 +748,58 @@ class SystemsService:
                 related_by_anchor[anchor] = related_entries
         return related_by_anchor
 
+    def build_related_entities_for_book_sections(
+        self,
+        campaign_slug: str,
+        entry: SystemsEntryRecord,
+    ) -> dict[str, list[dict[str, object]]]:
+        if entry.entry_type != "book" or str(entry.source_id or "").strip().upper() != "PHB":
+            return {}
+
+        raw_outline = (entry.metadata or {}).get("section_outline")
+        if not isinstance(raw_outline, list) or not raw_outline:
+            return {}
+
+        body_entries = dict(entry.body or {}).get("entries")
+        if body_entries in (None, "", [], {}):
+            return {}
+
+        visible_anchors = {
+            str(item.get("anchor") or "").strip()
+            for item in raw_outline
+            if isinstance(item, dict) and str(item.get("anchor") or "").strip()
+        }
+        if not visible_anchors:
+            return {}
+
+        related_refs_by_anchor: dict[str, list[dict[str, str | None]]] = defaultdict(list)
+        self._collect_book_section_entity_refs(
+            body_entries,
+            current_path=(),
+            visible_anchors=visible_anchors,
+            related_refs_by_anchor=related_refs_by_anchor,
+        )
+        if not related_refs_by_anchor:
+            return {}
+
+        entries_by_identity, exact_title_lookup = self._build_book_section_entity_lookups(campaign_slug)
+        if not entries_by_identity and not exact_title_lookup:
+            return {}
+
+        current_source_id = str(entry.source_id or "").strip().upper()
+        related_by_anchor: dict[str, list[dict[str, object]]] = {}
+        for anchor, related_refs in related_refs_by_anchor.items():
+            grouped_entries = self._resolve_book_section_entity_refs(
+                related_refs,
+                current_source_id=current_source_id,
+                entries_by_identity=entries_by_identity,
+                exact_title_lookup=exact_title_lookup,
+            )
+            if not grouped_entries:
+                continue
+            related_by_anchor[anchor] = grouped_entries
+        return related_by_anchor
+
     def _build_rules_reference_lookup(self, campaign_slug: str) -> dict[str, SystemsEntryRecord]:
         rows = self.list_entries_for_campaign_source(
             campaign_slug,
@@ -750,6 +829,279 @@ class SystemsService:
             seen_entry_keys.add(entry.entry_key)
             related_entries.append(entry)
         return related_entries
+
+    def _build_book_section_entity_lookups(
+        self,
+        campaign_slug: str,
+    ) -> tuple[dict[tuple[str, str, str], SystemsEntryRecord], dict[tuple[str, str], list[SystemsEntryRecord]]]:
+        def build_value():
+            enabled_source_ids = [
+                str(row.source.source_id or "").strip().upper()
+                for row in self.list_campaign_source_states(campaign_slug)
+                if row.is_enabled
+            ]
+            entries_by_identity: dict[tuple[str, str, str], SystemsEntryRecord] = {}
+            exact_title_lookup: dict[tuple[str, str], list[SystemsEntryRecord]] = defaultdict(list)
+            for source_id in enabled_source_ids:
+                for entry_type in PHB_BOOK_SECTION_ENTITY_TYPE_ORDER:
+                    for entry in self.list_entries_for_campaign_source(
+                        campaign_slug,
+                        source_id,
+                        entry_type=entry_type,
+                        limit=None,
+                    ):
+                        normalized_title = normalize_lookup(entry.title)
+                        if not normalized_title:
+                            continue
+                        entries_by_identity.setdefault((source_id, entry_type, normalized_title), entry)
+                        exact_title_lookup[(source_id, normalized_title)].append(entry)
+            return entries_by_identity, dict(exact_title_lookup)
+
+        return _systems_service_cache_get(
+            ("book_section_entity_lookups", campaign_slug),
+            build_value,
+        )
+
+    def _resolve_book_section_entity_refs(
+        self,
+        related_refs: list[dict[str, str | None]],
+        *,
+        current_source_id: str,
+        entries_by_identity: dict[tuple[str, str, str], SystemsEntryRecord],
+        exact_title_lookup: dict[tuple[str, str], list[SystemsEntryRecord]],
+    ) -> list[dict[str, object]]:
+        grouped_entries: dict[str, list[SystemsEntryRecord]] = defaultdict(list)
+        seen_entry_keys: set[str] = set()
+        for related_ref in related_refs:
+            entry = self._resolve_book_section_entity_ref(
+                related_ref,
+                current_source_id=current_source_id,
+                entries_by_identity=entries_by_identity,
+                exact_title_lookup=exact_title_lookup,
+            )
+            if entry is None or entry.entry_key in seen_entry_keys:
+                continue
+            seen_entry_keys.add(entry.entry_key)
+            grouped_entries[entry.entry_type].append(entry)
+
+        groups: list[dict[str, object]] = []
+        for entry_type in PHB_BOOK_SECTION_ENTITY_TYPE_ORDER:
+            entries = grouped_entries.get(entry_type, [])
+            if not entries:
+                continue
+            groups.append(
+                {
+                    "label": PHB_BOOK_SECTION_ENTITY_GROUP_LABELS.get(
+                        entry_type,
+                        entry_type.replace("_", " ").title(),
+                    ),
+                    "entries": entries,
+                }
+            )
+        return groups
+
+    def _resolve_book_section_entity_ref(
+        self,
+        related_ref: dict[str, str | None],
+        *,
+        current_source_id: str,
+        entries_by_identity: dict[tuple[str, str, str], SystemsEntryRecord],
+        exact_title_lookup: dict[tuple[str, str], list[SystemsEntryRecord]],
+    ) -> SystemsEntryRecord | None:
+        normalized_title = str(related_ref.get("title") or "").strip()
+        if not normalized_title:
+            return None
+        source_id = str(related_ref.get("source_id") or current_source_id or "").strip().upper()
+        if not source_id:
+            return None
+
+        entry_type = str(related_ref.get("entry_type") or "").strip().lower()
+        if entry_type:
+            return entries_by_identity.get((source_id, entry_type, normalized_title))
+
+        candidates = exact_title_lookup.get((source_id, normalized_title), [])
+        return candidates[0] if len(candidates) == 1 else None
+
+    def _collect_book_section_entity_refs(
+        self,
+        value: object,
+        *,
+        current_path: tuple[str, ...],
+        visible_anchors: set[str],
+        related_refs_by_anchor: dict[str, list[dict[str, str | None]]],
+    ) -> None:
+        if value is None:
+            return
+        current_anchor = self._resolve_visible_book_section_anchor(current_path, visible_anchors)
+        if isinstance(value, str):
+            self._collect_inline_book_section_entity_refs(
+                value,
+                visible_anchor=current_anchor,
+                related_refs_by_anchor=related_refs_by_anchor,
+            )
+            return
+        if isinstance(value, list):
+            for item in value:
+                self._collect_book_section_entity_refs(
+                    item,
+                    current_path=current_path,
+                    visible_anchors=visible_anchors,
+                    related_refs_by_anchor=related_refs_by_anchor,
+                )
+            return
+        if not isinstance(value, dict):
+            return
+
+        next_path = current_path
+        if self._is_book_navigation_section(value):
+            name = self._clean_embedded_text(str(value.get("name", "") or ""))
+            if name:
+                next_path = (*current_path, name)
+        next_anchor = self._resolve_visible_book_section_anchor(next_path, visible_anchors)
+        self._collect_named_book_section_entity_refs(
+            value,
+            visible_anchor=next_anchor,
+            related_refs_by_anchor=related_refs_by_anchor,
+        )
+
+        value_type = str(value.get("type", "") or "").strip().lower()
+        nested_values: list[object] = []
+        if value_type == "list":
+            nested_values.append(value.get("items"))
+        elif value_type == "options":
+            nested_values.append(value.get("entries"))
+        else:
+            if value.get("entries") is not None:
+                nested_values.append(value.get("entries"))
+            elif value.get("entry") is not None:
+                nested_values.append(value.get("entry"))
+        for nested_value in nested_values:
+            self._collect_book_section_entity_refs(
+                nested_value,
+                current_path=next_path,
+                visible_anchors=visible_anchors,
+                related_refs_by_anchor=related_refs_by_anchor,
+            )
+
+    def _collect_inline_book_section_entity_refs(
+        self,
+        value: str,
+        *,
+        visible_anchor: str | None,
+        related_refs_by_anchor: dict[str, list[dict[str, str | None]]],
+    ) -> None:
+        if not visible_anchor:
+            return
+        for match in INLINE_TAG_PATTERN.finditer(str(value or "")):
+            body = match.group(1).strip()
+            tag, _, remainder = body.partition(" ")
+            entry_type = PHB_BOOK_SECTION_ENTITY_TAG_ENTRY_TYPES.get(tag.lower().strip())
+            if not entry_type or not remainder.strip():
+                continue
+            title, source_id = self._parse_book_section_entity_reference(remainder)
+            if not title:
+                continue
+            self._append_book_section_entity_ref(
+                related_refs_by_anchor,
+                visible_anchor=visible_anchor,
+                entry_type=entry_type,
+                title=title,
+                source_id=source_id,
+            )
+
+    def _collect_named_book_section_entity_refs(
+        self,
+        value: dict[str, object],
+        *,
+        visible_anchor: str | None,
+        related_refs_by_anchor: dict[str, list[dict[str, str | None]]],
+    ) -> None:
+        if not visible_anchor:
+            return
+
+        candidate_titles: list[str] = []
+        name = self._clean_embedded_text(str(value.get("name", "") or ""))
+        if name:
+            candidate_titles.append(name)
+
+        raw_aliases = value.get("alias")
+        alias_values = raw_aliases if isinstance(raw_aliases, list) else [raw_aliases]
+        for raw_alias in alias_values:
+            alias = self._clean_embedded_text(str(raw_alias or ""))
+            if alias:
+                candidate_titles.append(alias)
+
+        for title in candidate_titles:
+            self._append_book_section_entity_ref(
+                related_refs_by_anchor,
+                visible_anchor=visible_anchor,
+                entry_type=None,
+                title=title,
+                source_id=None,
+            )
+
+    def _append_book_section_entity_ref(
+        self,
+        related_refs_by_anchor: dict[str, list[dict[str, str | None]]],
+        *,
+        visible_anchor: str,
+        entry_type: str | None,
+        title: str,
+        source_id: str | None,
+    ) -> None:
+        normalized_title = normalize_lookup(self._clean_embedded_text(str(title or "")))
+        if not normalized_title:
+            return
+        normalized_source_id = str(source_id or "").strip().upper() or None
+        related_refs_by_anchor.setdefault(visible_anchor, []).append(
+            {
+                "entry_type": entry_type,
+                "title": normalized_title,
+                "source_id": normalized_source_id,
+            }
+        )
+
+    def _parse_book_section_entity_reference(self, raw_reference: str) -> tuple[str, str | None]:
+        parts = [part.strip() for part in str(raw_reference or "").split("|")]
+        if not parts:
+            return "", None
+        title = self._clean_embedded_text(parts[0])
+        source_id = parts[1].upper() if len(parts) > 1 and parts[1] else None
+        return title, source_id
+
+    def _resolve_visible_book_section_anchor(
+        self,
+        current_path: tuple[str, ...],
+        visible_anchors: set[str],
+    ) -> str | None:
+        if not current_path or not visible_anchors:
+            return None
+        for length in range(len(current_path), 0, -1):
+            anchor = self._build_book_section_anchor(current_path[:length])
+            if anchor in visible_anchors:
+                return anchor
+        return None
+
+    def _build_book_section_anchor(self, path: tuple[str, ...]) -> str:
+        parts: list[str] = []
+        for item in path:
+            cleaned_item = self._clean_embedded_text(str(item or ""))
+            if not cleaned_item:
+                continue
+            anchor_part = slugify(cleaned_item).replace("/", "-") or normalize_lookup(cleaned_item)
+            if anchor_part:
+                parts.append(anchor_part)
+        return "--".join(parts) or "book-section"
+
+    def _is_book_navigation_section(self, value: object) -> bool:
+        if not isinstance(value, dict):
+            return False
+        value_type = str(value.get("type", "") or "").strip().lower()
+        if value_type not in {"", "section", "entries"}:
+            return False
+        if not self._clean_embedded_text(str(value.get("name", "") or "")):
+            return False
+        return value.get("entries") is not None or value.get("entry") is not None
 
     def _collect_related_rule_keys_for_entry(self, entry: SystemsEntryRecord) -> list[str]:
         metadata = dict(entry.metadata or {})
