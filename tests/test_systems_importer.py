@@ -548,6 +548,235 @@ def build_test_data_root(root: Path) -> Path:
     return root
 
 
+def build_phb_book_data_root(root: Path) -> Path:
+    data_root = build_test_data_root(root)
+    write_json(
+        root / "data/books.json",
+        {
+            "book": [
+                {
+                    "name": "Player's Handbook (2014)",
+                    "id": "PHB",
+                    "source": "PHB",
+                    "contents": [
+                        {
+                            "name": "Introduction",
+                            "headers": [
+                                "Worlds of Adventure",
+                                "How to Play",
+                            ],
+                        },
+                        {
+                            "name": "Step-by-Step Characters",
+                            "headers": [
+                                "1. Choose a Race",
+                                "Beyond 1st Level",
+                            ],
+                            "ordinal": {"type": "chapter", "identifier": 1},
+                        },
+                        {
+                            "name": "Equipment",
+                            "headers": ["Armor and Shields"],
+                            "ordinal": {"type": "chapter", "identifier": 5},
+                        },
+                        {
+                            "name": "Using Ability Scores",
+                            "headers": [
+                                "Advantage and Disadvantage",
+                                "Ability Checks",
+                            ],
+                            "ordinal": {"type": "chapter", "identifier": 7},
+                        },
+                        {
+                            "name": "Adventuring",
+                            "headers": [
+                                "Time",
+                                "Resting",
+                            ],
+                            "ordinal": {"type": "chapter", "identifier": 8},
+                        },
+                        {
+                            "name": "Combat",
+                            "headers": [
+                                "Surprise",
+                                "Reactions",
+                            ],
+                            "ordinal": {"type": "chapter", "identifier": 9},
+                        },
+                        {
+                            "name": "Spellcasting",
+                            "headers": [
+                                "Casting a Spell",
+                                "Targets",
+                            ],
+                            "ordinal": {"type": "chapter", "identifier": 10},
+                        },
+                    ],
+                }
+            ]
+        },
+    )
+    write_json(
+        root / "data/book/book-phb.json",
+        {
+            "data": [
+                {
+                    "type": "section",
+                    "name": "Introduction",
+                    "page": 5,
+                    "entries": [
+                        "Dungeons & Dragons is a game of shared adventure.",
+                        {
+                            "type": "section",
+                            "name": "How to Play",
+                            "page": 6,
+                            "entries": [
+                                "The DM describes the environment, the players say what they do, and the DM narrates the results.",
+                            ],
+                        },
+                        {
+                            "type": "image",
+                            "href": {"type": "internal", "path": "book/PHB/intro.webp"},
+                            "width": 1200,
+                            "height": 800,
+                        },
+                    ],
+                    "id": "phb-intro",
+                },
+                {
+                    "type": "section",
+                    "name": "Step-by-Step Characters",
+                    "page": 11,
+                    "entries": [
+                        "Your first step is choosing a race and a class.",
+                        {
+                            "type": "section",
+                            "name": "Beyond 1st Level",
+                            "page": 15,
+                            "entries": [
+                                "As your character adventures, you gain experience and new features.",
+                            ],
+                        },
+                    ],
+                    "id": "phb-step",
+                },
+                {
+                    "type": "section",
+                    "name": "Equipment",
+                    "page": 143,
+                    "entries": [
+                        "Equipment includes armor, weapons, and adventuring gear.",
+                    ],
+                    "id": "phb-equipment",
+                },
+                {
+                    "type": "section",
+                    "name": "Using Ability Scores",
+                    "page": 173,
+                    "entries": [
+                        "Six abilities describe a creature's physical and mental characteristics.",
+                        {
+                            "type": "section",
+                            "name": "Advantage and Disadvantage",
+                            "page": 173,
+                            "entries": [
+                                "Roll two d20s and use the higher roll for advantage or the lower roll for disadvantage.",
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Ability Checks",
+                            "page": 174,
+                            "entries": [
+                                "An ability check tests a creature's training and talent.",
+                                {
+                                    "type": "entries",
+                                    "name": "Passive Checks",
+                                    "page": 175,
+                                    "entries": [
+                                        {"type": "abilityGeneric", "text": "10 + all modifiers that normally apply to the check"},
+                                    ],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "image",
+                            "href": {"type": "internal", "path": "book/PHB/ch7.webp"},
+                            "width": 1200,
+                            "height": 800,
+                        },
+                    ],
+                    "id": "phb-ability",
+                },
+                {
+                    "type": "section",
+                    "name": "Adventuring",
+                    "page": 181,
+                    "entries": [
+                        "Adventuring covers exploration, travel, and rest.",
+                        {
+                            "type": "section",
+                            "name": "Time",
+                            "page": 181,
+                            "entries": ["Time can be tracked in rounds, minutes, hours, or days."],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Resting",
+                            "page": 186,
+                            "entries": ["Short rests and long rests let characters recover."],
+                        },
+                    ],
+                    "id": "phb-adventuring",
+                },
+                {
+                    "type": "section",
+                    "name": "Combat",
+                    "page": 189,
+                    "entries": [
+                        "Combat unfolds in rounds and turns.",
+                        {
+                            "type": "section",
+                            "name": "Surprise",
+                            "page": 189,
+                            "entries": ["A surprised creature cannot move or act on its first turn."],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Reactions",
+                            "page": 190,
+                            "entries": ["A reaction is an instant response to a trigger."],
+                        },
+                    ],
+                    "id": "phb-combat",
+                },
+                {
+                    "type": "section",
+                    "name": "Spellcasting",
+                    "page": 201,
+                    "entries": [
+                        "Spellcasting uses slots, components, and timing rules.",
+                        {
+                            "type": "section",
+                            "name": "Casting a Spell",
+                            "page": 202,
+                            "entries": ["Casting a spell requires choosing the spell and following its casting time."],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Targets",
+                            "page": 204,
+                            "entries": ["A spell's description tells you whether it targets creatures, objects, or points in space."],
+                        },
+                    ],
+                    "id": "phb-spellcasting",
+                },
+            ]
+        },
+    )
+    return data_root
+
+
 def build_magicvariant_data_root(root: Path) -> Path:
     data_root = build_test_data_root(root)
     write_json(
@@ -1862,6 +2091,77 @@ def test_source_detail_is_a_category_index_and_category_page_is_not_capped_at_on
     assert "Showing all 105 feats in this source." in category_body
     assert "Feat 000" in category_body
     assert "Feat 104" in category_body
+
+
+def test_phb_book_chapters_are_imported_and_browsable_in_book_order(
+    client, sign_in, users, app, tmp_path
+):
+    data_root = build_phb_book_data_root(tmp_path / "dnd5e-source-book")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("PHB", entry_types=["book"])
+
+        service = app.extensions["systems_service"]
+        book_entries = service.list_entries_for_campaign_source(
+            "linden-pass",
+            "PHB",
+            entry_type="book",
+            limit=None,
+        )
+        titles = [entry.title for entry in book_entries]
+        book_entry_links = [f'/campaigns/linden-pass/systems/entries/{entry.slug}' for entry in book_entries]
+        using_ability_scores = next(entry for entry in book_entries if entry.title == "Using Ability Scores")
+        introduction = next(entry for entry in book_entries if entry.title == "Introduction")
+
+    assert titles == [
+        "Introduction",
+        "Step-by-Step Characters",
+        "Using Ability Scores",
+        "Adventuring",
+        "Combat",
+        "Spellcasting",
+    ]
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    source_response = client.get("/campaigns/linden-pass/systems/sources/PHB")
+    category_response = client.get("/campaigns/linden-pass/systems/sources/PHB/types/book")
+    detail_response = client.get(f"/campaigns/linden-pass/systems/entries/{using_ability_scores.slug}")
+    intro_response = client.get(f"/campaigns/linden-pass/systems/entries/{introduction.slug}")
+
+    assert source_response.status_code == 200
+    source_body = source_response.get_data(as_text=True)
+    assert "Book Chapters" in source_body
+    assert "Introduction" in source_body
+    assert "Spellcasting" in source_body
+    assert "Equipment" not in source_body
+
+    assert category_response.status_code == 200
+    category_body = category_response.get_data(as_text=True)
+    assert "Showing all 6 book chapters in this source." in category_body
+    assert category_body.index(book_entry_links[0]) < category_body.index(book_entry_links[1])
+    assert category_body.index(book_entry_links[1]) < category_body.index(book_entry_links[2])
+    assert category_body.index(book_entry_links[2]) < category_body.index(book_entry_links[3])
+    assert category_body.index(book_entry_links[3]) < category_body.index(book_entry_links[4])
+    assert category_body.index(book_entry_links[4]) < category_body.index(book_entry_links[5])
+
+    assert detail_response.status_code == 200
+    detail_body = detail_response.get_data(as_text=True)
+    assert "Chapter 7" in detail_body
+    assert "Advantage and Disadvantage" in detail_body
+    assert "Passive Checks" in detail_body
+    assert "10 + all modifiers that normally apply to the check" in detail_body
+    assert "book/PHB/ch7.webp" not in detail_body
+    assert "Included headings" in detail_body
+
+    assert intro_response.status_code == 200
+    intro_body = intro_response.get_data(as_text=True)
+    assert "How to Play" in intro_body
+    assert "book/PHB/intro.webp" not in intro_body
 
 
 def test_importer_skips_xphb_subclass_variants(app, tmp_path):

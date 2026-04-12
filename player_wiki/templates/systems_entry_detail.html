@@ -251,6 +251,25 @@
           </ul>
         </section>
       {% endif %}
+      {% if entry.entry_type == "book" %}
+        <section class="card sidebar-card">
+          <h2>Book Section</h2>
+          {% if entry.metadata.section_label %}
+            <p class="meta">{{ entry.metadata.section_label }}</p>
+          {% endif %}
+          {% if entry.source_page %}
+            <p class="meta">Starts on page {{ entry.source_page }}</p>
+          {% endif %}
+          {% if book_headers %}
+            <p class="meta">Included headings</p>
+            <ul class="plain-list">
+              {% for header in book_headers %}
+                <li>{{ header }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+        </section>
+      {% endif %}
       <section class="card sidebar-card">
         <h2>Entry Metadata</h2>
         <p class="meta">Type: {{ entry_type_label }}</p>

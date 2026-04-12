@@ -188,6 +188,7 @@ CHARACTER_PORTRAIT_MAX_BYTES = 8 * 1024 * 1024
 SYSTEMS_ENTRY_TYPE_LABELS = {
     "action": "Actions",
     "background": "Backgrounds",
+    "book": "Book Chapters",
     "class": "Classes",
     "classfeature": "Class Features",
     "condition": "Conditions",
@@ -207,6 +208,7 @@ SYSTEMS_ENTRY_TYPE_LABELS = {
     "variantrule": "Variant Rules",
 }
 SYSTEMS_ENTRY_TYPE_ORDER = (
+    "book",
     "class",
     "subclass",
     "classfeature",
@@ -3168,10 +3170,17 @@ def create_app() -> Flask:
         hidden_entry_types = [
             group["entry_type"] for group in all_entry_groups if group["entry_type"] in SYSTEMS_SOURCE_INDEX_HIDDEN_ENTRY_TYPES
         ]
+        book_entries = systems_service.list_entries_for_campaign_source(
+            campaign_slug,
+            source_id,
+            entry_type="book",
+            limit=None,
+        )
         return {
             "campaign": campaign,
             "source_state": state,
             "entry_groups": entry_groups,
+            "book_entries": book_entries,
             "entry_count": sum(group["count"] for group in all_entry_groups),
             "browsable_entry_count": browsable_entry_count,
             "hidden_entry_count": hidden_entry_count,
@@ -3291,6 +3300,11 @@ def create_app() -> Flask:
             else None
         )
         related_rule_entries = systems_service.build_related_rules_for_entry(campaign_slug, entry)
+        book_headers = []
+        if entry.entry_type == "book":
+            raw_headers = (entry.metadata or {}).get("headers")
+            if isinstance(raw_headers, list):
+                book_headers = [str(item).strip() for item in raw_headers if str(item).strip()]
         return {
             "campaign": campaign,
             "entry": entry,
@@ -3305,6 +3319,7 @@ def create_app() -> Flask:
             "subclass_optionalfeature_sections": subclass_optionalfeature_sections,
             "feature_detail_card": feature_detail_card,
             "related_rule_entries": related_rule_entries,
+            "book_headers": book_headers,
             "source_state": source_state,
             "can_manage_systems": can_manage_campaign_systems(campaign_slug),
             "license_class_label": LICENSE_CLASS_LABELS.get(

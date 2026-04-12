@@ -115,6 +115,7 @@ PLAYER_SAFE_ENTRY_TYPES = {
 SUPPORTED_ENTRY_TYPES = (
     "action",
     "background",
+    "book",
     "class",
     "classfeature",
     "condition",
@@ -132,6 +133,19 @@ SUPPORTED_ENTRY_TYPES = (
     "subclassfeature",
     "variantrule",
 )
+
+BOOK_INDEX_RELATIVE_PATH = "data/books.json"
+BOOK_SOURCE_RELATIVE_PATH_TEMPLATE = "data/book/book-{source_slug}.json"
+BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
+    "PHB": (
+        "Introduction",
+        "Step-by-Step Characters",
+        "Using Ability Scores",
+        "Adventuring",
+        "Combat",
+        "Spellcasting",
+    ),
+}
 
 # The supported library catalog currently carries 2014 class sources plus the
 # selected player-safe books. Legacy compatibility aliases that point at
@@ -381,6 +395,16 @@ class Dnd5eSystemsImporter:
             entries=entries,
             imported_by_type=imported_by_type,
         )
+        if "book" in entry_types:
+            self._load_book_entries_for_source(
+                source_id,
+                source_files=source_files,
+                seen_source_files=seen_source_files,
+                used_entry_keys=used_entry_keys,
+                used_slugs=used_slugs,
+                entries=entries,
+                imported_by_type=imported_by_type,
+            )
         return entries
 
     def _load_dataset_raw_entries(
@@ -774,6 +798,103 @@ class Dnd5eSystemsImporter:
         seen_source_files.add(relative_source_path)
         source_files.append(relative_source_path)
 
+    def _load_book_entries_for_source(
+        self,
+        source_id: str,
+        *,
+        source_files: list[str],
+        seen_source_files: set[str],
+        used_entry_keys: set[str],
+        used_slugs: set[str],
+        entries: list[dict[str, Any]],
+        imported_by_type: Counter[str],
+    ) -> None:
+        target_chapter_names = BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE.get(source_id)
+        if not target_chapter_names:
+            return
+
+        book_path = self.data_root / BOOK_SOURCE_RELATIVE_PATH_TEMPLATE.format(source_slug=source_id.lower())
+        if not book_path.exists():
+            return
+
+        book_index_path = self.data_root / BOOK_INDEX_RELATIVE_PATH
+        chapter_contents_by_name: dict[str, dict[str, Any]] = {}
+        if book_index_path.exists():
+            with book_index_path.open(encoding="utf-8") as handle:
+                book_index_payload = json.load(handle)
+            chapter_contents_by_name = self._build_book_contents_lookup(book_index_payload, source_id)
+            self._append_source_file(
+                str(book_index_path.relative_to(self.data_root)).replace("\\", "/"),
+                source_files=source_files,
+                seen_source_files=seen_source_files,
+            )
+
+        with book_path.open(encoding="utf-8") as handle:
+            book_payload = json.load(handle)
+        raw_chapters = book_payload.get("data", [])
+        if not isinstance(raw_chapters, list):
+            return
+
+        chapter_name_set = {str(name).strip() for name in target_chapter_names if str(name).strip()}
+        if not chapter_name_set:
+            return
+
+        relative_source_path = str(book_path.relative_to(self.data_root)).replace("\\", "/")
+        self._append_source_file(
+            relative_source_path,
+            source_files=source_files,
+            seen_source_files=seen_source_files,
+        )
+        for chapter_index, raw_chapter in enumerate(raw_chapters):
+            if not isinstance(raw_chapter, dict):
+                continue
+            chapter_name = str(raw_chapter.get("name", "") or "").strip()
+            if chapter_name not in chapter_name_set:
+                continue
+            chapter_entry = {
+                **raw_chapter,
+                "source": source_id,
+                "_book_chapter_index": chapter_index,
+                "_book_contents": chapter_contents_by_name.get(chapter_name, {}),
+            }
+            built_entry = self._build_entry(
+                "book",
+                chapter_entry,
+                source_path=relative_source_path,
+                used_entry_keys=used_entry_keys,
+                used_slugs=used_slugs,
+            )
+            if built_entry is None:
+                continue
+            entries.append(built_entry)
+            imported_by_type[built_entry["entry_type"]] += 1
+
+    def _build_book_contents_lookup(
+        self,
+        payload: dict[str, Any],
+        source_id: str,
+    ) -> dict[str, dict[str, Any]]:
+        books = payload.get("book", [])
+        if not isinstance(books, list):
+            return {}
+        for raw_book in books:
+            if not isinstance(raw_book, dict):
+                continue
+            if str(raw_book.get("id", "") or "").strip().upper() != source_id:
+                continue
+            contents = raw_book.get("contents", [])
+            if not isinstance(contents, list):
+                return {}
+            lookup: dict[str, dict[str, Any]] = {}
+            for item in contents:
+                if not isinstance(item, dict):
+                    continue
+                chapter_name = str(item.get("name", "") or "").strip()
+                if chapter_name:
+                    lookup[chapter_name] = item
+            return lookup
+        return {}
+
     def _build_entry(
         self,
         entry_type: str,
@@ -840,6 +961,8 @@ class Dnd5eSystemsImporter:
         entry_type: str,
         raw_entry: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, Any], str]:
+        if entry_type == "book":
+            return self._build_book_content(raw_entry)
         if entry_type == "class":
             return self._build_class_content(raw_entry)
         if entry_type == "subclass":
@@ -849,6 +972,26 @@ class Dnd5eSystemsImporter:
         if entry_type == "monster":
             return self._build_monster_content(raw_entry)
         return self._build_generic_content(entry_type, raw_entry)
+
+    def _build_book_content(self, raw_entry: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], str]:
+        raw_contents = raw_entry.get("_book_contents")
+        contents = raw_contents if isinstance(raw_contents, dict) else {}
+        ordinal = contents.get("ordinal")
+        section_label = self._format_book_section_label(ordinal)
+        metadata = {
+            "chapter_index": raw_entry.get("_book_chapter_index"),
+            "section_label": section_label,
+            "section_type": self._clean_data(ordinal.get("type")) if isinstance(ordinal, dict) else "",
+            "section_identifier": self._clean_data(ordinal.get("identifier")) if isinstance(ordinal, dict) else "",
+            "headers": self._extract_book_headers(contents.get("headers")),
+        }
+        body = {"entries": self._clean_data(raw_entry.get("entries"))}
+        metadata_pairs = [("Book Section", section_label)]
+        rendered_html = self._render_entry_html(
+            metadata_pairs=metadata_pairs,
+            sections=[("Book Text", body["entries"])],
+        )
+        return metadata, body, rendered_html
 
     def _build_class_content(self, raw_entry: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], str]:
         spellcasting_progression = self._extract_class_spellcasting_progression(raw_entry)
@@ -1568,6 +1711,9 @@ class Dnd5eSystemsImporter:
                 return "".join(intro_parts)
             if value_type == "table":
                 return self._render_table(value)
+            if value_type.lower() == "abilitygeneric":
+                text = self._clean_text(str(value.get("text", "") or ""))
+                return f"<p>{escape(text)}</p>" if text else ""
             if value_type.lower() in {"abilitydc", "abilityattackmod"}:
                 return self._render_ability_formula(value)
             if value_type.lower() in {"refclassfeature", "refoptionalfeature", "refsubclassfeature"}:
@@ -1701,6 +1847,8 @@ class Dnd5eSystemsImporter:
 
     def _clean_data(self, value: Any) -> Any:
         if isinstance(value, dict):
+            if str(value.get("type", "") or "").strip().lower() == "image":
+                return None
             cleaned: dict[str, Any] = {}
             for key, nested_value in value.items():
                 if key in EXCLUDED_MEDIA_KEYS:
@@ -1719,6 +1867,34 @@ class Dnd5eSystemsImporter:
                 cleaned_list.append(rendered_item)
             return cleaned_list
         return value
+
+    def _extract_book_headers(self, value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        headers: list[str] = []
+        for item in value:
+            if isinstance(item, str):
+                header = self._clean_text(item)
+            elif isinstance(item, dict):
+                header = self._clean_text(str(item.get("header", "") or ""))
+            else:
+                header = ""
+            if header:
+                headers.append(header)
+        return headers
+
+    def _format_book_section_label(self, value: Any) -> str:
+        if not isinstance(value, dict):
+            return ""
+        section_type = str(value.get("type", "") or "").strip().lower()
+        identifier = str(value.get("identifier", "") or "").strip()
+        if not identifier:
+            return ""
+        if section_type == "chapter":
+            return f"Chapter {identifier}"
+        if section_type == "appendix":
+            return f"Appendix {identifier}"
+        return self._clean_text(identifier)
 
     def _extract_text(self, value: Any) -> str:
         if value is None:

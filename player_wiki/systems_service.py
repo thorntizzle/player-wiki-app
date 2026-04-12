@@ -346,7 +346,7 @@ class SystemsService:
         state = self.get_campaign_source_state(campaign_slug, source_id)
         if state is None or not state.is_enabled:
             return []
-        return self.store.list_entries_for_campaign_source(
+        entries = self.store.list_entries_for_campaign_source(
             campaign_slug,
             state.source.library_slug,
             state.source.source_id,
@@ -354,6 +354,9 @@ class SystemsService:
             query=query,
             limit=limit,
         )
+        if any(entry.entry_type == "book" for entry in entries):
+            return sorted(entries, key=self._entry_source_browse_sort_key)
+        return entries
 
     def list_enabled_entries_for_campaign(
         self,
@@ -754,6 +757,16 @@ class SystemsService:
                 "slot_progression",
             )
         )
+
+    def _entry_source_browse_sort_key(self, entry: SystemsEntryRecord) -> tuple[int, int, str, int]:
+        if entry.entry_type == "book":
+            return (
+                0,
+                self._coerce_int((entry.metadata or {}).get("chapter_index"), default=10_000),
+                entry.title.lower(),
+                entry.id,
+            )
+        return (1, 10_000, entry.title.lower(), entry.id)
 
     def list_monster_entries_for_campaign(
         self,

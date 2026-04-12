@@ -75,6 +75,7 @@ SUPPORTED_COMBAT_SYSTEM = "DND-5E"
 SYSTEMS_ENTRY_TYPE_LABELS = {
     "action": "Actions",
     "background": "Backgrounds",
+    "book": "Book Chapters",
     "class": "Classes",
     "classfeature": "Class Features",
     "condition": "Conditions",
@@ -93,6 +94,28 @@ SYSTEMS_ENTRY_TYPE_LABELS = {
     "subclassfeature": "Subclass Features",
     "variantrule": "Variant Rules",
 }
+SYSTEMS_ENTRY_TYPE_ORDER = (
+    "book",
+    "class",
+    "subclass",
+    "classfeature",
+    "subclassfeature",
+    "spell",
+    "feat",
+    "optionalfeature",
+    "item",
+    "race",
+    "rule",
+    "background",
+    "action",
+    "skill",
+    "sense",
+    "variantrule",
+    "condition",
+    "status",
+    "disease",
+    "monster",
+)
 SYSTEMS_SOURCE_INDEX_HIDDEN_ENTRY_TYPES = {"classfeature", "optionalfeature", "subclassfeature"}
 
 
@@ -285,6 +308,12 @@ def register_api(app) -> None:
     def entry_type_label(entry_type: str) -> str:
         normalized = str(entry_type or "").strip().lower()
         return SYSTEMS_ENTRY_TYPE_LABELS.get(normalized, normalized.replace("_", " ").title())
+
+    def systems_entry_type_sort_key(entry_type: str) -> tuple[int, str]:
+        try:
+            return (SYSTEMS_ENTRY_TYPE_ORDER.index(entry_type), entry_type)
+        except ValueError:
+            return (len(SYSTEMS_ENTRY_TYPE_ORDER), entry_type)
 
     def serialize_user(user) -> dict[str, Any]:
         return {
@@ -1591,6 +1620,12 @@ def register_api(app) -> None:
         if state is None or not state.is_enabled:
             abort(404)
 
+        book_entries = systems_service.list_entries_for_campaign_source(
+            campaign_slug,
+            source_id,
+            entry_type="book",
+            limit=None,
+        )
         all_entry_groups = [
             {
                 "entry_type": entry_type,
@@ -1599,7 +1634,12 @@ def register_api(app) -> None:
             }
             for entry_type, count in systems_service.list_entry_type_counts_for_campaign_source(campaign_slug, source_id)
         ]
-        all_entry_groups.sort(key=lambda item: (item["entry_type"] in SYSTEMS_SOURCE_INDEX_HIDDEN_ENTRY_TYPES, item["entry_type_label"]))
+        all_entry_groups.sort(
+            key=lambda item: (
+                item["entry_type"] in SYSTEMS_SOURCE_INDEX_HIDDEN_ENTRY_TYPES,
+                *systems_entry_type_sort_key(item["entry_type"]),
+            )
+        )
         entry_groups = [
             item for item in all_entry_groups if item["entry_type"] not in SYSTEMS_SOURCE_INDEX_HIDDEN_ENTRY_TYPES
         ]
@@ -1610,6 +1650,7 @@ def register_api(app) -> None:
                 "campaign": serialize_campaign(get_repository().get_campaign(campaign_slug)),
                 "source": serialize_systems_source_state(campaign_slug, state),
                 "entry_groups": entry_groups,
+                "book_entries": [serialize_systems_entry_summary(entry) for entry in book_entries],
                 "entry_count": sum(item["count"] for item in all_entry_groups),
                 "browsable_entry_count": sum(item["count"] for item in entry_groups),
                 "hidden_entry_types": [
