@@ -16,6 +16,7 @@ from .campaign_visibility import (
     VISIBILITY_PRIVATE,
     VISIBILITY_PUBLIC,
     is_valid_visibility,
+    most_private_visibility,
     normalize_visibility_choice,
 )
 from .dnd5e_rules_reference import (
@@ -190,6 +191,12 @@ DND_5E_SOURCE_CATALOG = (
         "public_visibility_allowed": False,
         "requires_unofficial_notice": True,
         "default_visibility": VISIBILITY_DM,
+        "book_entry_default_visibility": VISIBILITY_DM,
+        "book_entry_policy_note": (
+            "DMG chapter-backed rules pages default to DM visibility even if a campaign lowers "
+            "the broader DMG source to surface specific player-facing DMG rows. Use entry "
+            "overrides only when a chapter page should be intentionally exposed more broadly."
+        ),
         "rules_reference_search_scope": RULES_REFERENCE_SEARCH_SCOPE_SOURCE_ONLY,
     },
     {
@@ -1267,6 +1274,32 @@ class SystemsService:
             return RULES_REFERENCE_SEARCH_SCOPE_GLOBAL
         return scope
 
+    def get_default_entry_visibility_for_campaign(
+        self,
+        campaign_slug: str,
+        entry: SystemsEntryRecord,
+    ) -> str:
+        source_state = self.get_campaign_source_state(campaign_slug, entry.source_id)
+        if source_state is None or not source_state.is_enabled:
+            return VISIBILITY_PRIVATE
+        default_visibility = source_state.default_visibility
+        entry_default_visibility = self._entry_default_visibility_for_source(
+            source_state.source,
+            entry,
+        )
+        if entry_default_visibility:
+            default_visibility = most_private_visibility(default_visibility, entry_default_visibility)
+        return self.clamp_visibility_for_source(source_state.source, default_visibility)
+
+    def get_book_entry_policy_note_for_source(
+        self,
+        source: SystemsSourceRecord | str,
+        *,
+        library_slug: str | None = None,
+    ) -> str:
+        catalog_entry = self._source_catalog_entry(source, library_slug=library_slug)
+        return str((catalog_entry or {}).get("book_entry_policy_note") or "").strip()
+
     def _rules_reference_entry_sort_key(self, entry: SystemsEntryRecord) -> tuple[int, str, int, int, str, int]:
         return (*self._source_catalog_sort_key(entry.source_id), *self._entry_source_browse_sort_key(entry))
 
@@ -1279,6 +1312,21 @@ class SystemsService:
             if str(source_id or "").strip()
         ]
         return normalized
+
+    def _entry_default_visibility_for_source(
+        self,
+        source: SystemsSourceRecord,
+        entry: SystemsEntryRecord,
+    ) -> str:
+        if entry.entry_type != "book":
+            return ""
+        catalog_entry = self._source_catalog_entry(source)
+        default_visibility = normalize_visibility_choice(
+            str((catalog_entry or {}).get("book_entry_default_visibility") or "")
+        )
+        if is_valid_visibility(default_visibility):
+            return default_visibility
+        return ""
 
     def _reference_search_values(self, value: object) -> list[str]:
         if isinstance(value, list):

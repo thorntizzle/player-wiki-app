@@ -737,7 +737,7 @@ def get_effective_campaign_systems_entry_visibility(campaign_slug: str, entry_sl
     entry_visibility = (
         override.visibility_override
         if override is not None and override.visibility_override
-        else source_state.default_visibility
+        else service.get_default_entry_visibility_for_campaign(campaign_slug, entry)
     )
     entry_visibility = service.clamp_visibility_for_source(source_state.source, entry_visibility)
     return most_private_visibility(

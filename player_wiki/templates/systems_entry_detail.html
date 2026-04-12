@@ -287,6 +287,12 @@
       {% if entry.entry_type == "book" %}
         <section class="card sidebar-card">
           <h2>Book Section</h2>
+          {% if book_default_visibility_label %}
+            <p class="meta">Policy default visibility: {{ book_default_visibility_label }}</p>
+          {% endif %}
+          {% if book_visibility_policy_note %}
+            <p class="meta">{{ book_visibility_policy_note }}</p>
+          {% endif %}
           {% if entry.metadata.section_label %}
             <p class="meta">{{ entry.metadata.section_label }}</p>
           {% endif %}

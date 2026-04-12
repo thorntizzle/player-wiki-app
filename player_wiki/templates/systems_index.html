@@ -100,7 +100,7 @@
               <li>
                 <a href="{{ url_for('campaign_systems_source_detail', campaign_slug=campaign.slug, source_id=source.source_id) }}">{{ source.title }}</a>
                 <p class="meta">{{ source.source_id }} | {{ source.license_class_label }}</p>
-                <p class="meta">{{ source.default_visibility_label }} visibility | {{ source.entry_count }} imported entries</p>
+                <p class="meta">{{ source.default_visibility_label }} visibility | {{ source.entry_count }} available entries</p>
               </li>
             {% endfor %}
           </ul>

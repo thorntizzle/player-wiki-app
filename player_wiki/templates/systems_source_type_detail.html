@@ -31,9 +31,9 @@
       {% if entries %}
         <p class="meta">
           {% if query %}
-            Showing {{ filtered_entry_count }} matching entries out of {{ entry_count }} {{ entry_type_label|lower }}.
+            Showing {{ filtered_entry_count }} matching entries out of {{ entry_count }} {{ entry_type_label|lower }} available to you in this source.
           {% else %}
-            Showing all {{ entry_count }} {{ entry_type_label|lower }} in this source.
+            Showing all {{ entry_count }} {{ entry_type_label|lower }} available to you in this source.
           {% endif %}
         </p>
         <ul class="plain-list">
@@ -53,7 +53,7 @@
         <h2>Category Details</h2>
         <p class="meta">Source ID: {{ source_state.source.source_id }}</p>
         <p class="meta">Category: {{ entry_type_label }}</p>
-        <p class="meta">Imported entries: {{ entry_count }}</p>
+        <p class="meta">Available entries: {{ entry_count }}</p>
       </section>
     </aside>
   </div>

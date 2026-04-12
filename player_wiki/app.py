@@ -3127,6 +3127,39 @@ def create_app() -> Flask:
             "reference_scope": reference_scope,
         }
 
+    def filter_accessible_systems_entries(
+        campaign_slug: str,
+        entries: list[object],
+        *,
+        limit: int | None = None,
+    ) -> list[object]:
+        accessible_entries = [
+            entry
+            for entry in entries
+            if can_access_campaign_systems_entry(campaign_slug, str(getattr(entry, "slug", "") or ""))
+        ]
+        if limit is not None:
+            return accessible_entries[:limit]
+        return accessible_entries
+
+    def list_accessible_campaign_source_entries(
+        campaign_slug: str,
+        source_id: str,
+        *,
+        entry_type: str | None = None,
+        query: str = "",
+        limit: int | None = None,
+    ) -> list[object]:
+        systems_service = get_systems_service()
+        entries = systems_service.list_entries_for_campaign_source(
+            campaign_slug,
+            source_id,
+            entry_type=entry_type,
+            query=query,
+            limit=None,
+        )
+        return filter_accessible_systems_entries(campaign_slug, entries, limit=limit)
+
     def build_campaign_systems_index_context(
         campaign_slug: str,
         *,
@@ -3139,10 +3172,19 @@ def create_app() -> Flask:
         for state in systems_service.list_campaign_source_states(campaign_slug):
             if not state.is_enabled or not can_access_campaign_systems_source(campaign_slug, state.source.source_id):
                 continue
+            accessible_source_entries = list_accessible_campaign_source_entries(
+                campaign_slug,
+                state.source.source_id,
+                limit=None,
+            )
             source_has_rules_reference_entries = bool(
-                systems_service.list_rules_reference_entries_for_campaign(
+                filter_accessible_systems_entries(
                     campaign_slug,
-                    include_source_ids=[state.source.source_id],
+                    systems_service.list_rules_reference_entries_for_campaign(
+                        campaign_slug,
+                        include_source_ids=[state.source.source_id],
+                        limit=None,
+                    ),
                     limit=1,
                 )
             )
@@ -3154,7 +3196,7 @@ def create_app() -> Flask:
                         state.source.license_class,
                         state.source.license_class.replace("_", " ").title(),
                     ),
-                    "entry_count": systems_service.count_entries_for_source(campaign_slug, state.source.source_id),
+                    "entry_count": len(accessible_source_entries),
                     "default_visibility_label": VISIBILITY_LABELS[state.default_visibility],
                     "has_rules_reference_entries": source_has_rules_reference_entries,
                     "rules_reference_search_scope": systems_service.get_rules_reference_search_scope_for_source(
@@ -3181,10 +3223,14 @@ def create_app() -> Flask:
         ]
         search_results = []
         if search_query:
-            for entry in systems_service.search_entries_for_campaign(
+            for entry in filter_accessible_systems_entries(
                 campaign_slug,
-                query=search_query,
-                include_source_ids=include_source_ids,
+                systems_service.search_entries_for_campaign(
+                    campaign_slug,
+                    query=search_query,
+                    include_source_ids=include_source_ids,
+                    limit=None,
+                ),
                 limit=250,
             ):
                 search_results.append(
@@ -3201,10 +3247,14 @@ def create_app() -> Flask:
                 )
         rules_reference_results = []
         if rules_reference_query:
-            for entry in systems_service.search_rules_reference_entries_for_campaign(
+            for entry in filter_accessible_systems_entries(
                 campaign_slug,
-                query=rules_reference_query,
-                include_source_ids=global_rules_reference_source_ids,
+                systems_service.search_rules_reference_entries_for_campaign(
+                    campaign_slug,
+                    query=rules_reference_query,
+                    include_source_ids=global_rules_reference_source_ids,
+                    limit=None,
+                ),
                 limit=100,
             ):
                 rules_reference_results.append(build_rules_reference_search_result(entry))
@@ -3233,13 +3283,23 @@ def create_app() -> Flask:
         state = systems_service.get_campaign_source_state(campaign_slug, source_id)
         if state is None or not state.is_enabled:
             abort(404)
+        accessible_entries_by_type: dict[str, list[object]] = {}
         all_entry_groups = []
-        for entry_type, count in systems_service.list_entry_type_counts_for_campaign_source(campaign_slug, source_id):
+        for entry_type, _ in systems_service.list_entry_type_counts_for_campaign_source(campaign_slug, source_id):
+            accessible_entries = list_accessible_campaign_source_entries(
+                campaign_slug,
+                source_id,
+                entry_type=entry_type,
+                limit=None,
+            )
+            if not accessible_entries:
+                continue
+            accessible_entries_by_type[entry_type] = accessible_entries
             all_entry_groups.append(
                 {
                     "entry_type": entry_type,
                     "label": SYSTEMS_ENTRY_TYPE_LABELS.get(entry_type, entry_type.replace("_", " ").title()),
-                    "count": count,
+                    "count": len(accessible_entries),
                 }
             )
         all_entry_groups.sort(key=lambda group: systems_entry_type_sort_key(group["entry_type"]))
@@ -3253,15 +3313,15 @@ def create_app() -> Flask:
         hidden_entry_types = [
             group["entry_type"] for group in all_entry_groups if group["entry_type"] in SYSTEMS_SOURCE_INDEX_HIDDEN_ENTRY_TYPES
         ]
-        book_entries = systems_service.list_entries_for_campaign_source(
-            campaign_slug,
-            source_id,
-            entry_type="book",
-            limit=None,
-        )
-        rules_reference_entries = systems_service.list_rules_reference_entries_for_campaign(
+        book_entries = list(accessible_entries_by_type.get("book") or [])
+        raw_rules_reference_entries = systems_service.list_rules_reference_entries_for_campaign(
             campaign_slug,
             include_source_ids=[source_id],
+            limit=None,
+        )
+        rules_reference_entries = filter_accessible_systems_entries(
+            campaign_slug,
+            raw_rules_reference_entries,
             limit=None,
         )
         has_book_rules_reference_entries = any(
@@ -3271,6 +3331,11 @@ def create_app() -> Flask:
             entry.entry_type == "rule" for entry in rules_reference_entries
         )
         rules_reference_search_scope = systems_service.get_rules_reference_search_scope_for_source(state.source)
+        book_visibility_policy_note = (
+            systems_service.get_book_entry_policy_note_for_source(state.source)
+            if systems_service.count_entries_for_source(campaign_slug, source_id, entry_type="book")
+            else ""
+        )
         if has_book_rules_reference_entries and has_rule_rules_reference_entries:
             rules_reference_search_meta = (
                 "Searches only this source's book chapters and rules entries using curated metadata "
@@ -3302,10 +3367,14 @@ def create_app() -> Flask:
         rules_reference_query = reference_query.strip()
         rules_reference_results = []
         if rules_reference_query:
-            for entry in systems_service.search_rules_reference_entries_for_campaign(
+            for entry in filter_accessible_systems_entries(
                 campaign_slug,
-                query=rules_reference_query,
-                include_source_ids=[source_id],
+                systems_service.search_rules_reference_entries_for_campaign(
+                    campaign_slug,
+                    query=rules_reference_query,
+                    include_source_ids=[source_id],
+                    limit=None,
+                ),
                 limit=100,
             ):
                 rules_reference_results.append(build_rules_reference_search_result(entry))
@@ -3314,6 +3383,7 @@ def create_app() -> Flask:
             "source_state": state,
             "entry_groups": entry_groups,
             "book_entries": book_entries,
+            "book_visibility_policy_note": book_visibility_policy_note,
             "has_rules_reference_search": bool(rules_reference_entries),
             "rules_reference_search_meta": rules_reference_search_meta,
             "rules_reference_scope_note": rules_reference_scope_note,
@@ -3346,29 +3416,23 @@ def create_app() -> Flask:
         normalized_entry_type = (entry_type or "").strip().lower()
         if not normalized_entry_type:
             abort(404)
-        entry_count = systems_service.count_entries_for_source(
-            campaign_slug,
-            source_id,
-            entry_type=normalized_entry_type,
+        entry_count = len(
+            list_accessible_campaign_source_entries(
+                campaign_slug,
+                source_id,
+                entry_type=normalized_entry_type,
+                limit=None,
+            )
         )
         if not entry_count:
             abort(404)
         normalized_query = query.strip()
-        entries = (
-            systems_service.list_entries_for_campaign_source(
-                campaign_slug,
-                source_id,
-                entry_type=normalized_entry_type,
-                query=normalized_query,
-                limit=None,
-            )
-            if normalized_query
-            else systems_service.list_entries_for_campaign_source(
-                campaign_slug,
-                source_id,
-                entry_type=normalized_entry_type,
-                limit=None,
-            )
+        entries = list_accessible_campaign_source_entries(
+            campaign_slug,
+            source_id,
+            entry_type=normalized_entry_type,
+            query=normalized_query,
+            limit=None,
         )
         return {
             "campaign": campaign,
@@ -3399,6 +3463,13 @@ def create_app() -> Flask:
         source_state = systems_service.get_campaign_source_state(campaign_slug, entry.source_id)
         if source_state is None or not source_state.is_enabled:
             abort(404)
+        book_default_visibility_label = ""
+        book_visibility_policy_note = ""
+        if entry.entry_type == "book":
+            book_default_visibility_label = VISIBILITY_LABELS[
+                systems_service.get_default_entry_visibility_for_campaign(campaign_slug, entry)
+            ]
+            book_visibility_policy_note = systems_service.get_book_entry_policy_note_for_source(source_state.source)
         class_feature_progression_groups = (
             systems_service.build_class_feature_progression_for_class_entry(campaign_slug, entry)
             if entry.entry_type == "class"
@@ -3519,6 +3590,8 @@ def create_app() -> Flask:
             "related_rule_entries": related_rule_entries,
             "book_headers": book_headers,
             "book_section_outline": book_section_outline,
+            "book_default_visibility_label": book_default_visibility_label,
+            "book_visibility_policy_note": book_visibility_policy_note,
             "source_state": source_state,
             "can_manage_systems": can_manage_campaign_systems(campaign_slug),
             "license_class_label": LICENSE_CLASS_LABELS.get(
