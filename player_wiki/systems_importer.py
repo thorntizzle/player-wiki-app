@@ -179,6 +179,17 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         ("Monster Lore", "Yuan-ti: Snake People"),
         ("Character Races", "Height and Weight"),
     ),
+    "SCAG": (
+        ("Races of the Realms", "Dwarves"),
+        ("Races of the Realms", "Elves"),
+        ("Races of the Realms", "Halflings"),
+        ("Races of the Realms", "Humans"),
+        ("Races of the Realms", "Dragonborn"),
+        ("Races of the Realms", "Gnomes"),
+        ("Races of the Realms", "Half-Elves"),
+        ("Races of the Realms", "Half-Orcs"),
+        ("Races of the Realms", "Tieflings"),
+    ),
 }
 VGM_CHARACTER_RACE_WRAPPER_DEFINITIONS = (
     {

@@ -1561,6 +1561,319 @@ def build_scag_background_data_root(root: Path) -> Path:
     return root
 
 
+def build_scag_book_data_root(root: Path) -> Path:
+    data_root = build_test_data_root(root)
+    write_json(
+        root / "data/books.json",
+        {
+            "book": [
+                {
+                    "name": "Sword Coast Adventurer's Guide",
+                    "id": "SCAG",
+                    "source": "SCAG",
+                    "contents": [
+                        {
+                            "name": "Races of the Realms",
+                            "headers": [
+                                "Dwarves",
+                                "Elves",
+                                "Halflings",
+                                "Humans",
+                                "Dragonborn",
+                                "Gnomes",
+                                "Half-Elves",
+                                "Half-Orcs",
+                                "Tieflings",
+                            ],
+                            "ordinal": {"type": "chapter", "identifier": 3},
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    write_json(
+        root / "data/book/book-scag.json",
+        {
+            "data": [
+                {
+                    "type": "section",
+                    "name": "Races of the Realms",
+                    "page": 103,
+                    "entries": [
+                        "Faerun is home to many peoples and race traditions.",
+                        {
+                            "type": "section",
+                            "name": "Dwarves",
+                            "page": 103,
+                            "entries": [
+                                "The stout folk endure in holds across the North.",
+                                {
+                                    "type": "entries",
+                                    "name": "Shield Dwarves",
+                                    "page": 103,
+                                    "entries": ["Shield dwarves hold fast to ancient strongholds."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Gold Dwarves",
+                                    "page": 103,
+                                    "entries": ["Gold dwarves prosper in the southern lands."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Gray Dwarves (Duergar)",
+                                    "page": 104,
+                                    "entries": ["Duergar survive the Underdark through grim discipline."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Dwarven Deities",
+                                    "page": 104,
+                                    "entries": ["Moradin and the Morndinsamman remain central to dwarven faith."],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Elves",
+                            "page": 105,
+                            "entries": [
+                                "Elves maintain ancient ties to Faerun and its hidden realms.",
+                                {
+                                    "type": "entries",
+                                    "name": "Moon Elves",
+                                    "page": 105,
+                                    "entries": ["Moon elves are among the most common elves of the Sword Coast."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Sun Elves",
+                                    "page": 106,
+                                    "entries": ["Sun elves preserve old magical traditions."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Wood Elves",
+                                    "page": 106,
+                                    "entries": ["Wood elves favor the deep forest and a wandering life."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Dark Elves (Drow)",
+                                    "page": 107,
+                                    "entries": ["Drow communities endure beneath the surface world."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Elven Deities",
+                                    "page": 107,
+                                    "entries": ["Corellon and the Seldarine shape elven devotion."],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Halflings",
+                            "page": 108,
+                            "entries": [
+                                "Halflings weave themselves into larger realms while keeping close communities.",
+                                {
+                                    "type": "entries",
+                                    "name": "Lightfoot Halflings",
+                                    "page": 109,
+                                    "entries": ["Lightfoot halflings travel widely and adapt quickly."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Strongheart Halflings",
+                                    "page": 109,
+                                    "entries": ["Strongheart halflings hold to enduring customs and hearths."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Halfling Deities",
+                                    "page": 109,
+                                    "entries": ["Yondalla and her kin watch over halfling life."],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Humans",
+                            "page": 110,
+                            "entries": [
+                                "Human cultures span every road and coast of Faerun.",
+                                {
+                                    "type": "entries",
+                                    "name": "Human Ethnicities in Faerun",
+                                    "page": 110,
+                                    "entries": ["Calishite, Chondathan, Illuskan, and Tethyrian peoples are common in the region."],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Dragonborn",
+                            "page": 112,
+                            "entries": [
+                                "Dragonborn communities in Faerun carry memories of another world.",
+                                {
+                                    "type": "entries",
+                                    "name": "Uncertain Origins",
+                                    "page": 112,
+                                    "entries": ["Legends disagree on exactly how dragonborn reached Toril."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "The Fight for Freedom",
+                                    "page": 113,
+                                    "entries": ["Their history is marked by revolt against draconic tyrants."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Honor and Family",
+                                    "page": 113,
+                                    "entries": ["Honor and clan remain core dragonborn values."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Philosophy and Religion",
+                                    "page": 113,
+                                    "entries": ["Dragonborn faith and philosophy often emphasize self-mastery."],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Gnomes",
+                            "page": 114,
+                            "entries": [
+                                "Gnomes survive through craft, caution, and wit.",
+                                {
+                                    "type": "entries",
+                                    "name": "Forest Gnomes",
+                                    "page": 114,
+                                    "entries": ["Forest gnomes dwell in quiet woodland enclaves."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Rock Gnomes",
+                                    "page": 114,
+                                    "entries": ["Rock gnomes prize devices, gems, and ingenious workmanship."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Deep Gnomes (Svirfneblin)",
+                                    "page": 115,
+                                    "entries": ["Deep gnomes endure the dangers of the Underdark."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Gnomish Deities",
+                                    "page": 115,
+                                    "entries": ["Garl Glittergold and his circle guide gnomish worship."],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Half-Elves",
+                            "page": 116,
+                            "entries": [
+                                "Half-elves bridge communities that rarely see themselves clearly in each other.",
+                                {
+                                    "type": "entries",
+                                    "name": "Young Race, Old Roots",
+                                    "page": 116,
+                                    "entries": ["Half-elves grew more numerous as human and elven societies intertwined."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Mixed Heritage",
+                                    "page": 116,
+                                    "entries": ["Their heritage shapes how they move between cultures."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "The Gods of Two Peoples",
+                                    "page": 116,
+                                    "entries": ["Half-elves often inherit spiritual ties from both lineages."],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Half-Orcs",
+                            "page": 117,
+                            "entries": [
+                                "Half-orcs carry a long and often difficult history in Faerun.",
+                                {
+                                    "type": "entries",
+                                    "name": "Blood Will Tell",
+                                    "page": 117,
+                                    "entries": ["Many half-orcs wrestle with others' assumptions about their heritage."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Half-Orc Homelands",
+                                    "page": 117,
+                                    "entries": ["Communities of half-orcs can be found across the North."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Half-Orc Deities",
+                                    "page": 118,
+                                    "entries": ["Some half-orcs honor Gruumsh, while others seek different patrons."],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Tieflings",
+                            "page": 118,
+                            "entries": [
+                                "Tieflings in Faerun carry infernal blood and a visible burden of suspicion.",
+                                {
+                                    "type": "entries",
+                                    "name": "The Mark of Asmodeus",
+                                    "page": 118,
+                                    "entries": ["Many tieflings bear the legacy of Asmodeus's claim on their bloodline."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "A Race without a Home",
+                                    "page": 119,
+                                    "entries": ["Tieflings are scattered across cities and hard frontiers alike."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Lone Faithful",
+                                    "page": 119,
+                                    "entries": ["Tieflings often forge deeply personal religious lives."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Tiefling Names",
+                                    "page": 119,
+                                    "entries": ["Their names can reflect infernal, virtue-based, or adopted traditions."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Aasimar",
+                                    "page": 119,
+                                    "entries": ["Aasimar stand as a celestial contrast to tiefling lineages."],
+                                },
+                            ],
+                        },
+                    ],
+                }
+            ]
+        },
+    )
+    return data_root
+
+
 def build_mm_book_data_root(root: Path) -> Path:
     data_root = build_test_data_root(root)
     write_json(
@@ -3878,6 +4191,150 @@ def test_importer_supports_scag_backgrounds(app, tmp_path):
     assert clan_crafter.metadata["language_proficiencies"] == [{"dwarvish": True}, {"anyStandard": 1}]
     assert clan_crafter.metadata["tool_proficiencies"] == [{"anyArtisansTool": 1}]
     assert "Respect of the Stout Folk" in clan_crafter.rendered_html
+
+
+def test_scag_races_of_the_realms_wrappers_are_imported_for_player_browse(
+    client, sign_in, users, app, tmp_path
+):
+    data_root = build_scag_book_data_root(tmp_path / "dnd5e-source-scag-races-of-the-realms")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("SCAG", entry_types=["book"])
+
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="SCAG",
+            is_enabled=True,
+            default_visibility="players",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in service.list_entries_for_campaign_source(
+                "linden-pass",
+                "SCAG",
+                entry_type="book",
+                limit=None,
+            )
+        }
+
+    assert list(book_entries) == [
+        "Dwarves",
+        "Elves",
+        "Halflings",
+        "Humans",
+        "Dragonborn",
+        "Gnomes",
+        "Half-Elves",
+        "Half-Orcs",
+        "Tieflings",
+    ]
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    source_response = client.get("/campaigns/linden-pass/systems/sources/SCAG")
+    category_response = client.get("/campaigns/linden-pass/systems/sources/SCAG/types/book")
+    dwarves_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Dwarves'].slug}")
+    tieflings_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Tieflings'].slug}")
+
+    assert source_response.status_code == 200
+    source_body = source_response.get_data(as_text=True)
+    assert "Book Chapters" in source_body
+    assert "Dwarves" in source_body
+    assert "Tieflings" in source_body
+    assert source_body.index("Dwarves") < source_body.index("Elves")
+    assert source_body.index("Half-Elves") < source_body.index("Half-Orcs")
+    assert source_body.index("Half-Orcs") < source_body.index("Tieflings")
+
+    assert category_response.status_code == 200
+    category_body = category_response.get_data(as_text=True)
+    assert "Dwarves" in category_body
+    assert "Tieflings" in category_body
+    assert category_body.index("Dwarves") < category_body.index("Elves")
+    assert category_body.index("Half-Elves") < category_body.index("Half-Orcs")
+    assert category_body.index("Half-Orcs") < category_body.index("Tieflings")
+
+    assert dwarves_response.status_code == 200
+    dwarves_body = dwarves_response.get_data(as_text=True)
+    assert "Chapter 3" in dwarves_body
+    assert "Races of the Realms" in dwarves_body
+    assert "Shield Dwarves" in dwarves_body
+    assert "Gray Dwarves (Duergar)" in dwarves_body
+    assert "Dwarven Deities" in dwarves_body
+    assert 'href="#shield-dwarves"' in dwarves_body
+    assert 'href="#gray-dwarves-duergar"' in dwarves_body
+    assert 'id="dwarven-deities"' in dwarves_body
+
+    assert tieflings_response.status_code == 200
+    tieflings_body = tieflings_response.get_data(as_text=True)
+    assert "Chapter 3" in tieflings_body
+    assert "Races of the Realms" in tieflings_body
+    assert "The Mark of Asmodeus" in tieflings_body
+    assert "A Race without a Home" in tieflings_body
+    assert "Tiefling Names" in tieflings_body
+    assert "Aasimar" in tieflings_body
+    assert 'href="#the-mark-of-asmodeus"' in tieflings_body
+    assert 'href="#a-race-without-a-home"' in tieflings_body
+    assert 'id="tiefling-names"' in tieflings_body
+    assert 'id="aasimar"' in tieflings_body
+
+
+def test_scag_races_of_the_realms_book_entries_follow_source_visibility(
+    client, sign_in, users, app, tmp_path
+):
+    data_root = build_scag_book_data_root(tmp_path / "dnd5e-source-scag-races-of-the-realms-policy")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("SCAG", entry_types=["book"])
+
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="SCAG",
+            is_enabled=True,
+            default_visibility="dm",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in store.list_entries_for_source("DND-5E", "SCAG", entry_type="book", limit=20)
+        }
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    player_source_response = client.get("/campaigns/linden-pass/systems/sources/SCAG")
+    player_category_response = client.get("/campaigns/linden-pass/systems/sources/SCAG/types/book")
+    player_entry_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Dwarves'].slug}")
+
+    assert player_source_response.status_code == 404
+    assert player_category_response.status_code == 404
+    assert player_entry_response.status_code == 404
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    dm_source_response = client.get("/campaigns/linden-pass/systems/sources/SCAG")
+    dm_category_response = client.get("/campaigns/linden-pass/systems/sources/SCAG/types/book")
+    dm_entry_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Dwarves'].slug}")
+
+    assert dm_source_response.status_code == 200
+    assert "Book Chapters" in dm_source_response.get_data(as_text=True)
+    assert dm_category_response.status_code == 200
+    assert "Dwarves" in dm_category_response.get_data(as_text=True)
+    assert dm_entry_response.status_code == 200
+    dm_body = dm_entry_response.get_data(as_text=True)
+    assert "Dwarves" in dm_body
+    assert "Races of the Realms" in dm_body
 
 
 def test_importer_expands_safe_classic_magic_armor_variants(app, tmp_path):
