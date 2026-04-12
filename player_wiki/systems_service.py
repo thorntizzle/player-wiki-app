@@ -54,6 +54,10 @@ ATTACK_TAG_LABELS = {
     "ms,rs": "Melee or Ranged Spell Attack:",
 }
 
+ARMOR_ITEM_TYPE_CODES = {"LA", "MA", "HA", "S"}
+WEAPON_ITEM_TYPE_CODES = {"M", "R"}
+PASSIVE_CHECK_SKILL_KEYS = {"insight", "investigation", "perception"}
+
 
 def _systems_service_request_cache() -> dict[tuple[object, ...], object] | None:
     if not has_request_context():
@@ -645,6 +649,111 @@ class SystemsService:
         if entry is None or not self.is_entry_enabled_for_campaign(campaign_slug, entry):
             return None
         return entry
+
+    def build_related_rules_for_entry(
+        self,
+        campaign_slug: str,
+        entry: SystemsEntryRecord,
+    ) -> list[SystemsEntryRecord]:
+        if entry.source_id == DND5E_RULES_REFERENCE_SOURCE_ID or entry.entry_type == "rule":
+            return []
+
+        rules_by_key = self._build_rules_reference_lookup(campaign_slug)
+        if not rules_by_key:
+            return []
+
+        rule_keys = self._collect_related_rule_keys_for_entry(entry)
+        return [rules_by_key[key] for key in rule_keys if key in rules_by_key]
+
+    def _build_rules_reference_lookup(self, campaign_slug: str) -> dict[str, SystemsEntryRecord]:
+        rows = self.list_entries_for_campaign_source(
+            campaign_slug,
+            DND5E_RULES_REFERENCE_SOURCE_ID,
+            entry_type="rule",
+            limit=None,
+        )
+        lookup: dict[str, SystemsEntryRecord] = {}
+        for entry in rows:
+            metadata = dict(entry.metadata or {})
+            rule_key = str(metadata.get("rule_key") or "").strip() or normalize_lookup(entry.title)
+            if rule_key:
+                lookup[rule_key] = entry
+        return lookup
+
+    def _collect_related_rule_keys_for_entry(self, entry: SystemsEntryRecord) -> list[str]:
+        metadata = dict(entry.metadata or {})
+        title_key = normalize_lookup(entry.title)
+        entry_type = str(entry.entry_type or "").strip().lower()
+        rule_keys: list[str] = []
+
+        def add_rule_key(rule_key: str) -> None:
+            normalized_rule_key = str(rule_key or "").strip()
+            if normalized_rule_key and normalized_rule_key not in rule_keys:
+                rule_keys.append(normalized_rule_key)
+
+        if entry_type == "skill":
+            add_rule_key("ability-scores-and-ability-modifiers")
+            add_rule_key("proficiency-bonus")
+            add_rule_key("skill-bonuses-and-proficiency")
+            if title_key in PASSIVE_CHECK_SKILL_KEYS:
+                add_rule_key("passive-checks")
+            return rule_keys
+
+        if entry_type == "item":
+            item_type = str(metadata.get("type") or "").strip().upper()
+            is_armor = bool(metadata.get("armor")) or item_type in ARMOR_ITEM_TYPE_CODES or bool(metadata.get("ac"))
+            is_weapon = item_type in WEAPON_ITEM_TYPE_CODES
+            if is_armor:
+                add_rule_key("armor-class")
+            if is_weapon:
+                add_rule_key("attack-rolls-and-attack-bonus")
+                add_rule_key("damage-rolls")
+            add_rule_key("equipped-items-inventory-and-attunement")
+            return rule_keys
+
+        if entry_type == "spell":
+            add_rule_key("spell-attacks-and-save-dcs")
+            return rule_keys
+
+        if entry_type == "class":
+            add_rule_key("proficiency-bonus")
+            add_rule_key("hit-points-and-hit-dice")
+            if self._entry_has_spellcasting_metadata(metadata):
+                add_rule_key("spell-attacks-and-save-dcs")
+            return rule_keys
+
+        if entry_type == "subclass":
+            if self._entry_has_spellcasting_metadata(metadata):
+                add_rule_key("spell-attacks-and-save-dcs")
+            return rule_keys
+
+        if entry_type in {"classfeature", "subclassfeature", "feat", "optionalfeature"}:
+            if metadata.get("additional_spells") is not None:
+                add_rule_key("spell-attacks-and-save-dcs")
+            return rule_keys
+
+        if entry_type == "variantrule":
+            if title_key == "encumbrance":
+                add_rule_key("carrying-capacity-and-encumbrance")
+            return rule_keys
+
+        return rule_keys
+
+    def _entry_has_spellcasting_metadata(self, metadata: dict[str, object]) -> bool:
+        return any(
+            metadata.get(key)
+            for key in (
+                "spellcasting_ability",
+                "caster_progression",
+                "prepared_spells",
+                "prepared_spells_change",
+                "prepared_spells_progression",
+                "cantrip_progression",
+                "spells_known_progression",
+                "spells_known_progression_fixed",
+                "slot_progression",
+            )
+        )
 
     def list_monster_entries_for_campaign(
         self,

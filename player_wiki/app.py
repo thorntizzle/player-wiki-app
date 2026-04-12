@@ -3290,6 +3290,7 @@ def create_app() -> Flask:
             if entry.entry_type in {"classfeature", "subclassfeature", "optionalfeature"}
             else None
         )
+        related_rule_entries = systems_service.build_related_rules_for_entry(campaign_slug, entry)
         return {
             "campaign": campaign,
             "entry": entry,
@@ -3303,6 +3304,7 @@ def create_app() -> Flask:
             "subclass_feature_progression_groups": subclass_feature_progression_groups,
             "subclass_optionalfeature_sections": subclass_optionalfeature_sections,
             "feature_detail_card": feature_detail_card,
+            "related_rule_entries": related_rule_entries,
             "source_state": source_state,
             "can_manage_systems": can_manage_campaign_systems(campaign_slug),
             "license_class_label": LICENSE_CLASS_LABELS.get(

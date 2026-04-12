@@ -7,15 +7,21 @@ from .repository import slugify
 
 DND5E_RULES_REFERENCE_SOURCE_ID = "RULES"
 DND5E_RULES_REFERENCE_SOURCE_TITLE = "Character Rules Reference"
-DND5E_RULES_REFERENCE_VERSION = "2026-04-07.1"
+DND5E_RULES_REFERENCE_VERSION = "2026-04-11.1"
 
 _RULE_ENTRY_SPECS = (
     {
+        "rule_key": "character-math-overview",
         "title": "Character Math Overview",
         "aliases": [
             "derived stats",
             "character formulas",
             "sheet math",
+        ],
+        "rule_facets": [
+            "character-math",
+            "derived-stats",
+            "shared-derivation",
         ],
         "summary": (
             "This source collects the core DND 5E formulas the app can reuse when it derives "
@@ -45,6 +51,7 @@ _RULE_ENTRY_SPECS = (
         ],
     },
     {
+        "rule_key": "ability-scores-and-ability-modifiers",
         "title": "Ability Scores and Ability Modifiers",
         "aliases": [
             "ability modifier",
@@ -55,6 +62,11 @@ _RULE_ENTRY_SPECS = (
             "intelligence modifier",
             "wisdom modifier",
             "charisma modifier",
+        ],
+        "rule_facets": [
+            "ability-scores",
+            "ability-modifiers",
+            "core-inputs",
         ],
         "formula": "Ability modifier = floor((ability score - 10) / 2)",
         "summary": "Every ability score produces a modifier, and that modifier is the base ingredient for most other character math.",
@@ -78,11 +90,17 @@ _RULE_ENTRY_SPECS = (
         ],
     },
     {
+        "rule_key": "proficiency-bonus",
         "title": "Proficiency Bonus",
         "aliases": [
             "pb",
             "level proficiency",
             "proficiency by level",
+        ],
+        "rule_facets": [
+            "proficiency",
+            "proficiency-bonus",
+            "level-scaling",
         ],
         "formula": "Character proficiency bonus is based on total level: 1-4 +2, 5-8 +3, 9-12 +4, 13-16 +5, 17-20 +6",
         "summary": "A character's proficiency bonus scales by total character level and is reused anywhere the rules say the character is proficient.",
@@ -111,11 +129,17 @@ _RULE_ENTRY_SPECS = (
         ],
     },
     {
+        "rule_key": "saving-throw-bonuses",
         "title": "Saving Throw Bonuses",
         "aliases": [
             "save bonus",
             "saving throw proficiency",
             "saving throws",
+        ],
+        "rule_facets": [
+            "saving-throws",
+            "proficiency",
+            "ability-modifiers",
         ],
         "formula": "Saving throw bonus = relevant ability modifier + proficiency component + other save modifiers",
         "summary": "Each saving throw starts from its matching ability modifier, then adds proficiency only if the character is proficient in that save.",
@@ -140,12 +164,20 @@ _RULE_ENTRY_SPECS = (
         ],
     },
     {
+        "rule_key": "skill-bonuses-and-proficiency",
         "title": "Skill Bonuses and Proficiency",
         "aliases": [
             "skill modifier",
             "skill bonus",
             "expertise",
             "half proficiency",
+        ],
+        "rule_facets": [
+            "skills",
+            "skill-checks",
+            "proficiency",
+            "expertise",
+            "half-proficiency",
         ],
         "formula": "Skill bonus = linked ability modifier + proficiency component + other skill-specific modifiers",
         "summary": "A skill check uses the modifier for its linked ability, then layers in the proficiency amount the character has for that skill.",
@@ -178,12 +210,19 @@ _RULE_ENTRY_SPECS = (
         ],
     },
     {
+        "rule_key": "passive-checks",
         "title": "Passive Checks",
         "aliases": [
             "passive perception",
             "passive insight",
             "passive investigation",
             "passive score",
+        ],
+        "rule_facets": [
+            "passive-checks",
+            "perception",
+            "insight",
+            "investigation",
         ],
         "formula": "Passive check = 10 + the total modifier that would apply to the same check",
         "summary": "Passive checks reuse the same modifiers as active checks, but start from 10 instead of a d20 roll.",
@@ -205,10 +244,16 @@ _RULE_ENTRY_SPECS = (
         ],
     },
     {
+        "rule_key": "initiative",
         "title": "Initiative",
         "aliases": [
             "initiative bonus",
             "turn order bonus",
+        ],
+        "rule_facets": [
+            "initiative",
+            "dexterity",
+            "combat-order",
         ],
         "formula": "Initiative bonus = Dexterity modifier + other initiative modifiers",
         "summary": "Initiative usually starts from Dexterity, then adds any feature, feat, item, or campaign modifier that explicitly changes initiative.",
@@ -224,12 +269,19 @@ _RULE_ENTRY_SPECS = (
         ],
     },
     {
+        "rule_key": "armor-class",
         "title": "Armor Class",
         "aliases": [
             "ac",
             "shield bonus",
             "armor formula",
             "unarmored defense",
+        ],
+        "rule_facets": [
+            "armor-class",
+            "armor",
+            "shield",
+            "equipment",
         ],
         "formula": "Armor Class = active armor formula + shield bonus if wielded + other AC modifiers",
         "summary": "Armor Class depends on what the character is actually wearing or wielding, plus any replacement formulas or explicit bonuses.",
@@ -260,11 +312,18 @@ _RULE_ENTRY_SPECS = (
         ],
     },
     {
+        "rule_key": "attack-rolls-and-attack-bonus",
         "title": "Attack Rolls and Attack Bonus",
         "aliases": [
             "to hit",
             "attack modifier",
             "weapon attack bonus",
+        ],
+        "rule_facets": [
+            "attack-rolls",
+            "attack-bonus",
+            "weapon-attacks",
+            "proficiency",
         ],
         "formula": "Attack bonus = relevant ability modifier + proficiency component if proficient + other attack modifiers",
         "summary": "Attack rolls follow the same core pattern as other character math: choose the right ability, add proficiency if the character is proficient, then add any explicit bonuses or penalties.",
@@ -289,11 +348,18 @@ _RULE_ENTRY_SPECS = (
         ],
     },
     {
+        "rule_key": "damage-rolls",
         "title": "Damage Rolls",
         "aliases": [
             "weapon damage",
             "damage modifier",
             "off-hand damage",
+        ],
+        "rule_facets": [
+            "damage-rolls",
+            "weapon-damage",
+            "off-hand",
+            "attack-modes",
         ],
         "formula": "Damage roll = attack's damage dice + relevant ability modifier when applicable + other damage modifiers",
         "summary": "Damage usually starts from the attack's dice, then adds the same relevant ability modifier the attack roll used when the rules say to do so.",
@@ -315,11 +381,18 @@ _RULE_ENTRY_SPECS = (
         ],
     },
     {
+        "rule_key": "spell-attacks-and-save-dcs",
         "title": "Spell Attacks and Save DCs",
         "aliases": [
             "spell attack bonus",
             "spell save dc",
             "spellcasting ability",
+        ],
+        "rule_facets": [
+            "spellcasting",
+            "spell-attack",
+            "spell-save-dc",
+            "spellcasting-ability",
         ],
         "formula": "Spell attack bonus = proficiency bonus + spellcasting ability modifier; Spell save DC = 8 + proficiency bonus + spellcasting ability modifier",
         "summary": "Spellcasting math follows a fixed 5E pattern once the character's spellcasting ability is known.",
@@ -341,11 +414,18 @@ _RULE_ENTRY_SPECS = (
         ],
     },
     {
+        "rule_key": "hit-points-and-hit-dice",
         "title": "Hit Points and Hit Dice",
         "aliases": [
             "max hp",
             "hp by level",
             "hit dice",
+        ],
+        "rule_facets": [
+            "hit-points",
+            "hit-dice",
+            "level-progression",
+            "constitution",
         ],
         "formula": "Level 1 max HP = class hit die maximum + Constitution modifier; Later HP gain = rolled or fixed hit die increase + Constitution modifier",
         "summary": "Maximum hit points combine class hit dice, level progression, and Constitution modifier, with each level adding another increment.",
@@ -367,12 +447,19 @@ _RULE_ENTRY_SPECS = (
         ],
     },
     {
+        "rule_key": "carrying-capacity-and-encumbrance",
         "title": "Carrying Capacity and Encumbrance",
         "aliases": [
             "carry weight",
             "weight limit",
             "encumbered",
             "push drag lift",
+        ],
+        "rule_facets": [
+            "carrying-capacity",
+            "encumbrance",
+            "inventory-weight",
+            "strength",
         ],
         "formula": "Carrying capacity = 15 x Strength score in pounds; Push, drag, or lift = 30 x Strength score in pounds",
         "summary": "Inventory weight rules use Strength score rather than Strength modifier, with optional encumbrance thresholds adding movement penalties before the full capacity limit.",
@@ -395,12 +482,19 @@ _RULE_ENTRY_SPECS = (
         ],
     },
     {
+        "rule_key": "equipped-items-inventory-and-attunement",
         "title": "Equipped Items, Inventory, and Attunement",
         "aliases": [
             "equipped",
             "inventory",
             "attuned items",
             "attunement limit",
+        ],
+        "rule_facets": [
+            "equipment-state",
+            "inventory",
+            "attunement",
+            "equipped-items",
         ],
         "formula": "Inventory tracks what you carry; equipped state applies worn or wielded item rules; attunement is a separate state with a normal limit of 3 items",
         "summary": "Carried items, equipped items, and attuned items are related but distinct states. Treating them separately makes derived character math more reliable.",
@@ -434,8 +528,10 @@ def build_dnd5e_rules_reference_entries() -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     for spec in _RULE_ENTRY_SPECS:
         title = str(spec["title"]).strip()
+        rule_key = str(spec.get("rule_key") or slugify(title)).strip() or slugify(title)
         slug = f"{DND5E_RULES_REFERENCE_SOURCE_ID.lower()}-rule-{slugify(title)}"
         aliases = [str(value).strip() for value in list(spec.get("aliases") or []) if str(value).strip()]
+        rule_facets = [str(value).strip() for value in list(spec.get("rule_facets") or []) if str(value).strip()]
         formula = str(spec.get("formula") or "").strip()
         summary = str(spec.get("summary") or "").strip()
         body = {
@@ -448,10 +544,16 @@ def build_dnd5e_rules_reference_entries() -> list[dict[str, Any]]:
             "summary": summary,
             "formula": formula,
             "aliases": aliases,
+            "rule_key": rule_key,
+            "rule_facets": rule_facets,
             "seed_version": DND5E_RULES_REFERENCE_VERSION,
             "source_kind": "app_reference",
+            "source_provenance": {
+                "kind": "normalized_reference",
+                "source_ids": ["PHB"],
+            },
         }
-        search_parts = [title, formula, summary, *aliases]
+        search_parts = [title, formula, summary, *aliases, *rule_facets]
         entries.append(
             {
                 "entry_key": slug,

@@ -2252,6 +2252,85 @@ def test_class_features_are_hidden_from_source_index_and_embedded_on_class_pages
     assert "You gain a +2 bonus to attack rolls you make with ranged weapons." in fighter_body
 
 
+def test_systems_entry_pages_surface_related_rules_references(
+    client, sign_in, users, app, tmp_path
+):
+    data_root = build_test_data_root(tmp_path / "dnd5e-source")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("PHB")
+
+        store = app.extensions["systems_store"]
+        longsword_entry = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "PHB", entry_type="item", limit=20)
+            if entry.title == "Longsword"
+        )
+        athletics_entry = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "PHB", entry_type="skill", limit=20)
+            if entry.title == "Athletics"
+        )
+        mage_hand_entry = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "PHB", entry_type="spell", limit=20)
+            if entry.title == "Mage Hand"
+        )
+        fighter_entry = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "PHB", entry_type="class", limit=20)
+            if entry.title == "Fighter"
+        )
+        encumbrance_entry = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "PHB", entry_type="variantrule", limit=20)
+            if entry.title == "Encumbrance"
+        )
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    longsword_response = client.get(f"/campaigns/linden-pass/systems/entries/{longsword_entry.slug}")
+    athletics_response = client.get(f"/campaigns/linden-pass/systems/entries/{athletics_entry.slug}")
+    mage_hand_response = client.get(f"/campaigns/linden-pass/systems/entries/{mage_hand_entry.slug}")
+    fighter_response = client.get(f"/campaigns/linden-pass/systems/entries/{fighter_entry.slug}")
+    encumbrance_response = client.get(f"/campaigns/linden-pass/systems/entries/{encumbrance_entry.slug}")
+
+    assert longsword_response.status_code == 200
+    longsword_body = longsword_response.get_data(as_text=True)
+    assert "Related Rules References" in longsword_body
+    assert "Attack Rolls and Attack Bonus" in longsword_body
+    assert "Damage Rolls" in longsword_body
+    assert "Equipped Items, Inventory, and Attunement" in longsword_body
+
+    assert athletics_response.status_code == 200
+    athletics_body = athletics_response.get_data(as_text=True)
+    assert "Related Rules References" in athletics_body
+    assert "Ability Scores and Ability Modifiers" in athletics_body
+    assert "Proficiency Bonus" in athletics_body
+    assert "Skill Bonuses and Proficiency" in athletics_body
+
+    assert mage_hand_response.status_code == 200
+    mage_hand_body = mage_hand_response.get_data(as_text=True)
+    assert "Related Rules References" in mage_hand_body
+    assert "Spell Attacks and Save DCs" in mage_hand_body
+
+    assert fighter_response.status_code == 200
+    fighter_body = fighter_response.get_data(as_text=True)
+    assert "Related Rules References" in fighter_body
+    assert "Proficiency Bonus" in fighter_body
+    assert "Hit Points and Hit Dice" in fighter_body
+
+    assert encumbrance_response.status_code == 200
+    encumbrance_body = encumbrance_response.get_data(as_text=True)
+    assert "Related Rules References" in encumbrance_body
+    assert "Carrying Capacity and Encumbrance" in encumbrance_body
+
+
 def test_source_index_and_category_page_respect_disabled_entry_overrides(
     client, sign_in, users, app, tmp_path
 ):
