@@ -2880,7 +2880,7 @@ def test_phb_book_chapters_are_imported_and_browsable_in_book_order(
 
     assert category_response.status_code == 200
     category_body = category_response.get_data(as_text=True)
-    assert "Showing all 9 book chapters in this source." in category_body
+    assert "Showing all 9 book chapters available to you in this source." in category_body
     for earlier, later in zip(book_entry_links, book_entry_links[1:]):
         assert category_body.index(earlier) < category_body.index(later)
 
@@ -2997,7 +2997,7 @@ def test_dmg_book_chapters_are_imported_for_dm_browse_in_book_order(
 
     assert category_response.status_code == 200
     category_body = category_response.get_data(as_text=True)
-    assert "Showing all 6 book chapters in this source." in category_body
+    assert "Showing all 6 book chapters available to you in this source." in category_body
     for earlier, later in zip(book_entry_links, book_entry_links[1:]):
         assert category_body.index(earlier) < category_body.index(later)
 
