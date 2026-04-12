@@ -3,10 +3,11 @@
 __pycache__/
 *.pyc
 /.pytest-tmp/
-/.tmp-pytest-*/
-/.tmp-validation/
+/.tmp-*/
 /codex*/
+/pytesttmp*/
 /tmp*/
+/python_probe_write.txt
 campaigns/*
 !campaigns/.gitkeep
 !campaigns/README.md
