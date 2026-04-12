@@ -4149,6 +4149,7 @@ XGE_RULES_REFERENCE_TEST_TITLES = (
     "Random Encounters: A World of Possibilities",
     "Traps Revisited",
     "Downtime Revisited",
+    "Awarding Magic Items",
     "Variant Rules",
 )
 
@@ -7021,6 +7022,9 @@ def test_xge_book_entries_are_imported_for_player_browse(
     downtime_revisited_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Downtime Revisited'].slug}"
     )
+    awarding_magic_items_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Awarding Magic Items'].slug}"
+    )
     variant_rules_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Variant Rules'].slug}"
     )
@@ -7111,6 +7115,12 @@ def test_xge_book_entries_are_imported_for_player_browse(
     assert 'href="#downtime-activities"' in downtime_revisited_body
     assert 'id="example-downtime-activities"' in downtime_revisited_body
 
+    assert awarding_magic_items_response.status_code == 200
+    awarding_magic_items_body = awarding_magic_items_response.get_data(as_text=True)
+    assert "Chapter 2" in awarding_magic_items_body
+    assert "Dungeon Master&#39;s Tools" in awarding_magic_items_body
+    assert "Magic item awards can be paced by tone, treasure, and campaign expectations." in awarding_magic_items_body
+
     assert variant_rules_response.status_code == 200
     variant_rules_body = variant_rules_response.get_data(as_text=True)
     assert "Appendix A" in variant_rules_body
@@ -7148,7 +7158,7 @@ def test_xge_book_entries_follow_source_visibility(client, sign_in, users, app, 
     player_source_response = client.get("/campaigns/linden-pass/systems/sources/XGE")
     player_category_response = client.get("/campaigns/linden-pass/systems/sources/XGE/types/book")
     player_entry_response = client.get(
-        f"/campaigns/linden-pass/systems/entries/{book_entries['Random Encounters: A World of Possibilities'].slug}"
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Awarding Magic Items'].slug}"
     )
 
     assert player_source_response.status_code == 404
@@ -7161,18 +7171,18 @@ def test_xge_book_entries_follow_source_visibility(client, sign_in, users, app, 
     dm_source_response = client.get("/campaigns/linden-pass/systems/sources/XGE")
     dm_category_response = client.get("/campaigns/linden-pass/systems/sources/XGE/types/book")
     dm_entry_response = client.get(
-        f"/campaigns/linden-pass/systems/entries/{book_entries['Random Encounters: A World of Possibilities'].slug}"
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Awarding Magic Items'].slug}"
     )
 
     assert dm_source_response.status_code == 200
     assert "Book Chapters" in dm_source_response.get_data(as_text=True)
     assert dm_category_response.status_code == 200
-    assert "Random Encounters: A World of Possibilities" in dm_category_response.get_data(as_text=True)
+    assert "Awarding Magic Items" in dm_category_response.get_data(as_text=True)
     assert dm_entry_response.status_code == 200
     dm_body = dm_entry_response.get_data(as_text=True)
     assert "Chapter 2" in dm_body
     assert "Dungeon Master&#39;s Tools" in dm_body
-    assert "Flight, or Fight, or..?" in dm_body
+    assert "Magic item awards can be paced by tone, treasure, and campaign expectations." in dm_body
 
 
 def test_xge_book_slice_excludes_remaining_pending_section_pages(app, tmp_path):
@@ -7196,7 +7206,6 @@ def test_xge_book_slice_excludes_remaining_pending_section_pages(app, tmp_path):
     assert result.imported_by_type == {"book": len(XGE_RULES_REFERENCE_TEST_TITLES)}
     book_titles = {entry.title for entry in book_entries}
     assert book_titles == set(XGE_RULES_REFERENCE_TEST_TITLES)
-    assert "Awarding Magic Items" not in book_titles
     assert "Shared Campaigns" not in book_titles
 
 

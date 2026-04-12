@@ -225,9 +225,9 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
     ),
     # Keep the XGE slice reference-first. Standalone atomic wrappers remain,
     # while the broader Tool Proficiencies, Spellcasting, Encounter Building,
-    # Random Encounters, Traps Revisited, and Downtime Revisited sections now
-    # ship as their own source-backed pages. The other broader chapter slices
-    # stay on their own roadmap items.
+    # Random Encounters, Traps Revisited, Downtime Revisited, and Awarding
+    # Magic Items sections now ship as their own source-backed pages. The
+    # readable Shared Campaigns wrapper still stays on its own roadmap item.
     "XGE": (
         ("Dungeon Master's Tools", "Simultaneous Effects"),
         ("Dungeon Master's Tools", "Falling"),
@@ -242,6 +242,7 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         ("Dungeon Master's Tools", "Random Encounters: A World of Possibilities"),
         ("Dungeon Master's Tools", "Traps Revisited"),
         ("Dungeon Master's Tools", "Downtime Revisited"),
+        ("Dungeon Master's Tools", "Awarding Magic Items"),
         ("Shared Campaigns", "Variant Rules"),
     ),
 }
