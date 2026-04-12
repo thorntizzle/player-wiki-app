@@ -1001,6 +1001,22 @@ def build_dmg_book_data_root(root: Path) -> Path:
                             "ordinal": {"type": "chapter", "identifier": 2},
                         },
                         {
+                            "name": "Adventure Environments",
+                            "headers": [
+                                "Dungeons",
+                                "Mapping a Dungeon",
+                                "Wilderness",
+                                "Mapping a Wilderness",
+                                "Wilderness Survival",
+                                "Settlement",
+                                "Mapping a Settlement",
+                                "Urban Encounters",
+                                "Unusual Environments",
+                                "Traps",
+                            ],
+                            "ordinal": {"type": "chapter", "identifier": 5},
+                        },
+                        {
                             "name": "Between Adventures",
                             "headers": ["Linking Adventures", "Campaign Tracking", "Recurring Expenses", "Downtime Activities"],
                             "ordinal": {"type": "chapter", "identifier": 6},
@@ -1043,6 +1059,82 @@ def build_dmg_book_data_root(root: Path) -> Path:
                         },
                     ],
                     "id": "dmg-multiverse",
+                },
+                {
+                    "type": "section",
+                    "name": "Adventure Environments",
+                    "page": 99,
+                    "entries": [
+                        "Adventure locations shape the hazards and pacing of an expedition.",
+                        {
+                            "type": "section",
+                            "name": "Wilderness Survival",
+                            "page": 109,
+                            "entries": ["The wild demands navigation, supplies, and careful pace management."],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Unusual Environments",
+                            "page": 116,
+                            "entries": ["Odd realms can impose magical or physical pressures on explorers."],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Traps",
+                            "page": 120,
+                            "entries": [
+                                "Traps can be found almost anywhere and punish careless adventurers.",
+                                {
+                                    "type": "entries",
+                                    "name": "Traps in Play",
+                                    "page": 120,
+                                    "entries": [
+                                        "A trap needs a trigger, an effect, and a fair chance to notice or foil it.",
+                                        {
+                                            "type": "entries",
+                                            "name": "Triggering a Trap",
+                                            "page": 120,
+                                            "entries": [
+                                                "Pressure plates, trip wires, and magical glyphs are common triggers."
+                                            ],
+                                        },
+                                        {
+                                            "type": "entries",
+                                            "name": "Detecting and Disabling a Trap",
+                                            "page": 120,
+                                            "entries": [
+                                                "Perception, Investigation, and tool use can expose or disarm a trap."
+                                            ],
+                                        },
+                                        {
+                                            "type": "entries",
+                                            "name": "Trap Effects",
+                                            "page": 121,
+                                            "entries": [
+                                                "Trap effects can range from setbacks to deadly hazards."
+                                            ],
+                                        },
+                                        {
+                                            "type": "entries",
+                                            "name": "Complex Traps",
+                                            "page": 121,
+                                            "entries": [
+                                                "Some traps act over multiple rounds and feel more like encounters."
+                                            ],
+                                        },
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Sample Traps",
+                                    "page": 121,
+                                    "entries": ["Sample traps provide reusable patterns for dungeon hazards."],
+                                },
+                            ],
+                            "id": "dmg-traps",
+                        },
+                    ],
+                    "id": "dmg-adventure-environments",
                 },
                 {
                     "type": "section",
@@ -2643,11 +2735,13 @@ def test_dmg_book_chapters_are_imported_for_dm_browse_in_book_order(
         )
         titles = [entry.title for entry in book_entries]
         book_entry_links = [f'/campaigns/linden-pass/systems/entries/{entry.slug}' for entry in book_entries]
+        traps = next(entry for entry in book_entries if entry.title == "Traps")
         downtime_activities = next(entry for entry in book_entries if entry.title == "Downtime Activities")
         treasure = next(entry for entry in book_entries if entry.title == "Treasure")
         running_the_game = next(entry for entry in book_entries if entry.title == "Running the Game")
 
     assert titles == [
+        "Traps",
         "Downtime Activities",
         "Treasure",
         "Running the Game",
@@ -2657,6 +2751,7 @@ def test_dmg_book_chapters_are_imported_for_dm_browse_in_book_order(
     sign_in(users["dm"]["email"], users["dm"]["password"])
     source_response = client.get("/campaigns/linden-pass/systems/sources/DMG")
     category_response = client.get("/campaigns/linden-pass/systems/sources/DMG/types/book")
+    traps_response = client.get(f"/campaigns/linden-pass/systems/entries/{traps.slug}")
     downtime_response = client.get(f"/campaigns/linden-pass/systems/entries/{downtime_activities.slug}")
     treasure_response = client.get(f"/campaigns/linden-pass/systems/entries/{treasure.slug}")
     running_the_game_response = client.get(f"/campaigns/linden-pass/systems/entries/{running_the_game.slug}")
@@ -2664,19 +2759,37 @@ def test_dmg_book_chapters_are_imported_for_dm_browse_in_book_order(
     assert source_response.status_code == 200
     source_body = source_response.get_data(as_text=True)
     assert "Book Chapters" in source_body
+    assert "Traps" in source_body
     assert "Downtime Activities" in source_body
     assert "Treasure" in source_body
     assert "Running the Game" in source_body
     assert "Dungeon Master&#39;s Workshop" in source_body
+    assert "Adventure Environments" in source_body
     assert "Between Adventures" in source_body
     assert "Creating a Multiverse" not in source_body
     assert "Searches only this source&#39;s book chapters using curated metadata" in source_body
 
     assert category_response.status_code == 200
     category_body = category_response.get_data(as_text=True)
-    assert "Showing all 4 book chapters in this source." in category_body
+    assert "Showing all 5 book chapters in this source." in category_body
     for earlier, later in zip(book_entry_links, book_entry_links[1:]):
         assert category_body.index(earlier) < category_body.index(later)
+
+    assert traps_response.status_code == 200
+    traps_body = traps_response.get_data(as_text=True)
+    assert "Chapter 5" in traps_body
+    assert "Adventure Environments" in traps_body
+    assert "Traps in Play" in traps_body
+    assert "Triggering a Trap" in traps_body
+    assert "Detecting and Disabling a Trap" in traps_body
+    assert "Trap Effects" in traps_body
+    assert "Complex Traps" in traps_body
+    assert "Sample Traps" in traps_body
+    assert "Wilderness Survival" not in traps_body
+    assert 'href="#traps-in-play"' in traps_body
+    assert 'id="traps-in-play"' in traps_body
+    assert 'href="#traps-in-play--triggering-a-trap"' in traps_body
+    assert 'id="traps-in-play--triggering-a-trap"' in traps_body
 
     assert downtime_response.status_code == 200
     downtime_body = downtime_response.get_data(as_text=True)
@@ -2703,6 +2816,11 @@ def test_dmg_book_chapters_are_imported_for_dm_browse_in_book_order(
     assert 'href="#using-ability-scores"' in running_the_game_body
     assert 'id="using-ability-scores"' in running_the_game_body
     assert "Chases" in running_the_game_body
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["party"]["email"], users["party"]["password"])
+    blocked_traps_response = client.get(f"/campaigns/linden-pass/systems/entries/{traps.slug}")
+    assert blocked_traps_response.status_code == 404
 
 
 def test_phb_book_chapters_surface_related_imported_entities(

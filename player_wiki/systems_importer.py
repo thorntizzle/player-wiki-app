@@ -151,6 +151,7 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         "Conditions",
     ),
     "DMG": (
+        ("Adventure Environments", "Traps"),
         ("Between Adventures", "Downtime Activities"),
         "Treasure",
         "Running the Game",
