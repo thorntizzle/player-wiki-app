@@ -166,6 +166,17 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         ("Introduction", "Spore Servant Template"),
         ("Appendix B: Nonplayer Characters", "Customizing NPCs"),
     ),
+    "VGM": (
+        ("Monster Lore", "Beholders: Bad Dreams Come True"),
+        ("Monster Lore", "Giants: World Shakers"),
+        ("Monster Lore", "Gnolls: The Insatiable Hunger"),
+        ("Monster Lore", "Goblinoids: The Conquering Host"),
+        ("Monster Lore", "Hags: Dark Sisterhood"),
+        ("Monster Lore", "Kobolds: Little Dragons"),
+        ("Monster Lore", "Mind Flayers: Scourge of Worlds"),
+        ("Monster Lore", "Orcs: The Godsworn"),
+        ("Monster Lore", "Yuan-ti: Snake People"),
+    ),
 }
 
 # The supported library catalog currently carries 2014 class sources plus the
