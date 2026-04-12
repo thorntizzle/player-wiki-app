@@ -3234,6 +3234,30 @@ def create_app() -> Flask:
             include_source_ids=[source_id],
             limit=None,
         )
+        has_book_rules_reference_entries = any(
+            entry.entry_type == "book" for entry in rules_reference_entries
+        )
+        has_rule_rules_reference_entries = any(
+            entry.entry_type == "rule" for entry in rules_reference_entries
+        )
+        if has_book_rules_reference_entries and has_rule_rules_reference_entries:
+            rules_reference_search_meta = (
+                "Searches only this source's book chapters and rules entries using curated metadata "
+                "like chapter labels, section headings, aliases, formulas, and rule facets. "
+                "It does not search full entry body text."
+            )
+        elif has_book_rules_reference_entries:
+            rules_reference_search_meta = (
+                "Searches only this source's book chapters using curated metadata like chapter labels "
+                "and section headings. It does not search full entry body text."
+            )
+        elif has_rule_rules_reference_entries:
+            rules_reference_search_meta = (
+                "Searches only this source's rules entries using curated metadata like aliases, formulas, "
+                "and rule facets. It does not search full entry body text."
+            )
+        else:
+            rules_reference_search_meta = ""
         rules_reference_query = reference_query.strip()
         rules_reference_results = []
         if rules_reference_query:
@@ -3250,6 +3274,7 @@ def create_app() -> Flask:
             "entry_groups": entry_groups,
             "book_entries": book_entries,
             "has_rules_reference_search": bool(rules_reference_entries),
+            "rules_reference_search_meta": rules_reference_search_meta,
             "reference_query": rules_reference_query,
             "rules_reference_results": rules_reference_results,
             "entry_count": sum(group["count"] for group in all_entry_groups),
@@ -3370,7 +3395,11 @@ def create_app() -> Flask:
             if entry.entry_type in {"classfeature", "subclassfeature", "optionalfeature"}
             else None
         )
-        related_rule_entries = systems_service.build_related_rules_for_entry(campaign_slug, entry)
+        related_rule_entries = [
+            candidate
+            for candidate in systems_service.build_related_rules_for_entry(campaign_slug, entry)
+            if can_access_campaign_systems_entry(campaign_slug, candidate.slug)
+        ]
         book_headers = []
         book_section_outline = []
         if entry.entry_type == "book":

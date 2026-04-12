@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from player_wiki.dnd5e_rules_reference import DND5E_RULES_REFERENCE_VERSION, build_dnd5e_rules_reference_entries
 from player_wiki.auth_store import AuthStore
+from player_wiki.systems_importer import Dnd5eSystemsImporter
+from tests.test_systems_importer import build_test_data_root
 
 
 def build_source_form(app, campaign_slug: str = "linden-pass") -> dict[str, str]:
@@ -153,6 +155,7 @@ def test_builtin_rules_source_is_seeded_and_browsable_without_import(client, sig
     assert "Character Rules Reference" in source_body
     assert "Browse This Source" in source_body
     assert "Rules" in source_body
+    assert "Searches only this source&#39;s rules entries using curated metadata" in source_body
 
     assert category_response.status_code == 200
     category_body = category_response.get_data(as_text=True)
@@ -169,6 +172,49 @@ def test_builtin_rules_source_is_seeded_and_browsable_without_import(client, sig
     detail_body = detail_response.get_data(as_text=True)
     assert "attunement is a separate state with a normal limit of 3 items" in detail_body
     assert "Inventory Versus Equipment" in detail_body
+
+
+def test_related_rules_sidebar_respects_rules_source_visibility(client, sign_in, users, app, tmp_path):
+    data_root = build_test_data_root(tmp_path / "dnd5e-source")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("PHB", entry_types=["item"])
+
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="RULES",
+            is_enabled=True,
+            default_visibility="dm",
+        )
+        longsword_entry = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "PHB", entry_type="item", limit=20)
+            if entry.title == "Longsword"
+        )
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    player_response = client.get(f"/campaigns/linden-pass/systems/entries/{longsword_entry.slug}")
+
+    assert player_response.status_code == 200
+    player_body = player_response.get_data(as_text=True)
+    assert "Related Rules References" not in player_body
+    assert "Attack Rolls and Attack Bonus" not in player_body
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    dm_response = client.get(f"/campaigns/linden-pass/systems/entries/{longsword_entry.slug}")
+
+    assert dm_response.status_code == 200
+    dm_body = dm_response.get_data(as_text=True)
+    assert "Related Rules References" in dm_body
+    assert "Attack Rolls and Attack Bonus" in dm_body
 
 
 def test_builtin_rules_source_reseeds_stale_rows_from_managed_payload(app):

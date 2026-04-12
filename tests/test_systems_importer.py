@@ -2241,6 +2241,8 @@ def test_rules_reference_search_uses_curated_metadata_without_full_body_search(
     assert "Rules Reference Search" in source_body
     assert "Combat" in source_body
     assert "PHB | Book Chapters | Chapter 9" in source_body
+    assert "Searches only this source&#39;s book chapters using curated metadata" in source_body
+    assert "`RULES` entries" not in source_body
 
     assert rule_response.status_code == 200
     rule_body = rule_response.get_data(as_text=True)
