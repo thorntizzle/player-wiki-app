@@ -82,11 +82,13 @@ PHB_BOOK_SECTION_RULE_KEY_MAP = {
 PHB_BOOK_SECTION_ENTITY_TAG_ENTRY_TYPES = {
     "action": "action",
     "condition": "condition",
+    "feat": "feat",
     "status": "status",
     "skill": "skill",
     "sense": "sense",
     "spell": "spell",
     "item": "item",
+    "variantrule": "variantrule",
 }
 PHB_BOOK_SECTION_ENTITY_TYPE_ORDER = (
     "condition",
@@ -95,6 +97,8 @@ PHB_BOOK_SECTION_ENTITY_TYPE_ORDER = (
     "skill",
     "sense",
     "spell",
+    "variantrule",
+    "feat",
     "item",
 )
 PHB_BOOK_SECTION_ENTITY_GROUP_LABELS = {
@@ -104,6 +108,8 @@ PHB_BOOK_SECTION_ENTITY_GROUP_LABELS = {
     "skill": "Skills",
     "sense": "Senses",
     "spell": "Spells",
+    "variantrule": "Variant Rules",
+    "feat": "Feats",
     "item": "Equipment",
 }
 

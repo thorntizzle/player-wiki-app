@@ -580,6 +580,11 @@ def build_phb_book_data_root(root: Path) -> Path:
                             "ordinal": {"type": "chapter", "identifier": 5},
                         },
                         {
+                            "name": "Customization Options",
+                            "headers": ["Multiclassing", "Feats"],
+                            "ordinal": {"type": "chapter", "identifier": 6},
+                        },
+                        {
                             "name": "Using Ability Scores",
                             "headers": [
                                 "Advantage and Disadvantage",
@@ -614,8 +619,33 @@ def build_phb_book_data_root(root: Path) -> Path:
                             ],
                             "ordinal": {"type": "chapter", "identifier": 10},
                         },
+                        {
+                            "name": "Conditions",
+                            "ordinal": {"type": "appendix", "identifier": "A"},
+                        },
                     ],
                 }
+            ]
+        },
+    )
+    write_json(
+        root / "data/variantrules.json",
+        {
+            "variantrule": [
+                {
+                    "name": "Encumbrance",
+                    "source": "PHB",
+                    "page": 176,
+                    "ruleType": "O",
+                    "entries": ["If you carry weight in excess of 5 times your Strength score, you are encumbered."],
+                },
+                {
+                    "name": "Multiclassing",
+                    "source": "PHB",
+                    "page": 163,
+                    "ruleType": "O",
+                    "entries": ["This optional rule lets a character gain levels in multiple classes."],
+                },
             ]
         },
     )
@@ -692,8 +722,66 @@ def build_phb_book_data_root(root: Path) -> Path:
                     "page": 143,
                     "entries": [
                         "Equipment includes armor, weapons, and adventuring gear.",
+                        {
+                            "type": "section",
+                            "name": "Armor and Shields",
+                            "page": 144,
+                            "entries": [
+                                "Armor such as {@item chain mail|phb} helps protect you in battle.",
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Weapons",
+                            "page": 146,
+                            "entries": [
+                                "Weapons such as {@item longsword|phb} and {@item light crossbow|phb} support different fighting styles.",
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Tools",
+                            "page": 154,
+                            "entries": [
+                                "A set of tools lets you apply a specific craft or trade.",
+                            ],
+                        },
                     ],
                     "id": "phb-equipment",
+                },
+                {
+                    "type": "section",
+                    "name": "Customization Options",
+                    "page": 163,
+                    "entries": [
+                        "Customization options let a group opt into broader character-building rules.",
+                        {
+                            "type": "section",
+                            "name": "Multiclassing",
+                            "page": 163,
+                            "entries": [
+                                "The optional {@variantrule Multiclassing|PHB} rule lets you gain levels in multiple classes.",
+                                {
+                                    "type": "entries",
+                                    "name": "Spell Slots",
+                                    "page": 164,
+                                    "entries": [
+                                        "Multiclass spellcasters combine class levels to determine available spell slots.",
+                                    ],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Feats",
+                            "page": 165,
+                            "entries": [
+                                "A feat represents talent or expertise beyond standard class progression.",
+                                "The {@feat Alert|PHB} feat is one example of the options in this chapter.",
+                            ],
+                        },
+                    ],
+                    "id": "phb-customization",
                 },
                 {
                     "type": "section",
@@ -866,6 +954,29 @@ def build_phb_book_data_root(root: Path) -> Path:
                         },
                     ],
                     "id": "phb-spellcasting",
+                },
+                {
+                    "type": "section",
+                    "name": "Conditions",
+                    "page": 289,
+                    "entries": [
+                        "Conditions alter a creature's capabilities in a variety of ways.",
+                        {
+                            "type": "inlineBlock",
+                            "entries": [
+                                "The conditions are:",
+                                {
+                                    "type": "list",
+                                    "items": [
+                                        "{@condition blinded}",
+                                        "{@condition charmed}",
+                                        "{@condition deafened}",
+                                    ],
+                                },
+                            ],
+                        },
+                    ],
+                    "id": "phb-conditions",
                 },
             ]
         },
@@ -2212,9 +2323,12 @@ def test_phb_book_chapters_are_imported_and_browsable_in_book_order(
         )
         titles = [entry.title for entry in book_entries]
         book_entry_links = [f'/campaigns/linden-pass/systems/entries/{entry.slug}' for entry in book_entries]
+        equipment = next(entry for entry in book_entries if entry.title == "Equipment")
+        customization_options = next(entry for entry in book_entries if entry.title == "Customization Options")
         using_ability_scores = next(entry for entry in book_entries if entry.title == "Using Ability Scores")
         introduction = next(entry for entry in book_entries if entry.title == "Introduction")
         spellcasting = next(entry for entry in book_entries if entry.title == "Spellcasting")
+        conditions = next(entry for entry in book_entries if entry.title == "Conditions")
         rules_entries = {
             entry.title: entry
             for entry in store.list_entries_for_source("DND-5E", "RULES", entry_type="rule", limit=None)
@@ -2224,34 +2338,55 @@ def test_phb_book_chapters_are_imported_and_browsable_in_book_order(
     assert titles == [
         "Introduction",
         "Step-by-Step Characters",
+        "Equipment",
+        "Customization Options",
         "Using Ability Scores",
         "Adventuring",
         "Combat",
         "Spellcasting",
+        "Conditions",
     ]
 
     sign_in(users["party"]["email"], users["party"]["password"])
     source_response = client.get("/campaigns/linden-pass/systems/sources/PHB")
     category_response = client.get("/campaigns/linden-pass/systems/sources/PHB/types/book")
+    equipment_response = client.get(f"/campaigns/linden-pass/systems/entries/{equipment.slug}")
+    customization_response = client.get(f"/campaigns/linden-pass/systems/entries/{customization_options.slug}")
     detail_response = client.get(f"/campaigns/linden-pass/systems/entries/{using_ability_scores.slug}")
     intro_response = client.get(f"/campaigns/linden-pass/systems/entries/{introduction.slug}")
     spellcasting_response = client.get(f"/campaigns/linden-pass/systems/entries/{spellcasting.slug}")
+    conditions_response = client.get(f"/campaigns/linden-pass/systems/entries/{conditions.slug}")
 
     assert source_response.status_code == 200
     source_body = source_response.get_data(as_text=True)
     assert "Book Chapters" in source_body
     assert "Introduction" in source_body
+    assert "Equipment" in source_body
+    assert "Customization Options" in source_body
     assert "Spellcasting" in source_body
-    assert "Equipment" not in source_body
+    assert "Conditions" in source_body
 
     assert category_response.status_code == 200
     category_body = category_response.get_data(as_text=True)
-    assert "Showing all 6 book chapters in this source." in category_body
-    assert category_body.index(book_entry_links[0]) < category_body.index(book_entry_links[1])
-    assert category_body.index(book_entry_links[1]) < category_body.index(book_entry_links[2])
-    assert category_body.index(book_entry_links[2]) < category_body.index(book_entry_links[3])
-    assert category_body.index(book_entry_links[3]) < category_body.index(book_entry_links[4])
-    assert category_body.index(book_entry_links[4]) < category_body.index(book_entry_links[5])
+    assert "Showing all 9 book chapters in this source." in category_body
+    for earlier, later in zip(book_entry_links, book_entry_links[1:]):
+        assert category_body.index(earlier) < category_body.index(later)
+
+    assert equipment_response.status_code == 200
+    equipment_body = equipment_response.get_data(as_text=True)
+    assert "Chapter 5" in equipment_body
+    assert "Armor and Shields" in equipment_body
+    assert "Weapons" in equipment_body
+    assert 'href="#armor-and-shields"' in equipment_body
+    assert 'id="armor-and-shields"' in equipment_body
+
+    assert customization_response.status_code == 200
+    customization_body = customization_response.get_data(as_text=True)
+    assert "Chapter 6" in customization_body
+    assert "Multiclassing" in customization_body
+    assert "Feats" in customization_body
+    assert 'href="#multiclassing"' in customization_body
+    assert 'id="multiclassing"' in customization_body
 
     assert detail_response.status_code == 200
     detail_body = detail_response.get_data(as_text=True)
@@ -2282,6 +2417,12 @@ def test_phb_book_chapters_are_imported_and_browsable_in_book_order(
     assert 'id="casting-a-spell--components"' in spellcasting_body
     assert 'id="targets--areas-of-effect"' in spellcasting_body
 
+    assert conditions_response.status_code == 200
+    conditions_body = conditions_response.get_data(as_text=True)
+    assert "Appendix A" in conditions_body
+    assert "Conditions alter a creature" in conditions_body
+    assert "blinded" in conditions_body
+
 
 def test_phb_book_chapters_surface_related_imported_entities(
     client, sign_in, users, app, tmp_path
@@ -2296,7 +2437,7 @@ def test_phb_book_chapters_surface_related_imported_entities(
         )
         importer.import_source(
             "PHB",
-            entry_types=["action", "book", "condition", "item", "sense", "skill", "spell"],
+            entry_types=["action", "book", "condition", "feat", "item", "sense", "skill", "spell", "variantrule"],
         )
 
         service = app.extensions["systems_service"]
@@ -2312,12 +2453,16 @@ def test_phb_book_chapters_surface_related_imported_entities(
         }
         phb_entries = {
             (entry.entry_type, entry.title): entry
-            for entry_type in ("action", "condition", "item", "sense", "skill", "spell")
+            for entry_type in ("action", "condition", "feat", "item", "sense", "skill", "spell", "variantrule")
             for entry in store.list_entries_for_source("DND-5E", "PHB", entry_type=entry_type, limit=None)
         }
 
     sign_in(users["party"]["email"], users["party"]["password"])
     step_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Step-by-Step Characters'].slug}")
+    equipment_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Equipment'].slug}")
+    customization_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Customization Options'].slug}"
+    )
     ability_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Using Ability Scores'].slug}")
     adventuring_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Adventuring'].slug}")
     combat_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Combat'].slug}")
@@ -2328,6 +2473,22 @@ def test_phb_book_chapters_surface_related_imported_entities(
     assert "Equipment:" in step_body
     assert f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("item", "Chain Mail")].slug}"' in step_body
     assert f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("item", "Longsword")].slug}"' in step_body
+
+    assert equipment_response.status_code == 200
+    equipment_body = equipment_response.get_data(as_text=True)
+    assert "Equipment:" in equipment_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("item", "Chain Mail")].slug}"' in equipment_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("item", "Longsword")].slug}"' in equipment_body
+
+    assert customization_response.status_code == 200
+    customization_body = customization_response.get_data(as_text=True)
+    assert "Variant Rules:" in customization_body
+    assert "Feats:" in customization_body
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("variantrule", "Multiclassing")].slug}"'
+        in customization_body
+    )
+    assert f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("feat", "Alert")].slug}"' in customization_body
 
     assert ability_response.status_code == 200
     ability_body = ability_response.get_data(as_text=True)

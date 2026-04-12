@@ -141,10 +141,13 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
     "PHB": (
         "Introduction",
         "Step-by-Step Characters",
+        "Equipment",
+        "Customization Options",
         "Using Ability Scores",
         "Adventuring",
         "Combat",
         "Spellcasting",
+        "Conditions",
     ),
 }
 
