@@ -4135,6 +4135,278 @@ def build_spell_metadata_data_root(root: Path) -> Path:
     return root
 
 
+XGE_ATOMIC_WRAPPER_TEST_TITLES = (
+    "Simultaneous Effects",
+    "Falling",
+    "Sleep",
+    "Waking Someone",
+    "Adamantine Weapons",
+    "Tying Knots",
+    "Identifying a Spell",
+    "Variant Rules",
+)
+
+
+def build_xge_atomic_wrapper_book_data_root(root: Path) -> Path:
+    data_root = build_test_data_root(root)
+    write_json(
+        root / "data/books.json",
+        {
+            "book": [
+                {
+                    "name": "Xanathar's Guide to Everything",
+                    "id": "XGE",
+                    "source": "XGE",
+                    "contents": [
+                        {
+                            "name": "Dungeon Master's Tools",
+                            "headers": [
+                                "Simultaneous Effects",
+                                "Falling",
+                                "Sleep",
+                                "Adamantine Weapons",
+                                "Tying Knots",
+                                "Tool Proficiencies",
+                                "Spellcasting",
+                                "Encounter Building",
+                                "Random Encounters: A World of Possibilities",
+                                "Traps Revisited",
+                                "Downtime Revisited",
+                                "Awarding Magic Items",
+                            ],
+                            "ordinal": {"type": "chapter", "identifier": 2},
+                        },
+                        {
+                            "name": "Shared Campaigns",
+                            "headers": [
+                                "Code of Conduct",
+                                "Designing Adventures",
+                                "Character Creation",
+                                "Variant Rules",
+                            ],
+                            "ordinal": {"type": "appendix", "identifier": "A"},
+                        },
+                    ],
+                }
+            ]
+        },
+    )
+    write_json(
+        root / "data/book/book-xge.json",
+        {
+            "data": [
+                {
+                    "type": "section",
+                    "name": "Dungeon Master's Tools",
+                    "page": 77,
+                    "entries": [
+                        {
+                            "type": "entries",
+                            "name": "Simultaneous Effects",
+                            "page": 77,
+                            "entries": [
+                                "When multiple things happen at once, the person at the table or the creature in the game world who controls those things decides the order.",
+                            ],
+                        },
+                        {
+                            "type": "entries",
+                            "name": "Falling",
+                            "page": 77,
+                            "entries": [
+                                "The rule for falling assumes a creature immediately drops when it falls.",
+                                {
+                                    "type": "entries",
+                                    "name": "Rate of Falling",
+                                    "page": 77,
+                                    "entries": ["A creature instantly descends up to 500 feet when it falls."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Flying Creatures and Falling",
+                                    "page": 77,
+                                    "entries": ["Flying creatures can stay aloft or plummet depending on why they fall."],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "entries",
+                            "name": "Sleep",
+                            "page": 77,
+                            "entries": [
+                                "Sleep and rest can be interrupted, deepened, or ignored only at a cost.",
+                                {
+                                    "type": "entries",
+                                    "name": "Waking Someone",
+                                    "page": 77,
+                                    "entries": ["A sleeper can be awakened by noise, damage, or an ally's effort."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Sleeping in Armor",
+                                    "page": 77,
+                                    "entries": ["Armor makes rest harder and limits its benefits."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Going without a Long Rest",
+                                    "page": 78,
+                                    "entries": ["Skipping long rests invites exhaustion and mounting risk."],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "entries",
+                            "name": "Adamantine Weapons",
+                            "page": 78,
+                            "entries": ["Adamantine weapons bite into objects and structures with unusual certainty."],
+                        },
+                        {
+                            "type": "entries",
+                            "name": "Tying Knots",
+                            "page": 78,
+                            "entries": ["Different knots ask for different ability checks, time, and conditions."],
+                        },
+                        {
+                            "type": "entries",
+                            "name": "Tool Proficiencies",
+                            "page": 78,
+                            "entries": [
+                                "Tool proficiencies can deepen a character's identity without changing the app's current automation scope.",
+                                {
+                                    "type": "entries",
+                                    "name": "Tools and Skills Together",
+                                    "page": 78,
+                                    "entries": ["Tools and skills can combine when both are relevant."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Tool Descriptions",
+                                    "page": 78,
+                                    "entries": ["Each tool description gives examples of useful checks and activities."],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "entries",
+                            "name": "Spellcasting",
+                            "page": 85,
+                            "entries": [
+                                "This section expands on core spellcasting without replacing the core rules.",
+                                {
+                                    "type": "entries",
+                                    "name": "Perceiving a Caster at Work",
+                                    "page": 85,
+                                    "entries": ["Obvious components or visible magic can reveal that a spell is being cast."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Identifying a Spell",
+                                    "page": 85,
+                                    "entries": ["Observers can sometimes identify a spell as it is cast or after its effect appears."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Invalid Spell Targets",
+                                    "page": 85,
+                                    "entries": ["Spells can fail or misfire when their targets are invalid."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Areas of Effect on a Grid",
+                                    "page": 86,
+                                    "entries": ["A grid can help adjudicate cones, cubes, cylinders, lines, and spheres."],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "entries",
+                            "name": "Encounter Building",
+                            "page": 88,
+                            "entries": ["Encounter building weighs party size, monster count, and expected difficulty."],
+                        },
+                        {
+                            "type": "entries",
+                            "name": "Random Encounters: A World of Possibilities",
+                            "page": 92,
+                            "entries": ["Random encounters can do more than trigger a fight."],
+                        },
+                        {
+                            "type": "entries",
+                            "name": "Traps Revisited",
+                            "page": 113,
+                            "entries": ["Traps range from quick hazards to elaborate multi-round challenges."],
+                        },
+                        {
+                            "type": "entries",
+                            "name": "Downtime Revisited",
+                            "page": 123,
+                            "entries": [
+                                "Downtime can span weeks or months and generate new problems as well as rewards.",
+                                {
+                                    "type": "entries",
+                                    "name": "Rivals",
+                                    "page": 123,
+                                    "entries": ["Rivals turn downtime into a continuing source of tension."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Downtime Activities",
+                                    "page": 125,
+                                    "entries": ["Downtime activities spend time and treasure on focused goals."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Example Downtime Activities",
+                                    "page": 126,
+                                    "entries": ["Example activities show how the downtime framework behaves in play."],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "entries",
+                            "name": "Awarding Magic Items",
+                            "page": 135,
+                            "entries": ["Magic item awards can be paced by tone, treasure, and campaign expectations."],
+                        },
+                    ],
+                },
+                {
+                    "type": "section",
+                    "name": "Shared Campaigns",
+                    "page": 171,
+                    "entries": [
+                        {
+                            "type": "entries",
+                            "name": "Code of Conduct",
+                            "page": 171,
+                            "entries": ["Shared campaigns ask everyone to follow the same conduct expectations."],
+                        },
+                        {
+                            "type": "entries",
+                            "name": "Designing Adventures",
+                            "page": 172,
+                            "entries": ["Shared-campaign adventures need tighter assumptions about pacing and rewards."],
+                        },
+                        {
+                            "type": "entries",
+                            "name": "Character Creation",
+                            "page": 173,
+                            "entries": ["Character creation in shared campaigns uses a narrower rules contract."],
+                        },
+                        {
+                            "type": "entries",
+                            "name": "Variant Rules",
+                            "page": 173,
+                            "entries": ["Shared campaigns keep a bounded rules list so different tables stay compatible."],
+                        },
+                    ],
+                },
+            ]
+        },
+    )
+    return data_root
+
+
 def build_subclass_optionalfeature_progression_data_root(root: Path) -> Path:
     write_json(
         root / "data/optionalfeatures.json",
@@ -6477,6 +6749,162 @@ def test_phb_book_chapters_surface_related_imported_entities(
     spellcasting_body = spellcasting_response.get_data(as_text=True)
     assert "Spells:" in spellcasting_body
     assert f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("spell", "Mage Hand")].slug}"' in spellcasting_body
+
+
+def test_xge_atomic_rule_wrappers_are_imported_for_player_browse(
+    client, sign_in, users, app, tmp_path
+):
+    data_root = build_xge_atomic_wrapper_book_data_root(tmp_path / "dnd5e-source-xge-atomic-wrappers")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("XGE", entry_types=["book"])
+
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="XGE",
+            is_enabled=True,
+            default_visibility="players",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in service.list_entries_for_campaign_source(
+                "linden-pass",
+                "XGE",
+                entry_type="book",
+                limit=None,
+            )
+        }
+
+    assert list(book_entries) == list(XGE_ATOMIC_WRAPPER_TEST_TITLES)
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    source_response = client.get("/campaigns/linden-pass/systems/sources/XGE")
+    category_response = client.get("/campaigns/linden-pass/systems/sources/XGE/types/book")
+    falling_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Falling'].slug}")
+    variant_rules_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Variant Rules'].slug}"
+    )
+
+    assert source_response.status_code == 200
+    source_body = source_response.get_data(as_text=True)
+    assert "Book Chapters" in source_body
+    source_indexes = [source_body.index(title) for title in XGE_ATOMIC_WRAPPER_TEST_TITLES]
+    assert source_indexes == sorted(source_indexes)
+
+    assert category_response.status_code == 200
+    category_body = category_response.get_data(as_text=True)
+    category_indexes = [category_body.index(title) for title in XGE_ATOMIC_WRAPPER_TEST_TITLES]
+    assert category_indexes == sorted(category_indexes)
+
+    assert falling_response.status_code == 200
+    falling_body = falling_response.get_data(as_text=True)
+    assert "Chapter 2" in falling_body
+    assert "Dungeon Master&#39;s Tools" in falling_body
+    assert "Rate of Falling" in falling_body
+    assert "Flying Creatures and Falling" in falling_body
+    assert 'href="#rate-of-falling"' in falling_body
+    assert 'id="flying-creatures-and-falling"' in falling_body
+
+    assert variant_rules_response.status_code == 200
+    variant_rules_body = variant_rules_response.get_data(as_text=True)
+    assert "Appendix A" in variant_rules_body
+    assert "Shared Campaigns" in variant_rules_body
+    assert "bounded rules list" in variant_rules_body
+
+
+def test_xge_atomic_rule_wrappers_follow_source_visibility(client, sign_in, users, app, tmp_path):
+    data_root = build_xge_atomic_wrapper_book_data_root(
+        tmp_path / "dnd5e-source-xge-atomic-wrappers-policy"
+    )
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("XGE", entry_types=["book"])
+
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="XGE",
+            is_enabled=True,
+            default_visibility="dm",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in store.list_entries_for_source("DND-5E", "XGE", entry_type="book", limit=20)
+        }
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    player_source_response = client.get("/campaigns/linden-pass/systems/sources/XGE")
+    player_category_response = client.get("/campaigns/linden-pass/systems/sources/XGE/types/book")
+    player_entry_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Simultaneous Effects'].slug}"
+    )
+
+    assert player_source_response.status_code == 404
+    assert player_category_response.status_code == 404
+    assert player_entry_response.status_code == 404
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    dm_source_response = client.get("/campaigns/linden-pass/systems/sources/XGE")
+    dm_category_response = client.get("/campaigns/linden-pass/systems/sources/XGE/types/book")
+    dm_entry_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Simultaneous Effects'].slug}"
+    )
+
+    assert dm_source_response.status_code == 200
+    assert "Book Chapters" in dm_source_response.get_data(as_text=True)
+    assert dm_category_response.status_code == 200
+    assert "Simultaneous Effects" in dm_category_response.get_data(as_text=True)
+    assert dm_entry_response.status_code == 200
+    dm_body = dm_entry_response.get_data(as_text=True)
+    assert "Chapter 2" in dm_body
+    assert "Dungeon Master&#39;s Tools" in dm_body
+
+
+def test_xge_first_wrapper_slice_excludes_broader_section_pages(app, tmp_path):
+    data_root = build_xge_atomic_wrapper_book_data_root(
+        tmp_path / "dnd5e-source-xge-atomic-wrapper-boundary"
+    )
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        result = importer.import_source("XGE", entry_types=["book"])
+        store = app.extensions["systems_store"]
+        book_entries = list(
+            store.list_entries_for_source("DND-5E", "XGE", entry_type="book", limit=20)
+        )
+
+    assert result.imported_count == len(XGE_ATOMIC_WRAPPER_TEST_TITLES)
+    assert result.imported_by_type == {"book": len(XGE_ATOMIC_WRAPPER_TEST_TITLES)}
+    book_titles = {entry.title for entry in book_entries}
+    assert book_titles == set(XGE_ATOMIC_WRAPPER_TEST_TITLES)
+    assert "Tool Proficiencies" not in book_titles
+    assert "Spellcasting" not in book_titles
+    assert "Downtime Revisited" not in book_titles
+    assert "Encounter Building" not in book_titles
+    assert "Random Encounters: A World of Possibilities" not in book_titles
+    assert "Traps Revisited" not in book_titles
+    assert "Awarding Magic Items" not in book_titles
+    assert "Shared Campaigns" not in book_titles
 
 
 def test_rules_reference_search_uses_curated_metadata_without_full_body_search(
