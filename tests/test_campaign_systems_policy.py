@@ -272,24 +272,24 @@ def test_dmg_book_entries_stay_dm_only(client, sign_in, users, app, tmp_path):
         importer.import_source("DMG", entry_types=["book"])
 
         store = app.extensions["systems_store"]
-        running_the_game_entry = next(
+        multiverse_entry = next(
             entry
             for entry in store.list_entries_for_source("DND-5E", "DMG", entry_type="book", limit=20)
-            if entry.title == "Running the Game"
+            if entry.title == "Creating a Multiverse"
         )
 
     sign_in(users["party"]["email"], users["party"]["password"])
-    player_response = client.get(f"/campaigns/linden-pass/systems/entries/{running_the_game_entry.slug}")
+    player_response = client.get(f"/campaigns/linden-pass/systems/entries/{multiverse_entry.slug}")
     assert player_response.status_code == 404
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["dm"]["email"], users["dm"]["password"])
-    dm_response = client.get(f"/campaigns/linden-pass/systems/entries/{running_the_game_entry.slug}")
+    dm_response = client.get(f"/campaigns/linden-pass/systems/entries/{multiverse_entry.slug}")
 
     assert dm_response.status_code == 200
     dm_body = dm_response.get_data(as_text=True)
-    assert "Running the Game" in dm_body
-    assert "Chapter 8" in dm_body
+    assert "Creating a Multiverse" in dm_body
+    assert "Chapter 2" in dm_body
 
 
 def test_builtin_rules_source_reseeds_stale_rows_from_managed_payload(app):

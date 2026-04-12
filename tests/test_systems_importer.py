@@ -997,7 +997,18 @@ def build_dmg_book_data_root(root: Path) -> Path:
                     "contents": [
                         {
                             "name": "Creating a Multiverse",
-                            "headers": ["The Planes", "Planar Travel"],
+                            "headers": [
+                                "The Planes",
+                                "Planar Travel",
+                                "Astral Plane",
+                                "Ethereal Plane",
+                                "Feywild",
+                                "Shadowfell",
+                                "Inner Planes",
+                                "Outer Planes",
+                                "Other Planes",
+                                "Known Worlds of the Material Plane",
+                            ],
                             "ordinal": {"type": "chapter", "identifier": 2},
                         },
                         {
@@ -1055,7 +1066,107 @@ def build_dmg_book_data_root(root: Path) -> Path:
                             "type": "section",
                             "name": "The Planes",
                             "page": 43,
-                            "entries": ["The multiverse includes transitive, inner, and outer planes."],
+                            "entries": [
+                                "The multiverse includes transitive, inner, and outer planes.",
+                                {
+                                    "type": "entries",
+                                    "name": "Planar Categories",
+                                    "page": 43,
+                                    "entries": [
+                                        "Transitive, inner, and outer planes each serve different roles in a cosmology."
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Putting the Planes Together",
+                                    "page": 44,
+                                    "entries": [
+                                        "A cosmology can connect the planes in the way that best fits a campaign."
+                                    ],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Planar Travel",
+                            "page": 44,
+                            "entries": [
+                                "Portals, spells, and magical sites can carry travelers between worlds.",
+                                {
+                                    "type": "entries",
+                                    "name": "Planar Portals",
+                                    "page": 44,
+                                    "entries": ["Portals can be keyed to places, times, or rituals."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Spells",
+                                    "page": 45,
+                                    "entries": [
+                                        "Magic such as plane shift and gate can move creatures across planar boundaries."
+                                    ],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Feywild",
+                            "page": 49,
+                            "entries": [
+                                "The Feywild is a bright echo of the world steeped in emotion and strange magic.",
+                                {
+                                    "type": "entries",
+                                    "name": "Optional Rules: Feywild Magic",
+                                    "page": 50,
+                                    "entries": ["Feywild regions can twist spells in whimsical ways."],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Outer Planes",
+                            "page": 57,
+                            "entries": [
+                                "The Outer Planes align with moral and philosophical principles.",
+                                {
+                                    "type": "entries",
+                                    "name": "Traveling the Outer Planes",
+                                    "page": 59,
+                                    "entries": [
+                                        "Journeys across the Outer Planes reflect belief, petitioners, and planar pathways."
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Optional Rules",
+                                    "page": 59,
+                                    "entries": ["Planar traits and optional rules can reinforce a plane's theme."],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Other Planes",
+                            "page": 67,
+                            "entries": [
+                                "Demiplanes and stranger realms sit outside the main planar rings.",
+                                {
+                                    "type": "entries",
+                                    "name": "The Outlands and Sigil",
+                                    "page": 67,
+                                    "entries": [
+                                        "The Outlands connect to every Outer Plane, with Sigil at its spire's crown."
+                                    ],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Known Worlds of the Material Plane",
+                            "page": 68,
+                            "entries": [
+                                "Material worlds such as Toril, Oerth, Krynn, and Athas can anchor distinct campaigns."
+                            ],
                         },
                     ],
                     "id": "dmg-multiverse",
@@ -2735,12 +2846,14 @@ def test_dmg_book_chapters_are_imported_for_dm_browse_in_book_order(
         )
         titles = [entry.title for entry in book_entries]
         book_entry_links = [f'/campaigns/linden-pass/systems/entries/{entry.slug}' for entry in book_entries]
+        multiverse = next(entry for entry in book_entries if entry.title == "Creating a Multiverse")
         traps = next(entry for entry in book_entries if entry.title == "Traps")
         downtime_activities = next(entry for entry in book_entries if entry.title == "Downtime Activities")
         treasure = next(entry for entry in book_entries if entry.title == "Treasure")
         running_the_game = next(entry for entry in book_entries if entry.title == "Running the Game")
 
     assert titles == [
+        "Creating a Multiverse",
         "Traps",
         "Downtime Activities",
         "Treasure",
@@ -2751,6 +2864,7 @@ def test_dmg_book_chapters_are_imported_for_dm_browse_in_book_order(
     sign_in(users["dm"]["email"], users["dm"]["password"])
     source_response = client.get("/campaigns/linden-pass/systems/sources/DMG")
     category_response = client.get("/campaigns/linden-pass/systems/sources/DMG/types/book")
+    multiverse_response = client.get(f"/campaigns/linden-pass/systems/entries/{multiverse.slug}")
     traps_response = client.get(f"/campaigns/linden-pass/systems/entries/{traps.slug}")
     downtime_response = client.get(f"/campaigns/linden-pass/systems/entries/{downtime_activities.slug}")
     treasure_response = client.get(f"/campaigns/linden-pass/systems/entries/{treasure.slug}")
@@ -2759,6 +2873,7 @@ def test_dmg_book_chapters_are_imported_for_dm_browse_in_book_order(
     assert source_response.status_code == 200
     source_body = source_response.get_data(as_text=True)
     assert "Book Chapters" in source_body
+    assert "Creating a Multiverse" in source_body
     assert "Traps" in source_body
     assert "Downtime Activities" in source_body
     assert "Treasure" in source_body
@@ -2766,14 +2881,26 @@ def test_dmg_book_chapters_are_imported_for_dm_browse_in_book_order(
     assert "Dungeon Master&#39;s Workshop" in source_body
     assert "Adventure Environments" in source_body
     assert "Between Adventures" in source_body
-    assert "Creating a Multiverse" not in source_body
     assert "Searches only this source&#39;s book chapters using curated metadata" in source_body
 
     assert category_response.status_code == 200
     category_body = category_response.get_data(as_text=True)
-    assert "Showing all 5 book chapters in this source." in category_body
+    assert "Showing all 6 book chapters in this source." in category_body
     for earlier, later in zip(book_entry_links, book_entry_links[1:]):
         assert category_body.index(earlier) < category_body.index(later)
+
+    assert multiverse_response.status_code == 200
+    multiverse_body = multiverse_response.get_data(as_text=True)
+    assert "Chapter 2" in multiverse_body
+    assert "The Planes" in multiverse_body
+    assert "Planar Travel" in multiverse_body
+    assert "Outer Planes" in multiverse_body
+    assert "Optional Rules" in multiverse_body
+    assert "Known Worlds of the Material Plane" in multiverse_body
+    assert 'href="#the-planes"' in multiverse_body
+    assert 'id="the-planes"' in multiverse_body
+    assert 'href="#outer-planes--optional-rules"' in multiverse_body
+    assert 'id="outer-planes--optional-rules"' in multiverse_body
 
     assert traps_response.status_code == 200
     traps_body = traps_response.get_data(as_text=True)
@@ -2819,8 +2946,8 @@ def test_dmg_book_chapters_are_imported_for_dm_browse_in_book_order(
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["party"]["email"], users["party"]["password"])
-    blocked_traps_response = client.get(f"/campaigns/linden-pass/systems/entries/{traps.slug}")
-    assert blocked_traps_response.status_code == 404
+    blocked_multiverse_response = client.get(f"/campaigns/linden-pass/systems/entries/{multiverse.slug}")
+    assert blocked_multiverse_response.status_code == 404
 
 
 def test_phb_book_chapters_surface_related_imported_entities(
