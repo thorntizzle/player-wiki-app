@@ -46,6 +46,11 @@
               <a class="ghost-button" href="{{ url_for('character_edit_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
                 Edit character
               </a>
+              {% if can_retrain %}
+                <a class="ghost-button" href="{{ url_for('character_retraining_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
+                  Retrain
+                </a>
+              {% endif %}
               {% if can_level_up %}
                 <a class="ghost-button" href="{{ url_for('character_level_up_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
                   Level up

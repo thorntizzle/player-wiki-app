@@ -395,6 +395,241 @@ The drill is meant to replace a memorized shortcut with a more disciplined respo
     assert not list(record.definition.spellcasting.get("campaign_option_replacement_bases") or [])
 
 
+def test_character_retraining_route_updates_existing_spell_support_replacements(
+    app, client, sign_in, users, get_character, set_campaign_visibility
+):
+    training_page_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "content"
+        / "mechanics"
+        / "harbor-spell-drill.md"
+    )
+    training_page_path.write_text(
+        """---
+title: Harbor Spell Drill
+section: Mechanics
+subsection: Blessings
+published: true
+summary: A harbor rite that teaches a new cantrip and rewires an old one.
+character_option:
+  name: Harbor Spell Drill
+  description_markdown: Harbor drillmasters teach you a practiced magical exchange.
+  activation_type: special
+  spell_support:
+    - grants:
+        _:
+          - spell: Detect Magic
+            always_prepared: true
+            ritual: true
+      choices:
+        _:
+          - category: granted
+            options:
+              - Light
+              - Mage Hand
+            count: 1
+            label_prefix: Drill Cantrip
+            mark: Granted
+      replacement:
+        _:
+          - kind: known
+            from:
+              options:
+                - Message
+            to:
+              options:
+                - Ray of Frost
+                - Thaumaturgy
+---
+The drill is meant to replace a memorized shortcut with a more disciplined response.
+""",
+        encoding="utf-8",
+    )
+
+    with app.app_context():
+        systems_store = app.extensions["systems_store"]
+        systems_store.upsert_library("DND-5E", title="DND 5E", system_code="DND-5E")
+        systems_store.upsert_source(
+            "DND-5E",
+            "PHB",
+            title="Player's Handbook",
+            license_class="srd_cc",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        systems_store.replace_entries_for_source(
+            "DND-5E",
+            "PHB",
+            entry_types=["spell"],
+            entries=[
+                {
+                    "entry_key": "dnd-5e|spell|phb|message",
+                    "entry_type": "spell",
+                    "slug": "phb-spell-message",
+                    "title": "Message",
+                    "source_page": "259",
+                    "source_path": "data/spells/spells-phb.json",
+                    "search_text": "message",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"casting_time": [{"number": 1, "unit": "action"}], "level": 0},
+                    "body": {},
+                    "rendered_html": "<p>Message.</p>",
+                },
+                {
+                    "entry_key": "dnd-5e|spell|phb|detect-magic",
+                    "entry_type": "spell",
+                    "slug": "phb-spell-detect-magic",
+                    "title": "Detect Magic",
+                    "source_page": "231",
+                    "source_path": "data/spells/spells-phb.json",
+                    "search_text": "detect magic",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"casting_time": [{"number": 1, "unit": "action"}], "level": 1, "ritual": True},
+                    "body": {},
+                    "rendered_html": "<p>Detect Magic.</p>",
+                },
+                {
+                    "entry_key": "dnd-5e|spell|phb|light",
+                    "entry_type": "spell",
+                    "slug": "phb-spell-light",
+                    "title": "Light",
+                    "source_page": "255",
+                    "source_path": "data/spells/spells-phb.json",
+                    "search_text": "light",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"casting_time": [{"number": 1, "unit": "action"}], "level": 0},
+                    "body": {},
+                    "rendered_html": "<p>Light.</p>",
+                },
+                {
+                    "entry_key": "dnd-5e|spell|phb|mage-hand",
+                    "entry_type": "spell",
+                    "slug": "phb-spell-mage-hand",
+                    "title": "Mage Hand",
+                    "source_page": "256",
+                    "source_path": "data/spells/spells-phb.json",
+                    "search_text": "mage hand",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"casting_time": [{"number": 1, "unit": "action"}], "level": 0},
+                    "body": {},
+                    "rendered_html": "<p>Mage Hand.</p>",
+                },
+                {
+                    "entry_key": "dnd-5e|spell|phb|ray-of-frost",
+                    "entry_type": "spell",
+                    "slug": "phb-spell-ray-of-frost",
+                    "title": "Ray of Frost",
+                    "source_page": "271",
+                    "source_path": "data/spells/spells-phb.json",
+                    "search_text": "ray of frost",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"casting_time": [{"number": 1, "unit": "action"}], "level": 0},
+                    "body": {},
+                    "rendered_html": "<p>Ray of Frost.</p>",
+                },
+                {
+                    "entry_key": "dnd-5e|spell|phb|thaumaturgy",
+                    "entry_type": "spell",
+                    "slug": "phb-spell-thaumaturgy",
+                    "title": "Thaumaturgy",
+                    "source_page": "282",
+                    "source_path": "data/spells/spells-phb.json",
+                    "search_text": "thaumaturgy",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"casting_time": [{"number": 1, "unit": "action"}], "level": 0},
+                    "body": {},
+                    "rendered_html": "<p>Thaumaturgy.</p>",
+                },
+            ],
+        )
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    record = get_character("arden-march")
+    assert record is not None
+
+    add_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "",
+            "weapon_proficiencies_text": "Daggers\nLight Crossbows\nQuarterstaffs",
+            "tool_proficiencies_text": "Navigator's Tools",
+            "custom_feature_name_1": "",
+            "custom_feature_page_ref_1": "mechanics/harbor-spell-drill",
+            "custom_feature_activation_type_1": "special",
+            "custom_feature_description_1": "",
+            "custom_feature_spell_support_1_granted_1_1": "phb-spell-light",
+            "custom_feature_spell_support_1_replace_known_1_from_1": "phb-spell-message",
+            "custom_feature_spell_support_1_replace_known_1_to_1": "phb-spell-ray-of-frost",
+        },
+        follow_redirects=False,
+    )
+
+    assert add_response.status_code == 302
+
+    page_response = client.get("/campaigns/linden-pass/characters/arden-march/retraining")
+    assert page_response.status_code == 200
+    page_html = page_response.get_data(as_text=True)
+    assert "Harbor Spell Drill" in page_html
+    assert "Choose the replacement spell." in page_html
+    assert 'value="phb-spell-ray-of-frost" selected' in page_html
+
+    record = get_character("arden-march")
+    assert record is not None
+    invalid_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/retraining",
+        data={
+            "expected_revision": record.state_record.revision,
+            "custom_feature_spell_support_1_granted_1_1": "phb-spell-light",
+            "custom_feature_spell_support_1_replace_known_1_from_1": "phb-spell-message",
+            "custom_feature_spell_support_1_replace_known_1_to_1": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert invalid_response.status_code == 400
+
+    record = get_character("arden-march")
+    assert record is not None
+    retrain_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/retraining",
+        data={
+            "expected_revision": record.state_record.revision,
+            "custom_feature_spell_support_1_granted_1_1": "phb-spell-light",
+            "custom_feature_spell_support_1_replace_known_1_from_1": "phb-spell-message",
+            "custom_feature_spell_support_1_replace_known_1_to_1": "phb-spell-thaumaturgy",
+        },
+        follow_redirects=False,
+    )
+
+    assert retrain_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    spells_by_name = {spell["name"]: spell for spell in record.definition.spellcasting["spells"]}
+    hidden_spells = list(record.definition.spellcasting.get("campaign_option_replacement_bases") or [])
+
+    assert "Detect Magic" in spells_by_name
+    assert spells_by_name["Light"]["mark"] == "Granted"
+    assert "Thaumaturgy" in spells_by_name
+    assert "Ray of Frost" not in spells_by_name
+    assert "Message" not in spells_by_name
+    assert any(spell.get("name") == "Message" for spell in hidden_spells)
+    latest_event = list((record.definition.source or {}).get("native_progression", {}).get("history") or [])[-1]
+    assert latest_event["action"] == "retrain"
+    assert latest_event["kind"] == "retrain"
+
+
 def test_native_character_edits_can_apply_and_remove_campaign_page_spell_support_source_rows(
     app, client, sign_in, users, get_character, set_campaign_visibility
 ):
@@ -1339,6 +1574,156 @@ The harbor masters insist on repetition until every motion is clean.
     }
     assert "phb-optionalfeature-defense" not in feature_slugs
     assert "phb-optionalfeature-dueling" in feature_slugs
+
+
+def test_character_retraining_route_swaps_optionalfeature_choices_and_rebuilds_attacks(
+    app, client, sign_in, users, get_character, set_campaign_visibility
+):
+    feat_page_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "content"
+        / "mechanics"
+        / "harbor-drill.md"
+    )
+    feat_page_path.write_text(
+        """---
+title: Harbor Drill
+section: Mechanics
+subsection: Feats
+published: true
+summary: A harbor discipline that grants a fighting style.
+character_option:
+  kind: feat
+  name: Harbor Drill
+  description_markdown: Harbor veterans drill you into a practiced fighting style.
+  optionalfeature_progression:
+    - name: Fighting Style
+      featureType:
+        - FS:F
+      progression:
+        "1": 1
+---
+The harbor masters insist on repetition until every motion is clean.
+""",
+        encoding="utf-8",
+    )
+
+    with app.app_context():
+        systems_store = app.extensions["systems_store"]
+        systems_store.upsert_library("DND-5E", title="DND 5E", system_code="DND-5E")
+        systems_store.upsert_source(
+            "DND-5E",
+            "PHB",
+            title="Player's Handbook",
+            license_class="srd_cc",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        systems_store.replace_entries_for_source(
+            "DND-5E",
+            "PHB",
+            entry_types=["optionalfeature"],
+            entries=[
+                {
+                    "entry_key": "dnd-5e|optionalfeature|phb|archery",
+                    "entry_type": "optionalfeature",
+                    "slug": "phb-optionalfeature-archery",
+                    "title": "Archery",
+                    "source_page": "72",
+                    "source_path": "data/class/class-fighter.json",
+                    "search_text": "archery fighting style",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"feature_type": ["FS:F"]},
+                    "body": {},
+                    "rendered_html": "<p>Archery.</p>",
+                },
+                {
+                    "entry_key": "dnd-5e|optionalfeature|phb|defense",
+                    "entry_type": "optionalfeature",
+                    "slug": "phb-optionalfeature-defense",
+                    "title": "Defense",
+                    "source_page": "72",
+                    "source_path": "data/class/class-fighter.json",
+                    "search_text": "defense fighting style",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"feature_type": ["FS:F"]},
+                    "body": {},
+                    "rendered_html": "<p>Defense.</p>",
+                },
+            ],
+        )
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    record = get_character("arden-march")
+    assert record is not None
+    baseline_crossbow = next(attack for attack in record.definition.attacks if "Crossbow" in attack["name"])
+    assert baseline_crossbow["attack_bonus"] == 5
+
+    add_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "",
+            "weapon_proficiencies_text": "Daggers\nLight Crossbows\nQuarterstaffs",
+            "tool_proficiencies_text": "Navigator's Tools",
+            "custom_feature_name_1": "",
+            "custom_feature_page_ref_1": "mechanics/harbor-drill",
+            "custom_feature_activation_type_1": "passive",
+            "custom_feature_description_1": "",
+            "custom_feature_optionalfeature_1_1_1": "phb-optionalfeature-archery",
+        },
+        follow_redirects=False,
+    )
+
+    assert add_response.status_code == 302
+
+    read_response = client.get("/campaigns/linden-pass/characters/arden-march")
+    assert read_response.status_code == 200
+    read_html = read_response.get_data(as_text=True)
+    assert "/campaigns/linden-pass/characters/arden-march/retraining" in read_html
+
+    record = get_character("arden-march")
+    assert record is not None
+    boosted_crossbow = next(attack for attack in record.definition.attacks if "Crossbow" in attack["name"])
+    assert boosted_crossbow["attack_bonus"] == 7
+
+    retraining_page = client.get("/campaigns/linden-pass/characters/arden-march/retraining")
+    assert retraining_page.status_code == 200
+    retraining_html = retraining_page.get_data(as_text=True)
+    assert "Harbor Drill Fighting Style" in retraining_html
+    assert 'value="phb-optionalfeature-archery" selected' in retraining_html
+
+    retrain_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/retraining",
+        data={
+            "expected_revision": record.state_record.revision,
+            "custom_feature_optionalfeature_1_1_1": "phb-optionalfeature-defense",
+        },
+        follow_redirects=False,
+    )
+
+    assert retrain_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    feature_slugs = {
+        str(dict(feature.get("systems_ref") or {}).get("slug") or "").strip()
+        for feature in record.definition.features
+    }
+    retrained_crossbow = next(attack for attack in record.definition.attacks if "Crossbow" in attack["name"])
+
+    assert "phb-optionalfeature-archery" not in feature_slugs
+    assert "phb-optionalfeature-defense" in feature_slugs
+    assert retrained_crossbow["attack_bonus"] == 5
+    latest_event = list((record.definition.source or {}).get("native_progression", {}).get("history") or [])[-1]
+    assert latest_event["action"] == "retrain"
+    assert latest_event["kind"] == "retrain"
 
 
 def test_native_character_edits_apply_fixed_page_backed_feat_metadata(

@@ -60,6 +60,7 @@ from .character_builder import (
     _spell_payload_support_kwargs,
     _spellcasting_mode_for_class,
     _strip_definition_campaign_feat_effects,
+    _with_native_progression_event,
     normalize_definition_to_native_model,
 )
 from .character_campaign_options import (
@@ -76,7 +77,7 @@ from .repository import normalize_lookup
 from .repository import slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_EDITOR_VERSION = "2026-04-11.01"
+CHARACTER_EDITOR_VERSION = "2026-04-11.02"
 CUSTOM_FEATURE_CATEGORY = "custom_feature"
 CUSTOM_EQUIPMENT_SOURCE_KIND = "manual_edit"
 CUSTOM_FEATURE_TRACKER_PREFIX = "manual-feature-tracker"
@@ -1725,6 +1726,186 @@ def build_native_character_edit_context(
             if str(item.get("source_kind") or "") != CUSTOM_EQUIPMENT_SOURCE_KIND
         ],
     }
+
+
+def build_native_character_retraining_context(
+    definition: CharacterDefinition,
+    *,
+    campaign_page_records: list[Any] | None = None,
+    form_values: dict[str, str] | None = None,
+    optionalfeature_catalog: dict[str, SystemsEntryRecord] | None = None,
+    spell_catalog: dict[str, Any] | None = None,
+    item_catalog: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    edit_context = build_native_character_edit_context(
+        definition,
+        campaign_page_records=campaign_page_records,
+        form_values=form_values,
+        optionalfeature_catalog=optionalfeature_catalog,
+        spell_catalog=spell_catalog,
+        item_catalog=item_catalog,
+    )
+    retraining_rows = _native_character_retraining_rows_from_edit_context(edit_context)
+    return {
+        "values": dict(edit_context.get("values") or {}),
+        "feature_rows": retraining_rows,
+        "state_revision": edit_context.get("state_revision"),
+        "supported_scope": [
+            "Linked custom features with persisted structured choices such as optional-feature swaps, granted spell selectors, explicit spell-support replacements, and supported feature spell-manager source choices.",
+            "The route reuses the existing native edit derivation pass, so spells, attacks, resources, and other downstream sheet math are rebuilt through the normal shared path instead of a retraining-only side engine.",
+            "Generic rebuilds, full respec, and freeform history rewrites remain out of scope for this first retraining slice.",
+        ],
+    }
+
+
+def apply_native_character_retraining(
+    campaign_slug: str,
+    current_definition: CharacterDefinition,
+    current_import_metadata: CharacterImportMetadata,
+    *,
+    campaign_page_records: list[Any] | None = None,
+    form_values: dict[str, str] | None = None,
+    optionalfeature_catalog: dict[str, SystemsEntryRecord] | None = None,
+    spell_catalog: dict[str, Any] | None = None,
+    item_catalog: dict[str, Any] | None = None,
+    systems_service: Any | None = None,
+) -> tuple[CharacterDefinition, CharacterImportMetadata, dict[str, int]]:
+    values = dict(form_values or {})
+    base_edit_context = build_native_character_edit_context(
+        current_definition,
+        campaign_page_records=campaign_page_records,
+        optionalfeature_catalog=optionalfeature_catalog,
+        spell_catalog=spell_catalog,
+        item_catalog=item_catalog,
+    )
+    retraining_context = build_native_character_retraining_context(
+        current_definition,
+        campaign_page_records=campaign_page_records,
+        optionalfeature_catalog=optionalfeature_catalog,
+        spell_catalog=spell_catalog,
+        item_catalog=item_catalog,
+    )
+    retraining_field_names = _native_character_retraining_field_names(retraining_context)
+    if not retraining_field_names:
+        raise CharacterEditValidationError(
+            "This character does not currently have any supported structured retraining options."
+        )
+
+    merged_values = _native_character_edit_form_values_from_context(base_edit_context)
+    for field_name in retraining_field_names:
+        if field_name not in values:
+            continue
+        merged_values[field_name] = str(values.get(field_name) or "").strip()
+
+    definition, import_metadata, inventory_quantity_overrides = apply_native_character_edits(
+        campaign_slug,
+        current_definition,
+        current_import_metadata,
+        campaign_page_records=campaign_page_records,
+        form_values=merged_values,
+        optionalfeature_catalog=optionalfeature_catalog,
+        spell_catalog=spell_catalog,
+        item_catalog=item_catalog,
+        systems_service=systems_service,
+    )
+    if definition.to_dict() != current_definition.to_dict():
+        payload = deepcopy(definition.to_dict())
+        payload["source"] = _with_native_progression_event(
+            payload.get("source"),
+            kind="retrain",
+            target_level=_character_total_level(definition),
+            previous_level=_character_total_level(current_definition),
+            action="retrain",
+        )
+        definition = CharacterDefinition.from_dict(payload)
+
+    return definition, import_metadata, inventory_quantity_overrides
+
+
+def _native_character_retraining_rows_from_edit_context(
+    edit_context: dict[str, Any],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in list(edit_context.get("feature_rows") or []):
+        feature_id = str(row.get("id") or "").strip()
+        choice_fields = [
+            dict(field)
+            for field in list(row.get("choice_fields") or [])
+            if str(field.get("name") or "").strip()
+        ]
+        if not feature_id or not choice_fields:
+            continue
+        campaign_option = dict(row.get("campaign_option") or {})
+        rows.append(
+            {
+                "index": int(row.get("index") or 0),
+                "id": feature_id,
+                "name": str(
+                    row.get("name")
+                    or campaign_option.get("name")
+                    or "Linked Feature"
+                ).strip()
+                or "Linked Feature",
+                "page_ref": str(row.get("page_ref") or "").strip(),
+                "activation_type": str(row.get("activation_type") or "").strip(),
+                "summary": str(
+                    campaign_option.get("description_markdown")
+                    or row.get("description_markdown")
+                    or ""
+                ).strip(),
+                "choice_fields": choice_fields,
+            }
+        )
+    return rows
+
+
+def _native_character_retraining_field_names(retraining_context: dict[str, Any]) -> set[str]:
+    return {
+        str(field.get("name") or "").strip()
+        for row in list(retraining_context.get("feature_rows") or [])
+        for field in list(dict(row or {}).get("choice_fields") or [])
+        if str(field.get("name") or "").strip()
+    }
+
+
+def _native_character_edit_form_values_from_context(edit_context: dict[str, Any]) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for field_group in ("proficiency_fields", "reference_fields", "stat_adjustment_fields"):
+        for field in list(edit_context.get(field_group) or []):
+            field_name = str(field.get("name") or "").strip()
+            if not field_name:
+                continue
+            values[field_name] = str(field.get("value") or "")
+
+    for row in list(edit_context.get("feature_rows") or []):
+        row_index = int(row.get("index") or 0)
+        if row_index <= 0:
+            continue
+        values[f"custom_feature_id_{row_index}"] = str(row.get("id") or "").strip()
+        values[f"custom_feature_name_{row_index}"] = str(row.get("name") or "").strip()
+        values[f"custom_feature_page_ref_{row_index}"] = str(row.get("page_ref") or "").strip()
+        values[f"custom_feature_activation_type_{row_index}"] = str(row.get("activation_type") or "").strip()
+        values[f"custom_feature_description_{row_index}"] = str(row.get("description_markdown") or "")
+        values[f"custom_feature_resource_max_{row_index}"] = str(row.get("resource_max") or "").strip()
+        values[f"custom_feature_resource_reset_on_{row_index}"] = str(row.get("resource_reset_on") or "").strip()
+        for field in list(row.get("choice_fields") or []):
+            field_name = str(field.get("name") or "").strip()
+            if not field_name:
+                continue
+            values[field_name] = str(field.get("selected") or "").strip()
+
+    for row in list(edit_context.get("equipment_rows") or []):
+        row_index = int(row.get("index") or 0)
+        if row_index <= 0:
+            continue
+        values[f"manual_item_id_{row_index}"] = str(row.get("id") or "").strip()
+        values[f"manual_item_name_{row_index}"] = str(row.get("name") or "").strip()
+        values[f"manual_item_page_ref_{row_index}"] = str(row.get("page_ref") or "").strip()
+        values[f"manual_item_quantity_{row_index}"] = str(row.get("quantity") or "").strip()
+        values[f"manual_item_weight_{row_index}"] = str(row.get("weight") or "").strip()
+        values[f"manual_item_notes_{row_index}"] = str(row.get("notes") or "")
+
+    return values
 
 
 def apply_native_character_edits(

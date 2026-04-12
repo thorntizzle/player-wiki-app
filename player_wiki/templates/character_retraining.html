@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}Retrain {{ character.name }} | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Character retraining</p>
+    <h1>Retrain {{ character.name }}</h1>
+    <p class="lede">
+      Use this focused pass for supported structured retraining only. The current slice handles existing linked feature choices that already have durable rules-backed metadata, while full rebuilds and freeform respec stay out of scope.
+    </p>
+    <div class="hero-actions">
+      <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, page='features') }}">Back to sheet</a>
+      <a class="ghost-button" href="{{ url_for('character_edit_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">Open full editor</a>
+      {% if character.class_level_text %}
+        <span class="meta">{{ character.class_level_text }}</span>
+      {% endif %}
+    </div>
+  </section>
+
+  <article class="card character-edit-sheet">
+    <section class="read-section">
+      <div class="section-heading">
+        <h2>Supported Scope</h2>
+      </div>
+      <ul class="plain-list builder-feature-list">
+        {% for item in retraining_context.supported_scope %}
+          <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <form class="stack-form" method="post">
+      <input type="hidden" name="expected_revision" value="{{ retraining_context.state_revision }}">
+
+      <section class="read-section">
+        <div class="section-heading">
+          <h2>Structured Choices</h2>
+        </div>
+        <div class="character-edit-stack">
+          {% for row in retraining_context.feature_rows %}
+            <article class="detail-card character-edit-row">
+              <div class="section-heading">
+                <div>
+                  <h3>{{ row.name }}</h3>
+                  {% if row.page_ref %}
+                    <p class="meta">{{ row.page_ref }}</p>
+                  {% endif %}
+                </div>
+                {% if row.activation_type %}
+                  <span class="meta">{{ row.activation_type | replace('_', ' ') | title }}</span>
+                {% endif %}
+              </div>
+              {% if row.summary %}
+                <p class="meta">{{ row.summary }}</p>
+              {% endif %}
+              <div class="detail-grid character-edit-grid">
+                {% for field in row.choice_fields %}
+                  <label class="field">
+                    <span>{{ field.label }}</span>
+                    <select name="{{ field.name }}">
+                      <option value="" {% if not field.selected %}selected{% endif %}>Choose an option</option>
+                      {% for option in field.options %}
+                        <option value="{{ option.value }}"{% if field.selected == option.value %} selected{% endif %}>{{ option.label }}</option>
+                      {% endfor %}
+                    </select>
+                    {% if field.help_text %}
+                      <small>{{ field.help_text }}</small>
+                    {% endif %}
+                  </label>
+                {% endfor %}
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <div class="hero-actions">
+        <button type="submit">Save retraining</button>
+        <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, page='features') }}">Cancel</a>
+      </div>
+    </form>
+  </article>
+{% endblock %}
