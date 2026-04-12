@@ -4135,19 +4135,20 @@ def build_spell_metadata_data_root(root: Path) -> Path:
     return root
 
 
-XGE_ATOMIC_WRAPPER_TEST_TITLES = (
+XGE_RULES_REFERENCE_TEST_TITLES = (
     "Simultaneous Effects",
     "Falling",
     "Sleep",
     "Waking Someone",
     "Adamantine Weapons",
     "Tying Knots",
+    "Spellcasting",
     "Identifying a Spell",
     "Variant Rules",
 )
 
 
-def build_xge_atomic_wrapper_book_data_root(root: Path) -> Path:
+def build_xge_book_data_root(root: Path) -> Path:
     data_root = build_test_data_root(root)
     write_json(
         root / "data/books.json",
@@ -6751,10 +6752,10 @@ def test_phb_book_chapters_surface_related_imported_entities(
     assert f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("spell", "Mage Hand")].slug}"' in spellcasting_body
 
 
-def test_xge_atomic_rule_wrappers_are_imported_for_player_browse(
+def test_xge_book_entries_are_imported_for_player_browse(
     client, sign_in, users, app, tmp_path
 ):
-    data_root = build_xge_atomic_wrapper_book_data_root(tmp_path / "dnd5e-source-xge-atomic-wrappers")
+    data_root = build_xge_book_data_root(tmp_path / "dnd5e-source-xge-book-entries")
 
     with app.app_context():
         importer = Dnd5eSystemsImporter(
@@ -6783,12 +6784,15 @@ def test_xge_atomic_rule_wrappers_are_imported_for_player_browse(
             )
         }
 
-    assert list(book_entries) == list(XGE_ATOMIC_WRAPPER_TEST_TITLES)
+    assert list(book_entries) == list(XGE_RULES_REFERENCE_TEST_TITLES)
 
     sign_in(users["party"]["email"], users["party"]["password"])
     source_response = client.get("/campaigns/linden-pass/systems/sources/XGE")
     category_response = client.get("/campaigns/linden-pass/systems/sources/XGE/types/book")
     falling_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Falling'].slug}")
+    spellcasting_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Spellcasting'].slug}"
+    )
     variant_rules_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Variant Rules'].slug}"
     )
@@ -6796,12 +6800,12 @@ def test_xge_atomic_rule_wrappers_are_imported_for_player_browse(
     assert source_response.status_code == 200
     source_body = source_response.get_data(as_text=True)
     assert "Book Chapters" in source_body
-    source_indexes = [source_body.index(title) for title in XGE_ATOMIC_WRAPPER_TEST_TITLES]
+    source_indexes = [source_body.index(title) for title in XGE_RULES_REFERENCE_TEST_TITLES]
     assert source_indexes == sorted(source_indexes)
 
     assert category_response.status_code == 200
     category_body = category_response.get_data(as_text=True)
-    category_indexes = [category_body.index(title) for title in XGE_ATOMIC_WRAPPER_TEST_TITLES]
+    category_indexes = [category_body.index(title) for title in XGE_RULES_REFERENCE_TEST_TITLES]
     assert category_indexes == sorted(category_indexes)
 
     assert falling_response.status_code == 200
@@ -6813,6 +6817,17 @@ def test_xge_atomic_rule_wrappers_are_imported_for_player_browse(
     assert 'href="#rate-of-falling"' in falling_body
     assert 'id="flying-creatures-and-falling"' in falling_body
 
+    assert spellcasting_response.status_code == 200
+    spellcasting_body = spellcasting_response.get_data(as_text=True)
+    assert "Chapter 2" in spellcasting_body
+    assert "Dungeon Master&#39;s Tools" in spellcasting_body
+    assert "Perceiving a Caster at Work" in spellcasting_body
+    assert "Invalid Spell Targets" in spellcasting_body
+    assert "Areas of Effect on a Grid" in spellcasting_body
+    assert 'href="#perceiving-a-caster-at-work"' in spellcasting_body
+    assert 'href="#areas-of-effect-on-a-grid"' in spellcasting_body
+    assert 'id="invalid-spell-targets"' in spellcasting_body
+
     assert variant_rules_response.status_code == 200
     variant_rules_body = variant_rules_response.get_data(as_text=True)
     assert "Appendix A" in variant_rules_body
@@ -6820,9 +6835,9 @@ def test_xge_atomic_rule_wrappers_are_imported_for_player_browse(
     assert "bounded rules list" in variant_rules_body
 
 
-def test_xge_atomic_rule_wrappers_follow_source_visibility(client, sign_in, users, app, tmp_path):
-    data_root = build_xge_atomic_wrapper_book_data_root(
-        tmp_path / "dnd5e-source-xge-atomic-wrappers-policy"
+def test_xge_book_entries_follow_source_visibility(client, sign_in, users, app, tmp_path):
+    data_root = build_xge_book_data_root(
+        tmp_path / "dnd5e-source-xge-book-entries-policy"
     )
 
     with app.app_context():
@@ -6850,7 +6865,7 @@ def test_xge_atomic_rule_wrappers_follow_source_visibility(client, sign_in, user
     player_source_response = client.get("/campaigns/linden-pass/systems/sources/XGE")
     player_category_response = client.get("/campaigns/linden-pass/systems/sources/XGE/types/book")
     player_entry_response = client.get(
-        f"/campaigns/linden-pass/systems/entries/{book_entries['Simultaneous Effects'].slug}"
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Spellcasting'].slug}"
     )
 
     assert player_source_response.status_code == 404
@@ -6863,22 +6878,23 @@ def test_xge_atomic_rule_wrappers_follow_source_visibility(client, sign_in, user
     dm_source_response = client.get("/campaigns/linden-pass/systems/sources/XGE")
     dm_category_response = client.get("/campaigns/linden-pass/systems/sources/XGE/types/book")
     dm_entry_response = client.get(
-        f"/campaigns/linden-pass/systems/entries/{book_entries['Simultaneous Effects'].slug}"
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Spellcasting'].slug}"
     )
 
     assert dm_source_response.status_code == 200
     assert "Book Chapters" in dm_source_response.get_data(as_text=True)
     assert dm_category_response.status_code == 200
-    assert "Simultaneous Effects" in dm_category_response.get_data(as_text=True)
+    assert "Spellcasting" in dm_category_response.get_data(as_text=True)
     assert dm_entry_response.status_code == 200
     dm_body = dm_entry_response.get_data(as_text=True)
     assert "Chapter 2" in dm_body
     assert "Dungeon Master&#39;s Tools" in dm_body
+    assert "Perceiving a Caster at Work" in dm_body
 
 
-def test_xge_first_wrapper_slice_excludes_broader_section_pages(app, tmp_path):
-    data_root = build_xge_atomic_wrapper_book_data_root(
-        tmp_path / "dnd5e-source-xge-atomic-wrapper-boundary"
+def test_xge_book_slice_excludes_other_pending_section_pages(app, tmp_path):
+    data_root = build_xge_book_data_root(
+        tmp_path / "dnd5e-source-xge-book-boundary"
     )
 
     with app.app_context():
@@ -6893,12 +6909,11 @@ def test_xge_first_wrapper_slice_excludes_broader_section_pages(app, tmp_path):
             store.list_entries_for_source("DND-5E", "XGE", entry_type="book", limit=20)
         )
 
-    assert result.imported_count == len(XGE_ATOMIC_WRAPPER_TEST_TITLES)
-    assert result.imported_by_type == {"book": len(XGE_ATOMIC_WRAPPER_TEST_TITLES)}
+    assert result.imported_count == len(XGE_RULES_REFERENCE_TEST_TITLES)
+    assert result.imported_by_type == {"book": len(XGE_RULES_REFERENCE_TEST_TITLES)}
     book_titles = {entry.title for entry in book_entries}
-    assert book_titles == set(XGE_ATOMIC_WRAPPER_TEST_TITLES)
+    assert book_titles == set(XGE_RULES_REFERENCE_TEST_TITLES)
     assert "Tool Proficiencies" not in book_titles
-    assert "Spellcasting" not in book_titles
     assert "Downtime Revisited" not in book_titles
     assert "Encounter Building" not in book_titles
     assert "Random Encounters: A World of Possibilities" not in book_titles
