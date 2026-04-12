@@ -1581,6 +1581,7 @@ def build_mm_book_data_root(root: Path) -> Path:
                                 "Legendary Creatures",
                                 "Shadow Dragon Template",
                                 "Half-Dragon Template",
+                                "Spore Servant Template",
                             ],
                         }
                     ],
@@ -1835,6 +1836,88 @@ def build_mm_book_data_root(root: Path) -> Path:
                                                 ["Gargantuan", "As an adult dragon", "Challenge 8 or higher"],
                                             ],
                                         },
+                                    ],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "entries",
+                            "name": "Spore Servant Template",
+                            "page": 230,
+                            "entries": [
+                                "A spore servant is any Large or smaller creature brought back to life by the animating spores of a myconid sovereign.",
+                                {
+                                    "type": "entries",
+                                    "name": "Retained Characteristics",
+                                    "page": 230,
+                                    "entries": [
+                                        "The servant retains its Armor Class, hit points, Hit Dice, Strength, Dexterity, Constitution, vulnerabilities, resistances, and immunities."
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Lost Characteristics",
+                                    "page": 230,
+                                    "entries": [
+                                        "The servant loses its original saving throw and skill bonuses, special senses, and special traits."
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Type",
+                                    "page": 230,
+                                    "entries": ["The servant's type is plant, and it loses any tags."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Alignment",
+                                    "page": 230,
+                                    "entries": ["The servant is unaligned."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Speed",
+                                    "page": 230,
+                                    "entries": ["Reduce all the servant's speeds by 10 feet, to a minimum of 5 feet."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Ability Scores",
+                                    "page": 230,
+                                    "entries": [
+                                        "The servant's ability scores change as follows: Int 2 (-4), Wis 6 (-2), Cha 1 (-5)."
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Senses",
+                                    "page": 230,
+                                    "entries": [
+                                        "The servant has blindsight with a radius of 30 feet, and it is blind beyond this radius."
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Condition Immunities",
+                                    "page": 230,
+                                    "entries": [
+                                        "The servant can't be blinded, charmed, frightened, or paralyzed."
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Languages",
+                                    "page": 230,
+                                    "entries": [
+                                        "The servant loses all known languages, but it responds to orders given to it by myconids using rapport spores."
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Attacks",
+                                    "page": 230,
+                                    "entries": [
+                                        "If the servant has no other means of dealing damage, it can use its fists or limbs to make unarmed strikes."
                                     ],
                                 },
                             ],
@@ -3372,8 +3455,15 @@ def test_mm_intro_book_sections_are_imported_for_dm_browse(client, sign_in, user
         legendary = next(entry for entry in book_entries if entry.title == "Legendary Creatures")
         shadow_dragon_template = next(entry for entry in book_entries if entry.title == "Shadow Dragon Template")
         half_dragon_template = next(entry for entry in book_entries if entry.title == "Half-Dragon Template")
+        spore_servant_template = next(entry for entry in book_entries if entry.title == "Spore Servant Template")
 
-    assert titles == ["Statistics", "Legendary Creatures", "Shadow Dragon Template", "Half-Dragon Template"]
+    assert titles == [
+        "Statistics",
+        "Legendary Creatures",
+        "Shadow Dragon Template",
+        "Half-Dragon Template",
+        "Spore Servant Template",
+    ]
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
     source_response = client.get("/campaigns/linden-pass/systems/sources/MM")
@@ -3387,9 +3477,11 @@ def test_mm_intro_book_sections_are_imported_for_dm_browse(client, sign_in, user
     assert "Legendary Creatures" in source_body
     assert "Shadow Dragon Template" in source_body
     assert "Half-Dragon Template" in source_body
+    assert "Spore Servant Template" in source_body
     assert source_body.index("Statistics") < source_body.index("Legendary Creatures")
     assert source_body.index("Legendary Creatures") < source_body.index("Shadow Dragon Template")
     assert source_body.index("Shadow Dragon Template") < source_body.index("Half-Dragon Template")
+    assert source_body.index("Half-Dragon Template") < source_body.index("Spore Servant Template")
 
     assert category_response.status_code == 200
     category_body = category_response.get_data(as_text=True)
@@ -3397,9 +3489,11 @@ def test_mm_intro_book_sections_are_imported_for_dm_browse(client, sign_in, user
     assert "Legendary Creatures" in category_body
     assert "Shadow Dragon Template" in category_body
     assert "Half-Dragon Template" in category_body
+    assert "Spore Servant Template" in category_body
     assert category_body.index("Statistics") < category_body.index("Legendary Creatures")
     assert category_body.index("Legendary Creatures") < category_body.index("Shadow Dragon Template")
     assert category_body.index("Shadow Dragon Template") < category_body.index("Half-Dragon Template")
+    assert category_body.index("Half-Dragon Template") < category_body.index("Spore Servant Template")
 
     assert statistics_response.status_code == 200
     statistics_body = statistics_response.get_data(as_text=True)
@@ -3471,6 +3565,30 @@ def test_mm_intro_book_sections_are_imported_for_dm_browse(client, sign_in, user
     assert 'id="challenge"' in half_dragon_body
     assert 'href="#new-action-breath-weapon"' in half_dragon_body
     assert 'id="new-action-breath-weapon"' in half_dragon_body
+
+    spore_servant_response = client.get(f"/campaigns/linden-pass/systems/entries/{spore_servant_template.slug}")
+    assert spore_servant_response.status_code == 200
+    spore_servant_body = spore_servant_response.get_data(as_text=True)
+    assert "Introduction" in spore_servant_body
+    assert "Chapter Navigation" in spore_servant_body
+    assert "Retained Characteristics" in spore_servant_body
+    assert "Lost Characteristics" in spore_servant_body
+    assert "Type" in spore_servant_body
+    assert "Speed" in spore_servant_body
+    assert "Ability Scores" in spore_servant_body
+    assert "Senses" in spore_servant_body
+    assert "blindsight" in spore_servant_body
+    assert "Condition Immunities" in spore_servant_body
+    assert "Languages" in spore_servant_body
+    assert "rapport spores" in spore_servant_body
+    assert "Attacks" in spore_servant_body
+    assert "Breath Weapon" not in spore_servant_body
+    assert 'href="#retained-characteristics"' in spore_servant_body
+    assert 'id="retained-characteristics"' in spore_servant_body
+    assert 'href="#senses"' in spore_servant_body
+    assert 'id="senses"' in spore_servant_body
+    assert 'href="#condition-immunities"' in spore_servant_body
+    assert 'id="attacks"' in spore_servant_body
 
 
 def test_dmg_book_chapters_surface_related_imported_entities(client, sign_in, users, app, tmp_path):

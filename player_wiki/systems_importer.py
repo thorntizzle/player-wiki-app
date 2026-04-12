@@ -163,6 +163,7 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         ("Introduction", "Legendary Creatures"),
         ("Introduction", "Shadow Dragon Template"),
         ("Introduction", "Half-Dragon Template"),
+        ("Introduction", "Spore Servant Template"),
     ),
 }
 
