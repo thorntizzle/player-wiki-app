@@ -275,6 +275,24 @@
           </ul>
         </section>
       {% endif %}
+      {% if book_source_context_sections %}
+        <section class="card sidebar-card">
+          <h2>Source Context</h2>
+          {% if book_source_context_note %}
+            <p class="meta">{{ book_source_context_note }}</p>
+          {% endif %}
+          <ul class="plain-list">
+            {% for section in book_source_context_sections %}
+              <li>
+                <a href="#{{ section.anchor }}">{{ section.title }}</a>
+                {% if section.page %}
+                  <span class="meta">p. {{ section.page }}</span>
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        </section>
+      {% endif %}
       {% if book_section_outline %}
         <section class="card sidebar-card">
           <h2>Chapter Navigation</h2>

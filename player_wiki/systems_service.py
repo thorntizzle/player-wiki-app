@@ -1024,6 +1024,47 @@ class SystemsService:
             build_value,
         )
 
+    def build_source_context_sections_for_entry(
+        self,
+        entry: SystemsEntryRecord,
+    ) -> list[dict[str, str]]:
+        if entry.entry_type != "book":
+            return []
+        if str(entry.source_id or "").strip().upper() != "VGM":
+            return []
+
+        raw_outline = (entry.metadata or {}).get("section_outline")
+        if not isinstance(raw_outline, list) or not raw_outline:
+            return []
+
+        def build_value() -> list[dict[str, str]]:
+            sections: list[dict[str, str]] = []
+            seen_anchors: set[str] = set()
+            for item in raw_outline:
+                if not isinstance(item, dict):
+                    continue
+                title = str(item.get("title") or "").strip()
+                anchor = str(item.get("anchor") or "").strip()
+                if not title or not anchor or anchor in seen_anchors:
+                    continue
+                if not self._is_vgm_source_context_section_title(title):
+                    continue
+                seen_anchors.add(anchor)
+                section = {
+                    "title": title,
+                    "anchor": anchor,
+                }
+                page = str(item.get("page") or "").strip()
+                if page:
+                    section["page"] = page
+                sections.append(section)
+            return sections
+
+        return _systems_service_cache_get(
+            ("source_context_sections_for_entry", entry.entry_key),
+            build_value,
+        )
+
     def build_related_rules_for_book_sections(
         self,
         campaign_slug: str,
@@ -2665,6 +2706,20 @@ class SystemsService:
             for right_value in right_variants:
                 if left_value in right_value or right_value in left_value:
                     return True
+        return False
+
+    def _is_vgm_source_context_section_title(self, title: str) -> bool:
+        normalized = normalize_lookup(title)
+        if not normalized:
+            return False
+        if normalized.startswith("roleplaying"):
+            return True
+        if normalized == "regioneffects" or "lair" in normalized:
+            return True
+        if "tactics" in normalized:
+            return True
+        if normalized == "variantabilities" or normalized.startswith("variant") or normalized.endswith("variants"):
+            return True
         return False
 
     def _collect_optionalfeature_section_option_labels(self, section: dict[str, object]) -> set[str]:

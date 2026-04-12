@@ -3515,6 +3515,8 @@ def create_app() -> Flask:
         ]
         related_race_entries = []
         related_monster_entries = []
+        book_source_context_sections = []
+        book_source_context_note = ""
         book_headers = []
         book_section_outline = []
         if entry.entry_type == "book":
@@ -3528,6 +3530,12 @@ def create_app() -> Flask:
                 for candidate in systems_service.build_related_monsters_for_entry(campaign_slug, entry)
                 if can_access_campaign_systems_entry(campaign_slug, candidate.slug)
             ]
+            book_source_context_sections = systems_service.build_source_context_sections_for_entry(entry)
+            if book_source_context_sections:
+                book_source_context_note = (
+                    "These VGM sections are preserved as readable source context for roleplaying, lair, tactics, "
+                    "and variant-ability guidance. The app does not currently model them automatically."
+                )
             book_related_rules_by_anchor = systems_service.build_related_rules_for_book_sections(
                 campaign_slug,
                 entry,
@@ -3602,6 +3610,8 @@ def create_app() -> Flask:
             "related_rule_entries": related_rule_entries,
             "related_race_entries": related_race_entries,
             "related_monster_entries": related_monster_entries,
+            "book_source_context_sections": book_source_context_sections,
+            "book_source_context_note": book_source_context_note,
             "book_headers": book_headers,
             "book_section_outline": book_section_outline,
             "book_default_visibility_label": book_default_visibility_label,

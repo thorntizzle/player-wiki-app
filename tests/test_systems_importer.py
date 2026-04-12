@@ -2717,6 +2717,24 @@ def build_vgm_monster_lore_data_root(root: Path) -> Path:
                             "entries": [
                                 "Beholders twist reality through paranoia and impossible dreams.",
                                 {"type": "entries", "name": "Dreamspawn", "page": 6, "entries": ["New beholders emerge from warped dreams."]},
+                                {
+                                    "type": "entries",
+                                    "name": "Roleplaying a Beholder",
+                                    "page": 8,
+                                    "entries": ["Beholder tables and quirks remain readable source context for encounter prep."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Battle Tactics",
+                                    "page": 9,
+                                    "entries": ["Beholders keep tactical guidance in book context instead of turning it into modeled combat behavior."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Variant Abilities",
+                                    "page": 12,
+                                    "entries": ["Variant eye effects stay readable on the wrapper page without becoming mechanically modeled options."],
+                                },
                             ],
                         },
                         {
@@ -2753,6 +2771,31 @@ def build_vgm_monster_lore_data_root(root: Path) -> Path:
                             "entries": [
                                 "Hags bargain, corrupt, and gather in covens.",
                                 {"type": "entries", "name": "Covens", "page": 53, "entries": ["A hag coven is more dangerous than any lone sister."]},
+                                {
+                                    "type": "entries",
+                                    "name": "Roleplaying a Hag",
+                                    "page": 54,
+                                    "entries": ["Roleplaying cues stay visible here as source context for DM-facing prep."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Hag Lair Actions",
+                                    "page": 59,
+                                    "entries": [
+                                        {
+                                            "type": "entries",
+                                            "name": "Lair Actions",
+                                            "page": 59,
+                                            "entries": ["Grandmother hags can shape their lairs with distinct effects."],
+                                        },
+                                        {
+                                            "type": "entries",
+                                            "name": "Regional Effects",
+                                            "page": 60,
+                                            "entries": ["A hag's warped territory remains readable as source context."],
+                                        },
+                                    ],
+                                },
                             ],
                         },
                         {
@@ -2762,6 +2805,12 @@ def build_vgm_monster_lore_data_root(root: Path) -> Path:
                             "entries": [
                                 "Kobolds survive by traps, teamwork, and draconic devotion.",
                                 {"type": "entries", "name": "Tribal Ingenuity", "page": 64, "entries": ["Kobolds turn scrap into vicious inventions."]},
+                                {
+                                    "type": "entries",
+                                    "name": "Tactics",
+                                    "page": 67,
+                                    "entries": ["Kobold battlefield tricks stay readable as source context rather than modeled logic."],
+                                },
                             ],
                         },
                         {
@@ -4676,6 +4725,71 @@ def test_vgm_monster_lore_wrappers_surface_related_monster_family_entries(
                 f'href="/campaigns/linden-pass/systems/entries/{monster_entries[monster_title].slug}"'
                 in body
             )
+
+
+def test_vgm_monster_lore_wrappers_preserve_reference_only_source_context_sections(
+    client, sign_in, users, app, tmp_path
+):
+    data_root = build_vgm_monster_lore_data_root(tmp_path / "dnd5e-source-vgm-monster-lore-source-context")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("VGM", entry_types=["book"])
+
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="VGM",
+            is_enabled=True,
+            default_visibility="dm",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in service.list_entries_for_campaign_source(
+                "linden-pass",
+                "VGM",
+                entry_type="book",
+                limit=None,
+            )
+        }
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    beholder_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Beholders: Bad Dreams Come True'].slug}"
+    )
+    assert beholder_response.status_code == 200
+    beholder_body = beholder_response.get_data(as_text=True)
+    assert "Source Context" in beholder_body
+    assert "roleplaying, lair, tactics, and variant-ability guidance" in beholder_body
+    assert "The app does not currently model them automatically." in beholder_body
+    assert 'href="#roleplaying-a-beholder"' in beholder_body
+    assert 'href="#battle-tactics"' in beholder_body
+    assert 'href="#variant-abilities"' in beholder_body
+    assert 'id="roleplaying-a-beholder"' in beholder_body
+    assert 'id="variant-abilities"' in beholder_body
+
+    hag_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Hags: Dark Sisterhood'].slug}")
+    assert hag_response.status_code == 200
+    hag_body = hag_response.get_data(as_text=True)
+    assert 'href="#hag-lair-actions"' in hag_body
+    assert 'href="#hag-lair-actions--lair-actions"' in hag_body
+    assert 'href="#hag-lair-actions--regional-effects"' in hag_body
+    assert 'id="hag-lair-actions--regional-effects"' in hag_body
+
+    kobold_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Kobolds: Little Dragons'].slug}"
+    )
+    assert kobold_response.status_code == 200
+    kobold_body = kobold_response.get_data(as_text=True)
+    assert 'href="#tactics"' in kobold_body
+    assert 'id="tactics"' in kobold_body
 
 
 def test_vgm_character_race_wrappers_surface_related_race_entries(client, sign_in, users, app, tmp_path):
