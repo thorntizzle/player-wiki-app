@@ -2040,6 +2040,188 @@ def build_scag_classes_book_data_root(root: Path) -> Path:
     return data_root
 
 
+def build_scag_entry_source_context_data_root(root: Path) -> Path:
+    data_root = build_test_data_root(root)
+    write_json(
+        root / "data/books.json",
+        {
+            "book": [
+                {
+                    "name": "Sword Coast Adventurer's Guide",
+                    "id": "SCAG",
+                    "source": "SCAG",
+                    "contents": [
+                        {
+                            "name": "Races of the Realms",
+                            "headers": ["Halflings"],
+                            "ordinal": {"type": "chapter", "identifier": 3},
+                        },
+                        {
+                            "name": "Classes",
+                            "headers": ["Primal Paths", "Musical Instruments"],
+                            "ordinal": {"type": "chapter", "identifier": 4},
+                        },
+                        {
+                            "name": "Backgrounds",
+                            "ordinal": {"type": "chapter", "identifier": 5},
+                        },
+                    ],
+                }
+            ]
+        },
+    )
+    write_json(
+        root / "data/book/book-scag.json",
+        {
+            "data": [
+                {
+                    "type": "section",
+                    "name": "Races of the Realms",
+                    "page": 103,
+                    "entries": [
+                        {
+                            "type": "section",
+                            "name": "Halflings",
+                            "page": 108,
+                            "entries": [
+                                "Ghostwise halflings are one of the subraces discussed in this section."
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "type": "section",
+                    "name": "Classes",
+                    "page": 121,
+                    "entries": [
+                        {
+                            "type": "section",
+                            "name": "Primal Paths",
+                            "page": 121,
+                            "entries": [
+                                "Barbarians in the Realms have the following Primal Path options.",
+                                "Path of the Battlerager appears here alongside its specialized armor.",
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Musical Instruments",
+                            "page": 124,
+                            "entries": [
+                                {
+                                    "type": "list",
+                                    "items": [
+                                        {"type": "item", "name": "Birdpipes", "entry": "A Faerunian wind instrument."},
+                                        {"type": "item", "name": "Longhorn", "entry": "A favored instrument of elven enclaves."},
+                                    ],
+                                }
+                            ],
+                        },
+                    ],
+                },
+                {
+                    "type": "section",
+                    "name": "Backgrounds",
+                    "page": 145,
+                    "entries": [
+                        "This chapter offers additional backgrounds for characters in a Forgotten Realms campaign.",
+                        {"type": "list", "items": ["{@background Clan Crafter|SCAG}"]},
+                    ],
+                },
+            ]
+        },
+    )
+    write_json(
+        root / "data/races.json",
+        {
+            "race": [
+                {
+                    "name": "Ghostwise Halfling",
+                    "source": "SCAG",
+                    "page": 110,
+                    "raceName": "Halfling",
+                    "subraceName": "Ghostwise",
+                    "size": ["S"],
+                    "speed": {"walk": 30},
+                    "entries": ["Ghostwise halflings keep ancient traditions and quiet settlements."],
+                }
+            ]
+        },
+    )
+    write_json(
+        root / "data/backgrounds.json",
+        {
+            "background": [
+                {
+                    "name": "Clan Crafter",
+                    "source": "SCAG",
+                    "page": 145,
+                    "skillProficiencies": [{"history": True, "insight": True}],
+                    "entries": ["Clan crafters are respected artisans among dwarven communities."],
+                }
+            ]
+        },
+    )
+    write_json(
+        root / "data/items.json",
+        {
+            "item": [
+                {
+                    "name": "Spiked Armor",
+                    "source": "SCAG",
+                    "page": 121,
+                    "type": "MA",
+                    "armor": True,
+                    "ac": 14,
+                    "entries": ["Spiked armor is favored by battleragers."],
+                },
+                {
+                    "name": "Birdpipes",
+                    "source": "SCAG",
+                    "page": 124,
+                    "type": "INS",
+                    "entries": ["Birdpipes are also known as satyr pipes."],
+                },
+            ],
+            "itemGroup": [],
+        },
+    )
+    write_json(
+        root / "data/class/index.json",
+        {"scag": "class-scag.json"},
+    )
+    write_json(
+        root / "data/class/class-scag.json",
+        {
+            "subclass": [
+                {
+                    "name": "Path of the Battlerager",
+                    "shortName": "Battlerager",
+                    "source": "SCAG",
+                    "page": 121,
+                    "className": "Barbarian",
+                    "classSource": "PHB",
+                    "subclassFeatures": ["Battlerager Armor|Barbarian|PHB|Battlerager|SCAG|3"],
+                }
+            ],
+            "subclassFeature": [
+                {
+                    "name": "Battlerager Armor",
+                    "source": "SCAG",
+                    "page": 121,
+                    "className": "Barbarian",
+                    "classSource": "PHB",
+                    "subclassShortName": "Battlerager",
+                    "subclassSource": "SCAG",
+                    "level": 3,
+                    "entries": ["You can use spiked armor as a weapon while raging."],
+                }
+            ],
+        },
+    )
+    return data_root
+
+
 def build_mm_book_data_root(root: Path) -> Path:
     data_root = build_test_data_root(root)
     write_json(
@@ -4747,6 +4929,70 @@ def test_scag_backgrounds_book_entry_follows_source_visibility(client, sign_in, 
     dm_body = dm_entry_response.get_data(as_text=True)
     assert "Backgrounds" in dm_body
     assert "City Watch" in dm_body
+
+
+def test_scag_entry_pages_surface_source_chapter_context_links(client, sign_in, users, app, tmp_path):
+    data_root = build_scag_entry_source_context_data_root(
+        tmp_path / "dnd5e-source-scag-entry-source-context"
+    )
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source(
+            "SCAG",
+            entry_types=["book", "race", "subclass", "subclassfeature", "background", "item"],
+        )
+
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="SCAG",
+            is_enabled=True,
+            default_visibility="players",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in service.list_entries_for_campaign_source(
+                "linden-pass",
+                "SCAG",
+                entry_type="book",
+                limit=None,
+            )
+        }
+        scag_entries = {
+            entry.title: entry
+            for entry in store.list_entries_for_source("DND-5E", "SCAG", limit=None)
+            if entry.entry_type != "book"
+        }
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    page_expectations = {
+        "Ghostwise Halfling": ("Halflings",),
+        "Path of the Battlerager": ("Primal Paths",),
+        "Battlerager Armor": ("Primal Paths",),
+        "Clan Crafter": ("Backgrounds",),
+        "Spiked Armor": ("Primal Paths",),
+        "Birdpipes": ("Musical Instruments",),
+    }
+
+    for title, book_titles in page_expectations.items():
+        response = client.get(f"/campaigns/linden-pass/systems/entries/{scag_entries[title].slug}")
+        assert response.status_code == 200
+        body = response.get_data(as_text=True)
+        assert "Source Chapter Context" in body
+        for book_title in book_titles:
+            assert book_title in body
+            assert (
+                f'href="/campaigns/linden-pass/systems/entries/{book_entries[book_title].slug}"'
+                in body
+            )
 
 
 def test_importer_expands_safe_classic_magic_armor_variants(app, tmp_path):

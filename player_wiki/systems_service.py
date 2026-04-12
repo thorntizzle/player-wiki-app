@@ -320,6 +320,46 @@ VGM_CHARACTER_RACE_WRAPPER_RACE_MATCHERS = {
     },
 }
 
+SCAG_RACE_WRAPPER_TITLE_BY_KEY = {
+    normalize_lookup("Dwarf"): "Dwarves",
+    normalize_lookup("Dragonborn"): "Dragonborn",
+    normalize_lookup("Elf"): "Elves",
+    normalize_lookup("Gnome"): "Gnomes",
+    normalize_lookup("Halfling"): "Halflings",
+    normalize_lookup("Half-Elf"): "Half-Elves",
+    normalize_lookup("Half-Orc"): "Half-Orcs",
+    normalize_lookup("Human"): "Humans",
+    normalize_lookup("Tiefling"): "Tieflings",
+}
+SCAG_RACE_WRAPPER_MATCH_ORDER = (
+    normalize_lookup("Half-Elf"),
+    normalize_lookup("Half-Orc"),
+    normalize_lookup("Dragonborn"),
+    normalize_lookup("Halfling"),
+    normalize_lookup("Tiefling"),
+    normalize_lookup("Dwarf"),
+    normalize_lookup("Gnome"),
+    normalize_lookup("Human"),
+    normalize_lookup("Elf"),
+)
+SCAG_SUBCLASS_WRAPPER_TITLE_BY_CLASS_KEY = {
+    normalize_lookup("Barbarian"): "Primal Paths",
+    normalize_lookup("Bard"): "Bardic Colleges",
+    normalize_lookup("Cleric"): "Divine Domain",
+    normalize_lookup("Druid"): "Druid Circles",
+    normalize_lookup("Fighter"): "Martial Archetype",
+    normalize_lookup("Monk"): "Monastic Traditions",
+    normalize_lookup("Paladin"): "Sacred Oath",
+    normalize_lookup("Rogue"): "Roguish Archetypes",
+    normalize_lookup("Sorcerer"): "Sorcerous Origin",
+    normalize_lookup("Warlock"): "Otherworldly Patron",
+    normalize_lookup("Wizard"): "Arcane Tradition",
+}
+SCAG_ITEM_WRAPPER_TITLE_BY_PAGE = {
+    "121": "Primal Paths",
+    "124": "Musical Instruments",
+}
+
 
 def _systems_service_request_cache() -> dict[tuple[object, ...], object] | None:
     if not has_request_context():
@@ -1071,6 +1111,53 @@ class SystemsService:
             build_value,
         )
 
+    def build_source_chapter_context_entries_for_entry(
+        self,
+        campaign_slug: str,
+        entry: SystemsEntryRecord,
+    ) -> list[dict[str, object]]:
+        if entry.entry_type == "book":
+            return []
+        if str(entry.source_id or "").strip().upper() != "SCAG":
+            return []
+
+        wrapper_titles = self._build_scag_source_chapter_context_titles(entry)
+        if not wrapper_titles:
+            return []
+
+        def build_value() -> list[dict[str, object]]:
+            book_lookup = {
+                normalize_lookup(candidate.title): candidate
+                for candidate in self.list_entries_for_campaign_source(
+                    campaign_slug,
+                    "SCAG",
+                    entry_type="book",
+                    limit=None,
+                )
+            }
+            context_entries: list[dict[str, object]] = []
+            seen_entry_keys: set[str] = set()
+            for title in wrapper_titles:
+                candidate = book_lookup.get(normalize_lookup(title))
+                if candidate is None or candidate.entry_key in seen_entry_keys:
+                    continue
+                seen_entry_keys.add(candidate.entry_key)
+                metadata = dict(candidate.metadata or {})
+                context_entries.append(
+                    {
+                        "entry": candidate,
+                        "section_label": str(metadata.get("section_label") or "").strip(),
+                        "chapter_title": str(metadata.get("chapter_title") or "").strip(),
+                        "page": str(candidate.source_page or "").strip(),
+                    }
+                )
+            return context_entries
+
+        return _systems_service_cache_get(
+            ("source_chapter_context_entries_for_entry", campaign_slug, entry.entry_key),
+            build_value,
+        )
+
     def build_related_rules_for_book_sections(
         self,
         campaign_slug: str,
@@ -1233,6 +1320,55 @@ class SystemsService:
         if base_race_key and base_race_key in matcher.get("base_race_keys", ()):
             return True
         return False
+
+    def _build_scag_source_chapter_context_titles(
+        self,
+        entry: SystemsEntryRecord,
+    ) -> tuple[str, ...]:
+        if entry.entry_type == "race":
+            wrapper_title = self._resolve_scag_race_wrapper_title(entry)
+            return (wrapper_title,) if wrapper_title else ()
+        if entry.entry_type in {"subclass", "subclassfeature"}:
+            metadata = dict(entry.metadata or {})
+            class_key = normalize_lookup(str(metadata.get("class_name") or ""))
+            wrapper_title = SCAG_SUBCLASS_WRAPPER_TITLE_BY_CLASS_KEY.get(class_key, "")
+            return (wrapper_title,) if wrapper_title else ()
+        if entry.entry_type == "background":
+            return ("Backgrounds",)
+        if entry.entry_type == "item":
+            wrapper_title = self._resolve_scag_item_wrapper_title(entry)
+            return (wrapper_title,) if wrapper_title else ()
+        return ()
+
+    def _resolve_scag_race_wrapper_title(self, entry: SystemsEntryRecord) -> str:
+        metadata = dict(entry.metadata or {})
+        candidate_keys = [
+            normalize_lookup(str(metadata.get("base_race_name") or "")),
+            normalize_lookup(str(entry.title or "")),
+        ]
+        for candidate_key in candidate_keys:
+            if not candidate_key:
+                continue
+            direct_match = SCAG_RACE_WRAPPER_TITLE_BY_KEY.get(candidate_key, "")
+            if direct_match:
+                return direct_match
+            for race_key in SCAG_RACE_WRAPPER_MATCH_ORDER:
+                if race_key and race_key in candidate_key:
+                    return SCAG_RACE_WRAPPER_TITLE_BY_KEY.get(race_key, "")
+        return ""
+
+    def _resolve_scag_item_wrapper_title(self, entry: SystemsEntryRecord) -> str:
+        metadata = dict(entry.metadata or {})
+        item_type_key = normalize_lookup(str(metadata.get("type") or ""))
+        if item_type_key == normalize_lookup("INS"):
+            return "Musical Instruments"
+
+        title_key = normalize_lookup(entry.title)
+        if title_key == normalize_lookup("Spiked Armor"):
+            return "Primal Paths"
+
+        page_key = str(entry.source_page or "").strip()
+        return SCAG_ITEM_WRAPPER_TITLE_BY_PAGE.get(page_key, "")
 
     def _monster_metadata_group_keys(self, value: object) -> set[str]:
         keys: set[str] = set()

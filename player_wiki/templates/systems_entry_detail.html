@@ -251,6 +251,31 @@
           </ul>
         </section>
       {% endif %}
+      {% if source_chapter_context_entries %}
+        <section class="card sidebar-card">
+          <h2>Source Chapter Context</h2>
+          <ul class="plain-list">
+            {% for context_entry in source_chapter_context_entries %}
+              <li>
+                <a href="{{ url_for('campaign_systems_entry_detail', campaign_slug=campaign.slug, entry_slug=context_entry.entry.slug) }}">{{ context_entry.entry.title }}</a>
+                {% if context_entry.section_label or context_entry.chapter_title or context_entry.page %}
+                  <span class="meta">
+                    {% if context_entry.section_label %}
+                      {{ context_entry.section_label }}
+                    {% endif %}
+                    {% if context_entry.chapter_title and context_entry.chapter_title != context_entry.entry.title %}
+                      {% if context_entry.section_label %} · {% endif %}{{ context_entry.chapter_title }}
+                    {% endif %}
+                    {% if context_entry.page %}
+                      {% if context_entry.section_label or (context_entry.chapter_title and context_entry.chapter_title != context_entry.entry.title) %} · {% endif %}p. {{ context_entry.page }}
+                    {% endif %}
+                  </span>
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        </section>
+      {% endif %}
       {% if related_race_entries %}
         <section class="card sidebar-card">
           <h2>Related Races</h2>

@@ -3513,6 +3513,20 @@ def create_app() -> Flask:
             for candidate in systems_service.build_related_rules_for_entry(campaign_slug, entry)
             if can_access_campaign_systems_entry(campaign_slug, candidate.slug)
         ]
+        source_chapter_context_entries = []
+        for candidate in systems_service.build_source_chapter_context_entries_for_entry(
+            campaign_slug,
+            entry,
+        ):
+            if not isinstance(candidate, dict):
+                continue
+            context_entry = candidate.get("entry")
+            if context_entry is None or not can_access_campaign_systems_entry(
+                campaign_slug,
+                context_entry.slug,
+            ):
+                continue
+            source_chapter_context_entries.append(candidate)
         related_race_entries = []
         related_monster_entries = []
         book_source_context_sections = []
@@ -3608,6 +3622,7 @@ def create_app() -> Flask:
             "subclass_optionalfeature_sections": subclass_optionalfeature_sections,
             "feature_detail_card": feature_detail_card,
             "related_rule_entries": related_rule_entries,
+            "source_chapter_context_entries": source_chapter_context_entries,
             "related_race_entries": related_race_entries,
             "related_monster_entries": related_monster_entries,
             "book_source_context_sections": book_source_context_sections,
