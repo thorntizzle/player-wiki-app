@@ -179,6 +179,9 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         ("Monster Lore", "Yuan-ti: Snake People"),
         ("Character Races", "Height and Weight"),
     ),
+    # Keep the first SCAG slice focused on player-option wrappers; the heavier
+    # setting chapters stay out until a later pass needs them for source
+    # navigation.
     "SCAG": (
         ("Races of the Realms", "Dwarves"),
         ("Races of the Realms", "Elves"),

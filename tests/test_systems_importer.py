@@ -2040,6 +2040,108 @@ def build_scag_classes_book_data_root(root: Path) -> Path:
     return data_root
 
 
+def build_scag_first_slice_boundary_data_root(root: Path) -> Path:
+    data_root = build_test_data_root(root)
+    write_json(
+        root / "data/books.json",
+        {
+            "book": [
+                {
+                    "name": "Sword Coast Adventurer's Guide",
+                    "id": "SCAG",
+                    "source": "SCAG",
+                    "contents": [
+                        {
+                            "name": "Welcome to the Realms",
+                            "ordinal": {"type": "chapter", "identifier": 1},
+                        },
+                        {
+                            "name": "The Sword Coast and the North",
+                            "ordinal": {"type": "chapter", "identifier": 2},
+                        },
+                        {
+                            "name": "Races of the Realms",
+                            "headers": ["Dwarves"],
+                            "ordinal": {"type": "chapter", "identifier": 3},
+                        },
+                        {
+                            "name": "Classes",
+                            "headers": ["Barbarians"],
+                            "ordinal": {"type": "chapter", "identifier": 4},
+                        },
+                        {
+                            "name": "Backgrounds",
+                            "ordinal": {"type": "chapter", "identifier": 5},
+                        },
+                    ],
+                }
+            ]
+        },
+    )
+    write_json(
+        root / "data/book/book-scag.json",
+        {
+            "data": [
+                {
+                    "type": "section",
+                    "name": "Welcome to the Realms",
+                    "page": 7,
+                    "entries": [
+                        "This chapter introduces the broader Forgotten Realms setting and travel context."
+                    ],
+                },
+                {
+                    "type": "section",
+                    "name": "The Sword Coast and the North",
+                    "page": 17,
+                    "entries": [
+                        "This chapter surveys settlements, frontiers, and regional lore across the Sword Coast."
+                    ],
+                },
+                {
+                    "type": "section",
+                    "name": "Races of the Realms",
+                    "page": 103,
+                    "entries": [
+                        {
+                            "type": "section",
+                            "name": "Dwarves",
+                            "page": 103,
+                            "entries": [
+                                "The stout folk endure in holds across the North."
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "type": "section",
+                    "name": "Classes",
+                    "page": 121,
+                    "entries": [
+                        {
+                            "type": "section",
+                            "name": "Barbarians",
+                            "page": 121,
+                            "entries": [
+                                "Barbarians keep distinct traditions in the North."
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "type": "section",
+                    "name": "Backgrounds",
+                    "page": 145,
+                    "entries": [
+                        "This chapter offers additional backgrounds for characters in a Forgotten Realms campaign."
+                    ],
+                },
+            ]
+        },
+    )
+    return data_root
+
+
 def build_scag_entry_source_context_data_root(root: Path) -> Path:
     data_root = build_test_data_root(root)
     write_json(
@@ -4929,6 +5031,31 @@ def test_scag_backgrounds_book_entry_follows_source_visibility(client, sign_in, 
     dm_body = dm_entry_response.get_data(as_text=True)
     assert "Backgrounds" in dm_body
     assert "City Watch" in dm_body
+
+
+def test_scag_first_slice_excludes_setting_lore_chapters_from_book_imports(app, tmp_path):
+    data_root = build_scag_first_slice_boundary_data_root(
+        tmp_path / "dnd5e-source-scag-first-slice-boundary"
+    )
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        result = importer.import_source("SCAG", entry_types=["book"])
+        store = app.extensions["systems_store"]
+        book_entries = list(
+            store.list_entries_for_source("DND-5E", "SCAG", entry_type="book", limit=20)
+        )
+
+    assert result.imported_count == 3
+    assert result.imported_by_type == {"book": 3}
+    book_titles = {entry.title for entry in book_entries}
+    assert book_titles == {"Dwarves", "Barbarians", "Backgrounds"}
+    assert "Welcome to the Realms" not in book_titles
+    assert "The Sword Coast and the North" not in book_titles
 
 
 def test_scag_entry_pages_surface_source_chapter_context_links(client, sign_in, users, app, tmp_path):
