@@ -3092,7 +3092,43 @@ def create_app() -> Flask:
             "active_nav": "systems",
         }
 
-    def build_campaign_systems_index_context(campaign_slug: str, *, query: str = "") -> dict[str, object]:
+    def build_rules_reference_search_result(entry) -> dict[str, object]:
+        metadata = dict(entry.metadata or {})
+        reference_scope = ""
+        if entry.entry_type == "book":
+            reference_scope = str(metadata.get("section_label") or "").strip()
+        elif entry.entry_type == "rule":
+            facets = [
+                str(value).strip()
+                for value in list(metadata.get("rule_facets") or [])
+                if str(value).strip()
+            ]
+            aliases = [
+                str(value).strip()
+                for value in list(metadata.get("aliases") or [])
+                if str(value).strip()
+            ]
+            summary_values = facets or aliases
+            if summary_values:
+                reference_scope = ", ".join(summary_values[:3])
+        return {
+            "title": entry.title,
+            "entry_type": entry.entry_type,
+            "entry_type_label": SYSTEMS_ENTRY_TYPE_LABELS.get(
+                entry.entry_type,
+                entry.entry_type.replace("_", " ").title(),
+            ),
+            "source_id": entry.source_id,
+            "slug": entry.slug,
+            "reference_scope": reference_scope,
+        }
+
+    def build_campaign_systems_index_context(
+        campaign_slug: str,
+        *,
+        query: str = "",
+        reference_query: str = "",
+    ) -> dict[str, object]:
         campaign = load_campaign_context(campaign_slug)
         systems_service = get_systems_service()
         source_cards = []
@@ -3113,9 +3149,10 @@ def create_app() -> Flask:
             )
 
         search_query = query.strip()
+        rules_reference_query = reference_query.strip()
+        include_source_ids = [row["source_id"] for row in source_cards]
         search_results = []
         if search_query:
-            include_source_ids = [row["source_id"] for row in source_cards]
             for entry in systems_service.search_entries_for_campaign(
                 campaign_slug,
                 query=search_query,
@@ -3134,17 +3171,33 @@ def create_app() -> Flask:
                         "slug": entry.slug,
                     }
                 )
+        rules_reference_results = []
+        if rules_reference_query:
+            for entry in systems_service.search_rules_reference_entries_for_campaign(
+                campaign_slug,
+                query=rules_reference_query,
+                include_source_ids=include_source_ids,
+                limit=100,
+            ):
+                rules_reference_results.append(build_rules_reference_search_result(entry))
 
         return {
             "campaign": campaign,
             "query": search_query,
+            "reference_query": rules_reference_query,
             "source_cards": source_cards,
             "search_results": search_results,
+            "rules_reference_results": rules_reference_results,
             "can_manage_systems": can_manage_campaign_systems(campaign_slug),
             "active_nav": "systems",
         }
 
-    def build_campaign_systems_source_context(campaign_slug: str, source_id: str) -> dict[str, object]:
+    def build_campaign_systems_source_context(
+        campaign_slug: str,
+        source_id: str,
+        *,
+        reference_query: str = "",
+    ) -> dict[str, object]:
         campaign = load_campaign_context(campaign_slug)
         systems_service = get_systems_service()
         state = systems_service.get_campaign_source_state(campaign_slug, source_id)
@@ -3176,11 +3229,29 @@ def create_app() -> Flask:
             entry_type="book",
             limit=None,
         )
+        rules_reference_entries = systems_service.list_rules_reference_entries_for_campaign(
+            campaign_slug,
+            include_source_ids=[source_id],
+            limit=None,
+        )
+        rules_reference_query = reference_query.strip()
+        rules_reference_results = []
+        if rules_reference_query:
+            for entry in systems_service.search_rules_reference_entries_for_campaign(
+                campaign_slug,
+                query=rules_reference_query,
+                include_source_ids=[source_id],
+                limit=100,
+            ):
+                rules_reference_results.append(build_rules_reference_search_result(entry))
         return {
             "campaign": campaign,
             "source_state": state,
             "entry_groups": entry_groups,
             "book_entries": book_entries,
+            "has_rules_reference_search": bool(rules_reference_entries),
+            "reference_query": rules_reference_query,
+            "rules_reference_results": rules_reference_results,
             "entry_count": sum(group["count"] for group in all_entry_groups),
             "browsable_entry_count": browsable_entry_count,
             "hidden_entry_count": hidden_entry_count,
@@ -3913,20 +3984,35 @@ def create_app() -> Flask:
     @campaign_scope_access_required("systems")
     def campaign_systems_index(campaign_slug: str):
         query = request.args.get("q", "").strip()
-        context = build_campaign_systems_index_context(campaign_slug, query=query)
+        reference_query = request.args.get("reference_q", "").strip()
+        context = build_campaign_systems_index_context(
+            campaign_slug,
+            query=query,
+            reference_query=reference_query,
+        )
         return render_template("systems_index.html", **context)
 
     @app.get("/campaigns/<campaign_slug>/systems/search")
     @campaign_scope_access_required("systems")
     def campaign_systems_search(campaign_slug: str):
         query = request.args.get("q", "").strip()
-        context = build_campaign_systems_index_context(campaign_slug, query=query)
+        reference_query = request.args.get("reference_q", "").strip()
+        context = build_campaign_systems_index_context(
+            campaign_slug,
+            query=query,
+            reference_query=reference_query,
+        )
         return render_template("systems_index.html", **context)
 
     @app.get("/campaigns/<campaign_slug>/systems/sources/<source_id>")
     @campaign_systems_source_access_required
     def campaign_systems_source_detail(campaign_slug: str, source_id: str):
-        context = build_campaign_systems_source_context(campaign_slug, source_id)
+        reference_query = request.args.get("reference_q", "").strip()
+        context = build_campaign_systems_source_context(
+            campaign_slug,
+            source_id,
+            reference_query=reference_query,
+        )
         return render_template("systems_source_detail.html", **context)
 
     @app.get("/campaigns/<campaign_slug>/systems/sources/<source_id>/types/<entry_type>")

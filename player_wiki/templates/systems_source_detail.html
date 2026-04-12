@@ -23,7 +23,7 @@
       {% if book_entries %}
         <section>
           <h3>Book Chapters</h3>
-          <p class="meta">These source-backed chapter pages live in SQLite like other Systems entries and follow this source's policy and visibility rules.</p>
+          <p class="meta">These source-backed chapter pages are the primary browse surface for this source's rules-reference content. They live in SQLite like other Systems entries and follow this source's policy and visibility rules.</p>
           <ul class="plain-list">
             {% for chapter in book_entries %}
               <li>
@@ -35,6 +35,34 @@
               </li>
             {% endfor %}
           </ul>
+        </section>
+      {% endif %}
+      {% if has_rules_reference_search %}
+        <section>
+          <h3>Rules Reference Search</h3>
+          <form method="get" action="{{ url_for('campaign_systems_source_detail', campaign_slug=campaign.slug, source_id=source_state.source.source_id) }}" class="stack-form">
+            <label class="field">
+              <span>Search this source's rules references</span>
+              <input type="search" name="reference_q" value="{{ reference_query }}" placeholder="chapter heading, rule alias, or facet">
+            </label>
+            <button type="submit">Search</button>
+          </form>
+          <p class="meta">Searches only this source's `Book Chapters` or `RULES` entries using curated metadata like chapter labels, section headings, aliases, formulas, and rule facets. It does not search full entry body text.</p>
+
+          {% if reference_query %}
+            {% if rules_reference_results %}
+              <ul class="plain-list">
+                {% for result in rules_reference_results %}
+                  <li>
+                    <a href="{{ url_for('campaign_systems_entry_detail', campaign_slug=campaign.slug, entry_slug=result.slug) }}">{{ result.title }}</a>
+                    <span class="meta">{{ result.source_id }} | {{ result.entry_type_label }}{% if result.reference_scope %} | {{ result.reference_scope }}{% endif %}</span>
+                  </li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <p class="meta">No rules references matched that metadata search in this source.</p>
+            {% endif %}
+          {% endif %}
         </section>
       {% endif %}
       {% if hidden_entry_count %}

@@ -57,6 +57,7 @@ ATTACK_TAG_LABELS = {
 ARMOR_ITEM_TYPE_CODES = {"LA", "MA", "HA", "S"}
 WEAPON_ITEM_TYPE_CODES = {"M", "R"}
 PASSIVE_CHECK_SKILL_KEYS = {"insight", "investigation", "perception"}
+RULES_REFERENCE_ENTRY_TYPES = ("book", "rule")
 
 
 def _systems_service_request_cache() -> dict[tuple[object, ...], object] | None:
@@ -767,6 +768,121 @@ class SystemsService:
                 entry.id,
             )
         return (1, 10_000, entry.title.lower(), entry.id)
+
+    def _source_catalog_sort_key(self, source_id: str) -> tuple[int, str]:
+        normalized_source_id = str(source_id or "").strip().upper()
+        for index, source in enumerate(DND_5E_SOURCE_CATALOG):
+            if str(source.get("source_id") or "").strip().upper() == normalized_source_id:
+                return (index, normalized_source_id)
+        return (len(DND_5E_SOURCE_CATALOG), normalized_source_id)
+
+    def _rules_reference_entry_sort_key(self, entry: SystemsEntryRecord) -> tuple[int, str, int, int, str, int]:
+        return (*self._source_catalog_sort_key(entry.source_id), *self._entry_source_browse_sort_key(entry))
+
+    def _normalize_source_filter(self, source_ids: list[str] | None) -> list[str] | None:
+        if source_ids is None:
+            return None
+        normalized = [
+            str(source_id or "").strip().upper()
+            for source_id in list(source_ids or [])
+            if str(source_id or "").strip()
+        ]
+        return normalized
+
+    def _reference_search_values(self, value: object) -> list[str]:
+        if isinstance(value, list):
+            values: list[str] = []
+            for item in value:
+                values.extend(self._reference_search_values(item))
+            return values
+        if isinstance(value, dict):
+            values: list[str] = []
+            for key in ("title", "label", "name"):
+                cleaned = str(value.get(key) or "").strip()
+                if cleaned:
+                    values.append(cleaned)
+            return values
+        cleaned = str(value or "").strip()
+        return [cleaned] if cleaned else []
+
+    def _build_rules_reference_search_text(self, entry: SystemsEntryRecord) -> str:
+        metadata = dict(entry.metadata or {})
+        search_parts: list[str] = [entry.title, entry.source_id, entry.entry_type]
+        if entry.entry_type == "book":
+            search_parts.extend(
+                [
+                    str(metadata.get("section_label") or "").strip(),
+                    *self._reference_search_values(metadata.get("headers")),
+                    *self._reference_search_values(metadata.get("section_outline")),
+                ]
+            )
+        elif entry.entry_type == "rule":
+            search_parts.extend(
+                [
+                    str(metadata.get("rule_key") or "").strip(),
+                    str(metadata.get("formula") or "").strip(),
+                    *self._reference_search_values(metadata.get("aliases")),
+                    *self._reference_search_values(metadata.get("rule_facets")),
+                ]
+            )
+        search_parts.extend(self._reference_search_values(metadata.get("reference_terms")))
+        return " ".join(normalize_lookup(part) for part in search_parts if str(part or "").strip())
+
+    def list_rules_reference_entries_for_campaign(
+        self,
+        campaign_slug: str,
+        *,
+        include_source_ids: list[str] | None = None,
+        limit: int | None = None,
+    ) -> list[SystemsEntryRecord]:
+        normalized_source_ids = self._normalize_source_filter(include_source_ids)
+        if include_source_ids is not None and not normalized_source_ids:
+            return []
+
+        entries: list[SystemsEntryRecord] = []
+        for entry_type in RULES_REFERENCE_ENTRY_TYPES:
+            entries.extend(
+                self.list_enabled_entries_for_campaign(
+                    campaign_slug,
+                    entry_type=entry_type,
+                    limit=None,
+                )
+            )
+        if normalized_source_ids is not None:
+            entries = [entry for entry in entries if str(entry.source_id or "").strip().upper() in normalized_source_ids]
+        entries = sorted(entries, key=self._rules_reference_entry_sort_key)
+        if limit is not None:
+            return entries[:limit]
+        return entries
+
+    def search_rules_reference_entries_for_campaign(
+        self,
+        campaign_slug: str,
+        *,
+        query: str,
+        include_source_ids: list[str] | None = None,
+        limit: int | None = 100,
+    ) -> list[SystemsEntryRecord]:
+        normalized_terms = [
+            normalize_lookup(term)
+            for term in str(query or "").split()
+            if normalize_lookup(term)
+        ]
+        if not normalized_terms:
+            return []
+
+        matches = [
+            entry
+            for entry in self.list_rules_reference_entries_for_campaign(
+                campaign_slug,
+                include_source_ids=include_source_ids,
+                limit=None,
+            )
+            if all(term in self._build_rules_reference_search_text(entry) for term in normalized_terms)
+        ]
+        if limit is not None:
+            return matches[:limit]
+        return matches
 
     def list_monster_entries_for_campaign(
         self,

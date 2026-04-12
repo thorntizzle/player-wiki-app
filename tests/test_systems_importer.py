@@ -2210,6 +2210,49 @@ def test_phb_book_chapters_are_imported_and_browsable_in_book_order(
     assert 'id="targets--areas-of-effect"' in spellcasting_body
 
 
+def test_rules_reference_search_uses_curated_metadata_without_full_body_search(
+    client, sign_in, users, app, tmp_path
+):
+    data_root = build_phb_book_data_root(tmp_path / "dnd5e-source-book-reference-search")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("PHB", entry_types=["book"])
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    heading_response = client.get("/campaigns/linden-pass/systems/search?reference_q=passive+checks")
+    source_response = client.get("/campaigns/linden-pass/systems/sources/PHB?reference_q=surprise")
+    rule_response = client.get("/campaigns/linden-pass/systems/search?reference_q=15+strength")
+    negative_response = client.get("/campaigns/linden-pass/systems/search?reference_q=training+talent")
+
+    assert heading_response.status_code == 200
+    heading_body = heading_response.get_data(as_text=True)
+    assert "Rules Reference Search" in heading_body
+    assert "Using Ability Scores" in heading_body
+    assert "PHB | Book Chapters | Chapter 7" in heading_body
+
+    assert source_response.status_code == 200
+    source_body = source_response.get_data(as_text=True)
+    assert "Rules Reference Search" in source_body
+    assert "Combat" in source_body
+    assert "PHB | Book Chapters | Chapter 9" in source_body
+
+    assert rule_response.status_code == 200
+    rule_body = rule_response.get_data(as_text=True)
+    assert "Carrying Capacity and Encumbrance" in rule_body
+    assert "RULES | Rules" in rule_body
+
+    assert negative_response.status_code == 200
+    negative_body = negative_response.get_data(as_text=True)
+    assert "No rules references matched that metadata search yet." in negative_body
+    assert "Using Ability Scores" not in negative_body
+
+
 def test_importer_skips_xphb_subclass_variants(app, tmp_path):
     data_root = build_xphb_variant_subclass_data_root(tmp_path / "dnd5e-source-xphb-variants")
 
