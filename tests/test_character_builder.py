@@ -915,6 +915,28 @@ def _set_progressions(
     systems_service.build_subclass_feature_progression_for_subclass_entry = _build_subclass_feature_progression_for_subclass_entry
 
 
+def _structured_subclass_spellcasting_metadata(
+    *,
+    spell_list_class_name: str = "Wizard",
+    caster_progression: str = "1/3",
+) -> dict[str, object]:
+    return {
+        "class_name": "Fighter",
+        "class_source": "PHB",
+        "spellcasting_ability": "int",
+        "spell_list_class_name": spell_list_class_name,
+        "caster_progression": caster_progression,
+        "cantrip_progression": [0, 0, 2, 2],
+        "spells_known_progression": [0, 0, 3, 4],
+        "slot_progression": [
+            [],
+            [],
+            [{"level": 1, "max_slots": 2}],
+            [{"level": 1, "max_slots": 3}],
+        ],
+    }
+
+
 def test_imported_character_readiness_is_ready_when_required_links_are_present():
     fighter = _systems_entry(
         "class",
@@ -1263,6 +1285,81 @@ def test_multiclass_readiness_blocks_unsupported_subclass_only_spellcasting_rows
     assert any("subclass-only spellcasting" in reason.lower() for reason in readiness["reasons"])
 
 
+def test_multiclass_readiness_supports_structured_subclass_only_spellcasting_rows():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "proficiency": ["str", "con"], "subclass_title": "Martial Archetype"},
+    )
+    spellblade = _systems_entry(
+        "subclass",
+        "xge-subclass-spellblade",
+        "Spellblade",
+        metadata=_structured_subclass_spellcasting_metadata(),
+        source_id="XGE",
+    )
+    wizard = _systems_entry(
+        "class",
+        "phb-class-wizard",
+        "Wizard",
+        metadata={
+            "hit_die": {"faces": 6},
+            "spellcasting_ability": "int",
+            "caster_progression": "full",
+            "spells_known_progression_fixed": [6],
+        },
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter, wizard],
+            "subclass": [spellblade],
+            "race": [human],
+            "background": [acolyte],
+        },
+        class_progression=[],
+    )
+    _set_progressions(
+        systems_service,
+        class_by_slug={
+            fighter.slug: [{"level": 3, "feature_rows": [_progression_row("Martial Archetype")]}],
+            wizard.slug: [{"level": 1, "feature_rows": [_progression_row("Spellcasting")]}],
+        },
+        subclass_by_slug={
+            spellblade.slug: [{"level": 3, "feature_rows": [_progression_row("Spellcasting")]}],
+        },
+    )
+    definition = _minimal_character_definition("fighter-spellblade-wizard", "Fighter Spellblade Wizard")
+    definition.profile["classes"] = [
+        {
+            "row_id": "class-row-1",
+            "class_name": "Fighter",
+            "subclass_name": "Spellblade",
+            "level": 3,
+            "systems_ref": _systems_ref(fighter),
+            "subclass_ref": _systems_ref(spellblade),
+        },
+        {
+            "row_id": "class-row-2",
+            "class_name": "Wizard",
+            "subclass_name": "",
+            "level": 1,
+            "systems_ref": _systems_ref(wizard),
+        },
+    ]
+    definition.profile["class_ref"] = _systems_ref(fighter)
+    definition.profile["subclass_ref"] = _systems_ref(spellblade)
+    definition.profile["class_level_text"] = "Fighter 3 / Wizard 1"
+    definition.spellcasting = {"slot_progression": [], "spells": []}
+
+    readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
+
+    assert readiness["status"] == "ready"
+    assert readiness["selected_class_rows"][0]["selected_subclass"].slug == spellblade.slug
+
+
 def test_normalize_definition_to_native_model_derives_shared_slots_for_full_and_half_casters():
     cleric = _systems_entry(
         "class",
@@ -1595,6 +1692,84 @@ def test_normalize_definition_to_native_model_shares_slots_for_eldritch_knight_a
     normalized = normalize_definition_to_native_model(definition, systems_service=systems_service)
 
     assert normalized.spellcasting["slot_progression"] == [{"level": 1, "max_slots": 3}]
+    assert [row["caster_progression"] for row in normalized.spellcasting["class_rows"]] == ["1/3", "full"]
+    assert all(row["slot_lane_id"] == "shared-multiclass-slots" for row in normalized.spellcasting["class_rows"])
+
+
+def test_normalize_definition_to_native_model_supports_structured_subclass_only_spellcasting_rows():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "proficiency": ["str", "con"], "subclass_title": "Martial Archetype"},
+    )
+    spellblade = _systems_entry(
+        "subclass",
+        "xge-subclass-spellblade",
+        "Spellblade",
+        metadata=_structured_subclass_spellcasting_metadata(),
+        source_id="XGE",
+    )
+    wizard = _systems_entry(
+        "class",
+        "phb-class-wizard",
+        "Wizard",
+        metadata={
+            "hit_die": {"faces": 6},
+            "spellcasting_ability": "int",
+            "caster_progression": "full",
+            "spells_known_progression_fixed": [6],
+        },
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter, wizard],
+            "subclass": [spellblade],
+            "race": [human],
+            "background": [acolyte],
+        },
+        class_progression=[],
+    )
+    _set_progressions(
+        systems_service,
+        class_by_slug={
+            fighter.slug: [{"level": 3, "feature_rows": [_progression_row("Martial Archetype")]}],
+            wizard.slug: [{"level": 1, "feature_rows": [_progression_row("Spellcasting")]}],
+        },
+        subclass_by_slug={spellblade.slug: [{"level": 3, "feature_rows": [_progression_row("Spellcasting")]}]},
+    )
+    definition = _minimal_character_definition("spellblade-wizard", "Spellblade Wizard")
+    definition.profile["classes"] = [
+        {
+            "row_id": "class-row-1",
+            "class_name": "Fighter",
+            "subclass_name": "Spellblade",
+            "level": 3,
+            "systems_ref": _systems_ref(fighter),
+            "subclass_ref": _systems_ref(spellblade),
+        },
+        {
+            "row_id": "class-row-2",
+            "class_name": "Wizard",
+            "subclass_name": "",
+            "level": 1,
+            "systems_ref": _systems_ref(wizard),
+        },
+    ]
+    definition.profile["class_ref"] = _systems_ref(fighter)
+    definition.profile["subclass_ref"] = _systems_ref(spellblade)
+    definition.profile["class_level_text"] = "Fighter 3 / Wizard 1"
+    definition.spellcasting = {"slot_progression": [], "spells": []}
+
+    normalized = normalize_definition_to_native_model(definition, systems_service=systems_service)
+
+    first_row = dict(normalized.spellcasting["class_rows"][0])
+    assert normalized.spellcasting["slot_progression"] == [{"level": 1, "max_slots": 3}]
+    assert first_row["class_name"] == "Fighter"
+    assert first_row["spell_list_class_name"] == "Wizard"
+    assert first_row["caster_progression"] == "1/3"
     assert [row["caster_progression"] for row in normalized.spellcasting["class_rows"]] == ["1/3", "full"]
     assert all(row["slot_lane_id"] == "shared-multiclass-slots" for row in normalized.spellcasting["class_rows"])
 
@@ -2383,6 +2558,133 @@ def test_native_level_up_surfaces_and_applies_eldritch_knight_spell_choices():
     assert spells_by_name["Shield"]["class_row_id"] == "class-row-1"
 
 
+def test_native_level_up_surfaces_and_applies_structured_subclass_spell_choices():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "proficiency": ["str", "con"], "subclass_title": "Martial Archetype"},
+    )
+    spellblade = _systems_entry(
+        "subclass",
+        "xge-subclass-spellblade",
+        "Spellblade",
+        metadata=_structured_subclass_spellcasting_metadata(),
+        source_id="XGE",
+    )
+    fire_bolt = _systems_entry(
+        "spell",
+        "phb-spell-fire-bolt",
+        "Fire Bolt",
+        metadata={"level": 0, "class_lists": {"PHB": ["Wizard"]}},
+    )
+    mage_hand = _systems_entry(
+        "spell",
+        "phb-spell-mage-hand",
+        "Mage Hand",
+        metadata={"level": 0, "class_lists": {"PHB": ["Wizard"]}},
+    )
+    ray_of_frost = _systems_entry(
+        "spell",
+        "phb-spell-ray-of-frost",
+        "Ray of Frost",
+        metadata={"level": 0, "class_lists": {"PHB": ["Wizard"]}},
+    )
+    detect_magic = _systems_entry(
+        "spell",
+        "phb-spell-detect-magic",
+        "Detect Magic",
+        metadata={"level": 1, "class_lists": {"PHB": ["Wizard"]}},
+    )
+    magic_missile = _systems_entry(
+        "spell",
+        "phb-spell-magic-missile",
+        "Magic Missile",
+        metadata={"level": 1, "class_lists": {"PHB": ["Wizard"]}},
+    )
+    shield = _systems_entry(
+        "spell",
+        "phb-spell-shield",
+        "Shield",
+        metadata={"level": 1, "class_lists": {"PHB": ["Wizard"]}},
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "subclass": [spellblade],
+            "race": [human],
+            "background": [acolyte],
+            "spell": [fire_bolt, mage_hand, ray_of_frost, detect_magic, magic_missile, shield],
+        },
+        class_progression=[],
+    )
+    _set_progressions(
+        systems_service,
+        class_by_slug={fighter.slug: [{"level": 3, "feature_rows": [_progression_row("Martial Archetype")]}]},
+        subclass_by_slug={spellblade.slug: [{"level": 3, "feature_rows": [_progression_row("Spellcasting")]}]},
+    )
+    current_definition = _minimal_character_definition("spellblade-level-up", "Spellblade Level Up")
+    current_definition.profile["class_level_text"] = "Fighter 2"
+    current_definition.profile["class_ref"] = _systems_ref(fighter)
+    current_definition.profile["classes"][0]["level"] = 2
+    current_definition.profile["classes"][0]["systems_ref"] = _systems_ref(fighter)
+    current_definition.stats["max_hp"] = 20
+
+    form_values = {
+        "advancement_mode": "advance_existing",
+        "target_class_row_id": "class-row-1",
+        "subclass_slug": spellblade.slug,
+        "hp_gain": "6",
+    }
+    context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        current_definition,
+        form_values,
+    )
+
+    assert _find_builder_field(context, "levelup_spell_cantrip_1")["label"] == "New Cantrip 1"
+    assert _find_builder_field(context, "levelup_spell_known_1")["label"] == "New Spell 1"
+
+    form_values.update(
+        {
+            "levelup_spell_cantrip_1": _field_value_for_label(context, "levelup_spell_cantrip_1", "Fire Bolt"),
+            "levelup_spell_cantrip_2": _field_value_for_label(context, "levelup_spell_cantrip_2", "Mage Hand"),
+            "levelup_spell_known_1": _field_value_for_label(context, "levelup_spell_known_1", "Detect Magic"),
+            "levelup_spell_known_2": _field_value_for_label(context, "levelup_spell_known_2", "Magic Missile"),
+            "levelup_spell_known_3": _field_value_for_label(context, "levelup_spell_known_3", "Shield"),
+        }
+    )
+    context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        current_definition,
+        form_values,
+    )
+    leveled_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        context,
+        form_values,
+    )
+
+    spell_row = dict(leveled_definition.spellcasting["class_rows"][0])
+    spells_by_name = {spell["name"]: dict(spell) for spell in leveled_definition.spellcasting["spells"]}
+
+    assert leveled_definition.profile["classes"][0]["subclass_name"] == "Spellblade"
+    assert spell_row["class_name"] == "Fighter"
+    assert spell_row["spell_list_class_name"] == "Wizard"
+    assert spell_row["caster_progression"] == "1/3"
+    assert leveled_definition.spellcasting["slot_progression"] == [{"level": 1, "max_slots": 2}]
+    assert spells_by_name["Fire Bolt"]["mark"] == "Cantrip"
+    assert spells_by_name["Mage Hand"]["mark"] == "Cantrip"
+    assert spells_by_name["Detect Magic"]["mark"] == "Known"
+    assert spells_by_name["Magic Missile"]["class_row_id"] == "class-row-1"
+    assert spells_by_name["Shield"]["class_row_id"] == "class-row-1"
+
+
 def test_imported_multiclass_repair_is_row_aware_and_unlocks_native_advancement():
     fighter = _systems_entry(
         "class",
@@ -2470,6 +2772,86 @@ def test_imported_multiclass_repair_is_row_aware_and_unlocks_native_advancement(
     assert [row["row_id"] for row in repaired_definition.profile["classes"]] == ["class-row-1", "class-row-2"]
     assert [row["level"] for row in leveled_definition.profile["classes"]] == [1, 2]
     assert any(feature["name"] == "Cunning Action" for feature in leveled_definition.features)
+
+
+def test_imported_multiclass_repair_supports_structured_subclass_only_spellcasting_rows():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "proficiency": ["str", "con"], "subclass_title": "Martial Archetype"},
+    )
+    spellblade = _systems_entry(
+        "subclass",
+        "xge-subclass-spellblade",
+        "Spellblade",
+        metadata=_structured_subclass_spellcasting_metadata(),
+        source_id="XGE",
+    )
+    wizard = _systems_entry(
+        "class",
+        "phb-class-wizard",
+        "Wizard",
+        metadata={
+            "hit_die": {"faces": 6},
+            "spellcasting_ability": "int",
+            "caster_progression": "full",
+            "spells_known_progression_fixed": [6],
+        },
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter, wizard],
+            "subclass": [spellblade],
+            "race": [human],
+            "background": [acolyte],
+        },
+        class_progression=[],
+    )
+    _set_progressions(
+        systems_service,
+        class_by_slug={
+            fighter.slug: [{"level": 3, "feature_rows": [_progression_row("Martial Archetype")]}],
+            wizard.slug: [{"level": 1, "feature_rows": [_progression_row("Spellcasting")]}],
+        },
+        subclass_by_slug={spellblade.slug: [{"level": 3, "feature_rows": [_progression_row("Spellcasting")]}]},
+    )
+    definition = _minimal_imported_character_definition("imported-spellblade-wizard", "Imported Spellblade Wizard")
+    definition.profile["classes"] = [
+        {"row_id": "class-row-1", "class_name": "Fighter", "subclass_name": "Spellblade", "level": 3},
+        {"row_id": "class-row-2", "class_name": "Wizard", "subclass_name": "", "level": 1},
+    ]
+    definition.profile["class_level_text"] = "Fighter 3 / Wizard 1"
+    definition.profile.pop("class_ref", None)
+    definition.profile.pop("subclass_ref", None)
+
+    repair_context = build_imported_progression_repair_context(
+        systems_service,
+        "linden-pass",
+        definition,
+    )
+
+    first_row_subclass_labels = [option["label"] for option in repair_context["class_rows"][0]["subclass_options"]]
+    assert any("Spellblade" in label for label in first_row_subclass_labels)
+
+    repaired_definition, _ = apply_imported_progression_repairs(
+        "linden-pass",
+        definition,
+        _minimal_import_metadata(definition.character_slug),
+        repair_context,
+        {
+            **repair_context["values"],
+            "repair_class_slug_class-row-1": f"systems:{fighter.slug}",
+            "repair_subclass_slug_class-row-1": f"systems:{spellblade.slug}",
+            "repair_class_slug_class-row-2": f"systems:{wizard.slug}",
+        },
+    )
+    repaired_readiness = native_level_up_readiness(systems_service, "linden-pass", repaired_definition)
+
+    assert repaired_readiness["status"] == "ready"
+    assert repaired_definition.profile["classes"][0]["subclass_ref"]["slug"] == spellblade.slug
 
 
 def test_imported_multiclass_repair_blocks_duplicate_row_repairs():

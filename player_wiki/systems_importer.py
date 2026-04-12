@@ -919,6 +919,7 @@ class Dnd5eSystemsImporter:
         metadata = {
             "class_name": self._clean_data(raw_entry.get("className")),
             "class_source": self._clean_data(raw_entry.get("classSource")),
+            **self._extract_subclass_spellcasting_progression(raw_entry),
             "optionalfeature_progression": self._clean_data(raw_entry.get("optionalfeatureProgression")),
             "additional_spells": self._clean_data(raw_entry.get("additionalSpells")),
         }
@@ -983,12 +984,46 @@ class Dnd5eSystemsImporter:
             "slot_progression": slot_progression,
         }
 
+    def _extract_subclass_spellcasting_progression(self, raw_entry: dict[str, Any]) -> dict[str, Any]:
+        slot_progression = self._extract_spell_slot_progression(raw_entry, "subclassTableGroups", "classTableGroups")
+        spell_list_class_name = next(
+            (
+                str(raw_entry.get(key) or "").strip()
+                for key in ("spellListClassName", "spellcastingClassName", "spellcastingClass")
+                if str(raw_entry.get(key) or "").strip()
+            ),
+            "",
+        )
+        return {
+            "caster_progression": self._clean_data(raw_entry.get("casterProgression")),
+            "spellcasting_ability": self._clean_data(raw_entry.get("spellcastingAbility")),
+            "spell_list_class_name": spell_list_class_name,
+            "prepared_spells": self._clean_data(raw_entry.get("preparedSpells")),
+            "prepared_spells_change": self._clean_data(raw_entry.get("preparedSpellsChange")),
+            "prepared_spells_progression": self._clean_data(raw_entry.get("preparedSpellsProgression")),
+            "cantrip_progression": self._clean_data(raw_entry.get("cantripProgression")),
+            "spells_known_progression": self._clean_data(raw_entry.get("spellsKnownProgression")),
+            "spells_known_progression_fixed": self._clean_data(raw_entry.get("spellsKnownProgressionFixed")),
+            "slot_progression": slot_progression,
+        }
+
     def _extract_class_slot_progression(self, raw_entry: dict[str, Any]) -> list[list[dict[str, int]]]:
-        class_table_groups = list(raw_entry.get("classTableGroups") or [])
+        return self._extract_spell_slot_progression(raw_entry, "classTableGroups")
+
+    def _extract_spell_slot_progression(
+        self,
+        raw_entry: dict[str, Any],
+        *table_group_keys: str,
+    ) -> list[list[dict[str, int]]]:
+        table_groups: list[Any] = []
+        for key in table_group_keys or ("classTableGroups",):
+            table_groups = list(raw_entry.get(key) or [])
+            if table_groups:
+                break
         spell_progression_group = next(
             (
                 group
-                for group in class_table_groups
+                for group in table_groups
                 if isinstance(group, dict) and isinstance(group.get("rowsSpellProgression"), list)
             ),
             None,
@@ -1009,7 +1044,7 @@ class Dnd5eSystemsImporter:
                 )
             return normalized_rows
 
-        for group in class_table_groups:
+        for group in table_groups:
             if not isinstance(group, dict):
                 continue
             col_labels = list(group.get("colLabels") or [])

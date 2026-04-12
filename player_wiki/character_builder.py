@@ -535,12 +535,6 @@ LEVEL_TWO_SPELL_RULES_BY_CLASS = {
 }
 SUPPORTED_MULTICLASS_CASTER_PROGRESSIONS = {"full", "1/2", "artificer", "1/3"}
 MULTICLASS_SHARED_SLOT_REFERENCE_CLASS = "Wizard"
-SUPPORTED_SUBCLASS_ONLY_SPELLCASTING_SLUGS = frozenset(
-    {
-        "phb-subclass-eldritch-knight",
-        "phb-subclass-arcane-trickster",
-    }
-)
 EXTRA_PHB_LEVEL_ONE_SPELL_LISTS = {
     "Paladin": {
         "1": [
@@ -583,7 +577,7 @@ NATIVE_LEVEL_UP_LIMITATIONS = [
     "Native level-up currently advances one level at a time, including add-class multiclass starts and row-specific multiclass advancement.",
     "Hit point gain is entered manually so your table can choose rolled or fixed HP.",
     "Prepared-caster level-up currently preserves existing prepared spells and adds the new picks needed for the next level.",
-    "Multiclass support in this slice covers shared-slot base casters, supported Eldritch Knight and Arcane Trickster third-caster rows, Pact Magic base casters, and martial rows. Other subclass-only spellcasting lanes still need manual follow-up.",
+    "Multiclass support in this slice covers shared-slot base casters, supported structured subclass-only spellcasting rows, Pact Magic base casters, and martial rows. Spell-bearing subclasses that still lack a structured supported spellcasting profile continue to need manual follow-up.",
     "Some advanced feat side effects and non-structured campaign spell access still need manual follow-up.",
 ]
 LEVEL_ONE_ALWAYS_PREPARED_SPELLS_BY_SUBCLASS = {
@@ -3324,8 +3318,14 @@ def _subclass_supports_shared_slot_multiclass(
         return False
     if _class_has_base_spellcasting(selected_class):
         return True
-    if str(selected_subclass.slug or "").strip() in SUPPORTED_SUBCLASS_ONLY_SPELLCASTING_SLUGS:
-        return True
+    subclass_spell_profile = _subclass_spell_progression(selected_subclass)
+    subclass_spell_mode = _spellcasting_mode_from_progression(subclass_spell_profile)
+    subclass_caster_progression = _normalize_caster_progression(subclass_spell_profile.get("caster_progression"))
+    if subclass_spell_mode or subclass_caster_progression:
+        return (
+            subclass_caster_progression in SUPPORTED_MULTICLASS_CASTER_PROGRESSIONS
+            or subclass_caster_progression == "pact"
+        )
     subclass_progression = _subclass_progression_for_builder(systems_service, campaign_slug, selected_subclass)
     return not _progression_has_spellbearing_features(subclass_progression)
 
@@ -3362,6 +3362,13 @@ def _evaluate_shared_slot_multiclass_support(
     class_name = str(selected_class.title or "").strip()
     class_progression = _class_progression_for_builder(systems_service, campaign_slug, selected_class)
     subclass_progression = _subclass_progression_for_builder(systems_service, campaign_slug, selected_subclass)
+    subclass_spell_profile = _subclass_spell_progression(selected_subclass)
+    subclass_spell_mode = _spellcasting_mode_from_progression(subclass_spell_profile)
+    subclass_caster_progression = _normalize_caster_progression(subclass_spell_profile.get("caster_progression"))
+    subclass_profile_active = (
+        bool(subclass_spell_mode or subclass_caster_progression)
+        and _spellcasting_profile_is_active_at_level(subclass_spell_profile, row_level)
+    )
     spell_mode = _spellcasting_mode_for_class(
         class_name,
         selected_class=selected_class,
@@ -3402,18 +3409,37 @@ def _evaluate_shared_slot_multiclass_support(
             "spellcasting_row": False,
             "reason": f"{selected_class.title} has spell-bearing class features outside the current multiclass spellcasting lane.",
         }
-    if subclass_has_spellbearing and selected_subclass is not None:
-        if str(selected_subclass.slug or "").strip() in SUPPORTED_SUBCLASS_ONLY_SPELLCASTING_SLUGS:
+    if selected_subclass is not None and (subclass_has_spellbearing or subclass_spell_mode or subclass_caster_progression):
+        if not (subclass_spell_mode or subclass_caster_progression):
+            return {
+                "supported": False,
+                "spellcasting_row": False,
+                "reason": (
+                    f"{selected_subclass.title} grants subclass-only spellcasting, "
+                    "which is not supported in the current multiclass spellcasting lane."
+                ),
+            }
+        if not subclass_profile_active:
+            return {
+                "supported": True,
+                "spellcasting_row": False,
+                "reason": "",
+            }
+        if (
+            subclass_caster_progression in SUPPORTED_MULTICLASS_CASTER_PROGRESSIONS
+            or subclass_caster_progression == "pact"
+        ):
             return {
                 "supported": True,
                 "spellcasting_row": True,
                 "reason": "",
             }
+        unsupported_lane = subclass_caster_progression or "an unknown"
         return {
             "supported": False,
             "spellcasting_row": False,
             "reason": (
-                f"{selected_subclass.title} grants subclass-only spellcasting, "
+                f"{selected_subclass.title} uses {unsupported_lane} subclass-only spellcasting progression, "
                 "which is not supported in the current multiclass spellcasting lane."
             ),
         }
@@ -11265,7 +11291,40 @@ def _subclass_spell_progression(
 ) -> dict[str, Any]:
     if not isinstance(selected_subclass, SystemsEntryRecord):
         return {}
-    return dict(_load_phb_subclass_spell_progression().get(str(selected_subclass.slug or "").strip()) or {})
+    progression = dict(_load_phb_subclass_spell_progression().get(str(selected_subclass.slug or "").strip()) or {})
+    metadata = dict(selected_subclass.metadata or {})
+    for key in (
+        "spellcasting_ability",
+        "caster_progression",
+        "spell_list_class_name",
+        "prepared_spells",
+        "prepared_spells_change",
+    ):
+        value = str(metadata.get(key) or "").strip()
+        if value:
+            progression[key] = value
+    for key in (
+        "cantrip_progression",
+        "spells_known_progression",
+        "spells_known_progression_fixed",
+        "prepared_spells_progression",
+    ):
+        values = [int(value or 0) for value in list(metadata.get(key) or [])]
+        if values:
+            progression[key] = values
+    slot_rows: list[list[dict[str, Any]]] = []
+    for row in list(metadata.get("slot_progression") or []):
+        normalized_row: list[dict[str, Any]] = []
+        for slot in list(row or []):
+            slot_payload = dict(slot or {})
+            level = int(slot_payload.get("level") or 0)
+            max_slots = int(slot_payload.get("max_slots") or 0)
+            if level > 0 and max_slots > 0:
+                normalized_row.append({"level": level, "max_slots": max_slots})
+        slot_rows.append(normalized_row)
+    if slot_rows:
+        progression["slot_progression"] = slot_rows
+    return progression
 
 
 def _spellcasting_mode_from_progression(

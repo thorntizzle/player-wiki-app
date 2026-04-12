@@ -1227,6 +1227,55 @@ def build_subclass_short_name_matching_data_root(root: Path) -> Path:
     return root
 
 
+def build_subclass_spellcasting_data_root(root: Path) -> Path:
+    write_json(root / "data/class/index.json", {"fighter": "class-fighter.json"})
+    write_json(
+        root / "data/class/class-fighter.json",
+        {
+            "subclass": [
+                {
+                    "name": "Spellblade",
+                    "source": "XGE",
+                    "className": "Fighter",
+                    "classSource": "PHB",
+                    "page": 101,
+                    "spellcastingAbility": "int",
+                    "casterProgression": "1/3",
+                    "subclassTableGroups": [
+                        {
+                            "rowsSpellProgression": [
+                                [],
+                                [],
+                                [2],
+                                [3],
+                            ]
+                        }
+                    ],
+                    "cantripProgression": [0, 0, 2, 2],
+                    "spellsKnownProgression": [0, 0, 3, 4],
+                    "subclassFeatures": [
+                        "Spellcasting|Fighter||Spellblade|XGE|3",
+                    ],
+                }
+            ],
+            "subclassFeature": [
+                {
+                    "name": "Spellcasting",
+                    "source": "XGE",
+                    "className": "Fighter",
+                    "classSource": "PHB",
+                    "subclassShortName": "Spellblade",
+                    "subclassSource": "XGE",
+                    "level": 3,
+                    "page": 101,
+                    "entries": ["You study martial spellcraft."],
+                }
+            ],
+        },
+    )
+    return root
+
+
 def build_unsupported_cross_source_subclassfeature_data_root(root: Path) -> Path:
     write_json(root / "data/class/index.json", {"cleric": "class-cleric.json"})
     write_json(
@@ -2001,6 +2050,36 @@ def test_subclass_pages_match_subclassfeature_short_names_to_full_titles(
     assert "Bonus Proficiencies" in subclass_body
     assert "You gain proficiency with three skills of your choice." in subclass_body
     assert f'href="/campaigns/linden-pass/systems/entries/{subclassfeature_entry.slug}"' in subclass_body
+
+
+def test_subclass_import_preserves_structured_spellcasting_metadata(app, tmp_path):
+    data_root = build_subclass_spellcasting_data_root(tmp_path / "dnd5e-source-subclass-spellcasting")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("XGE", entry_types=["subclass", "subclassfeature"])
+
+        store = app.extensions["systems_store"]
+        subclass_entry = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "XGE", entry_type="subclass", limit=20)
+            if entry.title == "Spellblade"
+        )
+
+    assert subclass_entry.metadata["spellcasting_ability"] == "int"
+    assert subclass_entry.metadata["caster_progression"] == "1/3"
+    assert subclass_entry.metadata["cantrip_progression"] == [0, 0, 2, 2]
+    assert subclass_entry.metadata["spells_known_progression"] == [0, 0, 3, 4]
+    assert subclass_entry.metadata["slot_progression"] == [
+        [],
+        [],
+        [{"level": 1, "max_slots": 2}],
+        [{"level": 1, "max_slots": 3}],
+    ]
 
 
 def test_subclass_pages_surface_campaign_mechanics_progression_overlays(
