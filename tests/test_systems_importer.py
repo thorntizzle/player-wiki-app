@@ -1580,6 +1580,7 @@ def build_mm_book_data_root(root: Path) -> Path:
                                 "Statistics",
                                 "Legendary Creatures",
                                 "Shadow Dragon Template",
+                                "Half-Dragon Template",
                             ],
                         }
                     ],
@@ -1768,6 +1769,72 @@ def build_mm_book_data_root(root: Path) -> Path:
                                     "page": 85,
                                     "entries": [
                                         "The dragon's breath weapon deals necrotic damage instead of its normal damage type.",
+                                    ],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "entries",
+                            "name": "Half-Dragon Template",
+                            "page": 180,
+                            "entries": [
+                                "A beast, humanoid, giant, or monstrosity can become a half-dragon.",
+                                {
+                                    "type": "entries",
+                                    "name": "Challenge",
+                                    "page": 180,
+                                    "entries": [
+                                        "Use the template on a creature that meets the optional prerequisite to avoid recalculating challenge."
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Senses",
+                                    "page": 180,
+                                    "entries": [
+                                        "The half-dragon gains blindsight out to 10 feet and darkvision out to 60 feet."
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Resistances",
+                                    "page": 180,
+                                    "entries": [
+                                        "The half-dragon gains resistance based on the color of its draconic ancestry.",
+                                        {
+                                            "type": "table",
+                                            "colLabels": ["Color", "Damage Resistance"],
+                                            "rows": [
+                                                ["Black or copper", "Acid"],
+                                                ["Blue or bronze", "Lightning"],
+                                                ["Brass, gold, or red", "Fire"],
+                                            ],
+                                        },
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Languages",
+                                    "page": 180,
+                                    "entries": [
+                                        "The half-dragon speaks Draconic in addition to any other languages it knows."
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "New Action: Breath Weapon",
+                                    "page": 180,
+                                    "entries": [
+                                        "The half-dragon has the breath weapon of its dragon half.",
+                                        {
+                                            "type": "table",
+                                            "colLabels": ["Size", "Breath Weapon", "Optional Prerequisite"],
+                                            "rows": [
+                                                ["Large or smaller", "As a wyrmling", "Challenge 2 or higher"],
+                                                ["Huge", "As a young dragon", "Challenge 7 or higher"],
+                                                ["Gargantuan", "As an adult dragon", "Challenge 8 or higher"],
+                                            ],
+                                        },
                                     ],
                                 },
                             ],
@@ -3304,8 +3371,9 @@ def test_mm_intro_book_sections_are_imported_for_dm_browse(client, sign_in, user
         statistics = next(entry for entry in book_entries if entry.title == "Statistics")
         legendary = next(entry for entry in book_entries if entry.title == "Legendary Creatures")
         shadow_dragon_template = next(entry for entry in book_entries if entry.title == "Shadow Dragon Template")
+        half_dragon_template = next(entry for entry in book_entries if entry.title == "Half-Dragon Template")
 
-    assert titles == ["Statistics", "Legendary Creatures", "Shadow Dragon Template"]
+    assert titles == ["Statistics", "Legendary Creatures", "Shadow Dragon Template", "Half-Dragon Template"]
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
     source_response = client.get("/campaigns/linden-pass/systems/sources/MM")
@@ -3318,16 +3386,20 @@ def test_mm_intro_book_sections_are_imported_for_dm_browse(client, sign_in, user
     assert "Statistics" in source_body
     assert "Legendary Creatures" in source_body
     assert "Shadow Dragon Template" in source_body
+    assert "Half-Dragon Template" in source_body
     assert source_body.index("Statistics") < source_body.index("Legendary Creatures")
     assert source_body.index("Legendary Creatures") < source_body.index("Shadow Dragon Template")
+    assert source_body.index("Shadow Dragon Template") < source_body.index("Half-Dragon Template")
 
     assert category_response.status_code == 200
     category_body = category_response.get_data(as_text=True)
     assert "Statistics" in category_body
     assert "Legendary Creatures" in category_body
     assert "Shadow Dragon Template" in category_body
+    assert "Half-Dragon Template" in category_body
     assert category_body.index("Statistics") < category_body.index("Legendary Creatures")
     assert category_body.index("Legendary Creatures") < category_body.index("Shadow Dragon Template")
+    assert category_body.index("Shadow Dragon Template") < category_body.index("Half-Dragon Template")
 
     assert statistics_response.status_code == 200
     statistics_body = statistics_response.get_data(as_text=True)
@@ -3379,6 +3451,26 @@ def test_mm_intro_book_sections_are_imported_for_dm_browse(client, sign_in, user
     assert 'id="damage-resistances"' in shadow_body
     assert 'href="#living-shadow"' in shadow_body
     assert 'id="shadow-breath"' in shadow_body
+
+    half_dragon_response = client.get(f"/campaigns/linden-pass/systems/entries/{half_dragon_template.slug}")
+    assert half_dragon_response.status_code == 200
+    half_dragon_body = half_dragon_response.get_data(as_text=True)
+    assert "Introduction" in half_dragon_body
+    assert "Chapter Navigation" in half_dragon_body
+    assert "Challenge" in half_dragon_body
+    assert "Senses" in half_dragon_body
+    assert "blindsight" in half_dragon_body
+    assert "darkvision" in half_dragon_body
+    assert "Resistances" in half_dragon_body
+    assert "Damage Resistance" in half_dragon_body
+    assert "Languages" in half_dragon_body
+    assert "Breath Weapon" in half_dragon_body
+    assert "Optional Prerequisite" in half_dragon_body
+    assert "Shadow Breath" not in half_dragon_body
+    assert 'href="#challenge"' in half_dragon_body
+    assert 'id="challenge"' in half_dragon_body
+    assert 'href="#new-action-breath-weapon"' in half_dragon_body
+    assert 'id="new-action-breath-weapon"' in half_dragon_body
 
 
 def test_dmg_book_chapters_surface_related_imported_entities(client, sign_in, users, app, tmp_path):
