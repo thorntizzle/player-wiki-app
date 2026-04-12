@@ -1701,7 +1701,39 @@ def build_mm_book_data_root(root: Path) -> Path:
                             "type": "section",
                             "name": "Legendary Creatures",
                             "page": 11,
-                            "entries": ["Legendary creatures can take special actions outside their turns."],
+                            "entries": [
+                                "Legendary creatures can take special actions outside their turns.",
+                                {
+                                    "type": "entries",
+                                    "name": "Legendary Actions",
+                                    "page": 11,
+                                    "entries": [
+                                        "A legendary creature can act outside its turn through legendary actions."
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "A Legendary Creature's Lair",
+                                    "page": 11,
+                                    "entries": [
+                                        "Some legendary creatures reshape the places where they dwell.",
+                                        {
+                                            "type": "entries",
+                                            "name": "Lair Actions",
+                                            "page": 11,
+                                            "entries": ["Lair actions occur on initiative count 20."],
+                                        },
+                                        {
+                                            "type": "entries",
+                                            "name": "Regional Effects",
+                                            "page": 11,
+                                            "entries": [
+                                                "Regional effects reflect a legendary creature's magical presence."
+                                            ],
+                                        },
+                                    ],
+                                },
+                            ],
                         },
                     ],
                     "id": "mm-introduction",
@@ -3213,7 +3245,7 @@ def test_dmg_book_chapters_are_imported_for_dm_browse_in_book_order(
     assert blocked_multiverse_response.status_code == 404
 
 
-def test_mm_statistics_book_section_is_imported_for_dm_browse(client, sign_in, users, app, tmp_path):
+def test_mm_intro_book_sections_are_imported_for_dm_browse(client, sign_in, users, app, tmp_path):
     data_root = build_mm_book_data_root(tmp_path / "dnd5e-source-mm-book")
 
     with app.app_context():
@@ -3233,8 +3265,9 @@ def test_mm_statistics_book_section_is_imported_for_dm_browse(client, sign_in, u
         )
         titles = [entry.title for entry in book_entries]
         statistics = next(entry for entry in book_entries if entry.title == "Statistics")
+        legendary = next(entry for entry in book_entries if entry.title == "Legendary Creatures")
 
-    assert titles == ["Statistics"]
+    assert titles == ["Statistics", "Legendary Creatures"]
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
     source_response = client.get("/campaigns/linden-pass/systems/sources/MM")
@@ -3245,11 +3278,14 @@ def test_mm_statistics_book_section_is_imported_for_dm_browse(client, sign_in, u
     source_body = source_response.get_data(as_text=True)
     assert "Book Chapters" in source_body
     assert "Statistics" in source_body
-    assert "Legendary Creatures" not in source_body
+    assert "Legendary Creatures" in source_body
+    assert source_body.index("Statistics") < source_body.index("Legendary Creatures")
 
     assert category_response.status_code == 200
     category_body = category_response.get_data(as_text=True)
     assert "Statistics" in category_body
+    assert "Legendary Creatures" in category_body
+    assert category_body.index("Statistics") < category_body.index("Legendary Creatures")
 
     assert statistics_response.status_code == 200
     statistics_body = statistics_response.get_data(as_text=True)
@@ -3271,6 +3307,21 @@ def test_mm_statistics_book_section_is_imported_for_dm_browse(client, sign_in, u
     assert 'id="type--tags"' in statistics_body
     assert 'href="#senses--blindsight"' in statistics_body
     assert 'id="senses--blindsight"' in statistics_body
+
+    legendary_response = client.get(f"/campaigns/linden-pass/systems/entries/{legendary.slug}")
+    assert legendary_response.status_code == 200
+    legendary_body = legendary_response.get_data(as_text=True)
+    assert "Introduction" in legendary_body
+    assert "Chapter Navigation" in legendary_body
+    assert "Legendary Actions" in legendary_body
+    assert "A Legendary Creature&#39;s Lair" in legendary_body
+    assert "Lair Actions" in legendary_body
+    assert "Regional Effects" in legendary_body
+    assert "Statistics" not in legendary_body
+    assert 'href="#legendary-actions"' in legendary_body
+    assert 'id="legendary-actions"' in legendary_body
+    assert 'href="#a-legendary-creatures-lair--lair-actions"' in legendary_body
+    assert 'id="a-legendary-creatures-lair--regional-effects"' in legendary_body
 
 
 def test_dmg_book_chapters_surface_related_imported_entities(client, sign_in, users, app, tmp_path):
