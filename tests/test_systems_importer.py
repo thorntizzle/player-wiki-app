@@ -1561,6 +1561,157 @@ def build_scag_background_data_root(root: Path) -> Path:
     return root
 
 
+def build_mm_book_data_root(root: Path) -> Path:
+    data_root = build_test_data_root(root)
+    write_json(
+        root / "data/books.json",
+        {
+            "book": [
+                {
+                    "name": "Monster Manual (2014)",
+                    "id": "MM",
+                    "source": "MM",
+                    "contents": [
+                        {
+                            "name": "Introduction",
+                            "headers": [
+                                "How to Use This Book",
+                                "What Is a Monster?",
+                                "Statistics",
+                                "Legendary Creatures",
+                            ],
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    write_json(
+        root / "data/book/book-mm.json",
+        {
+            "data": [
+                {
+                    "type": "section",
+                    "name": "Introduction",
+                    "page": 4,
+                    "entries": [
+                        {
+                            "type": "section",
+                            "name": "How to Use This Book",
+                            "page": 4,
+                            "entries": ["Use the Monster Manual to populate adventures with memorable creatures."],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Statistics",
+                            "page": 6,
+                            "entries": [
+                                "A monster's statistics provide the essential information needed to run it.",
+                                {
+                                    "type": "entries",
+                                    "name": "Size",
+                                    "page": 6,
+                                    "entries": [
+                                        "A monster can be Tiny, Small, Medium, Large, Huge, or Gargantuan.",
+                                        {
+                                            "type": "table",
+                                            "caption": "Size Categories",
+                                            "colLabels": ["Size", "Space", "Examples"],
+                                            "rows": [
+                                                ["Tiny", "2 1/2 by 2 1/2 ft.", "Imp, sprite"],
+                                                ["Large", "10 by 10 ft.", "Hippogriff, ogre"],
+                                            ],
+                                        },
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Type",
+                                    "page": 6,
+                                    "entries": [
+                                        "A monster's type speaks to its fundamental nature.",
+                                        {
+                                            "type": "entries",
+                                            "name": "Tags",
+                                            "page": 7,
+                                            "entries": ["Tags provide extra categorization for certain creatures."],
+                                        },
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Speed",
+                                    "page": 8,
+                                    "entries": [
+                                        "A monster's speed tells you how far it can move on its turn.",
+                                        {
+                                            "type": "entries",
+                                            "name": "Burrow",
+                                            "page": 8,
+                                            "entries": ["A burrowing creature can move through sand, earth, mud, or ice."],
+                                        },
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Senses",
+                                    "page": 8,
+                                    "entries": [
+                                        "The Senses entry notes special perception capabilities.",
+                                        {
+                                            "type": "entries",
+                                            "name": "Blindsight",
+                                            "page": 8,
+                                            "entries": [
+                                                "A monster with blindsight can perceive its surroundings without relying on sight.",
+                                            ],
+                                        },
+                                        {
+                                            "type": "entries",
+                                            "name": "Darkvision",
+                                            "page": 9,
+                                            "entries": ["Darkvision lets a monster see in darkness within a limited radius."],
+                                        },
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Challenge",
+                                    "page": 9,
+                                    "entries": [
+                                        "Challenge summarizes a monster's overall threat.",
+                                        {
+                                            "type": "entries",
+                                            "name": "Experience Points",
+                                            "page": 9,
+                                            "entries": ["Challenge Rating maps to an XP award."],
+                                        },
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Equipment",
+                                    "page": 11,
+                                    "entries": ["Equipment carried and used by a monster is noted here."],
+                                },
+                            ],
+                            "id": "mm-statistics",
+                        },
+                        {
+                            "type": "section",
+                            "name": "Legendary Creatures",
+                            "page": 11,
+                            "entries": ["Legendary creatures can take special actions outside their turns."],
+                        },
+                    ],
+                    "id": "mm-introduction",
+                }
+            ]
+        },
+    )
+    return root
+
+
 def build_additional_spell_metadata_data_root(root: Path) -> Path:
     write_json(root / "data/class/index.json", {"cleric": "class-cleric.json"})
     write_json(
@@ -3060,6 +3211,66 @@ def test_dmg_book_chapters_are_imported_for_dm_browse_in_book_order(
     sign_in(users["party"]["email"], users["party"]["password"])
     blocked_multiverse_response = client.get(f"/campaigns/linden-pass/systems/entries/{multiverse.slug}")
     assert blocked_multiverse_response.status_code == 404
+
+
+def test_mm_statistics_book_section_is_imported_for_dm_browse(client, sign_in, users, app, tmp_path):
+    data_root = build_mm_book_data_root(tmp_path / "dnd5e-source-mm-book")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("MM", entry_types=["book"])
+
+        service = app.extensions["systems_service"]
+        book_entries = service.list_entries_for_campaign_source(
+            "linden-pass",
+            "MM",
+            entry_type="book",
+            limit=None,
+        )
+        titles = [entry.title for entry in book_entries]
+        statistics = next(entry for entry in book_entries if entry.title == "Statistics")
+
+    assert titles == ["Statistics"]
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    source_response = client.get("/campaigns/linden-pass/systems/sources/MM")
+    category_response = client.get("/campaigns/linden-pass/systems/sources/MM/types/book")
+    statistics_response = client.get(f"/campaigns/linden-pass/systems/entries/{statistics.slug}")
+
+    assert source_response.status_code == 200
+    source_body = source_response.get_data(as_text=True)
+    assert "Book Chapters" in source_body
+    assert "Statistics" in source_body
+    assert "Legendary Creatures" not in source_body
+
+    assert category_response.status_code == 200
+    category_body = category_response.get_data(as_text=True)
+    assert "Statistics" in category_body
+
+    assert statistics_response.status_code == 200
+    statistics_body = statistics_response.get_data(as_text=True)
+    assert "Introduction" in statistics_body
+    assert "Chapter Navigation" in statistics_body
+    assert "Size" in statistics_body
+    assert "Type" in statistics_body
+    assert "Tags" in statistics_body
+    assert "Speed" in statistics_body
+    assert "Burrow" in statistics_body
+    assert "Senses" in statistics_body
+    assert "Blindsight" in statistics_body
+    assert "Challenge" in statistics_body
+    assert "Experience Points" in statistics_body
+    assert "Equipment" in statistics_body
+    assert "Legendary Creatures" not in statistics_body
+    assert "Size Categories" in statistics_body
+    assert 'href="#type--tags"' in statistics_body
+    assert 'id="type--tags"' in statistics_body
+    assert 'href="#senses--blindsight"' in statistics_body
+    assert 'id="senses--blindsight"' in statistics_body
 
 
 def test_dmg_book_chapters_surface_related_imported_entities(client, sign_in, users, app, tmp_path):

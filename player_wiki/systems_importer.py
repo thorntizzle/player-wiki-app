@@ -158,6 +158,9 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         "Running the Game",
         "Dungeon Master's Workshop",
     ),
+    "MM": (
+        ("Introduction", "Statistics"),
+    ),
 }
 
 # The supported library catalog currently carries 2014 class sources plus the
