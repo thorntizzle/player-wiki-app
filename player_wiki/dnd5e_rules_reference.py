@@ -1,544 +1,81 @@
 from __future__ import annotations
 
+import json
+from functools import lru_cache
 from html import escape
+from pathlib import Path
 from typing import Any
 
 from .repository import slugify
 
 DND5E_RULES_REFERENCE_SOURCE_ID = "RULES"
-DND5E_RULES_REFERENCE_SOURCE_TITLE = "Character Rules Reference"
-DND5E_RULES_REFERENCE_VERSION = "2026-04-11.1"
+_RULES_REFERENCE_DATA_RELATIVE_PATH = "player_wiki/data/dnd5e_rules_reference.json"
+_RULES_REFERENCE_DATA_PATH = Path(__file__).resolve().parent / "data" / "dnd5e_rules_reference.json"
 
-_RULE_ENTRY_SPECS = (
-    {
-        "rule_key": "character-math-overview",
-        "title": "Character Math Overview",
-        "aliases": [
-            "derived stats",
-            "character formulas",
-            "sheet math",
-        ],
-        "rule_facets": [
-            "character-math",
-            "derived-stats",
-            "shared-derivation",
-        ],
-        "summary": (
-            "This source collects the core DND 5E formulas the app can reuse when it derives "
-            "character values from classes, equipment, proficiencies, and features."
-        ),
-        "sections": [
-            {
-                "title": "Core Inputs",
-                "paragraphs": [
-                    "Most derived values come from the same small set of inputs: ability modifiers, proficiency bonus, proficiency level, equipped item state, attunement state, and any explicit bonuses or penalties from features or magic.",
-                    "When a rule says to replace a base formula, use the replacement instead of stacking both formulas together unless the rule also says they combine.",
-                ],
-                "bullets": [
-                    "Ability modifiers feed saves, skills, initiative, attacks, spellcasting, and many class features.",
-                    "Proficiency can be absent, full, half, or doubled depending on the rule that grants it.",
-                    "Carried inventory matters for tracking and weight, but equipped and attuned items are the states that most often change combat-facing math.",
-                ],
-            },
-            {
-                "title": "How To Use This Reference",
-                "bullets": [
-                    "Use the specific rule entry when the app needs one exact formula.",
-                    "Use this overview when a new derived field depends on several rules at once.",
-                    "Prefer applying the same rule once in the shared derivation layer rather than re-implementing the same math separately in builder, edit, import, and read-mode code.",
-                ],
-            },
-        ],
-    },
-    {
-        "rule_key": "ability-scores-and-ability-modifiers",
-        "title": "Ability Scores and Ability Modifiers",
-        "aliases": [
-            "ability modifier",
-            "stat modifier",
-            "strength modifier",
-            "dexterity modifier",
-            "constitution modifier",
-            "intelligence modifier",
-            "wisdom modifier",
-            "charisma modifier",
-        ],
-        "rule_facets": [
-            "ability-scores",
-            "ability-modifiers",
-            "core-inputs",
-        ],
-        "formula": "Ability modifier = floor((ability score - 10) / 2)",
-        "summary": "Every ability score produces a modifier, and that modifier is the base ingredient for most other character math.",
-        "sections": [
-            {
-                "title": "Use The Modifier, Not The Raw Score",
-                "paragraphs": [
-                    "Checks, saves, attacks, AC formulas, spellcasting formulas, and many class features usually add the ability modifier rather than the raw score.",
-                    "A score of 10 or 11 gives a +0 modifier. Every 2 points above or below that usually changes the modifier by 1.",
-                ],
-                "bullets": [
-                    "8-9 -> -1",
-                    "10-11 -> +0",
-                    "12-13 -> +1",
-                    "14-15 -> +2",
-                    "16-17 -> +3",
-                    "18-19 -> +4",
-                    "20-21 -> +5",
-                ],
-            },
-        ],
-    },
-    {
-        "rule_key": "proficiency-bonus",
-        "title": "Proficiency Bonus",
-        "aliases": [
-            "pb",
-            "level proficiency",
-            "proficiency by level",
-        ],
-        "rule_facets": [
-            "proficiency",
-            "proficiency-bonus",
-            "level-scaling",
-        ],
-        "formula": "Character proficiency bonus is based on total level: 1-4 +2, 5-8 +3, 9-12 +4, 13-16 +5, 17-20 +6",
-        "summary": "A character's proficiency bonus scales by total character level and is reused anywhere the rules say the character is proficient.",
-        "sections": [
-            {
-                "title": "Common Uses",
-                "bullets": [
-                    "Saving throws you are proficient in",
-                    "Skills, tools, weapons, and armor you are proficient with",
-                    "Spell attack bonus and spell save DC",
-                    "Class and feat features that scale off proficiency bonus",
-                ],
-            },
-            {
-                "title": "Modified Proficiency",
-                "paragraphs": [
-                    "Some rules change the normal proficiency contribution. Expertise doubles it, while some features add half proficiency instead.",
-                ],
-                "bullets": [
-                    "No proficiency -> add 0",
-                    "Proficient -> add proficiency bonus",
-                    "Expertise -> add double proficiency bonus",
-                    "Half proficiency -> add half proficiency bonus, usually rounded down unless the rule says otherwise",
-                ],
-            },
-        ],
-    },
-    {
-        "rule_key": "saving-throw-bonuses",
-        "title": "Saving Throw Bonuses",
-        "aliases": [
-            "save bonus",
-            "saving throw proficiency",
-            "saving throws",
-        ],
-        "rule_facets": [
-            "saving-throws",
-            "proficiency",
-            "ability-modifiers",
-        ],
-        "formula": "Saving throw bonus = relevant ability modifier + proficiency component + other save modifiers",
-        "summary": "Each saving throw starts from its matching ability modifier, then adds proficiency only if the character is proficient in that save.",
-        "sections": [
-            {
-                "title": "Ability Pairings",
-                "bullets": [
-                    "Strength save -> Strength modifier",
-                    "Dexterity save -> Dexterity modifier",
-                    "Constitution save -> Constitution modifier",
-                    "Intelligence save -> Intelligence modifier",
-                    "Wisdom save -> Wisdom modifier",
-                    "Charisma save -> Charisma modifier",
-                ],
-            },
-            {
-                "title": "Additional Modifiers",
-                "paragraphs": [
-                    "Features, feats, magic items, and temporary effects can add flat bonuses, advantage, or replacement rules on top of the normal save bonus.",
-                ],
-            },
-        ],
-    },
-    {
-        "rule_key": "skill-bonuses-and-proficiency",
-        "title": "Skill Bonuses and Proficiency",
-        "aliases": [
-            "skill modifier",
-            "skill bonus",
-            "expertise",
-            "half proficiency",
-        ],
-        "rule_facets": [
-            "skills",
-            "skill-checks",
-            "proficiency",
-            "expertise",
-            "half-proficiency",
-        ],
-        "formula": "Skill bonus = linked ability modifier + proficiency component + other skill-specific modifiers",
-        "summary": "A skill check uses the modifier for its linked ability, then layers in the proficiency amount the character has for that skill.",
-        "sections": [
-            {
-                "title": "Default Skill Abilities",
-                "bullets": [
-                    "Athletics -> Strength",
-                    "Acrobatics, Sleight of Hand, Stealth -> Dexterity",
-                    "Arcana, History, Investigation, Nature, Religion -> Intelligence",
-                    "Animal Handling, Insight, Medicine, Perception, Survival -> Wisdom",
-                    "Deception, Intimidation, Performance, Persuasion -> Charisma",
-                ],
-            },
-            {
-                "title": "Proficiency Levels",
-                "bullets": [
-                    "No proficiency -> ability modifier only",
-                    "Proficient -> ability modifier + proficiency bonus",
-                    "Expertise -> ability modifier + double proficiency bonus",
-                    "Half proficiency -> ability modifier + half proficiency bonus",
-                ],
-            },
-            {
-                "title": "Rule Flexibility",
-                "paragraphs": [
-                    "The DM can pair a skill with a different ability when the situation calls for it. When that happens, keep the skill proficiency the same and swap only the ability modifier.",
-                ],
-            },
-        ],
-    },
-    {
-        "rule_key": "passive-checks",
-        "title": "Passive Checks",
-        "aliases": [
-            "passive perception",
-            "passive insight",
-            "passive investigation",
-            "passive score",
-        ],
-        "rule_facets": [
-            "passive-checks",
-            "perception",
-            "insight",
-            "investigation",
-        ],
-        "formula": "Passive check = 10 + the total modifier that would apply to the same check",
-        "summary": "Passive checks reuse the same modifiers as active checks, but start from 10 instead of a d20 roll.",
-        "sections": [
-            {
-                "title": "Common Passive Scores",
-                "bullets": [
-                    "Passive Perception = 10 + Perception modifier",
-                    "Passive Insight = 10 + Insight modifier",
-                    "Passive Investigation = 10 + Investigation modifier",
-                ],
-            },
-            {
-                "title": "Advantage And Disadvantage",
-                "paragraphs": [
-                    "If a table applies the usual passive-check adjustment, advantage adds 5 and disadvantage subtracts 5 from the passive score.",
-                ],
-            },
-        ],
-    },
-    {
-        "rule_key": "initiative",
-        "title": "Initiative",
-        "aliases": [
-            "initiative bonus",
-            "turn order bonus",
-        ],
-        "rule_facets": [
-            "initiative",
-            "dexterity",
-            "combat-order",
-        ],
-        "formula": "Initiative bonus = Dexterity modifier + other initiative modifiers",
-        "summary": "Initiative usually starts from Dexterity, then adds any feature, feat, item, or campaign modifier that explicitly changes initiative.",
-        "sections": [
-            {
-                "title": "What Usually Modifies Initiative",
-                "bullets": [
-                    "Dexterity modifier is the normal base",
-                    "Features like Alert can add a flat bonus",
-                    "Temporary effects can grant advantage or penalties without changing the stored base bonus",
-                ],
-            },
-        ],
-    },
-    {
-        "rule_key": "armor-class",
-        "title": "Armor Class",
-        "aliases": [
-            "ac",
-            "shield bonus",
-            "armor formula",
-            "unarmored defense",
-        ],
-        "rule_facets": [
-            "armor-class",
-            "armor",
-            "shield",
-            "equipment",
-        ],
-        "formula": "Armor Class = active armor formula + shield bonus if wielded + other AC modifiers",
-        "summary": "Armor Class depends on what the character is actually wearing or wielding, plus any replacement formulas or explicit bonuses.",
-        "sections": [
-            {
-                "title": "Base Armor Formulas",
-                "bullets": [
-                    "No armor -> 10 + Dexterity modifier",
-                    "Light armor -> listed armor value + Dexterity modifier",
-                    "Medium armor -> listed armor value + Dexterity modifier, maximum +2 unless a rule changes that cap",
-                    "Heavy armor -> listed armor value",
-                ],
-            },
-            {
-                "title": "Common Additions And Replacements",
-                "bullets": [
-                    "Shield wielded -> +2 AC unless a rule says otherwise",
-                    "Fighting Style: Defense or similar bonuses add on top of the active base formula",
-                    "Unarmored Defense and similar features replace the normal unarmored formula when their rules say they do",
-                ],
-            },
-            {
-                "title": "Equipment State Matters",
-                "paragraphs": [
-                    "Carrying armor in inventory is not enough. The character usually needs the armor worn or the shield wielded for that item to affect AC.",
-                ],
-            },
-        ],
-    },
-    {
-        "rule_key": "attack-rolls-and-attack-bonus",
-        "title": "Attack Rolls and Attack Bonus",
-        "aliases": [
-            "to hit",
-            "attack modifier",
-            "weapon attack bonus",
-        ],
-        "rule_facets": [
-            "attack-rolls",
-            "attack-bonus",
-            "weapon-attacks",
-            "proficiency",
-        ],
-        "formula": "Attack bonus = relevant ability modifier + proficiency component if proficient + other attack modifiers",
-        "summary": "Attack rolls follow the same core pattern as other character math: choose the right ability, add proficiency if the character is proficient, then add any explicit bonuses or penalties.",
-        "sections": [
-            {
-                "title": "Typical Weapon Ability Rules",
-                "bullets": [
-                    "Most melee weapon attacks use Strength",
-                    "Most ranged weapon attacks use Dexterity",
-                    "Finesse weapons can use Strength or Dexterity",
-                    "Thrown weapons usually keep the ability of the underlying weapon attack",
-                ],
-            },
-            {
-                "title": "Common Attack Modifiers",
-                "bullets": [
-                    "Weapon proficiency adds proficiency bonus",
-                    "Magic weapon bonuses add to the attack roll when the item says they do",
-                    "Fighting styles, feats, or temporary effects can add or subtract extra modifiers",
-                ],
-            },
-        ],
-    },
-    {
-        "rule_key": "damage-rolls",
-        "title": "Damage Rolls",
-        "aliases": [
-            "weapon damage",
-            "damage modifier",
-            "off-hand damage",
-        ],
-        "rule_facets": [
-            "damage-rolls",
-            "weapon-damage",
-            "off-hand",
-            "attack-modes",
-        ],
-        "formula": "Damage roll = attack's damage dice + relevant ability modifier when applicable + other damage modifiers",
-        "summary": "Damage usually starts from the attack's dice, then adds the same relevant ability modifier the attack roll used when the rules say to do so.",
-        "sections": [
-            {
-                "title": "Common Patterns",
-                "bullets": [
-                    "Melee and ranged weapon attacks usually add the same relevant ability modifier they used for the attack roll",
-                    "Versatile weapons use a different damage die when wielded in two hands",
-                    "Thrown attacks usually keep the same damage ability modifier as the weapon's normal attack mode",
-                ],
-            },
-            {
-                "title": "Two-Weapon Fighting",
-                "paragraphs": [
-                    "A normal bonus-action off-hand attack does not add the ability modifier to damage unless a feature or rule says it does.",
-                ],
-            },
-        ],
-    },
-    {
-        "rule_key": "spell-attacks-and-save-dcs",
-        "title": "Spell Attacks and Save DCs",
-        "aliases": [
-            "spell attack bonus",
-            "spell save dc",
-            "spellcasting ability",
-        ],
-        "rule_facets": [
-            "spellcasting",
-            "spell-attack",
-            "spell-save-dc",
-            "spellcasting-ability",
-        ],
-        "formula": "Spell attack bonus = proficiency bonus + spellcasting ability modifier; Spell save DC = 8 + proficiency bonus + spellcasting ability modifier",
-        "summary": "Spellcasting math follows a fixed 5E pattern once the character's spellcasting ability is known.",
-        "sections": [
-            {
-                "title": "Spellcasting Ability",
-                "paragraphs": [
-                    "Use the spellcasting ability granted by the class, subclass, feat, species trait, or other feature that is providing the spell.",
-                ],
-            },
-            {
-                "title": "What Changes The Result",
-                "bullets": [
-                    "An increased spellcasting ability modifier changes both spell attack bonus and spell save DC",
-                    "A changed proficiency bonus changes both values too",
-                    "Specific features or items can add a separate bonus on top of the standard formula",
-                ],
-            },
-        ],
-    },
-    {
-        "rule_key": "hit-points-and-hit-dice",
-        "title": "Hit Points and Hit Dice",
-        "aliases": [
-            "max hp",
-            "hp by level",
-            "hit dice",
-        ],
-        "rule_facets": [
-            "hit-points",
-            "hit-dice",
-            "level-progression",
-            "constitution",
-        ],
-        "formula": "Level 1 max HP = class hit die maximum + Constitution modifier; Later HP gain = rolled or fixed hit die increase + Constitution modifier",
-        "summary": "Maximum hit points combine class hit dice, level progression, and Constitution modifier, with each level adding another increment.",
-        "sections": [
-            {
-                "title": "Level 1 And Later Levels",
-                "bullets": [
-                    "At 1st level, use the class hit die at its maximum value",
-                    "At later levels, add either the rolled result or the class's fixed average value, then add Constitution modifier",
-                    "A Constitution change can also change total max HP if the rule says it applies retroactively",
-                ],
-            },
-            {
-                "title": "Hit Dice",
-                "paragraphs": [
-                    "Characters also track hit dice by class. Those dice matter for rests even when they do not directly change the displayed max HP formula.",
-                ],
-            },
-        ],
-    },
-    {
-        "rule_key": "carrying-capacity-and-encumbrance",
-        "title": "Carrying Capacity and Encumbrance",
-        "aliases": [
-            "carry weight",
-            "weight limit",
-            "encumbered",
-            "push drag lift",
-        ],
-        "rule_facets": [
-            "carrying-capacity",
-            "encumbrance",
-            "inventory-weight",
-            "strength",
-        ],
-        "formula": "Carrying capacity = 15 x Strength score in pounds; Push, drag, or lift = 30 x Strength score in pounds",
-        "summary": "Inventory weight rules use Strength score rather than Strength modifier, with optional encumbrance thresholds adding movement penalties before the full capacity limit.",
-        "sections": [
-            {
-                "title": "Standard Carrying Rules",
-                "bullets": [
-                    "Carry normally up to 15 times Strength score in pounds",
-                    "Push, drag, or lift up to 30 times Strength score in pounds",
-                ],
-            },
-            {
-                "title": "Optional Encumbrance Thresholds",
-                "bullets": [
-                    "Over 5 times Strength score -> encumbered",
-                    "Over 10 times Strength score -> heavily encumbered",
-                    "These thresholds are optional and should only change sheet math if the campaign is using them",
-                ],
-            },
-        ],
-    },
-    {
-        "rule_key": "equipped-items-inventory-and-attunement",
-        "title": "Equipped Items, Inventory, and Attunement",
-        "aliases": [
-            "equipped",
-            "inventory",
-            "attuned items",
-            "attunement limit",
-        ],
-        "rule_facets": [
-            "equipment-state",
-            "inventory",
-            "attunement",
-            "equipped-items",
-        ],
-        "formula": "Inventory tracks what you carry; equipped state applies worn or wielded item rules; attunement is a separate state with a normal limit of 3 items",
-        "summary": "Carried items, equipped items, and attuned items are related but distinct states. Treating them separately makes derived character math more reliable.",
-        "sections": [
-            {
-                "title": "Inventory Versus Equipment",
-                "bullets": [
-                    "Inventory is the full carried list, including stored gear, consumables, treasure, and unequipped equipment",
-                    "Equipped items are the worn or wielded items that can actively change AC, attacks, damage, speed, or other sheet values",
-                    "An item can be in inventory without being equipped",
-                ],
-            },
-            {
-                "title": "Attunement",
-                "bullets": [
-                    "A character can normally be attuned to up to 3 magic items at once",
-                    "Attunement is separate from equipping: an item may need to be both equipped and attuned before its benefits apply",
-                    "If an item does not require attunement, its benefits depend only on the states named in that item's rules",
-                ],
-            },
-        ],
-    },
-)
 
+@lru_cache(maxsize=1)
+def _load_rules_reference_payload() -> dict[str, Any]:
+    # Keep the reference text in managed seed data so SQLite reseeding does not depend on Python literals.
+    payload = json.loads(_RULES_REFERENCE_DATA_PATH.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("DND 5E rules reference payload must be a JSON object.")
+
+    source_id = str(payload.get("source_id") or "").strip()
+    source_title = str(payload.get("source_title") or "").strip()
+    version = str(payload.get("version") or "").strip()
+    raw_entries = payload.get("entries")
+
+    if source_id != DND5E_RULES_REFERENCE_SOURCE_ID:
+        raise ValueError(
+            f"Expected DND 5E rules reference source_id {DND5E_RULES_REFERENCE_SOURCE_ID!r}, got {source_id!r}."
+        )
+    if not source_title:
+        raise ValueError("DND 5E rules reference payload is missing source_title.")
+    if not version:
+        raise ValueError("DND 5E rules reference payload is missing version.")
+    if not isinstance(raw_entries, list) or not raw_entries:
+        raise ValueError("DND 5E rules reference payload must include at least one entry.")
+
+    return payload
+
+
+_RULES_REFERENCE_PAYLOAD = _load_rules_reference_payload()
+DND5E_RULES_REFERENCE_SOURCE_TITLE = str(_RULES_REFERENCE_PAYLOAD["source_title"])
+DND5E_RULES_REFERENCE_VERSION = str(_RULES_REFERENCE_PAYLOAD["version"])
+_FIRST_ENTRY_TITLE = str(
+    (dict(_RULES_REFERENCE_PAYLOAD["entries"][0]).get("title") or "")
+).strip()
+if not _FIRST_ENTRY_TITLE:
+    raise ValueError("DND 5E rules reference payload is missing the first entry title.")
 DND5E_RULES_REFERENCE_SENTINEL_ENTRY_KEY = (
-    f"{DND5E_RULES_REFERENCE_SOURCE_ID.lower()}-rule-{slugify(_RULE_ENTRY_SPECS[0]['title'])}"
+    f"{DND5E_RULES_REFERENCE_SOURCE_ID.lower()}-rule-{slugify(_FIRST_ENTRY_TITLE)}"
 )
 
 
 def build_dnd5e_rules_reference_entries() -> list[dict[str, Any]]:
+    payload = _load_rules_reference_payload()
     entries: list[dict[str, Any]] = []
-    for spec in _RULE_ENTRY_SPECS:
-        title = str(spec["title"]).strip()
-        rule_key = str(spec.get("rule_key") or slugify(title)).strip() or slugify(title)
+    source_path = f"managed:{_RULES_REFERENCE_DATA_RELATIVE_PATH}#{DND5E_RULES_REFERENCE_VERSION}"
+    for index, raw_spec in enumerate(payload["entries"], start=1):
+        if not isinstance(raw_spec, dict):
+            raise ValueError(f"DND 5E rules reference entry {index} must be an object.")
+
+        title = str(raw_spec.get("title") or "").strip()
+        if not title:
+            raise ValueError(f"DND 5E rules reference entry {index} is missing title.")
+        rule_key = str(raw_spec.get("rule_key") or slugify(title)).strip() or slugify(title)
         slug = f"{DND5E_RULES_REFERENCE_SOURCE_ID.lower()}-rule-{slugify(title)}"
-        aliases = [str(value).strip() for value in list(spec.get("aliases") or []) if str(value).strip()]
-        rule_facets = [str(value).strip() for value in list(spec.get("rule_facets") or []) if str(value).strip()]
-        formula = str(spec.get("formula") or "").strip()
-        summary = str(spec.get("summary") or "").strip()
+        aliases = _normalize_string_list(raw_spec.get("aliases"))
+        rule_facets = _normalize_string_list(raw_spec.get("rule_facets"))
+        formula = str(raw_spec.get("formula") or "").strip()
+        summary = str(raw_spec.get("summary") or "").strip()
+        sections = _normalize_sections(raw_spec.get("sections"))
+        source_provenance = _normalize_source_provenance(raw_spec.get("source_provenance"))
         body = {
             "summary": summary,
             "formula": formula,
             "aliases": aliases,
-            "sections": list(spec.get("sections") or []),
+            "sections": sections,
         }
         metadata = {
             "summary": summary,
@@ -548,10 +85,10 @@ def build_dnd5e_rules_reference_entries() -> list[dict[str, Any]]:
             "rule_facets": rule_facets,
             "seed_version": DND5E_RULES_REFERENCE_VERSION,
             "source_kind": "app_reference",
-            "source_provenance": {
-                "kind": "normalized_reference",
-                "source_ids": ["PHB"],
-            },
+            "source_provenance": source_provenance,
+            "content_origin": "managed_seed_file",
+            "content_source_path": _RULES_REFERENCE_DATA_RELATIVE_PATH,
+            "content_migration_stage": "seed_file_to_sqlite",
         }
         search_parts = [title, formula, summary, *aliases, *rule_facets]
         entries.append(
@@ -560,17 +97,73 @@ def build_dnd5e_rules_reference_entries() -> list[dict[str, Any]]:
                 "entry_type": "rule",
                 "slug": slug,
                 "title": title,
-                "source_page": "App reference",
-                "source_path": f"builtin:dnd5e-rules:{DND5E_RULES_REFERENCE_VERSION}",
+                "source_page": "Rules reference",
+                "source_path": source_path,
                 "search_text": " ".join(part for part in search_parts if part).lower(),
                 "player_safe_default": True,
                 "dm_heavy": False,
                 "metadata": metadata,
                 "body": body,
-                "rendered_html": _render_rule_entry_html(summary=summary, formula=formula, aliases=aliases, sections=body["sections"]),
+                "rendered_html": _render_rule_entry_html(
+                    summary=summary,
+                    formula=formula,
+                    aliases=aliases,
+                    sections=sections,
+                ),
             }
         )
     return entries
+
+
+def _normalize_string_list(raw_values: object) -> list[str]:
+    if not isinstance(raw_values, list):
+        return []
+    return [str(value).strip() for value in raw_values if str(value).strip()]
+
+
+def _normalize_sections(raw_sections: object) -> list[dict[str, Any]]:
+    if not isinstance(raw_sections, list):
+        return []
+
+    sections: list[dict[str, Any]] = []
+    for raw_section in raw_sections:
+        if not isinstance(raw_section, dict):
+            continue
+        title = str(raw_section.get("title") or "").strip()
+        paragraphs = _normalize_string_list(raw_section.get("paragraphs"))
+        bullets = _normalize_string_list(raw_section.get("bullets"))
+        if not title and not paragraphs and not bullets:
+            continue
+        sections.append(
+            {
+                "title": title,
+                "paragraphs": paragraphs,
+                "bullets": bullets,
+            }
+        )
+    return sections
+
+
+def _normalize_source_provenance(raw_provenance: object) -> dict[str, Any]:
+    if not isinstance(raw_provenance, dict) or not raw_provenance:
+        return {
+            "kind": "normalized_reference",
+            "source_ids": ["PHB"],
+        }
+
+    normalized: dict[str, Any] = {}
+    kind = str(raw_provenance.get("kind") or "").strip()
+    if kind:
+        normalized["kind"] = kind
+    source_ids = _normalize_string_list(raw_provenance.get("source_ids"))
+    if source_ids:
+        normalized["source_ids"] = source_ids
+    if normalized:
+        return normalized
+    return {
+        "kind": "normalized_reference",
+        "source_ids": ["PHB"],
+    }
 
 
 def _render_rule_entry_html(

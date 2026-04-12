@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from player_wiki.dnd5e_rules_reference import DND5E_RULES_REFERENCE_VERSION, build_dnd5e_rules_reference_entries
 from player_wiki.auth_store import AuthStore
 
 
@@ -132,6 +133,13 @@ def test_builtin_rules_source_is_seeded_and_browsable_without_import(client, sig
         attunement_entry = next(
             entry for entry in entries if entry.title == "Equipped Items, Inventory, and Attunement"
         )
+        assert attunement_entry.metadata["content_origin"] == "managed_seed_file"
+        assert attunement_entry.metadata["content_migration_stage"] == "seed_file_to_sqlite"
+        assert attunement_entry.metadata["content_source_path"] == "player_wiki/data/dnd5e_rules_reference.json"
+        assert attunement_entry.metadata["seed_version"] == DND5E_RULES_REFERENCE_VERSION
+        assert attunement_entry.source_path.endswith(
+            f"player_wiki/data/dnd5e_rules_reference.json#{DND5E_RULES_REFERENCE_VERSION}"
+        )
 
     sign_in(users["party"]["email"], users["party"]["password"])
 
@@ -161,3 +169,39 @@ def test_builtin_rules_source_is_seeded_and_browsable_without_import(client, sig
     detail_body = detail_response.get_data(as_text=True)
     assert "attunement is a separate state with a normal limit of 3 items" in detail_body
     assert "Inventory Versus Equipment" in detail_body
+
+
+def test_builtin_rules_source_reseeds_stale_rows_from_managed_payload(app):
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        service.ensure_builtin_library_seeded("DND-5E")
+
+        stale_entries = build_dnd5e_rules_reference_entries()
+        for entry in stale_entries:
+            entry["source_path"] = "builtin:dnd5e-rules:legacy"
+            entry["metadata"] = {
+                **entry["metadata"],
+                "seed_version": "2026-04-01.0",
+                "content_origin": "code_seed",
+                "content_source_path": "player_wiki/dnd5e_rules_reference.py",
+                "content_migration_stage": "python_literal_seed",
+            }
+
+        store.replace_entries_for_source("DND-5E", "RULES", entries=stale_entries)
+
+        refreshed_state = service.get_campaign_source_state("linden-pass", "RULES")
+        assert refreshed_state is not None
+
+        refreshed_entry = store.get_entry(
+            "DND-5E",
+            "rules-rule-character-math-overview",
+        )
+        assert refreshed_entry is not None
+        assert refreshed_entry.metadata["seed_version"] == DND5E_RULES_REFERENCE_VERSION
+        assert refreshed_entry.metadata["content_origin"] == "managed_seed_file"
+        assert refreshed_entry.metadata["content_migration_stage"] == "seed_file_to_sqlite"
+        assert refreshed_entry.metadata["content_source_path"] == "player_wiki/data/dnd5e_rules_reference.json"
+        assert refreshed_entry.source_path.endswith(
+            f"player_wiki/data/dnd5e_rules_reference.json#{DND5E_RULES_REFERENCE_VERSION}"
+        )
