@@ -137,6 +137,7 @@ SUPPORTED_ENTRY_TYPES = (
 BOOK_INDEX_RELATIVE_PATH = "data/books.json"
 BOOK_SOURCE_RELATIVE_PATH_TEMPLATE = "data/book/book-{source_slug}.json"
 BOOK_SECTION_OUTLINE_MAX_DEPTH = 2
+BookImportTarget = str | tuple[str, ...]
 BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
     "PHB": (
         "Introduction",
@@ -150,6 +151,7 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         "Conditions",
     ),
     "DMG": (
+        ("Between Adventures", "Downtime Activities"),
         "Treasure",
         "Running the Game",
         "Dungeon Master's Workshop",
@@ -818,8 +820,15 @@ class Dnd5eSystemsImporter:
         entries: list[dict[str, Any]],
         imported_by_type: Counter[str],
     ) -> None:
-        target_chapter_names = BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE.get(source_id)
-        if not target_chapter_names:
+        target_definitions = BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE.get(source_id)
+        if not target_definitions:
+            return
+        target_paths = [
+            target_path
+            for target_path in (self._normalize_book_import_target_path(target) for target in target_definitions)
+            if target_path
+        ]
+        if not target_paths:
             return
 
         book_path = self.data_root / BOOK_SOURCE_RELATIVE_PATH_TEMPLATE.format(source_slug=source_id.lower())
@@ -844,27 +853,37 @@ class Dnd5eSystemsImporter:
         if not isinstance(raw_chapters, list):
             return
 
-        chapter_name_set = {str(name).strip() for name in target_chapter_names if str(name).strip()}
-        if not chapter_name_set:
-            return
-
         relative_source_path = str(book_path.relative_to(self.data_root)).replace("\\", "/")
         self._append_source_file(
             relative_source_path,
             source_files=source_files,
             seen_source_files=seen_source_files,
         )
+        chapter_records_by_name: dict[str, tuple[int, dict[str, Any]]] = {}
         for chapter_index, raw_chapter in enumerate(raw_chapters):
             if not isinstance(raw_chapter, dict):
                 continue
-            chapter_name = str(raw_chapter.get("name", "") or "").strip()
-            if chapter_name not in chapter_name_set:
+            chapter_name = self._clean_text(str(raw_chapter.get("name", "") or ""))
+            if chapter_name:
+                chapter_records_by_name[chapter_name] = (chapter_index, raw_chapter)
+
+        for target_path in target_paths:
+            chapter_name = target_path[0]
+            chapter_record = chapter_records_by_name.get(chapter_name)
+            if chapter_record is None:
+                continue
+            chapter_index, raw_chapter = chapter_record
+            target_entry = self._resolve_book_import_target(raw_chapter, target_path=target_path)
+            if target_entry is None:
                 continue
             chapter_entry = {
-                **raw_chapter,
+                **copy.deepcopy(target_entry),
                 "source": source_id,
                 "_book_chapter_index": chapter_index,
+                "_book_chapter_name": chapter_name,
                 "_book_contents": chapter_contents_by_name.get(chapter_name, {}),
+                "_book_target_path": list(target_path),
+                "_book_is_full_chapter": len(target_path) == 1,
             }
             built_entry = self._build_entry(
                 "book",
@@ -877,6 +896,47 @@ class Dnd5eSystemsImporter:
                 continue
             entries.append(built_entry)
             imported_by_type[built_entry["entry_type"]] += 1
+
+    def _normalize_book_import_target_path(self, target: BookImportTarget) -> tuple[str, ...]:
+        if isinstance(target, tuple):
+            raw_parts = target
+        else:
+            raw_parts = (target,)
+        return tuple(
+            cleaned
+            for cleaned in (self._clean_text(str(part or "")) for part in raw_parts)
+            if cleaned
+        )
+
+    def _resolve_book_import_target(
+        self,
+        raw_chapter: dict[str, Any],
+        *,
+        target_path: tuple[str, ...],
+    ) -> dict[str, Any] | None:
+        chapter_name = self._clean_text(str(raw_chapter.get("name", "") or ""))
+        if not target_path or chapter_name != target_path[0]:
+            return None
+        current = raw_chapter
+        for section_name in target_path[1:]:
+            current = self._find_named_book_section_child(current, section_name)
+            if current is None:
+                return None
+        return current
+
+    def _find_named_book_section_child(self, value: Any, target_name: str) -> dict[str, Any] | None:
+        if not isinstance(value, dict):
+            return None
+        entries = value.get("entries")
+        if not isinstance(entries, list):
+            return None
+        for item in entries:
+            if not isinstance(item, dict):
+                continue
+            item_name = self._clean_text(str(item.get("name", "") or ""))
+            if item_name and item_name == target_name:
+                return item
+        return None
 
     def _build_book_contents_lookup(
         self,
@@ -987,16 +1047,28 @@ class Dnd5eSystemsImporter:
         contents = raw_contents if isinstance(raw_contents, dict) else {}
         ordinal = contents.get("ordinal")
         section_label = self._format_book_section_label(ordinal)
+        title = self._clean_text(str(raw_entry.get("name", "") or ""))
+        chapter_title = self._clean_text(str(raw_entry.get("_book_chapter_name", "") or "")) or title
+        raw_section_path = raw_entry.get("_book_target_path")
+        section_path = []
+        if isinstance(raw_section_path, list):
+            section_path = [self._clean_text(str(item or "")) for item in raw_section_path if self._clean_text(str(item or ""))]
+        is_full_chapter = bool(raw_entry.get("_book_is_full_chapter"))
         body = {"entries": self._clean_data(raw_entry.get("entries"))}
         metadata = {
             "chapter_index": raw_entry.get("_book_chapter_index"),
             "section_label": section_label,
             "section_type": self._clean_data(ordinal.get("type")) if isinstance(ordinal, dict) else "",
             "section_identifier": self._clean_data(ordinal.get("identifier")) if isinstance(ordinal, dict) else "",
-            "headers": self._extract_book_headers(contents.get("headers")),
+            "chapter_title": chapter_title,
+            "section_path": section_path,
+            "headers": self._extract_book_headers(contents.get("headers")) if is_full_chapter else [],
             "section_outline": self._build_book_section_outline(body["entries"]),
+            "reference_terms": section_path[:-1] if len(section_path) > 1 else [],
         }
         metadata_pairs = [("Book Section", section_label)]
+        if chapter_title and chapter_title != title:
+            metadata_pairs.append(("Chapter", chapter_title))
         rendered_html = self._render_entry_html(
             metadata_pairs=metadata_pairs,
             sections=[("Book Text", body["entries"])],

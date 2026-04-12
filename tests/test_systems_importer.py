@@ -1002,7 +1002,7 @@ def build_dmg_book_data_root(root: Path) -> Path:
                         },
                         {
                             "name": "Between Adventures",
-                            "headers": ["Linking Adventures", "Downtime Activities"],
+                            "headers": ["Linking Adventures", "Campaign Tracking", "Recurring Expenses", "Downtime Activities"],
                             "ordinal": {"type": "chapter", "identifier": 6},
                         },
                         {
@@ -1047,14 +1047,45 @@ def build_dmg_book_data_root(root: Path) -> Path:
                 {
                     "type": "section",
                     "name": "Between Adventures",
-                    "page": 127,
+                    "page": 125,
                     "entries": [
                         "Campaigns often pause between major adventures.",
                         {
                             "type": "section",
+                            "name": "Recurring Expenses",
+                            "page": 126,
+                            "entries": ["Owning property and hirelings creates continuing upkeep costs."],
+                        },
+                        {
+                            "type": "section",
                             "name": "Downtime Activities",
                             "page": 127,
-                            "entries": ["Downtime lets characters craft, train, or pursue contacts."],
+                            "entries": [
+                                "Downtime lets characters craft, train, or pursue contacts.",
+                                {
+                                    "type": "entries",
+                                    "name": "More Downtime Activities",
+                                    "page": 128,
+                                    "entries": [
+                                        "The chapter adds more downtime options for campaigns.",
+                                        {
+                                            "type": "list",
+                                            "items": [
+                                                "{@variantrule Downtime Activity: Building a Stronghold||Building a Stronghold}",
+                                                "{@variantrule Downtime Activity: Carousing||Carousing}",
+                                            ],
+                                        },
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Creating Downtime Activities",
+                                    "page": 131,
+                                    "entries": [
+                                        "You can create new downtime activities that fit the campaign.",
+                                    ],
+                                },
+                            ],
                         },
                     ],
                     "id": "dmg-between-adventures",
@@ -2612,10 +2643,12 @@ def test_dmg_book_chapters_are_imported_for_dm_browse_in_book_order(
         )
         titles = [entry.title for entry in book_entries]
         book_entry_links = [f'/campaigns/linden-pass/systems/entries/{entry.slug}' for entry in book_entries]
+        downtime_activities = next(entry for entry in book_entries if entry.title == "Downtime Activities")
         treasure = next(entry for entry in book_entries if entry.title == "Treasure")
         running_the_game = next(entry for entry in book_entries if entry.title == "Running the Game")
 
     assert titles == [
+        "Downtime Activities",
         "Treasure",
         "Running the Game",
         "Dungeon Master's Workshop",
@@ -2624,24 +2657,36 @@ def test_dmg_book_chapters_are_imported_for_dm_browse_in_book_order(
     sign_in(users["dm"]["email"], users["dm"]["password"])
     source_response = client.get("/campaigns/linden-pass/systems/sources/DMG")
     category_response = client.get("/campaigns/linden-pass/systems/sources/DMG/types/book")
+    downtime_response = client.get(f"/campaigns/linden-pass/systems/entries/{downtime_activities.slug}")
     treasure_response = client.get(f"/campaigns/linden-pass/systems/entries/{treasure.slug}")
     running_the_game_response = client.get(f"/campaigns/linden-pass/systems/entries/{running_the_game.slug}")
 
     assert source_response.status_code == 200
     source_body = source_response.get_data(as_text=True)
     assert "Book Chapters" in source_body
+    assert "Downtime Activities" in source_body
     assert "Treasure" in source_body
     assert "Running the Game" in source_body
     assert "Dungeon Master&#39;s Workshop" in source_body
-    assert "Between Adventures" not in source_body
+    assert "Between Adventures" in source_body
     assert "Creating a Multiverse" not in source_body
     assert "Searches only this source&#39;s book chapters using curated metadata" in source_body
 
     assert category_response.status_code == 200
     category_body = category_response.get_data(as_text=True)
-    assert "Showing all 3 book chapters in this source." in category_body
+    assert "Showing all 4 book chapters in this source." in category_body
     for earlier, later in zip(book_entry_links, book_entry_links[1:]):
         assert category_body.index(earlier) < category_body.index(later)
+
+    assert downtime_response.status_code == 200
+    downtime_body = downtime_response.get_data(as_text=True)
+    assert "Chapter 6" in downtime_body
+    assert "Between Adventures" in downtime_body
+    assert "More Downtime Activities" in downtime_body
+    assert "Creating Downtime Activities" in downtime_body
+    assert "Recurring Expenses" not in downtime_body
+    assert 'href="#more-downtime-activities"' in downtime_body
+    assert 'id="more-downtime-activities"' in downtime_body
 
     assert treasure_response.status_code == 200
     treasure_body = treasure_response.get_data(as_text=True)

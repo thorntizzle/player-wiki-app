@@ -3096,7 +3096,11 @@ def create_app() -> Flask:
         metadata = dict(entry.metadata or {})
         reference_scope = ""
         if entry.entry_type == "book":
-            reference_scope = str(metadata.get("section_label") or "").strip()
+            scope_parts = [str(metadata.get("section_label") or "").strip()]
+            chapter_title = str(metadata.get("chapter_title") or "").strip()
+            if chapter_title and chapter_title != entry.title:
+                scope_parts.append(chapter_title)
+            reference_scope = " | ".join(part for part in scope_parts if part)
         elif entry.entry_type == "rule":
             facets = [
                 str(value).strip()

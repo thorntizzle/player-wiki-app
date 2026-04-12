@@ -30,7 +30,12 @@
                 <a href="{{ url_for('campaign_systems_entry_detail', campaign_slug=campaign.slug, entry_slug=chapter.slug) }}">{{ chapter.title }}</a>
                 <span class="meta">
                   {% if chapter.metadata.section_label %}{{ chapter.metadata.section_label }}{% endif %}
-                  {% if chapter.source_page %}{% if chapter.metadata.section_label %} | {% endif %}p. {{ chapter.source_page }}{% endif %}
+                  {% if chapter.metadata.chapter_title and chapter.metadata.chapter_title != chapter.title %}
+                    {% if chapter.metadata.section_label %} | {% endif %}{{ chapter.metadata.chapter_title }}
+                  {% endif %}
+                  {% if chapter.source_page %}
+                    {% if chapter.metadata.section_label or (chapter.metadata.chapter_title and chapter.metadata.chapter_title != chapter.title) %} | {% endif %}p. {{ chapter.source_page }}
+                  {% endif %}
                 </span>
               </li>
             {% endfor %}

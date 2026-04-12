@@ -290,6 +290,9 @@
           {% if entry.metadata.section_label %}
             <p class="meta">{{ entry.metadata.section_label }}</p>
           {% endif %}
+          {% if entry.metadata.chapter_title and entry.metadata.chapter_title != entry.title %}
+            <p class="meta">From {{ entry.metadata.chapter_title }}</p>
+          {% endif %}
           {% if entry.source_page %}
             <p class="meta">Starts on page {{ entry.source_page }}</p>
           {% endif %}
