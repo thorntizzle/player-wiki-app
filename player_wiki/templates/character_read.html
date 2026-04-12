@@ -152,6 +152,38 @@
         </section>
       {% endif %}
 
+      {% if show_quick_sections and character.attack_reminders %}
+        <section class="read-section">
+          <div class="section-heading">
+            <h2>Combat reminders</h2>
+          </div>
+          <div class="detail-grid">
+            {% for rule in character.attack_reminders %}
+              <article class="detail-card">
+                <div class="section-heading">
+                  <h3>{{ rule.title }}</h3>
+                  <span class="meta">{{ rule.status_label }}</span>
+                </div>
+                {% for effect in rule.effects %}
+                  <p><strong>{{ effect.label }}:</strong> {{ effect.summary }}</p>
+                {% endfor %}
+                {% if rule.eligible_attacks %}
+                  <p class="meta">Eligible attacks: {{ rule.eligible_attacks | join(", ") }}</p>
+                {% elif rule.scope_label %}
+                  <p class="meta">Scope: {{ rule.scope_label }}</p>
+                {% endif %}
+                {% if rule.condition %}
+                  <p class="meta">{{ rule.condition }}</p>
+                {% endif %}
+                {% if rule.availability_note %}
+                  <p class="meta">{{ rule.availability_note }}</p>
+                {% endif %}
+              </article>
+            {% endfor %}
+          </div>
+        </section>
+      {% endif %}
+
       {% if is_session_mode %}
         {% include "_character_session_panels.html" %}
       {% endif %}

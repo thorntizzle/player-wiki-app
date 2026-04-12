@@ -5096,9 +5096,167 @@ def _collect_defensive_support_flags(features: list[dict[str, Any]] | None) -> d
 
     return {
         "heavy_armor_master": has_slug("phb-feat-heavy-armor-master") or has_effect("Heavy Armor Master"),
+        "mage_slayer": has_slug("phb-feat-mage-slayer") or has_effect("Mage Slayer"),
         "medium_armor_master": has_slug("phb-feat-medium-armor-master") or has_effect("Medium Armor Master"),
         "shield_master": has_slug("phb-feat-shield-master") or has_effect("Shield Master"),
     }
+
+
+def _collect_attack_reminder_support_flags(features: list[dict[str, Any]] | None) -> dict[str, bool]:
+    feature_slugs = _extract_feature_slugs(features)
+    effect_keys = {
+        normalize_lookup(str(value or "").strip())
+        for value in _extract_character_effect_keys(features)
+        if str(value or "").strip()
+    }
+
+    def has_slug(*raw_slugs: str) -> bool:
+        return any(normalize_lookup(raw_slug) in feature_slugs for raw_slug in raw_slugs if str(raw_slug or "").strip())
+
+    def has_effect(*raw_effects: str) -> bool:
+        return any(normalize_lookup(raw_effect) in effect_keys for raw_effect in raw_effects if str(raw_effect or "").strip())
+
+    return {
+        "crusher": has_slug("tce-feat-crusher") or has_effect("Crusher"),
+        "mage_slayer": has_slug("phb-feat-mage-slayer") or has_effect("Mage Slayer"),
+        "piercer": has_slug("tce-feat-piercer") or has_effect("Piercer"),
+        "sentinel": has_slug("phb-feat-sentinel") or has_effect("Sentinel"),
+        "slasher": has_slug("tce-feat-slasher") or has_effect("Slasher"),
+    }
+
+
+def _derive_attack_reminder_state_from_character_inputs(
+    *,
+    features: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    support_flags = _collect_attack_reminder_support_flags(features)
+    rules: list[dict[str, Any]] = []
+    if support_flags.get("sentinel"):
+        rules.append(
+            {
+                "id": "feat:phb-feat-sentinel",
+                "title": "Sentinel",
+                "condition": "Use these reminders when enemies leave your reach or attack nearby allies.",
+                "attack_scope": {
+                    "label": "Melee weapon attacks",
+                    "categories": ["melee weapon"],
+                },
+                "effects": [
+                    {
+                        "kind": "opportunity_attack",
+                        "label": "Opportunity attacks",
+                        "summary": "Creatures within your reach provoke opportunity attacks from you even if they take the Disengage action.",
+                    },
+                    {
+                        "kind": "speed_control",
+                        "label": "On hit",
+                        "summary": "When you hit a creature with an opportunity attack, its speed becomes 0 for the rest of the turn.",
+                    },
+                    {
+                        "kind": "reaction",
+                        "label": "Adjacent ally trigger",
+                        "summary": "When a creature within 5 feet of you attacks a target other than you, you can use your reaction to make a melee weapon attack against that creature.",
+                    },
+                ],
+            }
+        )
+    if support_flags.get("mage_slayer"):
+        rules.append(
+            {
+                "id": "feat:phb-feat-mage-slayer",
+                "title": "Mage Slayer",
+                "condition": "Use these reminders when a creature within 5 feet of you casts a spell or is concentrating on one.",
+                "attack_scope": {
+                    "label": "Melee weapon attacks",
+                    "categories": ["melee weapon"],
+                },
+                "effects": [
+                    {
+                        "kind": "reaction",
+                        "label": "Spellcasting trigger",
+                        "summary": "When a creature within 5 feet of you casts a spell, you can use your reaction to make a melee weapon attack against it.",
+                    },
+                    {
+                        "kind": "concentration",
+                        "label": "On hit",
+                        "summary": "When you damage a creature that is concentrating on a spell, that creature has disadvantage on the saving throw it makes to maintain concentration.",
+                    },
+                ],
+            }
+        )
+    if support_flags.get("crusher"):
+        rules.append(
+            {
+                "id": "feat:tce-feat-crusher",
+                "title": "Crusher",
+                "condition": "Use these reminders only when a visible attack deals bludgeoning damage.",
+                "attack_scope": {
+                    "label": "Bludgeoning attacks",
+                    "damage_types": ["Bludgeoning"],
+                },
+                "effects": [
+                    {
+                        "kind": "forced_movement",
+                        "label": "Once per turn on hit",
+                        "summary": "When you hit a creature with bludgeoning damage, you can move it 5 feet to an unoccupied space if it is no more than one size larger than you.",
+                    },
+                    {
+                        "kind": "critical",
+                        "label": "On critical hit",
+                        "summary": "Attack rolls against that creature have advantage until the start of your next turn.",
+                    },
+                ],
+            }
+        )
+    if support_flags.get("piercer"):
+        rules.append(
+            {
+                "id": "feat:tce-feat-piercer",
+                "title": "Piercer",
+                "condition": "Use these reminders only when a visible attack deals piercing damage.",
+                "attack_scope": {
+                    "label": "Piercing attacks",
+                    "damage_types": ["Piercing"],
+                },
+                "effects": [
+                    {
+                        "kind": "damage_reroll",
+                        "label": "Once per turn on hit",
+                        "summary": "You can reroll one of the attack's damage dice.",
+                    },
+                    {
+                        "kind": "critical_damage",
+                        "label": "On critical hit",
+                        "summary": "Roll one additional damage die when determining the extra piercing damage the target takes.",
+                    },
+                ],
+            }
+        )
+    if support_flags.get("slasher"):
+        rules.append(
+            {
+                "id": "feat:tce-feat-slasher",
+                "title": "Slasher",
+                "condition": "Use these reminders only when a visible attack deals slashing damage.",
+                "attack_scope": {
+                    "label": "Slashing attacks",
+                    "damage_types": ["Slashing"],
+                },
+                "effects": [
+                    {
+                        "kind": "speed_control",
+                        "label": "Once per turn on hit",
+                        "summary": "You can reduce the target's speed by 10 feet until the start of your next turn.",
+                    },
+                    {
+                        "kind": "critical",
+                        "label": "On critical hit",
+                        "summary": "The target has disadvantage on all attack rolls until the start of your next turn.",
+                    },
+                ],
+            }
+        )
+    return {"rules": rules}
 
 
 def _derive_definition_max_hp(
@@ -5278,6 +5436,9 @@ def _derive_definition_stats(
     )
     if derived_armor_class is not None:
         stats["armor_class"] = derived_armor_class
+    stats["attack_reminder_state"] = _derive_attack_reminder_state_from_character_inputs(
+        features=features,
+    )
     stats["defensive_state"] = _derive_defensive_state_from_character_inputs(
         equipment_catalog=list(definition.equipment_catalog or []),
         features=features,
@@ -9576,6 +9737,23 @@ def _derive_defensive_state_from_character_inputs(
                 ],
             }
         )
+    if support_flags.get("mage_slayer"):
+        rules.append(
+            {
+                "id": "feat:phb-feat-mage-slayer",
+                "title": "Mage Slayer",
+                "active": True,
+                "condition": "Applies against spells cast by creatures within 5 feet of you.",
+                "inactive_reason": "",
+                "effects": [
+                    {
+                        "kind": "saving_throw",
+                        "label": "Spell saves",
+                        "summary": "You have advantage on saving throws against spells cast by creatures within 5 feet of you.",
+                    }
+                ],
+            }
+        )
     if support_flags.get("shield_master"):
         active = bool(armor_state.get("wearing_shield"))
         shield_bonus_value = int(armor_state.get("shield_bonus") or 0)
@@ -9636,6 +9814,9 @@ def _recalculate_definition_armor_class(
     )
     if derived_armor_class is not None:
         stats["armor_class"] = derived_armor_class
+    stats["attack_reminder_state"] = _derive_attack_reminder_state_from_character_inputs(
+        features=list(definition.features or []),
+    )
     stats["defensive_state"] = _derive_defensive_state_from_character_inputs(
         equipment_catalog=list(definition.equipment_catalog or []),
         features=list(definition.features or []),
@@ -13007,6 +13188,9 @@ def _build_level_one_stats(
             }
             for ability_key, score in ability_scores.items()
         },
+        "attack_reminder_state": _derive_attack_reminder_state_from_character_inputs(
+            features=features or [],
+        ),
         "defensive_state": _derive_defensive_state_from_character_inputs(
             equipment_catalog=equipment_catalog or [],
             features=features or [],
@@ -13179,6 +13363,9 @@ def _build_leveled_stats(
         ),
         item_catalog=item_catalog or {},
         allow_plain_unarmored_base=True,
+    )
+    stats["attack_reminder_state"] = _derive_attack_reminder_state_from_character_inputs(
+        features=features or list(current_definition.features or []),
     )
     stats["defensive_state"] = _derive_defensive_state_from_character_inputs(
         equipment_catalog=equipment_catalog or list(current_definition.equipment_catalog or []),

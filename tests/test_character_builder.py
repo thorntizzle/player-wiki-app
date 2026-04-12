@@ -7610,6 +7610,128 @@ def test_normalize_definition_to_native_model_keeps_xphb_mounted_combatant_out_o
     assert attacks_by_name["Handaxe (thrown)"]["notes"] == "range 20/60."
 
 
+def test_normalize_definition_to_native_model_derives_stateful_attack_reminder_contract():
+    definition = _minimal_character_definition("reactive-marshal", "Reactive Marshal")
+    definition.features = [
+        {
+            "id": "sentinel-1",
+            "name": "Sentinel",
+            "category": "feat",
+            "source": "PHB",
+            "description_markdown": "",
+            "systems_ref": {
+                "entry_type": "feat",
+                "slug": "phb-feat-sentinel",
+                "title": "Sentinel",
+                "source_id": "PHB",
+            },
+        },
+        {
+            "id": "mage-slayer-1",
+            "name": "Mage Slayer",
+            "category": "feat",
+            "source": "PHB",
+            "description_markdown": "",
+            "systems_ref": {
+                "entry_type": "feat",
+                "slug": "phb-feat-mage-slayer",
+                "title": "Mage Slayer",
+                "source_id": "PHB",
+            },
+        },
+        {
+            "id": "crusher-1",
+            "name": "Crusher",
+            "category": "feat",
+            "source": "TCE",
+            "description_markdown": "",
+            "systems_ref": {
+                "entry_type": "feat",
+                "slug": "tce-feat-crusher",
+                "title": "Crusher",
+                "source_id": "TCE",
+            },
+        },
+        {
+            "id": "piercer-1",
+            "name": "Piercer",
+            "category": "feat",
+            "source": "TCE",
+            "description_markdown": "",
+            "systems_ref": {
+                "entry_type": "feat",
+                "slug": "tce-feat-piercer",
+                "title": "Piercer",
+                "source_id": "TCE",
+            },
+        },
+        {
+            "id": "slasher-1",
+            "name": "Slasher",
+            "category": "feat",
+            "source": "TCE",
+            "description_markdown": "",
+            "systems_ref": {
+                "entry_type": "feat",
+                "slug": "tce-feat-slasher",
+                "title": "Slasher",
+                "source_id": "TCE",
+            },
+        },
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+
+    reminder_state = dict(normalized.stats.get("attack_reminder_state") or {})
+    rules_by_title = {
+        str(rule.get("title") or ""): dict(rule)
+        for rule in list(reminder_state.get("rules") or [])
+    }
+    defensive_state = dict(normalized.stats.get("defensive_state") or {})
+    defensive_rules_by_title = {
+        str(rule.get("title") or ""): dict(rule)
+        for rule in list(defensive_state.get("rules") or [])
+    }
+
+    assert dict(rules_by_title["Sentinel"]["attack_scope"]) == {
+        "label": "Melee weapon attacks",
+        "categories": ["melee weapon"],
+    }
+    assert [effect["kind"] for effect in list(rules_by_title["Sentinel"]["effects"] or [])] == [
+        "opportunity_attack",
+        "speed_control",
+        "reaction",
+    ]
+    assert dict(rules_by_title["Mage Slayer"]["attack_scope"]) == {
+        "label": "Melee weapon attacks",
+        "categories": ["melee weapon"],
+    }
+    assert [effect["kind"] for effect in list(rules_by_title["Mage Slayer"]["effects"] or [])] == [
+        "reaction",
+        "concentration",
+    ]
+    assert dict(rules_by_title["Crusher"]["attack_scope"]) == {
+        "label": "Bludgeoning attacks",
+        "damage_types": ["Bludgeoning"],
+    }
+    assert dict(rules_by_title["Piercer"]["attack_scope"]) == {
+        "label": "Piercing attacks",
+        "damage_types": ["Piercing"],
+    }
+    assert dict(rules_by_title["Slasher"]["attack_scope"]) == {
+        "label": "Slashing attacks",
+        "damage_types": ["Slashing"],
+    }
+    assert defensive_rules_by_title["Mage Slayer"]["active"] is True
+    assert defensive_rules_by_title["Mage Slayer"]["effects"] == [
+        {
+            "kind": "saving_throw",
+            "label": "Spell saves",
+            "summary": "You have advantage on saving throws against spells cast by creatures within 5 feet of you.",
+        }
+    ]
+
+
 def test_normalize_definition_to_native_model_derives_barbarian_unarmored_defense_for_imported_character():
     definition = _minimal_imported_character_definition("bryn-coal", "Bryn Coal")
     definition.profile["class_level_text"] = "Barbarian 3"
@@ -10957,6 +11079,93 @@ def test_level_one_builder_adds_phb_mounted_combatant_note_only_to_melee_attacks
         == "Mounted Combatant (while mounted, advantage against unmounted creatures smaller than your mount)."
     )
     assert attacks_by_name["Handaxe (thrown)"]["notes"] == "range 20/60."
+
+
+def test_level_one_builder_surfaces_sentinel_attack_reminder_state():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+            "starting_equipment": {
+                "defaultData": [
+                    {"_": ["handaxe|phb"]},
+                ]
+            },
+        },
+    )
+    variant_human = _systems_entry(
+        "race",
+        "phb-race-variant-human",
+        "Variant Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}], "feats": [{"any": 1}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    sentinel = _systems_entry("feat", "phb-feat-sentinel", "Sentinel", source_id="PHB")
+    handaxe = _systems_entry("item", "phb-item-handaxe", "Handaxe", metadata={"weight": 2})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [variant_human],
+            "background": [acolyte],
+            "feat": [sentinel],
+            "subclass": [],
+            "item": [handaxe],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+    form_values = {
+        "name": "Holdfast Vale",
+        "character_slug": "holdfast-vale",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": variant_human.slug,
+        "background_slug": acolyte.slug,
+        "species_feat_1": sentinel.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+    reminder_state = dict(definition.stats.get("attack_reminder_state") or {})
+    sentinel_rule = next(rule for rule in list(reminder_state.get("rules") or []) if rule["title"] == "Sentinel")
+
+    assert "Handaxe (+5, 1d6+3 slashing)" in context["preview"]["attacks"]
+    assert dict(sentinel_rule["attack_scope"]) == {
+        "label": "Melee weapon attacks",
+        "categories": ["melee weapon"],
+    }
 
 
 def test_level_one_builder_applies_structured_attack_modes_to_firearm_attacks():
@@ -20929,6 +21138,106 @@ def test_native_level_up_adds_campaign_mounted_combatant_note_only_to_melee_atta
         == "Mounted Combatant (while mounted, advantage against unmounted creatures smaller than your mount)."
     )
     assert attacks_by_name["Handaxe (thrown)"]["notes"] == "range 20/60."
+
+
+def test_native_level_up_surfaces_crusher_attack_reminder_state():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    ability_score_improvement = _systems_entry(
+        "classfeature",
+        "phb-classfeature-ability-score-improvement",
+        "Ability Score Improvement",
+        metadata={"level": 4},
+    )
+    crusher = _systems_entry("feat", "tce-feat-crusher", "Crusher", source_id="TCE")
+    mace = _systems_entry("item", "phb-item-mace", "Mace", metadata={"weight": 4})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [crusher],
+            "subclass": [],
+            "item": [mace],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 4,
+                "level_label": "Level 4",
+                "feature_rows": [
+                    {
+                        "label": "Ability Score Improvement",
+                        "entry": ability_score_improvement,
+                        "embedded_card": {"option_groups": []},
+                    }
+                ],
+            }
+        ],
+    )
+
+    current_definition = _minimal_character_definition("crusher-veteran", "Crusher Veteran")
+    current_definition.profile["class_level_text"] = "Fighter 3"
+    current_definition.profile["classes"][0]["level"] = 3
+    current_definition.stats["max_hp"] = 28
+    current_definition.proficiencies["weapons"] = ["Simple Weapons"]
+    current_definition.equipment_catalog = [
+        {
+            "id": "mace-1",
+            "name": "Mace",
+            "default_quantity": 1,
+            "weight": "4 lb.",
+            "notes": "",
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-mace",
+                "title": "Mace",
+                "source_id": "PHB",
+            },
+        }
+    ]
+
+    form_values = {
+        "hp_gain": "8",
+        "levelup_asi_mode_1": "feat",
+        "levelup_feat_1": crusher.slug,
+    }
+
+    level_up_context = build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values)
+    leveled_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        level_up_context,
+        form_values,
+    )
+    reminder_state = dict(leveled_definition.stats.get("attack_reminder_state") or {})
+    crusher_rule = next(rule for rule in list(reminder_state.get("rules") or []) if rule["title"] == "Crusher")
+
+    assert "Crusher" in level_up_context["preview"]["gained_features"]
+    assert dict(crusher_rule["attack_scope"]) == {
+        "label": "Bludgeoning attacks",
+        "damage_types": ["Bludgeoning"],
+    }
 
 
 def test_native_level_up_applies_medium_armor_master_to_equipped_medium_armor():
