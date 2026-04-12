@@ -2138,6 +2138,7 @@ def test_phb_book_chapters_are_imported_and_browsable_in_book_order(
         importer.import_source("PHB", entry_types=["book"])
 
         service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
         book_entries = service.list_entries_for_campaign_source(
             "linden-pass",
             "PHB",
@@ -2149,6 +2150,11 @@ def test_phb_book_chapters_are_imported_and_browsable_in_book_order(
         using_ability_scores = next(entry for entry in book_entries if entry.title == "Using Ability Scores")
         introduction = next(entry for entry in book_entries if entry.title == "Introduction")
         spellcasting = next(entry for entry in book_entries if entry.title == "Spellcasting")
+        rules_entries = {
+            entry.title: entry
+            for entry in store.list_entries_for_source("DND-5E", "RULES", entry_type="rule", limit=None)
+        }
+        passive_checks_rule = rules_entries["Passive Checks"]
 
     assert titles == [
         "Introduction",
@@ -2194,6 +2200,8 @@ def test_phb_book_chapters_are_imported_and_browsable_in_book_order(
     assert "Contests" in detail_body
     assert "Passive Checks" in detail_body
     assert "10 + all modifiers that normally apply to the check" in detail_body
+    assert "Rules:" in detail_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{passive_checks_rule.slug}"' in detail_body
     assert "book/PHB/ch7.webp" not in detail_body
     assert "p. 175" in detail_body
 

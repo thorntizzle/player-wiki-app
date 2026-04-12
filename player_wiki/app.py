@@ -3403,6 +3403,10 @@ def create_app() -> Flask:
         book_headers = []
         book_section_outline = []
         if entry.entry_type == "book":
+            book_related_rules_by_anchor = systems_service.build_related_rules_for_book_sections(
+                campaign_slug,
+                entry,
+            )
             raw_headers = (entry.metadata or {}).get("headers")
             if isinstance(raw_headers, list):
                 book_headers = [str(item).strip() for item in raw_headers if str(item).strip()]
@@ -3418,12 +3422,18 @@ def create_app() -> Flask:
                     raw_depth = item.get("depth")
                     depth = int(raw_depth) if isinstance(raw_depth, int) and raw_depth > 0 else 1
                     page = str(item.get("page", "") or "").strip()
+                    section_related_rule_entries = [
+                        candidate
+                        for candidate in book_related_rules_by_anchor.get(anchor, [])
+                        if can_access_campaign_systems_entry(campaign_slug, candidate.slug)
+                    ]
                     book_section_outline.append(
                         {
                             "title": title,
                             "anchor": anchor,
                             "depth": depth,
                             "page": page,
+                            "related_rule_entries": section_related_rule_entries,
                         }
                     )
         return {

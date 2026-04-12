@@ -1693,6 +1693,10 @@ button {
   font-size: 0.82rem;
 }
 
+.systems-book-outline__related-rules {
+  font-size: 0.82rem;
+}
+
 .systems-inline-feature-card,
 .systems-inline-option-group,
 .systems-inline-option-stack {

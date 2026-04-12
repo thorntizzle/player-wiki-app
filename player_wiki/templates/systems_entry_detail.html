@@ -261,6 +261,14 @@
                 {% if section.page %}
                   <span class="meta systems-book-outline__page">p. {{ section.page }}</span>
                 {% endif %}
+                {% if section.related_rule_entries %}
+                  <p class="meta systems-book-outline__related-rules">
+                    Rules:
+                    {% for related_entry in section.related_rule_entries %}
+                      <a href="{{ url_for('campaign_systems_entry_detail', campaign_slug=campaign.slug, entry_slug=related_entry.slug) }}">{{ related_entry.title }}</a>{% if not loop.last %}, {% endif %}
+                    {% endfor %}
+                  </p>
+                {% endif %}
               </li>
             {% endfor %}
           </ul>

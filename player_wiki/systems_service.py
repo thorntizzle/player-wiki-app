@@ -58,6 +58,27 @@ ARMOR_ITEM_TYPE_CODES = {"LA", "MA", "HA", "S"}
 WEAPON_ITEM_TYPE_CODES = {"M", "R"}
 PASSIVE_CHECK_SKILL_KEYS = {"insight", "investigation", "perception"}
 RULES_REFERENCE_ENTRY_TYPES = ("book", "rule")
+PHB_BOOK_SECTION_RULE_KEY_MAP = {
+    # Only link section anchors whose rule identity already exists as a stable RULES entry.
+    "2-choose-a-class--hit-points-and-hit-dice": ("hit-points-and-hit-dice",),
+    "2-choose-a-class--proficiency-bonus": ("proficiency-bonus",),
+    "5-choose-equipment--armor-class": ("armor-class",),
+    "ability-scores-and-modifiers": ("ability-scores-and-ability-modifiers",),
+    "proficiency-bonus": ("proficiency-bonus",),
+    "ability-checks--skills": ("skill-bonuses-and-proficiency",),
+    "ability-checks--passive-checks": ("passive-checks",),
+    "saving-throws": ("saving-throw-bonuses",),
+    "movement--resting": ("hit-points-and-hit-dice",),
+    "the-order-of-combat--initiative": ("initiative",),
+    "making-an-attack": ("attack-rolls-and-attack-bonus",),
+    "making-an-attack--attack-rolls": ("attack-rolls-and-attack-bonus",),
+    "damage-and-healing--hit-points": ("hit-points-and-hit-dice",),
+    "damage-and-healing--damage-rolls": ("damage-rolls",),
+    "damage-and-healing--dropping-to-0-hit-points": ("hit-points-and-hit-dice",),
+    "damage-and-healing--temporary-hit-points": ("hit-points-and-hit-dice",),
+    "casting-a-spell--saving-throws": ("spell-attacks-and-save-dcs",),
+    "casting-a-spell--attack-rolls": ("spell-attacks-and-save-dcs",),
+}
 
 
 def _systems_service_request_cache() -> dict[tuple[object, ...], object] | None:
@@ -667,7 +688,38 @@ class SystemsService:
             return []
 
         rule_keys = self._collect_related_rule_keys_for_entry(entry)
-        return [rules_by_key[key] for key in rule_keys if key in rules_by_key]
+        return self._resolve_rule_entries_by_key(rules_by_key, rule_keys)
+
+    def build_related_rules_for_book_sections(
+        self,
+        campaign_slug: str,
+        entry: SystemsEntryRecord,
+    ) -> dict[str, list[SystemsEntryRecord]]:
+        if entry.entry_type != "book" or str(entry.source_id or "").strip().upper() != "PHB":
+            return {}
+
+        raw_outline = (entry.metadata or {}).get("section_outline")
+        if not isinstance(raw_outline, list) or not raw_outline:
+            return {}
+
+        rules_by_key = self._build_rules_reference_lookup(campaign_slug)
+        if not rules_by_key:
+            return {}
+
+        related_by_anchor: dict[str, list[SystemsEntryRecord]] = {}
+        for item in raw_outline:
+            if not isinstance(item, dict):
+                continue
+            anchor = str(item.get("anchor") or "").strip()
+            if not anchor:
+                continue
+            rule_keys = PHB_BOOK_SECTION_RULE_KEY_MAP.get(anchor, ())
+            if not rule_keys:
+                continue
+            related_entries = self._resolve_rule_entries_by_key(rules_by_key, rule_keys)
+            if related_entries:
+                related_by_anchor[anchor] = related_entries
+        return related_by_anchor
 
     def _build_rules_reference_lookup(self, campaign_slug: str) -> dict[str, SystemsEntryRecord]:
         rows = self.list_entries_for_campaign_source(
@@ -683,6 +735,21 @@ class SystemsService:
             if rule_key:
                 lookup[rule_key] = entry
         return lookup
+
+    def _resolve_rule_entries_by_key(
+        self,
+        rules_by_key: dict[str, SystemsEntryRecord],
+        rule_keys: list[str] | tuple[str, ...],
+    ) -> list[SystemsEntryRecord]:
+        related_entries: list[SystemsEntryRecord] = []
+        seen_entry_keys: set[str] = set()
+        for rule_key in rule_keys:
+            entry = rules_by_key.get(str(rule_key or "").strip())
+            if entry is None or entry.entry_key in seen_entry_keys:
+                continue
+            seen_entry_keys.add(entry.entry_key)
+            related_entries.append(entry)
+        return related_entries
 
     def _collect_related_rule_keys_for_entry(self, entry: SystemsEntryRecord) -> list[str]:
         metadata = dict(entry.metadata or {})
