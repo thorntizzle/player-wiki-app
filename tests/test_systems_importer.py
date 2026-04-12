@@ -4145,6 +4145,7 @@ XGE_RULES_REFERENCE_TEST_TITLES = (
     "Tool Proficiencies",
     "Spellcasting",
     "Identifying a Spell",
+    "Downtime Revisited",
     "Variant Rules",
 )
 
@@ -6797,6 +6798,9 @@ def test_xge_book_entries_are_imported_for_player_browse(
     spellcasting_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Spellcasting'].slug}"
     )
+    downtime_revisited_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Downtime Revisited'].slug}"
+    )
     variant_rules_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Variant Rules'].slug}"
     )
@@ -6841,6 +6845,17 @@ def test_xge_book_entries_are_imported_for_player_browse(
     assert 'href="#areas-of-effect-on-a-grid"' in spellcasting_body
     assert 'id="invalid-spell-targets"' in spellcasting_body
 
+    assert downtime_revisited_response.status_code == 200
+    downtime_revisited_body = downtime_revisited_response.get_data(as_text=True)
+    assert "Chapter 2" in downtime_revisited_body
+    assert "Dungeon Master&#39;s Tools" in downtime_revisited_body
+    assert "Rivals" in downtime_revisited_body
+    assert "Downtime Activities" in downtime_revisited_body
+    assert "Example Downtime Activities" in downtime_revisited_body
+    assert 'href="#rivals"' in downtime_revisited_body
+    assert 'href="#downtime-activities"' in downtime_revisited_body
+    assert 'id="example-downtime-activities"' in downtime_revisited_body
+
     assert variant_rules_response.status_code == 200
     variant_rules_body = variant_rules_response.get_data(as_text=True)
     assert "Appendix A" in variant_rules_body
@@ -6878,7 +6893,7 @@ def test_xge_book_entries_follow_source_visibility(client, sign_in, users, app, 
     player_source_response = client.get("/campaigns/linden-pass/systems/sources/XGE")
     player_category_response = client.get("/campaigns/linden-pass/systems/sources/XGE/types/book")
     player_entry_response = client.get(
-        f"/campaigns/linden-pass/systems/entries/{book_entries['Tool Proficiencies'].slug}"
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Downtime Revisited'].slug}"
     )
 
     assert player_source_response.status_code == 404
@@ -6891,18 +6906,18 @@ def test_xge_book_entries_follow_source_visibility(client, sign_in, users, app, 
     dm_source_response = client.get("/campaigns/linden-pass/systems/sources/XGE")
     dm_category_response = client.get("/campaigns/linden-pass/systems/sources/XGE/types/book")
     dm_entry_response = client.get(
-        f"/campaigns/linden-pass/systems/entries/{book_entries['Tool Proficiencies'].slug}"
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Downtime Revisited'].slug}"
     )
 
     assert dm_source_response.status_code == 200
     assert "Book Chapters" in dm_source_response.get_data(as_text=True)
     assert dm_category_response.status_code == 200
-    assert "Tool Proficiencies" in dm_category_response.get_data(as_text=True)
+    assert "Downtime Revisited" in dm_category_response.get_data(as_text=True)
     assert dm_entry_response.status_code == 200
     dm_body = dm_entry_response.get_data(as_text=True)
     assert "Chapter 2" in dm_body
     assert "Dungeon Master&#39;s Tools" in dm_body
-    assert "Tools and Skills Together" in dm_body
+    assert "Downtime Activities" in dm_body
 
 
 def test_xge_book_slice_excludes_other_pending_section_pages(app, tmp_path):
@@ -6926,7 +6941,6 @@ def test_xge_book_slice_excludes_other_pending_section_pages(app, tmp_path):
     assert result.imported_by_type == {"book": len(XGE_RULES_REFERENCE_TEST_TITLES)}
     book_titles = {entry.title for entry in book_entries}
     assert book_titles == set(XGE_RULES_REFERENCE_TEST_TITLES)
-    assert "Downtime Revisited" not in book_titles
     assert "Encounter Building" not in book_titles
     assert "Random Encounters: A World of Possibilities" not in book_titles
     assert "Traps Revisited" not in book_titles

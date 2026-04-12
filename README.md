@@ -133,7 +133,7 @@ The app now treats deployed functionality and live content as separate concerns:
 - shared DND 5E source ingest can now be driven through an admin-only JSON API upload plus import-run history endpoints
 - systems source policy and combat tracker state now have API coverage in addition to the browser UI
 - the Systems UI now exposes an initial DM-default DMG book-backed browse slice (`Treasure`, `Running the Game`, and `Dungeon Master's Workshop`) through the normal source/category/detail path while keeping it hidden from players under source policy
-- the Systems UI now also exposes a player-visible XGE wrapper-first atomic `Book Chapters` slice (`Simultaneous Effects`, `Falling`, `Sleep`, `Waking Someone`, `Adamantine Weapons`, `Tying Knots`, `Identifying a Spell`, and appendix `Variant Rules`) while leaving the broader XGE chapter pages for follow-up work
+- the Systems UI now also exposes a player-visible XGE `Book Chapters` slice that combines wrapper-first atomic pages with the broader `Tool Proficiencies`, `Spellcasting`, and `Downtime Revisited` chapter pages, while `Encounter Building`, `Random Encounters: A World of Possibilities`, `Traps Revisited`, `Awarding Magic Items`, and the readable `Shared Campaigns` wrapper stay as follow-up work
 - DM session management can lazy-search visible published wiki pages and accessible Systems entries, then pull either into the session article store as a revealable snapshot
 - local testing can mirror Fly by pulling down both `/data/player_wiki.sqlite3` and `/data/campaigns`
 - published wiki pages are mirrored to `campaigns/<slug>/content/`, but the app now serves them from a SQLite read model
