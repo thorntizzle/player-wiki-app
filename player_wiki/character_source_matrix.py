@@ -83,5 +83,5 @@ class NativeSourceMatrixPolicy:
 # additions can land as a policy update instead of a scattered builder refactor.
 DEFAULT_NATIVE_SOURCE_MATRIX_POLICY = NativeSourceMatrixPolicy(
     supported_non_phb_base_class_keys=frozenset({("TCE", "Artificer")}),
-    supported_subordinate_source_ids=frozenset({"TCE", "SCAG", "XGE", "EGW"}),
+    supported_subordinate_source_ids=frozenset({"TCE", "SCAG", "XGE", "EGW", "DMG"}),
 )

@@ -14,7 +14,12 @@ def test_default_native_source_matrix_policy_keeps_current_source_boundary_expli
         class_name="Mystic",
         class_source="ua",
     )
+    assert not DEFAULT_NATIVE_SOURCE_MATRIX_POLICY.supports_base_class_identity(
+        class_name="Expert Sidekick",
+        class_source="TCE",
+    )
     assert DEFAULT_NATIVE_SOURCE_MATRIX_POLICY.supports_subclass_source("XGE")
+    assert DEFAULT_NATIVE_SOURCE_MATRIX_POLICY.supports_subclass_source("DMG")
     assert not DEFAULT_NATIVE_SOURCE_MATRIX_POLICY.supports_subclass_source("ERLW")
     assert DEFAULT_NATIVE_SOURCE_MATRIX_POLICY.should_prefix_profile_link_source("SCAG")
     assert not DEFAULT_NATIVE_SOURCE_MATRIX_POLICY.should_prefix_profile_link_source("PHB")

@@ -3469,6 +3469,128 @@ def test_imported_egw_subclass_with_stale_source_locked_ref_repairs_to_egw_entry
     assert repaired_readiness["status"] == "ready"
 
 
+def test_imported_dmg_subclass_with_stale_source_locked_ref_repairs_to_dmg_entry():
+    cleric = _systems_entry(
+        "class",
+        "phb-class-cleric",
+        "Cleric",
+        metadata={
+            "hit_die": {"faces": 8},
+            "proficiency": ["wis", "cha"],
+            "subclass_title": "Divine Domain",
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "shield"],
+                "weapons": ["simple"],
+                "skills": [{"choose": {"count": 2, "from": ["history", "insight", "medicine", "religion"]}}],
+            },
+        },
+        source_id="PHB",
+    )
+    phb_death_domain = _systems_entry(
+        "subclass",
+        "phb-subclass-cleric-death-domain",
+        "Death Domain",
+        source_id="PHB",
+        metadata={"class_name": "Cleric", "class_source": "PHB"},
+    )
+    dmg_death_domain = _systems_entry(
+        "subclass",
+        "dmg-subclass-cleric-death-domain",
+        "Death Domain",
+        source_id="DMG",
+        metadata={"class_name": "Cleric", "class_source": "PHB"},
+    )
+    human = _systems_entry("race", "phb-race-human", "Human", source_id="PHB")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte", source_id="PHB")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [cleric],
+            "subclass": [phb_death_domain, dmg_death_domain],
+            "race": [human],
+            "background": [acolyte],
+            "spell": [],
+        },
+        class_progression=[{"level": 1, "feature_rows": [{"label": "Divine Domain"}]}],
+        enabled_source_ids=["PHB", "DMG"],
+    )
+    definition = _minimal_imported_character_definition("dmg-cleric", "DMG Cleric")
+    definition.profile["class_level_text"] = "Cleric 1"
+    definition.profile["classes"][0] = {
+        "class_name": "Cleric",
+        "subclass_name": "Death Domain",
+        "level": 1,
+        "systems_ref": {
+            "entry_key": "dnd-5e|class|phb|cleric",
+            "entry_type": "class",
+            "title": "Cleric",
+            "slug": cleric.slug,
+            "source_id": "PHB",
+        },
+        "subclass_ref": {
+            "entry_key": "dnd-5e|subclass|dmg|death-domain",
+            "entry_type": "subclass",
+            "title": "Death Domain",
+            "slug": "stale-dmg-subclass-death-domain",
+            "source_id": "DMG",
+        },
+    }
+    definition.profile["class_ref"] = dict(definition.profile["classes"][0]["systems_ref"])
+    definition.profile["subclass_ref"] = dict(definition.profile["classes"][0]["subclass_ref"])
+    definition.profile["species"] = "Human"
+    definition.profile["species_ref"] = {
+        "entry_key": "dnd-5e|race|phb|human",
+        "entry_type": "race",
+        "title": "Human",
+        "slug": human.slug,
+        "source_id": "PHB",
+    }
+    definition.profile["background"] = "Acolyte"
+    definition.profile["background_ref"] = {
+        "entry_key": "dnd-5e|background|phb|acolyte",
+        "entry_type": "background",
+        "title": "Acolyte",
+        "slug": acolyte.slug,
+        "source_id": "PHB",
+    }
+    import_metadata = CharacterImportMetadata(
+        campaign_slug="linden-pass",
+        character_slug=definition.character_slug,
+        source_path="imports://dmg-cleric.md",
+        imported_at_utc="2026-04-11T00:00:00Z",
+        parser_version="fixture",
+        import_status="clean",
+        warnings=[],
+    )
+
+    readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
+
+    assert readiness["status"] == "repairable"
+    assert readiness["selected_subclass"].slug == dmg_death_domain.slug
+    assert readiness["selected_subclass"].source_id == "DMG"
+    assert any("DMG Divine Domain link" in reason for reason in readiness["reasons"])
+
+    repair_context = build_imported_progression_repair_context(
+        systems_service,
+        "linden-pass",
+        definition,
+    )
+
+    assert repair_context["values"]["repair_subclass_slug"] == f"systems:{dmg_death_domain.slug}"
+
+    repaired_definition, _ = apply_imported_progression_repairs(
+        "linden-pass",
+        definition,
+        import_metadata,
+        repair_context,
+        repair_context["values"],
+    )
+    repaired_readiness = native_level_up_readiness(systems_service, "linden-pass", repaired_definition)
+
+    assert repaired_definition.profile["subclass_ref"]["slug"] == dmg_death_domain.slug
+    assert repaired_definition.profile["subclass_ref"]["source_id"] == "DMG"
+    assert repaired_readiness["status"] == "ready"
+
+
 def test_imported_progression_repair_can_restore_refs_and_add_prior_feature_links():
     fighter = _systems_entry(
         "class",
@@ -7157,6 +7279,134 @@ def test_level_one_builder_supports_enabled_non_phb_species_background_feat_and_
     assert definition.profile["background_ref"]["source_id"] == "XGE"
     assert any(feature["name"] == "Telekinetic" for feature in definition.features)
     assert import_metadata.source_path == "builder://native-level-1"
+
+
+def test_level_one_builder_supports_enabled_dmg_subclass_options_while_sidekick_classes_stay_blocked():
+    cleric = _systems_entry(
+        "class",
+        "phb-class-cleric",
+        "Cleric",
+        metadata={
+            "hit_die": {"faces": 8},
+            "proficiency": ["wis", "cha"],
+            "subclass_title": "Divine Domain",
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "shield"],
+                "weapons": ["simple"],
+                "skills": [{"choose": {"count": 2, "from": ["history", "insight", "medicine", "religion"]}}],
+            },
+        },
+        source_id="PHB",
+    )
+    expert_sidekick = _systems_entry(
+        "class",
+        "tce-class-expert-sidekick",
+        "Expert Sidekick",
+        metadata={"hit_die": {"faces": 8}, "proficiency": ["dex", "cha"]},
+        source_id="TCE",
+    )
+    death_domain = _systems_entry(
+        "subclass",
+        "dmg-subclass-cleric-death-domain",
+        "Death Domain",
+        metadata={"class_name": "Cleric", "class_source": "PHB"},
+        source_id="DMG",
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    spellcasting_feature = _systems_entry("classfeature", "phb-classfeature-spellcasting", "Spellcasting", metadata={"level": 1})
+    divine_domain = _systems_entry("classfeature", "phb-classfeature-divine-domain", "Divine Domain", metadata={"level": 1})
+    light = _systems_entry("spell", "phb-spell-light", "Light", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 0})
+    sacred_flame = _systems_entry(
+        "spell",
+        "phb-spell-sacred-flame",
+        "Sacred Flame",
+        metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 0},
+    )
+    thaumaturgy = _systems_entry(
+        "spell",
+        "phb-spell-thaumaturgy",
+        "Thaumaturgy",
+        metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 0},
+    )
+    bless = _systems_entry("spell", "phb-spell-bless", "Bless", metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1})
+    cure_wounds = _systems_entry(
+        "spell",
+        "phb-spell-cure-wounds",
+        "Cure Wounds",
+        metadata={"casting_time": [{"number": 1, "unit": "action"}], "level": 1},
+    )
+    healing_word = _systems_entry(
+        "spell",
+        "phb-spell-healing-word",
+        "Healing Word",
+        metadata={"casting_time": [{"number": 1, "unit": "bonus"}], "level": 1},
+    )
+    shield_of_faith = _systems_entry(
+        "spell",
+        "phb-spell-shield-of-faith",
+        "Shield of Faith",
+        metadata={"casting_time": [{"number": 1, "unit": "bonus"}], "level": 1},
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [cleric, expert_sidekick],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [death_domain],
+            "item": [],
+            "spell": [light, sacred_flame, thaumaturgy, bless, cure_wounds, healing_word, shield_of_faith],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Spellcasting", "entry": spellcasting_feature, "embedded_card": {"option_groups": []}},
+                    {"label": "Divine Domain", "entry": divine_domain, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+        enabled_source_ids=["PHB", "DMG", "TCE"],
+    )
+    form_values = {
+        "name": "Mournwell",
+        "character_slug": "mournwell",
+        "alignment": "Neutral Evil",
+        "experience_model": "Milestone",
+        "class_slug": cleric.slug,
+        "subclass_slug": death_domain.slug,
+        "species_slug": human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "history",
+        "class_skill_2": "medicine",
+        "str": "10",
+        "dex": "12",
+        "con": "14",
+        "int": "11",
+        "wis": "16",
+        "cha": "13",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+
+    assert any(
+        option["slug"] == death_domain.slug and option["label"] == "Death Domain (DMG)"
+        for option in context["subclass_options"]
+    )
+    assert context["selected_subclass"].slug == death_domain.slug
+    assert all(option["slug"] != expert_sidekick.slug for option in context["class_options"])
 
 
 def test_normalize_definition_to_native_model_updates_bardic_inspiration_to_short_rest_at_level_five():
