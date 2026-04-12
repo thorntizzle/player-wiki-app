@@ -1874,6 +1874,103 @@ def build_scag_book_data_root(root: Path) -> Path:
     return data_root
 
 
+SCAG_CLASSES_TEST_SECTION_DEFINITIONS = (
+    ("Barbarians", 121, ("Uthgardt Tribes", "Berserkers of the North")),
+    ("Primal Paths", 121, ("Path of the Battlerager", "Path of the Totem Warrior")),
+    ("Bards", 122, ("Harpers and Heralds",)),
+    ("The Harpers", 123, ("Harper Agent",)),
+    ("Bardic Colleges", 123, ("College of Fochlucan", "College of New Olamn", "College of the Herald")),
+    ("Musical Instruments", 124, ("Birdpipes", "Longhorn")),
+    ("Clerics", 125, ("Priests of Faerun",)),
+    ("Divine Domain", 125, ("Arcana Domain",)),
+    ("Druids", 126, ("Circle Traditions",)),
+    ("Druid Circles", 126, ("Circle of the Land",)),
+    ("Fighters", 127, ("Mercenary Companies",)),
+    ("Martial Archetype", 128, ("Purple Dragon Knight",)),
+    ("Monks", 129, ("Monasteries of the Realms",)),
+    ("Monastic Orders", 129, ("Order of the Yellow Rose",)),
+    ("Monastic Traditions", 130, ("Way of the Long Death", "Way of the Sun Soul")),
+    ("Paladins", 131, ("Knightly Orders",)),
+    ("Paladin Orders", 132, ("Order of the Gauntlet",)),
+    ("Sacred Oath", 132, ("Oath of the Crown",)),
+    ("Rangers", 133, ("Wardens of the North",)),
+    ("Rogues", 134, ("Rogues of Faerun",)),
+    ("Roguish Archetypes", 135, ("Mastermind", "Swashbuckler")),
+    ("Sorcerers", 136, ("Spellscarred Bloodlines",)),
+    ("Sorcerous Origin", 137, ("Storm Sorcery",)),
+    ("Warlocks", 138, ("Patrons in the Realms", "The Archfey", "The Fiend", "The Great Old One")),
+    ("Otherworldly Patron", 139, ("The Undying",)),
+    ("Wizards", 140, ("The Art in Faerun",)),
+    ("Wizardly Groups", 140, ("War Wizards of Cormyr",)),
+    ("Arcane Tradition", 141, ("Bladesinger", "Bladesinger Styles")),
+    (
+        "Cantrips for Sorcerers, Warlocks, and Wizards",
+        142,
+        ("Booming Blade", "Green-Flame Blade"),
+    ),
+)
+SCAG_CLASSES_TEST_HEADERS = tuple(name for name, _, _ in SCAG_CLASSES_TEST_SECTION_DEFINITIONS)
+
+
+def build_scag_classes_book_data_root(root: Path) -> Path:
+    data_root = build_test_data_root(root)
+    write_json(
+        root / "data/books.json",
+        {
+            "book": [
+                {
+                    "name": "Sword Coast Adventurer's Guide",
+                    "id": "SCAG",
+                    "source": "SCAG",
+                    "contents": [
+                        {
+                            "name": "Classes",
+                            "headers": list(SCAG_CLASSES_TEST_HEADERS),
+                            "ordinal": {"type": "chapter", "identifier": 4},
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    chapter_entries: list[object] = [
+        "The twelve classes of the Player's Handbook appear across the Sword Coast and the North."
+    ]
+    for title, page, subsection_titles in SCAG_CLASSES_TEST_SECTION_DEFINITIONS:
+        section_entries: list[object] = [f"{title} have a distinct place in the Forgotten Realms."]
+        for subsection_index, subsection_title in enumerate(subsection_titles):
+            section_entries.append(
+                {
+                    "type": "entries",
+                    "name": subsection_title,
+                    "page": page + min(subsection_index, 1),
+                    "entries": [f"{subsection_title} keeps the source-backed {title.lower()} wrapper readable in book context."],
+                }
+            )
+        chapter_entries.append(
+            {
+                "type": "section",
+                "name": title,
+                "page": page,
+                "entries": section_entries,
+            }
+        )
+    write_json(
+        root / "data/book/book-scag.json",
+        {
+            "data": [
+                {
+                    "type": "section",
+                    "name": "Classes",
+                    "page": 121,
+                    "entries": chapter_entries,
+                }
+            ]
+        },
+    )
+    return data_root
+
+
 def build_mm_book_data_root(root: Path) -> Path:
     data_root = build_test_data_root(root)
     write_json(
@@ -4335,6 +4432,135 @@ def test_scag_races_of_the_realms_book_entries_follow_source_visibility(
     dm_body = dm_entry_response.get_data(as_text=True)
     assert "Dwarves" in dm_body
     assert "Races of the Realms" in dm_body
+
+
+def test_scag_classes_book_entries_follow_book_order_and_render_detail_pages(
+    client, sign_in, users, app, tmp_path
+):
+    data_root = build_scag_classes_book_data_root(tmp_path / "dnd5e-source-scag-classes")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("SCAG", entry_types=["book"])
+
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="SCAG",
+            is_enabled=True,
+            default_visibility="players",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in service.list_entries_for_campaign_source(
+                "linden-pass",
+                "SCAG",
+                entry_type="book",
+                limit=None,
+            )
+        }
+
+    assert list(book_entries) == list(SCAG_CLASSES_TEST_HEADERS)
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    source_response = client.get("/campaigns/linden-pass/systems/sources/SCAG")
+    category_response = client.get("/campaigns/linden-pass/systems/sources/SCAG/types/book")
+    colleges_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Bardic Colleges'].slug}"
+    )
+    cantrips_response = client.get(
+        "/campaigns/linden-pass/systems/entries/"
+        f"{book_entries['Cantrips for Sorcerers, Warlocks, and Wizards'].slug}"
+    )
+
+    assert source_response.status_code == 200
+    source_body = source_response.get_data(as_text=True)
+    assert "Book Chapters" in source_body
+    source_indexes = [source_body.index(title) for title in SCAG_CLASSES_TEST_HEADERS]
+    assert source_indexes == sorted(source_indexes)
+
+    assert category_response.status_code == 200
+    category_body = category_response.get_data(as_text=True)
+    category_indexes = [category_body.index(title) for title in SCAG_CLASSES_TEST_HEADERS]
+    assert category_indexes == sorted(category_indexes)
+
+    assert colleges_response.status_code == 200
+    colleges_body = colleges_response.get_data(as_text=True)
+    assert "Chapter 4" in colleges_body
+    assert "Classes" in colleges_body
+    assert "College of Fochlucan" in colleges_body
+    assert "College of New Olamn" in colleges_body
+    assert "College of the Herald" in colleges_body
+    assert 'href="#college-of-fochlucan"' in colleges_body
+    assert 'href="#college-of-the-herald"' in colleges_body
+    assert 'id="college-of-new-olamn"' in colleges_body
+
+    assert cantrips_response.status_code == 200
+    cantrips_body = cantrips_response.get_data(as_text=True)
+    assert "Chapter 4" in cantrips_body
+    assert "Classes" in cantrips_body
+    assert "Booming Blade" in cantrips_body
+    assert "Green-Flame Blade" in cantrips_body
+    assert 'href="#booming-blade"' in cantrips_body
+    assert 'id="green-flame-blade"' in cantrips_body
+
+
+def test_scag_classes_book_entries_follow_source_visibility(client, sign_in, users, app, tmp_path):
+    data_root = build_scag_classes_book_data_root(tmp_path / "dnd5e-source-scag-classes-policy")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("SCAG", entry_types=["book"])
+
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="SCAG",
+            is_enabled=True,
+            default_visibility="dm",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in store.list_entries_for_source("DND-5E", "SCAG", entry_type="book", limit=40)
+        }
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    player_source_response = client.get("/campaigns/linden-pass/systems/sources/SCAG")
+    player_category_response = client.get("/campaigns/linden-pass/systems/sources/SCAG/types/book")
+    player_entry_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Barbarians'].slug}"
+    )
+
+    assert player_source_response.status_code == 404
+    assert player_category_response.status_code == 404
+    assert player_entry_response.status_code == 404
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    dm_source_response = client.get("/campaigns/linden-pass/systems/sources/SCAG")
+    dm_category_response = client.get("/campaigns/linden-pass/systems/sources/SCAG/types/book")
+    dm_entry_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Barbarians'].slug}")
+
+    assert dm_source_response.status_code == 200
+    assert "Book Chapters" in dm_source_response.get_data(as_text=True)
+    assert dm_category_response.status_code == 200
+    assert "Barbarians" in dm_category_response.get_data(as_text=True)
+    assert dm_entry_response.status_code == 200
+    dm_body = dm_entry_response.get_data(as_text=True)
+    assert "Barbarians" in dm_body
+    assert "Classes" in dm_body
 
 
 def test_importer_expands_safe_classic_magic_armor_variants(app, tmp_path):

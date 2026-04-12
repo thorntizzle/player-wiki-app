@@ -189,6 +189,35 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         ("Races of the Realms", "Half-Elves"),
         ("Races of the Realms", "Half-Orcs"),
         ("Races of the Realms", "Tieflings"),
+        ("Classes", "Barbarians"),
+        ("Classes", "Primal Paths"),
+        ("Classes", "Bards"),
+        ("Classes", "The Harpers"),
+        ("Classes", "Bardic Colleges"),
+        ("Classes", "Musical Instruments"),
+        ("Classes", "Clerics"),
+        ("Classes", "Divine Domain"),
+        ("Classes", "Druids"),
+        ("Classes", "Druid Circles"),
+        ("Classes", "Fighters"),
+        ("Classes", "Martial Archetype"),
+        ("Classes", "Monks"),
+        ("Classes", "Monastic Orders"),
+        ("Classes", "Monastic Traditions"),
+        ("Classes", "Paladins"),
+        ("Classes", "Paladin Orders"),
+        ("Classes", "Sacred Oath"),
+        ("Classes", "Rangers"),
+        ("Classes", "Rogues"),
+        ("Classes", "Roguish Archetypes"),
+        ("Classes", "Sorcerers"),
+        ("Classes", "Sorcerous Origin"),
+        ("Classes", "Warlocks"),
+        ("Classes", "Otherworldly Patron"),
+        ("Classes", "Wizards"),
+        ("Classes", "Wizardly Groups"),
+        ("Classes", "Arcane Tradition"),
+        ("Classes", "Cantrips for Sorcerers, Warlocks, and Wizards"),
     ),
 }
 VGM_CHARACTER_RACE_WRAPPER_DEFINITIONS = (
@@ -954,7 +983,7 @@ class Dnd5eSystemsImporter:
             if chapter_name:
                 chapter_records_by_name[chapter_name] = (chapter_index, raw_chapter)
 
-        for target_path in target_paths:
+        for target_order, target_path in enumerate(target_paths):
             chapter_name = target_path[0]
             chapter_record = chapter_records_by_name.get(chapter_name)
             if chapter_record is None:
@@ -971,6 +1000,7 @@ class Dnd5eSystemsImporter:
                 "_book_contents": chapter_contents_by_name.get(chapter_name, {}),
                 "_book_target_path": list(target_path),
                 "_book_is_full_chapter": len(target_path) == 1,
+                "_book_target_order": target_order,
             }
             built_entry = self._build_entry(
                 "book",
@@ -1477,6 +1507,7 @@ class Dnd5eSystemsImporter:
             "section_identifier": self._clean_data(ordinal.get("identifier")) if isinstance(ordinal, dict) else "",
             "chapter_title": chapter_title,
             "section_path": section_path,
+            "target_order": raw_entry.get("_book_target_order"),
             "headers": self._extract_book_headers(contents.get("headers")) if is_full_chapter else [],
             "section_outline": self._build_book_section_outline(body["entries"]),
             "reference_terms": section_path[:-1] if len(section_path) > 1 else [],

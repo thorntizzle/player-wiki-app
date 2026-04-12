@@ -1659,11 +1659,12 @@ class SystemsService:
             )
         )
 
-    def _entry_source_browse_sort_key(self, entry: SystemsEntryRecord) -> tuple[int, int, int, str, int]:
+    def _entry_source_browse_sort_key(self, entry: SystemsEntryRecord) -> tuple[int, int, int, int, str, int]:
         if entry.entry_type == "book":
             return (
                 0,
                 self._coerce_int((entry.metadata or {}).get("chapter_index"), default=10_000),
+                self._coerce_int((entry.metadata or {}).get("target_order"), default=10_000),
                 self._coerce_int(entry.source_page, default=10_000),
                 entry.title.lower(),
                 entry.id,
