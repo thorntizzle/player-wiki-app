@@ -58,6 +58,8 @@ ARMOR_ITEM_TYPE_CODES = {"LA", "MA", "HA", "S"}
 WEAPON_ITEM_TYPE_CODES = {"M", "R"}
 PASSIVE_CHECK_SKILL_KEYS = {"insight", "investigation", "perception"}
 RULES_REFERENCE_ENTRY_TYPES = ("book", "rule")
+RULES_REFERENCE_SEARCH_SCOPE_GLOBAL = "global"
+RULES_REFERENCE_SEARCH_SCOPE_SOURCE_ONLY = "source_only"
 PHB_BOOK_SECTION_RULE_KEY_MAP = {
     # Only link section anchors whose rule identity already exists as a stable RULES entry.
     "2-choose-a-class--hit-points-and-hit-dice": ("hit-points-and-hit-dice",),
@@ -188,6 +190,7 @@ DND_5E_SOURCE_CATALOG = (
         "public_visibility_allowed": False,
         "requires_unofficial_notice": True,
         "default_visibility": VISIBILITY_DM,
+        "rules_reference_search_scope": RULES_REFERENCE_SEARCH_SCOPE_SOURCE_ONLY,
     },
     {
         "source_id": "MM",
@@ -1221,6 +1224,48 @@ class SystemsService:
             if str(source.get("source_id") or "").strip().upper() == normalized_source_id:
                 return (index, normalized_source_id)
         return (len(DND_5E_SOURCE_CATALOG), normalized_source_id)
+
+    def _source_catalog_entry(
+        self,
+        source: SystemsSourceRecord | str,
+        *,
+        library_slug: str | None = None,
+    ) -> dict[str, object] | None:
+        if isinstance(source, SystemsSourceRecord):
+            library_slug = source.library_slug
+            source_id = source.source_id
+        else:
+            source_id = str(source or "").strip()
+        resolved_library_slug = str(library_slug or "DND-5E").strip()
+        if not resolved_library_slug or not str(source_id or "").strip():
+            return None
+        catalog = BUILTIN_LIBRARY_CATALOG.get(resolved_library_slug, {})
+        normalized_source_id = str(source_id or "").strip().upper()
+        for item in catalog.get("sources", ()):
+            if str(item.get("source_id") or "").strip().upper() == normalized_source_id:
+                return dict(item)
+        return None
+
+    def get_rules_reference_search_scope_for_source(
+        self,
+        source: SystemsSourceRecord | str,
+        *,
+        library_slug: str | None = None,
+    ) -> str:
+        catalog_entry = self._source_catalog_entry(source, library_slug=library_slug)
+        scope = str(
+            (catalog_entry or {}).get(
+                "rules_reference_search_scope",
+                RULES_REFERENCE_SEARCH_SCOPE_GLOBAL,
+            )
+            or RULES_REFERENCE_SEARCH_SCOPE_GLOBAL
+        ).strip().lower()
+        if scope not in {
+            RULES_REFERENCE_SEARCH_SCOPE_GLOBAL,
+            RULES_REFERENCE_SEARCH_SCOPE_SOURCE_ONLY,
+        }:
+            return RULES_REFERENCE_SEARCH_SCOPE_GLOBAL
+        return scope
 
     def _rules_reference_entry_sort_key(self, entry: SystemsEntryRecord) -> tuple[int, str, int, int, str, int]:
         return (*self._source_catalog_sort_key(entry.source_id), *self._entry_source_browse_sort_key(entry))

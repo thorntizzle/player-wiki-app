@@ -292,6 +292,35 @@ def test_dmg_book_entries_stay_dm_only(client, sign_in, users, app, tmp_path):
     assert "Chapter 2" in dm_body
 
 
+def test_dmg_rules_reference_search_stays_source_scoped(client, sign_in, users, app, tmp_path):
+    data_root = build_dmg_book_data_root(tmp_path / "dnd5e-source-dmg-search-scope")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("DMG", entry_types=["book"])
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    landing_response = client.get("/campaigns/linden-pass/systems?reference_q=planar+travel")
+    source_response = client.get("/campaigns/linden-pass/systems/sources/DMG?reference_q=planar+travel")
+
+    assert landing_response.status_code == 200
+    landing_body = landing_response.get_data(as_text=True)
+    assert "No rules references matched that metadata search yet." in landing_body
+    assert "Creating a Multiverse" not in landing_body
+    assert "DM-heavy source-backed references stay on their own source pages" in landing_body
+    assert 'href="/campaigns/linden-pass/systems/sources/DMG"' in landing_body
+
+    assert source_response.status_code == 200
+    source_body = source_response.get_data(as_text=True)
+    assert "Creating a Multiverse" in source_body
+    assert "DM-heavy source keeps chapter browse and rules-reference metadata search on this source page" in source_body
+
+
 def test_builtin_rules_source_reseeds_stale_rows_from_managed_payload(app):
     with app.app_context():
         service = app.extensions["systems_service"]

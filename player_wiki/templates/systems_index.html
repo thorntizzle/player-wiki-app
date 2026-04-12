@@ -49,17 +49,29 @@
 
       <section>
         <h2>Rules Reference Search</h2>
-        <form method="get" action="{{ url_for('campaign_systems_search', campaign_slug=campaign.slug) }}" class="stack-form">
-          {% if query %}
-            <input type="hidden" name="q" value="{{ query }}">
-          {% endif %}
-          <label class="field">
-            <span>Search rules references</span>
-            <input type="search" name="reference_q" value="{{ reference_query }}" placeholder="chapter heading, rule alias, or facet">
-          </label>
-          <button type="submit">Search</button>
-        </form>
-        <p class="meta">Searches only book-backed chapter pages and `RULES` entries using curated metadata like chapter labels, section headings, aliases, formulas, and rule facets. It does not search full entry body text.</p>
+        {% if has_rules_reference_search %}
+          <form method="get" action="{{ url_for('campaign_systems_search', campaign_slug=campaign.slug) }}" class="stack-form">
+            {% if query %}
+              <input type="hidden" name="q" value="{{ query }}">
+            {% endif %}
+            <label class="field">
+              <span>Search rules references</span>
+              <input type="search" name="reference_q" value="{{ reference_query }}" placeholder="chapter heading, rule alias, or facet">
+            </label>
+            <button type="submit">Search</button>
+          </form>
+          <p class="meta">Searches only landing-page book-backed chapter pages and `RULES` entries using curated metadata like chapter labels, section headings, aliases, formulas, and rule facets. It does not search full entry body text.</p>
+        {% else %}
+          <p class="meta">No landing-page rules-reference sources are currently available to this viewer.</p>
+        {% endif %}
+        {% if source_scoped_rules_reference_sources %}
+          <p class="meta">
+            DM-heavy source-backed references stay on their own source pages to keep this landing search focused:
+            {% for source in source_scoped_rules_reference_sources %}
+              <a href="{{ url_for('campaign_systems_source_detail', campaign_slug=campaign.slug, source_id=source.source_id) }}">{{ source.title }}</a>{% if not loop.last %}, {% endif %}
+            {% endfor %}.
+          </p>
+        {% endif %}
 
         {% if reference_query %}
           <h3>Rules Reference Results</h3>

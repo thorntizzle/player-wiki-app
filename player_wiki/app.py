@@ -3139,6 +3139,13 @@ def create_app() -> Flask:
         for state in systems_service.list_campaign_source_states(campaign_slug):
             if not state.is_enabled or not can_access_campaign_systems_source(campaign_slug, state.source.source_id):
                 continue
+            source_has_rules_reference_entries = bool(
+                systems_service.list_rules_reference_entries_for_campaign(
+                    campaign_slug,
+                    include_source_ids=[state.source.source_id],
+                    limit=1,
+                )
+            )
             source_cards.append(
                 {
                     "source_id": state.source.source_id,
@@ -3149,12 +3156,29 @@ def create_app() -> Flask:
                     ),
                     "entry_count": systems_service.count_entries_for_source(campaign_slug, state.source.source_id),
                     "default_visibility_label": VISIBILITY_LABELS[state.default_visibility],
+                    "has_rules_reference_entries": source_has_rules_reference_entries,
+                    "rules_reference_search_scope": systems_service.get_rules_reference_search_scope_for_source(
+                        state.source
+                    ),
                 }
             )
 
         search_query = query.strip()
         rules_reference_query = reference_query.strip()
         include_source_ids = [row["source_id"] for row in source_cards]
+        global_rules_reference_source_ids = [
+            row["source_id"]
+            for row in source_cards
+            if row["has_rules_reference_entries"] and row["rules_reference_search_scope"] == "global"
+        ]
+        source_scoped_rules_reference_sources = [
+            {
+                "source_id": row["source_id"],
+                "title": row["title"],
+            }
+            for row in source_cards
+            if row["has_rules_reference_entries"] and row["rules_reference_search_scope"] == "source_only"
+        ]
         search_results = []
         if search_query:
             for entry in systems_service.search_entries_for_campaign(
@@ -3180,7 +3204,7 @@ def create_app() -> Flask:
             for entry in systems_service.search_rules_reference_entries_for_campaign(
                 campaign_slug,
                 query=rules_reference_query,
-                include_source_ids=include_source_ids,
+                include_source_ids=global_rules_reference_source_ids,
                 limit=100,
             ):
                 rules_reference_results.append(build_rules_reference_search_result(entry))
@@ -3192,6 +3216,8 @@ def create_app() -> Flask:
             "source_cards": source_cards,
             "search_results": search_results,
             "rules_reference_results": rules_reference_results,
+            "has_rules_reference_search": bool(global_rules_reference_source_ids),
+            "source_scoped_rules_reference_sources": source_scoped_rules_reference_sources,
             "can_manage_systems": can_manage_campaign_systems(campaign_slug),
             "active_nav": "systems",
         }
@@ -3244,6 +3270,7 @@ def create_app() -> Flask:
         has_rule_rules_reference_entries = any(
             entry.entry_type == "rule" for entry in rules_reference_entries
         )
+        rules_reference_search_scope = systems_service.get_rules_reference_search_scope_for_source(state.source)
         if has_book_rules_reference_entries and has_rule_rules_reference_entries:
             rules_reference_search_meta = (
                 "Searches only this source's book chapters and rules entries using curated metadata "
@@ -3262,6 +3289,16 @@ def create_app() -> Flask:
             )
         else:
             rules_reference_search_meta = ""
+        rules_reference_scope_note = ""
+        if (
+            rules_reference_entries
+            and rules_reference_search_scope == "source_only"
+        ):
+            rules_reference_scope_note = (
+                "This DM-heavy source keeps chapter browse and rules-reference metadata search on this "
+                "source page instead of surfacing those chapter matches in the landing-page Rules "
+                "Reference Search."
+            )
         rules_reference_query = reference_query.strip()
         rules_reference_results = []
         if rules_reference_query:
@@ -3279,6 +3316,7 @@ def create_app() -> Flask:
             "book_entries": book_entries,
             "has_rules_reference_search": bool(rules_reference_entries),
             "rules_reference_search_meta": rules_reference_search_meta,
+            "rules_reference_scope_note": rules_reference_scope_note,
             "reference_query": rules_reference_query,
             "rules_reference_results": rules_reference_results,
             "entry_count": sum(group["count"] for group in all_entry_groups),
