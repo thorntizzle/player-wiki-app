@@ -3513,9 +3513,15 @@ def create_app() -> Flask:
             for candidate in systems_service.build_related_rules_for_entry(campaign_slug, entry)
             if can_access_campaign_systems_entry(campaign_slug, candidate.slug)
         ]
+        related_monster_entries = []
         book_headers = []
         book_section_outline = []
         if entry.entry_type == "book":
+            related_monster_entries = [
+                candidate
+                for candidate in systems_service.build_related_monsters_for_entry(campaign_slug, entry)
+                if can_access_campaign_systems_entry(campaign_slug, candidate.slug)
+            ]
             book_related_rules_by_anchor = systems_service.build_related_rules_for_book_sections(
                 campaign_slug,
                 entry,
@@ -3588,6 +3594,7 @@ def create_app() -> Flask:
             "subclass_optionalfeature_sections": subclass_optionalfeature_sections,
             "feature_detail_card": feature_detail_card,
             "related_rule_entries": related_rule_entries,
+            "related_monster_entries": related_monster_entries,
             "book_headers": book_headers,
             "book_section_outline": book_section_outline,
             "book_default_visibility_label": book_default_visibility_label,

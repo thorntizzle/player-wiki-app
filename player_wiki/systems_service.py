@@ -148,6 +148,128 @@ BOOK_SECTION_ENTITY_SOURCE_FALLBACKS = {
 }
 
 
+def _normalized_nonempty_tuple(*values: str) -> tuple[str, ...]:
+    normalized_values: list[str] = []
+    for value in values:
+        normalized_value = normalize_lookup(value)
+        if normalized_value:
+            normalized_values.append(normalized_value)
+    return tuple(normalized_values)
+
+
+VGM_MONSTER_LORE_WRAPPER_MONSTER_MATCHERS = {
+    normalize_lookup("Beholders: Bad Dreams Come True"): {
+        "group_keys": _normalized_nonempty_tuple("Beholders"),
+        "type_keys": (),
+        "tag_keys": (),
+        "title_keys": _normalized_nonempty_tuple(
+            "Beholder",
+            "Death Tyrant",
+            "Death Kiss",
+            "Gauth",
+            "Gazer",
+            "Spectator",
+        ),
+        "title_prefix_keys": (),
+        "title_suffix_keys": (),
+    },
+    normalize_lookup("Giants: World Shakers"): {
+        "group_keys": (),
+        "type_keys": (),
+        "tag_keys": _normalized_nonempty_tuple(
+            "cloud giant",
+            "fire giant",
+            "frost giant",
+            "hill giant",
+            "stone giant",
+            "storm giant",
+        ),
+        "title_keys": _normalized_nonempty_tuple(
+            "Cloud Giant",
+            "Fire Giant",
+            "Frost Giant",
+            "Hill Giant",
+            "Stone Giant",
+            "Storm Giant",
+            "Mouth of Grolantor",
+        ),
+        "title_prefix_keys": _normalized_nonempty_tuple(
+            "Cloud Giant",
+            "Fire Giant",
+            "Frost Giant",
+            "Hill Giant",
+            "Stone Giant",
+            "Storm Giant",
+        ),
+        "title_suffix_keys": (),
+    },
+    normalize_lookup("Gnolls: The Insatiable Hunger"): {
+        "group_keys": (),
+        "type_keys": (),
+        "tag_keys": _normalized_nonempty_tuple("gnoll"),
+        "title_keys": _normalized_nonempty_tuple("Flind"),
+        "title_prefix_keys": _normalized_nonempty_tuple("Gnoll"),
+        "title_suffix_keys": (),
+    },
+    normalize_lookup("Goblinoids: The Conquering Host"): {
+        "group_keys": (),
+        "type_keys": (),
+        "tag_keys": _normalized_nonempty_tuple("goblinoid"),
+        "title_keys": (),
+        "title_prefix_keys": (),
+        "title_suffix_keys": (),
+    },
+    normalize_lookup("Hags: Dark Sisterhood"): {
+        "group_keys": (),
+        "type_keys": (),
+        "tag_keys": (),
+        "title_keys": (),
+        "title_prefix_keys": (),
+        "title_suffix_keys": _normalized_nonempty_tuple("Hag"),
+    },
+    normalize_lookup("Kobolds: Little Dragons"): {
+        "group_keys": (),
+        "type_keys": (),
+        "tag_keys": _normalized_nonempty_tuple("kobold"),
+        "title_keys": (),
+        "title_prefix_keys": _normalized_nonempty_tuple("Kobold"),
+        "title_suffix_keys": (),
+    },
+    normalize_lookup("Mind Flayers: Scourge of Worlds"): {
+        "group_keys": (),
+        "type_keys": (),
+        "tag_keys": (),
+        "title_keys": _normalized_nonempty_tuple(
+            "Alhoon",
+            "Elder Brain",
+            "Intellect Devourer",
+            "Mind Flayer",
+            "Mindwitness",
+            "Neothelid",
+            "Ulitharid",
+        ),
+        "title_prefix_keys": _normalized_nonempty_tuple("Mind Flayer"),
+        "title_suffix_keys": (),
+    },
+    normalize_lookup("Orcs: The Godsworn"): {
+        "group_keys": (),
+        "type_keys": (),
+        "tag_keys": _normalized_nonempty_tuple("orc"),
+        "title_keys": _normalized_nonempty_tuple("Orc"),
+        "title_prefix_keys": (),
+        "title_suffix_keys": (),
+    },
+    normalize_lookup("Yuan-ti: Snake People"): {
+        "group_keys": (),
+        "type_keys": (),
+        "tag_keys": _normalized_nonempty_tuple("yuan-ti"),
+        "title_keys": (),
+        "title_prefix_keys": _normalized_nonempty_tuple("Yuan-ti"),
+        "title_suffix_keys": (),
+    },
+}
+
+
 def _systems_service_request_cache() -> dict[tuple[object, ...], object] | None:
     if not has_request_context():
         return None
@@ -764,6 +886,50 @@ class SystemsService:
         rule_keys = self._collect_related_rule_keys_for_entry(entry)
         return self._resolve_rule_entries_by_key(rules_by_key, rule_keys)
 
+    def build_related_monsters_for_entry(
+        self,
+        campaign_slug: str,
+        entry: SystemsEntryRecord,
+    ) -> list[SystemsEntryRecord]:
+        if entry.entry_type != "book":
+            return []
+        if str(entry.source_id or "").strip().upper() != "VGM":
+            return []
+        matcher = VGM_MONSTER_LORE_WRAPPER_MONSTER_MATCHERS.get(normalize_lookup(entry.title))
+        if not matcher:
+            return []
+
+        def build_value() -> list[SystemsEntryRecord]:
+            related_entries: list[SystemsEntryRecord] = []
+            seen_entry_keys: set[str] = set()
+            for candidate in self.list_enabled_entries_for_campaign(
+                campaign_slug,
+                entry_type="monster",
+                limit=None,
+            ):
+                if str(candidate.source_id or "").strip().upper() not in {"MM", "VGM"}:
+                    continue
+                if candidate.entry_key in seen_entry_keys:
+                    continue
+                if not self._monster_entry_matches_family(candidate, matcher):
+                    continue
+                seen_entry_keys.add(candidate.entry_key)
+                related_entries.append(candidate)
+            return sorted(
+                related_entries,
+                key=lambda candidate: (
+                    *self._source_catalog_sort_key(candidate.source_id),
+                    self._coerce_int(candidate.source_page, default=10_000),
+                    candidate.title.lower(),
+                    candidate.id,
+                ),
+            )
+
+        return _systems_service_cache_get(
+            ("related_monsters_for_entry", campaign_slug, entry.entry_key),
+            build_value,
+        )
+
     def build_related_rules_for_book_sections(
         self,
         campaign_slug: str,
@@ -876,6 +1042,71 @@ class SystemsService:
             seen_entry_keys.add(entry.entry_key)
             related_entries.append(entry)
         return related_entries
+
+    def _monster_entry_matches_family(
+        self,
+        entry: SystemsEntryRecord,
+        matcher: dict[str, tuple[str, ...]],
+    ) -> bool:
+        if entry.entry_type != "monster":
+            return False
+
+        title_key = normalize_lookup(entry.title)
+        if title_key and title_key in matcher.get("title_keys", ()):
+            return True
+        if title_key and any(
+            title_key.startswith(prefix_key) for prefix_key in matcher.get("title_prefix_keys", ())
+        ):
+            return True
+        if title_key and any(
+            title_key.endswith(suffix_key) for suffix_key in matcher.get("title_suffix_keys", ())
+        ):
+            return True
+
+        metadata = dict(entry.metadata or {})
+        group_keys = self._monster_metadata_group_keys(metadata.get("group"))
+        if group_keys.intersection(matcher.get("group_keys", ())):
+            return True
+
+        type_keys, tag_keys = self._monster_metadata_type_keys(metadata.get("type"))
+        if type_keys.intersection(matcher.get("type_keys", ())):
+            return True
+        if tag_keys.intersection(matcher.get("tag_keys", ())):
+            return True
+        return False
+
+    def _monster_metadata_group_keys(self, value: object) -> set[str]:
+        keys: set[str] = set()
+        raw_values = value if isinstance(value, list) else [value]
+        for raw_value in raw_values:
+            normalized_value = normalize_lookup(str(raw_value or ""))
+            if normalized_value:
+                keys.add(normalized_value)
+        return keys
+
+    def _monster_metadata_type_keys(self, value: object) -> tuple[set[str], set[str]]:
+        type_keys: set[str] = set()
+        tag_keys: set[str] = set()
+        raw_values = value if isinstance(value, list) else [value]
+        for raw_value in raw_values:
+            if isinstance(raw_value, dict):
+                normalized_type = normalize_lookup(str(raw_value.get("type") or ""))
+                if normalized_type:
+                    type_keys.add(normalized_type)
+                raw_tags = raw_value.get("tags")
+                tag_values = raw_tags if isinstance(raw_tags, list) else [raw_tags]
+                for raw_tag in tag_values:
+                    if isinstance(raw_tag, dict):
+                        raw_tag = raw_tag.get("tag") or raw_tag.get("name") or raw_tag.get("value")
+                    normalized_tag = normalize_lookup(str(raw_tag or ""))
+                    if normalized_tag:
+                        tag_keys.add(normalized_tag)
+                continue
+
+            normalized_type = normalize_lookup(str(raw_value or ""))
+            if normalized_type:
+                type_keys.add(normalized_type)
+        return type_keys, tag_keys
 
     def _build_book_section_entity_lookups(
         self,

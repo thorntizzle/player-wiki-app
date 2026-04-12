@@ -1760,6 +1760,7 @@ class Dnd5eSystemsImporter:
         metadata = {
             "size": self._clean_data(raw_entry.get("size")),
             "type": self._clean_data(raw_entry.get("type")),
+            "group": self._clean_data(raw_entry.get("group")),
             "alignment": self._clean_data(raw_entry.get("alignment")),
             "ac": self._clean_data(raw_entry.get("ac")),
             "hp": self._clean_data(raw_entry.get("hp")),

@@ -2629,6 +2629,204 @@ def build_vgm_book_data_root(root: Path) -> Path:
     return data_root
 
 
+def build_vgm_monster_lore_data_root(root: Path) -> Path:
+    data_root = build_test_data_root(root)
+
+    def monster(
+        name: str,
+        *,
+        page: int,
+        monster_type: str,
+        tags: list[str] | None = None,
+        group: list[str] | None = None,
+        size: str = "M",
+        cr: str = "5",
+    ) -> dict[str, object]:
+        type_value: object = monster_type
+        if tags:
+            type_value = {"type": monster_type, "tags": tags}
+        payload: dict[str, object] = {
+            "name": name,
+            "source": "VGM",
+            "page": page,
+            "size": [size],
+            "type": type_value,
+            "alignment": ["C", "E"],
+            "ac": [14],
+            "hp": {"average": 45, "formula": "6d8 + 18"},
+            "speed": {"walk": 30},
+            "str": 16,
+            "dex": 14,
+            "con": 16,
+            "int": 10,
+            "wis": 12,
+            "cha": 10,
+            "passive": 11,
+            "languages": ["Common"],
+            "cr": cr,
+            "trait": [{"name": "Trait", "entries": [f"{name} has a focused test trait."]}],
+            "action": [{"name": "Attack", "entries": [f"{name} makes a focused test attack."]}],
+        }
+        if group:
+            payload["group"] = group
+        return payload
+
+    write_json(
+        root / "data/books.json",
+        {
+            "book": [
+                {
+                    "name": "Volo's Guide to Monsters",
+                    "id": "VGM",
+                    "source": "VGM",
+                    "contents": [
+                        {
+                            "name": "Monster Lore",
+                            "headers": [
+                                "Beholders: Bad Dreams Come True",
+                                "Giants: World Shakers",
+                                "Gnolls: The Insatiable Hunger",
+                                "Goblinoids: The Conquering Host",
+                                "Hags: Dark Sisterhood",
+                                "Kobolds: Little Dragons",
+                                "Mind Flayers: Scourge of Worlds",
+                                "Orcs: The Godsworn",
+                                "Yuan-ti: Snake People",
+                            ],
+                            "ordinal": {"type": "chapter", "identifier": 1},
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    write_json(
+        root / "data/book/book-vgm.json",
+        {
+            "data": [
+                {
+                    "type": "section",
+                    "name": "Monster Lore",
+                    "page": 5,
+                    "entries": [
+                        "This chapter expands several iconic monster families with source-backed lore and lair guidance.",
+                        {
+                            "type": "section",
+                            "name": "Beholders: Bad Dreams Come True",
+                            "page": 5,
+                            "entries": [
+                                "Beholders twist reality through paranoia and impossible dreams.",
+                                {"type": "entries", "name": "Dreamspawn", "page": 6, "entries": ["New beholders emerge from warped dreams."]},
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Giants: World Shakers",
+                            "page": 18,
+                            "entries": [
+                                "Giants and their kin still feel the pull of the ordning.",
+                                {"type": "entries", "name": "The Ordning", "page": 19, "entries": ["Every true giant measures itself against the ordning."]},
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Gnolls: The Insatiable Hunger",
+                            "page": 33,
+                            "entries": [
+                                "Gnolls carry Yeenoghu's hunger into every raid.",
+                                {"type": "entries", "name": "Demonic Hunger", "page": 34, "entries": ["Gnoll packs devour everything in their path."]},
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Goblinoids: The Conquering Host",
+                            "page": 40,
+                            "entries": [
+                                "Goblinoids rally under Maglubiyet's endless call to conquest.",
+                                {"type": "entries", "name": "The Host", "page": 41, "entries": ["Goblins, bugbears, and hobgoblins answer the same war god."]},
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Hags: Dark Sisterhood",
+                            "page": 52,
+                            "entries": [
+                                "Hags bargain, corrupt, and gather in covens.",
+                                {"type": "entries", "name": "Covens", "page": 53, "entries": ["A hag coven is more dangerous than any lone sister."]},
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Kobolds: Little Dragons",
+                            "page": 63,
+                            "entries": [
+                                "Kobolds survive by traps, teamwork, and draconic devotion.",
+                                {"type": "entries", "name": "Tribal Ingenuity", "page": 64, "entries": ["Kobolds turn scrap into vicious inventions."]},
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Mind Flayers: Scourge of Worlds",
+                            "page": 71,
+                            "entries": [
+                                "Mind flayers and their warped servants pursue impossible schemes below the world.",
+                                {"type": "entries", "name": "Elder Brains", "page": 72, "entries": ["Every colony bends toward an elder brain's designs."]},
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Orcs: The Godsworn",
+                            "page": 82,
+                            "entries": [
+                                "Orc war bands define themselves through divine struggle and violence.",
+                                {"type": "entries", "name": "Gruumsh's Chosen", "page": 83, "entries": ["Gruumsh's servants hurl whole tribes into war."]},
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Yuan-ti: Snake People",
+                            "page": 92,
+                            "entries": [
+                                "Yuan-ti societies prize transformation, hierarchy, and hidden rule.",
+                                {"type": "entries", "name": "The Castes", "page": 93, "entries": ["Every yuan-ti city enforces a ruthless caste ladder."]},
+                            ],
+                        },
+                    ],
+                }
+            ]
+        },
+    )
+    write_json(
+        root / "data/bestiary/bestiary-vgm.json",
+        {
+            "_meta": {"dependencies": {"monster": ["MM"]}, "internalCopies": ["monster"]},
+            "monster": [
+                monster("Death Kiss", page=124, monster_type="aberration", group=["Beholders"], size="L", cr="10"),
+                monster("Gauth", page=125, monster_type="aberration", group=["Beholders"], cr="6"),
+                monster("Gazer", page=126, monster_type="aberration", group=["Beholders"], size="T", cr="1/2"),
+                monster("Cloud Giant Smiling One", page=146, monster_type="giant", tags=["cloud giant"], size="H", cr="11"),
+                monster("Mouth of Grolantor", page=149, monster_type="giant", tags=["hill giant"], size="H", cr="6"),
+                monster("Flind", page=153, monster_type="humanoid", tags=["gnoll"], cr="9"),
+                monster("Gnoll Witherling", page=155, monster_type="undead", cr="1/4"),
+                monster("Nilbog", page=159, monster_type="humanoid", tags=["goblinoid"], cr="1"),
+                monster("Hobgoblin Devastator", page=161, monster_type="humanoid", tags=["goblinoid"], cr="4"),
+                monster("Annis Hag", page=159, monster_type="fey", size="L", cr="6"),
+                monster("Bheur Hag", page=160, monster_type="fey", size="L", cr="7"),
+                monster("Kobold Dragonshield", page=165, monster_type="humanoid", tags=["kobold"], cr="1"),
+                monster("Kobold Inventor", page=166, monster_type="humanoid", tags=["kobold"], cr="1/4"),
+                monster("Alhoon", page=172, monster_type="undead", cr="10"),
+                monster("Mindwitness", page=176, monster_type="aberration", size="L", cr="5"),
+                monster("Ulitharid", page=175, monster_type="aberration", size="L", cr="9"),
+                monster("Orc Hand of Yurtrus", page=184, monster_type="humanoid", tags=["orc"], cr="2"),
+                monster("Tanarukk", page=186, monster_type="fiend", tags=["demon", "orc"], cr="5"),
+                monster("Yuan-ti Anathema", page=202, monster_type="monstrosity", tags=["shapechanger", "yuan-ti"], size="H", cr="12"),
+                monster("Yuan-ti Broodguard", page=203, monster_type="humanoid", tags=["yuan-ti"], cr="2"),
+            ],
+        },
+    )
+    return data_root
+
+
 def build_additional_spell_metadata_data_root(root: Path) -> Path:
     write_json(root / "data/class/index.json", {"cleric": "class-cleric.json"})
     write_json(
@@ -4416,6 +4614,68 @@ def test_vgm_character_race_wrappers_are_imported_for_dm_browse(client, sign_in,
     assert "Triton" in height_body
     assert "Yuan-ti Pureblood" in height_body
     assert 'href="#height-and-weight"' not in height_body
+
+
+def test_vgm_monster_lore_wrappers_surface_related_monster_family_entries(
+    client, sign_in, users, app, tmp_path
+):
+    data_root = build_vgm_monster_lore_data_root(tmp_path / "dnd5e-source-vgm-monster-lore")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("VGM", entry_types=["book", "monster"])
+
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="VGM",
+            is_enabled=True,
+            default_visibility="dm",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in service.list_entries_for_campaign_source(
+                "linden-pass",
+                "VGM",
+                entry_type="book",
+                limit=None,
+            )
+        }
+        monster_entries = {
+            entry.title: entry
+            for entry in store.list_entries_for_source("DND-5E", "VGM", entry_type="monster", limit=None)
+        }
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    page_expectations = {
+        "Beholders: Bad Dreams Come True": ("Death Kiss", "Gauth", "Gazer"),
+        "Giants: World Shakers": ("Cloud Giant Smiling One", "Mouth of Grolantor"),
+        "Gnolls: The Insatiable Hunger": ("Flind", "Gnoll Witherling"),
+        "Goblinoids: The Conquering Host": ("Nilbog", "Hobgoblin Devastator"),
+        "Hags: Dark Sisterhood": ("Annis Hag", "Bheur Hag"),
+        "Kobolds: Little Dragons": ("Kobold Dragonshield", "Kobold Inventor"),
+        "Mind Flayers: Scourge of Worlds": ("Alhoon", "Mindwitness", "Ulitharid"),
+        "Orcs: The Godsworn": ("Orc Hand of Yurtrus", "Tanarukk"),
+        "Yuan-ti: Snake People": ("Yuan-ti Anathema", "Yuan-ti Broodguard"),
+    }
+
+    for title, monster_titles in page_expectations.items():
+        response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries[title].slug}")
+        assert response.status_code == 200
+        body = response.get_data(as_text=True)
+        assert "Related Monsters" in body
+        for monster_title in monster_titles:
+            assert monster_title in body
+            assert (
+                f'href="/campaigns/linden-pass/systems/entries/{monster_entries[monster_title].slug}"'
+                in body
+            )
 
 
 def test_mm_book_pages_surface_related_monsters_and_monster_rules(
