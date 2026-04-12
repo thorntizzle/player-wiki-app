@@ -1561,6 +1561,75 @@ def build_scag_background_data_root(root: Path) -> Path:
     return root
 
 
+SCAG_BACKGROUND_TEST_NAMES = (
+    "City Watch",
+    "Clan Crafter",
+    "Cloistered Scholar",
+    "Courtier",
+    "Faction Agent",
+    "Far Traveler",
+    "Inheritor",
+    "Knight of the Order",
+    "Mercenary Veteran",
+    "Uthgardt Tribe Member",
+    "Waterdhavian Noble",
+    "Urban Bounty Hunter",
+)
+
+
+def build_scag_backgrounds_book_data_root(root: Path) -> Path:
+    data_root = build_test_data_root(root)
+    write_json(
+        root / "data/books.json",
+        {
+            "book": [
+                {
+                    "name": "Sword Coast Adventurer's Guide",
+                    "id": "SCAG",
+                    "source": "SCAG",
+                    "contents": [
+                        {
+                            "name": "Backgrounds",
+                            "ordinal": {"type": "chapter", "identifier": 5},
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    write_json(
+        root / "data/book/book-scag.json",
+        {
+            "data": [
+                {
+                    "type": "section",
+                    "name": "Backgrounds",
+                    "page": 145,
+                    "entries": [
+                        (
+                            "The backgrounds described in the Player's Handbook are all found in "
+                            "Faerun's various societies, in some form or another. This chapter "
+                            "offers additional backgrounds for characters in a Forgotten Realms "
+                            "campaign, many of them specific to Faerun or to the Sword Coast and "
+                            "the North in particular."
+                        ),
+                        (
+                            "As in the Player's Handbook, each of the backgrounds presented here "
+                            "provides proficiencies, languages, and equipment, as well as a "
+                            "background feature and sometimes a variant form."
+                        ),
+                        {
+                            "type": "list",
+                            "items": [f"{{@background {name}|SCAG}}" for name in SCAG_BACKGROUND_TEST_NAMES],
+                        },
+                    ],
+                }
+            ]
+        },
+    )
+    return data_root
+
+
 def build_scag_book_data_root(root: Path) -> Path:
     data_root = build_test_data_root(root)
     write_json(
@@ -4561,6 +4630,123 @@ def test_scag_classes_book_entries_follow_source_visibility(client, sign_in, use
     dm_body = dm_entry_response.get_data(as_text=True)
     assert "Barbarians" in dm_body
     assert "Classes" in dm_body
+
+
+def test_scag_backgrounds_book_entry_is_imported_for_player_browse(
+    client, sign_in, users, app, tmp_path
+):
+    data_root = build_scag_backgrounds_book_data_root(tmp_path / "dnd5e-source-scag-backgrounds-book")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("SCAG", entry_types=["book"])
+
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="SCAG",
+            is_enabled=True,
+            default_visibility="players",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in service.list_entries_for_campaign_source(
+                "linden-pass",
+                "SCAG",
+                entry_type="book",
+                limit=None,
+            )
+        }
+
+    assert list(book_entries) == ["Backgrounds"]
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    source_response = client.get("/campaigns/linden-pass/systems/sources/SCAG")
+    category_response = client.get("/campaigns/linden-pass/systems/sources/SCAG/types/book")
+    backgrounds_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Backgrounds'].slug}"
+    )
+
+    assert source_response.status_code == 200
+    source_body = source_response.get_data(as_text=True)
+    assert "Book Chapters" in source_body
+    assert "Backgrounds" in source_body
+
+    assert category_response.status_code == 200
+    category_body = category_response.get_data(as_text=True)
+    assert "Showing all 1 book chapters available to you in this source." in category_body
+    assert "Backgrounds" in category_body
+
+    assert backgrounds_response.status_code == 200
+    backgrounds_body = backgrounds_response.get_data(as_text=True)
+    assert "Chapter 5" in backgrounds_body
+    assert "Backgrounds" in backgrounds_body
+    assert "This chapter offers additional backgrounds for characters in a Forgotten Realms campaign" in backgrounds_body
+    assert "City Watch" in backgrounds_body
+    assert "Clan Crafter" in backgrounds_body
+    assert "Urban Bounty Hunter" in backgrounds_body
+
+
+def test_scag_backgrounds_book_entry_follows_source_visibility(client, sign_in, users, app, tmp_path):
+    data_root = build_scag_backgrounds_book_data_root(
+        tmp_path / "dnd5e-source-scag-backgrounds-book-policy"
+    )
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("SCAG", entry_types=["book"])
+
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="SCAG",
+            is_enabled=True,
+            default_visibility="dm",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in store.list_entries_for_source("DND-5E", "SCAG", entry_type="book", limit=20)
+        }
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    player_source_response = client.get("/campaigns/linden-pass/systems/sources/SCAG")
+    player_category_response = client.get("/campaigns/linden-pass/systems/sources/SCAG/types/book")
+    player_entry_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Backgrounds'].slug}"
+    )
+
+    assert player_source_response.status_code == 404
+    assert player_category_response.status_code == 404
+    assert player_entry_response.status_code == 404
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    dm_source_response = client.get("/campaigns/linden-pass/systems/sources/SCAG")
+    dm_category_response = client.get("/campaigns/linden-pass/systems/sources/SCAG/types/book")
+    dm_entry_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Backgrounds'].slug}"
+    )
+
+    assert dm_source_response.status_code == 200
+    assert "Book Chapters" in dm_source_response.get_data(as_text=True)
+    assert dm_category_response.status_code == 200
+    assert "Backgrounds" in dm_category_response.get_data(as_text=True)
+    assert dm_entry_response.status_code == 200
+    dm_body = dm_entry_response.get_data(as_text=True)
+    assert "Backgrounds" in dm_body
+    assert "City Watch" in dm_body
 
 
 def test_importer_expands_safe_classic_magic_armor_variants(app, tmp_path):

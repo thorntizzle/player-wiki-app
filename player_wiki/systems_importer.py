@@ -218,6 +218,7 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         ("Classes", "Wizardly Groups"),
         ("Classes", "Arcane Tradition"),
         ("Classes", "Cantrips for Sorcerers, Warlocks, and Wizards"),
+        "Backgrounds",
     ),
 }
 VGM_CHARACTER_RACE_WRAPPER_DEFINITIONS = (
