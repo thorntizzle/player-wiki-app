@@ -136,6 +136,7 @@ SUPPORTED_ENTRY_TYPES = (
 
 BOOK_INDEX_RELATIVE_PATH = "data/books.json"
 BOOK_SOURCE_RELATIVE_PATH_TEMPLATE = "data/book/book-{source_slug}.json"
+BOOK_SECTION_OUTLINE_MAX_DEPTH = 2
 BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
     "PHB": (
         "Introduction",
@@ -978,18 +979,20 @@ class Dnd5eSystemsImporter:
         contents = raw_contents if isinstance(raw_contents, dict) else {}
         ordinal = contents.get("ordinal")
         section_label = self._format_book_section_label(ordinal)
+        body = {"entries": self._clean_data(raw_entry.get("entries"))}
         metadata = {
             "chapter_index": raw_entry.get("_book_chapter_index"),
             "section_label": section_label,
             "section_type": self._clean_data(ordinal.get("type")) if isinstance(ordinal, dict) else "",
             "section_identifier": self._clean_data(ordinal.get("identifier")) if isinstance(ordinal, dict) else "",
             "headers": self._extract_book_headers(contents.get("headers")),
+            "section_outline": self._build_book_section_outline(body["entries"]),
         }
-        body = {"entries": self._clean_data(raw_entry.get("entries"))}
         metadata_pairs = [("Book Section", section_label)]
         rendered_html = self._render_entry_html(
             metadata_pairs=metadata_pairs,
             sections=[("Book Text", body["entries"])],
+            section_anchor_path=(),
         )
         return metadata, body, rendered_html
 
@@ -1646,6 +1649,7 @@ class Dnd5eSystemsImporter:
         *,
         metadata_pairs: list[tuple[str, str]],
         sections: list[tuple[str, Any]],
+        section_anchor_path: tuple[str, ...] | None = None,
     ) -> str:
         parts: list[str] = []
         filtered_pairs = [(label, value) for label, value in metadata_pairs if value]
@@ -1662,11 +1666,23 @@ class Dnd5eSystemsImporter:
                 continue
             parts.append("<section>")
             parts.append(f"<h2>{escape(section_title)}</h2>")
-            parts.append(self._render_content_block(section_value, heading_level=3))
+            parts.append(
+                self._render_content_block(
+                    section_value,
+                    heading_level=3,
+                    section_anchor_path=section_anchor_path,
+                )
+            )
             parts.append("</section>")
         return "\n".join(parts)
 
-    def _render_content_block(self, value: Any, *, heading_level: int) -> str:
+    def _render_content_block(
+        self,
+        value: Any,
+        *,
+        heading_level: int,
+        section_anchor_path: tuple[str, ...] | None = None,
+    ) -> str:
         if value is None:
             return ""
         if isinstance(value, str):
@@ -1678,7 +1694,13 @@ class Dnd5eSystemsImporter:
             return "\n".join(
                 block
                 for item in value
-                for block in [self._render_content_block(item, heading_level=heading_level)]
+                for block in [
+                    self._render_content_block(
+                        item,
+                        heading_level=heading_level,
+                        section_anchor_path=section_anchor_path,
+                    )
+                ]
                 if block
             )
         if isinstance(value, dict):
@@ -1689,7 +1711,14 @@ class Dnd5eSystemsImporter:
                 items = value.get("items", [])
                 if not isinstance(items, list):
                     return ""
-                list_items = [self._render_list_item(item, heading_level=heading_level) for item in items]
+                list_items = [
+                    self._render_list_item(
+                        item,
+                        heading_level=heading_level,
+                        section_anchor_path=section_anchor_path,
+                    )
+                    for item in items
+                ]
                 list_items = [item for item in list_items if item]
                 if not list_items:
                     return ""
@@ -1704,7 +1733,14 @@ class Dnd5eSystemsImporter:
                     intro_parts.append(
                         f"<p>Choose {escape(str(count))} option{'s' if str(count) != '1' else ''}:</p>"
                     )
-                list_items = [self._render_list_item(item, heading_level=heading_level) for item in option_items]
+                list_items = [
+                    self._render_list_item(
+                        item,
+                        heading_level=heading_level,
+                        section_anchor_path=section_anchor_path,
+                    )
+                    for item in option_items
+                ]
                 list_items = [item for item in list_items if item]
                 if list_items:
                     intro_parts.append("<ul>" + "".join(f"<li>{item}</li>" for item in list_items) + "</ul>")
@@ -1722,9 +1758,24 @@ class Dnd5eSystemsImporter:
             name = self._clean_text(str(value.get("name", "") or ""))
             entries = value.get("entries")
             entry_value = entries if entries is not None else value.get("entry")
-            rendered_entries = self._render_content_block(entry_value, heading_level=min(heading_level + 1, 6))
+            current_anchor_path = section_anchor_path
+            is_book_navigation_section = bool(section_anchor_path is not None and self._is_book_navigation_section(value) and name)
+            if is_book_navigation_section:
+                current_anchor_path = (*section_anchor_path, name)
+            rendered_entries = self._render_content_block(
+                entry_value,
+                heading_level=min(heading_level + 1, 6),
+                section_anchor_path=current_anchor_path,
+            )
             if name and rendered_entries:
                 heading_tag = f"h{heading_level}"
+                if is_book_navigation_section and current_anchor_path:
+                    section_anchor = self._build_book_section_anchor(current_anchor_path)
+                    return (
+                        f'<section id="{escape(section_anchor)}" class="systems-book-section">'
+                        f"<{heading_tag}>{escape(name)}</{heading_tag}>"
+                        f"{rendered_entries}</section>"
+                    )
                 return f"<section><{heading_tag}>{escape(name)}</{heading_tag}>{rendered_entries}</section>"
             if name:
                 return f"<p><strong>{escape(name)}.</strong></p>"
@@ -1732,17 +1783,35 @@ class Dnd5eSystemsImporter:
                 return rendered_entries
         return f"<p>{escape(self._clean_text(self._format_compact_value(value)))}</p>"
 
-    def _render_list_item(self, item: Any, *, heading_level: int) -> str:
+    def _render_list_item(
+        self,
+        item: Any,
+        *,
+        heading_level: int,
+        section_anchor_path: tuple[str, ...] | None = None,
+    ) -> str:
         if isinstance(item, dict) and str(item.get("type", "") or "") == "item":
             name = self._clean_text(str(item.get("name", "") or ""))
             entry_value = item.get("entry", item.get("entries"))
-            entry_text = self._strip_outer_paragraph(self._render_content_block(entry_value, heading_level=heading_level))
+            entry_text = self._strip_outer_paragraph(
+                self._render_content_block(
+                    entry_value,
+                    heading_level=heading_level,
+                    section_anchor_path=section_anchor_path,
+                )
+            )
             if name and entry_text:
                 return f"<strong>{escape(name)}</strong> {entry_text}"
             if name:
                 return f"<strong>{escape(name)}</strong>"
             return entry_text
-        return self._strip_outer_paragraph(self._render_content_block(item, heading_level=heading_level))
+        return self._strip_outer_paragraph(
+            self._render_content_block(
+                item,
+                heading_level=heading_level,
+                section_anchor_path=section_anchor_path,
+            )
+        )
 
     def _render_reference_label(self, value: dict[str, Any]) -> str:
         for key in ("optionalfeature", "classFeature", "subclassFeature"):
@@ -1882,6 +1951,78 @@ class Dnd5eSystemsImporter:
             if header:
                 headers.append(header)
         return headers
+
+    def _build_book_section_outline(self, value: Any) -> list[dict[str, Any]]:
+        outline: list[dict[str, Any]] = []
+        self._collect_book_section_outline(value, outline=outline, parent_path=())
+        return outline
+
+    def _collect_book_section_outline(
+        self,
+        value: Any,
+        *,
+        outline: list[dict[str, Any]],
+        parent_path: tuple[str, ...],
+    ) -> None:
+        if value is None:
+            return
+        if isinstance(value, list):
+            for item in value:
+                self._collect_book_section_outline(item, outline=outline, parent_path=parent_path)
+            return
+        if not isinstance(value, dict):
+            return
+
+        current_path = parent_path
+        if self._is_book_navigation_section(value):
+            name = self._clean_text(str(value.get("name", "") or ""))
+            current_path = (*parent_path, name)
+            depth = len(current_path)
+            if depth <= BOOK_SECTION_OUTLINE_MAX_DEPTH:
+                outline_item: dict[str, Any] = {
+                    "title": name,
+                    "anchor": self._build_book_section_anchor(current_path),
+                    "depth": depth,
+                }
+                page = value.get("page")
+                if page not in (None, ""):
+                    outline_item["page"] = page
+                outline.append(outline_item)
+
+        value_type = str(value.get("type", "") or "").strip().lower()
+        nested_values: list[Any] = []
+        if value_type == "list":
+            nested_values.append(value.get("items"))
+        elif value_type == "options":
+            nested_values.append(value.get("entries"))
+        else:
+            if value.get("entries") is not None:
+                nested_values.append(value.get("entries"))
+            elif value.get("entry") is not None:
+                nested_values.append(value.get("entry"))
+        for nested_value in nested_values:
+            self._collect_book_section_outline(nested_value, outline=outline, parent_path=current_path)
+
+    def _is_book_navigation_section(self, value: Any) -> bool:
+        if not isinstance(value, dict):
+            return False
+        value_type = str(value.get("type", "") or "").strip().lower()
+        if value_type not in {"", "section", "entries"}:
+            return False
+        if not self._clean_text(str(value.get("name", "") or "")):
+            return False
+        return value.get("entries") is not None or value.get("entry") is not None
+
+    def _build_book_section_anchor(self, path: tuple[str, ...]) -> str:
+        parts: list[str] = []
+        for item in path:
+            cleaned_item = self._clean_text(str(item or ""))
+            if not cleaned_item:
+                continue
+            anchor_part = slugify(cleaned_item).replace("/", "-") or normalize_lookup(cleaned_item)
+            if anchor_part:
+                parts.append(anchor_part)
+        return "--".join(parts) or "book-section"
 
     def _format_book_section_label(self, value: Any) -> str:
         if not isinstance(value, dict):

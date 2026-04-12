@@ -1671,6 +1671,28 @@ button {
   color: var(--ink);
 }
 
+.systems-book-section {
+  scroll-margin-top: 1rem;
+}
+
+.systems-book-outline {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.systems-book-outline__item {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.systems-book-outline__item--depth-2 {
+  padding-left: 0.9rem;
+}
+
+.systems-book-outline__page {
+  font-size: 0.82rem;
+}
+
 .systems-inline-feature-card,
 .systems-inline-option-group,
 .systems-inline-option-stack {

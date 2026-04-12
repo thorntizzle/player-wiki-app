@@ -251,6 +251,21 @@
           </ul>
         </section>
       {% endif %}
+      {% if book_section_outline %}
+        <section class="card sidebar-card">
+          <h2>Chapter Navigation</h2>
+          <ul class="plain-list systems-book-outline">
+            {% for section in book_section_outline %}
+              <li class="systems-book-outline__item systems-book-outline__item--depth-{{ section.depth }}">
+                <a href="#{{ section.anchor }}">{{ section.title }}</a>
+                {% if section.page %}
+                  <span class="meta systems-book-outline__page">p. {{ section.page }}</span>
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        </section>
+      {% endif %}
       {% if entry.entry_type == "book" %}
         <section class="card sidebar-card">
           <h2>Book Section</h2>
@@ -260,7 +275,7 @@
           {% if entry.source_page %}
             <p class="meta">Starts on page {{ entry.source_page }}</p>
           {% endif %}
-          {% if book_headers %}
+          {% if not book_section_outline and book_headers %}
             <p class="meta">Included headings</p>
             <ul class="plain-list">
               {% for header in book_headers %}

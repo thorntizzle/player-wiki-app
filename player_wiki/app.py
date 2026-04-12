@@ -3301,10 +3301,31 @@ def create_app() -> Flask:
         )
         related_rule_entries = systems_service.build_related_rules_for_entry(campaign_slug, entry)
         book_headers = []
+        book_section_outline = []
         if entry.entry_type == "book":
             raw_headers = (entry.metadata or {}).get("headers")
             if isinstance(raw_headers, list):
                 book_headers = [str(item).strip() for item in raw_headers if str(item).strip()]
+            raw_outline = (entry.metadata or {}).get("section_outline")
+            if isinstance(raw_outline, list):
+                for item in raw_outline:
+                    if not isinstance(item, dict):
+                        continue
+                    title = str(item.get("title", "") or "").strip()
+                    anchor = str(item.get("anchor", "") or "").strip()
+                    if not title or not anchor:
+                        continue
+                    raw_depth = item.get("depth")
+                    depth = int(raw_depth) if isinstance(raw_depth, int) and raw_depth > 0 else 1
+                    page = str(item.get("page", "") or "").strip()
+                    book_section_outline.append(
+                        {
+                            "title": title,
+                            "anchor": anchor,
+                            "depth": depth,
+                            "page": page,
+                        }
+                    )
         return {
             "campaign": campaign,
             "entry": entry,
@@ -3320,6 +3341,7 @@ def create_app() -> Flask:
             "feature_detail_card": feature_detail_card,
             "related_rule_entries": related_rule_entries,
             "book_headers": book_headers,
+            "book_section_outline": book_section_outline,
             "source_state": source_state,
             "can_manage_systems": can_manage_campaign_systems(campaign_slug),
             "license_class_label": LICENSE_CLASS_LABELS.get(

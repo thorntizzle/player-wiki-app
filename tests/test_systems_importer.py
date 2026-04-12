@@ -584,6 +584,7 @@ def build_phb_book_data_root(root: Path) -> Path:
                             "headers": [
                                 "Advantage and Disadvantage",
                                 "Ability Checks",
+                                "Contests",
                             ],
                             "ordinal": {"type": "chapter", "identifier": 7},
                         },
@@ -607,7 +608,9 @@ def build_phb_book_data_root(root: Path) -> Path:
                             "name": "Spellcasting",
                             "headers": [
                                 "Casting a Spell",
+                                "Components",
                                 "Targets",
+                                "Areas of Effect",
                             ],
                             "ordinal": {"type": "chapter", "identifier": 10},
                         },
@@ -697,6 +700,14 @@ def build_phb_book_data_root(root: Path) -> Path:
                                         {"type": "abilityGeneric", "text": "10 + all modifiers that normally apply to the check"},
                                     ],
                                 },
+                                {
+                                    "type": "entries",
+                                    "name": "Contests",
+                                    "page": 175,
+                                    "entries": [
+                                        "A contest pits two creatures' efforts against each other.",
+                                    ],
+                                },
                             ],
                         },
                         {
@@ -760,13 +771,33 @@ def build_phb_book_data_root(root: Path) -> Path:
                             "type": "section",
                             "name": "Casting a Spell",
                             "page": 202,
-                            "entries": ["Casting a spell requires choosing the spell and following its casting time."],
+                            "entries": [
+                                "Casting a spell requires choosing the spell and following its casting time.",
+                                {
+                                    "type": "entries",
+                                    "name": "Components",
+                                    "page": 203,
+                                    "entries": [
+                                        "Verbal, somatic, and material components define what a caster must provide.",
+                                    ],
+                                },
+                            ],
                         },
                         {
                             "type": "section",
                             "name": "Targets",
                             "page": 204,
-                            "entries": ["A spell's description tells you whether it targets creatures, objects, or points in space."],
+                            "entries": [
+                                "A spell's description tells you whether it targets creatures, objects, or points in space.",
+                                {
+                                    "type": "entries",
+                                    "name": "Areas of Effect",
+                                    "page": 204,
+                                    "entries": [
+                                        "Some spells affect an area rather than a single target.",
+                                    ],
+                                },
+                            ],
                         },
                     ],
                     "id": "phb-spellcasting",
@@ -2117,6 +2148,7 @@ def test_phb_book_chapters_are_imported_and_browsable_in_book_order(
         book_entry_links = [f'/campaigns/linden-pass/systems/entries/{entry.slug}' for entry in book_entries]
         using_ability_scores = next(entry for entry in book_entries if entry.title == "Using Ability Scores")
         introduction = next(entry for entry in book_entries if entry.title == "Introduction")
+        spellcasting = next(entry for entry in book_entries if entry.title == "Spellcasting")
 
     assert titles == [
         "Introduction",
@@ -2132,6 +2164,7 @@ def test_phb_book_chapters_are_imported_and_browsable_in_book_order(
     category_response = client.get("/campaigns/linden-pass/systems/sources/PHB/types/book")
     detail_response = client.get(f"/campaigns/linden-pass/systems/entries/{using_ability_scores.slug}")
     intro_response = client.get(f"/campaigns/linden-pass/systems/entries/{introduction.slug}")
+    spellcasting_response = client.get(f"/campaigns/linden-pass/systems/entries/{spellcasting.slug}")
 
     assert source_response.status_code == 200
     source_body = source_response.get_data(as_text=True)
@@ -2152,16 +2185,29 @@ def test_phb_book_chapters_are_imported_and_browsable_in_book_order(
     assert detail_response.status_code == 200
     detail_body = detail_response.get_data(as_text=True)
     assert "Chapter 7" in detail_body
+    assert "Chapter Navigation" in detail_body
+    assert 'href="#advantage-and-disadvantage"' in detail_body
+    assert 'href="#ability-checks--contests"' in detail_body
+    assert 'id="advantage-and-disadvantage"' in detail_body
+    assert 'id="ability-checks--contests"' in detail_body
     assert "Advantage and Disadvantage" in detail_body
+    assert "Contests" in detail_body
     assert "Passive Checks" in detail_body
     assert "10 + all modifiers that normally apply to the check" in detail_body
     assert "book/PHB/ch7.webp" not in detail_body
-    assert "Included headings" in detail_body
+    assert "p. 175" in detail_body
 
     assert intro_response.status_code == 200
     intro_body = intro_response.get_data(as_text=True)
     assert "How to Play" in intro_body
     assert "book/PHB/intro.webp" not in intro_body
+
+    assert spellcasting_response.status_code == 200
+    spellcasting_body = spellcasting_response.get_data(as_text=True)
+    assert 'href="#casting-a-spell--components"' in spellcasting_body
+    assert 'href="#targets--areas-of-effect"' in spellcasting_body
+    assert 'id="casting-a-spell--components"' in spellcasting_body
+    assert 'id="targets--areas-of-effect"' in spellcasting_body
 
 
 def test_importer_skips_xphb_subclass_variants(app, tmp_path):
