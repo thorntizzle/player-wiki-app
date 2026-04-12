@@ -987,6 +987,115 @@ def build_phb_book_data_root(root: Path) -> Path:
 def build_dmg_book_data_root(root: Path) -> Path:
     data_root = build_test_data_root(root)
     write_json(
+        root / "data/actions.json",
+        {
+            "action": [
+                {
+                    "name": "Help",
+                    "source": "PHB",
+                    "page": 192,
+                    "time": [{"number": 1, "unit": "action"}],
+                    "entries": ["You can lend your aid to another creature in the completion of a task."],
+                },
+                {
+                    "name": "Overrun",
+                    "source": "DMG",
+                    "page": 272,
+                    "time": [{"number": 1, "unit": "action"}],
+                    "entries": ["You can try to force your way through a hostile creature's space by making a contested check."],
+                },
+            ]
+        },
+    )
+    write_json(
+        root / "data/conditionsdiseases.json",
+        {
+            "condition": [
+                {
+                    "name": "Blinded",
+                    "source": "PHB",
+                    "page": 290,
+                    "entries": ["A blinded creature can't see."],
+                }
+            ],
+            "disease": [
+                {
+                    "name": "Cackle Fever",
+                    "source": "DMG",
+                    "page": 257,
+                    "entries": ["This disease manifests in feverish laughter and bouts of disorientation."],
+                }
+            ],
+            "status": [
+                {
+                    "name": "Concentration",
+                    "source": "PHB",
+                    "page": 203,
+                    "entries": ["You can concentrate on only one spell at a time."],
+                }
+            ],
+        },
+    )
+    write_json(
+        root / "data/variantrules.json",
+        {
+            "variantrule": [
+                {
+                    "name": "Encumbrance",
+                    "source": "PHB",
+                    "page": 176,
+                    "ruleType": "O",
+                    "entries": ["If you carry weight in excess of 5 times your Strength score, you are encumbered."],
+                },
+                {
+                    "name": "Chases",
+                    "source": "DMG",
+                    "page": 252,
+                    "ruleType": "O",
+                    "entries": ["A chase adds complications and escalating pressure while creatures flee or pursue."],
+                },
+                {
+                    "name": "Downtime Activity: Building a Stronghold",
+                    "source": "DMG",
+                    "page": 128,
+                    "ruleType": "O",
+                    "entries": ["Characters can invest time and treasure to establish and maintain a stronghold."],
+                },
+                {
+                    "name": "Downtime Activity: Carousing",
+                    "source": "DMG",
+                    "page": 128,
+                    "ruleType": "O",
+                    "entries": ["Carousing can build contacts and complications during downtime."],
+                },
+            ]
+        },
+    )
+    write_json(
+        root / "data/items.json",
+        {
+            "item": [
+                {
+                    "name": "Longsword",
+                    "source": "PHB",
+                    "page": 149,
+                    "type": "M",
+                    "weight": 3,
+                    "entries": ["A versatile martial weapon."],
+                },
+                {
+                    "name": "Potion of Healing",
+                    "source": "DMG",
+                    "page": 187,
+                    "type": "P",
+                    "weight": 0.5,
+                    "entries": ["A character who drinks the magical red fluid regains hit points."],
+                },
+            ],
+            "itemGroup": [],
+        },
+    )
+    write_json(
         root / "data/books.json",
         {
             "book": [
@@ -1293,22 +1402,23 @@ def build_dmg_book_data_root(root: Path) -> Path:
                     ],
                     "id": "dmg-between-adventures",
                 },
-                {
-                    "type": "section",
-                    "name": "Treasure",
-                    "page": 133,
-                    "entries": [
-                        "Treasure rewards adventurers with coins, art objects, and magic.",
                         {
                             "type": "section",
-                            "name": "Magic Items",
-                            "page": 135,
+                            "name": "Treasure",
+                            "page": 133,
                             "entries": [
+                                "Treasure rewards adventurers with coins, art objects, and magic.",
                                 {
-                                    "type": "entries",
-                                    "name": "Attunement",
-                                    "page": 136,
-                                    "entries": ["Some magic items require a creature to attune to them before they work."],
+                                    "type": "section",
+                                    "name": "Magic Items",
+                                    "page": 135,
+                                    "entries": [
+                                        "Magic items such as {@item Potion of Healing|DMG} can keep an expedition going.",
+                                        {
+                                            "type": "entries",
+                                            "name": "Attunement",
+                                            "page": 136,
+                                            "entries": ["Some magic items require a creature to attune to them before they work."],
                                 },
                                 {
                                     "type": "entries",
@@ -1327,30 +1437,32 @@ def build_dmg_book_data_root(root: Path) -> Path:
                     ],
                     "id": "dmg-treasure",
                 },
-                {
-                    "type": "section",
-                    "name": "Running the Game",
-                    "page": 235,
-                    "entries": [
-                        "Running the game means adjudicating uncertain outcomes and pacing scenes.",
                         {
                             "type": "section",
-                            "name": "Using Ability Scores",
-                            "page": 237,
+                            "name": "Running the Game",
+                            "page": 235,
                             "entries": [
-                                "Use ability checks and saving throws when outcomes are uncertain.",
-                            ],
-                        },
-                        {
-                            "type": "section",
-                            "name": "Combat",
-                            "page": 247,
-                            "entries": [
+                                "Running the game means adjudicating uncertain outcomes and pacing scenes.",
                                 {
-                                    "type": "entries",
-                                    "name": "Chases",
-                                    "page": 252,
-                                    "entries": ["A chase adds movement pressure and complications to a pursuit scene."],
+                                    "type": "section",
+                                    "name": "Using Ability Scores",
+                                    "page": 237,
+                                    "entries": [
+                                        "Use ability checks and saving throws when outcomes are uncertain.",
+                                        "Lingering afflictions such as {@disease Cackle Fever|DMG} can complicate those rulings.",
+                                    ],
+                                },
+                                {
+                                    "type": "section",
+                                    "name": "Combat",
+                                    "page": 247,
+                                    "entries": [
+                                        "Optional actions such as {@action Overrun|DMG} can shift how melee pressure works.",
+                                        {
+                                            "type": "entries",
+                                            "name": "Chases",
+                                            "page": 252,
+                                            "entries": ["A chase adds movement pressure and complications to a pursuit scene."],
                                 }
                             ],
                         },
@@ -2948,6 +3060,68 @@ def test_dmg_book_chapters_are_imported_for_dm_browse_in_book_order(
     sign_in(users["party"]["email"], users["party"]["password"])
     blocked_multiverse_response = client.get(f"/campaigns/linden-pass/systems/entries/{multiverse.slug}")
     assert blocked_multiverse_response.status_code == 404
+
+
+def test_dmg_book_chapters_surface_related_imported_entities(client, sign_in, users, app, tmp_path):
+    data_root = build_dmg_book_data_root(tmp_path / "dnd5e-source-dmg-book-entity-links")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("DMG", entry_types=["action", "book", "disease", "item", "variantrule"])
+
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        book_entries = {
+            entry.title: entry
+            for entry in service.list_entries_for_campaign_source(
+                "linden-pass",
+                "DMG",
+                entry_type="book",
+                limit=None,
+            )
+        }
+        dmg_entries = {
+            (entry.entry_type, entry.title): entry
+            for entry_type in ("action", "disease", "item", "variantrule")
+            for entry in store.list_entries_for_source("DND-5E", "DMG", entry_type=entry_type, limit=None)
+        }
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    treasure_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Treasure'].slug}")
+    downtime_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Downtime Activities'].slug}")
+    running_the_game_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Running the Game'].slug}")
+
+    assert treasure_response.status_code == 200
+    treasure_body = treasure_response.get_data(as_text=True)
+    assert "Equipment:" in treasure_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{dmg_entries[("item", "Potion of Healing")].slug}"' in treasure_body
+
+    assert downtime_response.status_code == 200
+    downtime_body = downtime_response.get_data(as_text=True)
+    assert "Variant Rules:" in downtime_body
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/'
+        f'{dmg_entries[("variantrule", "Downtime Activity: Building a Stronghold")].slug}"'
+        in downtime_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/'
+        f'{dmg_entries[("variantrule", "Downtime Activity: Carousing")].slug}"'
+        in downtime_body
+    )
+
+    assert running_the_game_response.status_code == 200
+    running_the_game_body = running_the_game_response.get_data(as_text=True)
+    assert "Diseases:" in running_the_game_body
+    assert "Actions:" in running_the_game_body
+    assert "Variant Rules:" in running_the_game_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{dmg_entries[("disease", "Cackle Fever")].slug}"' in running_the_game_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{dmg_entries[("action", "Overrun")].slug}"' in running_the_game_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{dmg_entries[("variantrule", "Chases")].slug}"' in running_the_game_body
 
 
 def test_phb_book_chapters_surface_related_imported_entities(

@@ -79,19 +79,27 @@ PHB_BOOK_SECTION_RULE_KEY_MAP = {
     "casting-a-spell--saving-throws": ("spell-attacks-and-save-dcs",),
     "casting-a-spell--attack-rolls": ("spell-attacks-and-save-dcs",),
 }
-PHB_BOOK_SECTION_ENTITY_TAG_ENTRY_TYPES = {
+BOOK_SECTION_ENTITY_TAG_ENTRY_TYPES = {
     "action": "action",
+    "background": "background",
+    "class": "class",
     "condition": "condition",
+    "disease": "disease",
     "feat": "feat",
     "status": "status",
     "skill": "skill",
     "sense": "sense",
     "spell": "spell",
     "item": "item",
+    "monster": "monster",
+    "optionalfeature": "optionalfeature",
+    "race": "race",
+    "subclass": "subclass",
     "variantrule": "variantrule",
 }
-PHB_BOOK_SECTION_ENTITY_TYPE_ORDER = (
+BOOK_SECTION_ENTITY_TYPE_ORDER = (
     "condition",
+    "disease",
     "status",
     "action",
     "skill",
@@ -100,9 +108,16 @@ PHB_BOOK_SECTION_ENTITY_TYPE_ORDER = (
     "variantrule",
     "feat",
     "item",
+    "background",
+    "race",
+    "class",
+    "subclass",
+    "monster",
+    "optionalfeature",
 )
-PHB_BOOK_SECTION_ENTITY_GROUP_LABELS = {
+BOOK_SECTION_ENTITY_GROUP_LABELS = {
     "condition": "Conditions",
+    "disease": "Diseases",
     "status": "Statuses",
     "action": "Actions",
     "skill": "Skills",
@@ -111,6 +126,12 @@ PHB_BOOK_SECTION_ENTITY_GROUP_LABELS = {
     "variantrule": "Variant Rules",
     "feat": "Feats",
     "item": "Equipment",
+    "background": "Backgrounds",
+    "race": "Races",
+    "class": "Classes",
+    "subclass": "Subclasses",
+    "monster": "Monsters",
+    "optionalfeature": "Optional Features",
 }
 
 
@@ -759,7 +780,7 @@ class SystemsService:
         campaign_slug: str,
         entry: SystemsEntryRecord,
     ) -> dict[str, list[dict[str, object]]]:
-        if entry.entry_type != "book" or str(entry.source_id or "").strip().upper() != "PHB":
+        if entry.entry_type != "book":
             return {}
 
         raw_outline = (entry.metadata or {}).get("section_outline")
@@ -849,7 +870,7 @@ class SystemsService:
             entries_by_identity: dict[tuple[str, str, str], SystemsEntryRecord] = {}
             exact_title_lookup: dict[tuple[str, str], list[SystemsEntryRecord]] = defaultdict(list)
             for source_id in enabled_source_ids:
-                for entry_type in PHB_BOOK_SECTION_ENTITY_TYPE_ORDER:
+                for entry_type in BOOK_SECTION_ENTITY_TYPE_ORDER:
                     for entry in self.list_entries_for_campaign_source(
                         campaign_slug,
                         source_id,
@@ -891,13 +912,13 @@ class SystemsService:
             grouped_entries[entry.entry_type].append(entry)
 
         groups: list[dict[str, object]] = []
-        for entry_type in PHB_BOOK_SECTION_ENTITY_TYPE_ORDER:
+        for entry_type in BOOK_SECTION_ENTITY_TYPE_ORDER:
             entries = grouped_entries.get(entry_type, [])
             if not entries:
                 continue
             groups.append(
                 {
-                    "label": PHB_BOOK_SECTION_ENTITY_GROUP_LABELS.get(
+                    "label": BOOK_SECTION_ENTITY_GROUP_LABELS.get(
                         entry_type,
                         entry_type.replace("_", " ").title(),
                     ),
@@ -1001,7 +1022,7 @@ class SystemsService:
         for match in INLINE_TAG_PATTERN.finditer(str(value or "")):
             body = match.group(1).strip()
             tag, _, remainder = body.partition(" ")
-            entry_type = PHB_BOOK_SECTION_ENTITY_TAG_ENTRY_TYPES.get(tag.lower().strip())
+            entry_type = BOOK_SECTION_ENTITY_TAG_ENTRY_TYPES.get(tag.lower().strip())
             if not entry_type or not remainder.strip():
                 continue
             title, source_id = self._parse_book_section_entity_reference(remainder)
