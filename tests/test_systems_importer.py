@@ -4159,6 +4159,7 @@ TCE_RULES_REFERENCE_TEST_TITLES = (
     "Ten Rules to Remember",
     "Customizing Your Origin",
     "Changing a Skill",
+    "Changing Your Subclass",
 )
 
 
@@ -7609,6 +7610,9 @@ def test_tce_book_entries_are_imported_for_player_browse(
     changing_skill_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Changing a Skill'].slug}"
     )
+    changing_subclass_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Changing Your Subclass'].slug}"
+    )
 
     assert source_response.status_code == 200
     source_body = source_response.get_data(as_text=True)
@@ -7616,13 +7620,15 @@ def test_tce_book_entries_are_imported_for_player_browse(
     assert "Ten Rules to Remember" in source_body
     assert "Customizing Your Origin" in source_body
     assert "Changing a Skill" in source_body
+    assert "Changing Your Subclass" in source_body
 
     assert category_response.status_code == 200
     category_body = category_response.get_data(as_text=True)
-    assert "Showing all 3 book chapters available to you in this source." in category_body
+    assert "Showing all 4 book chapters available to you in this source." in category_body
     assert "Ten Rules to Remember" in category_body
     assert "Customizing Your Origin" in category_body
     assert "Changing a Skill" in category_body
+    assert "Changing Your Subclass" in category_body
 
     assert ten_rules_response.status_code == 200
     ten_rules_body = ten_rules_response.get_data(as_text=True)
@@ -7649,6 +7655,12 @@ def test_tce_book_entries_are_imported_for_player_browse(
         "Swap an underused skill proficiency for another one your class offered at 1st level."
         in changing_skill_body
     )
+
+    assert changing_subclass_response.status_code == 200
+    changing_subclass_body = changing_subclass_response.get_data(as_text=True)
+    assert "Character Options" in changing_subclass_body
+    assert "Changing Your Subclass" in changing_subclass_body
+    assert "replace your subclass when you gain a new subclass feature." in changing_subclass_body
 
 
 def test_tce_book_entries_follow_source_visibility(client, sign_in, users, app, tmp_path):
@@ -7681,7 +7693,7 @@ def test_tce_book_entries_follow_source_visibility(client, sign_in, users, app, 
     player_source_response = client.get("/campaigns/linden-pass/systems/sources/TCE")
     player_category_response = client.get("/campaigns/linden-pass/systems/sources/TCE/types/book")
     player_entry_response = client.get(
-        f"/campaigns/linden-pass/systems/entries/{book_entries['Changing a Skill'].slug}"
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Changing Your Subclass'].slug}"
     )
 
     assert player_source_response.status_code == 404
@@ -7694,7 +7706,7 @@ def test_tce_book_entries_follow_source_visibility(client, sign_in, users, app, 
     dm_source_response = client.get("/campaigns/linden-pass/systems/sources/TCE")
     dm_category_response = client.get("/campaigns/linden-pass/systems/sources/TCE/types/book")
     dm_entry_response = client.get(
-        f"/campaigns/linden-pass/systems/entries/{book_entries['Changing a Skill'].slug}"
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Changing Your Subclass'].slug}"
     )
 
     assert dm_source_response.status_code == 200
@@ -7704,13 +7716,14 @@ def test_tce_book_entries_follow_source_visibility(client, sign_in, users, app, 
     assert "Ten Rules to Remember" in dm_category_body
     assert "Customizing Your Origin" in dm_category_body
     assert "Changing a Skill" in dm_category_body
+    assert "Changing Your Subclass" in dm_category_body
     assert dm_entry_response.status_code == 200
     dm_entry_body = dm_entry_response.get_data(as_text=True)
     assert "Character Options" in dm_entry_body
-    assert "Changing a Skill" in dm_entry_body
+    assert "Changing Your Subclass" in dm_entry_body
 
 
-def test_tce_book_slice_includes_changing_a_skill_wrapper_for_now(app, tmp_path):
+def test_tce_book_slice_includes_changing_your_subclass_wrapper_for_now(app, tmp_path):
     data_root = build_tce_book_data_root(tmp_path / "dnd5e-source-tce-book-boundary")
 
     with app.app_context():

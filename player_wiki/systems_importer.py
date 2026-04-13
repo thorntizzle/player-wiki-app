@@ -253,6 +253,7 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         ("Using This Book", "Ten Rules to Remember"),
         ("Character Options", "Customizing Your Origin"),
         ("Character Options", "Changing a Skill"),
+        ("Character Options", "Changing Your Subclass"),
     ),
 }
 VGM_CHARACTER_RACE_WRAPPER_DEFINITIONS = (
