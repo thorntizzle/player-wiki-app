@@ -287,6 +287,7 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         ("Elves", "Elf Subraces"),
         ("Dwarves and Duergar", "Duergar Characters"),
         ("Gith and Their Endless War", "Gith Characters"),
+        ("Halflings and Gnomes", "Deep Gnome Characters"),
     ),
 }
 VGM_CHARACTER_RACE_WRAPPER_DEFINITIONS = (

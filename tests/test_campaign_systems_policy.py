@@ -588,6 +588,7 @@ def test_mtf_book_entries_stay_hidden_when_source_visibility_is_lowered_for_othe
         elf_wrapper_entry = book_entries["Elf Subraces"]
         duergar_wrapper_entry = book_entries["Duergar Characters"]
         gith_wrapper_entry = book_entries["Gith Characters"]
+        deep_gnome_wrapper_entry = book_entries["Deep Gnome Characters"]
         asmodeus_tiefling_entry = next(
             entry
             for entry in store.list_entries_for_source("DND-5E", "MTF", entry_type="race", limit=20)
@@ -608,6 +609,11 @@ def test_mtf_book_entries_stay_hidden_when_source_visibility_is_lowered_for_othe
             for entry in store.list_entries_for_source("DND-5E", "MTF", entry_type="race", limit=20)
             if entry.title == "Githyanki"
         )
+        deep_gnome_entry = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "MTF", entry_type="race", limit=20)
+            if entry.title == "Deep Gnome"
+        )
 
     sign_in(users["party"]["email"], users["party"]["password"])
 
@@ -621,15 +627,20 @@ def test_mtf_book_entries_stay_hidden_when_source_visibility_is_lowered_for_othe
         f"/campaigns/linden-pass/systems/entries/{duergar_wrapper_entry.slug}"
     )
     player_gith_book_response = client.get(f"/campaigns/linden-pass/systems/entries/{gith_wrapper_entry.slug}")
+    player_deep_gnome_book_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{deep_gnome_wrapper_entry.slug}"
+    )
     player_tiefling_race_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{asmodeus_tiefling_entry.slug}"
     )
     player_elf_race_response = client.get(f"/campaigns/linden-pass/systems/entries/{sea_elf_entry.slug}")
     player_duergar_race_response = client.get(f"/campaigns/linden-pass/systems/entries/{duergar_entry.slug}")
     player_githyanki_race_response = client.get(f"/campaigns/linden-pass/systems/entries/{githyanki_entry.slug}")
+    player_deep_gnome_race_response = client.get(f"/campaigns/linden-pass/systems/entries/{deep_gnome_entry.slug}")
     search_response = client.get("/campaigns/linden-pass/systems?q=subraces")
     duergar_search_response = client.get("/campaigns/linden-pass/systems?q=duergar+characters")
     gith_search_response = client.get("/campaigns/linden-pass/systems?q=gith+characters")
+    deep_gnome_search_response = client.get("/campaigns/linden-pass/systems?q=deep+gnome+characters")
 
     assert source_response.status_code == 200
     source_body = source_response.get_data(as_text=True)
@@ -638,6 +649,7 @@ def test_mtf_book_entries_stay_hidden_when_source_visibility_is_lowered_for_othe
     assert "Elf Subraces" not in source_body
     assert "Duergar Characters" not in source_body
     assert "Gith Characters" not in source_body
+    assert "Deep Gnome Characters" not in source_body
     assert "Races" in source_body
     assert "default to DM visibility" in source_body
 
@@ -646,6 +658,7 @@ def test_mtf_book_entries_stay_hidden_when_source_visibility_is_lowered_for_othe
     assert player_elf_book_response.status_code == 404
     assert player_duergar_book_response.status_code == 404
     assert player_gith_book_response.status_code == 404
+    assert player_deep_gnome_book_response.status_code == 404
 
     assert player_tiefling_race_response.status_code == 200
     assert "Asmodeus Tiefling" in player_tiefling_race_response.get_data(as_text=True)
@@ -655,6 +668,8 @@ def test_mtf_book_entries_stay_hidden_when_source_visibility_is_lowered_for_othe
     assert "Duergar" in player_duergar_race_response.get_data(as_text=True)
     assert player_githyanki_race_response.status_code == 200
     assert "Githyanki" in player_githyanki_race_response.get_data(as_text=True)
+    assert player_deep_gnome_race_response.status_code == 200
+    assert "Deep Gnome" in player_deep_gnome_race_response.get_data(as_text=True)
 
     assert search_response.status_code == 200
     search_body = search_response.get_data(as_text=True)
@@ -664,6 +679,8 @@ def test_mtf_book_entries_stay_hidden_when_source_visibility_is_lowered_for_othe
     assert "Duergar Characters" not in duergar_search_response.get_data(as_text=True)
     assert gith_search_response.status_code == 200
     assert "Gith Characters" not in gith_search_response.get_data(as_text=True)
+    assert deep_gnome_search_response.status_code == 200
+    assert "Deep Gnome Characters" not in deep_gnome_search_response.get_data(as_text=True)
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["dm"]["email"], users["dm"]["password"])
@@ -674,8 +691,12 @@ def test_mtf_book_entries_stay_hidden_when_source_visibility_is_lowered_for_othe
     dm_elf_book_response = client.get(f"/campaigns/linden-pass/systems/entries/{elf_wrapper_entry.slug}")
     dm_duergar_book_response = client.get(f"/campaigns/linden-pass/systems/entries/{duergar_wrapper_entry.slug}")
     dm_gith_book_response = client.get(f"/campaigns/linden-pass/systems/entries/{gith_wrapper_entry.slug}")
+    dm_deep_gnome_book_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{deep_gnome_wrapper_entry.slug}"
+    )
     dm_duergar_search_response = client.get("/campaigns/linden-pass/systems?q=duergar+characters")
     dm_gith_search_response = client.get("/campaigns/linden-pass/systems?q=gith+characters")
+    dm_deep_gnome_search_response = client.get("/campaigns/linden-pass/systems?q=deep+gnome+characters")
 
     assert dm_source_response.status_code == 200
     dm_source_body = dm_source_response.get_data(as_text=True)
@@ -684,9 +705,11 @@ def test_mtf_book_entries_stay_hidden_when_source_visibility_is_lowered_for_othe
     assert "Elf Subraces" in dm_source_body
     assert "Duergar Characters" in dm_source_body
     assert "Gith Characters" in dm_source_body
+    assert "Deep Gnome Characters" in dm_source_body
     assert dm_source_body.index("Tiefling Subraces") < dm_source_body.index("Elf Subraces")
     assert dm_source_body.index("Elf Subraces") < dm_source_body.index("Duergar Characters")
     assert dm_source_body.index("Duergar Characters") < dm_source_body.index("Gith Characters")
+    assert dm_source_body.index("Gith Characters") < dm_source_body.index("Deep Gnome Characters")
     assert "default to DM visibility" in dm_source_body
 
     assert dm_book_category_response.status_code == 200
@@ -695,9 +718,11 @@ def test_mtf_book_entries_stay_hidden_when_source_visibility_is_lowered_for_othe
     assert "Elf Subraces" in dm_book_category_body
     assert "Duergar Characters" in dm_book_category_body
     assert "Gith Characters" in dm_book_category_body
+    assert "Deep Gnome Characters" in dm_book_category_body
     assert dm_book_category_body.index("Tiefling Subraces") < dm_book_category_body.index("Elf Subraces")
     assert dm_book_category_body.index("Elf Subraces") < dm_book_category_body.index("Duergar Characters")
     assert dm_book_category_body.index("Duergar Characters") < dm_book_category_body.index("Gith Characters")
+    assert dm_book_category_body.index("Gith Characters") < dm_book_category_body.index("Deep Gnome Characters")
 
     assert dm_tiefling_book_response.status_code == 200
     assert "Policy default visibility: DM" in dm_tiefling_book_response.get_data(as_text=True)
@@ -707,10 +732,14 @@ def test_mtf_book_entries_stay_hidden_when_source_visibility_is_lowered_for_othe
     assert "Policy default visibility: DM" in dm_duergar_book_response.get_data(as_text=True)
     assert dm_gith_book_response.status_code == 200
     assert "Policy default visibility: DM" in dm_gith_book_response.get_data(as_text=True)
+    assert dm_deep_gnome_book_response.status_code == 200
+    assert "Policy default visibility: DM" in dm_deep_gnome_book_response.get_data(as_text=True)
     assert dm_duergar_search_response.status_code == 200
     assert "Duergar Characters" in dm_duergar_search_response.get_data(as_text=True)
     assert dm_gith_search_response.status_code == 200
     assert "Gith Characters" in dm_gith_search_response.get_data(as_text=True)
+    assert dm_deep_gnome_search_response.status_code == 200
+    assert "Deep Gnome Characters" in dm_deep_gnome_search_response.get_data(as_text=True)
 
 
 def test_dmg_rules_reference_search_stays_source_scoped(client, sign_in, users, app, tmp_path):

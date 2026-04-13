@@ -4750,6 +4750,21 @@ def build_mtf_book_data_root(root: Path) -> Path:
                     ],
                 },
                 {
+                    "name": "Gnome",
+                    "source": "PHB",
+                    "page": 35,
+                    "size": ["S"],
+                    "speed": {"walk": 25},
+                    "ability": [{"int": 2}],
+                    "entries": [
+                        {
+                            "name": "Gnome Cunning",
+                            "type": "entries",
+                            "entries": ["You have advantage on all Intelligence, Wisdom, and Charisma saving throws against magic."],
+                        }
+                    ],
+                },
+                {
                     "name": "Tiefling",
                     "source": "PHB",
                     "page": 42,
@@ -4838,6 +4853,21 @@ def build_mtf_book_data_root(root: Path) -> Path:
                             "name": "Duergar Resilience",
                             "type": "entries",
                             "entries": ["You have advantage on saving throws against illusions and against being charmed or paralyzed."],
+                        }
+                    ],
+                },
+                {
+                    "name": "Deep",
+                    "source": "MTF",
+                    "raceName": "Gnome",
+                    "raceSource": "PHB",
+                    "page": 113,
+                    "ability": [{"dex": 1}],
+                    "entries": [
+                        {
+                            "name": "Stone Camouflage",
+                            "type": "entries",
+                            "entries": ["You have advantage on Dexterity (Stealth) checks to hide in rocky terrain."],
                         }
                     ],
                 },
@@ -5037,6 +5067,11 @@ def build_mtf_book_data_root(root: Path) -> Path:
                             "name": "Gith and Their Endless War",
                             "headers": ["Gith Characters"],
                             "ordinal": {"type": "chapter", "identifier": 4},
+                        },
+                        {
+                            "name": "Halflings and Gnomes",
+                            "headers": ["Deep Gnome Characters"],
+                            "ordinal": {"type": "chapter", "identifier": 5},
                         }
                     ],
                 }
@@ -5156,6 +5191,27 @@ def build_mtf_book_data_root(root: Path) -> Path:
                                                 ["5 ft.", "+2d12 in.", "100 lb.", "\u00d7 (2d6) lb."],
                                             ],
                                         }
+                                    ],
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "type": "section",
+                    "name": "Halflings and Gnomes",
+                    "page": 113,
+                    "entries": [
+                        {
+                            "type": "section",
+                            "name": "Deep Gnome Characters",
+                            "page": 113,
+                            "entries": [
+                                "At the DM's discretion, you can play a deep gnome character. When you choose the subrace of your gnome, you can choose deep gnome, using the following rules to create your character.",
+                                {
+                                    "type": "list",
+                                    "items": [
+                                        "{@race Gnome (Deep)|MTF}",
                                     ],
                                 },
                             ],
@@ -8438,7 +8494,7 @@ def test_mm_book_pages_surface_related_monsters_and_monster_rules(
     )
 
 
-def test_mtf_tiefling_elf_duergar_and_gith_wrappers_are_imported_for_dm_browse(
+def test_mtf_tiefling_elf_duergar_gith_and_deep_gnome_wrappers_are_imported_for_dm_browse(
     client, sign_in, users, app, tmp_path
 ):
     data_root = build_mtf_book_data_root(tmp_path / "dnd5e-source-mtf-ancestry-subraces")
@@ -8470,13 +8526,14 @@ def test_mtf_tiefling_elf_duergar_and_gith_wrappers_are_imported_for_dm_browse(
             )
         }
 
-    assert result.imported_count == 4
-    assert result.imported_by_type == {"book": 4}
+    assert result.imported_count == 5
+    assert result.imported_by_type == {"book": 5}
     assert list(book_entries) == [
         "Tiefling Subraces",
         "Elf Subraces",
         "Duergar Characters",
         "Gith Characters",
+        "Deep Gnome Characters",
     ]
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
@@ -8492,6 +8549,9 @@ def test_mtf_tiefling_elf_duergar_and_gith_wrappers_are_imported_for_dm_browse(
     gith_entry_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Gith Characters'].slug}"
     )
+    deep_gnome_entry_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Deep Gnome Characters'].slug}"
+    )
 
     assert source_response.status_code == 200
     source_body = source_response.get_data(as_text=True)
@@ -8500,20 +8560,24 @@ def test_mtf_tiefling_elf_duergar_and_gith_wrappers_are_imported_for_dm_browse(
     assert "Elf Subraces" in source_body
     assert "Duergar Characters" in source_body
     assert "Gith Characters" in source_body
+    assert "Deep Gnome Characters" in source_body
     assert source_body.index("Tiefling Subraces") < source_body.index("Elf Subraces")
     assert source_body.index("Elf Subraces") < source_body.index("Duergar Characters")
     assert source_body.index("Duergar Characters") < source_body.index("Gith Characters")
+    assert source_body.index("Gith Characters") < source_body.index("Deep Gnome Characters")
 
     assert category_response.status_code == 200
     category_body = category_response.get_data(as_text=True)
-    assert "Showing all 4 book chapters available to you in this source." in category_body
+    assert "Showing all 5 book chapters available to you in this source." in category_body
     assert "Tiefling Subraces" in category_body
     assert "Elf Subraces" in category_body
     assert "Duergar Characters" in category_body
     assert "Gith Characters" in category_body
+    assert "Deep Gnome Characters" in category_body
     assert category_body.index("Tiefling Subraces") < category_body.index("Elf Subraces")
     assert category_body.index("Elf Subraces") < category_body.index("Duergar Characters")
     assert category_body.index("Duergar Characters") < category_body.index("Gith Characters")
+    assert category_body.index("Gith Characters") < category_body.index("Deep Gnome Characters")
 
     assert tiefling_entry_response.status_code == 200
     tiefling_entry_body = tiefling_entry_response.get_data(as_text=True)
@@ -8548,6 +8612,13 @@ def test_mtf_tiefling_elf_duergar_and_gith_wrappers_are_imported_for_dm_browse(
     assert "Gith (Githyanki)" in gith_entry_body
     assert "Gith (Githzerai)" in gith_entry_body
     assert "Gith Random Height and Weight" in gith_entry_body
+
+    assert deep_gnome_entry_response.status_code == 200
+    deep_gnome_entry_body = deep_gnome_entry_response.get_data(as_text=True)
+    assert "Chapter 5" in deep_gnome_entry_body
+    assert "Halflings and Gnomes" in deep_gnome_entry_body
+    assert "At the DM&#x27;s discretion" in deep_gnome_entry_body
+    assert "Gnome (Deep)" in deep_gnome_entry_body
 
 
 def test_dmg_book_chapters_surface_related_imported_entities(client, sign_in, users, app, tmp_path):
