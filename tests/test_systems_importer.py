@@ -5050,7 +5050,7 @@ def build_mtf_book_data_root(root: Path) -> Path:
                     "contents": [
                         {
                             "name": "The Blood War",
-                            "headers": ["Tiefling Subraces"],
+                            "headers": ["Tiefling Subraces", "Demonic Boons"],
                             "ordinal": {"type": "chapter", "identifier": 1},
                         },
                         {
@@ -5108,7 +5108,30 @@ def build_mtf_book_data_root(root: Path) -> Path:
                                     ],
                                 },
                             ],
-                        }
+                        },
+                        {
+                            "type": "section",
+                            "name": "Demonic Boons",
+                            "page": 30,
+                            "entries": [
+                                "Wicked folk who seek power from demons are scattered across the multiverse.",
+                                "The following entries outline boons that a DM can grant to monsters and NPCs dedicated to a particular demon lord.",
+                                {
+                                    "type": "list",
+                                    "items": [
+                                        "{@boon Demonic Boon of Baphomet}",
+                                        "{@boon Demonic Boon of Demogorgon}",
+                                        "{@boon Demonic Boon of Fraz-Urb'luu}",
+                                        "{@boon Demonic Boon of Graz'zt}",
+                                        "{@boon Demonic Boon of Juiblex}",
+                                        "{@boon Demonic Boon of Orcus}",
+                                        "{@boon Demonic Boon of Yeenoghu}",
+                                        "{@boon Demonic Boon of Zuggtmoy}",
+                                    ],
+                                },
+                                "Boons from demons are fickle gifts that remain only as long as the demon is pleased.",
+                            ],
+                        },
                     ],
                 },
                 {
@@ -8494,7 +8517,7 @@ def test_mm_book_pages_surface_related_monsters_and_monster_rules(
     )
 
 
-def test_mtf_tiefling_elf_duergar_gith_and_deep_gnome_wrappers_are_imported_for_dm_browse(
+def test_mtf_tiefling_demonic_boons_elf_duergar_gith_and_deep_gnome_pages_are_imported_for_dm_browse(
     client, sign_in, users, app, tmp_path
 ):
     data_root = build_mtf_book_data_root(tmp_path / "dnd5e-source-mtf-ancestry-subraces")
@@ -8526,10 +8549,11 @@ def test_mtf_tiefling_elf_duergar_gith_and_deep_gnome_wrappers_are_imported_for_
             )
         }
 
-    assert result.imported_count == 5
-    assert result.imported_by_type == {"book": 5}
+    assert result.imported_count == 6
+    assert result.imported_by_type == {"book": 6}
     assert list(book_entries) == [
         "Tiefling Subraces",
+        "Demonic Boons",
         "Elf Subraces",
         "Duergar Characters",
         "Gith Characters",
@@ -8541,6 +8565,9 @@ def test_mtf_tiefling_elf_duergar_gith_and_deep_gnome_wrappers_are_imported_for_
     category_response = client.get("/campaigns/linden-pass/systems/sources/MTF/types/book")
     tiefling_entry_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Tiefling Subraces'].slug}"
+    )
+    demonic_boons_entry_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Demonic Boons'].slug}"
     )
     elf_entry_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Elf Subraces'].slug}")
     duergar_entry_response = client.get(
@@ -8557,24 +8584,28 @@ def test_mtf_tiefling_elf_duergar_gith_and_deep_gnome_wrappers_are_imported_for_
     source_body = source_response.get_data(as_text=True)
     assert "Book Chapters" in source_body
     assert "Tiefling Subraces" in source_body
+    assert "Demonic Boons" in source_body
     assert "Elf Subraces" in source_body
     assert "Duergar Characters" in source_body
     assert "Gith Characters" in source_body
     assert "Deep Gnome Characters" in source_body
-    assert source_body.index("Tiefling Subraces") < source_body.index("Elf Subraces")
+    assert source_body.index("Tiefling Subraces") < source_body.index("Demonic Boons")
+    assert source_body.index("Demonic Boons") < source_body.index("Elf Subraces")
     assert source_body.index("Elf Subraces") < source_body.index("Duergar Characters")
     assert source_body.index("Duergar Characters") < source_body.index("Gith Characters")
     assert source_body.index("Gith Characters") < source_body.index("Deep Gnome Characters")
 
     assert category_response.status_code == 200
     category_body = category_response.get_data(as_text=True)
-    assert "Showing all 5 book chapters available to you in this source." in category_body
+    assert "Showing all 6 book chapters available to you in this source." in category_body
     assert "Tiefling Subraces" in category_body
+    assert "Demonic Boons" in category_body
     assert "Elf Subraces" in category_body
     assert "Duergar Characters" in category_body
     assert "Gith Characters" in category_body
     assert "Deep Gnome Characters" in category_body
-    assert category_body.index("Tiefling Subraces") < category_body.index("Elf Subraces")
+    assert category_body.index("Tiefling Subraces") < category_body.index("Demonic Boons")
+    assert category_body.index("Demonic Boons") < category_body.index("Elf Subraces")
     assert category_body.index("Elf Subraces") < category_body.index("Duergar Characters")
     assert category_body.index("Duergar Characters") < category_body.index("Gith Characters")
     assert category_body.index("Gith Characters") < category_body.index("Deep Gnome Characters")
@@ -8587,6 +8618,15 @@ def test_mtf_tiefling_elf_duergar_gith_and_deep_gnome_wrappers_are_imported_for_
     assert "Tiefling (Asmodeus)" in tiefling_entry_body
     assert "Tiefling (Mephistopheles)" in tiefling_entry_body
     assert "Tiefling (Zariel)" in tiefling_entry_body
+
+    assert demonic_boons_entry_response.status_code == 200
+    demonic_boons_entry_body = demonic_boons_entry_response.get_data(as_text=True)
+    assert "Chapter 1" in demonic_boons_entry_body
+    assert "The Blood War" in demonic_boons_entry_body
+    assert "Wicked folk who seek power from demons are scattered across the multiverse." in demonic_boons_entry_body
+    assert "Demonic Boon of Baphomet" in demonic_boons_entry_body
+    assert "Demonic Boon of Orcus" in demonic_boons_entry_body
+    assert "Demonic Boon of Zuggtmoy" in demonic_boons_entry_body
 
     assert elf_entry_response.status_code == 200
     elf_entry_body = elf_entry_response.get_data(as_text=True)
