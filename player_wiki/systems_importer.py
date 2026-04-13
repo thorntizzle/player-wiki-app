@@ -246,10 +246,11 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         "Shared Campaigns",
         ("Shared Campaigns", "Variant Rules"),
     ),
-    # TCE now ships the front-matter reference page plus the class-option
+    # TCE now ships the front-matter reference page, the class-option
     # wrapper pages that sit directly on top of already-imported class,
-    # subclass, subclass-feature, and optional-feature content. The broader
-    # DM-tools slices stay queued for later passes.
+    # subclass, subclass-feature, and optional-feature content, plus the
+    # first Dungeon Master's Tools reference page. The remaining broader
+    # DM-tools and miscellany slices stay queued for later passes.
     "TCE": (
         ("Using This Book", "Ten Rules to Remember"),
         ("Character Options", "Customizing Your Origin"),
@@ -268,6 +269,7 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         ("Character Options", "Sorcerer"),
         ("Character Options", "Warlock"),
         ("Character Options", "Wizard"),
+        ("Dungeon Master's Tools", "Sidekicks"),
     ),
 }
 VGM_CHARACTER_RACE_WRAPPER_DEFINITIONS = (

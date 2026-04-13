@@ -4177,6 +4177,7 @@ TCE_RULES_REFERENCE_TEST_TITLES = (
     "Customizing Your Origin",
     "Changing a Skill",
     "Changing Your Subclass",
+    "Sidekicks",
 ) + TCE_CLASS_WRAPPER_TEST_TITLES
 
 
@@ -4732,6 +4733,13 @@ def build_tce_book_data_root(root: Path) -> Path:
                                 *TCE_CLASS_WRAPPER_TEST_TITLES,
                             ],
                             "ordinal": {"type": "chapter", "identifier": 1},
+                        },
+                        {
+                            "name": "Dungeon Master's Tools",
+                            "headers": [
+                                "Sidekicks",
+                            ],
+                            "ordinal": {"type": "chapter", "identifier": 4},
                         }
                     ],
                 }
@@ -5342,6 +5350,59 @@ def build_tce_book_data_root(root: Path) -> Path:
                             "page": 75,
                             "entries": ["Wizard options in this chapter expand traditions and optional class features."],
                         },
+                    ],
+                },
+                {
+                    "type": "section",
+                    "name": "Dungeon Master's Tools",
+                    "page": 139,
+                    "entries": [
+                        {
+                            "type": "section",
+                            "name": "Sidekicks",
+                            "page": 142,
+                            "entries": [
+                                {
+                                    "type": "quote",
+                                    "entries": [
+                                        "A sidekick-in-training could learn a few tricks from this section."
+                                    ],
+                                },
+                                "These rules let a low-CR ally join the party as a special NPC sidekick.",
+                                {
+                                    "type": "entries",
+                                    "name": "Creating a Sidekick",
+                                    "page": 142,
+                                    "entries": [
+                                        "Choose a creature with a modest challenge rating and a reason to adventure with the group."
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Gaining a Sidekick Class",
+                                    "page": 143,
+                                    "entries": [
+                                        "Each sidekick follows one simple class: Expert, Spellcaster, or Warrior.",
+                                        {
+                                            "type": "entries",
+                                            "name": "Starting Level",
+                                            "page": 143,
+                                            "entries": [
+                                                "A sidekick usually begins close to the party's current level."
+                                            ],
+                                        },
+                                        {
+                                            "type": "entries",
+                                            "name": "Leveling Up a Sidekick",
+                                            "page": 143,
+                                            "entries": [
+                                                "When the group advances, the sidekick can gain levels as well."
+                                            ],
+                                        },
+                                    ],
+                                },
+                            ],
+                        }
                     ],
                 }
             ]
@@ -8089,6 +8150,9 @@ def test_tce_book_entries_are_imported_for_player_browse(
     changing_subclass_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Changing Your Subclass'].slug}"
     )
+    sidekicks_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Sidekicks'].slug}"
+    )
     artificer_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Artificer'].slug}"
     )
@@ -8103,6 +8167,7 @@ def test_tce_book_entries_are_imported_for_player_browse(
     assert "Customizing Your Origin" in source_body
     assert "Changing a Skill" in source_body
     assert "Changing Your Subclass" in source_body
+    assert "Sidekicks" in source_body
     assert "Artificer" in source_body
     assert "Fighter" in source_body
     assert "Wizard" in source_body
@@ -8117,6 +8182,7 @@ def test_tce_book_entries_are_imported_for_player_browse(
     assert "Customizing Your Origin" in category_body
     assert "Changing a Skill" in category_body
     assert "Changing Your Subclass" in category_body
+    assert "Sidekicks" in category_body
     assert "Artificer" in category_body
     assert "Fighter" in category_body
     assert "Wizard" in category_body
@@ -8152,6 +8218,17 @@ def test_tce_book_entries_are_imported_for_player_browse(
     assert "Character Options" in changing_subclass_body
     assert "Changing Your Subclass" in changing_subclass_body
     assert "replace your subclass when you gain a new subclass feature." in changing_subclass_body
+
+    assert sidekicks_response.status_code == 200
+    sidekicks_body = sidekicks_response.get_data(as_text=True)
+    assert "Chapter 4" in sidekicks_body
+    assert "Dungeon Master's Tools" in sidekicks_body
+    assert "Sidekicks" in sidekicks_body
+    assert "Creating a Sidekick" in sidekicks_body
+    assert "Gaining a Sidekick Class" in sidekicks_body
+    assert "Expert, Spellcaster, or Warrior" in sidekicks_body
+    assert 'href="#creating-a-sidekick"' in sidekicks_body
+    assert 'id="gaining-a-sidekick-class"' in sidekicks_body
 
     assert artificer_response.status_code == 200
     artificer_body = artificer_response.get_data(as_text=True)
@@ -8196,7 +8273,7 @@ def test_tce_book_entries_follow_source_visibility(client, sign_in, users, app, 
     player_source_response = client.get("/campaigns/linden-pass/systems/sources/TCE")
     player_category_response = client.get("/campaigns/linden-pass/systems/sources/TCE/types/book")
     player_entry_response = client.get(
-        f"/campaigns/linden-pass/systems/entries/{book_entries['Changing Your Subclass'].slug}"
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Sidekicks'].slug}"
     )
 
     assert player_source_response.status_code == 404
@@ -8209,7 +8286,7 @@ def test_tce_book_entries_follow_source_visibility(client, sign_in, users, app, 
     dm_source_response = client.get("/campaigns/linden-pass/systems/sources/TCE")
     dm_category_response = client.get("/campaigns/linden-pass/systems/sources/TCE/types/book")
     dm_entry_response = client.get(
-        f"/campaigns/linden-pass/systems/entries/{book_entries['Changing Your Subclass'].slug}"
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Sidekicks'].slug}"
     )
 
     assert dm_source_response.status_code == 200
@@ -8220,13 +8297,14 @@ def test_tce_book_entries_follow_source_visibility(client, sign_in, users, app, 
     assert "Customizing Your Origin" in dm_category_body
     assert "Changing a Skill" in dm_category_body
     assert "Changing Your Subclass" in dm_category_body
+    assert "Sidekicks" in dm_category_body
     assert dm_entry_response.status_code == 200
     dm_entry_body = dm_entry_response.get_data(as_text=True)
-    assert "Character Options" in dm_entry_body
-    assert "Changing Your Subclass" in dm_entry_body
+    assert "Dungeon Master's Tools" in dm_entry_body
+    assert "Sidekicks" in dm_entry_body
 
 
-def test_tce_book_slice_includes_changing_your_subclass_wrapper_for_now(app, tmp_path):
+def test_tce_book_slice_includes_sidekicks_page_for_now(app, tmp_path):
     data_root = build_tce_book_data_root(tmp_path / "dnd5e-source-tce-book-boundary")
 
     with app.app_context():
