@@ -5414,6 +5414,97 @@ def build_egw_heroic_chronicle_book_data_root(root: Path) -> Path:
     return data_root
 
 
+def build_egw_dunamis_book_data_root(root: Path) -> Path:
+    data_root = build_test_data_root(root)
+    write_json(
+        root / "data/books.json",
+        {
+            "book": [
+                {
+                    "name": "Explorer's Guide to Wildemount",
+                    "id": "EGW",
+                    "source": "EGW",
+                    "contents": [
+                        {
+                            "name": "Character Options",
+                            "headers": ["Dunamis and Dunamancy", "Heroic Chronicle"],
+                            "ordinal": {"type": "chapter", "identifier": 4},
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    write_json(
+        root / "data/book/book-egw.json",
+        {
+            "data": [
+                {
+                    "type": "section",
+                    "name": "Character Options",
+                    "page": 168,
+                    "entries": [
+                        {
+                            "type": "section",
+                            "name": "Subclasses",
+                            "page": 182,
+                            "entries": [
+                                {
+                                    "type": "entries",
+                                    "name": "Dunamis and Dunamancy",
+                                    "page": 182,
+                                    "entries": [
+                                        (
+                                            "Dunamis studies possibility, probability, and the unseen force "
+                                            "that can bend time and gravity."
+                                        ),
+                                        {
+                                            "type": "entries",
+                                            "name": "Beyond the Kryn Dynasty",
+                                            "page": 182,
+                                            "entries": [
+                                                (
+                                                    "Although the Kryn Dynasty is the best-known home of "
+                                                    "dunamancy, its techniques can spread through study, "
+                                                    "espionage, or magical experimentation."
+                                                )
+                                            ],
+                                        },
+                                        {
+                                            "type": "entries",
+                                            "name": "Dunamis as a Martial Focus",
+                                            "page": 183,
+                                            "entries": [
+                                                (
+                                                    "Warriors and mages alike can turn dunamis toward "
+                                                    "mobility, battlefield control, and momentary glimpses of "
+                                                    "alternate futures."
+                                                )
+                                            ],
+                                        },
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Heroic Chronicle",
+                                    "page": 196,
+                                    "entries": [
+                                        (
+                                            "The heroic chronicle system lets players and Dungeon Masters "
+                                            "build a backstory rooted in Wildemount."
+                                        )
+                                    ],
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    return data_root
+
+
 def build_tce_book_data_root(root: Path) -> Path:
     data_root = build_test_data_root(root)
     write_json(
@@ -9046,6 +9137,78 @@ def test_egw_heroic_chronicle_page_is_imported_for_player_browse(
     assert 'id="backstory"' in detail_body
     assert 'href="#prophecy"' in detail_body
     assert 'id="prophecy"' in detail_body
+
+
+def test_egw_dunamis_page_is_imported_for_player_browse_and_keeps_book_order(
+    client, sign_in, users, app, tmp_path
+):
+    data_root = build_egw_dunamis_book_data_root(tmp_path / "dnd5e-source-egw-dunamis")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        result = importer.import_source("EGW", entry_types=["book"])
+
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="EGW",
+            is_enabled=True,
+            default_visibility="players",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in service.list_entries_for_campaign_source(
+                "linden-pass",
+                "EGW",
+                entry_type="book",
+                limit=None,
+            )
+        }
+
+    assert result.imported_count == 2
+    assert result.imported_by_type == {"book": 2}
+    assert list(book_entries) == ["Dunamis and Dunamancy", "Heroic Chronicle"]
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    source_response = client.get("/campaigns/linden-pass/systems/sources/EGW")
+    category_response = client.get("/campaigns/linden-pass/systems/sources/EGW/types/book")
+    detail_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Dunamis and Dunamancy'].slug}"
+    )
+
+    assert source_response.status_code == 200
+    source_body = source_response.get_data(as_text=True)
+    assert "Book Chapters" in source_body
+    assert source_body.index("Dunamis and Dunamancy") < source_body.index("Heroic Chronicle")
+
+    assert category_response.status_code == 200
+    category_body = category_response.get_data(as_text=True)
+    assert "Showing all 2 book chapters available to you in this source." in category_body
+    assert category_body.index("Dunamis and Dunamancy") < category_body.index("Heroic Chronicle")
+
+    assert detail_response.status_code == 200
+    detail_body = detail_response.get_data(as_text=True)
+    assert "Chapter 4" in detail_body
+    assert "Character Options" in detail_body
+    assert "Dunamis and Dunamancy" in detail_body
+    assert (
+        "Dunamis studies possibility, probability, and the unseen force that can bend time and gravity."
+        in detail_body
+    )
+    assert "Beyond the Kryn Dynasty" in detail_body
+    assert "Dunamis as a Martial Focus" in detail_body
+    assert "Chapter Navigation" in detail_body
+    assert 'href="#beyond-the-kryn-dynasty"' in detail_body
+    assert 'id="beyond-the-kryn-dynasty"' in detail_body
+    assert 'href="#dunamis-as-a-martial-focus"' in detail_body
+    assert 'id="dunamis-as-a-martial-focus"' in detail_body
 
 
 def test_dmg_book_chapters_surface_related_imported_entities(client, sign_in, users, app, tmp_path):
