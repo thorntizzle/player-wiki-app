@@ -3528,6 +3528,8 @@ def create_app() -> Flask:
                 continue
             source_chapter_context_entries.append(candidate)
         related_race_entries = []
+        related_feat_entries = []
+        related_item_entries = []
         related_monster_entries = []
         book_source_context_sections = []
         book_source_context_note = ""
@@ -3537,6 +3539,16 @@ def create_app() -> Flask:
             related_race_entries = [
                 candidate
                 for candidate in systems_service.build_related_races_for_entry(campaign_slug, entry)
+                if can_access_campaign_systems_entry(campaign_slug, candidate.slug)
+            ]
+            related_feat_entries = [
+                candidate
+                for candidate in systems_service.build_related_feats_for_entry(campaign_slug, entry)
+                if can_access_campaign_systems_entry(campaign_slug, candidate.slug)
+            ]
+            related_item_entries = [
+                candidate
+                for candidate in systems_service.build_related_items_for_entry(campaign_slug, entry)
                 if can_access_campaign_systems_entry(campaign_slug, candidate.slug)
             ]
             related_monster_entries = [
@@ -3624,6 +3636,8 @@ def create_app() -> Flask:
             "related_rule_entries": related_rule_entries,
             "source_chapter_context_entries": source_chapter_context_entries,
             "related_race_entries": related_race_entries,
+            "related_feat_entries": related_feat_entries,
+            "related_item_entries": related_item_entries,
             "related_monster_entries": related_monster_entries,
             "book_source_context_sections": book_source_context_sections,
             "book_source_context_note": book_source_context_note,

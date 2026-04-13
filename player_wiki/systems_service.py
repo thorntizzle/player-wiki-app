@@ -326,6 +326,72 @@ VGM_CHARACTER_RACE_WRAPPER_RACE_MATCHERS = {
         "base_race_keys": (),
     },
 }
+MTF_ANCESTRY_WRAPPER_RACE_MATCHERS = {
+    normalize_lookup("Tiefling Subraces"): {
+        "title_keys": (),
+        "base_race_keys": _normalized_nonempty_tuple("Tiefling"),
+    },
+    normalize_lookup("Elf Subraces"): {
+        "title_keys": (),
+        "base_race_keys": _normalized_nonempty_tuple("Elf"),
+    },
+    normalize_lookup("Duergar Characters"): {
+        "title_keys": _normalized_nonempty_tuple("Dwarf (Duergar)"),
+        "base_race_keys": _normalized_nonempty_tuple("Dwarf"),
+    },
+    normalize_lookup("Gith Characters"): {
+        "title_keys": _normalized_nonempty_tuple("Gith"),
+        "base_race_keys": _normalized_nonempty_tuple("Gith"),
+    },
+    normalize_lookup("Deep Gnome Characters"): {
+        "title_keys": _normalized_nonempty_tuple("Gnome (Deep)"),
+        "base_race_keys": _normalized_nonempty_tuple("Gnome"),
+    },
+}
+MTF_BOOK_WRAPPER_MONSTER_TITLE_KEYS = {
+    normalize_lookup("Diabolical Cults"): _normalized_nonempty_tuple("Geryon", "Zariel"),
+    normalize_lookup("Demonic Boons"): _normalized_nonempty_tuple(
+        "Baphomet",
+        "Demogorgon",
+        "Fraz-Urb'luu",
+        "Graz'zt",
+        "Juiblex",
+        "Orcus",
+        "Yeenoghu",
+        "Zuggtmoy",
+    ),
+    normalize_lookup("Elf Subraces"): _normalized_nonempty_tuple(
+        "Autumn Eladrin",
+        "Spring Eladrin",
+        "Summer Eladrin",
+        "Winter Eladrin",
+    ),
+    normalize_lookup("Duergar Characters"): _normalized_nonempty_tuple(
+        "Duergar Despot",
+        "Duergar Hammerer",
+        "Duergar Kavalrachni",
+        "Duergar Mind Master",
+        "Duergar Screamer",
+        "Duergar Soulblade",
+        "Duergar Stone Guard",
+        "Duergar Warlord",
+        "Duergar Xarrorn",
+    ),
+    normalize_lookup("Gith Characters"): _normalized_nonempty_tuple(
+        "Githyanki Gish",
+        "Githyanki Kith'rak",
+        "Githyanki Supreme Commander",
+        "Githzerai Anarch",
+        "Githzerai Enlightened",
+    ),
+}
+MTF_BOOK_WRAPPER_FEAT_TITLE_KEYS = {
+    normalize_lookup("Deep Gnome Characters"): _normalized_nonempty_tuple("Svirfneblin Magic"),
+}
+MTF_BOOK_WRAPPER_ITEM_TITLE_KEYS = {
+    normalize_lookup("Elf Subraces"): _normalized_nonempty_tuple("Elven Trinket"),
+    normalize_lookup("Gith Characters"): _normalized_nonempty_tuple("Greater Silver Sword", "Silver Sword"),
+}
 
 SCAG_RACE_WRAPPER_TITLE_BY_KEY = {
     normalize_lookup("Dwarf"): "Dwarves",
@@ -1003,41 +1069,53 @@ class SystemsService:
     ) -> list[SystemsEntryRecord]:
         if entry.entry_type != "book":
             return []
-        if str(entry.source_id or "").strip().upper() != "VGM":
-            return []
-        matcher = VGM_MONSTER_LORE_WRAPPER_MONSTER_MATCHERS.get(normalize_lookup(entry.title))
-        if not matcher:
-            return []
+        normalized_source_id = str(entry.source_id or "").strip().upper()
+        if normalized_source_id == "VGM":
+            matcher = VGM_MONSTER_LORE_WRAPPER_MONSTER_MATCHERS.get(normalize_lookup(entry.title))
+            if not matcher:
+                return []
 
-        def build_value() -> list[SystemsEntryRecord]:
-            related_entries: list[SystemsEntryRecord] = []
-            seen_entry_keys: set[str] = set()
-            for candidate in self.list_enabled_entries_for_campaign(
-                campaign_slug,
-                entry_type="monster",
-                limit=None,
-            ):
-                if str(candidate.source_id or "").strip().upper() not in {"MM", "VGM"}:
-                    continue
-                if candidate.entry_key in seen_entry_keys:
-                    continue
-                if not self._monster_entry_matches_family(candidate, matcher):
-                    continue
-                seen_entry_keys.add(candidate.entry_key)
-                related_entries.append(candidate)
-            return sorted(
-                related_entries,
-                key=lambda candidate: (
-                    *self._source_catalog_sort_key(candidate.source_id),
-                    self._coerce_int(candidate.source_page, default=10_000),
-                    candidate.title.lower(),
-                    candidate.id,
-                ),
+            def build_value() -> list[SystemsEntryRecord]:
+                related_entries: list[SystemsEntryRecord] = []
+                seen_entry_keys: set[str] = set()
+                for candidate in self.list_enabled_entries_for_campaign(
+                    campaign_slug,
+                    entry_type="monster",
+                    limit=None,
+                ):
+                    if str(candidate.source_id or "").strip().upper() not in {"MM", "VGM"}:
+                        continue
+                    if candidate.entry_key in seen_entry_keys:
+                        continue
+                    if not self._monster_entry_matches_family(candidate, matcher):
+                        continue
+                    seen_entry_keys.add(candidate.entry_key)
+                    related_entries.append(candidate)
+                return sorted(
+                    related_entries,
+                    key=lambda candidate: (
+                        *self._source_catalog_sort_key(candidate.source_id),
+                        self._coerce_int(candidate.source_page, default=10_000),
+                        candidate.title.lower(),
+                        candidate.id,
+                    ),
+                )
+
+            return _systems_service_cache_get(
+                ("related_monsters_for_entry", campaign_slug, entry.entry_key),
+                build_value,
             )
 
-        return _systems_service_cache_get(
-            ("related_monsters_for_entry", campaign_slug, entry.entry_key),
-            build_value,
+        title_keys = MTF_BOOK_WRAPPER_MONSTER_TITLE_KEYS.get(normalize_lookup(entry.title))
+        if normalized_source_id != "MTF" or not title_keys:
+            return []
+        return self._build_curated_related_entries_for_entry(
+            campaign_slug,
+            entry=entry,
+            entry_type="monster",
+            source_ids=("MTF",),
+            title_keys=title_keys,
+            cache_prefix="related_monsters_for_entry",
         )
 
     def build_related_races_for_entry(
@@ -1047,9 +1125,13 @@ class SystemsService:
     ) -> list[SystemsEntryRecord]:
         if entry.entry_type != "book":
             return []
-        if str(entry.source_id or "").strip().upper() != "VGM":
-            return []
-        matcher = VGM_CHARACTER_RACE_WRAPPER_RACE_MATCHERS.get(normalize_lookup(entry.title))
+        normalized_source_id = str(entry.source_id or "").strip().upper()
+        if normalized_source_id == "VGM":
+            matcher = VGM_CHARACTER_RACE_WRAPPER_RACE_MATCHERS.get(normalize_lookup(entry.title))
+        elif normalized_source_id == "MTF":
+            matcher = MTF_ANCESTRY_WRAPPER_RACE_MATCHERS.get(normalize_lookup(entry.title))
+        else:
+            matcher = None
         if not matcher:
             return []
 
@@ -1061,7 +1143,7 @@ class SystemsService:
                 entry_type="race",
                 limit=None,
             ):
-                if str(candidate.source_id or "").strip().upper() != "VGM":
+                if str(candidate.source_id or "").strip().upper() != normalized_source_id:
                     continue
                 if candidate.entry_key in seen_entry_keys:
                     continue
@@ -1081,6 +1163,48 @@ class SystemsService:
         return _systems_service_cache_get(
             ("related_races_for_entry", campaign_slug, entry.entry_key),
             build_value,
+        )
+
+    def build_related_feats_for_entry(
+        self,
+        campaign_slug: str,
+        entry: SystemsEntryRecord,
+    ) -> list[SystemsEntryRecord]:
+        if entry.entry_type != "book":
+            return []
+        if str(entry.source_id or "").strip().upper() != "MTF":
+            return []
+        title_keys = MTF_BOOK_WRAPPER_FEAT_TITLE_KEYS.get(normalize_lookup(entry.title))
+        if not title_keys:
+            return []
+        return self._build_curated_related_entries_for_entry(
+            campaign_slug,
+            entry=entry,
+            entry_type="feat",
+            source_ids=("MTF",),
+            title_keys=title_keys,
+            cache_prefix="related_feats_for_entry",
+        )
+
+    def build_related_items_for_entry(
+        self,
+        campaign_slug: str,
+        entry: SystemsEntryRecord,
+    ) -> list[SystemsEntryRecord]:
+        if entry.entry_type != "book":
+            return []
+        if str(entry.source_id or "").strip().upper() != "MTF":
+            return []
+        title_keys = MTF_BOOK_WRAPPER_ITEM_TITLE_KEYS.get(normalize_lookup(entry.title))
+        if not title_keys:
+            return []
+        return self._build_curated_related_entries_for_entry(
+            campaign_slug,
+            entry=entry,
+            entry_type="item",
+            source_ids=("MTF",),
+            title_keys=title_keys,
+            cache_prefix="related_items_for_entry",
         )
 
     def build_source_context_sections_for_entry(
@@ -1283,6 +1407,55 @@ class SystemsService:
             seen_entry_keys.add(entry.entry_key)
             related_entries.append(entry)
         return related_entries
+
+    def _build_curated_related_entries_for_entry(
+        self,
+        campaign_slug: str,
+        *,
+        entry: SystemsEntryRecord,
+        entry_type: str,
+        source_ids: tuple[str, ...],
+        title_keys: tuple[str, ...],
+        cache_prefix: str,
+    ) -> list[SystemsEntryRecord]:
+        normalized_source_ids = {
+            str(source_id or "").strip().upper()
+            for source_id in source_ids
+            if str(source_id or "").strip()
+        }
+        if not normalized_source_ids or not title_keys:
+            return []
+
+        def build_value() -> list[SystemsEntryRecord]:
+            related_entries: list[SystemsEntryRecord] = []
+            seen_entry_keys: set[str] = set()
+            for candidate in self.list_enabled_entries_for_campaign(
+                campaign_slug,
+                entry_type=entry_type,
+                limit=None,
+            ):
+                if str(candidate.source_id or "").strip().upper() not in normalized_source_ids:
+                    continue
+                if candidate.entry_key in seen_entry_keys:
+                    continue
+                if normalize_lookup(candidate.title) not in title_keys:
+                    continue
+                seen_entry_keys.add(candidate.entry_key)
+                related_entries.append(candidate)
+            return sorted(
+                related_entries,
+                key=lambda candidate: (
+                    *self._source_catalog_sort_key(candidate.source_id),
+                    self._coerce_int(candidate.source_page, default=10_000),
+                    candidate.title.lower(),
+                    candidate.id,
+                ),
+            )
+
+        return _systems_service_cache_get(
+            (cache_prefix, campaign_slug, entry.entry_key),
+            build_value,
+        )
 
     def _monster_entry_matches_family(
         self,
