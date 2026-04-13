@@ -5050,7 +5050,12 @@ def build_mtf_book_data_root(root: Path) -> Path:
                     "contents": [
                         {
                             "name": "The Blood War",
-                            "headers": ["Tiefling Subraces", "Demonic Boons"],
+                            "headers": [
+                                "Diabolical Cults",
+                                "Tiefling Subraces",
+                                "Demonic Boons",
+                                "Fiendish Cults",
+                            ],
                             "ordinal": {"type": "chapter", "identifier": 1},
                         },
                         {
@@ -5087,6 +5092,31 @@ def build_mtf_book_data_root(root: Path) -> Path:
                     "name": "The Blood War",
                     "page": 11,
                     "entries": [
+                        {
+                            "type": "section",
+                            "name": "Diabolical Cults",
+                            "page": 18,
+                            "entries": [
+                                "Cults dedicated to infernal beings are the foes of adventurers throughout the D&D multiverse.",
+                                "Every archdevil attracts a certain type of person based on the gifts the devil offers.",
+                                "Each description also includes a list of signature spells associated with the cult.",
+                                {
+                                    "type": "entries",
+                                    "name": "Cult of Glasya",
+                                    "page": 19,
+                                    "entries": [
+                                        "Followers of Glasya delight in secrets, smuggling, and elegant cruelty.",
+                                        {
+                                            "type": "list",
+                                            "items": [
+                                                "Typical Cultist: {@creature Spy|MM}",
+                                                "Signature Spells: disguise self, invisibility",
+                                            ],
+                                        },
+                                    ],
+                                },
+                            ],
+                        },
                         {
                             "type": "section",
                             "name": "Tiefling Subraces",
@@ -5130,6 +5160,31 @@ def build_mtf_book_data_root(root: Path) -> Path:
                                     ],
                                 },
                                 "Boons from demons are fickle gifts that remain only as long as the demon is pleased.",
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Fiendish Cults",
+                            "page": 34,
+                            "entries": [
+                                "The following tables can be used to generate random cults dedicated to fiends.",
+                                {
+                                    "type": "entries",
+                                    "name": "Cult Goals",
+                                    "page": 34,
+                                    "entries": [
+                                        {
+                                            "type": "table",
+                                            "colLabels": ["d4", "Goal"],
+                                            "rows": [
+                                                ["1", "Free a bound fiend."],
+                                                ["2", "Spread infernal corruption through a city."],
+                                                ["3", "Recover a relic tied to the Lower Planes."],
+                                                ["4", "Open a gate to the Abyss or the Nine Hells."],
+                                            ],
+                                        }
+                                    ],
+                                },
                             ],
                         },
                     ],
@@ -8517,10 +8572,10 @@ def test_mm_book_pages_surface_related_monsters_and_monster_rules(
     )
 
 
-def test_mtf_tiefling_demonic_boons_elf_duergar_gith_and_deep_gnome_pages_are_imported_for_dm_browse(
+def test_mtf_blood_war_cult_and_ancestry_pages_are_imported_for_dm_browse(
     client, sign_in, users, app, tmp_path
 ):
-    data_root = build_mtf_book_data_root(tmp_path / "dnd5e-source-mtf-ancestry-subraces")
+    data_root = build_mtf_book_data_root(tmp_path / "dnd5e-source-mtf-blood-war-wrappers")
 
     with app.app_context():
         importer = Dnd5eSystemsImporter(
@@ -8549,25 +8604,44 @@ def test_mtf_tiefling_demonic_boons_elf_duergar_gith_and_deep_gnome_pages_are_im
             )
         }
 
-    assert result.imported_count == 6
-    assert result.imported_by_type == {"book": 6}
+    assert result.imported_count == 8
+    assert result.imported_by_type == {"book": 8}
     assert list(book_entries) == [
+        "Diabolical Cults",
         "Tiefling Subraces",
         "Demonic Boons",
+        "Fiendish Cults",
         "Elf Subraces",
         "Duergar Characters",
         "Gith Characters",
         "Deep Gnome Characters",
     ]
 
+    sign_in(users["party"]["email"], users["party"]["password"])
+    player_source_response = client.get("/campaigns/linden-pass/systems/sources/MTF")
+    player_category_response = client.get("/campaigns/linden-pass/systems/sources/MTF/types/book")
+    player_entry_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Diabolical Cults'].slug}"
+    )
+
+    assert player_source_response.status_code == 404
+    assert player_category_response.status_code == 404
+    assert player_entry_response.status_code == 404
+
     sign_in(users["dm"]["email"], users["dm"]["password"])
     source_response = client.get("/campaigns/linden-pass/systems/sources/MTF")
     category_response = client.get("/campaigns/linden-pass/systems/sources/MTF/types/book")
+    diabolical_cults_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Diabolical Cults'].slug}"
+    )
     tiefling_entry_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Tiefling Subraces'].slug}"
     )
     demonic_boons_entry_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Demonic Boons'].slug}"
+    )
+    fiendish_cults_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Fiendish Cults'].slug}"
     )
     elf_entry_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Elf Subraces'].slug}")
     duergar_entry_response = client.get(
@@ -8583,32 +8657,48 @@ def test_mtf_tiefling_demonic_boons_elf_duergar_gith_and_deep_gnome_pages_are_im
     assert source_response.status_code == 200
     source_body = source_response.get_data(as_text=True)
     assert "Book Chapters" in source_body
+    assert "Diabolical Cults" in source_body
     assert "Tiefling Subraces" in source_body
     assert "Demonic Boons" in source_body
+    assert "Fiendish Cults" in source_body
     assert "Elf Subraces" in source_body
     assert "Duergar Characters" in source_body
     assert "Gith Characters" in source_body
     assert "Deep Gnome Characters" in source_body
+    assert source_body.index("Diabolical Cults") < source_body.index("Tiefling Subraces")
     assert source_body.index("Tiefling Subraces") < source_body.index("Demonic Boons")
-    assert source_body.index("Demonic Boons") < source_body.index("Elf Subraces")
+    assert source_body.index("Demonic Boons") < source_body.index("Fiendish Cults")
+    assert source_body.index("Fiendish Cults") < source_body.index("Elf Subraces")
     assert source_body.index("Elf Subraces") < source_body.index("Duergar Characters")
     assert source_body.index("Duergar Characters") < source_body.index("Gith Characters")
     assert source_body.index("Gith Characters") < source_body.index("Deep Gnome Characters")
 
     assert category_response.status_code == 200
     category_body = category_response.get_data(as_text=True)
-    assert "Showing all 6 book chapters available to you in this source." in category_body
+    assert "Showing all 8 book chapters available to you in this source." in category_body
+    assert "Diabolical Cults" in category_body
     assert "Tiefling Subraces" in category_body
     assert "Demonic Boons" in category_body
+    assert "Fiendish Cults" in category_body
     assert "Elf Subraces" in category_body
     assert "Duergar Characters" in category_body
     assert "Gith Characters" in category_body
     assert "Deep Gnome Characters" in category_body
+    assert category_body.index("Diabolical Cults") < category_body.index("Tiefling Subraces")
     assert category_body.index("Tiefling Subraces") < category_body.index("Demonic Boons")
-    assert category_body.index("Demonic Boons") < category_body.index("Elf Subraces")
+    assert category_body.index("Demonic Boons") < category_body.index("Fiendish Cults")
+    assert category_body.index("Fiendish Cults") < category_body.index("Elf Subraces")
     assert category_body.index("Elf Subraces") < category_body.index("Duergar Characters")
     assert category_body.index("Duergar Characters") < category_body.index("Gith Characters")
     assert category_body.index("Gith Characters") < category_body.index("Deep Gnome Characters")
+
+    assert diabolical_cults_response.status_code == 200
+    diabolical_cults_body = diabolical_cults_response.get_data(as_text=True)
+    assert "Chapter 1" in diabolical_cults_body
+    assert "The Blood War" in diabolical_cults_body
+    assert "Cults dedicated to infernal beings are the foes of adventurers throughout the D&amp;D multiverse." in diabolical_cults_body
+    assert "Cult of Glasya" in diabolical_cults_body
+    assert "Typical Cultist: Spy" in diabolical_cults_body
 
     assert tiefling_entry_response.status_code == 200
     tiefling_entry_body = tiefling_entry_response.get_data(as_text=True)
@@ -8627,6 +8717,14 @@ def test_mtf_tiefling_demonic_boons_elf_duergar_gith_and_deep_gnome_pages_are_im
     assert "Demonic Boon of Baphomet" in demonic_boons_entry_body
     assert "Demonic Boon of Orcus" in demonic_boons_entry_body
     assert "Demonic Boon of Zuggtmoy" in demonic_boons_entry_body
+
+    assert fiendish_cults_response.status_code == 200
+    fiendish_cults_body = fiendish_cults_response.get_data(as_text=True)
+    assert "Chapter 1" in fiendish_cults_body
+    assert "The Blood War" in fiendish_cults_body
+    assert "The following tables can be used to generate random cults dedicated to fiends." in fiendish_cults_body
+    assert "Cult Goals" in fiendish_cults_body
+    assert "Open a gate to the Abyss or the Nine Hells." in fiendish_cults_body
 
     assert elf_entry_response.status_code == 200
     elf_entry_body = elf_entry_response.get_data(as_text=True)

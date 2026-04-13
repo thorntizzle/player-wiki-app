@@ -280,12 +280,14 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         ("Dungeon Master's Tools", "Environmental Hazards"),
         ("Dungeon Master's Tools", "Puzzles"),
     ),
-    # Keep the first MTF slice focused on the standout ancestry wrappers plus
-    # Demonic Boons while the broader cult/subsystem follow-up pages stay
-    # queued.
+    # Keep the first MTF slice focused on the standout Blood War cult/ancestry
+    # wrappers plus Demonic Boons while broader elf/monster follow-up pages
+    # stay queued.
     "MTF": (
+        ("The Blood War", "Diabolical Cults"),
         ("The Blood War", "Tiefling Subraces"),
         ("The Blood War", "Demonic Boons"),
+        ("The Blood War", "Fiendish Cults"),
         ("Elves", "Elf Subraces"),
         ("Dwarves and Duergar", "Duergar Characters"),
         ("Gith and Their Endless War", "Gith Characters"),
