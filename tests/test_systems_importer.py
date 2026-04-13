@@ -4150,6 +4150,7 @@ XGE_RULES_REFERENCE_TEST_TITLES = (
     "Traps Revisited",
     "Downtime Revisited",
     "Awarding Magic Items",
+    "Shared Campaigns",
     "Variant Rules",
 )
 
@@ -7025,6 +7026,9 @@ def test_xge_book_entries_are_imported_for_player_browse(
     awarding_magic_items_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Awarding Magic Items'].slug}"
     )
+    shared_campaigns_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Shared Campaigns'].slug}"
+    )
     variant_rules_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Variant Rules'].slug}"
     )
@@ -7121,6 +7125,17 @@ def test_xge_book_entries_are_imported_for_player_browse(
     assert "Dungeon Master&#39;s Tools" in awarding_magic_items_body
     assert "Magic item awards can be paced by tone, treasure, and campaign expectations." in awarding_magic_items_body
 
+    assert shared_campaigns_response.status_code == 200
+    shared_campaigns_body = shared_campaigns_response.get_data(as_text=True)
+    assert "Appendix A" in shared_campaigns_body
+    assert "Code of Conduct" in shared_campaigns_body
+    assert "Designing Adventures" in shared_campaigns_body
+    assert "Character Creation" in shared_campaigns_body
+    assert "Variant Rules" in shared_campaigns_body
+    assert 'href="#code-of-conduct"' in shared_campaigns_body
+    assert 'href="#character-creation"' in shared_campaigns_body
+    assert 'id="variant-rules"' in shared_campaigns_body
+
     assert variant_rules_response.status_code == 200
     variant_rules_body = variant_rules_response.get_data(as_text=True)
     assert "Appendix A" in variant_rules_body
@@ -7158,7 +7173,7 @@ def test_xge_book_entries_follow_source_visibility(client, sign_in, users, app, 
     player_source_response = client.get("/campaigns/linden-pass/systems/sources/XGE")
     player_category_response = client.get("/campaigns/linden-pass/systems/sources/XGE/types/book")
     player_entry_response = client.get(
-        f"/campaigns/linden-pass/systems/entries/{book_entries['Awarding Magic Items'].slug}"
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Shared Campaigns'].slug}"
     )
 
     assert player_source_response.status_code == 404
@@ -7171,21 +7186,23 @@ def test_xge_book_entries_follow_source_visibility(client, sign_in, users, app, 
     dm_source_response = client.get("/campaigns/linden-pass/systems/sources/XGE")
     dm_category_response = client.get("/campaigns/linden-pass/systems/sources/XGE/types/book")
     dm_entry_response = client.get(
-        f"/campaigns/linden-pass/systems/entries/{book_entries['Awarding Magic Items'].slug}"
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Shared Campaigns'].slug}"
     )
 
     assert dm_source_response.status_code == 200
     assert "Book Chapters" in dm_source_response.get_data(as_text=True)
     assert dm_category_response.status_code == 200
-    assert "Awarding Magic Items" in dm_category_response.get_data(as_text=True)
+    assert "Shared Campaigns" in dm_category_response.get_data(as_text=True)
     assert dm_entry_response.status_code == 200
     dm_body = dm_entry_response.get_data(as_text=True)
-    assert "Chapter 2" in dm_body
-    assert "Dungeon Master&#39;s Tools" in dm_body
-    assert "Magic item awards can be paced by tone, treasure, and campaign expectations." in dm_body
+    assert "Appendix A" in dm_body
+    assert "Code of Conduct" in dm_body
+    assert "Character Creation" in dm_body
 
 
-def test_xge_book_slice_excludes_remaining_pending_section_pages(app, tmp_path):
+def test_xge_book_slice_includes_shared_campaigns_wrapper_and_excludes_remaining_pending_section_pages(
+    app, tmp_path
+):
     data_root = build_xge_book_data_root(
         tmp_path / "dnd5e-source-xge-book-boundary"
     )
@@ -7206,7 +7223,7 @@ def test_xge_book_slice_excludes_remaining_pending_section_pages(app, tmp_path):
     assert result.imported_by_type == {"book": len(XGE_RULES_REFERENCE_TEST_TITLES)}
     book_titles = {entry.title for entry in book_entries}
     assert book_titles == set(XGE_RULES_REFERENCE_TEST_TITLES)
-    assert "Shared Campaigns" not in book_titles
+    assert "Shared Campaigns" in book_titles
 
 
 def test_rules_reference_search_uses_curated_metadata_without_full_body_search(
