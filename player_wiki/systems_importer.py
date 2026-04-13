@@ -281,9 +281,10 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         ("Dungeon Master's Tools", "Puzzles"),
     ),
     # Keep the first MTF slice tightly focused on the standout ancestry
-    # wrapper while the broader MTF wrapper/subsystem follow-ups stay queued.
+    # wrappers while the broader MTF wrapper/subsystem follow-ups stay queued.
     "MTF": (
         ("The Blood War", "Tiefling Subraces"),
+        ("Elves", "Elf Subraces"),
     ),
 }
 VGM_CHARACTER_RACE_WRAPPER_DEFINITIONS = (

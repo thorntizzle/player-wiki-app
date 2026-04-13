@@ -4720,6 +4720,21 @@ def build_mtf_book_data_root(root: Path) -> Path:
         {
             "race": [
                 {
+                    "name": "Elf",
+                    "source": "PHB",
+                    "page": 23,
+                    "size": ["M"],
+                    "speed": {"walk": 30},
+                    "ability": [{"dex": 2}],
+                    "entries": [
+                        {
+                            "name": "Keen Senses",
+                            "type": "entries",
+                            "entries": ["You have proficiency in the Perception skill."],
+                        }
+                    ],
+                },
+                {
                     "name": "Tiefling",
                     "source": "PHB",
                     "page": 42,
@@ -4736,6 +4751,51 @@ def build_mtf_book_data_root(root: Path) -> Path:
                 }
             ],
             "subrace": [
+                {
+                    "name": "Eladrin",
+                    "source": "MTF",
+                    "raceName": "Elf",
+                    "raceSource": "PHB",
+                    "page": 61,
+                    "ability": [{"cha": 1}],
+                    "entries": [
+                        {
+                            "name": "Fey Step",
+                            "type": "entries",
+                            "entries": ["You can teleport a short distance in a shimmer of Feywild magic."],
+                        }
+                    ],
+                },
+                {
+                    "name": "Sea",
+                    "source": "MTF",
+                    "raceName": "Elf",
+                    "raceSource": "PHB",
+                    "page": 62,
+                    "ability": [{"con": 1}],
+                    "entries": [
+                        {
+                            "name": "Child of the Sea",
+                            "type": "entries",
+                            "entries": ["Sea elves can breathe water and swim with uncanny grace."],
+                        }
+                    ],
+                },
+                {
+                    "name": "Shadar-kai",
+                    "source": "MTF",
+                    "raceName": "Elf",
+                    "raceSource": "PHB",
+                    "page": 62,
+                    "ability": [{"con": 1}],
+                    "entries": [
+                        {
+                            "name": "Blessing of the Raven Queen",
+                            "type": "entries",
+                            "entries": ["You can step through the shadows under the Raven Queen's blessing."],
+                        }
+                    ],
+                },
                 {
                     "name": "Asmodeus",
                     "source": "MTF",
@@ -4887,6 +4947,11 @@ def build_mtf_book_data_root(root: Path) -> Path:
                             "name": "The Blood War",
                             "headers": ["Tiefling Subraces"],
                             "ordinal": {"type": "chapter", "identifier": 1},
+                        },
+                        {
+                            "name": "Elves",
+                            "headers": ["Elf Subraces"],
+                            "ordinal": {"type": "chapter", "identifier": 2},
                         }
                     ],
                 }
@@ -4920,6 +4985,29 @@ def build_mtf_book_data_root(root: Path) -> Path:
                                         "{@race Tiefling (Mammon)|MTF}",
                                         "{@race Tiefling (Mephistopheles)|MTF}",
                                         "{@race Tiefling (Zariel)|MTF}",
+                                    ],
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "type": "section",
+                    "name": "Elves",
+                    "page": 35,
+                    "entries": [
+                        {
+                            "type": "section",
+                            "name": "Elf Subraces",
+                            "page": 61,
+                            "entries": [
+                                "At the DM's discretion, you have access to more subraces for elf characters, in addition to the subraces in the Player's Handbook.",
+                                {
+                                    "type": "list",
+                                    "items": [
+                                        "{@race Elf (Eladrin)|MTF}",
+                                        "{@race Elf (Sea)|MTF}",
+                                        "{@race Elf (Shadar-kai)|MTF}",
                                     ],
                                 },
                             ],
@@ -8202,10 +8290,10 @@ def test_mm_book_pages_surface_related_monsters_and_monster_rules(
     )
 
 
-def test_mtf_tiefling_subraces_wrapper_is_imported_for_dm_browse(
+def test_mtf_tiefling_and_elf_subraces_wrappers_are_imported_for_dm_browse(
     client, sign_in, users, app, tmp_path
 ):
-    data_root = build_mtf_book_data_root(tmp_path / "dnd5e-source-mtf-tiefling-subraces")
+    data_root = build_mtf_book_data_root(tmp_path / "dnd5e-source-mtf-ancestry-subraces")
 
     with app.app_context():
         importer = Dnd5eSystemsImporter(
@@ -8234,35 +8322,49 @@ def test_mtf_tiefling_subraces_wrapper_is_imported_for_dm_browse(
             )
         }
 
-    assert result.imported_count == 1
-    assert result.imported_by_type == {"book": 1}
-    assert list(book_entries) == ["Tiefling Subraces"]
+    assert result.imported_count == 2
+    assert result.imported_by_type == {"book": 2}
+    assert list(book_entries) == ["Tiefling Subraces", "Elf Subraces"]
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
     source_response = client.get("/campaigns/linden-pass/systems/sources/MTF")
     category_response = client.get("/campaigns/linden-pass/systems/sources/MTF/types/book")
-    entry_response = client.get(
+    tiefling_entry_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Tiefling Subraces'].slug}"
     )
+    elf_entry_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Elf Subraces'].slug}")
 
     assert source_response.status_code == 200
     source_body = source_response.get_data(as_text=True)
     assert "Book Chapters" in source_body
     assert "Tiefling Subraces" in source_body
+    assert "Elf Subraces" in source_body
+    assert source_body.index("Tiefling Subraces") < source_body.index("Elf Subraces")
 
     assert category_response.status_code == 200
     category_body = category_response.get_data(as_text=True)
-    assert "Showing all 1 book chapters available to you in this source." in category_body
+    assert "Showing all 2 book chapters available to you in this source." in category_body
     assert "Tiefling Subraces" in category_body
+    assert "Elf Subraces" in category_body
+    assert category_body.index("Tiefling Subraces") < category_body.index("Elf Subraces")
 
-    assert entry_response.status_code == 200
-    entry_body = entry_response.get_data(as_text=True)
-    assert "Chapter 1" in entry_body
-    assert "The Blood War" in entry_body
-    assert "At the DM&#39;s option" in entry_body
-    assert "Tiefling (Asmodeus)" in entry_body
-    assert "Tiefling (Mephistopheles)" in entry_body
-    assert "Tiefling (Zariel)" in entry_body
+    assert tiefling_entry_response.status_code == 200
+    tiefling_entry_body = tiefling_entry_response.get_data(as_text=True)
+    assert "Chapter 1" in tiefling_entry_body
+    assert "The Blood War" in tiefling_entry_body
+    assert "At the DM&#39;s option" in tiefling_entry_body
+    assert "Tiefling (Asmodeus)" in tiefling_entry_body
+    assert "Tiefling (Mephistopheles)" in tiefling_entry_body
+    assert "Tiefling (Zariel)" in tiefling_entry_body
+
+    assert elf_entry_response.status_code == 200
+    elf_entry_body = elf_entry_response.get_data(as_text=True)
+    assert "Chapter 2" in elf_entry_body
+    assert "Elves" in elf_entry_body
+    assert "At the DM&#39;s discretion" in elf_entry_body
+    assert "Elf (Eladrin)" in elf_entry_body
+    assert "Elf (Sea)" in elf_entry_body
+    assert "Elf (Shadar-kai)" in elf_entry_body
 
 
 def test_dmg_book_chapters_surface_related_imported_entities(client, sign_in, users, app, tmp_path):
