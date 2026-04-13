@@ -4623,6 +4623,62 @@ def build_xge_book_data_root(root: Path) -> Path:
     return data_root
 
 
+def build_xge_book_related_entities_data_root(root: Path) -> Path:
+    data_root = build_xge_book_data_root(root)
+    book_path = root / "data/book/book-xge.json"
+    book_payload = json.loads(book_path.read_text(encoding="utf-8"))
+    dungeon_masters_tools = book_payload["data"][0]["entries"]
+    sleep_entry = next(entry for entry in dungeon_masters_tools if entry.get("name") == "Sleep")
+    sleep_entry["entries"].append(
+        {
+            "type": "inlineBlock",
+            "entries": [
+                {
+                    "type": "list",
+                    "items": ["{@variantrule Waking Someone||Waking Someone}"],
+                }
+            ],
+        }
+    )
+    spellcasting_entry = next(
+        entry for entry in dungeon_masters_tools if entry.get("name") == "Spellcasting"
+    )
+    spellcasting_entry["entries"].append(
+        {
+            "type": "inlineBlock",
+            "entries": [
+                {
+                    "type": "list",
+                    "items": ["{@variantrule Identifying a Spell||Identifying a Spell}"],
+                }
+            ],
+        }
+    )
+    write_json(book_path, book_payload)
+    write_json(
+        root / "data/variantrules.json",
+        {
+            "variantrule": [
+                {
+                    "name": "Waking Someone",
+                    "source": "XGE",
+                    "page": 77,
+                    "ruleType": "O",
+                    "entries": ["A sleeper can be awakened by noise, damage, or an ally's effort."],
+                },
+                {
+                    "name": "Identifying a Spell",
+                    "source": "XGE",
+                    "page": 85,
+                    "ruleType": "O",
+                    "entries": ["Observers can sometimes identify a spell as it is cast or after its effects appear."],
+                },
+            ]
+        },
+    )
+    return data_root
+
+
 def build_subclass_optionalfeature_progression_data_root(root: Path) -> Path:
     write_json(
         root / "data/optionalfeatures.json",
@@ -7141,6 +7197,83 @@ def test_xge_book_entries_are_imported_for_player_browse(
     assert "Appendix A" in variant_rules_body
     assert "Shared Campaigns" in variant_rules_body
     assert "bounded rules list" in variant_rules_body
+
+
+def test_xge_book_chapters_surface_related_variant_rules_and_respect_entry_visibility(
+    client, sign_in, users, app, tmp_path
+):
+    data_root = build_xge_book_related_entities_data_root(
+        tmp_path / "dnd5e-source-xge-book-entity-links"
+    )
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("XGE", entry_types=["book", "variantrule"])
+
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="XGE",
+            is_enabled=True,
+            default_visibility="players",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in store.list_entries_for_source("DND-5E", "XGE", entry_type="book", limit=20)
+        }
+        xge_rules = {
+            entry.title: entry
+            for entry in store.list_entries_for_source("DND-5E", "XGE", entry_type="variantrule", limit=20)
+        }
+        store.upsert_campaign_entry_override(
+            "linden-pass",
+            library_slug="DND-5E",
+            entry_key=xge_rules["Identifying a Spell"].entry_key,
+            visibility_override="dm",
+            is_enabled_override=None,
+        )
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    sleep_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Sleep'].slug}")
+    spellcasting_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Spellcasting'].slug}"
+    )
+
+    assert sleep_response.status_code == 200
+    sleep_body = sleep_response.get_data(as_text=True)
+    assert "Variant Rules:" in sleep_body
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{xge_rules["Waking Someone"].slug}"'
+        in sleep_body
+    )
+
+    assert spellcasting_response.status_code == 200
+    spellcasting_body = spellcasting_response.get_data(as_text=True)
+    assert "Identifying a Spell" in spellcasting_body
+    assert "Variant Rules:" not in spellcasting_body
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{xge_rules["Identifying a Spell"].slug}"'
+        not in spellcasting_body
+    )
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    dm_spellcasting_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Spellcasting'].slug}"
+    )
+
+    assert dm_spellcasting_response.status_code == 200
+    dm_spellcasting_body = dm_spellcasting_response.get_data(as_text=True)
+    assert "Variant Rules:" in dm_spellcasting_body
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{xge_rules["Identifying a Spell"].slug}"'
+        in dm_spellcasting_body
+    )
 
 
 def test_xge_book_entries_follow_source_visibility(client, sign_in, users, app, tmp_path):
