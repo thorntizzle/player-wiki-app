@@ -294,10 +294,11 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         ("Halflings and Gnomes", "Deep Gnome Characters"),
     ),
     # Keep the first EGW slice focused on the standout character-history
-    # page plus the core dunamis overview page. The surrounding Character
-    # Options wrappers and spell-section follow-ups stay queued for later
-    # passes.
+    # page, Hollow One supernatural-gift wrapper, and the core dunamis
+    # overview page. The broader Character Options wrappers and spell-section
+    # follow-ups stay queued for later passes.
     "EGW": (
+        ("Character Options", "Hollow One"),
         ("Character Options", "Subclasses", "Dunamis and Dunamancy"),
         ("Character Options", "Subclasses", "Heroic Chronicle"),
     ),

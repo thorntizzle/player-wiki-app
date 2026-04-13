@@ -5427,7 +5427,7 @@ def build_egw_dunamis_book_data_root(root: Path) -> Path:
                     "contents": [
                         {
                             "name": "Character Options",
-                            "headers": ["Dunamis and Dunamancy", "Heroic Chronicle"],
+                            "headers": ["Hollow One", "Dunamis and Dunamancy", "Heroic Chronicle"],
                             "ordinal": {"type": "chapter", "identifier": 4},
                         }
                     ],
@@ -5444,6 +5444,40 @@ def build_egw_dunamis_book_data_root(root: Path) -> Path:
                     "name": "Character Options",
                     "page": 168,
                     "entries": [
+                        {
+                            "type": "section",
+                            "name": "Hollow One",
+                            "page": 181,
+                            "entries": [
+                                (
+                                    "The eastern coast of Xhorhas, known to the Kryn as Blightshore, "
+                                    "is a land scarred by evil magic. Among the creations of that foul "
+                                    "place are the Hollow Ones."
+                                ),
+                                (
+                                    "The transition from life to becoming a Hollow One affects "
+                                    "different people to different degrees."
+                                ),
+                                {
+                                    "type": "entries",
+                                    "name": "Supernatural Gift: Hollow One",
+                                    "page": 182,
+                                    "entries": [
+                                        (
+                                            "The Dungeon Master can allow a character created in a "
+                                            "Wildemount campaign to return as a Hollow One."
+                                        ),
+                                        {
+                                            "type": "statblock",
+                                            "tag": "charoption",
+                                            "source": "EGW",
+                                            "name": "Hollow One",
+                                            "page": 182,
+                                        },
+                                    ],
+                                },
+                            ],
+                        },
                         {
                             "type": "section",
                             "name": "Subclasses",
@@ -9171,14 +9205,17 @@ def test_egw_dunamis_page_is_imported_for_player_browse_and_keeps_book_order(
             )
         }
 
-    assert result.imported_count == 2
-    assert result.imported_by_type == {"book": 2}
-    assert list(book_entries) == ["Dunamis and Dunamancy", "Heroic Chronicle"]
+    assert result.imported_count == 3
+    assert result.imported_by_type == {"book": 3}
+    assert list(book_entries) == ["Hollow One", "Dunamis and Dunamancy", "Heroic Chronicle"]
 
     sign_in(users["party"]["email"], users["party"]["password"])
 
     source_response = client.get("/campaigns/linden-pass/systems/sources/EGW")
     category_response = client.get("/campaigns/linden-pass/systems/sources/EGW/types/book")
+    hollow_one_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Hollow One'].slug}"
+    )
     detail_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Dunamis and Dunamancy'].slug}"
     )
@@ -9186,12 +9223,28 @@ def test_egw_dunamis_page_is_imported_for_player_browse_and_keeps_book_order(
     assert source_response.status_code == 200
     source_body = source_response.get_data(as_text=True)
     assert "Book Chapters" in source_body
+    assert source_body.index("Hollow One") < source_body.index("Dunamis and Dunamancy")
     assert source_body.index("Dunamis and Dunamancy") < source_body.index("Heroic Chronicle")
 
     assert category_response.status_code == 200
     category_body = category_response.get_data(as_text=True)
-    assert "Showing all 2 book chapters available to you in this source." in category_body
+    assert "Showing all 3 book chapters available to you in this source." in category_body
+    assert category_body.index("Hollow One") < category_body.index("Dunamis and Dunamancy")
     assert category_body.index("Dunamis and Dunamancy") < category_body.index("Heroic Chronicle")
+
+    assert hollow_one_response.status_code == 200
+    hollow_one_body = hollow_one_response.get_data(as_text=True)
+    assert "Chapter 4" in hollow_one_body
+    assert "Character Options" in hollow_one_body
+    assert "Hollow One" in hollow_one_body
+    assert (
+        "The eastern coast of Xhorhas, known to the Kryn as Blightshore, is a land scarred by evil magic."
+        in hollow_one_body
+    )
+    assert "Supernatural Gift: Hollow One" in hollow_one_body
+    assert "Chapter Navigation" in hollow_one_body
+    assert 'href="#supernatural-gift-hollow-one"' in hollow_one_body
+    assert 'id="supernatural-gift-hollow-one"' in hollow_one_body
 
     assert detail_response.status_code == 200
     detail_body = detail_response.get_data(as_text=True)
