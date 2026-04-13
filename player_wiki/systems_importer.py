@@ -248,9 +248,11 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
     ),
     # TCE now ships the front-matter reference page, the class-option
     # wrapper pages that sit directly on top of already-imported class,
-    # subclass, subclass-feature, and optional-feature content, plus the
-    # current Dungeon Master's Tools reference pages. The remaining broader
-    # DM-tools and miscellany slices stay queued for later passes.
+    # subclass, subclass-feature, and optional-feature content, the full
+    # Group Patrons wrapper chapter, the current Magical Miscellany wrapper
+    # slice, and the current Dungeon Master's Tools reference pages. The
+    # remaining broader Character Options and miscellany follow-ups stay
+    # queued for later passes.
     "TCE": (
         ("Using This Book", "Ten Rules to Remember"),
         ("Character Options", "Customizing Your Origin"),
@@ -269,10 +271,14 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         ("Character Options", "Sorcerer"),
         ("Character Options", "Warlock"),
         ("Character Options", "Wizard"),
+        "Group Patrons",
+        ("Magical Miscellany", "Personalizing Spells"),
+        ("Magical Miscellany", "Magic Items", "Magic Tattoos"),
         ("Dungeon Master's Tools", "Session Zero"),
         ("Dungeon Master's Tools", "Sidekicks"),
         ("Dungeon Master's Tools", "Parleying with Monsters"),
         ("Dungeon Master's Tools", "Environmental Hazards"),
+        ("Dungeon Master's Tools", "Puzzles"),
     ),
 }
 VGM_CHARACTER_RACE_WRAPPER_DEFINITIONS = (

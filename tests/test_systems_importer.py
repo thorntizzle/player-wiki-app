@@ -4178,10 +4178,14 @@ TCE_RULES_REFERENCE_TEST_TITLES = (
     "Changing a Skill",
     "Changing Your Subclass",
 ) + TCE_CLASS_WRAPPER_TEST_TITLES + (
+    "Group Patrons",
+    "Personalizing Spells",
+    "Magic Tattoos",
     "Session Zero",
     "Sidekicks",
     "Parleying with Monsters",
     "Environmental Hazards",
+    "Puzzles",
 )
 
 
@@ -4739,12 +4743,33 @@ def build_tce_book_data_root(root: Path) -> Path:
                             "ordinal": {"type": "chapter", "identifier": 1},
                         },
                         {
+                            "name": "Group Patrons",
+                            "headers": [
+                                "How Patrons Work",
+                                "Example Patrons",
+                                "Being Your Own Patron",
+                            ],
+                            "ordinal": {"type": "chapter", "identifier": 2},
+                        },
+                        {
+                            "name": "Magical Miscellany",
+                            "headers": [
+                                "Spells",
+                                "Personalizing Spells",
+                                "Magic Items",
+                                "Magic Tattoos",
+                                "Magic Item Descriptions",
+                            ],
+                            "ordinal": {"type": "chapter", "identifier": 3},
+                        },
+                        {
                             "name": "Dungeon Master's Tools",
                             "headers": [
                                 "Session Zero",
                                 "Sidekicks",
                                 "Parleying with Monsters",
                                 "Environmental Hazards",
+                                "Puzzles",
                             ],
                             "ordinal": {"type": "chapter", "identifier": 4},
                         }
@@ -5361,6 +5386,119 @@ def build_tce_book_data_root(root: Path) -> Path:
                 },
                 {
                     "type": "section",
+                    "name": "Group Patrons",
+                    "page": 83,
+                    "entries": [
+                        "A group patron gives an adventuring party a shared purpose, a source of support, and a reliable way to frame the campaign's ongoing work.",
+                        {
+                            "type": "entries",
+                            "name": "How Patrons Work",
+                            "page": 83,
+                            "entries": [
+                                "Patrons offer the party concrete benefits, expected obligations, and a strong campaign premise that ties the group together.",
+                                {
+                                    "type": "entries",
+                                    "name": "Group Assistance",
+                                    "page": 83,
+                                    "entries": [
+                                        "A patron-backed party can coordinate more effectively when members support one another in the field.",
+                                    ],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "entries",
+                            "name": "Example Patrons",
+                            "page": 84,
+                            "entries": [
+                                "Academic institutions, military commands, criminal syndicates, religious orders, and guilds can all serve as patrons.",
+                            ],
+                        },
+                        {
+                            "type": "entries",
+                            "name": "Being Your Own Patron",
+                            "page": 94,
+                            "entries": [
+                                "The party can also form its own organization and treat that collective identity as the campaign's patron.",
+                            ],
+                        },
+                    ],
+                },
+                {
+                    "type": "section",
+                    "name": "Magical Miscellany",
+                    "page": 105,
+                    "entries": [
+                        {
+                            "type": "section",
+                            "name": "Spells",
+                            "page": 105,
+                            "entries": [
+                                "This chapter opens with new spells before shifting into cosmetic spell themes and magic items.",
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Personalizing Spells",
+                            "page": 116,
+                            "entries": [
+                                {
+                                    "type": "quote",
+                                    "entries": [
+                                        "What use is magic if you can't harness it to amuse your mom?",
+                                    ],
+                                },
+                                "Spellcasters can customize the cosmetic effects of their magic without changing how a spell actually works.",
+                                "Themes can reinforce the caster's training, beliefs, favored colors, or relationship to a season, culture, or supernatural force.",
+                                {
+                                    "type": "table",
+                                    "caption": "Magic Themes",
+                                    "colLabels": ["d4", "Theme"],
+                                    "rows": [
+                                        ["1", "Book pages, ink, and rustling library scents"],
+                                        ["2", "Brine-scented sea creatures and drifting spray"],
+                                    ],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Magic Items",
+                            "page": 118,
+                            "entries": [
+                                "After spell guidance, the chapter turns to new magic items and artifacts.",
+                                {
+                                    "type": "section",
+                                    "name": "Magic Tattoos",
+                                    "page": 118,
+                                    "entries": [
+                                        "Magic tattoos merge artistry and enchantment, binding wondrous power directly to a creature's body.",
+                                        "A tattoo can look like a brand, scarification, a birthmark, patterns of scales, or another cosmetic alteration.",
+                                        {
+                                            "type": "table",
+                                            "caption": "Magic Tattoo Coverage",
+                                            "colLabels": ["Tattoo Rarity", "Area Covered"],
+                                            "rows": [
+                                                ["Common", "One hand or foot or a quarter of a limb"],
+                                                ["Uncommon", "Half a limb or the scalp"],
+                                            ],
+                                        },
+                                    ],
+                                },
+                                {
+                                    "type": "section",
+                                    "name": "Magic Item Descriptions",
+                                    "page": 119,
+                                    "entries": [
+                                        "The chapter closes with item descriptions in alphabetical order.",
+                                    ],
+                                },
+                            ],
+                        },
+                    ],
+                },
+                {
+                    "type": "section",
                     "name": "Dungeon Master's Tools",
                     "page": 139,
                     "entries": [
@@ -5595,6 +5733,52 @@ def build_tce_book_data_root(root: Path) -> Path:
                                                 "Spells can approximate avalanches, sinkholes, and similar threats when you need a fast ruling.",
                                             ],
                                         },
+                                    ],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Puzzles",
+                            "page": 171,
+                            "entries": [
+                                {
+                                    "type": "quote",
+                                    "entries": [
+                                        "Why create a solvable puzzle? Just pose an enigmatic question without an answer and watch your trespassers squirm!",
+                                    ],
+                                },
+                                "Puzzles add collaborative problem solving to a campaign and can challenge characters without relying on combat statistics.",
+                                {
+                                    "type": "entries",
+                                    "name": "Why Use Puzzles?",
+                                    "page": 171,
+                                    "entries": [
+                                        "Puzzles invite teamwork, reward curiosity, and can make a location feel mysterious or magical.",
+                                        {
+                                            "type": "entries",
+                                            "name": "Puzzle Elements",
+                                            "page": 171,
+                                            "entries": [
+                                                "A good puzzle has a clear presentation, an understandable goal, and room for the group to experiment.",
+                                            ],
+                                        },
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Creature Paintings",
+                                    "page": 173,
+                                    "entries": [
+                                        "This sample puzzle asks the group to interpret murals of different creatures to unlock the next chamber.",
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Reckless Steps",
+                                    "page": 175,
+                                    "entries": [
+                                        "This sample puzzle tests whether the party can interpret a hazardous floor's hidden movement rules.",
                                     ],
                                 },
                             ],
@@ -8346,6 +8530,15 @@ def test_tce_book_entries_are_imported_for_player_browse(
     changing_subclass_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Changing Your Subclass'].slug}"
     )
+    group_patrons_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Group Patrons'].slug}"
+    )
+    personalizing_spells_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Personalizing Spells'].slug}"
+    )
+    magic_tattoos_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Magic Tattoos'].slug}"
+    )
     sidekicks_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Sidekicks'].slug}"
     )
@@ -8354,6 +8547,9 @@ def test_tce_book_entries_are_imported_for_player_browse(
     )
     environmental_hazards_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Environmental Hazards'].slug}"
+    )
+    puzzles_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Puzzles'].slug}"
     )
     session_zero_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Session Zero'].slug}"
@@ -8372,10 +8568,14 @@ def test_tce_book_entries_are_imported_for_player_browse(
     assert "Customizing Your Origin" in source_body
     assert "Changing a Skill" in source_body
     assert "Changing Your Subclass" in source_body
+    assert "Group Patrons" in source_body
+    assert "Personalizing Spells" in source_body
+    assert "Magic Tattoos" in source_body
     assert "Session Zero" in source_body
     assert "Sidekicks" in source_body
     assert "Parleying with Monsters" in source_body
     assert "Environmental Hazards" in source_body
+    assert "Puzzles" in source_body
     assert "Artificer" in source_body
     assert "Fighter" in source_body
     assert "Wizard" in source_body
@@ -8390,10 +8590,14 @@ def test_tce_book_entries_are_imported_for_player_browse(
     assert "Customizing Your Origin" in category_body
     assert "Changing a Skill" in category_body
     assert "Changing Your Subclass" in category_body
+    assert "Group Patrons" in category_body
+    assert "Personalizing Spells" in category_body
+    assert "Magic Tattoos" in category_body
     assert "Session Zero" in category_body
     assert "Sidekicks" in category_body
     assert "Parleying with Monsters" in category_body
     assert "Environmental Hazards" in category_body
+    assert "Puzzles" in category_body
     assert "Artificer" in category_body
     assert "Fighter" in category_body
     assert "Wizard" in category_body
@@ -8429,6 +8633,34 @@ def test_tce_book_entries_are_imported_for_player_browse(
     assert "Character Options" in changing_subclass_body
     assert "Changing Your Subclass" in changing_subclass_body
     assert "replace your subclass when you gain a new subclass feature." in changing_subclass_body
+
+    assert group_patrons_response.status_code == 200
+    group_patrons_body = group_patrons_response.get_data(as_text=True)
+    assert "Chapter 2" in group_patrons_body
+    assert "Group Patrons" in group_patrons_body
+    assert "How Patrons Work" in group_patrons_body
+    assert "Example Patrons" in group_patrons_body
+    assert "Being Your Own Patron" in group_patrons_body
+    assert 'href="#how-patrons-work"' in group_patrons_body
+    assert 'id="being-your-own-patron"' in group_patrons_body
+
+    assert personalizing_spells_response.status_code == 200
+    personalizing_spells_body = personalizing_spells_response.get_data(as_text=True)
+    assert "Chapter 3" in personalizing_spells_body
+    assert "Magical Miscellany" in personalizing_spells_body
+    assert "Personalizing Spells" in personalizing_spells_body
+    assert "cosmetic effects of their magic" in personalizing_spells_body
+    assert "Magic Themes" in personalizing_spells_body
+    assert "book pages, ink, and rustling library scents" in personalizing_spells_body
+
+    assert magic_tattoos_response.status_code == 200
+    magic_tattoos_body = magic_tattoos_response.get_data(as_text=True)
+    assert "Chapter 3" in magic_tattoos_body
+    assert "Magical Miscellany" in magic_tattoos_body
+    assert "Magic Tattoos" in magic_tattoos_body
+    assert "brand, scarification, a birthmark" in magic_tattoos_body
+    assert "Magic Tattoo Coverage" in magic_tattoos_body
+    assert "One hand or foot or a quarter of a limb" in magic_tattoos_body
 
     assert session_zero_response.status_code == 200
     session_zero_body = session_zero_response.get_data(as_text=True)
@@ -8483,6 +8715,18 @@ def test_tce_book_entries_are_imported_for_player_browse(
     assert 'href="#magical-phenomena"' in environmental_hazards_body
     assert 'id="natural-hazards"' in environmental_hazards_body
 
+    assert puzzles_response.status_code == 200
+    puzzles_body = puzzles_response.get_data(as_text=True)
+    assert "Chapter 4" in puzzles_body
+    assert "Dungeon Master&#x27;s Tools" in puzzles_body
+    assert "Puzzles" in puzzles_body
+    assert "Why Use Puzzles?" in puzzles_body
+    assert "Puzzle Elements" in puzzles_body
+    assert "Creature Paintings" in puzzles_body
+    assert "Reckless Steps" in puzzles_body
+    assert 'href="#why-use-puzzles"' in puzzles_body
+    assert 'id="creature-paintings"' in puzzles_body
+
     assert artificer_response.status_code == 200
     artificer_body = artificer_response.get_data(as_text=True)
     assert "Chapter 1" in artificer_body
@@ -8526,7 +8770,7 @@ def test_tce_book_entries_follow_source_visibility(client, sign_in, users, app, 
     player_source_response = client.get("/campaigns/linden-pass/systems/sources/TCE")
     player_category_response = client.get("/campaigns/linden-pass/systems/sources/TCE/types/book")
     player_entry_response = client.get(
-        f"/campaigns/linden-pass/systems/entries/{book_entries['Environmental Hazards'].slug}"
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Magic Tattoos'].slug}"
     )
 
     assert player_source_response.status_code == 404
@@ -8539,7 +8783,7 @@ def test_tce_book_entries_follow_source_visibility(client, sign_in, users, app, 
     dm_source_response = client.get("/campaigns/linden-pass/systems/sources/TCE")
     dm_category_response = client.get("/campaigns/linden-pass/systems/sources/TCE/types/book")
     dm_entry_response = client.get(
-        f"/campaigns/linden-pass/systems/entries/{book_entries['Sidekicks'].slug}"
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Puzzles'].slug}"
     )
 
     assert dm_source_response.status_code == 200
@@ -8550,17 +8794,21 @@ def test_tce_book_entries_follow_source_visibility(client, sign_in, users, app, 
     assert "Customizing Your Origin" in dm_category_body
     assert "Changing a Skill" in dm_category_body
     assert "Changing Your Subclass" in dm_category_body
+    assert "Group Patrons" in dm_category_body
+    assert "Personalizing Spells" in dm_category_body
+    assert "Magic Tattoos" in dm_category_body
     assert "Session Zero" in dm_category_body
     assert "Sidekicks" in dm_category_body
     assert "Parleying with Monsters" in dm_category_body
     assert "Environmental Hazards" in dm_category_body
+    assert "Puzzles" in dm_category_body
     assert dm_entry_response.status_code == 200
     dm_entry_body = dm_entry_response.get_data(as_text=True)
     assert "Dungeon Master&#x27;s Tools" in dm_entry_body
-    assert "Environmental Hazards" in dm_entry_body
+    assert "Puzzles" in dm_entry_body
 
 
-def test_tce_book_slice_includes_session_zero_sidekicks_parleying_and_environmental_hazards_pages_for_now(
+def test_tce_book_slice_includes_group_patrons_miscellany_and_dm_tool_wrappers_for_now(
     app, tmp_path
 ):
     data_root = build_tce_book_data_root(tmp_path / "dnd5e-source-tce-book-boundary")
