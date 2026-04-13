@@ -61,13 +61,25 @@
   {% if base_rule_refs %}
     <section class="systems-inline-option-group">
       <p class="meta systems-inline-option-group__label">Modifies Base Rules:</p>
+      <p class="meta">
+        Precedence in this campaign: the published campaign overlay applies first. Linked Character Rules Reference entries are the normalized app-owned rules layer beneath that overlay, and linked supported-source entries remain the baseline source context beneath both.
+      </p>
       <ul class="plain-list">
         {% for base_rule in base_rule_refs %}
           {% set target_href = url_for('campaign_systems_entry_detail', campaign_slug=campaign.slug, entry_slug=base_rule.entry.slug) %}
           {% if base_rule.anchor %}
             {% set target_href = target_href ~ '#' ~ base_rule.anchor %}
           {% endif %}
-          <li><a href="{{ target_href }}">{{ base_rule.label }}</a></li>
+          <li>
+            <a href="{{ target_href }}">{{ base_rule.label }}</a>
+            <span class="meta">
+              {% if base_rule.entry.source_id == "RULES" or base_rule.entry.entry_type == "rule" %}
+                Normalized RULES Reference
+              {% else %}
+                Supported Source Baseline
+              {% endif %}
+            </span>
+          </li>
         {% endfor %}
       </ul>
     </section>

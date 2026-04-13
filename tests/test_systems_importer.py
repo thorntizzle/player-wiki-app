@@ -11402,10 +11402,15 @@ def test_subclass_pages_surface_campaign_overlay_base_rule_refs(
     assert subclass_response.status_code == 200
     subclass_body = subclass_response.get_data(as_text=True)
     assert "Modifies Base Rules:" in subclass_body
+    assert "Precedence in this campaign: the published campaign overlay applies first." in subclass_body
+    assert "Linked Character Rules Reference entries are the normalized app-owned rules layer beneath that overlay" in subclass_body
+    assert "linked supported-source entries remain the baseline source context beneath both." in subclass_body
     assert f'href="/campaigns/linden-pass/systems/entries/{spell_math_rule_entry.slug}"' in subclass_body
     assert f'href="/campaigns/linden-pass/systems/entries/{spellcasting_entry.slug}"' in subclass_body
     assert "Spell Attacks and Save DCs" in subclass_body
     assert "Spellcasting" in subclass_body
+    assert "Normalized RULES Reference" in subclass_body
+    assert "Supported Source Baseline" in subclass_body
 
 
 def test_importer_skips_subclassfeatures_for_unsupported_subclass_sources(app, tmp_path):
