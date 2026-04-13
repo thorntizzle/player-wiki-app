@@ -5302,6 +5302,118 @@ def build_mtf_book_data_root(root: Path) -> Path:
     return data_root
 
 
+def build_egw_heroic_chronicle_book_data_root(root: Path) -> Path:
+    data_root = build_test_data_root(root)
+    write_json(
+        root / "data/books.json",
+        {
+            "book": [
+                {
+                    "name": "Explorer's Guide to Wildemount",
+                    "id": "EGW",
+                    "source": "EGW",
+                    "contents": [
+                        {
+                            "name": "Character Options",
+                            "headers": ["Heroic Chronicle"],
+                            "ordinal": {"type": "chapter", "identifier": 4},
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    write_json(
+        root / "data/book/book-egw.json",
+        {
+            "data": [
+                {
+                    "type": "section",
+                    "name": "Character Options",
+                    "page": 184,
+                    "entries": [
+                        {
+                            "type": "section",
+                            "name": "Subclasses",
+                            "page": 186,
+                            "entries": [
+                                {
+                                    "type": "entries",
+                                    "name": "Heroic Chronicle",
+                                    "page": 196,
+                                    "entries": [
+                                        (
+                                            "The heroic chronicle system lets players and Dungeon Masters "
+                                            "build a backstory rooted in Wildemount."
+                                        ),
+                                        {
+                                            "type": "entries",
+                                            "name": "Backstory",
+                                            "page": 196,
+                                            "entries": [
+                                                (
+                                                    "Instead of choosing a background in isolation, you can "
+                                                    "roll or choose details that tie your character to the "
+                                                    "setting's people and conflicts."
+                                                ),
+                                                {
+                                                    "type": "entries",
+                                                    "name": "Homeland",
+                                                    "page": 197,
+                                                    "entries": [
+                                                        (
+                                                            "Your homeland tells you where you were raised "
+                                                            "and which cultures shaped your earliest years."
+                                                        )
+                                                    ],
+                                                },
+                                                {
+                                                    "type": "entries",
+                                                    "name": "Mysterious Secret",
+                                                    "page": 200,
+                                                    "entries": [
+                                                        (
+                                                            "Each mysterious secret offers a campaign hook "
+                                                            "the Dungeon Master can reveal over time."
+                                                        )
+                                                    ],
+                                                },
+                                            ],
+                                        },
+                                        {
+                                            "type": "entries",
+                                            "name": "Prophecy",
+                                            "page": 201,
+                                            "entries": [
+                                                (
+                                                    "A prophecy hints at a destiny waiting for your "
+                                                    "adventuring career."
+                                                ),
+                                                {
+                                                    "type": "entries",
+                                                    "name": "Prophecy Rewards",
+                                                    "page": 202,
+                                                    "entries": [
+                                                        (
+                                                            "When your prophecy comes to pass, you gain a "
+                                                            "supernatural charm or other reward."
+                                                        )
+                                                    ],
+                                                },
+                                            ],
+                                        },
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    return data_root
+
+
 def build_tce_book_data_root(root: Path) -> Path:
     data_root = build_test_data_root(root)
     write_json(
@@ -8857,6 +8969,83 @@ def test_mtf_wrapper_pages_preserve_detail_navigation_and_inline_race_links(
     assert deep_gnome_response.status_code == 200
     deep_gnome_body = deep_gnome_response.get_data(as_text=True)
     assert f'href="/campaigns/linden-pass/systems/entries/{race_entries["Deep Gnome"].slug}"' in deep_gnome_body
+
+
+def test_egw_heroic_chronicle_page_is_imported_for_player_browse(
+    client, sign_in, users, app, tmp_path
+):
+    data_root = build_egw_heroic_chronicle_book_data_root(
+        tmp_path / "dnd5e-source-egw-heroic-chronicle"
+    )
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        result = importer.import_source("EGW", entry_types=["book"])
+
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="EGW",
+            is_enabled=True,
+            default_visibility="players",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in service.list_entries_for_campaign_source(
+                "linden-pass",
+                "EGW",
+                entry_type="book",
+                limit=None,
+            )
+        }
+
+    assert result.imported_count == 1
+    assert result.imported_by_type == {"book": 1}
+    assert list(book_entries) == ["Heroic Chronicle"]
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    source_response = client.get("/campaigns/linden-pass/systems/sources/EGW")
+    category_response = client.get("/campaigns/linden-pass/systems/sources/EGW/types/book")
+    detail_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Heroic Chronicle'].slug}"
+    )
+
+    assert source_response.status_code == 200
+    source_body = source_response.get_data(as_text=True)
+    assert "Book Chapters" in source_body
+    assert "Heroic Chronicle" in source_body
+
+    assert category_response.status_code == 200
+    category_body = category_response.get_data(as_text=True)
+    assert "Showing all 1 book chapters available to you in this source." in category_body
+    assert "Heroic Chronicle" in category_body
+
+    assert detail_response.status_code == 200
+    detail_body = detail_response.get_data(as_text=True)
+    assert "Chapter 4" in detail_body
+    assert "Character Options" in detail_body
+    assert "Heroic Chronicle" in detail_body
+    assert (
+        "The heroic chronicle system lets players and Dungeon Masters build a backstory rooted in Wildemount."
+        in detail_body
+    )
+    assert "Backstory" in detail_body
+    assert "Homeland" in detail_body
+    assert "Mysterious Secret" in detail_body
+    assert "Prophecy" in detail_body
+    assert "Prophecy Rewards" in detail_body
+    assert "Chapter Navigation" in detail_body
+    assert 'href="#backstory"' in detail_body
+    assert 'id="backstory"' in detail_body
+    assert 'href="#prophecy"' in detail_body
+    assert 'id="prophecy"' in detail_body
 
 
 def test_dmg_book_chapters_surface_related_imported_entities(client, sign_in, users, app, tmp_path):

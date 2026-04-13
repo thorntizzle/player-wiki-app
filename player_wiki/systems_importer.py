@@ -293,6 +293,12 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         ("Gith and Their Endless War", "Gith Characters"),
         ("Halflings and Gnomes", "Deep Gnome Characters"),
     ),
+    # Keep the first EGW slice focused on the standout character-history
+    # subsystem page. The surrounding Character Options wrappers and
+    # dunamancy follow-ups stay queued for later passes.
+    "EGW": (
+        ("Character Options", "Subclasses", "Heroic Chronicle"),
+    ),
 }
 VGM_CHARACTER_RACE_WRAPPER_DEFINITIONS = (
     {
