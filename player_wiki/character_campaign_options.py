@@ -18,6 +18,7 @@ VALID_CAMPAIGN_FEATURE_ACTIVATION_TYPES = {
 VALID_CAMPAIGN_RESOURCE_RESET_TYPES = {"manual", "short_rest", "long_rest"}
 VALID_CAMPAIGN_RESOURCE_SCALING_MODES = {"level", "half_level", "proficiency_bonus", "thresholds"}
 VALID_CAMPAIGN_RESOURCE_SCALING_ROUNDS = {"down", "up", "nearest"}
+VALID_CAMPAIGN_OVERLAY_SUPPORT_TYPES = {"reference_only", "modeled"}
 
 
 def normalize_campaign_base_rule_refs(value: Any) -> list[dict[str, Any]]:
@@ -67,6 +68,20 @@ def normalize_campaign_base_rule_refs(value: Any) -> list[dict[str, Any]]:
             normalized["section_title"] = section_title
         normalized_refs.append(normalized)
     return normalized_refs
+
+
+def normalize_campaign_overlay_support(
+    value: Any,
+    *,
+    option: dict[str, Any] | None = None,
+) -> str | None:
+    normalized_value = _normalize_overlay_support_value(value)
+    if normalized_value is not None:
+        return normalized_value
+    candidate_option = dict(option or {}) if isinstance(option, dict) else {}
+    if not normalize_campaign_base_rule_refs(candidate_option.get("base_rule_refs")):
+        return None
+    return "modeled" if _campaign_option_has_modeled_overlay_content(candidate_option) else "reference_only"
 
 
 def build_campaign_page_character_option(
@@ -182,7 +197,7 @@ def normalize_campaign_character_option(
         if modeled_effects:
             normalized["modeled_effects"] = modeled_effects
         if kind == "feature":
-            return normalized
+            return _finalize_campaign_overlay_support(normalized, raw_option)
         if kind == "feat":
             normalized["feat_name"] = str(raw_option.get("name") or "").strip() or str(title or "").strip()
             for key in (
@@ -207,7 +222,7 @@ def normalize_campaign_character_option(
             additional_spells = raw_option.get("additional_spells", raw_option.get("additionalSpells"))
             if additional_spells is not None:
                 normalized["additional_spells"] = deepcopy(additional_spells)
-            return normalized
+            return _finalize_campaign_overlay_support(normalized, raw_option)
         if kind == "species":
             normalized["species_name"] = str(raw_option.get("name") or "").strip() or str(title or "").strip()
             normalized_size = _normalize_size_value(raw_option.get("size"))
@@ -225,13 +240,13 @@ def normalize_campaign_character_option(
             language_proficiencies = raw_option.get("language_proficiencies")
             if language_proficiencies is not None and "languages" not in normalized:
                 normalized["languages"] = deepcopy(language_proficiencies)
-            return normalized
+            return _finalize_campaign_overlay_support(normalized, raw_option)
         if kind == "background":
             normalized["background_name"] = str(raw_option.get("name") or "").strip() or str(title or "").strip()
             for key in ("skill_proficiencies", "language_proficiencies", "tool_proficiencies"):
                 if key in raw_option:
                     normalized[key] = deepcopy(raw_option.get(key))
-            return normalized
+            return _finalize_campaign_overlay_support(normalized, raw_option)
 
     quantity = _normalize_positive_integer(raw_option.get("quantity"), default=1)
     normalized.update(
@@ -242,7 +257,7 @@ def normalize_campaign_character_option(
             "notes": str(raw_option.get("notes") or summary or "").strip(),
         }
     )
-    return normalized
+    return _finalize_campaign_overlay_support(normalized, raw_option)
 
 
 def collect_campaign_option_stat_adjustments(option_payloads: list[Any]) -> dict[str, int]:
@@ -326,6 +341,79 @@ def _normalize_string_list(value: Any) -> list[str]:
         seen.add(normalized_item)
         values.append(clean_item)
     return values
+
+
+def _normalize_overlay_support_value(value: Any) -> str | None:
+    normalized_value = str(value or "").strip().lower().replace("-", "_")
+    if not normalized_value:
+        return None
+    alias_map = {
+        "display_only": "reference_only",
+        "mechanically_modeled": "modeled",
+        "mechanical": "modeled",
+        "reference": "reference_only",
+    }
+    normalized_value = alias_map.get(normalized_value, normalized_value)
+    if normalized_value not in VALID_CAMPAIGN_OVERLAY_SUPPORT_TYPES:
+        return None
+    return normalized_value
+
+
+def _finalize_campaign_overlay_support(
+    normalized: dict[str, Any],
+    raw_option: dict[str, Any],
+) -> dict[str, Any]:
+    overlay_support = normalize_campaign_overlay_support(
+        raw_option.get("overlay_support", raw_option.get("overlaySupport")),
+        option=normalized,
+    )
+    if overlay_support:
+        normalized["overlay_support"] = overlay_support
+    return normalized
+
+
+def _campaign_option_has_modeled_overlay_content(option: dict[str, Any]) -> bool:
+    modeled_fields = (
+        "ability",
+        "additional_spells",
+        "armor_proficiencies",
+        "expertise",
+        "feats",
+        "language_proficiencies",
+        "languages",
+        "modeled_effects",
+        "optionalfeature_progression",
+        "proficiencies",
+        "resource",
+        "saving_throw_proficiencies",
+        "size",
+        "skill_proficiencies",
+        "skill_tool_language_proficiencies",
+        "spell_manager",
+        "spell_support",
+        "speed",
+        "spells",
+        "stat_adjustments",
+        "tool_proficiencies",
+        "weapon_proficiencies",
+    )
+    return any(_campaign_overlay_value_has_content(option.get(field_name)) for field_name in modeled_fields)
+
+
+def _campaign_overlay_value_has_content(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, dict):
+        return any(_campaign_overlay_value_has_content(item) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_campaign_overlay_value_has_content(item) for item in value)
+    return bool(value)
 
 
 def _normalize_modeled_effects(value: Any) -> list[str]:

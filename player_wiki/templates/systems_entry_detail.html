@@ -57,9 +57,15 @@
   </div>
 {%- endmacro %}
 
-{% macro render_base_rule_refs(base_rule_refs) -%}
+{% macro render_base_rule_refs(base_rule_refs, overlay_support=None) -%}
   {% if base_rule_refs %}
     <section class="systems-inline-option-group">
+      {% if overlay_support %}
+        <p class="meta systems-inline-option-group__label">Overlay Support:</p>
+        <p class="meta">
+          <strong>{{ overlay_support.label }}.</strong> {{ overlay_support.description }}
+        </p>
+      {% endif %}
       <p class="meta systems-inline-option-group__label">Modifies Base Rules:</p>
       <p class="meta">
         Precedence in this campaign: the published campaign overlay applies first. Linked Character Rules Reference entries are the normalized app-owned rules layer beneath that overlay, and linked supported-source entries remain the baseline source context beneath both.
@@ -110,7 +116,7 @@
               {% endif %}
             </header>
             {% if item.embedded_card and item.embedded_card.base_rule_refs %}
-              {{ render_base_rule_refs(item.embedded_card.base_rule_refs) }}
+              {{ render_base_rule_refs(item.embedded_card.base_rule_refs, item.embedded_card.overlay_support) }}
             {% endif %}
             {% if item.embedded_card and item.embedded_card.body_html %}
               <div class="article-body--compact systems-inline-card__body">
@@ -250,7 +256,7 @@
             <p><strong>Level:</strong> <span>{{ entry.metadata.level }}</span></p>
           {% endif %}
         </section>
-        {{ render_base_rule_refs(feature_detail_card.base_rule_refs) }}
+        {{ render_base_rule_refs(feature_detail_card.base_rule_refs, feature_detail_card.overlay_support) }}
         {% if feature_detail_card.body_html %}
           <div class="article-body--compact systems-inline-card__body">
             {{ feature_detail_card.body_html | safe }}

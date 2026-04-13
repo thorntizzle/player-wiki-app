@@ -11288,6 +11288,11 @@ def test_subclass_pages_surface_campaign_mechanics_progression_overlays(
             for entry in store.list_entries_for_source("DND-5E", "PHB", entry_type="subclass", limit=20)
             if entry.title == "Wild Magic"
         )
+        wild_magic_rule_entry = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "RULES", entry_type="rule", limit=50)
+            if entry.title == "Hit Points and Hit Dice"
+        )
 
         campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])
         page_path = campaigns_dir / "linden-pass" / "content" / "mechanics" / "wild-magic-modification.md"
@@ -11306,6 +11311,8 @@ def test_subclass_pages_surface_campaign_mechanics_progression_overlays(
             "  character_option:\n"
             "    name: Wild Magic Modification\n"
             "    activation_type: special\n"
+            "    base_rule_refs:\n"
+            "      - rule_key: hit-points-and-hit-dice\n"
             "    grants:\n"
             "      resource:\n"
             "        label: Wild Die\n"
@@ -11331,6 +11338,13 @@ def test_subclass_pages_surface_campaign_mechanics_progression_overlays(
     assert "Wild Die" in subclass_body
     assert "You gain a number of Wild Die equal to half your level." in subclass_body
     assert '/campaigns/linden-pass/pages/mechanics/wild-magic-modification' in subclass_body
+    assert "Overlay Support:" in subclass_body
+    assert "Mechanically Modeled Overlay." in subclass_body
+    assert (
+        "This overlay uses existing structured campaign metadata that the app can already project on supported "
+        "character and build surfaces." in subclass_body
+    )
+    assert f'href="/campaigns/linden-pass/systems/entries/{wild_magic_rule_entry.slug}"' in subclass_body
 
 
 def test_subclass_pages_surface_campaign_overlay_base_rule_refs(
@@ -11401,6 +11415,9 @@ def test_subclass_pages_surface_campaign_overlay_base_rule_refs(
 
     assert subclass_response.status_code == 200
     subclass_body = subclass_response.get_data(as_text=True)
+    assert "Overlay Support:" in subclass_body
+    assert "Reference-Only Overlay." in subclass_body
+    assert "This house rule stays visible beside the baseline links, but the app does not currently automate the change." in subclass_body
     assert "Modifies Base Rules:" in subclass_body
     assert "Precedence in this campaign: the published campaign overlay applies first." in subclass_body
     assert "Linked Character Rules Reference entries are the normalized app-owned rules layer beneath that overlay" in subclass_body

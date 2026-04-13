@@ -9,7 +9,7 @@ from pathlib import Path
 from flask import g, has_request_context
 
 from .auth_store import isoformat, utcnow
-from .character_campaign_options import normalize_campaign_base_rule_refs
+from .character_campaign_options import normalize_campaign_base_rule_refs, normalize_campaign_overlay_support
 from .character_campaign_progression import build_campaign_page_progression_entries
 from .campaign_visibility import (
     VISIBILITY_DM,
@@ -1144,6 +1144,34 @@ class SystemsService:
             seen_keys.add(marker)
             resolved_refs.append(resolved_ref)
         return resolved_refs
+
+    def build_overlay_support_for_campaign_option(
+        self,
+        campaign_option: dict[str, object] | None,
+        *,
+        base_rule_refs: list[dict[str, object]] | None = None,
+    ) -> dict[str, str] | None:
+        if not list(base_rule_refs or []):
+            return None
+        option = dict(campaign_option or {})
+        overlay_support = normalize_campaign_overlay_support(option.get("overlay_support"), option=option)
+        if overlay_support == "modeled":
+            return {
+                "key": "modeled",
+                "label": "Mechanically Modeled Overlay",
+                "description": (
+                    "This overlay uses existing structured campaign metadata that the app can already project on "
+                    "supported character and build surfaces."
+                ),
+            }
+        return {
+            "key": "reference_only",
+            "label": "Reference-Only Overlay",
+            "description": (
+                "This house rule stays visible beside the baseline links, but the app does not currently automate "
+                "the change."
+            ),
+        }
 
     def build_related_monsters_for_entry(
         self,
@@ -2915,11 +2943,16 @@ class SystemsService:
     ) -> dict[str, object]:
         campaign_option = dict(entry.metadata.get("campaign_option") or {})
         base_rule_refs = self.build_base_rule_refs_for_campaign_option(campaign_slug, campaign_option)
+        overlay_support = self.build_overlay_support_for_campaign_option(
+            campaign_option,
+            base_rule_refs=base_rule_refs,
+        )
         page_ref = str(entry.metadata.get("page_ref") or "").strip()
         if page_ref:
             return {
                 "meta_badges": self._build_embedded_feature_badges(entry),
                 "base_rule_refs": base_rule_refs,
+                "overlay_support": overlay_support,
                 "body_html": self._build_campaign_page_body_html(campaign_slug, page_ref),
                 "option_groups": [],
             }
@@ -2934,6 +2967,7 @@ class SystemsService:
         return {
             "meta_badges": self._build_embedded_feature_badges(entry),
             "base_rule_refs": base_rule_refs,
+            "overlay_support": overlay_support,
             "body_html": body_html,
             "option_groups": option_groups,
         }

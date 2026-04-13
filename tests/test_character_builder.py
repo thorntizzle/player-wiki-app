@@ -5922,6 +5922,7 @@ def test_campaign_progression_entries_preserve_base_rule_refs():
             "entry_type": "variantrule",
         },
     ]
+    assert progression_entry.metadata["campaign_option"]["overlay_support"] == "reference_only"
 
 
 def test_native_level_up_applies_campaign_progression_ritual_book_spell_manager():
