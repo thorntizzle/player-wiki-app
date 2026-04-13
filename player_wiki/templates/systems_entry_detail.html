@@ -57,6 +57,23 @@
   </div>
 {%- endmacro %}
 
+{% macro render_base_rule_refs(base_rule_refs) -%}
+  {% if base_rule_refs %}
+    <section class="systems-inline-option-group">
+      <p class="meta systems-inline-option-group__label">Modifies Base Rules:</p>
+      <ul class="plain-list">
+        {% for base_rule in base_rule_refs %}
+          {% set target_href = url_for('campaign_systems_entry_detail', campaign_slug=campaign.slug, entry_slug=base_rule.entry.slug) %}
+          {% if base_rule.anchor %}
+            {% set target_href = target_href ~ '#' ~ base_rule.anchor %}
+          {% endif %}
+          <li><a href="{{ target_href }}">{{ base_rule.label }}</a></li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endif %}
+{%- endmacro %}
+
 {% macro render_feature_progression(groups) -%}
   {% for group in groups %}
     <section>
@@ -80,6 +97,9 @@
                 </ul>
               {% endif %}
             </header>
+            {% if item.embedded_card and item.embedded_card.base_rule_refs %}
+              {{ render_base_rule_refs(item.embedded_card.base_rule_refs) }}
+            {% endif %}
             {% if item.embedded_card and item.embedded_card.body_html %}
               <div class="article-body--compact systems-inline-card__body">
                 {{ item.embedded_card.body_html | safe }}
@@ -218,6 +238,7 @@
             <p><strong>Level:</strong> <span>{{ entry.metadata.level }}</span></p>
           {% endif %}
         </section>
+        {{ render_base_rule_refs(feature_detail_card.base_rule_refs) }}
         {% if feature_detail_card.body_html %}
           <div class="article-body--compact systems-inline-card__body">
             {{ feature_detail_card.body_html | safe }}

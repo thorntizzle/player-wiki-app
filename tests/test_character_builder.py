@@ -5884,6 +5884,46 @@ def test_level_one_builder_applies_campaign_feature_ritual_book_spell_manager():
     assert "Identify (Ritual Book)" in list(context["preview"]["spells"] or [])
 
 
+def test_campaign_progression_entries_preserve_base_rule_refs():
+    progression_entry = build_campaign_page_progression_entries(
+        _campaign_page_record(
+            "mechanics/warding-principles",
+            "Warding Principles",
+            section="Mechanics",
+            subsection="Class Modifications",
+            metadata={
+                "character_progression": {
+                    "kind": "class",
+                    "class_name": "Wizard",
+                    "level": 2,
+                    "character_option": {
+                        "name": "Warding Principles",
+                        "base_rule_refs": [
+                            {"rule_key": "Armor Class"},
+                            {
+                                "systems_ref": {
+                                    "slug": "phb-variantrule-encumbrance",
+                                    "entry_type": "variantrule",
+                                    "source_id": "PHB",
+                                }
+                            },
+                        ],
+                    },
+                }
+            },
+        )
+    )[0]
+
+    assert progression_entry.metadata["campaign_option"]["base_rule_refs"] == [
+        {"rule_key": "armor-class"},
+        {
+            "slug": "phb-variantrule-encumbrance",
+            "source_id": "PHB",
+            "entry_type": "variantrule",
+        },
+    ]
+
+
 def test_native_level_up_applies_campaign_progression_ritual_book_spell_manager():
     fighter = _systems_entry(
         "class",

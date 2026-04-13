@@ -11333,6 +11333,81 @@ def test_subclass_pages_surface_campaign_mechanics_progression_overlays(
     assert '/campaigns/linden-pass/pages/mechanics/wild-magic-modification' in subclass_body
 
 
+def test_subclass_pages_surface_campaign_overlay_base_rule_refs(
+    app, client, sign_in, users, tmp_path
+):
+    data_root = build_campaign_subclass_progression_data_root(
+        tmp_path / "dnd5e-source-campaign-overlay-base-rules"
+    )
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("PHB", entry_types=["class", "classfeature", "subclass", "subclassfeature"])
+
+        store = app.extensions["systems_store"]
+        subclass_entry = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "PHB", entry_type="subclass", limit=20)
+            if entry.title == "Wild Magic"
+        )
+        spellcasting_entry = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "PHB", entry_type="classfeature", limit=20)
+            if entry.title == "Spellcasting"
+        )
+        spell_math_rule_entry = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "RULES", entry_type="rule", limit=50)
+            if entry.title == "Spell Attacks and Save DCs"
+        )
+
+        campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])
+        page_path = campaigns_dir / "linden-pass" / "content" / "mechanics" / "wild-magic-modification.md"
+        page_path.parent.mkdir(parents=True, exist_ok=True)
+        page_path.write_text(
+            (
+                "---\n"
+                "title: Wild Magic Modification\n"
+                "section: Mechanics\n"
+                "type: mechanic\n"
+                "subsection: Class Modifications\n"
+                "character_progression:\n"
+                "  kind: subclass\n"
+                "  class_name: Sorcerer\n"
+                "  subclass_name: Wild Magic\n"
+                "  level: 1\n"
+                "  character_option:\n"
+                "    name: Wild Magic Modification\n"
+                "    activation_type: special\n"
+                "    base_rule_refs:\n"
+                "      - rule_key: spell-attacks-and-save-dcs\n"
+                f"      - slug: {spellcasting_entry.slug}\n"
+                "        entry_type: classfeature\n"
+                "        source_id: PHB\n"
+                "---\n\n"
+                "Your wild magic now keys off the campaign spellcasting baseline.\n"
+            ),
+            encoding="utf-8",
+        )
+        app.extensions["repository_store"].refresh()
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    subclass_response = client.get(f"/campaigns/linden-pass/systems/entries/{subclass_entry.slug}")
+
+    assert subclass_response.status_code == 200
+    subclass_body = subclass_response.get_data(as_text=True)
+    assert "Modifies Base Rules:" in subclass_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{spell_math_rule_entry.slug}"' in subclass_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{spellcasting_entry.slug}"' in subclass_body
+    assert "Spell Attacks and Save DCs" in subclass_body
+    assert "Spellcasting" in subclass_body
+
+
 def test_importer_skips_subclassfeatures_for_unsupported_subclass_sources(app, tmp_path):
     data_root = build_unsupported_cross_source_subclassfeature_data_root(
         tmp_path / "dnd5e-source-unsupported-subclassfeature-sources"

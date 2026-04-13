@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 from typing import Any
 
 from .character_adjustments import normalize_manual_stat_adjustments
@@ -17,6 +18,55 @@ VALID_CAMPAIGN_FEATURE_ACTIVATION_TYPES = {
 VALID_CAMPAIGN_RESOURCE_RESET_TYPES = {"manual", "short_rest", "long_rest"}
 VALID_CAMPAIGN_RESOURCE_SCALING_MODES = {"level", "half_level", "proficiency_bonus", "thresholds"}
 VALID_CAMPAIGN_RESOURCE_SCALING_ROUNDS = {"down", "up", "nearest"}
+
+
+def normalize_campaign_base_rule_refs(value: Any) -> list[dict[str, Any]]:
+    raw_items = [value] if isinstance(value, dict) else list(value or []) if isinstance(value, list) else []
+    normalized_refs: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, str, str, str]] = set()
+    for raw_item in raw_items:
+        item = dict(raw_item or {}) if isinstance(raw_item, dict) else {}
+        if not item:
+            continue
+        systems_ref = dict(item.get("systems_ref") or {}) if isinstance(item.get("systems_ref"), dict) else {}
+        rule_key = _normalize_rule_key(item.get("rule_key", systems_ref.get("rule_key")))
+        entry_key = str(item.get("entry_key") or item.get("systems_entry_key") or systems_ref.get("entry_key") or "").strip()
+        slug = str(item.get("slug") or item.get("entry_slug") or systems_ref.get("slug") or "").strip()
+        source_id = str(item.get("source_id") or item.get("source") or systems_ref.get("source_id") or "").strip().upper()
+        entry_type = str(item.get("entry_type") or systems_ref.get("entry_type") or "").strip().lower()
+        title = str(item.get("title") or systems_ref.get("title") or "").strip()
+        anchor = str(item.get("anchor") or item.get("section_anchor") or "").strip()
+        section_title = str(item.get("section_title") or item.get("section") or item.get("anchor_title") or "").strip()
+        if not rule_key and not entry_key and not slug:
+            continue
+        marker = (
+            rule_key,
+            entry_key.casefold(),
+            slug.casefold(),
+            anchor.casefold(),
+        )
+        if marker in seen_keys:
+            continue
+        seen_keys.add(marker)
+        normalized: dict[str, Any] = {}
+        if rule_key:
+            normalized["rule_key"] = rule_key
+        if entry_key:
+            normalized["entry_key"] = entry_key
+        if slug:
+            normalized["slug"] = slug
+        if source_id:
+            normalized["source_id"] = source_id
+        if entry_type:
+            normalized["entry_type"] = entry_type
+        if title:
+            normalized["title"] = title
+        if anchor:
+            normalized["anchor"] = anchor
+        if section_title:
+            normalized["section_title"] = section_title
+        normalized_refs.append(normalized)
+    return normalized_refs
 
 
 def build_campaign_page_character_option(
@@ -90,6 +140,11 @@ def normalize_campaign_character_option(
             grants.get("spells") if "spells" in grants else raw_option.get("spells")
         ),
     }
+    base_rule_refs = normalize_campaign_base_rule_refs(
+        raw_option.get("base_rule_refs", raw_option.get("baseRuleRefs"))
+    )
+    if base_rule_refs:
+        normalized["base_rule_refs"] = base_rule_refs
     spell_support = raw_option.get("spell_support", raw_option.get("spellSupport"))
     if spell_support is not None:
         normalized["spell_support"] = deepcopy(spell_support)
@@ -435,3 +490,14 @@ def _normalize_speed_value(value: Any) -> int | str | None:
 
 def _contains_structured_builder_metadata(value: Any) -> bool:
     return isinstance(value, list) and any(isinstance(item, dict) for item in value)
+
+
+def _normalize_rule_key(value: Any) -> str:
+    clean_value = str(value or "").strip().lower()
+    if not clean_value:
+        return ""
+    clean_value = clean_value.replace("_", "-")
+    clean_value = re.sub(r"\s+", "-", clean_value)
+    clean_value = re.sub(r"[^a-z0-9-]+", "-", clean_value)
+    clean_value = re.sub(r"-{2,}", "-", clean_value)
+    return clean_value.strip("-")

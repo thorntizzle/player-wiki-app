@@ -3463,6 +3463,41 @@ def create_app() -> Flask:
         source_state = systems_service.get_campaign_source_state(campaign_slug, entry.source_id)
         if source_state is None or not source_state.is_enabled:
             abort(404)
+
+        def filter_base_rule_refs(value: object) -> list[dict[str, object]]:
+            filtered_refs: list[dict[str, object]] = []
+            for raw_item in list(value or []):
+                item = dict(raw_item or {}) if isinstance(raw_item, dict) else {}
+                target_entry = item.get("entry")
+                if target_entry is None or not can_access_campaign_systems_entry(campaign_slug, target_entry.slug):
+                    continue
+                filtered_refs.append(item)
+            return filtered_refs
+
+        def filter_embedded_card(value: object) -> dict[str, object] | None:
+            card = dict(value or {}) if isinstance(value, dict) else {}
+            if not card:
+                return None
+            card["base_rule_refs"] = filter_base_rule_refs(card.get("base_rule_refs"))
+            return card
+
+        def filter_progression_groups(value: object) -> list[dict[str, object]]:
+            filtered_groups: list[dict[str, object]] = []
+            for raw_group in list(value or []):
+                group = dict(raw_group or {}) if isinstance(raw_group, dict) else {}
+                if not group:
+                    continue
+                filtered_rows: list[dict[str, object]] = []
+                for raw_row in list(group.get("feature_rows") or []):
+                    row = dict(raw_row or {}) if isinstance(raw_row, dict) else {}
+                    if not row:
+                        continue
+                    row["embedded_card"] = filter_embedded_card(row.get("embedded_card"))
+                    filtered_rows.append(row)
+                group["feature_rows"] = filtered_rows
+                filtered_groups.append(group)
+            return filtered_groups
+
         book_default_visibility_label = ""
         book_visibility_policy_note = ""
         if entry.entry_type == "book":
@@ -3503,11 +3538,14 @@ def create_app() -> Flask:
             if entry.entry_type == "class"
             else []
         )
+        class_feature_progression_groups = filter_progression_groups(class_feature_progression_groups)
+        subclass_feature_progression_groups = filter_progression_groups(subclass_feature_progression_groups)
         feature_detail_card = (
             systems_service.build_feature_detail_card(campaign_slug, entry)
             if entry.entry_type in {"classfeature", "subclassfeature", "optionalfeature"}
             else None
         )
+        feature_detail_card = filter_embedded_card(feature_detail_card)
         related_rule_entries = [
             candidate
             for candidate in systems_service.build_related_rules_for_entry(campaign_slug, entry)

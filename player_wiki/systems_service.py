@@ -9,6 +9,7 @@ from pathlib import Path
 from flask import g, has_request_context
 
 from .auth_store import isoformat, utcnow
+from .character_campaign_options import normalize_campaign_base_rule_refs
 from .character_campaign_progression import build_campaign_page_progression_entries
 from .campaign_visibility import (
     VISIBILITY_DM,
@@ -1113,6 +1114,37 @@ class SystemsService:
         rule_keys = self._collect_related_rule_keys_for_entry(entry)
         return self._resolve_rule_entries_by_key(rules_by_key, rule_keys)
 
+    def build_base_rule_refs_for_campaign_option(
+        self,
+        campaign_slug: str,
+        campaign_option: dict[str, object] | None,
+    ) -> list[dict[str, object]]:
+        option = dict(campaign_option or {})
+        raw_refs = normalize_campaign_base_rule_refs(option.get("base_rule_refs"))
+        if not raw_refs:
+            return []
+
+        rules_by_key = self._build_rules_reference_lookup(campaign_slug)
+        resolved_refs: list[dict[str, object]] = []
+        seen_keys: set[tuple[str, str]] = set()
+        for raw_ref in raw_refs:
+            resolved_ref = self._resolve_campaign_base_rule_ref(
+                campaign_slug,
+                raw_ref,
+                rules_by_key=rules_by_key,
+            )
+            if resolved_ref is None:
+                continue
+            marker = (
+                str(resolved_ref["entry"].entry_key or "").strip(),
+                str(resolved_ref.get("anchor") or "").strip().casefold(),
+            )
+            if marker in seen_keys:
+                continue
+            seen_keys.add(marker)
+            resolved_refs.append(resolved_ref)
+        return resolved_refs
+
     def build_related_monsters_for_entry(
         self,
         campaign_slug: str,
@@ -1472,6 +1504,45 @@ class SystemsService:
             seen_entry_keys.add(entry.entry_key)
             related_entries.append(entry)
         return related_entries
+
+    def _resolve_campaign_base_rule_ref(
+        self,
+        campaign_slug: str,
+        raw_ref: dict[str, object],
+        *,
+        rules_by_key: dict[str, SystemsEntryRecord],
+    ) -> dict[str, object] | None:
+        ref = dict(raw_ref or {})
+        rule_key = str(ref.get("rule_key") or "").strip()
+        entry_key = str(ref.get("entry_key") or "").strip()
+        slug = str(ref.get("slug") or "").strip()
+        expected_source_id = str(ref.get("source_id") or "").strip().upper()
+        expected_entry_type = str(ref.get("entry_type") or "").strip().lower()
+        anchor = str(ref.get("anchor") or "").strip()
+        section_title = str(ref.get("section_title") or "").strip()
+
+        entry: SystemsEntryRecord | None = None
+        if rule_key:
+            entry = rules_by_key.get(rule_key)
+        if entry is None and entry_key:
+            entry = self.get_entry_for_campaign(campaign_slug, entry_key)
+        if entry is None and slug:
+            entry = self.get_entry_by_slug_for_campaign(campaign_slug, slug)
+        if entry is None or not self.is_entry_enabled_for_campaign(campaign_slug, entry):
+            return None
+        if expected_source_id and expected_source_id != str(entry.source_id or "").strip().upper():
+            return None
+        if expected_entry_type and expected_entry_type != str(entry.entry_type or "").strip().lower():
+            return None
+
+        label = entry.title
+        if section_title and section_title.casefold() != str(entry.title or "").strip().casefold():
+            label = f"{entry.title}: {section_title}"
+        return {
+            "entry": entry,
+            "label": label,
+            "anchor": anchor,
+        }
 
     def _build_curated_related_entries_for_entry(
         self,
@@ -2842,10 +2913,13 @@ class SystemsService:
         *,
         optionalfeature_lookup: dict[str, list[SystemsEntryRecord]],
     ) -> dict[str, object]:
+        campaign_option = dict(entry.metadata.get("campaign_option") or {})
+        base_rule_refs = self.build_base_rule_refs_for_campaign_option(campaign_slug, campaign_option)
         page_ref = str(entry.metadata.get("page_ref") or "").strip()
         if page_ref:
             return {
                 "meta_badges": self._build_embedded_feature_badges(entry),
+                "base_rule_refs": base_rule_refs,
                 "body_html": self._build_campaign_page_body_html(campaign_slug, page_ref),
                 "option_groups": [],
             }
@@ -2859,6 +2933,7 @@ class SystemsService:
         )
         return {
             "meta_badges": self._build_embedded_feature_badges(entry),
+            "base_rule_refs": base_rule_refs,
             "body_html": body_html,
             "option_groups": option_groups,
         }
