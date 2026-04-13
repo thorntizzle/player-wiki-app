@@ -4155,7 +4155,10 @@ XGE_RULES_REFERENCE_TEST_TITLES = (
 )
 
 
-TCE_RULES_REFERENCE_TEST_TITLES = ("Ten Rules to Remember",)
+TCE_RULES_REFERENCE_TEST_TITLES = (
+    "Ten Rules to Remember",
+    "Customizing Your Origin",
+)
 
 
 def build_xge_book_data_root(root: Path) -> Path:
@@ -4700,9 +4703,42 @@ def build_tce_book_data_root(root: Path) -> Path:
                                 "It's All Optional",
                                 "Ten Rules to Remember",
                             ],
+                        },
+                        {
+                            "name": "Character Options",
+                            "headers": [
+                                "Customizing Your Origin",
+                                "Changing a Skill",
+                                "Changing Your Subclass",
+                            ],
                         }
                     ],
                 }
+            ]
+        },
+    )
+    write_json(
+        root / "data/variantrules.json",
+        {
+            "variantrule": [
+                {
+                    "name": "Encumbrance",
+                    "source": "PHB",
+                    "page": 176,
+                    "ruleType": "O",
+                    "entries": [
+                        "If you carry weight in excess of 5 times your Strength score, you are encumbered."
+                    ],
+                },
+                {
+                    "name": "Customizing Your Origin",
+                    "source": "TCE",
+                    "page": 7,
+                    "ruleType": "O",
+                    "entries": [
+                        "With your DM's approval, you can customize the origin traits granted by your race."
+                    ],
+                },
             ]
         },
     )
@@ -4795,6 +4831,37 @@ def build_tce_book_data_root(root: Path) -> Path:
                                         {"type": "quote", "entries": ["The rules help, but the table comes first."]},
                                     ],
                                 },
+                            ],
+                        },
+                    ],
+                },
+                {
+                    "type": "section",
+                    "name": "Character Options",
+                    "page": 7,
+                    "entries": [
+                        {
+                            "type": "section",
+                            "name": "Customizing Your Origin",
+                            "page": 7,
+                            "entries": [
+                                "See the {@variantrule Customizing Your Origin|TCE} entry."
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Changing a Skill",
+                            "page": 8,
+                            "entries": [
+                                "Swap an underused skill proficiency for another one your class offered at 1st level."
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Changing Your Subclass",
+                            "page": 8,
+                            "entries": [
+                                "With your DM's approval, you can replace your subclass when you gain a new subclass feature."
                             ],
                         },
                     ],
@@ -7485,7 +7552,7 @@ def test_xge_book_slice_includes_shared_campaigns_wrapper_and_excludes_remaining
     assert "Shared Campaigns" in book_titles
 
 
-def test_tce_ten_rules_to_remember_is_imported_for_player_browse(
+def test_tce_book_entries_are_imported_for_player_browse(
     client, sign_in, users, app, tmp_path
 ):
     data_root = build_tce_book_data_root(tmp_path / "dnd5e-source-tce-book-entries")
@@ -7496,7 +7563,7 @@ def test_tce_ten_rules_to_remember_is_imported_for_player_browse(
             systems_service=app.extensions["systems_service"],
             data_root=data_root,
         )
-        importer.import_source("TCE", entry_types=["book"])
+        importer.import_source("TCE", entry_types=["book", "variantrule"])
 
         service = app.extensions["systems_service"]
         store = app.extensions["systems_store"]
@@ -7516,8 +7583,18 @@ def test_tce_ten_rules_to_remember_is_imported_for_player_browse(
                 limit=None,
             )
         }
+        tce_rules = {
+            entry.title: entry
+            for entry in service.list_entries_for_campaign_source(
+                "linden-pass",
+                "TCE",
+                entry_type="variantrule",
+                limit=None,
+            )
+        }
 
     assert list(book_entries) == list(TCE_RULES_REFERENCE_TEST_TITLES)
+    assert "Customizing Your Origin" in tce_rules
 
     sign_in(users["party"]["email"], users["party"]["password"])
     source_response = client.get("/campaigns/linden-pass/systems/sources/TCE")
@@ -7525,16 +7602,21 @@ def test_tce_ten_rules_to_remember_is_imported_for_player_browse(
     ten_rules_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Ten Rules to Remember'].slug}"
     )
+    customizing_origin_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Customizing Your Origin'].slug}"
+    )
 
     assert source_response.status_code == 200
     source_body = source_response.get_data(as_text=True)
     assert "Book Chapters" in source_body
     assert "Ten Rules to Remember" in source_body
+    assert "Customizing Your Origin" in source_body
 
     assert category_response.status_code == 200
     category_body = category_response.get_data(as_text=True)
-    assert "Showing all 1 book chapters available to you in this source." in category_body
+    assert "Showing all 2 book chapters available to you in this source." in category_body
     assert "Ten Rules to Remember" in category_body
+    assert "Customizing Your Origin" in category_body
 
     assert ten_rules_response.status_code == 200
     ten_rules_body = ten_rules_response.get_data(as_text=True)
@@ -7547,8 +7629,72 @@ def test_tce_ten_rules_to_remember_is_imported_for_player_browse(
     assert 'id="3-advantage-and-disadvantage"' in ten_rules_body
     assert "The rules help, but the table comes first." in ten_rules_body
 
+    assert customizing_origin_response.status_code == 200
+    customizing_origin_body = customizing_origin_response.get_data(as_text=True)
+    assert "Character Options" in customizing_origin_body
+    assert "Customizing Your Origin" in customizing_origin_body
+    assert "See the Customizing Your Origin entry." in customizing_origin_body
 
-def test_tce_book_slice_only_includes_ten_rules_to_remember_for_now(app, tmp_path):
+
+def test_tce_book_entries_follow_source_visibility(client, sign_in, users, app, tmp_path):
+    data_root = build_tce_book_data_root(
+        tmp_path / "dnd5e-source-tce-book-entries-policy"
+    )
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("TCE", entry_types=["book"])
+
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="TCE",
+            is_enabled=True,
+            default_visibility="dm",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in store.list_entries_for_source("DND-5E", "TCE", entry_type="book", limit=20)
+        }
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    player_source_response = client.get("/campaigns/linden-pass/systems/sources/TCE")
+    player_category_response = client.get("/campaigns/linden-pass/systems/sources/TCE/types/book")
+    player_entry_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Customizing Your Origin'].slug}"
+    )
+
+    assert player_source_response.status_code == 404
+    assert player_category_response.status_code == 404
+    assert player_entry_response.status_code == 404
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    dm_source_response = client.get("/campaigns/linden-pass/systems/sources/TCE")
+    dm_category_response = client.get("/campaigns/linden-pass/systems/sources/TCE/types/book")
+    dm_entry_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Customizing Your Origin'].slug}"
+    )
+
+    assert dm_source_response.status_code == 200
+    assert "Book Chapters" in dm_source_response.get_data(as_text=True)
+    assert dm_category_response.status_code == 200
+    dm_category_body = dm_category_response.get_data(as_text=True)
+    assert "Ten Rules to Remember" in dm_category_body
+    assert "Customizing Your Origin" in dm_category_body
+    assert dm_entry_response.status_code == 200
+    dm_entry_body = dm_entry_response.get_data(as_text=True)
+    assert "Character Options" in dm_entry_body
+    assert "Customizing Your Origin" in dm_entry_body
+
+
+def test_tce_book_slice_includes_customizing_your_origin_wrapper_for_now(app, tmp_path):
     data_root = build_tce_book_data_root(tmp_path / "dnd5e-source-tce-book-boundary")
 
     with app.app_context():
