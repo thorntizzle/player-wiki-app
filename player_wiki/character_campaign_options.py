@@ -19,6 +19,72 @@ VALID_CAMPAIGN_RESOURCE_RESET_TYPES = {"manual", "short_rest", "long_rest"}
 VALID_CAMPAIGN_RESOURCE_SCALING_MODES = {"level", "half_level", "proficiency_bonus", "thresholds"}
 VALID_CAMPAIGN_RESOURCE_SCALING_ROUNDS = {"down", "up", "nearest"}
 VALID_CAMPAIGN_OVERLAY_SUPPORT_TYPES = {"reference_only", "modeled"}
+CAMPAIGN_BASE_RULE_REUSE_HOOKS = {
+    "character_option": {
+        "key": "character_option",
+        "label": "Character Option",
+        "description": (
+            "Reuses the existing page-backed character option contract for structured grants, stat adjustments, "
+            "resources, and other supported character-facing payloads."
+        ),
+    },
+    "character_progression": {
+        "key": "character_progression",
+        "label": "Character Progression",
+        "description": (
+            "Reuses the existing class/subclass progression overlay lane so the modifier already rides the Systems "
+            "and native level-up read path."
+        ),
+    },
+    "spell_support": {
+        "key": "spell_support",
+        "label": "Spell Support",
+        "description": (
+            "Reuses the existing spell-support payload for granted, replaced, or otherwise structured spell choices."
+        ),
+    },
+    "spell_manager": {
+        "key": "spell_manager",
+        "label": "Spell Manager",
+        "description": (
+            "Reuses the existing spell-manager payload for managed spell sources such as ritual books and similar "
+            "tracked spell lists."
+        ),
+    },
+    "modeled_effects": {
+        "key": "modeled_effects",
+        "label": "Modeled Effects",
+        "description": (
+            "Reuses the existing modeled-effects keys for downstream derived behavior such as attack, save, speed, "
+            "or passive adjustments."
+        ),
+    },
+}
+CAMPAIGN_BASE_RULE_MISSING_METADATA = (
+    {
+        "key": "change_operation",
+        "label": "Change Operation",
+        "description": (
+            "The overlay does not yet say whether it adds to, replaces, removes, or otherwise overrides the linked "
+            "baseline rule."
+        ),
+    },
+    {
+        "key": "affected_rule_facet",
+        "label": "Affected Rule Facet",
+        "description": (
+            "The overlay does not yet identify which precise baseline subsection, field, or derived behavior it "
+            "changes."
+        ),
+    },
+    {
+        "key": "baseline_carry_forward",
+        "label": "Baseline Carry-Forward",
+        "description": (
+            "The overlay does not yet say whether unmodified parts of the baseline rule still apply as written."
+        ),
+    },
+)
 
 
 def normalize_campaign_base_rule_refs(value: Any) -> list[dict[str, Any]]:
@@ -82,6 +148,40 @@ def normalize_campaign_overlay_support(
     if not normalize_campaign_base_rule_refs(candidate_option.get("base_rule_refs")):
         return None
     return "modeled" if _campaign_option_has_modeled_overlay_content(candidate_option) else "reference_only"
+
+
+def build_campaign_base_rule_modification_summary(
+    option: dict[str, Any] | None,
+    *,
+    extra_hooks: list[str] | tuple[str, ...] | None = None,
+) -> dict[str, Any] | None:
+    candidate_option = dict(option or {}) if isinstance(option, dict) else {}
+    if not normalize_campaign_base_rule_refs(candidate_option.get("base_rule_refs")):
+        return None
+    hook_keys = _campaign_base_rule_reuse_hook_keys(candidate_option, extra_hooks=extra_hooks)
+    return {
+        "reused_hooks": [deepcopy(CAMPAIGN_BASE_RULE_REUSE_HOOKS[key]) for key in hook_keys],
+        "missing_metadata": [deepcopy(item) for item in CAMPAIGN_BASE_RULE_MISSING_METADATA],
+    }
+
+
+def extend_campaign_base_rule_modification_summary(
+    summary: Any,
+    *hook_keys: str,
+) -> dict[str, Any] | None:
+    normalized_summary = dict(summary or {}) if isinstance(summary, dict) else {}
+    if not normalized_summary:
+        return None
+    existing_hook_keys: list[str] = []
+    for raw_item in list(normalized_summary.get("reused_hooks") or []):
+        item = dict(raw_item or {}) if isinstance(raw_item, dict) else {}
+        hook_key = str(item.get("key") or "").strip().lower().replace("-", "_")
+        if hook_key in CAMPAIGN_BASE_RULE_REUSE_HOOKS:
+            existing_hook_keys.append(hook_key)
+    merged_hook_keys = _merge_campaign_base_rule_reuse_hook_keys(existing_hook_keys, extra_hooks=hook_keys)
+    normalized_summary["reused_hooks"] = [deepcopy(CAMPAIGN_BASE_RULE_REUSE_HOOKS[key]) for key in merged_hook_keys]
+    normalized_summary["missing_metadata"] = [deepcopy(item) for item in CAMPAIGN_BASE_RULE_MISSING_METADATA]
+    return normalized_summary
 
 
 def build_campaign_page_character_option(
@@ -369,6 +469,9 @@ def _finalize_campaign_overlay_support(
     )
     if overlay_support:
         normalized["overlay_support"] = overlay_support
+    base_rule_modification_summary = build_campaign_base_rule_modification_summary(normalized)
+    if base_rule_modification_summary:
+        normalized["base_rule_modification_summary"] = base_rule_modification_summary
     return normalized
 
 
@@ -414,6 +517,37 @@ def _campaign_overlay_value_has_content(value: Any) -> bool:
     if isinstance(value, (list, tuple, set)):
         return any(_campaign_overlay_value_has_content(item) for item in value)
     return bool(value)
+
+
+def _campaign_base_rule_reuse_hook_keys(
+    option: dict[str, Any],
+    *,
+    extra_hooks: list[str] | tuple[str, ...] | None = None,
+) -> list[str]:
+    hook_keys = ["character_option"]
+    if option.get("spell_support") is not None:
+        hook_keys.append("spell_support")
+    if option.get("spell_manager") is not None:
+        hook_keys.append("spell_manager")
+    if _campaign_overlay_value_has_content(option.get("modeled_effects")):
+        hook_keys.append("modeled_effects")
+    return _merge_campaign_base_rule_reuse_hook_keys(hook_keys, extra_hooks=extra_hooks)
+
+
+def _merge_campaign_base_rule_reuse_hook_keys(
+    hook_keys: list[str] | tuple[str, ...],
+    *,
+    extra_hooks: list[str] | tuple[str, ...] | None = None,
+) -> list[str]:
+    merged_keys: list[str] = []
+    seen_keys: set[str] = set()
+    for raw_key in [*list(hook_keys or []), *list(extra_hooks or [])]:
+        hook_key = str(raw_key or "").strip().lower().replace("-", "_")
+        if hook_key not in CAMPAIGN_BASE_RULE_REUSE_HOOKS or hook_key in seen_keys:
+            continue
+        seen_keys.add(hook_key)
+        merged_keys.append(hook_key)
+    return merged_keys
 
 
 def _normalize_modeled_effects(value: Any) -> list[str]:

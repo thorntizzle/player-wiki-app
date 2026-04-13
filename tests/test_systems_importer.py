@@ -11344,6 +11344,13 @@ def test_subclass_pages_surface_campaign_mechanics_progression_overlays(
         "This overlay uses existing structured campaign metadata that the app can already project on supported "
         "character and build surfaces." in subclass_body
     )
+    assert "Existing Structured Hooks:" in subclass_body
+    assert "Character Option." in subclass_body
+    assert "Character Progression." in subclass_body
+    assert "Missing Metadata For True Base-Rule Modifiers:" in subclass_body
+    assert "Change Operation." in subclass_body
+    assert "Affected Rule Facet." in subclass_body
+    assert "Baseline Carry-Forward." in subclass_body
     assert f'href="/campaigns/linden-pass/systems/entries/{wild_magic_rule_entry.slug}"' in subclass_body
 
 

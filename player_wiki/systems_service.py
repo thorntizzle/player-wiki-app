@@ -2947,12 +2947,18 @@ class SystemsService:
             campaign_option,
             base_rule_refs=base_rule_refs,
         )
+        base_rule_modification_summary = (
+            dict(campaign_option.get("base_rule_modification_summary") or {})
+            if isinstance(campaign_option.get("base_rule_modification_summary"), dict)
+            else None
+        )
         page_ref = str(entry.metadata.get("page_ref") or "").strip()
         if page_ref:
             return {
                 "meta_badges": self._build_embedded_feature_badges(entry),
                 "base_rule_refs": base_rule_refs,
                 "overlay_support": overlay_support,
+                "base_rule_modification_summary": base_rule_modification_summary,
                 "body_html": self._build_campaign_page_body_html(campaign_slug, page_ref),
                 "option_groups": [],
             }
@@ -2968,6 +2974,7 @@ class SystemsService:
             "meta_badges": self._build_embedded_feature_badges(entry),
             "base_rule_refs": base_rule_refs,
             "overlay_support": overlay_support,
+            "base_rule_modification_summary": base_rule_modification_summary,
             "body_html": body_html,
             "option_groups": option_groups,
         }

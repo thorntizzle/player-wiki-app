@@ -4,7 +4,10 @@ from copy import deepcopy
 from typing import Any
 
 from .auth_store import utcnow
-from .character_campaign_options import normalize_campaign_character_option
+from .character_campaign_options import (
+    extend_campaign_base_rule_modification_summary,
+    normalize_campaign_character_option,
+)
 from .repository import slugify
 from .systems_models import SystemsEntryRecord
 
@@ -133,6 +136,12 @@ def _normalize_campaign_progression_item(
     )
     if campaign_option is None:
         return None
+    base_rule_modification_summary = extend_campaign_base_rule_modification_summary(
+        campaign_option.get("base_rule_modification_summary"),
+        "character_progression",
+    )
+    if base_rule_modification_summary is not None:
+        campaign_option["base_rule_modification_summary"] = base_rule_modification_summary
 
     return {
         "kind": kind,

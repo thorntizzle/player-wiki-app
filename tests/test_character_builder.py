@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import player_wiki.app as app_module
 import pytest
 import yaml
+from player_wiki.character_campaign_options import normalize_campaign_character_option
 from player_wiki.character_campaign_progression import build_campaign_page_progression_entries
 from player_wiki.character_builder import (
     CHARACTER_BUILDER_VERSION,
@@ -5923,6 +5924,48 @@ def test_campaign_progression_entries_preserve_base_rule_refs():
         },
     ]
     assert progression_entry.metadata["campaign_option"]["overlay_support"] == "reference_only"
+    summary = progression_entry.metadata["campaign_option"]["base_rule_modification_summary"]
+    assert [hook["key"] for hook in summary["reused_hooks"]] == [
+        "character_option",
+        "character_progression",
+    ]
+    assert [item["key"] for item in summary["missing_metadata"]] == [
+        "change_operation",
+        "affected_rule_facet",
+        "baseline_carry_forward",
+    ]
+
+
+def test_campaign_character_option_base_rule_modification_summary_reuses_existing_hooks():
+    campaign_option = normalize_campaign_character_option(
+        {
+            "kind": "feature",
+            "name": "Arcane Thesis",
+            "base_rule_refs": [{"rule_key": "Spell Attacks and Save DCs"}],
+            "spell_support": [{"granted": [{"value": "Shield"}]}],
+            "spell_manager": {"mode": "ritual_book", "title": "Arcane Thesis"},
+            "modeled_effects": ["save-bonus:all:1"],
+        },
+        page_ref="mechanics/arcane-thesis",
+        title="Arcane Thesis",
+        summary="",
+        default_kind="feature",
+    )
+
+    assert campaign_option is not None
+    assert campaign_option["overlay_support"] == "modeled"
+    summary = campaign_option["base_rule_modification_summary"]
+    assert [hook["key"] for hook in summary["reused_hooks"]] == [
+        "character_option",
+        "spell_support",
+        "spell_manager",
+        "modeled_effects",
+    ]
+    assert [item["key"] for item in summary["missing_metadata"]] == [
+        "change_operation",
+        "affected_rule_facet",
+        "baseline_carry_forward",
+    ]
 
 
 def test_native_level_up_applies_campaign_progression_ritual_book_spell_manager():

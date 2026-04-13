@@ -57,7 +57,7 @@
   </div>
 {%- endmacro %}
 
-{% macro render_base_rule_refs(base_rule_refs, overlay_support=None) -%}
+{% macro render_base_rule_refs(base_rule_refs, overlay_support=None, base_rule_modification_summary=None) -%}
   {% if base_rule_refs %}
     <section class="systems-inline-option-group">
       {% if overlay_support %}
@@ -70,6 +70,22 @@
       <p class="meta">
         Precedence in this campaign: the published campaign overlay applies first. Linked Character Rules Reference entries are the normalized app-owned rules layer beneath that overlay, and linked supported-source entries remain the baseline source context beneath both.
       </p>
+      {% if base_rule_modification_summary and base_rule_modification_summary.reused_hooks %}
+        <p class="meta systems-inline-option-group__label">Existing Structured Hooks:</p>
+        <ul class="plain-list">
+          {% for hook in base_rule_modification_summary.reused_hooks %}
+            <li><strong>{{ hook.label }}.</strong> {{ hook.description }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      {% if base_rule_modification_summary and base_rule_modification_summary.missing_metadata %}
+        <p class="meta systems-inline-option-group__label">Missing Metadata For True Base-Rule Modifiers:</p>
+        <ul class="plain-list">
+          {% for metadata_gap in base_rule_modification_summary.missing_metadata %}
+            <li><strong>{{ metadata_gap.label }}.</strong> {{ metadata_gap.description }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
       <ul class="plain-list">
         {% for base_rule in base_rule_refs %}
           {% set target_href = url_for('campaign_systems_entry_detail', campaign_slug=campaign.slug, entry_slug=base_rule.entry.slug) %}
@@ -116,7 +132,7 @@
               {% endif %}
             </header>
             {% if item.embedded_card and item.embedded_card.base_rule_refs %}
-              {{ render_base_rule_refs(item.embedded_card.base_rule_refs, item.embedded_card.overlay_support) }}
+              {{ render_base_rule_refs(item.embedded_card.base_rule_refs, item.embedded_card.overlay_support, item.embedded_card.base_rule_modification_summary) }}
             {% endif %}
             {% if item.embedded_card and item.embedded_card.body_html %}
               <div class="article-body--compact systems-inline-card__body">
@@ -256,7 +272,7 @@
             <p><strong>Level:</strong> <span>{{ entry.metadata.level }}</span></p>
           {% endif %}
         </section>
-        {{ render_base_rule_refs(feature_detail_card.base_rule_refs, feature_detail_card.overlay_support) }}
+        {{ render_base_rule_refs(feature_detail_card.base_rule_refs, feature_detail_card.overlay_support, feature_detail_card.base_rule_modification_summary) }}
         {% if feature_detail_card.body_html %}
           <div class="article-body--compact systems-inline-card__body">
             {{ feature_detail_card.body_html | safe }}
