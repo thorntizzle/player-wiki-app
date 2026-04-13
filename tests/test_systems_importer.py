@@ -4735,6 +4735,21 @@ def build_mtf_book_data_root(root: Path) -> Path:
                     ],
                 },
                 {
+                    "name": "Dwarf",
+                    "source": "PHB",
+                    "page": 18,
+                    "size": ["M"],
+                    "speed": {"walk": 25},
+                    "ability": [{"con": 2}],
+                    "entries": [
+                        {
+                            "name": "Darkvision",
+                            "type": "entries",
+                            "entries": ["Accustomed to life underground, you have superior vision in dark and dim conditions."],
+                        }
+                    ],
+                },
+                {
                     "name": "Tiefling",
                     "source": "PHB",
                     "page": 42,
@@ -4793,6 +4808,21 @@ def build_mtf_book_data_root(root: Path) -> Path:
                             "name": "Blessing of the Raven Queen",
                             "type": "entries",
                             "entries": ["You can step through the shadows under the Raven Queen's blessing."],
+                        }
+                    ],
+                },
+                {
+                    "name": "Duergar",
+                    "source": "MTF",
+                    "raceName": "Dwarf",
+                    "raceSource": "PHB",
+                    "page": 81,
+                    "ability": [{"str": 1}],
+                    "entries": [
+                        {
+                            "name": "Duergar Resilience",
+                            "type": "entries",
+                            "entries": ["You have advantage on saving throws against illusions and against being charmed or paralyzed."],
                         }
                     ],
                 },
@@ -4952,6 +4982,11 @@ def build_mtf_book_data_root(root: Path) -> Path:
                             "name": "Elves",
                             "headers": ["Elf Subraces"],
                             "ordinal": {"type": "chapter", "identifier": 2},
+                        },
+                        {
+                            "name": "Dwarves and Duergar",
+                            "headers": ["Duergar Characters"],
+                            "ordinal": {"type": "chapter", "identifier": 3},
                         }
                     ],
                 }
@@ -5008,6 +5043,28 @@ def build_mtf_book_data_root(root: Path) -> Path:
                                         "{@race Elf (Eladrin)|MTF}",
                                         "{@race Elf (Sea)|MTF}",
                                         "{@race Elf (Shadar-kai)|MTF}",
+                                    ],
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "type": "section",
+                    "name": "Dwarves and Duergar",
+                    "page": 65,
+                    "entries": [
+                        {
+                            "type": "section",
+                            "name": "Duergar Characters",
+                            "page": 81,
+                            "entries": [
+                                "Those duergar who become adventurers are almost invariably exiles from their society.",
+                                "At the DM's discretion, you can play a duergar character. When you choose the subrace of your dwarf, you can choose duergar, using the following rules to create your character.",
+                                {
+                                    "type": "list",
+                                    "items": [
+                                        "{@race Dwarf (Duergar)|MTF}",
                                     ],
                                 },
                             ],
@@ -8290,7 +8347,7 @@ def test_mm_book_pages_surface_related_monsters_and_monster_rules(
     )
 
 
-def test_mtf_tiefling_and_elf_subraces_wrappers_are_imported_for_dm_browse(
+def test_mtf_tiefling_elf_and_duergar_wrappers_are_imported_for_dm_browse(
     client, sign_in, users, app, tmp_path
 ):
     data_root = build_mtf_book_data_root(tmp_path / "dnd5e-source-mtf-ancestry-subraces")
@@ -8322,9 +8379,9 @@ def test_mtf_tiefling_and_elf_subraces_wrappers_are_imported_for_dm_browse(
             )
         }
 
-    assert result.imported_count == 2
-    assert result.imported_by_type == {"book": 2}
-    assert list(book_entries) == ["Tiefling Subraces", "Elf Subraces"]
+    assert result.imported_count == 3
+    assert result.imported_by_type == {"book": 3}
+    assert list(book_entries) == ["Tiefling Subraces", "Elf Subraces", "Duergar Characters"]
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
     source_response = client.get("/campaigns/linden-pass/systems/sources/MTF")
@@ -8333,20 +8390,27 @@ def test_mtf_tiefling_and_elf_subraces_wrappers_are_imported_for_dm_browse(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Tiefling Subraces'].slug}"
     )
     elf_entry_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Elf Subraces'].slug}")
+    duergar_entry_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Duergar Characters'].slug}"
+    )
 
     assert source_response.status_code == 200
     source_body = source_response.get_data(as_text=True)
     assert "Book Chapters" in source_body
     assert "Tiefling Subraces" in source_body
     assert "Elf Subraces" in source_body
+    assert "Duergar Characters" in source_body
     assert source_body.index("Tiefling Subraces") < source_body.index("Elf Subraces")
+    assert source_body.index("Elf Subraces") < source_body.index("Duergar Characters")
 
     assert category_response.status_code == 200
     category_body = category_response.get_data(as_text=True)
-    assert "Showing all 2 book chapters available to you in this source." in category_body
+    assert "Showing all 3 book chapters available to you in this source." in category_body
     assert "Tiefling Subraces" in category_body
     assert "Elf Subraces" in category_body
+    assert "Duergar Characters" in category_body
     assert category_body.index("Tiefling Subraces") < category_body.index("Elf Subraces")
+    assert category_body.index("Elf Subraces") < category_body.index("Duergar Characters")
 
     assert tiefling_entry_response.status_code == 200
     tiefling_entry_body = tiefling_entry_response.get_data(as_text=True)
@@ -8365,6 +8429,13 @@ def test_mtf_tiefling_and_elf_subraces_wrappers_are_imported_for_dm_browse(
     assert "Elf (Eladrin)" in elf_entry_body
     assert "Elf (Sea)" in elf_entry_body
     assert "Elf (Shadar-kai)" in elf_entry_body
+
+    assert duergar_entry_response.status_code == 200
+    duergar_entry_body = duergar_entry_response.get_data(as_text=True)
+    assert "Chapter 3" in duergar_entry_body
+    assert "Dwarves and Duergar" in duergar_entry_body
+    assert "At the DM&#39;s discretion" in duergar_entry_body
+    assert "Dwarf (Duergar)" in duergar_entry_body
 
 
 def test_dmg_book_chapters_surface_related_imported_entities(client, sign_in, users, app, tmp_path):

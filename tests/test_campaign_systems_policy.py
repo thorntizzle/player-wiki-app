@@ -586,6 +586,7 @@ def test_mtf_book_entries_stay_hidden_when_source_visibility_is_lowered_for_othe
         }
         tiefling_wrapper_entry = book_entries["Tiefling Subraces"]
         elf_wrapper_entry = book_entries["Elf Subraces"]
+        duergar_wrapper_entry = book_entries["Duergar Characters"]
         asmodeus_tiefling_entry = next(
             entry
             for entry in store.list_entries_for_source("DND-5E", "MTF", entry_type="race", limit=20)
@@ -596,6 +597,11 @@ def test_mtf_book_entries_stay_hidden_when_source_visibility_is_lowered_for_othe
             for entry in store.list_entries_for_source("DND-5E", "MTF", entry_type="race", limit=20)
             if entry.title == "Sea Elf"
         )
+        duergar_entry = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "MTF", entry_type="race", limit=20)
+            if entry.title == "Duergar"
+        )
 
     sign_in(users["party"]["email"], users["party"]["password"])
 
@@ -605,33 +611,44 @@ def test_mtf_book_entries_stay_hidden_when_source_visibility_is_lowered_for_othe
         f"/campaigns/linden-pass/systems/entries/{tiefling_wrapper_entry.slug}"
     )
     player_elf_book_response = client.get(f"/campaigns/linden-pass/systems/entries/{elf_wrapper_entry.slug}")
+    player_duergar_book_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{duergar_wrapper_entry.slug}"
+    )
     player_tiefling_race_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{asmodeus_tiefling_entry.slug}"
     )
     player_elf_race_response = client.get(f"/campaigns/linden-pass/systems/entries/{sea_elf_entry.slug}")
+    player_duergar_race_response = client.get(f"/campaigns/linden-pass/systems/entries/{duergar_entry.slug}")
     search_response = client.get("/campaigns/linden-pass/systems?q=subraces")
+    duergar_search_response = client.get("/campaigns/linden-pass/systems?q=duergar+characters")
 
     assert source_response.status_code == 200
     source_body = source_response.get_data(as_text=True)
     assert "Book Chapters" not in source_body
     assert "Tiefling Subraces" not in source_body
     assert "Elf Subraces" not in source_body
+    assert "Duergar Characters" not in source_body
     assert "Races" in source_body
     assert "default to DM visibility" in source_body
 
     assert book_category_response.status_code == 404
     assert player_tiefling_book_response.status_code == 404
     assert player_elf_book_response.status_code == 404
+    assert player_duergar_book_response.status_code == 404
 
     assert player_tiefling_race_response.status_code == 200
     assert "Asmodeus Tiefling" in player_tiefling_race_response.get_data(as_text=True)
     assert player_elf_race_response.status_code == 200
     assert "Sea Elf" in player_elf_race_response.get_data(as_text=True)
+    assert player_duergar_race_response.status_code == 200
+    assert "Duergar" in player_duergar_race_response.get_data(as_text=True)
 
     assert search_response.status_code == 200
     search_body = search_response.get_data(as_text=True)
     assert "Tiefling Subraces" not in search_body
     assert "Elf Subraces" not in search_body
+    assert duergar_search_response.status_code == 200
+    assert "Duergar Characters" not in duergar_search_response.get_data(as_text=True)
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["dm"]["email"], users["dm"]["password"])
@@ -640,24 +657,35 @@ def test_mtf_book_entries_stay_hidden_when_source_visibility_is_lowered_for_othe
     dm_book_category_response = client.get("/campaigns/linden-pass/systems/sources/MTF/types/book")
     dm_tiefling_book_response = client.get(f"/campaigns/linden-pass/systems/entries/{tiefling_wrapper_entry.slug}")
     dm_elf_book_response = client.get(f"/campaigns/linden-pass/systems/entries/{elf_wrapper_entry.slug}")
+    dm_duergar_book_response = client.get(f"/campaigns/linden-pass/systems/entries/{duergar_wrapper_entry.slug}")
+    dm_duergar_search_response = client.get("/campaigns/linden-pass/systems?q=duergar+characters")
 
     assert dm_source_response.status_code == 200
     dm_source_body = dm_source_response.get_data(as_text=True)
     assert "Book Chapters" in dm_source_body
     assert "Tiefling Subraces" in dm_source_body
     assert "Elf Subraces" in dm_source_body
+    assert "Duergar Characters" in dm_source_body
     assert dm_source_body.index("Tiefling Subraces") < dm_source_body.index("Elf Subraces")
+    assert dm_source_body.index("Elf Subraces") < dm_source_body.index("Duergar Characters")
     assert "default to DM visibility" in dm_source_body
 
     assert dm_book_category_response.status_code == 200
     dm_book_category_body = dm_book_category_response.get_data(as_text=True)
     assert "Tiefling Subraces" in dm_book_category_body
     assert "Elf Subraces" in dm_book_category_body
+    assert "Duergar Characters" in dm_book_category_body
+    assert dm_book_category_body.index("Tiefling Subraces") < dm_book_category_body.index("Elf Subraces")
+    assert dm_book_category_body.index("Elf Subraces") < dm_book_category_body.index("Duergar Characters")
 
     assert dm_tiefling_book_response.status_code == 200
     assert "Policy default visibility: DM" in dm_tiefling_book_response.get_data(as_text=True)
     assert dm_elf_book_response.status_code == 200
     assert "Policy default visibility: DM" in dm_elf_book_response.get_data(as_text=True)
+    assert dm_duergar_book_response.status_code == 200
+    assert "Policy default visibility: DM" in dm_duergar_book_response.get_data(as_text=True)
+    assert dm_duergar_search_response.status_code == 200
+    assert "Duergar Characters" in dm_duergar_search_response.get_data(as_text=True)
 
 
 def test_dmg_rules_reference_search_stays_source_scoped(client, sign_in, users, app, tmp_path):
