@@ -4177,8 +4177,10 @@ TCE_RULES_REFERENCE_TEST_TITLES = (
     "Customizing Your Origin",
     "Changing a Skill",
     "Changing Your Subclass",
+) + TCE_CLASS_WRAPPER_TEST_TITLES + (
+    "Session Zero",
     "Sidekicks",
-) + TCE_CLASS_WRAPPER_TEST_TITLES
+)
 
 
 def build_xge_book_data_root(root: Path) -> Path:
@@ -4737,6 +4739,7 @@ def build_tce_book_data_root(root: Path) -> Path:
                         {
                             "name": "Dungeon Master's Tools",
                             "headers": [
+                                "Session Zero",
                                 "Sidekicks",
                             ],
                             "ordinal": {"type": "chapter", "identifier": 4},
@@ -5357,6 +5360,85 @@ def build_tce_book_data_root(root: Path) -> Path:
                     "name": "Dungeon Master's Tools",
                     "page": 139,
                     "entries": [
+                        {
+                            "type": "section",
+                            "name": "Session Zero",
+                            "page": 139,
+                            "entries": [
+                                {
+                                    "type": "quote",
+                                    "entries": [
+                                        "Set expectations early so the campaign has room to breathe."
+                                    ],
+                                },
+                                "A session zero gives the DM and players time to align on campaign expectations, tone, and house rules before play begins.",
+                                {
+                                    "type": "entries",
+                                    "name": "Character and Party Creation",
+                                    "page": 139,
+                                    "entries": [
+                                        "Build characters with the campaign's likely challenges in mind, and encourage the group to talk through how those characters fit together.",
+                                        {
+                                            "type": "entries",
+                                            "name": "Party Formation",
+                                            "page": 139,
+                                            "entries": [
+                                                "Use party-creation questions to decide why the adventurers stay together and what shared history already connects them.",
+                                                {
+                                                    "type": "table",
+                                                    "caption": "Party Origin",
+                                                    "colLabels": ["d6", "Origin Story"],
+                                                    "rows": [
+                                                        ["1", "The characters grew up in the same place."],
+                                                        ["2", "The characters united against a shared foe."],
+                                                    ],
+                                                },
+                                            ],
+                                        },
+                                        {
+                                            "type": "entries",
+                                            "name": "Running a Game for One Player",
+                                            "page": 140,
+                                            "entries": [
+                                                "A one-player campaign benefits from extra backstory work and a clear plan for whether a sidekick should round out the party.",
+                                            ],
+                                        },
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Social Contract",
+                                    "page": 140,
+                                    "entries": [
+                                        "Talk directly about the kind of game everyone wants so the table's expectations are explicit instead of assumed.",
+                                        {
+                                            "type": "entries",
+                                            "name": "Hard and Soft Limits",
+                                            "page": 141,
+                                            "entries": [
+                                                "Document the themes and behaviors the table wants to avoid or handle with extra care.",
+                                            ],
+                                        },
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Game Customization",
+                                    "page": 141,
+                                    "entries": [
+                                        "Ask players what kinds of challenges, tone, and advancement style they want the campaign to emphasize.",
+                                        {
+                                            "type": "entries",
+                                            "name": "House Rules",
+                                            "page": 141,
+                                            "entries": [
+                                                "Present house rules as experiments and revisit them if they stop making the game more fun.",
+                                            ],
+                                        },
+                                    ],
+                                },
+                            ],
+                        },
                         {
                             "type": "section",
                             "name": "Sidekicks",
@@ -8153,6 +8235,9 @@ def test_tce_book_entries_are_imported_for_player_browse(
     sidekicks_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Sidekicks'].slug}"
     )
+    session_zero_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Session Zero'].slug}"
+    )
     artificer_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Artificer'].slug}"
     )
@@ -8167,6 +8252,7 @@ def test_tce_book_entries_are_imported_for_player_browse(
     assert "Customizing Your Origin" in source_body
     assert "Changing a Skill" in source_body
     assert "Changing Your Subclass" in source_body
+    assert "Session Zero" in source_body
     assert "Sidekicks" in source_body
     assert "Artificer" in source_body
     assert "Fighter" in source_body
@@ -8182,6 +8268,7 @@ def test_tce_book_entries_are_imported_for_player_browse(
     assert "Customizing Your Origin" in category_body
     assert "Changing a Skill" in category_body
     assert "Changing Your Subclass" in category_body
+    assert "Session Zero" in category_body
     assert "Sidekicks" in category_body
     assert "Artificer" in category_body
     assert "Fighter" in category_body
@@ -8219,10 +8306,26 @@ def test_tce_book_entries_are_imported_for_player_browse(
     assert "Changing Your Subclass" in changing_subclass_body
     assert "replace your subclass when you gain a new subclass feature." in changing_subclass_body
 
+    assert session_zero_response.status_code == 200
+    session_zero_body = session_zero_response.get_data(as_text=True)
+    assert "Chapter 4" in session_zero_body
+    assert "Dungeon Master&#x27;s Tools" in session_zero_body
+    assert "Session Zero" in session_zero_body
+    assert "Character and Party Creation" in session_zero_body
+    assert "Party Formation" in session_zero_body
+    assert "Social Contract" in session_zero_body
+    assert "Hard and Soft Limits" in session_zero_body
+    assert "Game Customization" in session_zero_body
+    assert "House Rules" in session_zero_body
+    assert "Party Origin" in session_zero_body
+    assert 'href="#character-and-party-creation"' in session_zero_body
+    assert 'href="#social-contract--hard-and-soft-limits"' in session_zero_body
+    assert 'id="game-customization--house-rules"' in session_zero_body
+
     assert sidekicks_response.status_code == 200
     sidekicks_body = sidekicks_response.get_data(as_text=True)
     assert "Chapter 4" in sidekicks_body
-    assert "Dungeon Master's Tools" in sidekicks_body
+    assert "Dungeon Master&#x27;s Tools" in sidekicks_body
     assert "Sidekicks" in sidekicks_body
     assert "Creating a Sidekick" in sidekicks_body
     assert "Gaining a Sidekick Class" in sidekicks_body
@@ -8297,14 +8400,15 @@ def test_tce_book_entries_follow_source_visibility(client, sign_in, users, app, 
     assert "Customizing Your Origin" in dm_category_body
     assert "Changing a Skill" in dm_category_body
     assert "Changing Your Subclass" in dm_category_body
+    assert "Session Zero" in dm_category_body
     assert "Sidekicks" in dm_category_body
     assert dm_entry_response.status_code == 200
     dm_entry_body = dm_entry_response.get_data(as_text=True)
-    assert "Dungeon Master's Tools" in dm_entry_body
+    assert "Dungeon Master&#x27;s Tools" in dm_entry_body
     assert "Sidekicks" in dm_entry_body
 
 
-def test_tce_book_slice_includes_sidekicks_page_for_now(app, tmp_path):
+def test_tce_book_slice_includes_session_zero_and_sidekicks_pages_for_now(app, tmp_path):
     data_root = build_tce_book_data_root(tmp_path / "dnd5e-source-tce-book-boundary")
 
     with app.app_context():
