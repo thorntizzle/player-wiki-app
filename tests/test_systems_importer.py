@@ -4158,6 +4158,7 @@ XGE_RULES_REFERENCE_TEST_TITLES = (
 TCE_RULES_REFERENCE_TEST_TITLES = (
     "Ten Rules to Remember",
     "Customizing Your Origin",
+    "Changing a Skill",
 )
 
 
@@ -7605,18 +7606,23 @@ def test_tce_book_entries_are_imported_for_player_browse(
     customizing_origin_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Customizing Your Origin'].slug}"
     )
+    changing_skill_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Changing a Skill'].slug}"
+    )
 
     assert source_response.status_code == 200
     source_body = source_response.get_data(as_text=True)
     assert "Book Chapters" in source_body
     assert "Ten Rules to Remember" in source_body
     assert "Customizing Your Origin" in source_body
+    assert "Changing a Skill" in source_body
 
     assert category_response.status_code == 200
     category_body = category_response.get_data(as_text=True)
-    assert "Showing all 2 book chapters available to you in this source." in category_body
+    assert "Showing all 3 book chapters available to you in this source." in category_body
     assert "Ten Rules to Remember" in category_body
     assert "Customizing Your Origin" in category_body
+    assert "Changing a Skill" in category_body
 
     assert ten_rules_response.status_code == 200
     ten_rules_body = ten_rules_response.get_data(as_text=True)
@@ -7634,6 +7640,15 @@ def test_tce_book_entries_are_imported_for_player_browse(
     assert "Character Options" in customizing_origin_body
     assert "Customizing Your Origin" in customizing_origin_body
     assert "See the Customizing Your Origin entry." in customizing_origin_body
+
+    assert changing_skill_response.status_code == 200
+    changing_skill_body = changing_skill_response.get_data(as_text=True)
+    assert "Character Options" in changing_skill_body
+    assert "Changing a Skill" in changing_skill_body
+    assert (
+        "Swap an underused skill proficiency for another one your class offered at 1st level."
+        in changing_skill_body
+    )
 
 
 def test_tce_book_entries_follow_source_visibility(client, sign_in, users, app, tmp_path):
@@ -7666,7 +7681,7 @@ def test_tce_book_entries_follow_source_visibility(client, sign_in, users, app, 
     player_source_response = client.get("/campaigns/linden-pass/systems/sources/TCE")
     player_category_response = client.get("/campaigns/linden-pass/systems/sources/TCE/types/book")
     player_entry_response = client.get(
-        f"/campaigns/linden-pass/systems/entries/{book_entries['Customizing Your Origin'].slug}"
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Changing a Skill'].slug}"
     )
 
     assert player_source_response.status_code == 404
@@ -7679,7 +7694,7 @@ def test_tce_book_entries_follow_source_visibility(client, sign_in, users, app, 
     dm_source_response = client.get("/campaigns/linden-pass/systems/sources/TCE")
     dm_category_response = client.get("/campaigns/linden-pass/systems/sources/TCE/types/book")
     dm_entry_response = client.get(
-        f"/campaigns/linden-pass/systems/entries/{book_entries['Customizing Your Origin'].slug}"
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Changing a Skill'].slug}"
     )
 
     assert dm_source_response.status_code == 200
@@ -7688,13 +7703,14 @@ def test_tce_book_entries_follow_source_visibility(client, sign_in, users, app, 
     dm_category_body = dm_category_response.get_data(as_text=True)
     assert "Ten Rules to Remember" in dm_category_body
     assert "Customizing Your Origin" in dm_category_body
+    assert "Changing a Skill" in dm_category_body
     assert dm_entry_response.status_code == 200
     dm_entry_body = dm_entry_response.get_data(as_text=True)
     assert "Character Options" in dm_entry_body
-    assert "Customizing Your Origin" in dm_entry_body
+    assert "Changing a Skill" in dm_entry_body
 
 
-def test_tce_book_slice_includes_customizing_your_origin_wrapper_for_now(app, tmp_path):
+def test_tce_book_slice_includes_changing_a_skill_wrapper_for_now(app, tmp_path):
     data_root = build_tce_book_data_root(tmp_path / "dnd5e-source-tce-book-boundary")
 
     with app.app_context():
