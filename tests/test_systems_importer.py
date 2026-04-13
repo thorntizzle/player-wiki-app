@@ -8759,6 +8759,106 @@ def test_mtf_blood_war_cult_and_ancestry_pages_are_imported_for_dm_browse(
     assert "Gnome (Deep)" in deep_gnome_entry_body
 
 
+def test_mtf_wrapper_pages_preserve_detail_navigation_and_inline_race_links(
+    client, sign_in, users, app, tmp_path
+):
+    data_root = build_mtf_book_data_root(tmp_path / "dnd5e-source-mtf-wrapper-navigation")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("MTF", entry_types=["book", "race"])
+
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="MTF",
+            is_enabled=True,
+            default_visibility="dm",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in service.list_entries_for_campaign_source(
+                "linden-pass",
+                "MTF",
+                entry_type="book",
+                limit=None,
+            )
+        }
+        race_entries = {
+            entry.title: entry
+            for entry in store.list_entries_for_source("DND-5E", "MTF", entry_type="race", limit=None)
+        }
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    diabolical_cults_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Diabolical Cults'].slug}"
+    )
+    fiendish_cults_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Fiendish Cults'].slug}"
+    )
+    tiefling_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Tiefling Subraces'].slug}")
+    elf_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Elf Subraces'].slug}")
+    duergar_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Duergar Characters'].slug}"
+    )
+    gith_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Gith Characters'].slug}")
+    deep_gnome_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Deep Gnome Characters'].slug}"
+    )
+
+    assert diabolical_cults_response.status_code == 200
+    diabolical_cults_body = diabolical_cults_response.get_data(as_text=True)
+    assert "Chapter Navigation" in diabolical_cults_body
+    assert 'href="#cult-of-glasya"' in diabolical_cults_body
+    assert 'id="cult-of-glasya"' in diabolical_cults_body
+
+    assert fiendish_cults_response.status_code == 200
+    fiendish_cults_body = fiendish_cults_response.get_data(as_text=True)
+    assert "Chapter Navigation" in fiendish_cults_body
+    assert 'href="#cult-goals"' in fiendish_cults_body
+    assert 'id="cult-goals"' in fiendish_cults_body
+
+    assert tiefling_response.status_code == 200
+    tiefling_body = tiefling_response.get_data(as_text=True)
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{race_entries["Asmodeus Tiefling"].slug}"' in tiefling_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{race_entries["Mephistopheles Tiefling"].slug}"'
+        in tiefling_body
+    )
+    assert f'href="/campaigns/linden-pass/systems/entries/{race_entries["Zariel Tiefling"].slug}"' in tiefling_body
+
+    assert elf_response.status_code == 200
+    elf_body = elf_response.get_data(as_text=True)
+    assert f'href="/campaigns/linden-pass/systems/entries/{race_entries["Eladrin"].slug}"' in elf_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{race_entries["Sea Elf"].slug}"' in elf_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{race_entries["Shadar-kai"].slug}"' in elf_body
+
+    assert duergar_response.status_code == 200
+    duergar_body = duergar_response.get_data(as_text=True)
+    assert f'href="/campaigns/linden-pass/systems/entries/{race_entries["Duergar"].slug}"' in duergar_body
+
+    assert gith_response.status_code == 200
+    gith_body = gith_response.get_data(as_text=True)
+    assert "Chapter Navigation" in gith_body
+    assert 'href="#gith-random-height-and-weight"' in gith_body
+    assert 'id="gith-random-height-and-weight"' in gith_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{race_entries["Githyanki"].slug}"' in gith_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{race_entries["Githzerai"].slug}"' in gith_body
+
+    assert deep_gnome_response.status_code == 200
+    deep_gnome_body = deep_gnome_response.get_data(as_text=True)
+    assert f'href="/campaigns/linden-pass/systems/entries/{race_entries["Deep Gnome"].slug}"' in deep_gnome_body
+
+
 def test_dmg_book_chapters_surface_related_imported_entities(client, sign_in, users, app, tmp_path):
     data_root = build_dmg_book_data_root(tmp_path / "dnd5e-source-dmg-book-entity-links")
 
