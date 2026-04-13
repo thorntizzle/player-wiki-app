@@ -9411,7 +9411,7 @@ def test_mtf_blood_war_cult_and_ancestry_pages_are_imported_for_dm_browse(
     tiefling_entry_body = tiefling_entry_response.get_data(as_text=True)
     assert "Chapter 1" in tiefling_entry_body
     assert "The Blood War" in tiefling_entry_body
-    assert "At the DM&#39;s option" in tiefling_entry_body
+    assert "At the DM&#x27;s option" in tiefling_entry_body
     assert "Tiefling (Asmodeus)" in tiefling_entry_body
     assert "Tiefling (Mephistopheles)" in tiefling_entry_body
     assert "Tiefling (Zariel)" in tiefling_entry_body
@@ -9437,7 +9437,7 @@ def test_mtf_blood_war_cult_and_ancestry_pages_are_imported_for_dm_browse(
     elf_entry_body = elf_entry_response.get_data(as_text=True)
     assert "Chapter 2" in elf_entry_body
     assert "Elves" in elf_entry_body
-    assert "At the DM&#39;s discretion" in elf_entry_body
+    assert "At the DM&#x27;s discretion" in elf_entry_body
     assert "Elf (Eladrin)" in elf_entry_body
     assert "Elf (Sea)" in elf_entry_body
     assert "Elf (Shadar-kai)" in elf_entry_body
@@ -9446,14 +9446,14 @@ def test_mtf_blood_war_cult_and_ancestry_pages_are_imported_for_dm_browse(
     duergar_entry_body = duergar_entry_response.get_data(as_text=True)
     assert "Chapter 3" in duergar_entry_body
     assert "Dwarves and Duergar" in duergar_entry_body
-    assert "At the DM&#39;s discretion" in duergar_entry_body
+    assert "At the DM&#x27;s discretion" in duergar_entry_body
     assert "Dwarf (Duergar)" in duergar_entry_body
 
     assert gith_entry_response.status_code == 200
     gith_entry_body = gith_entry_response.get_data(as_text=True)
     assert "Chapter 4" in gith_entry_body
     assert "Gith and Their Endless War" in gith_entry_body
-    assert "At the DM&#39;s option" in gith_entry_body
+    assert "At the DM&#x27;s option" in gith_entry_body
     assert "Gith (Githyanki)" in gith_entry_body
     assert "Gith (Githzerai)" in gith_entry_body
     assert "Gith Random Height and Weight" in gith_entry_body
@@ -10000,7 +10000,7 @@ def test_egw_treasure_progression_pages_are_imported_and_item_pages_link_back(
     assert "Wildemount Treasures" in vestige_body
     assert "Advancement of a Vestige of Divergence" in vestige_body
     assert (
-        "Typically, the advancement of a Vestige of Divergence echoes its wielder's own journey of self-discovery."
+        "Typically, the advancement of a Vestige of Divergence echoes its wielder&#x27;s own journey of self-discovery."
         in vestige_body
     )
 
@@ -10708,7 +10708,7 @@ def test_tce_book_entries_are_imported_for_player_browse(
     assert "Personalizing Spells" in personalizing_spells_body
     assert "cosmetic effects of their magic" in personalizing_spells_body
     assert "Magic Themes" in personalizing_spells_body
-    assert "book pages, ink, and rustling library scents" in personalizing_spells_body
+    assert "Book pages, ink, and rustling library scents" in personalizing_spells_body
 
     assert magic_tattoos_response.status_code == 200
     magic_tattoos_body = magic_tattoos_response.get_data(as_text=True)
@@ -10820,7 +10820,7 @@ def test_tce_book_entries_follow_source_visibility(client, sign_in, users, app, 
         )
         book_entries = {
             entry.title: entry
-            for entry in store.list_entries_for_source("DND-5E", "TCE", entry_type="book", limit=20)
+            for entry in store.list_entries_for_source("DND-5E", "TCE", entry_type="book", limit=None)
         }
 
     sign_in(users["party"]["email"], users["party"]["password"])
@@ -10879,7 +10879,7 @@ def test_tce_book_slice_includes_group_patrons_miscellany_and_dm_tool_wrappers_f
         result = importer.import_source("TCE", entry_types=["book"])
         store = app.extensions["systems_store"]
         book_entries = list(
-            store.list_entries_for_source("DND-5E", "TCE", entry_type="book", limit=20)
+            store.list_entries_for_source("DND-5E", "TCE", entry_type="book", limit=None)
         )
 
     assert result.imported_count == len(TCE_RULES_REFERENCE_TEST_TITLES)

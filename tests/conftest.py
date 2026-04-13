@@ -109,6 +109,10 @@ def users(app):
 @pytest.fixture()
 def sign_in(client):
     def _sign_in(email: str, password: str):
+        client.post(
+            "/sign-out",
+            follow_redirects=False,
+        )
         return client.post(
             "/sign-in",
             data={"email": email, "password": password},

@@ -31,9 +31,17 @@
       {% if entries %}
         <p class="meta">
           {% if query %}
-            Showing {{ filtered_entry_count }} matching entries out of {{ entry_count }} {{ entry_type_label|lower }} available to you in this source.
+            {% if entry_type == "book" %}
+              Showing {{ filtered_entry_count }} matching entries out of {{ entry_count }} {{ entry_type_label|lower }} available to you in this source.
+            {% else %}
+              Showing {{ filtered_entry_count }} matching entries out of {{ entry_count }} {{ entry_type_label|lower }} in this source.
+            {% endif %}
           {% else %}
-            Showing all {{ entry_count }} {{ entry_type_label|lower }} available to you in this source.
+            {% if entry_type == "book" %}
+              Showing all {{ entry_count }} {{ entry_type_label|lower }} available to you in this source.
+            {% else %}
+              Showing all {{ entry_count }} {{ entry_type_label|lower }} in this source.
+            {% endif %}
           {% endif %}
         </p>
         <ul class="plain-list">

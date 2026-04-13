@@ -1178,7 +1178,7 @@ class Dnd5eSystemsImporter:
         )
         race_fluff_lookup = self._build_source_race_fluff_lookup(fluff_payload, source_id)
         chapter_contents = chapter_contents_by_name.get(chapter_name, {})
-        for wrapper_definition in VGM_CHARACTER_RACE_WRAPPER_DEFINITIONS:
+        for target_order, wrapper_definition in enumerate(VGM_CHARACTER_RACE_WRAPPER_DEFINITIONS):
             raw_entry = self._build_vgm_character_race_wrapper_book_entry(
                 source_id,
                 chapter_index=chapter_index,
@@ -1187,6 +1187,7 @@ class Dnd5eSystemsImporter:
                 fluff_payload=fluff_payload,
                 race_fluff_lookup=race_fluff_lookup,
                 race_page_lookup=race_page_lookup,
+                target_order=target_order,
                 wrapper_definition=wrapper_definition,
             )
             if raw_entry is None:
@@ -1282,6 +1283,7 @@ class Dnd5eSystemsImporter:
         fluff_payload: dict[str, Any],
         race_fluff_lookup: dict[str, dict[str, Any]],
         race_page_lookup: dict[str, int],
+        target_order: int,
         wrapper_definition: dict[str, Any],
     ) -> dict[str, Any] | None:
         title = self._clean_text(str(wrapper_definition.get("title", "") or ""))
@@ -1325,6 +1327,7 @@ class Dnd5eSystemsImporter:
             "_book_contents": chapter_contents,
             "_book_target_path": [chapter_name, title],
             "_book_is_full_chapter": False,
+            "_book_target_order": target_order,
         }
         if page_number is not None:
             raw_entry["page"] = page_number

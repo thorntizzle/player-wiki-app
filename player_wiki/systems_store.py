@@ -18,6 +18,37 @@ from .systems_models import (
 
 
 class SystemsStore:
+    def _coerce_int(self, value: Any, *, default: int) -> int:
+        try:
+            return int(str(value).strip())
+        except (TypeError, ValueError, AttributeError):
+            return default
+
+    def _entry_source_browse_sort_key(self, entry: SystemsEntryRecord) -> tuple[int, int, int, int, str, int]:
+        if entry.entry_type == "book":
+            metadata = dict(entry.metadata or {})
+            return (
+                0,
+                self._coerce_int(metadata.get("chapter_index"), default=10_000),
+                self._coerce_int(metadata.get("target_order"), default=10_000),
+                self._coerce_int(entry.source_page, default=10_000),
+                entry.title.lower(),
+                entry.id,
+            )
+        return (
+            1,
+            10_000,
+            10_000,
+            self._coerce_int(entry.source_page, default=10_000),
+            entry.title.lower(),
+            entry.id,
+        )
+
+    def _sort_entries_for_source_browse(self, entries: list[SystemsEntryRecord]) -> list[SystemsEntryRecord]:
+        if not any(entry.entry_type == "book" for entry in entries):
+            return entries
+        return sorted(entries, key=self._entry_source_browse_sort_key)
+
     def upsert_library(
         self,
         library_slug: str,
@@ -380,6 +411,7 @@ class SystemsStore:
     ) -> list[SystemsEntryRecord]:
         normalized_query = query.strip().lower()
         parameters: list[Any] = [library_slug, source_id]
+        apply_post_sort_limit = entry_type == "book" and (limit is not None or offset != 0)
         entry_type_clause = ""
         if entry_type:
             entry_type_clause = " AND entry_type = ?"
@@ -390,7 +422,7 @@ class SystemsStore:
         )
         parameters.extend(query_parameters)
         limit_clause = ""
-        if limit is not None:
+        if limit is not None and not apply_post_sort_limit:
             limit_clause = " LIMIT ? OFFSET ?"
             parameters.extend([limit, offset])
         rows = get_db().execute(
@@ -403,7 +435,11 @@ class SystemsStore:
             """,
             tuple(parameters),
         ).fetchall()
-        return [self._map_entry(row) for row in rows]
+        entries = self._sort_entries_for_source_browse([self._map_entry(row) for row in rows])
+        if apply_post_sort_limit:
+            end = None if limit is None else offset + limit
+            return entries[offset:end]
+        return entries
 
     def list_entries_for_campaign_source(
         self,
@@ -418,6 +454,7 @@ class SystemsStore:
     ) -> list[SystemsEntryRecord]:
         normalized_query = query.strip().lower()
         parameters: list[Any] = [campaign_slug, library_slug, source_id]
+        apply_post_sort_limit = entry_type == "book" and (limit is not None or offset != 0)
         entry_type_clause = ""
         if entry_type:
             entry_type_clause = " AND systems_entries.entry_type = ?"
@@ -428,7 +465,7 @@ class SystemsStore:
         )
         parameters.extend(query_parameters)
         limit_clause = ""
-        if limit is not None:
+        if limit is not None and not apply_post_sort_limit:
             limit_clause = " LIMIT ? OFFSET ?"
             parameters.extend([limit, offset])
         rows = get_db().execute(
@@ -447,7 +484,11 @@ class SystemsStore:
             """,
             tuple(parameters),
         ).fetchall()
-        return [self._map_entry(row) for row in rows]
+        entries = self._sort_entries_for_source_browse([self._map_entry(row) for row in rows])
+        if apply_post_sort_limit:
+            end = None if limit is None else offset + limit
+            return entries[offset:end]
+        return entries
 
     def list_entries_for_campaign(
         self,
@@ -471,6 +512,7 @@ class SystemsStore:
         placeholders = ", ".join("?" for _ in normalized_source_ids)
         normalized_query = query.strip().lower()
         parameters: list[Any] = [campaign_slug, library_slug, *normalized_source_ids]
+        apply_post_sort_limit = entry_type == "book" and (limit is not None or offset != 0)
         entry_type_clause = ""
         if entry_type:
             entry_type_clause = " AND systems_entries.entry_type = ?"
@@ -483,7 +525,7 @@ class SystemsStore:
             )
             parameters.extend(query_parameters)
         limit_clause = ""
-        if limit is not None:
+        if limit is not None and not apply_post_sort_limit:
             limit_clause = " LIMIT ? OFFSET ?"
             parameters.extend([limit, offset])
         rows = get_db().execute(
@@ -502,7 +544,11 @@ class SystemsStore:
             """,
             tuple(parameters),
         ).fetchall()
-        return [self._map_entry(row) for row in rows]
+        entries = self._sort_entries_for_source_browse([self._map_entry(row) for row in rows])
+        if apply_post_sort_limit:
+            end = None if limit is None else offset + limit
+            return entries[offset:end]
+        return entries
 
     def list_entries(
         self,
