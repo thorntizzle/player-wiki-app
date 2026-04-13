@@ -5867,6 +5867,148 @@ def build_egw_character_option_wrapper_data_root(root: Path) -> Path:
     return data_root
 
 
+def build_egw_treasure_progression_data_root(root: Path) -> Path:
+    data_root = build_test_data_root(root)
+    write_json(
+        root / "data/books.json",
+        {
+            "book": [
+                {
+                    "name": "Explorer's Guide to Wildemount",
+                    "id": "EGW",
+                    "source": "EGW",
+                    "contents": [
+                        {
+                            "name": "Wildemount Treasures",
+                            "headers": ["Vestiges of Divergence", "Arms of the Betrayers"],
+                            "ordinal": {"type": "chapter", "identifier": 6},
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    write_json(
+        root / "data/book/book-egw.json",
+        {
+            "data": [
+                {
+                    "type": "section",
+                    "name": "Wildemount Treasures",
+                    "page": 265,
+                    "entries": [
+                        {
+                            "type": "section",
+                            "name": "Vestiges of Divergence",
+                            "page": 270,
+                            "entries": [
+                                (
+                                    "Vestiges of Divergence are legendary relics that evolve with a worthy "
+                                    "bearer over the course of a campaign."
+                                ),
+                                {
+                                    "type": "list",
+                                    "items": [
+                                        "{@item Danoth's Visor|EGW}",
+                                        "{@item Wreath of the Prism|EGW}",
+                                    ],
+                                },
+                                {
+                                    "type": "inset",
+                                    "name": "Advancement of a Vestige of Divergence",
+                                    "page": 271,
+                                    "entries": [
+                                        (
+                                            "Typically, the advancement of a Vestige of Divergence echoes "
+                                            "its wielder's own journey of self-discovery."
+                                        ),
+                                        (
+                                            "A Vestige of Divergence typically remains dormant until its "
+                                            "wielder achieves 9th level."
+                                        ),
+                                    ],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Arms of the Betrayers",
+                            "page": 274,
+                            "entries": [
+                                (
+                                    "The Arms of the Betrayers are sentient weapons forged from the souls "
+                                    "of fiends by the Betrayer Gods."
+                                ),
+                                {
+                                    "type": "entries",
+                                    "name": "Betrayer Artifact Properties",
+                                    "page": 274,
+                                    "entries": [
+                                        (
+                                            "The Arms of the Betrayers advance in power in the same manner "
+                                            "as the Vestiges of Divergence."
+                                        ),
+                                        (
+                                            "When the item reaches its exalted state, it gains a major "
+                                            "beneficial property."
+                                        ),
+                                    ],
+                                },
+                                {
+                                    "type": "list",
+                                    "items": [
+                                        "{@item Grovelthrash|EGW}",
+                                        "{@item The Bloody End|EGW}",
+                                    ],
+                                },
+                            ],
+                        },
+                    ],
+                }
+            ]
+        },
+    )
+    write_json(
+        root / "data/items.json",
+        {
+            "item": [
+                {
+                    "name": "Danoth's Visor (Dormant)",
+                    "source": "EGW",
+                    "page": 270,
+                    "wondrous": True,
+                    "rarity": "legendary",
+                    "entries": [
+                        "This jeweled visor lets its wearer read omens in reflected light.",
+                    ],
+                },
+                {
+                    "name": "Grovelthrash (Dormant)",
+                    "source": "EGW",
+                    "page": 275,
+                    "type": "M",
+                    "rarity": "artifact",
+                    "entries": [
+                        "This brutal warhammer exults in greed and cruelty.",
+                    ],
+                },
+                {
+                    "name": "Staff of Dunamancy",
+                    "source": "EGW",
+                    "page": 270,
+                    "type": "ST",
+                    "rarity": "very rare",
+                    "entries": [
+                        "This staff helps a spellcaster shape gravity and time magic.",
+                    ],
+                },
+            ],
+            "itemGroup": [],
+        },
+    )
+    return data_root
+
+
 def build_tce_book_data_root(root: Path) -> Path:
     data_root = build_test_data_root(root)
     write_json(
@@ -9770,6 +9912,131 @@ def test_egw_entry_pages_surface_source_chapter_context_links(client, sign_in, u
                 f'href="/campaigns/linden-pass/systems/entries/{book_entries[wrapper_title].slug}"'
                 in body
             )
+
+
+def test_egw_treasure_progression_pages_are_imported_and_item_pages_link_back(
+    client, sign_in, users, app, tmp_path
+):
+    data_root = build_egw_treasure_progression_data_root(
+        tmp_path / "dnd5e-source-egw-treasure-progression"
+    )
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        result = importer.import_source("EGW", entry_types=["book", "item"])
+
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="EGW",
+            is_enabled=True,
+            default_visibility="players",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in service.list_entries_for_campaign_source(
+                "linden-pass",
+                "EGW",
+                entry_type="book",
+                limit=None,
+            )
+        }
+        item_entries = {
+            entry.title: entry
+            for entry in store.list_entries_for_source("DND-5E", "EGW", entry_type="item", limit=None)
+        }
+
+    assert result.imported_by_type == {"book": 2, "item": 3}
+    assert list(book_entries) == [
+        "Advancement of a Vestige of Divergence",
+        "Betrayer Artifact Properties",
+    ]
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    source_response = client.get("/campaigns/linden-pass/systems/sources/EGW")
+    category_response = client.get("/campaigns/linden-pass/systems/sources/EGW/types/book")
+    vestige_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Advancement of a Vestige of Divergence'].slug}"
+    )
+    betrayer_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Betrayer Artifact Properties'].slug}"
+    )
+    visor_response = client.get(
+        f'/campaigns/linden-pass/systems/entries/{item_entries["Danoth\'s Visor (Dormant)"].slug}'
+    )
+    grovelthrash_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{item_entries['Grovelthrash (Dormant)'].slug}"
+    )
+    staff_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{item_entries['Staff of Dunamancy'].slug}"
+    )
+
+    assert source_response.status_code == 200
+    source_body = source_response.get_data(as_text=True)
+    assert "Book Chapters" in source_body
+    assert (
+        source_body.index("Advancement of a Vestige of Divergence")
+        < source_body.index("Betrayer Artifact Properties")
+    )
+
+    assert category_response.status_code == 200
+    category_body = category_response.get_data(as_text=True)
+    assert "Showing all 2 book chapters available to you in this source." in category_body
+    assert (
+        category_body.index("Advancement of a Vestige of Divergence")
+        < category_body.index("Betrayer Artifact Properties")
+    )
+
+    assert vestige_response.status_code == 200
+    vestige_body = vestige_response.get_data(as_text=True)
+    assert "Chapter 6" in vestige_body
+    assert "Wildemount Treasures" in vestige_body
+    assert "Advancement of a Vestige of Divergence" in vestige_body
+    assert (
+        "Typically, the advancement of a Vestige of Divergence echoes its wielder's own journey of self-discovery."
+        in vestige_body
+    )
+
+    assert betrayer_response.status_code == 200
+    betrayer_body = betrayer_response.get_data(as_text=True)
+    assert "Chapter 6" in betrayer_body
+    assert "Wildemount Treasures" in betrayer_body
+    assert "Betrayer Artifact Properties" in betrayer_body
+    assert (
+        "The Arms of the Betrayers advance in power in the same manner as the Vestiges of Divergence."
+        in betrayer_body
+    )
+
+    assert visor_response.status_code == 200
+    visor_body = visor_response.get_data(as_text=True)
+    assert "Source Chapter Context" in visor_body
+    assert "Advancement of a Vestige of Divergence" in visor_body
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/'
+        f'{book_entries["Advancement of a Vestige of Divergence"].slug}"'
+        in visor_body
+    )
+
+    assert grovelthrash_response.status_code == 200
+    grovelthrash_body = grovelthrash_response.get_data(as_text=True)
+    assert "Source Chapter Context" in grovelthrash_body
+    assert "Betrayer Artifact Properties" in grovelthrash_body
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/'
+        f'{book_entries["Betrayer Artifact Properties"].slug}"'
+        in grovelthrash_body
+    )
+
+    assert staff_response.status_code == 200
+    staff_body = staff_response.get_data(as_text=True)
+    assert "Source Chapter Context" not in staff_body
 
 
 def test_dmg_book_chapters_surface_related_imported_entities(client, sign_in, users, app, tmp_path):

@@ -296,7 +296,8 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
     # EGW now ships the Character Options wrappers that sit directly on top of
     # already-imported EGW races, subclasses, spells, and backgrounds, plus the
     # previously shipped Hollow One, dunamis, and Heroic Chronicle pages. The
-    # remaining treasure and campaign-reference follow-ups stay queued.
+    # first Wildemount Treasures progression pages now ship as well, while the
+    # remaining campaign-reference follow-ups stay queued.
     "EGW": (
         ("Character Options", "Elves"),
         ("Character Options", "Halflings"),
@@ -310,6 +311,8 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         ("Character Options", "Subclasses", "Spell Descriptions"),
         ("Character Options", "Subclasses", "Heroic Chronicle"),
         ("Character Options", "Subclasses", "Backgrounds"),
+        ("Wildemount Treasures", "Vestiges of Divergence", "Advancement of a Vestige of Divergence"),
+        ("Wildemount Treasures", "Arms of the Betrayers", "Betrayer Artifact Properties"),
     ),
 }
 VGM_CHARACTER_RACE_WRAPPER_DEFINITIONS = (

@@ -464,6 +464,25 @@ EGW_SPELL_WRAPPER_TITLES = (
     "Dunamancy Spells",
     "Spell Descriptions",
 )
+EGW_VESTIGE_ITEM_TITLE_KEYS = {
+    normalize_lookup("Danoth's Visor"),
+    normalize_lookup("Grimoire Infinitus"),
+    normalize_lookup("Hide of the Feral Guardian"),
+    normalize_lookup("Infiltrator's Key"),
+    normalize_lookup("Stormgirdle"),
+    normalize_lookup("Verminshroud"),
+    normalize_lookup("Wreath of the Prism"),
+}
+EGW_BETRAYER_ITEM_TITLE_KEYS = {
+    normalize_lookup("Blade of Broken Mirrors"),
+    normalize_lookup("Grovelthrash"),
+    normalize_lookup("Lash of Shadows"),
+    normalize_lookup("Mace of the Black Crown"),
+    normalize_lookup("Ruin's Wake"),
+    normalize_lookup("Silken Spite"),
+    normalize_lookup("The Bloody End"),
+    normalize_lookup("Will of the Talon"),
+}
 
 
 def _systems_service_request_cache() -> dict[tuple[object, ...], object] | None:
@@ -1588,6 +1607,8 @@ class SystemsService:
             return EGW_SPELL_WRAPPER_TITLES
         if entry.entry_type == "background":
             return ("Backgrounds",)
+        if entry.entry_type == "item":
+            return self._build_egw_item_source_chapter_context_titles(entry)
         return ()
 
     def _resolve_scag_race_wrapper_title(self, entry: SystemsEntryRecord) -> str:
@@ -1620,6 +1641,29 @@ class SystemsService:
             if wrapper_title:
                 return wrapper_title
         return ""
+
+    def _build_egw_item_source_chapter_context_titles(
+        self,
+        entry: SystemsEntryRecord,
+    ) -> tuple[str, ...]:
+        normalized_title = normalize_lookup(str(entry.title or ""))
+        if normalized_title in EGW_VESTIGE_ITEM_TITLE_KEYS:
+            return ("Advancement of a Vestige of Divergence",)
+        if normalized_title in EGW_BETRAYER_ITEM_TITLE_KEYS:
+            return ("Betrayer Artifact Properties",)
+
+        base_title = re.sub(
+            r"\s+\((?:Dormant|Awakened|Exalted)\)\s*$",
+            "",
+            str(entry.title or ""),
+            flags=re.IGNORECASE,
+        ).strip()
+        normalized_base_title = normalize_lookup(base_title)
+        if normalized_base_title in EGW_VESTIGE_ITEM_TITLE_KEYS:
+            return ("Advancement of a Vestige of Divergence",)
+        if normalized_base_title in EGW_BETRAYER_ITEM_TITLE_KEYS:
+            return ("Betrayer Artifact Properties",)
+        return ()
 
     def _resolve_scag_item_wrapper_title(self, entry: SystemsEntryRecord) -> str:
         metadata = dict(entry.metadata or {})
