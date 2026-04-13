@@ -5968,6 +5968,128 @@ def test_campaign_character_option_base_rule_modification_summary_reuses_existin
     ]
 
 
+def test_level_one_builder_applies_page_backed_campaign_progression_overlay_base_rule_effects():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={
+            "hit_die": {"faces": 10},
+            "proficiency": ["str", "con"],
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "heavy", "shield"],
+                "weapons": ["simple", "martial"],
+                "skills": [{"choose": {"count": 2, "from": ["athletics", "history", "acrobatics"]}}],
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    soldier = _systems_entry(
+        "background",
+        "phb-background-soldier",
+        "Soldier",
+        metadata={"skill_proficiencies": [{"athletics": True, "intimidation": True}]},
+    )
+    second_wind = _systems_entry("classfeature", "phb-classfeature-second-wind", "Second Wind", metadata={"level": 1})
+    overlay_record = _campaign_page_record(
+        "mechanics/dockside-load-training",
+        "Dockside Load Training",
+        section="Mechanics",
+        subsection="Class Modifications",
+        metadata={
+            "character_progression": {
+                "kind": "class",
+                "class_name": "Fighter",
+                "level": 1,
+                "character_option": {
+                    "name": "Dockside Load Training",
+                    "description_markdown": "Dock crews in this campaign double the normal carrying baseline.",
+                    "activation_type": "passive",
+                    "base_rule_refs": [
+                        {"rule_key": "Carrying Capacity and Encumbrance"},
+                        {
+                            "systems_ref": {
+                                "slug": "phb-variantrule-encumbrance",
+                                "entry_type": "variantrule",
+                                "source_id": "PHB",
+                            }
+                        },
+                    ],
+                    "modeled_effects": ["carrying-capacity-multiplier:2"],
+                },
+            }
+        },
+    )
+    dockside_load_training = build_campaign_page_progression_entries(overlay_record)[0]
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "race": [human],
+            "background": [soldier],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Second Wind", "entry": second_wind, "embedded_card": {"option_groups": []}},
+                    {"label": "Dockside Load Training", "entry": dockside_load_training, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    form_values = {
+        "name": "Dockhand",
+        "character_slug": "dockhand",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": fighter.slug,
+        "species_slug": human.slug,
+        "background_slug": soldier.slug,
+        "class_skill_1": "athletics",
+        "class_skill_2": "history",
+        "str": "16",
+        "dex": "12",
+        "con": "14",
+        "int": "10",
+        "wis": "11",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=[overlay_record],
+    )
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+    overlay_feature = next(feature for feature in definition.features if feature["name"] == "Dockside Load Training")
+
+    assert "Dockside Load Training" in context["preview"]["features"]
+    assert overlay_feature["page_ref"] == "mechanics/dockside-load-training"
+    assert overlay_feature["campaign_option"]["overlay_support"] == "modeled"
+    assert overlay_feature["campaign_option"]["base_rule_refs"] == [
+        {"rule_key": "carrying-capacity-and-encumbrance"},
+        {
+            "slug": "phb-variantrule-encumbrance",
+            "source_id": "PHB",
+            "entry_type": "variantrule",
+        },
+    ]
+    assert definition.stats["carrying_capacity"] == 480
+    assert definition.stats["push_drag_lift"] == 960
+
+
 def test_native_level_up_applies_campaign_progression_ritual_book_spell_manager():
     fighter = _systems_entry(
         "class",
