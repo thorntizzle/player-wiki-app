@@ -271,6 +271,7 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         ("Character Options", "Wizard"),
         ("Dungeon Master's Tools", "Session Zero"),
         ("Dungeon Master's Tools", "Sidekicks"),
+        ("Dungeon Master's Tools", "Parleying with Monsters"),
     ),
 }
 VGM_CHARACTER_RACE_WRAPPER_DEFINITIONS = (

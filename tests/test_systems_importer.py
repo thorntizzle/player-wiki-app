@@ -4180,6 +4180,7 @@ TCE_RULES_REFERENCE_TEST_TITLES = (
 ) + TCE_CLASS_WRAPPER_TEST_TITLES + (
     "Session Zero",
     "Sidekicks",
+    "Parleying with Monsters",
 )
 
 
@@ -4741,6 +4742,7 @@ def build_tce_book_data_root(root: Path) -> Path:
                             "headers": [
                                 "Session Zero",
                                 "Sidekicks",
+                                "Parleying with Monsters",
                             ],
                             "ordinal": {"type": "chapter", "identifier": 4},
                         }
@@ -5479,6 +5481,54 @@ def build_tce_book_data_root(root: Path) -> Path:
                                             "page": 143,
                                             "entries": [
                                                 "When the group advances, the sidekick can gain levels as well."
+                                            ],
+                                        },
+                                    ],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Parleying with Monsters",
+                            "page": 148,
+                            "entries": [
+                                {
+                                    "type": "quote",
+                                    "entries": [
+                                        "A clever conversation can end an encounter before the first blade leaves its sheath."
+                                    ],
+                                },
+                                "Not every monster encounter begins or ends with violence if the party can figure out what the creature wants.",
+                                {
+                                    "type": "entries",
+                                    "name": "Monster Research",
+                                    "page": 148,
+                                    "entries": [
+                                        "Characters can study a creature's nature before opening negotiations.",
+                                        {
+                                            "type": "table",
+                                            "caption": "Monster Research",
+                                            "colLabels": ["Type", "Suggested Skills"],
+                                            "rows": [
+                                                ["Aberration", "Arcana"],
+                                                ["Beast", "Animal Handling, Nature, or Survival"],
+                                            ],
+                                        },
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Monsters' Desires",
+                                    "page": 148,
+                                    "entries": [
+                                        "Different creature types respond to different offerings.",
+                                        {
+                                            "type": "table",
+                                            "caption": "Beasts",
+                                            "colLabels": ["d4", "Desired Offering"],
+                                            "rows": [
+                                                ["1", "Fresh meat"],
+                                                ["2", "A soothing melody"],
                                             ],
                                         },
                                     ],
@@ -8235,6 +8285,9 @@ def test_tce_book_entries_are_imported_for_player_browse(
     sidekicks_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Sidekicks'].slug}"
     )
+    parleying_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Parleying with Monsters'].slug}"
+    )
     session_zero_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Session Zero'].slug}"
     )
@@ -8254,6 +8307,7 @@ def test_tce_book_entries_are_imported_for_player_browse(
     assert "Changing Your Subclass" in source_body
     assert "Session Zero" in source_body
     assert "Sidekicks" in source_body
+    assert "Parleying with Monsters" in source_body
     assert "Artificer" in source_body
     assert "Fighter" in source_body
     assert "Wizard" in source_body
@@ -8270,6 +8324,7 @@ def test_tce_book_entries_are_imported_for_player_browse(
     assert "Changing Your Subclass" in category_body
     assert "Session Zero" in category_body
     assert "Sidekicks" in category_body
+    assert "Parleying with Monsters" in category_body
     assert "Artificer" in category_body
     assert "Fighter" in category_body
     assert "Wizard" in category_body
@@ -8332,6 +8387,17 @@ def test_tce_book_entries_are_imported_for_player_browse(
     assert "Expert, Spellcaster, or Warrior" in sidekicks_body
     assert 'href="#creating-a-sidekick"' in sidekicks_body
     assert 'id="gaining-a-sidekick-class"' in sidekicks_body
+
+    assert parleying_response.status_code == 200
+    parleying_body = parleying_response.get_data(as_text=True)
+    assert "Chapter 4" in parleying_body
+    assert "Dungeon Master&#x27;s Tools" in parleying_body
+    assert "Parleying with Monsters" in parleying_body
+    assert "Monster Research" in parleying_body
+    assert "Monsters&#x27; Desires" in parleying_body
+    assert "Fresh meat" in parleying_body
+    assert 'href="#monster-research"' in parleying_body
+    assert 'id="monsters-desires"' in parleying_body
 
     assert artificer_response.status_code == 200
     artificer_body = artificer_response.get_data(as_text=True)
@@ -8402,13 +8468,14 @@ def test_tce_book_entries_follow_source_visibility(client, sign_in, users, app, 
     assert "Changing Your Subclass" in dm_category_body
     assert "Session Zero" in dm_category_body
     assert "Sidekicks" in dm_category_body
+    assert "Parleying with Monsters" in dm_category_body
     assert dm_entry_response.status_code == 200
     dm_entry_body = dm_entry_response.get_data(as_text=True)
     assert "Dungeon Master&#x27;s Tools" in dm_entry_body
     assert "Sidekicks" in dm_entry_body
 
 
-def test_tce_book_slice_includes_session_zero_and_sidekicks_pages_for_now(app, tmp_path):
+def test_tce_book_slice_includes_session_zero_sidekicks_and_parleying_pages_for_now(app, tmp_path):
     data_root = build_tce_book_data_root(tmp_path / "dnd5e-source-tce-book-boundary")
 
     with app.app_context():
