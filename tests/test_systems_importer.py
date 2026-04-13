@@ -4155,6 +4155,9 @@ XGE_RULES_REFERENCE_TEST_TITLES = (
 )
 
 
+TCE_RULES_REFERENCE_TEST_TITLES = ("Ten Rules to Remember",)
+
+
 def build_xge_book_data_root(root: Path) -> Path:
     data_root = build_test_data_root(root)
     write_json(
@@ -4673,6 +4676,129 @@ def build_xge_book_related_entities_data_root(root: Path) -> Path:
                     "ruleType": "O",
                     "entries": ["Observers can sometimes identify a spell as it is cast or after its effects appear."],
                 },
+            ]
+        },
+    )
+    return data_root
+
+
+def build_tce_book_data_root(root: Path) -> Path:
+    data_root = build_test_data_root(root)
+    write_json(
+        root / "data/books.json",
+        {
+            "book": [
+                {
+                    "name": "Tasha's Cauldron of Everything",
+                    "id": "TCE",
+                    "source": "TCE",
+                    "contents": [
+                        {
+                            "name": "Using This Book",
+                            "headers": [
+                                "What You'll Find Within",
+                                "It's All Optional",
+                                "Ten Rules to Remember",
+                            ],
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    write_json(
+        root / "data/book/book-tce.json",
+        {
+            "data": [
+                {
+                    "type": "section",
+                    "name": "Using This Book",
+                    "page": 4,
+                    "entries": [
+                        {
+                            "type": "entries",
+                            "name": "What You'll Find Within",
+                            "page": 4,
+                            "entries": ["This book adds optional tools for players and DMs."],
+                        },
+                        {
+                            "type": "entries",
+                            "name": "It's All Optional",
+                            "page": 4,
+                            "entries": ["Each group decides which optional material belongs in the campaign."],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Ten Rules to Remember",
+                            "page": 4,
+                            "entries": [
+                                {
+                                    "type": "entries",
+                                    "name": "1. The DM Adjudicates the Rules",
+                                    "page": 4,
+                                    "entries": ["The DM decides how the rules apply when play reaches an edge case."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "2. Exceptions Supersede General Rules",
+                                    "page": 4,
+                                    "entries": ["Specific features and spells override baseline procedures when they conflict."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "3. Advantage and Disadvantage",
+                                    "page": 4,
+                                    "entries": ["Multiple sources of advantage or disadvantage do not keep stacking."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "4. Reaction Timing",
+                                    "page": 4,
+                                    "entries": ["Reactions resolve after their triggers unless the rule says otherwise."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "5. Proficiency Bonus",
+                                    "page": 5,
+                                    "entries": ["You can apply your proficiency bonus only once to the same roll or DC."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "6. Bonus Action Spells",
+                                    "page": 5,
+                                    "entries": ["Casting a bonus action spell constrains what other spells you can cast that turn."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "7. Concentration",
+                                    "page": 5,
+                                    "entries": ["Only one concentration effect can be maintained at a time."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "8. Temporary Hit Points",
+                                    "page": 5,
+                                    "entries": ["Temporary hit points never stack; you keep the larger pool."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "9. Round Down",
+                                    "page": 5,
+                                    "entries": ["Fractional results round down unless a rule tells you to round another way."],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "10. Have Fun",
+                                    "page": 5,
+                                    "entries": [
+                                        "The table can adjust the procedure when it keeps the game moving and enjoyable.",
+                                        {"type": "quote", "entries": ["The rules help, but the table comes first."]},
+                                    ],
+                                },
+                            ],
+                        },
+                    ],
+                }
             ]
         },
     )
@@ -7357,6 +7483,89 @@ def test_xge_book_slice_includes_shared_campaigns_wrapper_and_excludes_remaining
     book_titles = {entry.title for entry in book_entries}
     assert book_titles == set(XGE_RULES_REFERENCE_TEST_TITLES)
     assert "Shared Campaigns" in book_titles
+
+
+def test_tce_ten_rules_to_remember_is_imported_for_player_browse(
+    client, sign_in, users, app, tmp_path
+):
+    data_root = build_tce_book_data_root(tmp_path / "dnd5e-source-tce-book-entries")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("TCE", entry_types=["book"])
+
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="TCE",
+            is_enabled=True,
+            default_visibility="players",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in service.list_entries_for_campaign_source(
+                "linden-pass",
+                "TCE",
+                entry_type="book",
+                limit=None,
+            )
+        }
+
+    assert list(book_entries) == list(TCE_RULES_REFERENCE_TEST_TITLES)
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    source_response = client.get("/campaigns/linden-pass/systems/sources/TCE")
+    category_response = client.get("/campaigns/linden-pass/systems/sources/TCE/types/book")
+    ten_rules_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Ten Rules to Remember'].slug}"
+    )
+
+    assert source_response.status_code == 200
+    source_body = source_response.get_data(as_text=True)
+    assert "Book Chapters" in source_body
+    assert "Ten Rules to Remember" in source_body
+
+    assert category_response.status_code == 200
+    category_body = category_response.get_data(as_text=True)
+    assert "Showing all 1 book chapters available to you in this source." in category_body
+    assert "Ten Rules to Remember" in category_body
+
+    assert ten_rules_response.status_code == 200
+    ten_rules_body = ten_rules_response.get_data(as_text=True)
+    assert "Using This Book" in ten_rules_body
+    assert "Ten Rules to Remember" in ten_rules_body
+    assert "1. The DM Adjudicates the Rules" in ten_rules_body
+    assert "10. Have Fun" in ten_rules_body
+    assert 'href="#1-the-dm-adjudicates-the-rules"' in ten_rules_body
+    assert 'href="#10-have-fun"' in ten_rules_body
+    assert 'id="3-advantage-and-disadvantage"' in ten_rules_body
+    assert "The rules help, but the table comes first." in ten_rules_body
+
+
+def test_tce_book_slice_only_includes_ten_rules_to_remember_for_now(app, tmp_path):
+    data_root = build_tce_book_data_root(tmp_path / "dnd5e-source-tce-book-boundary")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        result = importer.import_source("TCE", entry_types=["book"])
+        store = app.extensions["systems_store"]
+        book_entries = list(
+            store.list_entries_for_source("DND-5E", "TCE", entry_type="book", limit=20)
+        )
+
+    assert result.imported_count == len(TCE_RULES_REFERENCE_TEST_TITLES)
+    assert result.imported_by_type == {"book": len(TCE_RULES_REFERENCE_TEST_TITLES)}
+    assert [entry.title for entry in book_entries] == list(TCE_RULES_REFERENCE_TEST_TITLES)
 
 
 def test_rules_reference_search_uses_curated_metadata_without_full_body_search(

@@ -246,6 +246,11 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         "Shared Campaigns",
         ("Shared Campaigns", "Variant Rules"),
     ),
+    # Start TCE with the front-matter reference page that stays useful even
+    # before the broader character-option and DM-tools wrappers land.
+    "TCE": (
+        ("Using This Book", "Ten Rules to Remember"),
+    ),
 }
 VGM_CHARACTER_RACE_WRAPPER_DEFINITIONS = (
     {
