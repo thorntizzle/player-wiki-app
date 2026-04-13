@@ -5,6 +5,7 @@ from player_wiki.auth_store import AuthStore
 from player_wiki.systems_importer import Dnd5eSystemsImporter
 from tests.test_systems_importer import (
     build_dmg_book_data_root,
+    build_mtf_book_data_root,
     build_mm_book_data_root,
     build_phb_book_data_root,
     build_test_data_root,
@@ -553,6 +554,82 @@ def test_dmg_book_entries_stay_hidden_when_source_visibility_is_lowered_for_othe
 
     assert dm_book_category_response.status_code == 200
     assert "Creating a Multiverse" in dm_book_category_response.get_data(as_text=True)
+
+    assert dm_book_response.status_code == 200
+    assert "Policy default visibility: DM" in dm_book_response.get_data(as_text=True)
+
+
+def test_mtf_book_entries_stay_hidden_when_source_visibility_is_lowered_for_other_mtf_content(
+    client, sign_in, users, app, tmp_path
+):
+    data_root = build_mtf_book_data_root(tmp_path / "dnd5e-source-mtf-book-policy")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("MTF", entry_types=["book", "race"])
+
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="MTF",
+            is_enabled=True,
+            default_visibility="players",
+        )
+        tiefling_wrapper_entry = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "MTF", entry_type="book", limit=20)
+            if entry.title == "Tiefling Subraces"
+        )
+        asmodeus_tiefling_entry = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "MTF", entry_type="race", limit=20)
+            if entry.title == "Asmodeus Tiefling"
+        )
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    source_response = client.get("/campaigns/linden-pass/systems/sources/MTF")
+    book_category_response = client.get("/campaigns/linden-pass/systems/sources/MTF/types/book")
+    player_book_response = client.get(f"/campaigns/linden-pass/systems/entries/{tiefling_wrapper_entry.slug}")
+    player_race_response = client.get(f"/campaigns/linden-pass/systems/entries/{asmodeus_tiefling_entry.slug}")
+    search_response = client.get("/campaigns/linden-pass/systems?q=tiefling+subraces")
+
+    assert source_response.status_code == 200
+    source_body = source_response.get_data(as_text=True)
+    assert "Book Chapters" not in source_body
+    assert "Tiefling Subraces" not in source_body
+    assert "Races" in source_body
+    assert "default to DM visibility" in source_body
+
+    assert book_category_response.status_code == 404
+    assert player_book_response.status_code == 404
+
+    assert player_race_response.status_code == 200
+    assert "Asmodeus Tiefling" in player_race_response.get_data(as_text=True)
+
+    assert search_response.status_code == 200
+    assert "Tiefling Subraces" not in search_response.get_data(as_text=True)
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    dm_source_response = client.get("/campaigns/linden-pass/systems/sources/MTF")
+    dm_book_category_response = client.get("/campaigns/linden-pass/systems/sources/MTF/types/book")
+    dm_book_response = client.get(f"/campaigns/linden-pass/systems/entries/{tiefling_wrapper_entry.slug}")
+
+    assert dm_source_response.status_code == 200
+    dm_source_body = dm_source_response.get_data(as_text=True)
+    assert "Book Chapters" in dm_source_body
+    assert "Tiefling Subraces" in dm_source_body
+    assert "default to DM visibility" in dm_source_body
+
+    assert dm_book_category_response.status_code == 200
+    assert "Tiefling Subraces" in dm_book_category_response.get_data(as_text=True)
 
     assert dm_book_response.status_code == 200
     assert "Policy default visibility: DM" in dm_book_response.get_data(as_text=True)

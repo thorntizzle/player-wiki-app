@@ -4713,6 +4713,225 @@ def build_xge_book_related_entities_data_root(root: Path) -> Path:
     return data_root
 
 
+def build_mtf_book_data_root(root: Path) -> Path:
+    data_root = build_test_data_root(root)
+    write_json(
+        root / "data/races.json",
+        {
+            "race": [
+                {
+                    "name": "Tiefling",
+                    "source": "PHB",
+                    "page": 42,
+                    "size": ["M"],
+                    "speed": {"walk": 30},
+                    "ability": [{"cha": 2}],
+                    "entries": [
+                        {
+                            "name": "Hellish Resistance",
+                            "type": "entries",
+                            "entries": ["You have resistance to fire damage."],
+                        }
+                    ],
+                }
+            ],
+            "subrace": [
+                {
+                    "name": "Asmodeus",
+                    "source": "MTF",
+                    "raceName": "Tiefling",
+                    "raceSource": "PHB",
+                    "page": 21,
+                    "ability": [{"int": 1}],
+                    "entries": [
+                        {
+                            "name": "Legacy of Cania",
+                            "type": "entries",
+                            "entries": ["You know the thaumaturgy cantrip and channel infernal power through Cania."],
+                        }
+                    ],
+                },
+                {
+                    "name": "Baalzebul",
+                    "source": "MTF",
+                    "raceName": "Tiefling",
+                    "raceSource": "PHB",
+                    "page": 21,
+                    "ability": [{"int": 1}],
+                    "entries": [
+                        {
+                            "name": "Legacy of Maladomini",
+                            "type": "entries",
+                            "entries": ["Baalzebul tieflings inherit a silver tongue and subtle infernal magic."],
+                        }
+                    ],
+                },
+                {
+                    "name": "Dispater",
+                    "source": "MTF",
+                    "raceName": "Tiefling",
+                    "raceSource": "PHB",
+                    "page": 21,
+                    "ability": [{"dex": 1}],
+                    "entries": [
+                        {
+                            "name": "Legacy of Dis",
+                            "type": "entries",
+                            "entries": ["Dispater tieflings favor secrets, steel, and keen infernal precision."],
+                        }
+                    ],
+                },
+                {
+                    "name": "Fierna",
+                    "source": "MTF",
+                    "raceName": "Tiefling",
+                    "raceSource": "PHB",
+                    "page": 21,
+                    "ability": [{"wis": 1}],
+                    "entries": [
+                        {
+                            "name": "Legacy of Phlegethos",
+                            "type": "entries",
+                            "entries": ["Fierna tieflings are known for beguiling speech and flames touched by desire."],
+                        }
+                    ],
+                },
+                {
+                    "name": "Glasya",
+                    "source": "MTF",
+                    "raceName": "Tiefling",
+                    "raceSource": "PHB",
+                    "page": 22,
+                    "ability": [{"dex": 1}],
+                    "entries": [
+                        {
+                            "name": "Legacy of Malbolge",
+                            "type": "entries",
+                            "entries": ["Glasya tieflings slip through locks, lies, and shadows with infernal ease."],
+                        }
+                    ],
+                },
+                {
+                    "name": "Levistus",
+                    "source": "MTF",
+                    "raceName": "Tiefling",
+                    "raceSource": "PHB",
+                    "page": 22,
+                    "ability": [{"con": 1}],
+                    "entries": [
+                        {
+                            "name": "Legacy of Stygia",
+                            "type": "entries",
+                            "entries": ["Levistus tieflings endure with cold poise and frozen infernal resilience."],
+                        }
+                    ],
+                },
+                {
+                    "name": "Mammon",
+                    "source": "MTF",
+                    "raceName": "Tiefling",
+                    "raceSource": "PHB",
+                    "page": 22,
+                    "ability": [{"int": 1}],
+                    "entries": [
+                        {
+                            "name": "Legacy of Minauros",
+                            "type": "entries",
+                            "entries": ["Mammon tieflings draw on greed, guile, and infernal command over matter."],
+                        }
+                    ],
+                },
+                {
+                    "name": "Mephistopheles",
+                    "source": "MTF",
+                    "raceName": "Tiefling",
+                    "raceSource": "PHB",
+                    "page": 23,
+                    "ability": [{"int": 1}],
+                    "entries": [
+                        {
+                            "name": "Legacy of Cania",
+                            "type": "entries",
+                            "entries": ["Mephistopheles tieflings wield hellfire with a scholar's taste for arcana."],
+                        }
+                    ],
+                },
+                {
+                    "name": "Zariel",
+                    "source": "MTF",
+                    "raceName": "Tiefling",
+                    "raceSource": "PHB",
+                    "page": 23,
+                    "ability": [{"str": 1}],
+                    "entries": [
+                        {
+                            "name": "Legacy of Avernus",
+                            "type": "entries",
+                            "entries": ["Zariel tieflings bear martial fury and the battlefield fire of Avernus."],
+                        }
+                    ],
+                },
+            ],
+        },
+    )
+    write_json(
+        root / "data/books.json",
+        {
+            "book": [
+                {
+                    "name": "Mordenkainen's Tome of Foes",
+                    "id": "MTF",
+                    "source": "MTF",
+                    "contents": [
+                        {
+                            "name": "The Blood War",
+                            "headers": ["Tiefling Subraces"],
+                            "ordinal": {"type": "chapter", "identifier": 1},
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    write_json(
+        root / "data/book/book-mtf.json",
+        {
+            "data": [
+                {
+                    "type": "section",
+                    "name": "The Blood War",
+                    "page": 11,
+                    "entries": [
+                        {
+                            "type": "section",
+                            "name": "Tiefling Subraces",
+                            "page": 21,
+                            "entries": [
+                                "At the DM's option, you can create a tiefling character who has a special link to one of the Lords of the Nine Hells.",
+                                {
+                                    "type": "list",
+                                    "items": [
+                                        "{@race Tiefling (Asmodeus)|MTF}",
+                                        "{@race Tiefling (Baalzebul)|MTF}",
+                                        "{@race Tiefling (Dispater)|MTF}",
+                                        "{@race Tiefling (Fierna)|MTF}",
+                                        "{@race Tiefling (Glasya)|MTF}",
+                                        "{@race Tiefling (Levistus)|MTF}",
+                                        "{@race Tiefling (Mammon)|MTF}",
+                                        "{@race Tiefling (Mephistopheles)|MTF}",
+                                        "{@race Tiefling (Zariel)|MTF}",
+                                    ],
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    return data_root
+
+
 def build_tce_book_data_root(root: Path) -> Path:
     data_root = build_test_data_root(root)
     write_json(
@@ -7918,6 +8137,7 @@ def test_mm_book_pages_surface_related_monsters_and_monster_rules(
         in statistics_body
     )
 
+
     assert legendary_response.status_code == 200
     legendary_body = legendary_response.get_data(as_text=True)
     assert "Conditions:" in legendary_body
@@ -7980,6 +8200,69 @@ def test_mm_book_pages_surface_related_monsters_and_monster_rules(
         f'href="/campaigns/linden-pass/systems/entries/{phb_entries[("condition", "Paralyzed")].slug}"'
         in spore_servant_body
     )
+
+
+def test_mtf_tiefling_subraces_wrapper_is_imported_for_dm_browse(
+    client, sign_in, users, app, tmp_path
+):
+    data_root = build_mtf_book_data_root(tmp_path / "dnd5e-source-mtf-tiefling-subraces")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        result = importer.import_source("MTF", entry_types=["book"])
+
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="MTF",
+            is_enabled=True,
+            default_visibility="dm",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in service.list_entries_for_campaign_source(
+                "linden-pass",
+                "MTF",
+                entry_type="book",
+                limit=None,
+            )
+        }
+
+    assert result.imported_count == 1
+    assert result.imported_by_type == {"book": 1}
+    assert list(book_entries) == ["Tiefling Subraces"]
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    source_response = client.get("/campaigns/linden-pass/systems/sources/MTF")
+    category_response = client.get("/campaigns/linden-pass/systems/sources/MTF/types/book")
+    entry_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Tiefling Subraces'].slug}"
+    )
+
+    assert source_response.status_code == 200
+    source_body = source_response.get_data(as_text=True)
+    assert "Book Chapters" in source_body
+    assert "Tiefling Subraces" in source_body
+
+    assert category_response.status_code == 200
+    category_body = category_response.get_data(as_text=True)
+    assert "Showing all 1 book chapters available to you in this source." in category_body
+    assert "Tiefling Subraces" in category_body
+
+    assert entry_response.status_code == 200
+    entry_body = entry_response.get_data(as_text=True)
+    assert "Chapter 1" in entry_body
+    assert "The Blood War" in entry_body
+    assert "At the DM&#39;s option" in entry_body
+    assert "Tiefling (Asmodeus)" in entry_body
+    assert "Tiefling (Mephistopheles)" in entry_body
+    assert "Tiefling (Zariel)" in entry_body
 
 
 def test_dmg_book_chapters_surface_related_imported_entities(client, sign_in, users, app, tmp_path):
