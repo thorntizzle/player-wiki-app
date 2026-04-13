@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+from pathlib import Path
+from uuid import uuid4
+
+import pytest
+
 from player_wiki.dnd5e_rules_reference import DND5E_RULES_REFERENCE_VERSION, build_dnd5e_rules_reference_entries
 from player_wiki.auth_store import AuthStore
 from player_wiki.systems_importer import Dnd5eSystemsImporter
 from tests.test_systems_importer import (
     build_dmg_book_data_root,
+    build_egw_character_option_wrapper_data_root,
+    build_egw_dunamis_book_data_root,
     build_mtf_book_data_root,
     build_mm_book_data_root,
     build_phb_book_data_root,
@@ -24,6 +31,19 @@ def build_source_form(app, campaign_slug: str = "linden-pass") -> dict[str, str]
             data[f"source_{row.source.source_id}_enabled"] = "1"
         data[f"source_{row.source.source_id}_visibility"] = row.default_visibility
     return data
+
+
+def build_repo_local_test_root(name: str) -> Path:
+    root = Path(__file__).resolve().parents[1] / ".tmp-pytest-egw-data"
+    root.mkdir(exist_ok=True)
+    path = root / f"{name}-{uuid4().hex}"
+    path.mkdir()
+    return path
+
+
+@pytest.fixture()
+def tmp_path() -> Path:
+    return build_repo_local_test_root("pytest")
 
 
 def test_party_member_sees_systems_nav_and_player_visible_sources(client, sign_in, users):
@@ -759,6 +779,189 @@ def test_mtf_book_entries_stay_hidden_when_source_visibility_is_lowered_for_othe
     assert "Gith Characters" in dm_gith_search_response.get_data(as_text=True)
     assert dm_deep_gnome_search_response.status_code == 200
     assert "Deep Gnome Characters" in dm_deep_gnome_search_response.get_data(as_text=True)
+
+
+def test_egw_book_entries_follow_source_visibility(client, sign_in, users, app):
+    data_root = build_egw_dunamis_book_data_root(
+        build_repo_local_test_root("dnd5e-source-egw-book-entries-policy")
+    )
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("EGW", entry_types=["book"])
+
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="EGW",
+            is_enabled=True,
+            default_visibility="dm",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in store.list_entries_for_source("DND-5E", "EGW", entry_type="book", limit=20)
+        }
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    player_source_response = client.get("/campaigns/linden-pass/systems/sources/EGW")
+    player_category_response = client.get("/campaigns/linden-pass/systems/sources/EGW/types/book")
+    player_entry_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Dunamis and Dunamancy'].slug}"
+    )
+
+    assert player_source_response.status_code == 404
+    assert player_category_response.status_code == 404
+    assert player_entry_response.status_code == 404
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    dm_source_response = client.get("/campaigns/linden-pass/systems/sources/EGW")
+    dm_category_response = client.get("/campaigns/linden-pass/systems/sources/EGW/types/book")
+    dm_entry_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Dunamis and Dunamancy'].slug}"
+    )
+
+    assert dm_source_response.status_code == 200
+    dm_source_body = dm_source_response.get_data(as_text=True)
+    assert "Book Chapters" in dm_source_body
+    assert "Dunamis and Dunamancy" in dm_source_body
+
+    assert dm_category_response.status_code == 200
+    dm_category_body = dm_category_response.get_data(as_text=True)
+    assert "Dunamis and Dunamancy" in dm_category_body
+    assert "Heroic Chronicle" in dm_category_body
+
+    assert dm_entry_response.status_code == 200
+    dm_entry_body = dm_entry_response.get_data(as_text=True)
+    assert "Chapter 4" in dm_entry_body
+    assert "Character Options" in dm_entry_body
+    assert "Beyond the Kryn Dynasty" in dm_entry_body
+
+
+def test_egw_source_chapter_context_respects_wrapper_entry_visibility(
+    client, sign_in, users, app
+):
+    data_root = build_egw_character_option_wrapper_data_root(
+        build_repo_local_test_root("dnd5e-source-egw-wrapper-visibility")
+    )
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source(
+            "EGW",
+            entry_types=["background", "book", "race", "spell", "subclass", "subclassfeature"],
+        )
+
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="EGW",
+            is_enabled=True,
+            default_visibility="players",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in store.list_entries_for_source("DND-5E", "EGW", entry_type="book", limit=None)
+        }
+        spell_entries = {
+            entry.title: entry
+            for entry in store.list_entries_for_source("DND-5E", "EGW", entry_type="spell", limit=None)
+        }
+        for wrapper_title in ("Dunamancy Spells", "Spell Descriptions"):
+            store.upsert_campaign_entry_override(
+                "linden-pass",
+                library_slug="DND-5E",
+                entry_key=book_entries[wrapper_title].entry_key,
+                visibility_override="dm",
+                is_enabled_override=None,
+            )
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    player_source_response = client.get("/campaigns/linden-pass/systems/sources/EGW")
+    player_category_response = client.get("/campaigns/linden-pass/systems/sources/EGW/types/book")
+    player_hidden_wrapper_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Dunamancy Spells'].slug}"
+    )
+    player_spell_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{spell_entries['Dark Star'].slug}"
+    )
+
+    assert player_source_response.status_code == 200
+    player_source_body = player_source_response.get_data(as_text=True)
+    assert "Book Chapters" in player_source_body
+    assert "Heroic Chronicle" in player_source_body
+    assert "Dunamancy Spells" not in player_source_body
+    assert "Spell Descriptions" not in player_source_body
+
+    assert player_category_response.status_code == 200
+    player_category_body = player_category_response.get_data(as_text=True)
+    assert "Heroic Chronicle" in player_category_body
+    assert "Dunamancy Spells" not in player_category_body
+    assert "Spell Descriptions" not in player_category_body
+
+    assert player_hidden_wrapper_response.status_code == 404
+
+    assert player_spell_response.status_code == 200
+    player_spell_body = player_spell_response.get_data(as_text=True)
+    assert "Dark Star" in player_spell_body
+    assert "Source Chapter Context" not in player_spell_body
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{book_entries["Dunamancy Spells"].slug}"'
+        not in player_spell_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{book_entries["Spell Descriptions"].slug}"'
+        not in player_spell_body
+    )
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    dm_source_response = client.get("/campaigns/linden-pass/systems/sources/EGW")
+    dm_category_response = client.get("/campaigns/linden-pass/systems/sources/EGW/types/book")
+    dm_hidden_wrapper_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Dunamancy Spells'].slug}"
+    )
+    dm_spell_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{spell_entries['Dark Star'].slug}"
+    )
+
+    assert dm_source_response.status_code == 200
+    dm_source_body = dm_source_response.get_data(as_text=True)
+    assert "Dunamancy Spells" in dm_source_body
+    assert "Spell Descriptions" in dm_source_body
+
+    assert dm_category_response.status_code == 200
+    dm_category_body = dm_category_response.get_data(as_text=True)
+    assert "Dunamancy Spells" in dm_category_body
+    assert "Spell Descriptions" in dm_category_body
+
+    assert dm_hidden_wrapper_response.status_code == 200
+    assert "Dunamancy Spells" in dm_hidden_wrapper_response.get_data(as_text=True)
+
+    assert dm_spell_response.status_code == 200
+    dm_spell_body = dm_spell_response.get_data(as_text=True)
+    assert "Source Chapter Context" in dm_spell_body
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{book_entries["Dunamancy Spells"].slug}"'
+        in dm_spell_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{book_entries["Spell Descriptions"].slug}"'
+        in dm_spell_body
+    )
 
 
 def test_dmg_rules_reference_search_stays_source_scoped(client, sign_in, users, app, tmp_path):
