@@ -4763,6 +4763,21 @@ def build_mtf_book_data_root(root: Path) -> Path:
                             "entries": ["You have resistance to fire damage."],
                         }
                     ],
+                },
+                {
+                    "name": "Gith",
+                    "source": "MTF",
+                    "page": 96,
+                    "size": ["M"],
+                    "speed": {"walk": 30},
+                    "ability": [{"int": 1}],
+                    "entries": [
+                        {
+                            "name": "Decadent Mastery",
+                            "type": "entries",
+                            "entries": ["You learn one language of your choice, and you gain proficiency with one skill or tool of your choice."],
+                        }
+                    ],
                 }
             ],
             "subrace": [
@@ -4961,6 +4976,36 @@ def build_mtf_book_data_root(root: Path) -> Path:
                         }
                     ],
                 },
+                {
+                    "name": "Githyanki",
+                    "source": "MTF",
+                    "raceName": "Gith",
+                    "raceSource": "MTF",
+                    "page": 96,
+                    "ability": [{"str": 2}],
+                    "entries": [
+                        {
+                            "name": "Martial Prodigy",
+                            "type": "entries",
+                            "entries": ["You are proficient with light and medium armor and with shortswords, longswords, and greatswords."],
+                        }
+                    ],
+                },
+                {
+                    "name": "Githzerai",
+                    "source": "MTF",
+                    "raceName": "Gith",
+                    "raceSource": "MTF",
+                    "page": 96,
+                    "ability": [{"wis": 2}],
+                    "entries": [
+                        {
+                            "name": "Mental Discipline",
+                            "type": "entries",
+                            "entries": ["Your innate psychic defenses grant you advantage on saving throws against the charmed and frightened conditions."],
+                        }
+                    ],
+                },
             ],
         },
     )
@@ -4987,6 +5032,11 @@ def build_mtf_book_data_root(root: Path) -> Path:
                             "name": "Dwarves and Duergar",
                             "headers": ["Duergar Characters"],
                             "ordinal": {"type": "chapter", "identifier": 3},
+                        },
+                        {
+                            "name": "Gith and Their Endless War",
+                            "headers": ["Gith Characters"],
+                            "ordinal": {"type": "chapter", "identifier": 4},
                         }
                     ],
                 }
@@ -5065,6 +5115,47 @@ def build_mtf_book_data_root(root: Path) -> Path:
                                     "type": "list",
                                     "items": [
                                         "{@race Dwarf (Duergar)|MTF}",
+                                    ],
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "type": "section",
+                    "name": "Gith and Their Endless War",
+                    "page": 85,
+                    "entries": [
+                        {
+                            "type": "section",
+                            "name": "Gith Characters",
+                            "page": 96,
+                            "entries": [
+                                "At the DM's option, you can create a gith character, using the following traits.",
+                                {
+                                    "type": "list",
+                                    "items": [
+                                        "{@race Gith (Githyanki)|MTF}",
+                                        "{@race Gith (Githzerai)|MTF}",
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Gith Random Height and Weight",
+                                    "page": 96,
+                                    "entries": [
+                                        {
+                                            "type": "table",
+                                            "colLabels": [
+                                                "Base Height",
+                                                "Height Modifier",
+                                                "Base Weight",
+                                                "Weight Modifier",
+                                            ],
+                                            "rows": [
+                                                ["5 ft.", "+2d12 in.", "100 lb.", "\u00d7 (2d6) lb."],
+                                            ],
+                                        }
                                     ],
                                 },
                             ],
@@ -8347,7 +8438,7 @@ def test_mm_book_pages_surface_related_monsters_and_monster_rules(
     )
 
 
-def test_mtf_tiefling_elf_and_duergar_wrappers_are_imported_for_dm_browse(
+def test_mtf_tiefling_elf_duergar_and_gith_wrappers_are_imported_for_dm_browse(
     client, sign_in, users, app, tmp_path
 ):
     data_root = build_mtf_book_data_root(tmp_path / "dnd5e-source-mtf-ancestry-subraces")
@@ -8379,9 +8470,14 @@ def test_mtf_tiefling_elf_and_duergar_wrappers_are_imported_for_dm_browse(
             )
         }
 
-    assert result.imported_count == 3
-    assert result.imported_by_type == {"book": 3}
-    assert list(book_entries) == ["Tiefling Subraces", "Elf Subraces", "Duergar Characters"]
+    assert result.imported_count == 4
+    assert result.imported_by_type == {"book": 4}
+    assert list(book_entries) == [
+        "Tiefling Subraces",
+        "Elf Subraces",
+        "Duergar Characters",
+        "Gith Characters",
+    ]
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
     source_response = client.get("/campaigns/linden-pass/systems/sources/MTF")
@@ -8393,6 +8489,9 @@ def test_mtf_tiefling_elf_and_duergar_wrappers_are_imported_for_dm_browse(
     duergar_entry_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Duergar Characters'].slug}"
     )
+    gith_entry_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Gith Characters'].slug}"
+    )
 
     assert source_response.status_code == 200
     source_body = source_response.get_data(as_text=True)
@@ -8400,17 +8499,21 @@ def test_mtf_tiefling_elf_and_duergar_wrappers_are_imported_for_dm_browse(
     assert "Tiefling Subraces" in source_body
     assert "Elf Subraces" in source_body
     assert "Duergar Characters" in source_body
+    assert "Gith Characters" in source_body
     assert source_body.index("Tiefling Subraces") < source_body.index("Elf Subraces")
     assert source_body.index("Elf Subraces") < source_body.index("Duergar Characters")
+    assert source_body.index("Duergar Characters") < source_body.index("Gith Characters")
 
     assert category_response.status_code == 200
     category_body = category_response.get_data(as_text=True)
-    assert "Showing all 3 book chapters available to you in this source." in category_body
+    assert "Showing all 4 book chapters available to you in this source." in category_body
     assert "Tiefling Subraces" in category_body
     assert "Elf Subraces" in category_body
     assert "Duergar Characters" in category_body
+    assert "Gith Characters" in category_body
     assert category_body.index("Tiefling Subraces") < category_body.index("Elf Subraces")
     assert category_body.index("Elf Subraces") < category_body.index("Duergar Characters")
+    assert category_body.index("Duergar Characters") < category_body.index("Gith Characters")
 
     assert tiefling_entry_response.status_code == 200
     tiefling_entry_body = tiefling_entry_response.get_data(as_text=True)
@@ -8436,6 +8539,15 @@ def test_mtf_tiefling_elf_and_duergar_wrappers_are_imported_for_dm_browse(
     assert "Dwarves and Duergar" in duergar_entry_body
     assert "At the DM&#39;s discretion" in duergar_entry_body
     assert "Dwarf (Duergar)" in duergar_entry_body
+
+    assert gith_entry_response.status_code == 200
+    gith_entry_body = gith_entry_response.get_data(as_text=True)
+    assert "Chapter 4" in gith_entry_body
+    assert "Gith and Their Endless War" in gith_entry_body
+    assert "At the DM&#39;s option" in gith_entry_body
+    assert "Gith (Githyanki)" in gith_entry_body
+    assert "Gith (Githzerai)" in gith_entry_body
+    assert "Gith Random Height and Weight" in gith_entry_body
 
 
 def test_dmg_book_chapters_surface_related_imported_entities(client, sign_in, users, app, tmp_path):
