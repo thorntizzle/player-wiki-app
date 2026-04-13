@@ -11437,6 +11437,122 @@ def test_subclass_pages_surface_campaign_overlay_base_rule_refs(
     assert "Supported Source Baseline" in subclass_body
 
 
+def test_rule_pages_surface_active_campaign_overlays_from_mechanics_pages(
+    app, client, sign_in, users
+):
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        spell_math_rule_entry = next(
+            entry
+            for entry in service.list_entries_for_campaign_source(
+                "linden-pass",
+                "RULES",
+                entry_type="rule",
+                limit=None,
+            )
+            if entry.title == "Spell Attacks and Save DCs"
+        )
+
+        campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])
+        page_path = campaigns_dir / "linden-pass" / "content" / "mechanics" / "spellcasting-baseline-update.md"
+        page_path.parent.mkdir(parents=True, exist_ok=True)
+        page_path.write_text(
+            (
+                "---\n"
+                "title: Spellcasting Baseline Update\n"
+                "section: Mechanics\n"
+                "type: mechanic\n"
+                "subsection: Variant and House Rules\n"
+                "character_option:\n"
+                "  kind: feature\n"
+                "  name: Spellcasting Baseline Update\n"
+                "  activation_type: special\n"
+                "  base_rule_refs:\n"
+                "    - rule_key: spell-attacks-and-save-dcs\n"
+                "---\n\n"
+                "Spell attacks in this campaign use the published party-wide baseline for spell save math.\n"
+            ),
+            encoding="utf-8",
+        )
+        app.extensions["repository_store"].refresh()
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    rule_response = client.get(f"/campaigns/linden-pass/systems/entries/{spell_math_rule_entry.slug}")
+
+    assert rule_response.status_code == 200
+    rule_body = rule_response.get_data(as_text=True)
+    assert "Active Campaign Overlays" in rule_body
+    assert "Spellcasting Baseline Update" in rule_body
+    assert "Applies To:</strong> This entry." in rule_body
+    assert "This house rule stays visible beside the baseline links, but the app does not currently automate the change." in rule_body
+    assert "Spell attacks in this campaign use the published party-wide baseline for spell save math." in rule_body
+    assert '/campaigns/linden-pass/pages/mechanics/spellcasting-baseline-update' in rule_body
+
+
+def test_book_pages_surface_section_targeted_active_campaign_overlays(
+    app, client, sign_in, users, tmp_path
+):
+    data_root = build_phb_book_data_root(tmp_path / "dnd5e-source-book-campaign-overlays")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("PHB", entry_types=["book"])
+
+        store = app.extensions["systems_store"]
+        spellcasting_entry = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "PHB", entry_type="book", limit=20)
+            if entry.title == "Spellcasting"
+        )
+
+        campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])
+        page_path = campaigns_dir / "linden-pass" / "content" / "mechanics" / "component-casting-adjustment.md"
+        page_path.parent.mkdir(parents=True, exist_ok=True)
+        page_path.write_text(
+            (
+                "---\n"
+                "title: Component Casting Adjustment\n"
+                "section: Mechanics\n"
+                "type: mechanic\n"
+                "subsection: Class Modifications\n"
+                "character_progression:\n"
+                "  kind: class\n"
+                "  class_name: Wizard\n"
+                "  level: 1\n"
+                "  character_option:\n"
+                "    name: Component Casting Adjustment\n"
+                "    activation_type: special\n"
+                "    base_rule_refs:\n"
+                f"      - slug: {spellcasting_entry.slug}\n"
+                "        entry_type: book\n"
+                "        source_id: PHB\n"
+                "        anchor: casting-a-spell--components\n"
+                "        section_title: Components\n"
+                "---\n\n"
+                "Wizards in this campaign can substitute a bonded focus for listed common components.\n"
+            ),
+            encoding="utf-8",
+        )
+        app.extensions["repository_store"].refresh()
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    book_response = client.get(f"/campaigns/linden-pass/systems/entries/{spellcasting_entry.slug}")
+
+    assert book_response.status_code == 200
+    book_body = book_response.get_data(as_text=True)
+    assert "Active Campaign Overlays" in book_body
+    assert "Component Casting Adjustment" in book_body
+    assert "Applies To:</strong> Components" in book_body
+    assert "Wizards in this campaign can substitute a bonded focus for listed common components." in book_body
+    assert '/campaigns/linden-pass/pages/mechanics/component-casting-adjustment' in book_body
+
+
 def test_importer_skips_subclassfeatures_for_unsupported_subclass_sources(app, tmp_path):
     data_root = build_unsupported_cross_source_subclassfeature_data_root(
         tmp_path / "dnd5e-source-unsupported-subclassfeature-sources"

@@ -9,7 +9,11 @@ from pathlib import Path
 from flask import g, has_request_context
 
 from .auth_store import isoformat, utcnow
-from .character_campaign_options import normalize_campaign_base_rule_refs, normalize_campaign_overlay_support
+from .character_campaign_options import (
+    build_campaign_page_character_option,
+    normalize_campaign_base_rule_refs,
+    normalize_campaign_overlay_support,
+)
 from .character_campaign_progression import build_campaign_page_progression_entries
 from .campaign_visibility import (
     VISIBILITY_DM,
@@ -1173,6 +1177,30 @@ class SystemsService:
             ),
         }
 
+    def build_active_campaign_overlays_for_entry(
+        self,
+        campaign_slug: str,
+        entry: SystemsEntryRecord,
+    ) -> list[dict[str, object]]:
+        overlay_cards: list[dict[str, object]] = []
+        seen_markers: set[tuple[str, str]] = set()
+        for record in self._list_visible_campaign_mechanics_page_records(campaign_slug):
+            overlay_cards.extend(
+                self._build_active_campaign_overlay_cards_from_record(
+                    campaign_slug,
+                    entry,
+                    record,
+                    seen_markers=seen_markers,
+                )
+            )
+        return sorted(
+            overlay_cards,
+            key=lambda item: (
+                normalize_lookup(str(item.get("title") or "")),
+                str(item.get("page_ref") or "").casefold(),
+            ),
+        )
+
     def build_related_monsters_for_entry(
         self,
         campaign_slug: str,
@@ -1570,6 +1598,7 @@ class SystemsService:
             "entry": entry,
             "label": label,
             "anchor": anchor,
+            "section_title": section_title,
         }
 
     def _build_curated_related_entries_for_entry(
@@ -3031,6 +3060,19 @@ class SystemsService:
         ]
 
     def _list_campaign_progression_entries(self, campaign_slug: str) -> list[SystemsEntryRecord]:
+        entries: list[SystemsEntryRecord] = []
+        seen_keys: set[str] = set()
+        for record in self._list_visible_campaign_mechanics_page_records(campaign_slug):
+            for entry in build_campaign_page_progression_entries(record):
+                entry_key = str(entry.entry_key or "").strip()
+                if entry_key and entry_key in seen_keys:
+                    continue
+                if entry_key:
+                    seen_keys.add(entry_key)
+                entries.append(entry)
+        return entries
+
+    def _list_visible_campaign_mechanics_page_records(self, campaign_slug: str) -> list[object]:
         campaign = self._get_campaign(campaign_slug)
         page_store = getattr(self.repository_store, "page_store", None)
         if campaign is None or page_store is None:
@@ -3040,22 +3082,164 @@ class SystemsService:
             content_dir=Path(campaign.player_content_dir),
             include_body=True,
         )
-        entries: list[SystemsEntryRecord] = []
-        seen_keys: set[str] = set()
-        for record in records:
-            page = getattr(record, "page", None)
-            if page is None or not campaign.is_page_visible(page):
+        return [
+            record
+            for record in records
+            if (page := getattr(record, "page", None)) is not None
+            and campaign.is_page_visible(page)
+            and str(getattr(page, "section", "") or "").strip() == "Mechanics"
+        ]
+
+    def _build_active_campaign_overlay_cards_from_record(
+        self,
+        campaign_slug: str,
+        entry: SystemsEntryRecord,
+        record: object,
+        *,
+        seen_markers: set[tuple[str, str]],
+    ) -> list[dict[str, object]]:
+        page_ref = str(getattr(record, "page_ref", "") or "").strip()
+        page = getattr(record, "page", None)
+        if not page_ref or page is None:
+            return []
+        page_title = str(getattr(page, "title", "") or "").strip() or page_ref
+        body_html = self._build_campaign_page_body_html(campaign_slug, page_ref)
+
+        overlay_cards: list[dict[str, object]] = []
+        page_option = build_campaign_page_character_option(record, default_kind="feature")
+        page_option_card = self._build_active_campaign_overlay_card(
+            campaign_slug,
+            entry,
+            page_ref=page_ref,
+            page_title=page_title,
+            overlay_title=str(dict(page_option or {}).get("display_name") or page_title).strip() or page_title,
+            overlay_key=f"page|{page_ref}",
+            campaign_option=page_option,
+            body_html=body_html,
+            seen_markers=seen_markers,
+        )
+        if page_option_card is not None:
+            overlay_cards.append(page_option_card)
+
+        for progression_entry in build_campaign_page_progression_entries(record):
+            page_progression_card = self._build_active_campaign_overlay_card(
+                campaign_slug,
+                entry,
+                page_ref=page_ref,
+                page_title=page_title,
+                overlay_title=str(progression_entry.title or page_title).strip() or page_title,
+                overlay_key=str(progression_entry.entry_key or "").strip()
+                or f"progression|{page_ref}|{progression_entry.title}",
+                campaign_option=dict(progression_entry.metadata.get("campaign_option") or {}),
+                body_html=body_html,
+                seen_markers=seen_markers,
+            )
+            if page_progression_card is not None:
+                overlay_cards.append(page_progression_card)
+        return overlay_cards
+
+    def _build_active_campaign_overlay_card(
+        self,
+        campaign_slug: str,
+        entry: SystemsEntryRecord,
+        *,
+        page_ref: str,
+        page_title: str,
+        overlay_title: str,
+        overlay_key: str,
+        campaign_option: dict[str, object] | None,
+        body_html: str,
+        seen_markers: set[tuple[str, str]],
+    ) -> dict[str, object] | None:
+        option = dict(campaign_option or {})
+        if not option:
+            return None
+        base_rule_refs = self.build_base_rule_refs_for_campaign_option(campaign_slug, option)
+        matching_refs = self._filter_active_campaign_overlay_refs_for_entry(entry, base_rule_refs)
+        if not matching_refs:
+            return None
+        target_labels, targets_entry_wide = self._build_overlay_target_labels_for_entry(entry, matching_refs)
+        marker = (
+            str(overlay_key or page_ref).strip().casefold(),
+            "|".join(label.casefold() for label in target_labels)
+            or ("entry" if targets_entry_wide else ""),
+        )
+        if marker in seen_markers:
+            return None
+        seen_markers.add(marker)
+        return {
+            "title": overlay_title,
+            "page_ref": page_ref,
+            "page_title": page_title,
+            "overlay_support": self.build_overlay_support_for_campaign_option(
+                option,
+                base_rule_refs=base_rule_refs,
+            ),
+            "body_html": body_html,
+            "target_labels": target_labels,
+            "targets_entry_wide": targets_entry_wide,
+        }
+
+    def _filter_active_campaign_overlay_refs_for_entry(
+        self,
+        entry: SystemsEntryRecord,
+        base_rule_refs: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        entry_key = str(entry.entry_key or "").strip()
+        if not entry_key:
+            return []
+        matching_refs: list[dict[str, object]] = []
+        seen_markers: set[tuple[str, str, str]] = set()
+        for ref in list(base_rule_refs or []):
+            ref_entry = ref.get("entry")
+            if ref_entry is None or str(ref_entry.entry_key or "").strip() != entry_key:
                 continue
-            if str(getattr(page, "section", "") or "").strip() != "Mechanics":
+            marker = (
+                str(ref.get("label") or "").strip().casefold(),
+                str(ref.get("anchor") or "").strip().casefold(),
+                str(ref.get("section_title") or "").strip().casefold(),
+            )
+            if marker in seen_markers:
                 continue
-            for entry in build_campaign_page_progression_entries(record):
-                entry_key = str(entry.entry_key or "").strip()
-                if entry_key and entry_key in seen_keys:
+            seen_markers.add(marker)
+            matching_refs.append(ref)
+        return matching_refs
+
+    def _build_overlay_target_labels_for_entry(
+        self,
+        entry: SystemsEntryRecord,
+        matching_refs: list[dict[str, object]],
+    ) -> tuple[list[str], bool]:
+        book_section_lookup = self._build_book_section_title_lookup(entry)
+        target_labels: list[str] = []
+        seen_labels: set[str] = set()
+        targets_entry_wide = False
+        for ref in matching_refs:
+            section_title = str(ref.get("section_title") or "").strip()
+            anchor = str(ref.get("anchor") or "").strip()
+            label = section_title or book_section_lookup.get(anchor, "")
+            if label:
+                marker = label.casefold()
+                if marker in seen_labels:
                     continue
-                if entry_key:
-                    seen_keys.add(entry_key)
-                entries.append(entry)
-        return entries
+                seen_labels.add(marker)
+                target_labels.append(label)
+                continue
+            if not anchor:
+                targets_entry_wide = True
+        return target_labels, targets_entry_wide
+
+    def _build_book_section_title_lookup(self, entry: SystemsEntryRecord) -> dict[str, str]:
+        if entry.entry_type != "book":
+            return {}
+        lookup: dict[str, str] = {}
+        for raw_item in list((entry.metadata or {}).get("section_outline") or []):
+            item = dict(raw_item or {}) if isinstance(raw_item, dict) else {}
+            anchor = str(item.get("anchor") or "").strip()
+            title = str(item.get("title") or "").strip()
+            if anchor and title and anchor not in lookup:
+                lookup[anchor] = title
+        return lookup
 
     def _campaign_progression_entry_matches_class(
         self,

@@ -3546,6 +3546,10 @@ def create_app() -> Flask:
             else None
         )
         feature_detail_card = filter_embedded_card(feature_detail_card)
+        active_campaign_overlays = systems_service.build_active_campaign_overlays_for_entry(
+            campaign_slug,
+            entry,
+        )
         related_rule_entries = [
             candidate
             for candidate in systems_service.build_related_rules_for_entry(campaign_slug, entry)
@@ -3671,6 +3675,7 @@ def create_app() -> Flask:
             "subclass_feature_progression_groups": subclass_feature_progression_groups,
             "subclass_optionalfeature_sections": subclass_optionalfeature_sections,
             "feature_detail_card": feature_detail_card,
+            "active_campaign_overlays": active_campaign_overlays,
             "related_rule_entries": related_rule_entries,
             "source_chapter_context_entries": source_chapter_context_entries,
             "related_race_entries": related_race_entries,

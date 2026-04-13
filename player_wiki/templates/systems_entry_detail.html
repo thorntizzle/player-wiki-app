@@ -108,6 +108,54 @@
   {% endif %}
 {%- endmacro %}
 
+{% macro render_active_campaign_overlays(overlays) -%}
+  {% if overlays %}
+    <section>
+      <h2>Active Campaign Overlays</h2>
+      <p class="meta">
+        The Systems/RULES content above is the shared baseline for this campaign. These published Mechanics
+        overlays are the active local layer that currently applies on top of it.
+      </p>
+      <div class="systems-inline-option-stack">
+        {% for overlay in overlays %}
+          <article class="card systems-inline-feature-card">
+            <header class="systems-inline-card__header">
+              <h3 class="systems-inline-card__title">
+                <a href="{{ url_for('page_view', campaign_slug=campaign.slug, page_slug=overlay.page_ref) }}">{{ overlay.title }}</a>
+              </h3>
+              <ul class="inline-meta-list systems-inline-card__meta">
+                <li><span class="meta-badge">Campaign Overlay</span></li>
+                {% if overlay.overlay_support %}
+                  <li><span class="meta-badge">{{ overlay.overlay_support.label }}</span></li>
+                {% endif %}
+              </ul>
+            </header>
+            {% if overlay.page_title and overlay.page_title != overlay.title %}
+              <p class="meta">
+                Source page:
+                <a href="{{ url_for('page_view', campaign_slug=campaign.slug, page_slug=overlay.page_ref) }}">{{ overlay.page_title }}</a>
+              </p>
+            {% endif %}
+            {% if overlay.target_labels %}
+              <p class="meta"><strong>Applies To:</strong> {{ overlay.target_labels | join(", ") }}</p>
+            {% elif overlay.targets_entry_wide %}
+              <p class="meta"><strong>Applies To:</strong> This entry.</p>
+            {% endif %}
+            {% if overlay.overlay_support %}
+              <p class="meta">{{ overlay.overlay_support.description }}</p>
+            {% endif %}
+            {% if overlay.body_html %}
+              <div class="article-body--compact systems-inline-card__body">
+                {{ overlay.body_html | safe }}
+              </div>
+            {% endif %}
+          </article>
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+{%- endmacro %}
+
 {% macro render_feature_progression(groups) -%}
   {% for group in groups %}
     <section>
@@ -290,6 +338,8 @@
           <p class="meta">Source page: {{ entry.source_page }}</p>
         {% endif %}
       {% endif %}
+
+      {{ render_active_campaign_overlays(active_campaign_overlays) }}
     </section>
 
     <aside class="sidebar">
