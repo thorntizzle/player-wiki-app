@@ -5539,6 +5539,334 @@ def build_egw_dunamis_book_data_root(root: Path) -> Path:
     return data_root
 
 
+def build_egw_character_option_wrapper_data_root(root: Path) -> Path:
+    data_root = build_test_data_root(root)
+    wrapper_titles = [
+        "Elves",
+        "Halflings",
+        "Dragonborn",
+        "Orcs and Half-Orcs",
+        "Hollow One",
+        "Dunamis and Dunamancy",
+        "Fighter",
+        "Wizard",
+        "Dunamancy Spells",
+        "Spell Descriptions",
+        "Heroic Chronicle",
+        "Backgrounds",
+    ]
+
+    def section(name: str, page: int, entries: list[object]) -> dict[str, object]:
+        return {"type": "section", "name": name, "page": page, "entries": entries}
+
+    def entries_block(name: str, page: int, entries: list[object]) -> dict[str, object]:
+        return {"type": "entries", "name": name, "page": page, "entries": entries}
+
+    write_json(
+        root / "data/books.json",
+        {
+            "book": [
+                {
+                    "name": "Explorer's Guide to Wildemount",
+                    "id": "EGW",
+                    "source": "EGW",
+                    "contents": [
+                        {
+                            "name": "Character Options",
+                            "headers": wrapper_titles,
+                            "ordinal": {"type": "chapter", "identifier": 4},
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
+    write_json(
+        root / "data/book/book-egw.json",
+        {
+            "data": [
+                section(
+                    "Character Options",
+                    161,
+                    [
+                        section(
+                            "Elves",
+                            162,
+                            [
+                                "Wildemount's elves include secretive pallid communities hidden among the Biting North.",
+                                entries_block(
+                                    "Elf Subraces",
+                                    163,
+                                    [
+                                        "The following elf heritage appears in this source.",
+                                        {"type": "list", "items": ["{@race Elf (Pallid)|EGW}"]},
+                                    ],
+                                ),
+                            ],
+                        ),
+                        section(
+                            "Halflings",
+                            164,
+                            [
+                                "Lotusden clans guard the Vermaloc Wildwood and move with the forest itself.",
+                                entries_block(
+                                    "Halfling Subraces",
+                                    164,
+                                    [
+                                        "Wildemount presents the following halfling lineage.",
+                                        {"type": "list", "items": ["{@race halfling (Lotusden)|EGW|Lotusden halfling}"]},
+                                    ],
+                                ),
+                            ],
+                        ),
+                        section(
+                            "Dragonborn",
+                            168,
+                            [
+                                "Dragonborn in Wildemount carry lineages shaped by draconic empires and scattered exile.",
+                                entries_block(
+                                    "Dragonborn Variants",
+                                    168,
+                                    [
+                                        "Choose one of the following draconic bloodlines.",
+                                        {
+                                            "type": "list",
+                                            "items": [
+                                                "{@race Dragonborn (Draconblood)|EGW}",
+                                                "{@race Dragonborn (Ravenite)|EGW}",
+                                            ],
+                                        },
+                                    ],
+                                ),
+                            ],
+                        ),
+                        section(
+                            "Orcs and Half-Orcs",
+                            177,
+                            [
+                                "The wastes of Xhorhas and the fringes of the empire both make room for fierce orc traditions.",
+                                entries_block(
+                                    "Orc Traits",
+                                    178,
+                                    [
+                                        "Use the following racial traits for an orc character in Wildemount.",
+                                        {"type": "list", "items": ["{@race orc|EGW}"]},
+                                    ],
+                                ),
+                            ],
+                        ),
+                        section(
+                            "Hollow One",
+                            181,
+                            [
+                                "Blightshore's cruelties can return the dead to a cold and haunted semblance of life.",
+                                entries_block(
+                                    "Supernatural Gift: Hollow One",
+                                    182,
+                                    ["A Hollow One keeps moving through willpower and unfinished purpose."],
+                                ),
+                            ],
+                        ),
+                        section(
+                            "Subclasses",
+                            182,
+                            [
+                                entries_block(
+                                    "Dunamis and Dunamancy",
+                                    182,
+                                    [
+                                        "Dunamis studies possibility, probability, and the unseen force that can bend time and gravity.",
+                                        entries_block(
+                                            "Beyond the Kryn Dynasty",
+                                            182,
+                                            ["Dunamancy can spread through espionage, travel, and magical experimentation."],
+                                        ),
+                                        entries_block(
+                                            "Dunamis as a Martial Focus",
+                                            183,
+                                            ["Warriors can turn dunamis toward mobility, force, and improbable outcomes."],
+                                        ),
+                                    ],
+                                ),
+                                entries_block(
+                                    "Fighter",
+                                    183,
+                                    [
+                                        "Wildemount adds a martial archetype touched by unrealized timelines.",
+                                        entries_block(
+                                            "Echo Knight",
+                                            183,
+                                            [
+                                                "{@class fighter|phb|Echo Knight|Echo Knight|egw} commands a fading duplicate from another possibility."
+                                            ],
+                                        ),
+                                    ],
+                                ),
+                                entries_block(
+                                    "Wizard",
+                                    184,
+                                    [
+                                        "Two arcane traditions from Wildemount channel the study of time and gravity.",
+                                        entries_block(
+                                            "Chronurgy Magic",
+                                            184,
+                                            ["{@class wizard|phb|Chronurgy Magic|Chronurgy|egw} bends initiative and probability."],
+                                        ),
+                                        entries_block(
+                                            "Graviturgy Magic",
+                                            185,
+                                            ["{@class wizard|phb|Graviturgy Magic|Graviturgy|EGW} reshapes weight and force."],
+                                        ),
+                                    ],
+                                ),
+                                entries_block(
+                                    "Dunamancy Spells",
+                                    186,
+                                    [
+                                        "These spells are the best-known practical expressions of dunamis.",
+                                        entries_block(
+                                            "Dunamancy Spell List",
+                                            186,
+                                            [
+                                                {
+                                                    "type": "list",
+                                                    "items": [
+                                                        "{@spell Magnify Gravity|EGW}",
+                                                        "{@spell Dark Star|EGW}",
+                                                        "{@spell Temporal Shunt|EGW}",
+                                                    ],
+                                                }
+                                            ],
+                                        ),
+                                    ],
+                                ),
+                                entries_block(
+                                    "Spell Descriptions",
+                                    186,
+                                    [
+                                        entries_block(
+                                            "Dark Star",
+                                            186,
+                                            ["{@spell Dark Star|EGW} collapses an area into crushing magical void."],
+                                        ),
+                                        entries_block(
+                                            "Magnify Gravity",
+                                            188,
+                                            ["{@spell Magnify Gravity|EGW} intensifies weight around your target area."],
+                                        ),
+                                        entries_block(
+                                            "Temporal Shunt",
+                                            189,
+                                            ["{@spell Temporal Shunt|EGW} flickers a creature out of the current moment."],
+                                        ),
+                                    ],
+                                ),
+                                entries_block(
+                                    "Heroic Chronicle",
+                                    190,
+                                    ["The heroic chronicle system lets players and Dungeon Masters build a backstory rooted in Wildemount."],
+                                ),
+                                entries_block(
+                                    "Backgrounds",
+                                    200,
+                                    [
+                                        "Wildemount's factions and scars shape the following backgrounds.",
+                                        entries_block(
+                                            "Wildemount Backgrounds",
+                                            200,
+                                            [
+                                                {
+                                                    "type": "list",
+                                                    "items": [
+                                                        "{@background Grinner|EGW}",
+                                                        "{@background Luxonborn (Acolyte)|EGW}",
+                                                        "{@background Volstrucker Agent|EGW}",
+                                                    ],
+                                                }
+                                            ],
+                                        ),
+                                    ],
+                                ),
+                            ],
+                        ),
+                    ],
+                )
+            ]
+        },
+    )
+
+    write_json(
+        root / "data/races.json",
+        {
+            "race": [
+                {"name": "Dragonborn", "source": "PHB", "page": 32, "size": ["M"], "speed": {"walk": 30}, "ability": [{"str": 2, "cha": 1}], "entries": ["Dragonborn trace their bloodlines to mighty dragons."]},
+                {"name": "Elf", "source": "PHB", "page": 23, "size": ["M"], "speed": {"walk": 30}, "ability": [{"dex": 2}], "entries": ["Elves bring grace, perception, and long memory to every culture."]},
+                {"name": "Halfling", "source": "PHB", "page": 26, "size": ["S"], "speed": {"walk": 25}, "ability": [{"dex": 2}], "entries": ["Halflings move through the world with quickness and stubborn luck."]},
+                {"name": "Orc", "source": "EGW", "page": 178, "size": ["M"], "speed": {"walk": 30}, "ability": [{"str": 2, "con": 1}], "entries": ["Orcs of Wildemount endure harsh frontiers and ancestral wars."]},
+            ],
+            "subrace": [
+                {"name": "Pallid", "source": "EGW", "raceName": "Elf", "raceSource": "PHB", "page": 163, "ability": [{"wis": 1}], "entries": ["Pallid elves keep moonlit watch from hidden valleys."]},
+                {"name": "Lotusden", "source": "EGW", "raceName": "Halfling", "raceSource": "PHB", "page": 164, "ability": [{"wis": 1}], "entries": ["Lotusden halflings move quietly beneath the forest canopy."]},
+                {"name": "Draconblood", "source": "EGW", "raceName": "Dragonborn", "raceSource": "PHB", "page": 168, "ability": [{"int": 2, "cha": 1}], "entries": ["Draconblood dragonborn carry an imperious and analytical bearing."]},
+                {"name": "Ravenite", "source": "EGW", "raceName": "Dragonborn", "raceSource": "PHB", "page": 168, "ability": [{"str": 2, "con": 1}], "entries": ["Ravenite dragonborn prize resilience and physical might."]},
+            ],
+        },
+    )
+
+    write_json(
+        root / "data/backgrounds.json",
+        {
+            "background": [
+                {"name": "Grinner", "source": "EGW", "page": 200, "skillProficiencies": [{"deception": True, "performance": True}], "entries": ["You spread laughter, rumors, and quiet resistance through every tavern you visit."]},
+                {"name": "Luxonborn (Acolyte)", "source": "EGW", "page": 203, "skillProficiencies": [{"insight": True, "religion": True}], "entries": ["You were raised in devotion to the Luxon and its endless cycle of rebirth."]},
+                {"name": "Volstrucker Agent", "source": "EGW", "page": 202, "skillProficiencies": [{"deception": True, "stealth": True}], "entries": ["You were trained to serve the empire's darkest covert missions."]},
+            ]
+        },
+    )
+
+    write_json(
+        root / "data/spells/spells-egw.json",
+        {
+            "spell": [
+                {"name": "Dark Star", "source": "EGW", "page": 186, "level": 8, "school": "E", "time": [{"number": 1, "unit": "action"}], "range": {"type": "point", "distance": {"type": "feet", "amount": 150}}, "components": {"v": True, "s": True, "m": "a shard of onyx and a drop of the void"}, "duration": [{"type": "timed", "duration": {"type": "minute", "amount": 1}, "concentration": True}], "entries": ["A dark sphere of warped force forms at a point you can see within range."]},
+                {"name": "Magnify Gravity", "source": "EGW", "page": 188, "level": 1, "school": "T", "time": [{"number": 1, "unit": "action"}], "range": {"type": "point", "distance": {"type": "feet", "amount": 60}}, "components": {"v": True, "s": True}, "duration": [{"type": "instant"}], "entries": ["You intensify gravity in a 10-foot-radius sphere centered on a point you can see."]},
+                {"name": "Temporal Shunt", "source": "EGW", "page": 189, "level": 5, "school": "T", "time": [{"number": 1, "unit": "reaction"}], "range": {"type": "point", "distance": {"type": "feet", "amount": 120}}, "components": {"v": True, "s": True}, "duration": [{"type": "instant"}], "entries": ["You momentarily shift a creature out of time, causing its action to fizzle."]},
+            ]
+        },
+    )
+
+    write_json(root / "data/class/index.json", {"fighter": "class-fighter.json", "wizard": "class-wizard.json"})
+    write_json(
+        root / "data/class/class-fighter.json",
+        {
+            "subclass": [
+                {"name": "Echo Knight", "source": "EGW", "className": "Fighter", "classSource": "PHB", "page": 183, "subclassFeatures": ["Echo Knight|Fighter|PHB|Echo Knight|EGW|3", "Manifest Echo|Fighter|PHB|Echo Knight|EGW|3"]}
+            ],
+            "subclassFeature": [
+                {"name": "Echo Knight", "source": "EGW", "className": "Fighter", "classSource": "PHB", "subclassShortName": "Echo Knight", "subclassSource": "EGW", "level": 3, "page": 183, "entries": ["You can draw a shadowy echo from a branch of unrealized time."]},
+                {"name": "Manifest Echo", "source": "EGW", "className": "Fighter", "classSource": "PHB", "subclassShortName": "Echo Knight", "subclassSource": "EGW", "level": 3, "page": 183, "entries": ["You can manifest your echo in an unoccupied space you can see within 15 feet of you."]},
+            ],
+        },
+    )
+    write_json(
+        root / "data/class/class-wizard.json",
+        {
+            "subclass": [
+                {"name": "Chronurgy Magic", "source": "EGW", "className": "Wizard", "classSource": "PHB", "page": 184, "subclassFeatures": ["Chronurgy Magic|Wizard|PHB|Chronurgy|EGW|2", "Chronal Shift|Wizard|PHB|Chronurgy|EGW|2"]},
+                {"name": "Graviturgy Magic", "source": "EGW", "className": "Wizard", "classSource": "PHB", "page": 185, "subclassFeatures": ["Graviturgy Magic|Wizard|PHB|Graviturgy|EGW|2", "Adjust Density|Wizard|PHB|Graviturgy|EGW|2"]},
+            ],
+            "subclassFeature": [
+                {"name": "Chronurgy Magic", "source": "EGW", "className": "Wizard", "classSource": "PHB", "subclassShortName": "Chronurgy", "subclassSource": "EGW", "level": 2, "page": 184, "entries": ["You learn to peer slightly ahead in time and twist the order of events."]},
+                {"name": "Chronal Shift", "source": "EGW", "className": "Wizard", "classSource": "PHB", "subclassShortName": "Chronurgy", "subclassSource": "EGW", "level": 2, "page": 184, "entries": ["As a reaction, you can force a creature to reroll an attack roll, ability check, or saving throw."]},
+                {"name": "Graviturgy Magic", "source": "EGW", "className": "Wizard", "classSource": "PHB", "subclassShortName": "Graviturgy", "subclassSource": "EGW", "level": 2, "page": 185, "entries": ["You learn how to alter weight and pressure through arcane study."]},
+                {"name": "Adjust Density", "source": "EGW", "className": "Wizard", "classSource": "PHB", "subclassShortName": "Graviturgy", "subclassSource": "EGW", "level": 2, "page": 185, "entries": ["You can alter the weight of a willing creature or object you can see."]},
+            ],
+        },
+    )
+    return data_root
+
+
 def build_tce_book_data_root(root: Path) -> Path:
     data_root = build_test_data_root(root)
     write_json(
@@ -9262,6 +9590,186 @@ def test_egw_dunamis_page_is_imported_for_player_browse_and_keeps_book_order(
     assert 'id="beyond-the-kryn-dynasty"' in detail_body
     assert 'href="#dunamis-as-a-martial-focus"' in detail_body
     assert 'id="dunamis-as-a-martial-focus"' in detail_body
+
+
+def test_egw_character_option_wrapper_pages_surface_related_imported_entities(
+    client, sign_in, users, app, tmp_path
+):
+    data_root = build_egw_character_option_wrapper_data_root(
+        tmp_path / "dnd5e-source-egw-character-option-wrappers"
+    )
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        result = importer.import_source(
+            "EGW",
+            entry_types=["background", "book", "race", "spell", "subclass", "subclassfeature"],
+        )
+
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="EGW",
+            is_enabled=True,
+            default_visibility="players",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in service.list_entries_for_campaign_source(
+                "linden-pass",
+                "EGW",
+                entry_type="book",
+                limit=None,
+            )
+        }
+        egw_entries = {
+            (entry.entry_type, entry.title): entry
+            for entry_type in ("background", "race", "spell", "subclass")
+            for entry in store.list_entries_for_source("DND-5E", "EGW", entry_type=entry_type, limit=None)
+        }
+
+    assert result.imported_by_type == {
+        "background": 3,
+        "book": 12,
+        "race": 5,
+        "spell": 3,
+        "subclass": 3,
+        "subclassfeature": 6,
+    }
+    assert list(book_entries) == [
+        "Elves",
+        "Halflings",
+        "Dragonborn",
+        "Orcs and Half-Orcs",
+        "Hollow One",
+        "Dunamis and Dunamancy",
+        "Fighter",
+        "Wizard",
+        "Dunamancy Spells",
+        "Spell Descriptions",
+        "Heroic Chronicle",
+        "Backgrounds",
+    ]
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    category_response = client.get("/campaigns/linden-pass/systems/sources/EGW/types/book")
+    elves_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Elves'].slug}")
+    fighter_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Fighter'].slug}")
+    spells_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Dunamancy Spells'].slug}")
+    spell_descriptions_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Spell Descriptions'].slug}"
+    )
+    backgrounds_response = client.get(f"/campaigns/linden-pass/systems/entries/{book_entries['Backgrounds'].slug}")
+
+    assert category_response.status_code == 200
+    category_body = category_response.get_data(as_text=True)
+    assert "Showing all 12 book chapters available to you in this source." in category_body
+    assert category_body.index("Elves") < category_body.index("Halflings")
+    assert category_body.index("Halflings") < category_body.index("Dragonborn")
+    assert category_body.index("Dragonborn") < category_body.index("Orcs and Half-Orcs")
+    assert category_body.index("Orcs and Half-Orcs") < category_body.index("Hollow One")
+    assert category_body.index("Hollow One") < category_body.index("Dunamancy Spells")
+    assert category_body.index("Dunamancy Spells") < category_body.index("Backgrounds")
+
+    assert elves_response.status_code == 200
+    elves_body = elves_response.get_data(as_text=True)
+    assert "Related Races" in elves_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{egw_entries[("race", "Pallid Elf")].slug}"' in elves_body
+
+    assert fighter_response.status_code == 200
+    fighter_body = fighter_response.get_data(as_text=True)
+    assert "Subclasses:" in fighter_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{egw_entries[("subclass", "Echo Knight")].slug}"' in fighter_body
+
+    assert spells_response.status_code == 200
+    spells_body = spells_response.get_data(as_text=True)
+    assert "Spells:" in spells_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{egw_entries[("spell", "Dark Star")].slug}"' in spells_body
+
+    assert spell_descriptions_response.status_code == 200
+    spell_descriptions_body = spell_descriptions_response.get_data(as_text=True)
+    assert "Spells:" in spell_descriptions_body
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{egw_entries[("spell", "Temporal Shunt")].slug}"'
+        in spell_descriptions_body
+    )
+
+    assert backgrounds_response.status_code == 200
+    backgrounds_body = backgrounds_response.get_data(as_text=True)
+    assert "Backgrounds:" in backgrounds_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{egw_entries[("background", "Grinner")].slug}"' in backgrounds_body
+
+
+def test_egw_entry_pages_surface_source_chapter_context_links(client, sign_in, users, app, tmp_path):
+    data_root = build_egw_character_option_wrapper_data_root(
+        tmp_path / "dnd5e-source-egw-entry-source-context"
+    )
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source(
+            "EGW",
+            entry_types=["background", "book", "race", "spell", "subclass", "subclassfeature"],
+        )
+
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="EGW",
+            is_enabled=True,
+            default_visibility="players",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in service.list_entries_for_campaign_source(
+                "linden-pass",
+                "EGW",
+                entry_type="book",
+                limit=None,
+            )
+        }
+        egw_entries = {
+            (entry.entry_type, entry.title): entry
+            for entry_type in ("background", "race", "spell", "subclass", "subclassfeature")
+            for entry in store.list_entries_for_source("DND-5E", "EGW", entry_type=entry_type, limit=None)
+        }
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    expectations = {
+        ("race", "Pallid Elf"): ("Elves",),
+        ("race", "Lotusden Halfling"): ("Halflings",),
+        ("race", "Draconblood Dragonborn"): ("Dragonborn",),
+        ("race", "Orc"): ("Orcs and Half-Orcs",),
+        ("subclass", "Echo Knight"): ("Fighter",),
+        ("subclassfeature", "Chronal Shift"): ("Wizard",),
+        ("spell", "Dark Star"): ("Dunamancy Spells", "Spell Descriptions"),
+        ("background", "Grinner"): ("Backgrounds",),
+    }
+
+    for entry_key, wrapper_titles in expectations.items():
+        response = client.get(f"/campaigns/linden-pass/systems/entries/{egw_entries[entry_key].slug}")
+        assert response.status_code == 200
+        body = response.get_data(as_text=True)
+        assert "Source Chapter Context" in body
+        for wrapper_title in wrapper_titles:
+            assert wrapper_title in body
+            assert (
+                f'href="/campaigns/linden-pass/systems/entries/{book_entries[wrapper_title].slug}"'
+                in body
+            )
 
 
 def test_dmg_book_chapters_surface_related_imported_entities(client, sign_in, users, app, tmp_path):

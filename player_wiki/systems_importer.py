@@ -293,14 +293,23 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         ("Gith and Their Endless War", "Gith Characters"),
         ("Halflings and Gnomes", "Deep Gnome Characters"),
     ),
-    # Keep the first EGW slice focused on the standout character-history
-    # page, Hollow One supernatural-gift wrapper, and the core dunamis
-    # overview page. The broader Character Options wrappers and spell-section
-    # follow-ups stay queued for later passes.
+    # EGW now ships the Character Options wrappers that sit directly on top of
+    # already-imported EGW races, subclasses, spells, and backgrounds, plus the
+    # previously shipped Hollow One, dunamis, and Heroic Chronicle pages. The
+    # remaining treasure and campaign-reference follow-ups stay queued.
     "EGW": (
+        ("Character Options", "Elves"),
+        ("Character Options", "Halflings"),
+        ("Character Options", "Dragonborn"),
+        ("Character Options", "Orcs and Half-Orcs"),
         ("Character Options", "Hollow One"),
         ("Character Options", "Subclasses", "Dunamis and Dunamancy"),
+        ("Character Options", "Subclasses", "Fighter"),
+        ("Character Options", "Subclasses", "Wizard"),
+        ("Character Options", "Subclasses", "Dunamancy Spells"),
+        ("Character Options", "Subclasses", "Spell Descriptions"),
         ("Character Options", "Subclasses", "Heroic Chronicle"),
+        ("Character Options", "Subclasses", "Backgrounds"),
     ),
 }
 VGM_CHARACTER_RACE_WRAPPER_DEFINITIONS = (

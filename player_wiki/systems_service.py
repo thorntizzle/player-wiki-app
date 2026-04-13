@@ -392,6 +392,24 @@ MTF_BOOK_WRAPPER_ITEM_TITLE_KEYS = {
     normalize_lookup("Elf Subraces"): _normalized_nonempty_tuple("Elven Trinket"),
     normalize_lookup("Gith Characters"): _normalized_nonempty_tuple("Greater Silver Sword", "Silver Sword"),
 }
+EGW_RACE_WRAPPER_RACE_MATCHERS = {
+    normalize_lookup("Elves"): {
+        "title_keys": (),
+        "base_race_keys": _normalized_nonempty_tuple("Elf"),
+    },
+    normalize_lookup("Halflings"): {
+        "title_keys": (),
+        "base_race_keys": _normalized_nonempty_tuple("Halfling"),
+    },
+    normalize_lookup("Dragonborn"): {
+        "title_keys": (),
+        "base_race_keys": _normalized_nonempty_tuple("Dragonborn"),
+    },
+    normalize_lookup("Orcs and Half-Orcs"): {
+        "title_keys": _normalized_nonempty_tuple("Orc"),
+        "base_race_keys": (),
+    },
+}
 
 SCAG_RACE_WRAPPER_TITLE_BY_KEY = {
     normalize_lookup("Dwarf"): "Dwarves",
@@ -432,6 +450,20 @@ SCAG_ITEM_WRAPPER_TITLE_BY_PAGE = {
     "121": "Primal Paths",
     "124": "Musical Instruments",
 }
+EGW_RACE_WRAPPER_TITLE_BY_KEY = {
+    normalize_lookup("Dragonborn"): "Dragonborn",
+    normalize_lookup("Elf"): "Elves",
+    normalize_lookup("Halfling"): "Halflings",
+    normalize_lookup("Orc"): "Orcs and Half-Orcs",
+}
+EGW_SUBCLASS_WRAPPER_TITLE_BY_CLASS_KEY = {
+    normalize_lookup("Fighter"): "Fighter",
+    normalize_lookup("Wizard"): "Wizard",
+}
+EGW_SPELL_WRAPPER_TITLES = (
+    "Dunamancy Spells",
+    "Spell Descriptions",
+)
 
 
 def _systems_service_request_cache() -> dict[tuple[object, ...], object] | None:
@@ -1130,6 +1162,8 @@ class SystemsService:
             matcher = VGM_CHARACTER_RACE_WRAPPER_RACE_MATCHERS.get(normalize_lookup(entry.title))
         elif normalized_source_id == "MTF":
             matcher = MTF_ANCESTRY_WRAPPER_RACE_MATCHERS.get(normalize_lookup(entry.title))
+        elif normalized_source_id == "EGW":
+            matcher = EGW_RACE_WRAPPER_RACE_MATCHERS.get(normalize_lookup(entry.title))
         else:
             matcher = None
         if not matcher:
@@ -1255,10 +1289,11 @@ class SystemsService:
     ) -> list[dict[str, object]]:
         if entry.entry_type == "book":
             return []
-        if str(entry.source_id or "").strip().upper() != "SCAG":
+        source_id = str(entry.source_id or "").strip().upper()
+        if not source_id:
             return []
 
-        wrapper_titles = self._build_scag_source_chapter_context_titles(entry)
+        wrapper_titles = self._build_source_chapter_context_titles(entry)
         if not wrapper_titles:
             return []
 
@@ -1267,7 +1302,7 @@ class SystemsService:
                 normalize_lookup(candidate.title): candidate
                 for candidate in self.list_entries_for_campaign_source(
                     campaign_slug,
-                    "SCAG",
+                    source_id,
                     entry_type="book",
                     limit=None,
                 )
@@ -1294,6 +1329,17 @@ class SystemsService:
             ("source_chapter_context_entries_for_entry", campaign_slug, entry.entry_key),
             build_value,
         )
+
+    def _build_source_chapter_context_titles(
+        self,
+        entry: SystemsEntryRecord,
+    ) -> tuple[str, ...]:
+        source_id = str(entry.source_id or "").strip().upper()
+        if source_id == "SCAG":
+            return self._build_scag_source_chapter_context_titles(entry)
+        if source_id == "EGW":
+            return self._build_egw_source_chapter_context_titles(entry)
+        return ()
 
     def build_related_rules_for_book_sections(
         self,
@@ -1526,6 +1572,24 @@ class SystemsService:
             return (wrapper_title,) if wrapper_title else ()
         return ()
 
+    def _build_egw_source_chapter_context_titles(
+        self,
+        entry: SystemsEntryRecord,
+    ) -> tuple[str, ...]:
+        if entry.entry_type == "race":
+            wrapper_title = self._resolve_egw_race_wrapper_title(entry)
+            return (wrapper_title,) if wrapper_title else ()
+        if entry.entry_type in {"subclass", "subclassfeature"}:
+            metadata = dict(entry.metadata or {})
+            class_key = normalize_lookup(str(metadata.get("class_name") or ""))
+            wrapper_title = EGW_SUBCLASS_WRAPPER_TITLE_BY_CLASS_KEY.get(class_key, "")
+            return (wrapper_title,) if wrapper_title else ()
+        if entry.entry_type == "spell":
+            return EGW_SPELL_WRAPPER_TITLES
+        if entry.entry_type == "background":
+            return ("Backgrounds",)
+        return ()
+
     def _resolve_scag_race_wrapper_title(self, entry: SystemsEntryRecord) -> str:
         metadata = dict(entry.metadata or {})
         candidate_keys = [
@@ -1541,6 +1605,20 @@ class SystemsService:
             for race_key in SCAG_RACE_WRAPPER_MATCH_ORDER:
                 if race_key and race_key in candidate_key:
                     return SCAG_RACE_WRAPPER_TITLE_BY_KEY.get(race_key, "")
+        return ""
+
+    def _resolve_egw_race_wrapper_title(self, entry: SystemsEntryRecord) -> str:
+        metadata = dict(entry.metadata or {})
+        candidate_keys = [
+            normalize_lookup(str(metadata.get("base_race_name") or "")),
+            normalize_lookup(str(entry.title or "")),
+        ]
+        for candidate_key in candidate_keys:
+            if not candidate_key:
+                continue
+            wrapper_title = EGW_RACE_WRAPPER_TITLE_BY_KEY.get(candidate_key, "")
+            if wrapper_title:
+                return wrapper_title
         return ""
 
     def _resolve_scag_item_wrapper_title(self, entry: SystemsEntryRecord) -> str:
