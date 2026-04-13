@@ -4155,12 +4155,29 @@ XGE_RULES_REFERENCE_TEST_TITLES = (
 )
 
 
+TCE_CLASS_WRAPPER_TEST_TITLES = (
+    "Artificer",
+    "Barbarian",
+    "Bard",
+    "Cleric",
+    "Druid",
+    "Fighter",
+    "Monk",
+    "Paladin",
+    "Ranger",
+    "Rogue",
+    "Sorcerer",
+    "Warlock",
+    "Wizard",
+)
+
+
 TCE_RULES_REFERENCE_TEST_TITLES = (
     "Ten Rules to Remember",
     "Customizing Your Origin",
     "Changing a Skill",
     "Changing Your Subclass",
-)
+) + TCE_CLASS_WRAPPER_TEST_TITLES
 
 
 def build_xge_book_data_root(root: Path) -> Path:
@@ -4712,7 +4729,9 @@ def build_tce_book_data_root(root: Path) -> Path:
                                 "Customizing Your Origin",
                                 "Changing a Skill",
                                 "Changing Your Subclass",
+                                *TCE_CLASS_WRAPPER_TEST_TITLES,
                             ],
+                            "ordinal": {"type": "chapter", "identifier": 1},
                         }
                     ],
                 }
@@ -4742,6 +4761,304 @@ def build_tce_book_data_root(root: Path) -> Path:
                     ],
                 },
             ]
+        },
+    )
+    write_json(
+        root / "data/optionalfeatures.json",
+        {
+            "optionalfeature": [
+                {
+                    "name": "Blind Fighting",
+                    "source": "TCE",
+                    "page": 42,
+                    "featureType": ["FS:F", "FS:R"],
+                    "entries": ["You have blindsight with a range of 10 feet while you are not blinded."],
+                },
+                {
+                    "name": "Superior Technique",
+                    "source": "TCE",
+                    "page": 42,
+                    "featureType": ["FS:F"],
+                    "entries": ["You learn one maneuver of your choice and gain one superiority die."],
+                },
+                {
+                    "name": "Druidic Warrior",
+                    "source": "TCE",
+                    "page": 57,
+                    "featureType": ["FS:R"],
+                    "entries": ["You learn two druid cantrips of your choice."],
+                },
+            ]
+        },
+    )
+    write_json(
+        root / "data/class/index.json",
+        {
+            "artificer": "class-artificer.json",
+            "barbarian": "class-barbarian.json",
+            "fighter": "class-fighter.json",
+            "ranger": "class-ranger.json",
+        },
+    )
+    write_json(
+        root / "data/class/class-artificer.json",
+        {
+            "class": [
+                {
+                    "name": "Artificer",
+                    "source": "TCE",
+                    "page": 9,
+                    "hd": {"number": 1, "faces": 8},
+                    "proficiency": ["con", "int"],
+                    "classFeatures": ["Infuse Item|Artificer|TCE|2"],
+                }
+            ],
+            "classFeature": [
+                {
+                    "name": "Infuse Item",
+                    "source": "TCE",
+                    "className": "Artificer",
+                    "classSource": "TCE",
+                    "level": 2,
+                    "page": 12,
+                    "entries": ["You can infuse mundane items with magic."],
+                }
+            ],
+            "subclass": [
+                {
+                    "name": "Alchemist",
+                    "source": "TCE",
+                    "className": "Artificer",
+                    "classSource": "TCE",
+                    "page": 14,
+                    "subclassFeatures": ["Alchemist|Artificer|TCE|Alchemist|TCE|3"],
+                }
+            ],
+            "subclassFeature": [
+                {
+                    "name": "Alchemist",
+                    "source": "TCE",
+                    "className": "Artificer",
+                    "classSource": "TCE",
+                    "subclassShortName": "Alchemist",
+                    "subclassSource": "TCE",
+                    "level": 3,
+                    "page": 14,
+                    "entries": ["You learn alchemical formulas and experimental mixtures."],
+                }
+            ],
+        },
+    )
+    write_json(
+        root / "data/class/class-barbarian.json",
+        {
+            "classFeature": [
+                {
+                    "name": "Primal Knowledge",
+                    "source": "TCE",
+                    "className": "Barbarian",
+                    "classSource": "PHB",
+                    "level": 3,
+                    "page": 24,
+                    "entries": ["You gain proficiency in a skill from the barbarian class list."],
+                },
+                {
+                    "name": "Instinctive Pounce",
+                    "source": "TCE",
+                    "className": "Barbarian",
+                    "classSource": "PHB",
+                    "level": 7,
+                    "page": 24,
+                    "entries": ["Part of the movement granted by your rage can happen immediately."],
+                },
+            ],
+            "subclass": [
+                {
+                    "name": "Path of the Beast",
+                    "source": "TCE",
+                    "className": "Barbarian",
+                    "classSource": "PHB",
+                    "page": 24,
+                    "subclassFeatures": ["Path of the Beast|Barbarian|PHB|Beast|TCE|3"],
+                },
+                {
+                    "name": "Path of Wild Magic",
+                    "source": "TCE",
+                    "className": "Barbarian",
+                    "classSource": "PHB",
+                    "page": 25,
+                    "subclassFeatures": ["Path of Wild Magic|Barbarian|PHB|Wild Magic|TCE|3"],
+                },
+            ],
+            "subclassFeature": [
+                {
+                    "name": "Path of the Beast",
+                    "source": "TCE",
+                    "className": "Barbarian",
+                    "classSource": "PHB",
+                    "subclassShortName": "Beast",
+                    "subclassSource": "TCE",
+                    "level": 3,
+                    "page": 24,
+                    "entries": ["Your rage channels bestial ferocity."],
+                },
+                {
+                    "name": "Path of Wild Magic",
+                    "source": "TCE",
+                    "className": "Barbarian",
+                    "classSource": "PHB",
+                    "subclassShortName": "Wild Magic",
+                    "subclassSource": "TCE",
+                    "level": 3,
+                    "page": 25,
+                    "entries": ["Your rage crackles with unstable magic."],
+                },
+            ],
+        },
+    )
+    write_json(
+        root / "data/class/class-fighter.json",
+        {
+            "classFeature": [
+                {
+                    "name": "Martial Versatility",
+                    "source": "TCE",
+                    "className": "Fighter",
+                    "classSource": "PHB",
+                    "level": 4,
+                    "page": 42,
+                    "entries": ["Whenever you reach a level that grants the Ability Score Increase feature, you can replace a fighting style option or a maneuver."],
+                }
+            ],
+            "subclass": [
+                {
+                    "name": "Psi Warrior",
+                    "source": "TCE",
+                    "className": "Fighter",
+                    "classSource": "PHB",
+                    "page": 42,
+                    "subclassFeatures": ["Psi Warrior|Fighter|PHB|Psi Warrior|TCE|3"],
+                },
+                {
+                    "name": "Rune Knight",
+                    "source": "TCE",
+                    "className": "Fighter",
+                    "classSource": "PHB",
+                    "page": 45,
+                    "subclassFeatures": ["Rune Knight|Fighter|PHB|Rune Knight|TCE|3"],
+                },
+            ],
+            "subclassFeature": [
+                {
+                    "name": "Psi Warrior",
+                    "source": "TCE",
+                    "className": "Fighter",
+                    "classSource": "PHB",
+                    "subclassShortName": "Psi Warrior",
+                    "subclassSource": "TCE",
+                    "level": 3,
+                    "page": 42,
+                    "entries": ["You awaken psionic power within yourself."],
+                },
+                {
+                    "name": "Rune Knight",
+                    "source": "TCE",
+                    "className": "Fighter",
+                    "classSource": "PHB",
+                    "subclassShortName": "Rune Knight",
+                    "subclassSource": "TCE",
+                    "level": 3,
+                    "page": 45,
+                    "entries": ["You use runes and giant magic to empower your combat style."],
+                },
+            ],
+        },
+    )
+    write_json(
+        root / "data/class/class-ranger.json",
+        {
+            "classFeature": [
+                {
+                    "name": "Deft Explorer",
+                    "source": "TCE",
+                    "className": "Ranger",
+                    "classSource": "PHB",
+                    "level": 1,
+                    "page": 56,
+                    "entries": ["You gain Canny, Roving, and Tireless as you level."],
+                },
+                {
+                    "name": "Favored Foe",
+                    "source": "TCE",
+                    "className": "Ranger",
+                    "classSource": "PHB",
+                    "level": 1,
+                    "page": 56,
+                    "entries": ["You can mark a creature as your favored foe."],
+                },
+                {
+                    "name": "Spellcasting Focus",
+                    "source": "TCE",
+                    "className": "Ranger",
+                    "classSource": "PHB",
+                    "level": 2,
+                    "page": 57,
+                    "entries": ["A druidic focus can serve as a spellcasting focus for your ranger spells."],
+                },
+            ],
+            "subclass": [
+                {
+                    "name": "Fey Wanderer",
+                    "source": "TCE",
+                    "className": "Ranger",
+                    "classSource": "PHB",
+                    "page": 58,
+                    "subclassFeatures": ["Fey Wanderer|Ranger|PHB|Fey Wanderer|TCE|3"],
+                },
+                {
+                    "name": "Swarmkeeper",
+                    "source": "TCE",
+                    "className": "Ranger",
+                    "classSource": "PHB",
+                    "page": 60,
+                    "subclassFeatures": ["Swarmkeeper|Ranger|PHB|Swarmkeeper|TCE|3"],
+                },
+            ],
+            "subclassFeature": [
+                {
+                    "name": "Fey Wanderer",
+                    "source": "TCE",
+                    "className": "Ranger",
+                    "classSource": "PHB",
+                    "subclassShortName": "Fey Wanderer",
+                    "subclassSource": "TCE",
+                    "level": 3,
+                    "page": 58,
+                    "entries": ["The Feywild marks your presence."],
+                },
+                {
+                    "name": "Swarmkeeper",
+                    "source": "TCE",
+                    "className": "Ranger",
+                    "classSource": "PHB",
+                    "subclassShortName": "Swarmkeeper",
+                    "subclassSource": "TCE",
+                    "level": 3,
+                    "page": 60,
+                    "entries": ["A writhing swarm answers your call."],
+                },
+                {
+                    "name": "Primal Companion",
+                    "source": "TCE",
+                    "className": "Ranger",
+                    "classSource": "PHB",
+                    "subclassShortName": "Beast Master",
+                    "subclassSource": "PHB",
+                    "level": 3,
+                    "page": 61,
+                    "entries": ["You magically summon a primal beast companion."],
+                },
+            ],
         },
     )
     write_json(
@@ -4865,6 +5182,165 @@ def build_tce_book_data_root(root: Path) -> Path:
                             "entries": [
                                 "With your DM's approval, you can replace your subclass when you gain a new subclass feature."
                             ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Artificer",
+                            "page": 9,
+                            "entries": [
+                                {
+                                    "type": "section",
+                                    "name": "Artificers in Many Worlds",
+                                    "page": 9,
+                                    "entries": [
+                                        "{@class Artificer|TCE} is a full class in this source-backed slice.",
+                                        "{@classFeature Infuse Item|Artificer|TCE|2|TCE} anchors the artificer's magical crafting.",
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Artificer Specialists",
+                                    "page": 14,
+                                    "entries": [
+                                        "{@class Artificer|TCE|Alchemist|Alchemist|TCE} is one of the artificer specialists described here.",
+                                    ],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Barbarian",
+                            "page": 24,
+                            "entries": [
+                                {
+                                    "type": "entries",
+                                    "name": "Optional Class Features",
+                                    "page": 24,
+                                    "entries": [
+                                        "{@classFeature Primal Knowledge|Barbarian|PHB|3|TCE} broadens barbarian training.",
+                                        "{@classFeature Instinctive Pounce|Barbarian|PHB|7|TCE} improves battlefield movement.",
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Primal Paths",
+                                    "page": 24,
+                                    "entries": [
+                                        "{@class Barbarian|PHB|Path of the Beast|Beast|TCE} and {@class Barbarian|PHB|Path of Wild Magic|Wild Magic|TCE} are the new barbarian paths in this chapter.",
+                                    ],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Bard",
+                            "page": 27,
+                            "entries": ["Bard options in this chapter expand class features and colleges."],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Cleric",
+                            "page": 30,
+                            "entries": ["Cleric options in this chapter expand divine domains and class features."],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Druid",
+                            "page": 35,
+                            "entries": ["Druid options in this chapter expand circles and optional class features."],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Fighter",
+                            "page": 41,
+                            "entries": [
+                                {
+                                    "type": "entries",
+                                    "name": "Optional Class Features",
+                                    "page": 41,
+                                    "entries": [
+                                        "{@classFeature Martial Versatility|Fighter|PHB|4|TCE} lets fighters retrain part of their toolkit.",
+                                        "{@optfeature Blind Fighting|TCE} and {@optfeature Superior Technique|TCE} join the fighter's fighting-style options.",
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Martial Archetypes",
+                                    "page": 42,
+                                    "entries": [
+                                        "{@class Fighter|PHB|Psi Warrior|Psi Warrior|TCE} and {@class Fighter|PHB|Rune Knight|Rune Knight|TCE} are the new fighter archetypes in this chapter.",
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Battle Master Builds",
+                                    "page": 46,
+                                    "entries": [
+                                        "Battle Master sample builds remain reference-only guidance for now.",
+                                    ],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Monk",
+                            "page": 48,
+                            "entries": ["Monk options in this chapter expand traditions and optional class features."],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Paladin",
+                            "page": 52,
+                            "entries": ["Paladin options in this chapter expand oaths and optional class features."],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Ranger",
+                            "page": 56,
+                            "entries": [
+                                {
+                                    "type": "entries",
+                                    "name": "Optional Class Features",
+                                    "page": 56,
+                                    "entries": [
+                                        "{@classFeature Deft Explorer|Ranger|PHB|1|TCE} and {@classFeature Favored Foe|Ranger|PHB|1|TCE} replace baseline ranger features.",
+                                        "{@classFeature Spellcasting Focus|Ranger|PHB|2|TCE} and {@optfeature Druidic Warrior|TCE} reinforce the ranger's spell and fighting-style options.",
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Ranger Archetypes",
+                                    "page": 58,
+                                    "entries": [
+                                        "{@class Ranger|PHB|Fey Wanderer|Fey Wanderer|TCE} and {@class Ranger|PHB|Swarmkeeper|Swarmkeeper|TCE} are the new ranger archetypes in this chapter.",
+                                        "{@subclassFeature Primal Companion|Ranger|PHB|Beast Master|PHB|3|TCE} refreshes the Beast Master's companion rules.",
+                                    ],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Rogue",
+                            "page": 62,
+                            "entries": ["Rogue options in this chapter expand archetypes and optional class features."],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Sorcerer",
+                            "page": 65,
+                            "entries": ["Sorcerer options in this chapter expand origins and optional class features."],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Warlock",
+                            "page": 70,
+                            "entries": ["Warlock options in this chapter expand patrons and optional class features."],
+                        },
+                        {
+                            "type": "section",
+                            "name": "Wizard",
+                            "page": 75,
+                            "entries": ["Wizard options in this chapter expand traditions and optional class features."],
                         },
                     ],
                 }
@@ -7613,6 +8089,12 @@ def test_tce_book_entries_are_imported_for_player_browse(
     changing_subclass_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Changing Your Subclass'].slug}"
     )
+    artificer_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Artificer'].slug}"
+    )
+    fighter_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Fighter'].slug}"
+    )
 
     assert source_response.status_code == 200
     source_body = source_response.get_data(as_text=True)
@@ -7621,14 +8103,23 @@ def test_tce_book_entries_are_imported_for_player_browse(
     assert "Customizing Your Origin" in source_body
     assert "Changing a Skill" in source_body
     assert "Changing Your Subclass" in source_body
+    assert "Artificer" in source_body
+    assert "Fighter" in source_body
+    assert "Wizard" in source_body
 
     assert category_response.status_code == 200
     category_body = category_response.get_data(as_text=True)
-    assert "Showing all 4 book chapters available to you in this source." in category_body
+    assert (
+        f"Showing all {len(TCE_RULES_REFERENCE_TEST_TITLES)} book chapters available to you in this source."
+        in category_body
+    )
     assert "Ten Rules to Remember" in category_body
     assert "Customizing Your Origin" in category_body
     assert "Changing a Skill" in category_body
     assert "Changing Your Subclass" in category_body
+    assert "Artificer" in category_body
+    assert "Fighter" in category_body
+    assert "Wizard" in category_body
 
     assert ten_rules_response.status_code == 200
     ten_rules_body = ten_rules_response.get_data(as_text=True)
@@ -7661,6 +8152,18 @@ def test_tce_book_entries_are_imported_for_player_browse(
     assert "Character Options" in changing_subclass_body
     assert "Changing Your Subclass" in changing_subclass_body
     assert "replace your subclass when you gain a new subclass feature." in changing_subclass_body
+
+    assert artificer_response.status_code == 200
+    artificer_body = artificer_response.get_data(as_text=True)
+    assert "Chapter 1" in artificer_body
+    assert "Character Options" in artificer_body
+    assert "Artificers in Many Worlds" in artificer_body
+
+    assert fighter_response.status_code == 200
+    fighter_body = fighter_response.get_data(as_text=True)
+    assert "Chapter 1" in fighter_body
+    assert "Character Options" in fighter_body
+    assert "Battle Master Builds" in fighter_body
 
 
 def test_tce_book_entries_follow_source_visibility(client, sign_in, users, app, tmp_path):
@@ -7741,6 +8244,125 @@ def test_tce_book_slice_includes_changing_your_subclass_wrapper_for_now(app, tmp
     assert result.imported_count == len(TCE_RULES_REFERENCE_TEST_TITLES)
     assert result.imported_by_type == {"book": len(TCE_RULES_REFERENCE_TEST_TITLES)}
     assert [entry.title for entry in book_entries] == list(TCE_RULES_REFERENCE_TEST_TITLES)
+
+
+def test_tce_class_wrappers_surface_related_imported_entities(
+    client, sign_in, users, app, tmp_path
+):
+    data_root = build_tce_book_data_root(tmp_path / "dnd5e-source-tce-class-wrapper-links")
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source(
+            "TCE",
+            entry_types=["book", "class", "classfeature", "subclass", "subclassfeature", "optionalfeature"],
+        )
+
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug="DND-5E",
+            source_id="TCE",
+            is_enabled=True,
+            default_visibility="players",
+        )
+        book_entries = {
+            entry.title: entry
+            for entry in service.list_entries_for_campaign_source(
+                "linden-pass",
+                "TCE",
+                entry_type="book",
+                limit=None,
+            )
+        }
+        tce_entries = {
+            (entry.entry_type, entry.title): entry
+            for entry_type in ("class", "classfeature", "subclass", "subclassfeature", "optionalfeature")
+            for entry in store.list_entries_for_source("DND-5E", "TCE", entry_type=entry_type, limit=None)
+        }
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    artificer_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Artificer'].slug}"
+    )
+    fighter_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Fighter'].slug}"
+    )
+    ranger_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Ranger'].slug}"
+    )
+
+    assert artificer_response.status_code == 200
+    artificer_body = artificer_response.get_data(as_text=True)
+    assert "Classes:" in artificer_body
+    assert "Class Features:" in artificer_body
+    assert "Subclasses:" in artificer_body
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{tce_entries[("class", "Artificer")].slug}"'
+        in artificer_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{tce_entries[("classfeature", "Infuse Item")].slug}"'
+        in artificer_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{tce_entries[("subclass", "Alchemist")].slug}"'
+        in artificer_body
+    )
+
+    assert fighter_response.status_code == 200
+    fighter_body = fighter_response.get_data(as_text=True)
+    assert "Class Features:" in fighter_body
+    assert "Optional Features:" in fighter_body
+    assert "Subclasses:" in fighter_body
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{tce_entries[("classfeature", "Martial Versatility")].slug}"'
+        in fighter_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{tce_entries[("optionalfeature", "Blind Fighting")].slug}"'
+        in fighter_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{tce_entries[("optionalfeature", "Superior Technique")].slug}"'
+        in fighter_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{tce_entries[("subclass", "Psi Warrior")].slug}"'
+        in fighter_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{tce_entries[("subclass", "Rune Knight")].slug}"'
+        in fighter_body
+    )
+
+    assert ranger_response.status_code == 200
+    ranger_body = ranger_response.get_data(as_text=True)
+    assert "Class Features:" in ranger_body
+    assert "Optional Features:" in ranger_body
+    assert "Subclasses:" in ranger_body
+    assert "Subclass Features:" in ranger_body
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{tce_entries[("classfeature", "Deft Explorer")].slug}"'
+        in ranger_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{tce_entries[("optionalfeature", "Druidic Warrior")].slug}"'
+        in ranger_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{tce_entries[("subclass", "Fey Wanderer")].slug}"'
+        in ranger_body
+    )
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{tce_entries[("subclassfeature", "Primal Companion")].slug}"'
+        in ranger_body
+    )
 
 
 def test_rules_reference_search_uses_curated_metadata_without_full_body_search(

@@ -86,6 +86,7 @@ BOOK_SECTION_ENTITY_TAG_ENTRY_TYPES = {
     "action": "action",
     "background": "background",
     "class": "class",
+    "classfeature": "classfeature",
     "condition": "condition",
     "creature": "monster",
     "disease": "disease",
@@ -96,9 +97,11 @@ BOOK_SECTION_ENTITY_TAG_ENTRY_TYPES = {
     "spell": "spell",
     "item": "item",
     "monster": "monster",
+    "optfeature": "optionalfeature",
     "optionalfeature": "optionalfeature",
     "race": "race",
     "subclass": "subclass",
+    "subclassfeature": "subclassfeature",
     "variantrule": "variantrule",
 }
 BOOK_SECTION_ENTITY_TYPE_ORDER = (
@@ -115,7 +118,9 @@ BOOK_SECTION_ENTITY_TYPE_ORDER = (
     "background",
     "race",
     "class",
+    "classfeature",
     "subclass",
+    "subclassfeature",
     "monster",
     "optionalfeature",
 )
@@ -133,7 +138,9 @@ BOOK_SECTION_ENTITY_GROUP_LABELS = {
     "background": "Backgrounds",
     "race": "Races",
     "class": "Classes",
+    "classfeature": "Class Features",
     "subclass": "Subclasses",
+    "subclassfeature": "Subclass Features",
     "monster": "Monsters",
     "optionalfeature": "Optional Features",
 }
@@ -1612,16 +1619,21 @@ class SystemsService:
         for match in INLINE_TAG_PATTERN.finditer(str(value or "")):
             body = match.group(1).strip()
             tag, _, remainder = body.partition(" ")
-            entry_type = BOOK_SECTION_ENTITY_TAG_ENTRY_TYPES.get(tag.lower().strip())
+            tag_name = tag.lower().strip()
+            entry_type = BOOK_SECTION_ENTITY_TAG_ENTRY_TYPES.get(tag_name)
             if not entry_type or not remainder.strip():
                 continue
-            title, source_id = self._parse_book_section_entity_reference(remainder)
-            if not title:
+            resolved_entry_type, title, source_id = self._parse_book_section_entity_reference(
+                tag_name,
+                remainder,
+                default_entry_type=entry_type,
+            )
+            if not resolved_entry_type or not title:
                 continue
             self._append_book_section_entity_ref(
                 related_refs_by_anchor,
                 visible_anchor=visible_anchor,
-                entry_type=entry_type,
+                entry_type=resolved_entry_type,
                 title=title,
                 source_id=source_id,
             )
@@ -1678,13 +1690,71 @@ class SystemsService:
             }
         )
 
-    def _parse_book_section_entity_reference(self, raw_reference: str) -> tuple[str, str | None]:
+    def _parse_book_section_entity_reference(
+        self,
+        tag_name: str,
+        raw_reference: str,
+        *,
+        default_entry_type: str,
+    ) -> tuple[str | None, str, str | None]:
         parts = [part.strip() for part in str(raw_reference or "").split("|")]
         if not parts:
-            return "", None
+            return None, "", None
         title = self._clean_embedded_text(parts[0])
-        source_id = parts[1].upper() if len(parts) > 1 and parts[1] else None
-        return title, source_id
+        if not title:
+            return None, "", None
+
+        normalized_tag = str(tag_name or "").strip().lower()
+        if normalized_tag == "class":
+            subclass_title = self._clean_embedded_text(parts[2]) if len(parts) > 2 else ""
+            if subclass_title:
+                return (
+                    "subclass",
+                    subclass_title,
+                    self._normalize_book_section_source_id(parts[4] if len(parts) > 4 else "")
+                    or self._normalize_book_section_source_id(parts[1] if len(parts) > 1 else ""),
+                )
+            return (
+                default_entry_type,
+                title,
+                self._normalize_book_section_source_id(parts[1] if len(parts) > 1 else ""),
+            )
+
+        if normalized_tag == "subclass":
+            return (
+                default_entry_type,
+                title,
+                self._normalize_book_section_source_id(parts[4] if len(parts) > 4 else "")
+                or self._normalize_book_section_source_id(parts[3] if len(parts) > 3 else "")
+                or self._normalize_book_section_source_id(parts[2] if len(parts) > 2 else ""),
+            )
+
+        if normalized_tag == "classfeature":
+            return (
+                default_entry_type,
+                title,
+                self._normalize_book_section_source_id(parts[4] if len(parts) > 4 else "")
+                or self._normalize_book_section_source_id(parts[2] if len(parts) > 2 else ""),
+            )
+
+        if normalized_tag == "subclassfeature":
+            return (
+                default_entry_type,
+                title,
+                self._normalize_book_section_source_id(parts[6] if len(parts) > 6 else "")
+                or self._normalize_book_section_source_id(parts[4] if len(parts) > 4 else "")
+                or self._normalize_book_section_source_id(parts[2] if len(parts) > 2 else ""),
+            )
+
+        return (
+            default_entry_type,
+            title,
+            self._normalize_book_section_source_id(parts[1] if len(parts) > 1 else ""),
+        )
+
+    def _normalize_book_section_source_id(self, value: object) -> str | None:
+        normalized_value = str(value or "").strip().upper()
+        return normalized_value or None
 
     def _resolve_visible_book_section_anchor(
         self,

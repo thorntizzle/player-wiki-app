@@ -246,14 +246,28 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         "Shared Campaigns",
         ("Shared Campaigns", "Variant Rules"),
     ),
-    # Start TCE with the front-matter reference page plus the first
-    # high-value character-option wrapper before the broader chapter wrappers
-    # and DM-tools slices land.
+    # TCE now ships the front-matter reference page plus the class-option
+    # wrapper pages that sit directly on top of already-imported class,
+    # subclass, subclass-feature, and optional-feature content. The broader
+    # DM-tools slices stay queued for later passes.
     "TCE": (
         ("Using This Book", "Ten Rules to Remember"),
         ("Character Options", "Customizing Your Origin"),
         ("Character Options", "Changing a Skill"),
         ("Character Options", "Changing Your Subclass"),
+        ("Character Options", "Artificer"),
+        ("Character Options", "Barbarian"),
+        ("Character Options", "Bard"),
+        ("Character Options", "Cleric"),
+        ("Character Options", "Druid"),
+        ("Character Options", "Fighter"),
+        ("Character Options", "Monk"),
+        ("Character Options", "Paladin"),
+        ("Character Options", "Ranger"),
+        ("Character Options", "Rogue"),
+        ("Character Options", "Sorcerer"),
+        ("Character Options", "Warlock"),
+        ("Character Options", "Wizard"),
     ),
 }
 VGM_CHARACTER_RACE_WRAPPER_DEFINITIONS = (
