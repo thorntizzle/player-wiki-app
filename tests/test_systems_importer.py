@@ -11437,6 +11437,133 @@ def test_subclass_pages_surface_campaign_overlay_base_rule_refs(
     assert "Supported Source Baseline" in subclass_body
 
 
+def test_subclass_pages_only_surface_visible_campaign_overlay_links_and_support_levels(
+    app, client, sign_in, users, tmp_path
+):
+    data_root = build_campaign_subclass_progression_data_root(
+        tmp_path / "dnd5e-source-campaign-overlay-visibility"
+    )
+
+    with app.app_context():
+        importer = Dnd5eSystemsImporter(
+            store=app.extensions["systems_store"],
+            systems_service=app.extensions["systems_service"],
+            data_root=data_root,
+        )
+        importer.import_source("PHB", entry_types=["class", "classfeature", "subclass", "subclassfeature"])
+
+        store = app.extensions["systems_store"]
+        subclass_entry = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "PHB", entry_type="subclass", limit=20)
+            if entry.title == "Wild Magic"
+        )
+        spellcasting_entry = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "PHB", entry_type="classfeature", limit=20)
+            if entry.title == "Spellcasting"
+        )
+        spell_math_rule_entry = next(
+            entry
+            for entry in store.list_entries_for_source("DND-5E", "RULES", entry_type="rule", limit=50)
+            if entry.title == "Spell Attacks and Save DCs"
+        )
+
+        mechanics_dir = Path(app.config["TEST_CAMPAIGNS_DIR"]) / "linden-pass" / "content" / "mechanics"
+        mechanics_dir.mkdir(parents=True, exist_ok=True)
+
+        def write_overlay_page(
+            filename: str,
+            title: str,
+            body: str,
+            *,
+            modeled_effects: list[str] | None = None,
+            reveal_after_session: int | None = None,
+        ) -> None:
+            lines = [
+                "---",
+                f"title: {title}",
+                "section: Mechanics",
+                "type: mechanic",
+                "subsection: Class Modifications",
+            ]
+            if reveal_after_session is not None:
+                lines.append(f"reveal_after_session: {reveal_after_session}")
+            lines.extend(
+                [
+                    "character_progression:",
+                    "  kind: subclass",
+                    "  class_name: Sorcerer",
+                    "  subclass_name: Wild Magic",
+                    "  level: 1",
+                    "  character_option:",
+                    f"    name: {title}",
+                    "    activation_type: special",
+                    "    base_rule_refs:",
+                    "      - rule_key: spell-attacks-and-save-dcs",
+                    f"      - slug: {spellcasting_entry.slug}",
+                    "        entry_type: classfeature",
+                    "        source_id: PHB",
+                ]
+            )
+            if modeled_effects:
+                lines.append("    modeled_effects:")
+                lines.extend(f"      - {effect}" for effect in modeled_effects)
+            lines.extend(["---", "", body, ""])
+            (mechanics_dir / filename).write_text("\n".join(lines), encoding="utf-8")
+
+        write_overlay_page(
+            "wild-magic-tide-harnessing.md",
+            "Wild Magic Tide Harnessing",
+            "This campaign models a tide die on top of the usual spellcasting baseline.",
+            modeled_effects=["save-bonus:all:1"],
+        )
+        write_overlay_page(
+            "wild-magic-table-reference.md",
+            "Wild Magic Table Reference",
+            "This house rule changes the visible spellcasting baseline without automated math.",
+        )
+        write_overlay_page(
+            "hidden-wild-magic-forecast.md",
+            "Hidden Wild Magic Forecast",
+            "This future overlay should stay hidden until a later session.",
+            reveal_after_session=3,
+        )
+        app.extensions["repository_store"].refresh()
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    subclass_response = client.get(f"/campaigns/linden-pass/systems/entries/{subclass_entry.slug}")
+
+    assert subclass_response.status_code == 200
+    subclass_body = subclass_response.get_data(as_text=True)
+    assert "Wild Magic Tide Harnessing" in subclass_body
+    assert "Wild Magic Table Reference" in subclass_body
+    assert "Hidden Wild Magic Forecast" not in subclass_body
+    assert "Mechanically Modeled Overlay." in subclass_body
+    assert "Reference-Only Overlay." in subclass_body
+    assert (
+        "This overlay uses existing structured campaign metadata that the app can already project on supported "
+        "character and build surfaces." in subclass_body
+    )
+    assert (
+        "This house rule stays visible beside the baseline links, but the app does not currently automate the "
+        "change." in subclass_body
+    )
+    assert "Precedence in this campaign: the published campaign overlay applies first." in subclass_body
+    assert (
+        "Linked Character Rules Reference entries are the normalized app-owned rules layer beneath that overlay"
+        in subclass_body
+    )
+    assert "linked supported-source entries remain the baseline source context beneath both." in subclass_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{spell_math_rule_entry.slug}"' in subclass_body
+    assert f'href="/campaigns/linden-pass/systems/entries/{spellcasting_entry.slug}"' in subclass_body
+    assert "Spell Attacks and Save DCs" in subclass_body
+    assert "Spellcasting" in subclass_body
+    assert "Normalized RULES Reference" in subclass_body
+    assert "Supported Source Baseline" in subclass_body
+
+
 def test_rule_pages_surface_active_campaign_overlays_from_mechanics_pages(
     app, client, sign_in, users
 ):
