@@ -249,7 +249,7 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
     # TCE now ships the front-matter reference page, the class-option
     # wrapper pages that sit directly on top of already-imported class,
     # subclass, subclass-feature, and optional-feature content, plus the
-    # first Dungeon Master's Tools reference pages. The remaining broader
+    # current Dungeon Master's Tools reference pages. The remaining broader
     # DM-tools and miscellany slices stay queued for later passes.
     "TCE": (
         ("Using This Book", "Ten Rules to Remember"),
@@ -272,6 +272,7 @@ BOOK_CHAPTER_IMPORT_TARGETS_BY_SOURCE = {
         ("Dungeon Master's Tools", "Session Zero"),
         ("Dungeon Master's Tools", "Sidekicks"),
         ("Dungeon Master's Tools", "Parleying with Monsters"),
+        ("Dungeon Master's Tools", "Environmental Hazards"),
     ),
 }
 VGM_CHARACTER_RACE_WRAPPER_DEFINITIONS = (

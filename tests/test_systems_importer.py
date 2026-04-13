@@ -4181,6 +4181,7 @@ TCE_RULES_REFERENCE_TEST_TITLES = (
     "Session Zero",
     "Sidekicks",
     "Parleying with Monsters",
+    "Environmental Hazards",
 )
 
 
@@ -4743,6 +4744,7 @@ def build_tce_book_data_root(root: Path) -> Path:
                                 "Session Zero",
                                 "Sidekicks",
                                 "Parleying with Monsters",
+                                "Environmental Hazards",
                             ],
                             "ordinal": {"type": "chapter", "identifier": 4},
                         }
@@ -5534,7 +5536,69 @@ def build_tce_book_data_root(root: Path) -> Path:
                                     ],
                                 },
                             ],
-                        }
+                        },
+                        {
+                            "type": "section",
+                            "name": "Environmental Hazards",
+                            "page": 150,
+                            "entries": [
+                                {
+                                    "type": "quote",
+                                    "entries": [
+                                        "The land itself can become the encounter when magic reshapes it."
+                                    ],
+                                },
+                                "This section explores how to add fantastical challenges to any locale and ways to further bring an adventure's setting to life.",
+                                {
+                                    "type": "entries",
+                                    "name": "Supernatural Regions",
+                                    "page": 150,
+                                    "entries": [
+                                        "A supernatural region is warped by planar energy, lingering magic, or tragedy.",
+                                        {
+                                            "type": "entries",
+                                            "name": "Blessed Radiance",
+                                            "page": 150,
+                                            "entries": [
+                                                "Golden light bolsters allies and scorches fiends and undead.",
+                                            ],
+                                        },
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Magical Phenomena",
+                                    "page": 163,
+                                    "entries": [
+                                        "Localized magical events can make familiar terrain behave in uncanny ways.",
+                                        {
+                                            "type": "entries",
+                                            "name": "Eldritch Storms",
+                                            "page": 163,
+                                            "entries": [
+                                                "Arcane tempests lash the area with dangerous power.",
+                                            ],
+                                        },
+                                    ],
+                                },
+                                {
+                                    "type": "entries",
+                                    "name": "Natural Hazards",
+                                    "page": 169,
+                                    "entries": [
+                                        "The world still threatens travelers with mundane dangers alongside magical ones.",
+                                        {
+                                            "type": "entries",
+                                            "name": "Spell Equivalents of Natural Hazards",
+                                            "page": 170,
+                                            "entries": [
+                                                "Spells can approximate avalanches, sinkholes, and similar threats when you need a fast ruling.",
+                                            ],
+                                        },
+                                    ],
+                                },
+                            ],
+                        },
                     ],
                 }
             ]
@@ -8288,6 +8352,9 @@ def test_tce_book_entries_are_imported_for_player_browse(
     parleying_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Parleying with Monsters'].slug}"
     )
+    environmental_hazards_response = client.get(
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Environmental Hazards'].slug}"
+    )
     session_zero_response = client.get(
         f"/campaigns/linden-pass/systems/entries/{book_entries['Session Zero'].slug}"
     )
@@ -8308,6 +8375,7 @@ def test_tce_book_entries_are_imported_for_player_browse(
     assert "Session Zero" in source_body
     assert "Sidekicks" in source_body
     assert "Parleying with Monsters" in source_body
+    assert "Environmental Hazards" in source_body
     assert "Artificer" in source_body
     assert "Fighter" in source_body
     assert "Wizard" in source_body
@@ -8325,6 +8393,7 @@ def test_tce_book_entries_are_imported_for_player_browse(
     assert "Session Zero" in category_body
     assert "Sidekicks" in category_body
     assert "Parleying with Monsters" in category_body
+    assert "Environmental Hazards" in category_body
     assert "Artificer" in category_body
     assert "Fighter" in category_body
     assert "Wizard" in category_body
@@ -8399,6 +8468,21 @@ def test_tce_book_entries_are_imported_for_player_browse(
     assert 'href="#monster-research"' in parleying_body
     assert 'id="monsters-desires"' in parleying_body
 
+    assert environmental_hazards_response.status_code == 200
+    environmental_hazards_body = environmental_hazards_response.get_data(as_text=True)
+    assert "Chapter 4" in environmental_hazards_body
+    assert "Dungeon Master&#x27;s Tools" in environmental_hazards_body
+    assert "Environmental Hazards" in environmental_hazards_body
+    assert "Supernatural Regions" in environmental_hazards_body
+    assert "Magical Phenomena" in environmental_hazards_body
+    assert "Natural Hazards" in environmental_hazards_body
+    assert "Blessed Radiance" in environmental_hazards_body
+    assert "Eldritch Storms" in environmental_hazards_body
+    assert "Spell Equivalents of Natural Hazards" in environmental_hazards_body
+    assert 'href="#supernatural-regions"' in environmental_hazards_body
+    assert 'href="#magical-phenomena"' in environmental_hazards_body
+    assert 'id="natural-hazards"' in environmental_hazards_body
+
     assert artificer_response.status_code == 200
     artificer_body = artificer_response.get_data(as_text=True)
     assert "Chapter 1" in artificer_body
@@ -8442,7 +8526,7 @@ def test_tce_book_entries_follow_source_visibility(client, sign_in, users, app, 
     player_source_response = client.get("/campaigns/linden-pass/systems/sources/TCE")
     player_category_response = client.get("/campaigns/linden-pass/systems/sources/TCE/types/book")
     player_entry_response = client.get(
-        f"/campaigns/linden-pass/systems/entries/{book_entries['Sidekicks'].slug}"
+        f"/campaigns/linden-pass/systems/entries/{book_entries['Environmental Hazards'].slug}"
     )
 
     assert player_source_response.status_code == 404
@@ -8469,13 +8553,16 @@ def test_tce_book_entries_follow_source_visibility(client, sign_in, users, app, 
     assert "Session Zero" in dm_category_body
     assert "Sidekicks" in dm_category_body
     assert "Parleying with Monsters" in dm_category_body
+    assert "Environmental Hazards" in dm_category_body
     assert dm_entry_response.status_code == 200
     dm_entry_body = dm_entry_response.get_data(as_text=True)
     assert "Dungeon Master&#x27;s Tools" in dm_entry_body
-    assert "Sidekicks" in dm_entry_body
+    assert "Environmental Hazards" in dm_entry_body
 
 
-def test_tce_book_slice_includes_session_zero_sidekicks_and_parleying_pages_for_now(app, tmp_path):
+def test_tce_book_slice_includes_session_zero_sidekicks_parleying_and_environmental_hazards_pages_for_now(
+    app, tmp_path
+):
     data_root = build_tce_book_data_root(tmp_path / "dnd5e-source-tce-book-boundary")
 
     with app.app_context():
