@@ -51,7 +51,7 @@ primary_region = 'iad'
       X-Forwarded-Proto = 'https'
 
 [[vm]]
-  memory = '512mb'
+  memory = '1024mb'
   cpu_kind = 'shared'
   cpus = 1
-  memory_mb = 512
+  memory_mb = 1024
