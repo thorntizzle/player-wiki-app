@@ -3906,6 +3906,250 @@ def test_imported_spell_baseline_with_blank_marks_is_repairable():
     assert repair_context["spell_rows"]
 
 
+def _repair_form_values_for_spell_rows(
+    repair_context: dict[str, Any],
+    *,
+    cantrip_names: set[str],
+    noncantrip_mark: str,
+) -> dict[str, str]:
+    form_values = {
+        key: str(value)
+        for key, value in dict(repair_context.get("values") or {}).items()
+    }
+    for row in list(repair_context.get("spell_rows") or []):
+        field_name = str(row.get("field_name") or "").strip()
+        if not field_name:
+            continue
+        form_values[field_name] = "Cantrip" if str(row.get("name") or "").strip() in cantrip_names else noncantrip_mark
+        class_row_field_name = str(row.get("class_row_field_name") or "").strip()
+        if class_row_field_name and not str(form_values.get(class_row_field_name) or "").strip():
+            options = list(row.get("class_row_options") or [])
+            if options:
+                form_values[class_row_field_name] = str(options[0].get("value") or "").strip()
+    return form_values
+
+
+def test_imported_progression_repair_restores_armorer_always_prepared_spells():
+    artificer = _systems_entry(
+        "class",
+        "tce-class-artificer",
+        "Artificer",
+        source_id="TCE",
+        metadata={
+            "hit_die": {"faces": 8},
+            "proficiency": ["con", "int"],
+            "subclass_title": "Artificer Specialist",
+        },
+    )
+    armorer = _systems_entry(
+        "subclass",
+        "tce-subclass-armorer-artificer-tce",
+        "Armorer",
+        source_id="TCE",
+        metadata={
+            "class_name": "Artificer",
+            "class_source": "TCE",
+            "additional_spells": [
+                {
+                    "prepared": {
+                        "3": ["Magic Missile", "Thunderwave"],
+                        "5": ["Mirror Image", "Shatter"],
+                    }
+                }
+            ],
+        },
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    sage = _systems_entry("background", "phb-background-sage", "Sage")
+    message = _systems_entry("spell", "phb-spell-message", "Message", metadata={"level": 0, "class_lists": {"TCE": ["Artificer"]}})
+    fire_bolt = _systems_entry("spell", "phb-spell-fire-bolt", "Fire Bolt", metadata={"level": 0, "class_lists": {"TCE": ["Artificer"]}})
+    magic_missile = _systems_entry("spell", "phb-spell-magic-missile", "Magic Missile", metadata={"level": 1})
+    thunderwave = _systems_entry("spell", "phb-spell-thunderwave", "Thunderwave", metadata={"level": 1})
+    mirror_image = _systems_entry("spell", "phb-spell-mirror-image", "Mirror Image", metadata={"level": 2})
+    shatter = _systems_entry("spell", "phb-spell-shatter", "Shatter", metadata={"level": 2})
+    cure_wounds = _systems_entry("spell", "phb-spell-cure-wounds", "Cure Wounds", metadata={"level": 1, "class_lists": {"TCE": ["Artificer"]}})
+    systems_service = _FakeSystemsService(
+        {
+            "class": [artificer],
+            "subclass": [armorer],
+            "race": [human],
+            "background": [sage],
+            "spell": [message, fire_bolt, magic_missile, thunderwave, mirror_image, shatter, cure_wounds],
+        },
+        class_progression=[{"level": 3, "feature_rows": [{"label": "Artificer Specialist"}]}],
+    )
+    definition = _minimal_imported_character_definition("armorer-import", "Armorer Import")
+    definition.profile["class_level_text"] = "Artificer 5"
+    definition.profile["classes"][0] = {
+        "row_id": "class-row-1",
+        "class_name": "Artificer",
+        "subclass_name": "Armorer",
+        "level": 5,
+        "systems_ref": _systems_ref(artificer),
+        "subclass_ref": _systems_ref(armorer),
+    }
+    definition.profile["class_ref"] = _systems_ref(artificer)
+    definition.profile["subclass_ref"] = _systems_ref(armorer)
+    definition.profile["species"] = "Human"
+    definition.profile["species_ref"] = _systems_ref(human)
+    definition.profile["background"] = "Sage"
+    definition.profile["background_ref"] = _systems_ref(sage)
+    definition.stats["ability_scores"]["int"] = {"score": 16, "modifier": 3, "save_bonus": 3}
+    definition.spellcasting = {
+        "spellcasting_class": "Artificer",
+        "spellcasting_ability": "Intelligence",
+        "spells": [
+            {"name": "Message", "mark": "", "systems_ref": _systems_ref(message)},
+            {"name": "Fire Bolt", "mark": "", "systems_ref": _systems_ref(fire_bolt)},
+            {"name": "Magic Missile", "mark": "", "systems_ref": _systems_ref(magic_missile)},
+            {"name": "Thunderwave", "mark": "", "systems_ref": _systems_ref(thunderwave)},
+            {"name": "Mirror Image", "mark": "", "systems_ref": _systems_ref(mirror_image)},
+            {"name": "Shatter", "mark": "", "systems_ref": _systems_ref(shatter)},
+            {"name": "Cure Wounds", "mark": "", "systems_ref": _systems_ref(cure_wounds)},
+        ],
+    }
+    import_metadata = _minimal_import_metadata(definition.character_slug)
+    import_metadata.source_path = "imports://armorer-import.md"
+    repair_context = build_imported_progression_repair_context(
+        systems_service,
+        "linden-pass",
+        definition,
+    )
+
+    assert repair_context["readiness"]["status"] == "repairable"
+
+    repaired_definition, _ = apply_imported_progression_repairs(
+        "linden-pass",
+        definition,
+        import_metadata,
+        repair_context,
+        _repair_form_values_for_spell_rows(
+            repair_context,
+            cantrip_names={"Message", "Fire Bolt"},
+            noncantrip_mark="Known",
+        ),
+    )
+    repaired_readiness = native_level_up_readiness(systems_service, "linden-pass", repaired_definition)
+    spells_by_name = {spell["name"]: spell for spell in repaired_definition.spellcasting["spells"]}
+
+    assert repaired_readiness["status"] == "ready"
+    for spell_name in ("Magic Missile", "Thunderwave", "Mirror Image", "Shatter"):
+        assert spells_by_name[spell_name]["is_always_prepared"] is True
+        assert spells_by_name[spell_name]["mark"] == ""
+    assert spells_by_name["Cure Wounds"].get("is_always_prepared") is not True
+    assert spells_by_name["Cure Wounds"]["mark"] == "Known"
+
+
+def test_imported_progression_repair_restores_grave_domain_always_prepared_spells():
+    cleric = _systems_entry(
+        "class",
+        "phb-class-cleric",
+        "Cleric",
+        metadata={
+            "hit_die": {"faces": 8},
+            "proficiency": ["wis", "cha"],
+            "subclass_title": "Divine Domain",
+        },
+    )
+    grave_domain = _systems_entry(
+        "subclass",
+        "xge-subclass-cleric-grave-domain",
+        "Grave Domain",
+        source_id="XGE",
+        metadata={
+            "class_name": "Cleric",
+            "class_source": "PHB",
+            "additional_spells": [
+                {
+                    "prepared": {
+                        "1": ["Bane", "False Life"],
+                        "3": ["Gentle Repose", "Ray of Enfeeblement"],
+                    }
+                }
+            ],
+        },
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    sacred_flame = _systems_entry("spell", "phb-spell-sacred-flame", "Sacred Flame", metadata={"level": 0, "class_lists": {"PHB": ["Cleric"]}})
+    guidance = _systems_entry("spell", "phb-spell-guidance", "Guidance", metadata={"level": 0, "class_lists": {"PHB": ["Cleric"]}})
+    bane = _systems_entry("spell", "phb-spell-bane", "Bane", metadata={"level": 1, "class_lists": {"PHB": ["Cleric"]}})
+    false_life = _systems_entry("spell", "phb-spell-false-life", "False Life", metadata={"level": 1})
+    gentle_repose = _systems_entry("spell", "phb-spell-gentle-repose", "Gentle Repose", metadata={"level": 2, "class_lists": {"PHB": ["Cleric"]}})
+    ray_of_enfeeblement = _systems_entry("spell", "phb-spell-ray-of-enfeeblement", "Ray of Enfeeblement", metadata={"level": 2})
+    cure_wounds = _systems_entry("spell", "phb-spell-cure-wounds", "Cure Wounds", metadata={"level": 1, "class_lists": {"PHB": ["Cleric"]}})
+    systems_service = _FakeSystemsService(
+        {
+            "class": [cleric],
+            "subclass": [grave_domain],
+            "race": [human],
+            "background": [acolyte],
+            "spell": [sacred_flame, guidance, bane, false_life, gentle_repose, ray_of_enfeeblement, cure_wounds],
+        },
+        class_progression=[{"level": 1, "feature_rows": [{"label": "Divine Domain"}]}],
+    )
+    definition = _minimal_imported_character_definition("grave-import", "Grave Import")
+    definition.profile["class_level_text"] = "Cleric 5"
+    definition.profile["classes"][0] = {
+        "row_id": "class-row-1",
+        "class_name": "Cleric",
+        "subclass_name": "Grave Domain",
+        "level": 5,
+        "systems_ref": _systems_ref(cleric),
+        "subclass_ref": _systems_ref(grave_domain),
+    }
+    definition.profile["class_ref"] = _systems_ref(cleric)
+    definition.profile["subclass_ref"] = _systems_ref(grave_domain)
+    definition.profile["species"] = "Human"
+    definition.profile["species_ref"] = _systems_ref(human)
+    definition.profile["background"] = "Acolyte"
+    definition.profile["background_ref"] = _systems_ref(acolyte)
+    definition.stats["ability_scores"]["wis"] = {"score": 16, "modifier": 3, "save_bonus": 5}
+    definition.spellcasting = {
+        "spellcasting_class": "Cleric",
+        "spellcasting_ability": "Wisdom",
+        "spells": [
+            {"name": "Sacred Flame", "mark": "", "systems_ref": _systems_ref(sacred_flame)},
+            {"name": "Guidance", "mark": "", "systems_ref": _systems_ref(guidance)},
+            {"name": "Bane", "mark": "", "systems_ref": _systems_ref(bane)},
+            {"name": "False Life", "mark": "", "systems_ref": _systems_ref(false_life)},
+            {"name": "Gentle Repose", "mark": "", "systems_ref": _systems_ref(gentle_repose)},
+            {"name": "Ray of Enfeeblement", "mark": "", "systems_ref": _systems_ref(ray_of_enfeeblement)},
+            {"name": "Cure Wounds", "mark": "", "systems_ref": _systems_ref(cure_wounds)},
+        ],
+    }
+    import_metadata = _minimal_import_metadata(definition.character_slug)
+    import_metadata.source_path = "imports://grave-import.md"
+    repair_context = build_imported_progression_repair_context(
+        systems_service,
+        "linden-pass",
+        definition,
+    )
+
+    assert repair_context["readiness"]["status"] == "repairable"
+
+    repaired_definition, _ = apply_imported_progression_repairs(
+        "linden-pass",
+        definition,
+        import_metadata,
+        repair_context,
+        _repair_form_values_for_spell_rows(
+            repair_context,
+            cantrip_names={"Sacred Flame", "Guidance"},
+            noncantrip_mark="Known",
+        ),
+    )
+    repaired_readiness = native_level_up_readiness(systems_service, "linden-pass", repaired_definition)
+    spells_by_name = {spell["name"]: spell for spell in repaired_definition.spellcasting["spells"]}
+
+    assert repaired_readiness["status"] == "ready"
+    for spell_name in ("Bane", "False Life", "Gentle Repose", "Ray of Enfeeblement"):
+        assert spells_by_name[spell_name]["is_always_prepared"] is True
+        assert spells_by_name[spell_name]["mark"] == ""
+    assert spells_by_name["Cure Wounds"].get("is_always_prepared") is not True
+    assert spells_by_name["Cure Wounds"]["mark"] == "Known"
+
+
 def _builder_field_names(builder_context: dict[str, object]) -> set[str]:
     return {
         str(field.get("name") or "")

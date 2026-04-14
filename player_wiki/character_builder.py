@@ -1610,7 +1610,10 @@ def _build_imported_spell_repair_rows(
             (str(option.get("spell_mode") or "").strip() for option in option_rows if option.get("value") == selected_row_id),
             "",
         )
-        if mark and _spell_mark_is_valid_for_mode(mark, selected_row_mode or "") and (selected_row_id or len(option_rows) <= 1):
+        if (
+            bool(payload.get("is_always_prepared"))
+            or (mark and _spell_mark_is_valid_for_mode(mark, selected_row_mode or ""))
+        ) and (selected_row_id or len(option_rows) <= 1):
             continue
         rows.append(
             {
@@ -1634,6 +1637,70 @@ def _spell_mark_is_valid_for_mode(mark: str, spell_mode: str) -> bool:
         return False
     valid_marks = {value for value, _label in _imported_spell_mark_options(spell_mode)}
     return clean_mark in valid_marks
+
+
+def _canonical_automatic_prepared_spell_mark(mark: str) -> str:
+    parts: list[str] = []
+    for part in [part.strip() for part in str(mark or "").split("+")]:
+        normalized_part = normalize_lookup(part)
+        if normalized_part == "cantrip" and "Cantrip" not in parts:
+            parts.append("Cantrip")
+        elif normalized_part == "spellbook" and "Spellbook" not in parts:
+            parts.append("Spellbook")
+        elif normalized_part == "ritual book" and "Ritual book" not in parts:
+            parts.append("Ritual book")
+    return " + ".join(parts)
+
+
+def _apply_automatic_prepared_spell_flags(
+    spell_payloads: list[dict[str, Any]],
+    *,
+    resolved_class_rows: list[dict[str, Any]],
+    spell_catalog: dict[str, Any],
+    feature_entries: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    row_lookup_keys: dict[str, set[str]] = {}
+    for row in resolved_class_rows:
+        row_id = str(row.get("row_id") or "").strip()
+        selected_class = row.get("selected_class")
+        if not row_id or not isinstance(selected_class, SystemsEntryRecord):
+            continue
+        selected_subclass = (
+            row.get("selected_subclass")
+            if isinstance(row.get("selected_subclass"), SystemsEntryRecord)
+            else None
+        )
+        row_lookup_keys[row_id] = _automatic_prepared_spell_lookup_keys(
+            selected_class=selected_class,
+            selected_subclass=selected_subclass,
+            spell_catalog=spell_catalog,
+            target_level=max(int(row.get("row_level") or 0), 0),
+            feature_entries=feature_entries,
+        )
+
+    if not row_lookup_keys:
+        return _normalize_spell_payloads(spell_payloads)
+
+    assigned_payloads = _assign_spell_payload_class_rows(
+        spell_payloads,
+        spellcasting_rows=[
+            {"class_row_id": str(row.get("row_id") or "").strip()}
+            for row in resolved_class_rows
+            if str(row.get("row_id") or "").strip()
+        ],
+    )
+    updated_payloads: list[dict[str, Any]] = []
+    for payload in assigned_payloads:
+        spell_payload = dict(payload or {})
+        row_id = _spell_payload_class_row_id(spell_payload)
+        payload_key = _spell_payload_key(spell_payload)
+        if payload_key and payload_key in row_lookup_keys.get(row_id, set()):
+            spell_payload["is_always_prepared"] = True
+            spell_payload["mark"] = _canonical_automatic_prepared_spell_mark(
+                str(spell_payload.get("mark") or "").strip()
+            )
+        updated_payloads.append(spell_payload)
+    return _normalize_spell_payloads(updated_payloads)
 
 
 def _imported_spell_mark_options_for_rows(
@@ -2723,6 +2790,7 @@ def apply_imported_progression_repairs(
     repair_class_rows = [dict(row or {}) for row in list(repair_context.get("class_rows") or []) if isinstance(row, dict)]
     feat_entries = list(repair_context.get("feat_entries") or [])
     optionalfeature_entries = list(repair_context.get("optionalfeature_entries") or [])
+    spell_catalog = dict(repair_context.get("spell_catalog") or {})
 
     selected_species = _resolve_selected_entry(species_entries, values.get("repair_species_slug", ""))
     selected_background = _resolve_selected_entry(background_entries, values.get("repair_background_slug", ""))
@@ -2808,6 +2876,9 @@ def apply_imported_progression_repairs(
                 "kind": "optionalfeature",
                 "slug": str(selected_entry.slug or "").strip(),
                 "label": selected_entry.title,
+                "systems_entry": selected_entry,
+                "page_ref": _entry_page_ref(selected_entry),
+                "campaign_option": _entry_campaign_option(selected_entry) or None,
             }
         )
 
@@ -2895,7 +2966,16 @@ def apply_imported_progression_repairs(
         if selected_row_id:
             repaired_spells[spell_index]["class_row_id"] = selected_row_id
         repaired_spells[spell_index]["mark"] = selected_mark
-    spellcasting["spells"] = _normalize_spell_payloads(repaired_spells)
+    spellcasting["spells"] = _apply_automatic_prepared_spell_flags(
+        repaired_spells,
+        resolved_class_rows=resolved_class_rows,
+        spell_catalog=spell_catalog,
+        feature_entries=[
+            {"entry": feature_entry.get("systems_entry"), "campaign_option": feature_entry.get("campaign_option")}
+            for feature_entry in repaired_feature_entries
+            if feature_entry.get("systems_entry") or feature_entry.get("campaign_option")
+        ],
+    )
 
     payload = deepcopy(current_definition.to_dict())
     payload["campaign_slug"] = campaign_slug
@@ -2922,7 +3002,7 @@ def apply_imported_progression_repairs(
     definition = normalize_definition_to_native_model(
         CharacterDefinition.from_dict(payload),
         item_catalog=dict(repair_context.get("item_catalog") or {}),
-        spell_catalog=dict(repair_context.get("spell_catalog") or {}),
+        spell_catalog=spell_catalog,
         systems_service=repair_context.get("systems_service"),
         campaign_page_records=list(repair_context.get("campaign_page_records") or []),
         resolved_class=selected_class,
