@@ -1905,6 +1905,46 @@ def test_build_initial_state_tracks_slot_usage_by_lane_for_non_shared_multiclass
     ]
 
 
+def test_merge_state_with_definition_drops_legacy_spell_slot_duplicates_for_tracked_levels():
+    definition = _minimal_character_definition("wizard-slot-merge", "Wizard Slot Merge")
+    definition.spellcasting = {
+        "slot_progression": [],
+        "slot_lanes": [
+            {
+                "id": "class-row-1-slots",
+                "title": "Wizard spell slots",
+                "shared": False,
+                "row_ids": ["class-row-1"],
+                "slot_progression": [
+                    {"level": 1, "max_slots": 4},
+                    {"level": 2, "max_slots": 3},
+                    {"level": 3, "max_slots": 2},
+                ],
+            }
+        ],
+        "spells": [],
+    }
+    state = build_initial_state(definition)
+    state["spell_slots"][0]["used"] = 1
+    state["spell_slots"][1]["used"] = 0
+    state["spell_slots"][2]["used"] = 1
+    state["spell_slots"].extend(
+        [
+            {"level": 1, "max": 4, "used": 3},
+            {"level": 2, "max": 3, "used": 2},
+            {"level": 3, "max": 2, "used": 0},
+        ]
+    )
+
+    merged_state = merge_state_with_definition(definition, state)
+
+    assert merged_state["spell_slots"] == [
+        {"level": 1, "max": 4, "used": 1, "slot_lane_id": "class-row-1-slots"},
+        {"level": 2, "max": 3, "used": 0, "slot_lane_id": "class-row-1-slots"},
+        {"level": 3, "max": 2, "used": 1, "slot_lane_id": "class-row-1-slots"},
+    ]
+
+
 def test_prepared_spell_formula_supports_simple_level_plus_ability_tokens():
     cleric = _systems_entry(
         "class",

@@ -184,6 +184,7 @@ def merge_state_with_definition(
         legacy_slots_by_level.setdefault(level, []).append(dict(slot))
     merged_slots: list[dict[str, Any]] = []
     tracked_slot_keys: set[tuple[str, int]] = set()
+    tracked_slot_levels: set[int] = set()
     for lane in spell_slot_lanes_from_spellcasting(definition.spellcasting):
         lane_id = normalize_spell_slot_lane_id(lane.get("id"))
         for slot in list(lane.get("slot_progression") or []):
@@ -191,6 +192,7 @@ def merge_state_with_definition(
             max_slots = int(slot.get("max_slots") or 0)
             slot_key = (lane_id, level)
             tracked_slot_keys.add(slot_key)
+            tracked_slot_levels.add(level)
             existing_slot = existing_slots_by_key.get(slot_key)
             if existing_slot is None and legacy_slots_by_level.get(level):
                 existing_slot = legacy_slots_by_level[level].pop(0)
@@ -204,11 +206,12 @@ def merge_state_with_definition(
                 merged_slot["slot_lane_id"] = lane_id
             merged_slots.append(merged_slot)
     for slot in existing_slots:
-        slot_key = (
-            normalize_spell_slot_lane_id(slot.get("slot_lane_id")),
-            int(slot.get("level") or 0),
-        )
+        lane_id = normalize_spell_slot_lane_id(slot.get("slot_lane_id"))
+        level = int(slot.get("level") or 0)
+        slot_key = (lane_id, level)
         if slot_key in tracked_slot_keys:
+            continue
+        if not lane_id and level in tracked_slot_levels:
             continue
         merged_slots.append(deepcopy(slot))
     payload["spell_slots"] = merged_slots
