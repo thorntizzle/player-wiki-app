@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import logging
+
 
 def test_health_endpoint_reports_app_and_data_metadata(client):
     response = client.get("/healthz")
@@ -48,3 +51,71 @@ def test_api_app_endpoint_reports_metadata(client):
             "campaigns_dir": str(client.application.config["CAMPAIGNS_DIR"]),
         },
     }
+
+
+def test_request_trail_logs_start_for_campaign_route_when_enabled(app, client, caplog):
+    app.config.update(
+        REQUEST_TRAIL_ENABLED=True,
+        REQUEST_SLOW_LOG_THRESHOLD_MS=0.0,
+    )
+    caplog.set_level(logging.INFO)
+
+    response = client.get("/campaigns/linden-pass")
+
+    assert response.status_code == 200
+
+    start_records = [
+        record
+        for record in caplog.records
+        if record.message.startswith("request_trail_start ")
+    ]
+    assert start_records
+
+    payload = json.loads(start_records[-1].message.split(" ", 1)[1])
+    assert payload["method"] == "GET"
+    assert payload["path"] == "/campaigns/linden-pass"
+    assert payload["endpoint"] == "campaign_view"
+    assert payload["request_id"]
+
+
+def test_request_trail_skips_healthz_when_enabled(app, client, caplog):
+    app.config.update(
+        REQUEST_TRAIL_ENABLED=True,
+        REQUEST_SLOW_LOG_THRESHOLD_MS=0.0,
+    )
+    caplog.set_level(logging.INFO)
+
+    response = client.get("/healthz")
+
+    assert response.status_code == 200
+    assert not [
+        record
+        for record in caplog.records
+        if record.message.startswith("request_trail_start ")
+    ]
+
+
+def test_request_trail_logs_slow_request_warning(app, client, caplog):
+    app.config.update(
+        REQUEST_TRAIL_ENABLED=True,
+        REQUEST_SLOW_LOG_THRESHOLD_MS=0.01,
+    )
+    caplog.set_level(logging.WARNING)
+
+    response = client.get("/campaigns/linden-pass")
+
+    assert response.status_code == 200
+
+    slow_records = [
+        record
+        for record in caplog.records
+        if record.message.startswith("slow_request ")
+    ]
+    assert slow_records
+
+    payload = json.loads(slow_records[-1].message.split(" ", 1)[1])
+    assert payload["method"] == "GET"
+    assert payload["path"] == "/campaigns/linden-pass"
+    assert payload["endpoint"] == "campaign_view"
+    assert payload["status_code"] == 200
+    assert payload["request_time_ms"] >= 0.01

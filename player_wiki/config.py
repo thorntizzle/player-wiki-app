@@ -41,6 +41,11 @@ class Config:
     DEBUG = APP_ENV == "development"
     TESTING = APP_ENV == "testing"
     LIVE_DIAGNOSTICS = env_bool("PLAYER_WIKI_LIVE_DIAGNOSTICS", APP_ENV != "production")
+    REQUEST_TRAIL_ENABLED = env_bool("PLAYER_WIKI_REQUEST_TRAIL_ENABLED", False)
+    REQUEST_SLOW_LOG_THRESHOLD_MS = env_float(
+        "PLAYER_WIKI_REQUEST_SLOW_LOG_THRESHOLD_MS",
+        0.0,
+    )
     LIVE_SLOW_LOG_THRESHOLD_MS = env_float(
         "PLAYER_WIKI_LIVE_SLOW_LOG_THRESHOLD_MS",
         250.0 if APP_ENV == "production" else 0.0,

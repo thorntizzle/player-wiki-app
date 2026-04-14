@@ -6,6 +6,7 @@ from io import BytesIO
 import json
 import mimetypes
 from pathlib import Path
+import secrets
 import time
 
 from flask import Flask, abort, flash, g, jsonify, make_response, redirect, render_template, request, send_file, send_from_directory, url_for
@@ -356,17 +357,149 @@ def create_app() -> Flask:
     if app.config["APP_ENV"] == "production" and app.config["SECRET_KEY"] == "development-only-secret-key":
         app.logger.warning("PLAYER_WIKI_SECRET_KEY is using the default development value.")
 
-    @app.before_request
-    def start_live_request_diagnostics():
-        if not app.config["LIVE_DIAGNOSTICS"]:
+    REQUEST_TRAIL_IGNORED_ENDPOINTS = {
+        "campaign_asset",
+        "campaign_session_article_image",
+        "character_portrait_asset",
+        "static",
+    }
+    REQUEST_TRAIL_IGNORED_PATHS = {
+        "/favicon.ico",
+        "/healthz",
+    }
+
+    def _read_proc_status_kb(field_name: str) -> int | None:
+        status_path = Path("/proc/self/status")
+        if not status_path.is_file():
             return None
+        try:
+            for line in status_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                if not line.startswith(f"{field_name}:"):
+                    continue
+                parts = line.split()
+                if len(parts) < 2:
+                    return None
+                try:
+                    return int(parts[1])
+                except ValueError:
+                    return None
+        except OSError:
+            return None
+        return None
+
+    def current_request_duration_ms() -> float:
+        request_started_at = getattr(g, "request_started_at", None)
+        if not isinstance(request_started_at, float):
+            return 0.0
+        return max(0.0, (time.perf_counter() - request_started_at) * 1000)
+
+    def resolve_request_remote_addr() -> str:
+        if request.access_route:
+            return str(request.access_route[0] or "")
+        return str(request.remote_addr or "")
+
+    def should_log_request_trail() -> bool:
+        if not app.config["REQUEST_TRAIL_ENABLED"]:
+            return False
+        if request.method == "OPTIONS":
+            return False
+        path = str(request.path or "").strip()
+        if not path or path in REQUEST_TRAIL_IGNORED_PATHS or path.startswith("/static/"):
+            return False
+        endpoint = str(request.endpoint or "").strip()
+        if endpoint in REQUEST_TRAIL_IGNORED_ENDPOINTS:
+            return False
+        return True
+
+    def build_request_trail_payload(
+        *,
+        response=None,
+        request_time_ms: float | None = None,
+        exception: BaseException | None = None,
+    ) -> dict[str, object]:
+        query_metrics = get_db_query_metrics()
+        payload: dict[str, object] = {
+            "request_id": str(getattr(g, "request_trail_id", "") or ""),
+            "method": request.method,
+            "path": request.full_path.rstrip("?"),
+            "endpoint": str(request.endpoint or ""),
+            "query_count": int(query_metrics["query_count"] or 0),
+            "query_time_ms": round(float(query_metrics["query_time_ms"] or 0.0), 2),
+            "remote_addr": resolve_request_remote_addr(),
+        }
+        if request.content_length is not None:
+            payload["content_length"] = int(request.content_length)
+        if request_time_ms is not None:
+            payload["request_time_ms"] = round(max(0.0, request_time_ms), 2)
+        if response is not None:
+            payload["status_code"] = int(response.status_code or 0)
+            response_bytes = response.calculate_content_length()
+            if response_bytes is not None:
+                payload["response_bytes"] = int(response_bytes)
+        process_rss_kb = _read_proc_status_kb("VmRSS")
+        if process_rss_kb is not None:
+            payload["process_rss_kb"] = process_rss_kb
+        process_hwm_kb = _read_proc_status_kb("VmHWM")
+        if process_hwm_kb is not None:
+            payload["process_hwm_kb"] = process_hwm_kb
+        if exception is not None:
+            payload["exception_type"] = type(exception).__name__
+            payload["exception"] = str(exception)
+        return payload
+
+    @app.before_request
+    def initialize_request_diagnostics():
         reset_db_query_metrics()
-        g.live_request_started_at = time.perf_counter()
+        request_started_at = time.perf_counter()
+        g.request_started_at = request_started_at
+        g.live_request_started_at = request_started_at
+        g.request_trail_id = secrets.token_hex(6)
+        g.request_trail_should_log = should_log_request_trail()
+        if getattr(g, "request_trail_should_log", False):
+            app.logger.info(
+                "request_trail_start %s",
+                json.dumps(build_request_trail_payload(), sort_keys=True),
+            )
         return None
 
     before_request_chain = app.before_request_funcs.setdefault(None, [])
-    if before_request_chain and before_request_chain[-1] is start_live_request_diagnostics:
+    if before_request_chain and before_request_chain[-1] is initialize_request_diagnostics:
         before_request_chain.insert(0, before_request_chain.pop())
+
+    @app.after_request
+    def log_slow_request_trail(response):
+        if not getattr(g, "request_trail_should_log", False):
+            return response
+        slow_log_threshold_ms = float(app.config.get("REQUEST_SLOW_LOG_THRESHOLD_MS") or 0.0)
+        request_time_ms = current_request_duration_ms()
+        if slow_log_threshold_ms > 0 and request_time_ms >= slow_log_threshold_ms:
+            app.logger.warning(
+                "slow_request %s",
+                json.dumps(
+                    build_request_trail_payload(
+                        response=response,
+                        request_time_ms=request_time_ms,
+                    ),
+                    sort_keys=True,
+                ),
+            )
+        return response
+
+    @app.teardown_request
+    def log_request_trail_exception(exc: BaseException | None):
+        if exc is None or not getattr(g, "request_trail_should_log", False):
+            return None
+        app.logger.error(
+            "request_exception %s",
+            json.dumps(
+                build_request_trail_payload(
+                    request_time_ms=current_request_duration_ms(),
+                    exception=exc,
+                ),
+                sort_keys=True,
+            ),
+        )
+        return None
 
     def get_repository() -> Repository:
         return repository_store.get()
