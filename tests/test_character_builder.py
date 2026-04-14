@@ -4059,6 +4059,17 @@ def test_imported_progression_repair_restores_grave_domain_always_prepared_spell
         metadata={
             "class_name": "Cleric",
             "class_source": "PHB",
+        },
+    )
+    grave_domain_spells = _systems_entry(
+        "subclassfeature",
+        "xge-subclassfeature-grave-domain-spells",
+        "Grave Domain Spells",
+        source_id="XGE",
+        metadata={
+            "class_name": "Cleric",
+            "class_source": "PHB",
+            "subclass_name": "Grave Domain",
             "additional_spells": [
                 {
                     "prepared": {
@@ -4087,6 +4098,7 @@ def test_imported_progression_repair_restores_grave_domain_always_prepared_spell
             "spell": [sacred_flame, guidance, bane, false_life, gentle_repose, ray_of_enfeeblement, cure_wounds],
         },
         class_progression=[{"level": 1, "feature_rows": [{"label": "Divine Domain"}]}],
+        subclass_progression=[{"level": 1, "feature_rows": [{"label": "Grave Domain Spells", "entry": grave_domain_spells}]}],
     )
     definition = _minimal_imported_character_definition("grave-import", "Grave Import")
     definition.profile["class_level_text"] = "Cleric 5"

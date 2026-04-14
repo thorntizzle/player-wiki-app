@@ -1655,6 +1655,8 @@ def _canonical_automatic_prepared_spell_mark(mark: str) -> str:
 def _apply_automatic_prepared_spell_flags(
     spell_payloads: list[dict[str, Any]],
     *,
+    campaign_slug: str,
+    systems_service: Any | None,
     resolved_class_rows: list[dict[str, Any]],
     spell_catalog: dict[str, Any],
     feature_entries: list[dict[str, Any]] | None = None,
@@ -1670,12 +1672,30 @@ def _apply_automatic_prepared_spell_flags(
             if isinstance(row.get("selected_subclass"), SystemsEntryRecord)
             else None
         )
+        row_level = max(int(row.get("row_level") or 0), 0)
+        row_feature_entries = [dict(feature_entry or {}) for feature_entry in list(feature_entries or [])]
+        if systems_service is not None:
+            row_feature_entries.extend(
+                _spell_support_feature_entries_from_progressions(
+                    class_progression=_class_progression_for_builder(
+                        systems_service,
+                        campaign_slug,
+                        selected_class,
+                    ),
+                    subclass_progression=_subclass_progression_for_builder(
+                        systems_service,
+                        campaign_slug,
+                        selected_subclass,
+                    ),
+                    target_level=row_level,
+                )
+            )
         row_lookup_keys[row_id] = _automatic_prepared_spell_lookup_keys(
             selected_class=selected_class,
             selected_subclass=selected_subclass,
             spell_catalog=spell_catalog,
-            target_level=max(int(row.get("row_level") or 0), 0),
-            feature_entries=feature_entries,
+            target_level=row_level,
+            feature_entries=row_feature_entries,
         )
 
     if not row_lookup_keys:
@@ -2968,6 +2988,8 @@ def apply_imported_progression_repairs(
         repaired_spells[spell_index]["mark"] = selected_mark
     spellcasting["spells"] = _apply_automatic_prepared_spell_flags(
         repaired_spells,
+        campaign_slug=campaign_slug,
+        systems_service=repair_context.get("systems_service"),
         resolved_class_rows=resolved_class_rows,
         spell_catalog=spell_catalog,
         feature_entries=[
