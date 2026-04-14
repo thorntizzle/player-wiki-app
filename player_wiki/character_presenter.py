@@ -772,7 +772,7 @@ def build_attack_name_candidates(attack: dict[str, Any]) -> set[str]:
     for value in (
         attack.get("name"),
         dict(attack.get("systems_ref") or {}).get("title"),
-        dict(attack.get("page_ref") or {}).get("title"),
+        normalize_page_ref_title(attack.get("page_ref")),
     ):
         candidates.update(build_name_lookup_candidates(value))
     return candidates
@@ -787,7 +787,7 @@ def build_equipment_name_candidates(
         equipment_item.get("name"),
         inventory_item.get("name"),
         dict(equipment_item.get("systems_ref") or {}).get("title"),
-        dict(equipment_item.get("page_ref") or {}).get("title"),
+        normalize_page_ref_title(equipment_item.get("page_ref")),
     ):
         candidates.update(build_name_lookup_candidates(value))
     return candidates
@@ -822,6 +822,11 @@ def normalize_page_ref_slug(page_ref: Any) -> str:
     if slug:
         return slug
     return str(page_ref or "").strip()
+
+
+def normalize_page_ref_title(page_ref: Any) -> str:
+    payload = dict(page_ref or {}) if isinstance(page_ref, dict) else {}
+    return str(payload.get("title") or "").strip()
 
 
 def dedupe_values(values: Any) -> list[str]:

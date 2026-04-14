@@ -2866,6 +2866,56 @@ def test_quick_reference_can_fall_back_to_legacy_attack_name_matching_for_equipm
     assert "Hidden until equipped: Crossbow, Light." in html
 
 
+def test_quick_reference_tolerates_legacy_string_page_refs_when_linking_attacks_to_equipment(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        payload["equipment_catalog"] = [
+            {
+                "id": "manual-item-staff-of-the-crescent-moon",
+                "name": "Staff of the Crescent Moon",
+                "default_quantity": 1,
+                "weight": "4 lb.",
+                "notes": "",
+                "page_ref": "items/staff-of-the-crescent-moon",
+            }
+        ]
+        payload["attacks"] = [
+            {
+                "id": "staff-of-the-crescent-moon",
+                "name": "Staff of the Crescent Moon",
+                "category": "weapon",
+                "attack_bonus": 7,
+                "damage": "1d6+4 bludgeoning",
+                "damage_type": "bludgeoning",
+                "notes": "A crescent-tipped staff used in close quarters.",
+                "page_ref": "actions/staff-of-the-crescent-moon",
+            }
+        ]
+
+    def _mutate_state(payload: dict) -> None:
+        payload["inventory"] = [
+            {
+                "catalog_ref": "manual-item-staff-of-the-crescent-moon",
+                "name": "Staff of the Crescent Moon",
+                "quantity": 1,
+                "is_equipped": True,
+            }
+        ]
+
+    _write_character_definition(app, "arden-march", _mutate)
+    _write_character_state(app, "arden-march", _mutate_state)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=quick")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+
+    assert html.count('class="attack-card"') == 1
+    assert "Staff of the Crescent Moon" in html
+
+
 def test_quick_reference_renders_shield_master_helper_row_without_placeholder_math(app, client, sign_in, users):
     def _mutate(payload: dict) -> None:
         payload["equipment_catalog"] = [
