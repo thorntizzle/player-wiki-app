@@ -4,6 +4,7 @@ from collections import defaultdict
 import hashlib
 from io import BytesIO
 import json
+import logging
 import mimetypes
 from pathlib import Path
 import secrets
@@ -356,6 +357,8 @@ def create_app() -> Flask:
 
     if app.config["APP_ENV"] == "production" and app.config["SECRET_KEY"] == "development-only-secret-key":
         app.logger.warning("PLAYER_WIKI_SECRET_KEY is using the default development value.")
+    if app.config["REQUEST_TRAIL_ENABLED"] or app.config["LIVE_DIAGNOSTICS"]:
+        app.logger.setLevel(logging.INFO)
 
     REQUEST_TRAIL_IGNORED_ENDPOINTS = {
         "campaign_asset",
