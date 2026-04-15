@@ -2849,6 +2849,24 @@ def test_sheet_edit_view_makes_first_pass_bounded_scope_explicit(client, sign_in
     assert "Advanced character edit, level-up, retraining, and controls" in html
 
 
+def test_sheet_edit_view_explains_player_dm_and_admin_authority(client, sign_in, users, set_campaign_visibility):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=quick")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Player self-editing" in html
+    assert "Assigned player owners can use this same sheet edit view for their own characters" in html
+    assert "DM editing" in html
+    assert "DMs can open the same sheet edit view for characters they manage" in html
+    assert "Admin authority" in html
+    assert "Owner assignment stays admin-only on Controls" in html
+    assert "Read-only viewers" in html
+    assert "Observers and unassigned players stay on the standard character sheet" in html
+
+
 def test_sheet_edit_view_exposes_cancel_and_unsaved_change_warning_copy(client, sign_in, users, set_campaign_visibility):
     set_campaign_visibility("linden-pass", characters="players")
     sign_in(users["owner"]["email"], users["owner"]["password"])
