@@ -299,6 +299,105 @@ def test_owner_can_open_session_character_subpage_without_leaving_session_featur
     assert "Save personal details" not in html
 
 
+def test_session_character_page_shows_edit_controls_only_while_session_is_active(
+    client, sign_in, users, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    response = client.get(
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&page=overview"
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Save vitals" in html
+    assert 'name="return_view" value="session-character"' in html
+    assert (
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}"
+        "&amp;page=overview&amp;confirm_rest=short"
+    ) in html
+
+
+def test_session_character_state_save_redirects_back_to_session_surface(
+    client, sign_in, users, get_character, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    record = get_character(ASSIGNED_CHARACTER_SLUG)
+    assert record is not None
+
+    response = client.post(
+        f"/campaigns/linden-pass/characters/{ASSIGNED_CHARACTER_SLUG}/session/vitals",
+        data={
+            "expected_revision": record.state_record.revision,
+            "current_hp": 34,
+            "temp_hp": 3,
+            "mode": "session",
+            "page": "overview",
+            "return_view": "session-character",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert (
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}"
+        "&page=overview#session-vitals"
+    ) in response.headers["Location"]
+
+    updated = get_character(ASSIGNED_CHARACTER_SLUG)
+    assert updated is not None
+    assert updated.state_record.state["vitals"]["current_hp"] == 34
+    assert updated.state_record.state["vitals"]["temp_hp"] == 3
+
+
+def test_session_character_note_conflict_stays_on_session_surface(
+    client, sign_in, users, get_character, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    record = get_character(ASSIGNED_CHARACTER_SLUG)
+    assert record is not None
+    stale_revision = record.state_record.revision
+
+    client.post(
+        f"/campaigns/linden-pass/characters/{ASSIGNED_CHARACTER_SLUG}/session/resources/wild-die",
+        data={"expected_revision": stale_revision, "current": 1},
+        follow_redirects=False,
+    )
+
+    conflict = client.post(
+        f"/campaigns/linden-pass/characters/{ASSIGNED_CHARACTER_SLUG}/session/notes",
+        data={
+            "expected_revision": stale_revision,
+            "player_notes_markdown": "Draft note from the session character tab.",
+            "mode": "session",
+            "page": "notes",
+            "return_view": "session-character",
+        },
+        follow_redirects=True,
+    )
+
+    assert conflict.status_code == 409
+    html = conflict.get_data(as_text=True)
+    assert "Session Character" in html
+    assert "Save note" in html
+    assert "Draft note from the session character tab." in html
+    assert "This sheet changed in another session. Refresh the page and try again." in html
+
+
 def test_session_character_page_uses_combat_style_non_combat_section_nav(client, sign_in, users):
     sign_in(users["owner"]["email"], users["owner"]["password"])
 

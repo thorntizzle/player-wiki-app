@@ -13,6 +13,9 @@
     <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
     <input type="hidden" name="mode" value="session">
     <input type="hidden" name="page" value="{{ character_subpage }}">
+    {% if session_return_view %}
+      <input type="hidden" name="return_view" value="{{ session_return_view }}">
+    {% endif %}
     <label class="session-field">
       <span>Current HP</span>
       <input type="number" name="current_hp" value="{{ character.current_hp }}" min="0" max="{{ character.max_hp }}">
@@ -40,10 +43,10 @@
   </form>
 
   <div class="session-bar__actions" id="session-rest">
-    <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='session', confirm_rest='short', page=character_subpage) }}">
+    <a class="ghost-button" href="{% if session_return_view == 'session-character' %}{{ session_surface_short_rest_url }}{% else %}{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='session', confirm_rest='short', page=character_subpage) }}{% endif %}">
       Short rest
     </a>
-    <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='session', confirm_rest='long', page=character_subpage) }}">
+    <a class="ghost-button" href="{% if session_return_view == 'session-character' %}{{ session_surface_long_rest_url }}{% else %}{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='session', confirm_rest='long', page=character_subpage) }}{% endif %}">
       Long rest
     </a>
   </div>

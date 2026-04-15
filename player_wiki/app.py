@@ -1462,6 +1462,12 @@ def create_app() -> Flask:
         return definition.__class__.from_dict(payload)
 
     def redirect_to_character_mode(campaign_slug: str, character_slug: str, *, anchor: str | None = None):
+        if is_session_character_return_requested(campaign_slug, character_slug):
+            return redirect_to_campaign_session_character(
+                campaign_slug,
+                character_slug,
+                anchor=anchor,
+            )
         _, record = load_character_context(campaign_slug, character_slug)
         spellcasting_payload = dict(record.definition.spellcasting or {})
         read_subpage = normalize_character_read_subpage(
@@ -1532,6 +1538,34 @@ def create_app() -> Flask:
                 _anchor=anchor,
             )
         )
+
+    def redirect_to_campaign_session_character(
+        campaign_slug: str,
+        character_slug: str,
+        *,
+        anchor: str | None = None,
+        confirm_rest: str | None = None,
+    ):
+        _, record = load_character_context(campaign_slug, character_slug)
+        spellcasting_payload = dict(record.definition.spellcasting or {})
+        session_subpage = normalize_session_character_subpage(
+            request.values.get("page", ""),
+            include_spellcasting=bool(
+                spellcasting_payload.get("spells")
+                or spellcasting_payload.get("slot_progression")
+                or spellcasting_payload.get("slot_lanes")
+            ),
+        )
+        route_values: dict[str, object] = {
+            "campaign_slug": campaign_slug,
+            "character": character_slug,
+            "page": session_subpage,
+            "_anchor": anchor,
+        }
+        normalized_confirm_rest = str(confirm_rest or "").strip().lower()
+        if normalized_confirm_rest in {"short", "long"}:
+            route_values["confirm_rest"] = normalized_confirm_rest
+        return redirect(url_for("campaign_session_character_view", **route_values))
 
     def redirect_to_campaign_combat(
         campaign_slug: str,
@@ -1891,6 +1925,32 @@ def create_app() -> Flask:
         if can_manage_campaign_session(campaign_slug):
             return True
         return character_slug in get_owned_character_slugs(campaign_slug)
+
+    def is_session_character_return_requested(campaign_slug: str, character_slug: str) -> bool:
+        return (
+            request.values.get("return_view", "").strip().lower() == "session-character"
+            and can_access_session_character_surface(campaign_slug, character_slug)
+        )
+
+    def ensure_active_session_for_session_character_mutation(
+        campaign_slug: str,
+        character_slug: str,
+        *,
+        anchor: str,
+    ):
+        if not is_session_character_return_requested(campaign_slug, character_slug):
+            return None
+        if get_campaign_session_service().get_active_session(campaign_slug) is not None:
+            return None
+        flash(
+            "The live session has ended. Session character editing is no longer available.",
+            "error",
+        )
+        return redirect_to_campaign_session_character(
+            campaign_slug,
+            character_slug,
+            anchor=anchor,
+        )
 
     def list_session_accessible_character_records(campaign_slug: str):
         return [
@@ -2583,6 +2643,14 @@ def create_app() -> Flask:
         if user is None:
             abort(403)
 
+        inactive_session_redirect = ensure_active_session_for_session_character_mutation(
+            campaign_slug,
+            character_slug,
+            anchor=anchor,
+        )
+        if inactive_session_redirect is not None:
+            return inactive_session_redirect
+
         try:
             expected_revision = parse_expected_revision()
             action(record, expected_revision, user.id)
@@ -2797,7 +2865,16 @@ def create_app() -> Flask:
             "active_nav": "session",
         }
 
-    def build_campaign_session_character_page_context(campaign_slug: str) -> dict[str, object]:
+    def build_campaign_session_character_page_context(
+        campaign_slug: str,
+        *,
+        selected_character_slug: str | None = None,
+        requested_subpage: str | None = None,
+        requested_confirm_rest: str | None = None,
+        notes_draft: str | None = None,
+        physical_description_draft: str | None = None,
+        background_draft: str | None = None,
+    ) -> dict[str, object]:
         campaign = load_campaign_context(campaign_slug)
         session_service = get_campaign_session_service()
         can_manage_session = can_manage_campaign_session(campaign_slug)
@@ -2815,7 +2892,11 @@ def create_app() -> Flask:
                 message_count=len(live_messages),
             )
 
-        requested_character_slug = request.args.get("character", "").strip()
+        requested_character_slug = (
+            str(selected_character_slug).strip()
+            if selected_character_slug is not None
+            else request.args.get("character", "").strip()
+        )
         if requested_character_slug and requested_character_slug not in accessible_records_by_slug:
             abort(403)
         selected_character_slug = requested_character_slug or (
@@ -2846,8 +2927,13 @@ def create_app() -> Flask:
         character_subpages = []
         equipment_state_manager = None
         spell_manager = None
+        rest_preview = None
+        session_character_editing_enabled = False
         can_view_full_character_sheet = False
         full_character_sheet_url = ""
+        session_surface_return_url = ""
+        session_surface_short_rest_url = ""
+        session_surface_long_rest_url = ""
 
         if selected_character_slug:
             record = accessible_records_by_slug[selected_character_slug]
@@ -2857,6 +2943,12 @@ def create_app() -> Flask:
                 include_player_notes_section=True,
                 systems_service=get_systems_service(),
             )
+            if notes_draft is not None:
+                character["player_notes_markdown"] = notes_draft
+            if physical_description_draft is not None:
+                character["physical_description_markdown"] = physical_description_draft
+            if background_draft is not None:
+                character["personal_background_markdown"] = background_draft
             character["portrait"] = build_character_portrait_context(campaign, record.definition)
             spell_manager = build_character_spell_manager_context(campaign_slug, campaign, record)
             if not character.get("spellcasting") and spell_manager is not None:
@@ -2865,9 +2957,20 @@ def create_app() -> Flask:
                     character["spellcasting"] = spellcasting_placeholder
             include_spellcasting_subpage = bool(character.get("spellcasting"))
             character_subpage = normalize_session_character_subpage(
-                request.args.get("page", ""),
+                requested_subpage if requested_subpage is not None else request.args.get("page", ""),
                 include_spellcasting=include_spellcasting_subpage,
             )
+            session_character_editing_enabled = bool(
+                active_session_record is not None
+                and has_session_mode_access(campaign_slug, selected_character_slug)
+            )
+            confirm_rest = (
+                str(requested_confirm_rest).strip().lower()
+                if requested_confirm_rest is not None
+                else request.args.get("confirm_rest", "").strip().lower()
+            )
+            if session_character_editing_enabled and confirm_rest in {"short", "long"}:
+                rest_preview = get_character_state_service().preview_rest(record, confirm_rest)
             equipment_state_manager = build_character_equipment_state_context(
                 campaign_slug,
                 campaign,
@@ -2904,6 +3007,26 @@ def create_app() -> Flask:
                 if can_view_full_character_sheet
                 else ""
             )
+            session_surface_return_url = url_for(
+                "campaign_session_character_view",
+                campaign_slug=campaign.slug,
+                character=selected_character_slug,
+                page=character_subpage,
+            )
+            session_surface_short_rest_url = url_for(
+                "campaign_session_character_view",
+                campaign_slug=campaign.slug,
+                character=selected_character_slug,
+                page=character_subpage,
+                confirm_rest="short",
+            )
+            session_surface_long_rest_url = url_for(
+                "campaign_session_character_view",
+                campaign_slug=campaign.slug,
+                character=selected_character_slug,
+                page=character_subpage,
+                confirm_rest="long",
+            )
 
         return {
             "campaign": campaign,
@@ -2930,12 +3053,38 @@ def create_app() -> Flask:
             "spell_manager": spell_manager,
             "inventory_manager": None,
             "character_controls": None,
-            "can_use_session_mode": False,
-            "is_session_mode": False,
+            "can_use_session_mode": session_character_editing_enabled,
+            "is_session_mode": session_character_editing_enabled,
+            "rest_preview": rest_preview,
+            "session_character_editing_enabled": session_character_editing_enabled,
+            "session_return_view": "session-character",
+            "session_surface_return_url": session_surface_return_url,
+            "session_surface_short_rest_url": session_surface_short_rest_url,
+            "session_surface_long_rest_url": session_surface_long_rest_url,
             "can_view_full_character_sheet": can_view_full_character_sheet,
             "full_character_sheet_url": full_character_sheet_url,
             "active_nav": "session",
         }
+
+    def render_session_character_page(
+        campaign_slug: str,
+        character_slug: str,
+        *,
+        notes_draft: str | None = None,
+        physical_description_draft: str | None = None,
+        background_draft: str | None = None,
+        status_code: int = 200,
+    ):
+        context = build_campaign_session_character_page_context(
+            campaign_slug,
+            selected_character_slug=character_slug,
+            requested_subpage=request.values.get("page", ""),
+            requested_confirm_rest=request.values.get("confirm_rest", ""),
+            notes_draft=notes_draft,
+            physical_description_draft=physical_description_draft,
+            background_draft=background_draft,
+        )
+        return render_template("session_character.html", **context), status_code
 
     def resolve_combat_character_target(
         tracker_view: dict[str, object],
@@ -8572,6 +8721,13 @@ def create_app() -> Flask:
 
         notes_markdown = request.form.get("player_notes_markdown", "")
         return_to_session_mode = request.form.get("mode", "").strip().lower() == "session"
+        inactive_session_redirect = ensure_active_session_for_session_character_mutation(
+            campaign_slug,
+            character_slug,
+            anchor="session-notes",
+        )
+        if inactive_session_redirect is not None:
+            return inactive_session_redirect
         try:
             expected_revision = parse_expected_revision()
             get_character_state_service().update_player_notes(
@@ -8582,6 +8738,13 @@ def create_app() -> Flask:
             )
         except CharacterStateConflictError:
             flash("This sheet changed in another session. Refresh the page and try again.", "error")
+            if is_session_character_return_requested(campaign_slug, character_slug):
+                return render_session_character_page(
+                    campaign_slug,
+                    character_slug,
+                    notes_draft=notes_markdown,
+                    status_code=409,
+                )
             return render_character_page(
                 campaign_slug,
                 character_slug,
@@ -8591,6 +8754,13 @@ def create_app() -> Flask:
             )
         except (CharacterStateValidationError, ValueError) as exc:
             flash(str(exc), "error")
+            if is_session_character_return_requested(campaign_slug, character_slug):
+                return render_session_character_page(
+                    campaign_slug,
+                    character_slug,
+                    notes_draft=notes_markdown,
+                    status_code=400,
+                )
             return render_character_page(
                 campaign_slug,
                 character_slug,
@@ -8616,6 +8786,13 @@ def create_app() -> Flask:
         physical_description_markdown = request.form.get("physical_description_markdown", "")
         background_markdown = request.form.get("background_markdown", "")
         return_to_session_mode = request.form.get("mode", "").strip().lower() == "session"
+        inactive_session_redirect = ensure_active_session_for_session_character_mutation(
+            campaign_slug,
+            character_slug,
+            anchor="session-personal",
+        )
+        if inactive_session_redirect is not None:
+            return inactive_session_redirect
         try:
             expected_revision = parse_expected_revision()
             get_character_state_service().update_personal_details(
@@ -8627,6 +8804,14 @@ def create_app() -> Flask:
             )
         except CharacterStateConflictError:
             flash("This sheet changed in another session. Refresh the page and try again.", "error")
+            if is_session_character_return_requested(campaign_slug, character_slug):
+                return render_session_character_page(
+                    campaign_slug,
+                    character_slug,
+                    physical_description_draft=physical_description_markdown,
+                    background_draft=background_markdown,
+                    status_code=409,
+                )
             return render_character_page(
                 campaign_slug,
                 character_slug,
@@ -8637,6 +8822,14 @@ def create_app() -> Flask:
             )
         except (CharacterStateValidationError, ValueError) as exc:
             flash(str(exc), "error")
+            if is_session_character_return_requested(campaign_slug, character_slug):
+                return render_session_character_page(
+                    campaign_slug,
+                    character_slug,
+                    physical_description_draft=physical_description_markdown,
+                    background_draft=background_markdown,
+                    status_code=400,
+                )
             return render_character_page(
                 campaign_slug,
                 character_slug,
@@ -8654,6 +8847,14 @@ def create_app() -> Flask:
     def character_session_rest(campaign_slug: str, character_slug: str, rest_type: str):
         if request.form.get("confirm_rest", "") != "1":
             return redirect_to_character_mode(campaign_slug, character_slug, anchor="session-rest")
+
+        inactive_session_redirect = ensure_active_session_for_session_character_mutation(
+            campaign_slug,
+            character_slug,
+            anchor="session-rest",
+        )
+        if inactive_session_redirect is not None:
+            return inactive_session_redirect
 
         return run_session_mutation(
             campaign_slug,

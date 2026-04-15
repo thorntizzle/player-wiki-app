@@ -86,6 +86,7 @@
           </section>
 
           {% set show_overview_sections = character_subpage == 'overview' %}
+          {% set show_quick_sections = show_overview_sections %}
           {% set show_spellcasting_sections = character_subpage == 'spells' %}
           {% set show_resource_sections = character_subpage == 'resources' %}
           {% set show_feature_sections = character_subpage == 'features' %}
@@ -94,6 +95,10 @@
           {% set show_ability_skill_sections = character_subpage == 'abilities_skills' %}
           {% set show_note_sections = character_subpage == 'notes' %}
           {% set show_personal_sections = character_subpage == 'personal' %}
+
+          {% if session_character_editing_enabled and show_overview_sections %}
+            {% include "_character_session_bar.html" %}
+          {% endif %}
 
           {% if show_overview_sections %}
             <section class="read-section" id="session-character-overview">
@@ -134,6 +139,10 @@
                 {% endfor %}
               </div>
             </section>
+          {% endif %}
+
+          {% if session_character_editing_enabled %}
+            {% include "_character_session_panels.html" %}
           {% endif %}
 
           {% if show_resource_sections %}
