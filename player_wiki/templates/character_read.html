@@ -104,6 +104,38 @@
         {% endfor %}
       </nav>
 
+      {% if is_session_mode and character_sheet_edit_first_pass_scope %}
+        <section class="read-section" id="character-sheet-edit-scope">
+          <div class="section-heading">
+            <div>
+              <h2>Sheet edit scope</h2>
+              <p class="meta">
+                Keep the first pass focused on the state-backed Character-page fields that now batch through one save.
+                Use the standard character page or dedicated tools for the broader maintenance routes.
+              </p>
+            </div>
+          </div>
+          <div class="detail-grid">
+            <article class="detail-card">
+              <h3>Edit here in the first pass</h3>
+              <ul class="plain-list slot-list">
+                {% for item in character_sheet_edit_first_pass_scope %}
+                  <li>{{ item }}</li>
+                {% endfor %}
+              </ul>
+            </article>
+            <article class="detail-card">
+              <h3>Keep using the standard character page for</h3>
+              <ul class="plain-list slot-list">
+                {% for item in character_sheet_edit_outside_first_pass_scope %}
+                  <li>{{ item }}</li>
+                {% endfor %}
+              </ul>
+            </article>
+          </div>
+        </section>
+      {% endif %}
+
       {% set show_quick_sections = character_subpage == 'quick' %}
       {% set show_spellcasting_sections = character_subpage == 'spellcasting' %}
       {% set show_feature_sections = character_subpage == 'features' %}

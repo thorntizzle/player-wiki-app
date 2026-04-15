@@ -9,12 +9,14 @@
       {% if character_controls.current_user_is_owner %}
         <p>
           This page is where future self-service player controls for {{ character.name }} can live.
-          Current owner-facing sheet edits still happen through the main character sheet edit view, especially on Quick Reference, Personal, and Notes.
+          Current owner-facing sheet edits still happen through the first-pass main character sheet edit view on Quick
+          Reference, Inventory, Personal, and Notes.
         </p>
       {% else %}
         <p>
           This page now holds character management controls, and it is also reserved for future player-owned actions.
-          Current player-facing sheet edits still live on the main character sheet edit view, especially on Quick Reference, Personal, and Notes.
+          Current player-facing sheet edits still live on the first-pass main character sheet edit view on Quick
+          Reference, Inventory, Personal, and Notes.
         </p>
       {% endif %}
     </article>

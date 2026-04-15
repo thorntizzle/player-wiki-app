@@ -213,6 +213,17 @@ SESSION_CHARACTER_ACTIVE_EDIT_SCOPE = (
     "Inventory quantities and currency totals",
     "Player notes",
 )
+CHARACTER_SHEET_EDIT_FIRST_PASS_SCOPE = (
+    "Current HP, temp HP, tracked resources, and spell slot usage",
+    "Inventory quantities and currency totals",
+    "Physical description, background, and player notes",
+)
+CHARACTER_SHEET_EDIT_OUTSIDE_FIRST_PASS_SCOPE = (
+    "Rests and other relative quick actions",
+    "Spell-list changes and other non-slot spell management",
+    "Equipment state, portrait changes, and broader inventory or equipment maintenance",
+    "Advanced character edit, level-up, retraining, and controls",
+)
 SESSION_CHARACTER_FULL_PAGE_ONLY_SCOPE = (
     "Portrait, physical description, and background details",
     "Spell-list changes and other non-slot spell management",
@@ -2521,6 +2532,12 @@ def create_app() -> Flask:
                 can_retrain=can_retrain,
                 level_up_readiness=level_up_readiness,
                 is_session_mode=is_session_mode,
+                character_sheet_edit_first_pass_scope=(
+                    CHARACTER_SHEET_EDIT_FIRST_PASS_SCOPE if is_session_mode else ()
+                ),
+                character_sheet_edit_outside_first_pass_scope=(
+                    CHARACTER_SHEET_EDIT_OUTSIDE_FIRST_PASS_SCOPE if is_session_mode else ()
+                ),
                 rest_preview=rest_preview,
                 character_controls=character_controls,
                 inventory_manager=inventory_manager,

@@ -2823,6 +2823,26 @@ def test_session_active_widget_stays_on_quick_reference_only(client, sign_in, us
     assert "Save vitals" not in features_html
 
 
+def test_sheet_edit_view_makes_first_pass_bounded_scope_explicit(client, sign_in, users, set_campaign_visibility):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=quick")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Sheet edit scope" in html
+    assert "Edit here in the first pass" in html
+    assert "Current HP, temp HP, tracked resources, and spell slot usage" in html
+    assert "Inventory quantities and currency totals" in html
+    assert "Physical description, background, and player notes" in html
+    assert "Keep using the standard character page for" in html
+    assert "Rests and other relative quick actions" in html
+    assert "Spell-list changes and other non-slot spell management" in html
+    assert "Equipment state, portrait changes, and broader inventory or equipment maintenance" in html
+    assert "Advanced character edit, level-up, retraining, and controls" in html
+
+
 def test_quick_reference_hides_item_backed_attacks_when_the_linked_item_is_not_equipped(app, client, sign_in, users):
     def _mutate(payload: dict) -> None:
         attacks = list(payload.get("attacks") or [])
