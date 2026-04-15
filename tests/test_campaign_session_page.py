@@ -289,7 +289,8 @@ def test_owner_can_open_session_character_subpage_without_leaving_session_featur
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert "Session Character" in html
-    assert "Character chooser" in html
+    assert "Live session tools" in html
+    assert "Character chooser" not in html
     assert "Character sections" in html
     assert "Arden March" in html
     assert "Features and traits" in html
@@ -297,6 +298,41 @@ def test_owner_can_open_session_character_subpage_without_leaving_session_featur
     assert f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&amp;page=features" in html
     assert "Enter session mode" not in html
     assert "Save personal details" not in html
+    assert "/campaigns/linden-pass/session" in html
+    assert (
+        "Keep chat, revealed articles, and wiki lookup on the main Session page "
+        "so this Character tab stays focused on in-play sheet access."
+    ) in html
+
+
+def test_session_character_page_keeps_single_sheet_players_out_of_a_redundant_roster_sidebar(
+    client, sign_in, users
+):
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get("/campaigns/linden-pass/session/character")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Live session tools" in html
+    assert "Character chooser" not in html
+    assert ">Open Session<" in html
+    assert (
+        "When the DM starts a session, the live chat and article lookup stay on the main Session page."
+        in html
+    )
+
+
+def test_dm_session_character_page_keeps_character_chooser_for_cross_character_access(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get("/campaigns/linden-pass/session/character")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Live session tools" in html
+    assert "Character chooser" in html
+    assert "Open any session-enabled character sheet from the current campaign." in html
 
 
 def test_session_character_page_shows_edit_controls_only_while_session_is_active(
