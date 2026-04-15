@@ -51,6 +51,7 @@ from .character_builder import (
     _spell_entry_level,
     _spell_list_class_name_for_class,
     _spell_payload_management_row_id,
+    _spell_payload_is_always_prepared,
     _spell_lookup_key,
     _spell_payload_key,
     _spell_payload_map_key,
@@ -1061,9 +1062,8 @@ def _normalize_spell_management_payload(
 
     spell_level = _spell_entry_level(spell_entry) if spell_entry is not None else int(payload.get("level") or 0)
     source_label = str(payload.get("source") or "").strip()
-    normalized_source = normalize_lookup(source_label)
     normalized_mark = normalize_lookup(str(payload.get("mark") or "").strip())
-    always_prepared = bool(payload.get("is_always_prepared")) or normalize_lookup("always prepared") in normalized_source
+    always_prepared = _spell_payload_is_always_prepared(payload)
     feature_grant = _spell_management_is_feature_grant_source(
         source_label,
         class_name=class_name,

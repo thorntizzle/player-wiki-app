@@ -1119,6 +1119,10 @@ def test_spellcasting_subpage_can_prepare_spells_and_protect_always_prepared_ent
     assert "Prepare spell" in page_html
     assert "Always prepared" in page_html
 
+    session_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=spellcasting")
+    assert session_response.status_code == 200
+    assert "Always prepared" in session_response.get_data(as_text=True)
+
     add_response = client.post(
         "/campaigns/linden-pass/characters/arden-march/spellcasting/add",
         data={
@@ -1135,7 +1139,9 @@ def test_spellcasting_subpage_can_prepare_spells_and_protect_always_prepared_ent
     updated_definition = _read_character_definition(app, "arden-march")
     updated_spells = list((updated_definition.get("spellcasting") or {}).get("spells") or [])
     detect_magic = next(spell for spell in updated_spells if spell.get("name") == "Detect Magic")
+    bless = next(spell for spell in updated_spells if spell.get("name") == "Bless")
     assert detect_magic["mark"] == "Prepared"
+    assert bless["is_always_prepared"] is True
 
     protected_remove = client.post(
         "/campaigns/linden-pass/characters/arden-march/spellcasting/remove",

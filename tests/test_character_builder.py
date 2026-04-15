@@ -4162,6 +4162,164 @@ def test_imported_progression_repair_restores_grave_domain_always_prepared_spell
     assert spells_by_name["Cure Wounds"]["mark"] == "Known"
 
 
+def test_imported_progression_repair_restores_spell_support_always_prepared_grants():
+    cleric = _systems_entry(
+        "class",
+        "phb-class-cleric",
+        "Cleric",
+        metadata={
+            "hit_die": {"faces": 8},
+            "proficiency": ["wis", "cha"],
+            "subclass_title": "Divine Domain",
+        },
+    )
+    knowledge_domain = _systems_entry(
+        "subclass",
+        "phb-subclass-cleric-knowledge-domain",
+        "Knowledge Domain",
+        metadata={
+            "class_name": "Cleric",
+            "class_source": "PHB",
+        },
+    )
+    knowledge_domain_spells = _systems_entry(
+        "subclassfeature",
+        "phb-subclassfeature-knowledge-domain-spells",
+        "Knowledge Domain Spells",
+        metadata={
+            "class_name": "Cleric",
+            "class_source": "PHB",
+            "subclass_name": "Knowledge Domain",
+            "spell_support": [
+                {
+                    "grants": {
+                        "1": [
+                            {"spell": "Command", "always_prepared": True},
+                            {"spell": "Identify", "always_prepared": True},
+                        ],
+                        "3": [
+                            {"spell": "Augury", "always_prepared": True},
+                            {"spell": "Suggestion", "always_prepared": True},
+                        ],
+                    }
+                }
+            ],
+        },
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    sage = _systems_entry("background", "phb-background-sage", "Sage")
+    sacred_flame = _systems_entry("spell", "phb-spell-sacred-flame", "Sacred Flame", metadata={"level": 0, "class_lists": {"PHB": ["Cleric"]}})
+    guidance = _systems_entry("spell", "phb-spell-guidance", "Guidance", metadata={"level": 0, "class_lists": {"PHB": ["Cleric"]}})
+    command = _systems_entry("spell", "phb-spell-command", "Command", metadata={"level": 1, "class_lists": {"PHB": ["Cleric"]}})
+    identify = _systems_entry("spell", "phb-spell-identify", "Identify", metadata={"level": 1})
+    augury = _systems_entry("spell", "phb-spell-augury", "Augury", metadata={"level": 2, "class_lists": {"PHB": ["Cleric"]}})
+    suggestion = _systems_entry("spell", "phb-spell-suggestion", "Suggestion", metadata={"level": 2})
+    cure_wounds = _systems_entry("spell", "phb-spell-cure-wounds", "Cure Wounds", metadata={"level": 1, "class_lists": {"PHB": ["Cleric"]}})
+    systems_service = _FakeSystemsService(
+        {
+            "class": [cleric],
+            "subclass": [knowledge_domain],
+            "race": [human],
+            "background": [sage],
+            "spell": [sacred_flame, guidance, command, identify, augury, suggestion, cure_wounds],
+        },
+        class_progression=[{"level": 1, "feature_rows": [{"label": "Divine Domain"}]}],
+        subclass_progression=[{"level": 1, "feature_rows": [{"label": "Knowledge Domain Spells", "entry": knowledge_domain_spells}]}],
+    )
+    definition = _minimal_imported_character_definition("knowledge-import", "Knowledge Import")
+    definition.profile["class_level_text"] = "Cleric 5"
+    definition.profile["classes"][0] = {
+        "row_id": "class-row-1",
+        "class_name": "Cleric",
+        "subclass_name": "Knowledge Domain",
+        "level": 5,
+        "systems_ref": _systems_ref(cleric),
+        "subclass_ref": _systems_ref(knowledge_domain),
+    }
+    definition.profile["class_ref"] = _systems_ref(cleric)
+    definition.profile["subclass_ref"] = _systems_ref(knowledge_domain)
+    definition.profile["species"] = "Human"
+    definition.profile["species_ref"] = _systems_ref(human)
+    definition.profile["background"] = "Sage"
+    definition.profile["background_ref"] = _systems_ref(sage)
+    definition.stats["ability_scores"]["wis"] = {"score": 16, "modifier": 3, "save_bonus": 5}
+    definition.spellcasting = {
+        "spellcasting_class": "Cleric",
+        "spellcasting_ability": "Wisdom",
+        "spells": [
+            {"name": "Sacred Flame", "mark": "", "systems_ref": _systems_ref(sacred_flame)},
+            {"name": "Guidance", "mark": "", "systems_ref": _systems_ref(guidance)},
+            {"name": "Command", "mark": "", "systems_ref": _systems_ref(command)},
+            {"name": "Identify", "mark": "", "systems_ref": _systems_ref(identify)},
+            {"name": "Augury", "mark": "", "systems_ref": _systems_ref(augury)},
+            {"name": "Suggestion", "mark": "", "systems_ref": _systems_ref(suggestion)},
+            {"name": "Cure Wounds", "mark": "", "systems_ref": _systems_ref(cure_wounds)},
+        ],
+    }
+    import_metadata = _minimal_import_metadata(definition.character_slug)
+    import_metadata.source_path = "imports://knowledge-import.md"
+    repair_context = build_imported_progression_repair_context(
+        systems_service,
+        "linden-pass",
+        definition,
+    )
+
+    assert repair_context["readiness"]["status"] == "repairable"
+
+    repaired_definition, _ = apply_imported_progression_repairs(
+        "linden-pass",
+        definition,
+        import_metadata,
+        repair_context,
+        _repair_form_values_for_spell_rows(
+            repair_context,
+            cantrip_names={"Sacred Flame", "Guidance"},
+            noncantrip_mark="Known",
+        ),
+    )
+    spells_by_name = {spell["name"]: spell for spell in repaired_definition.spellcasting["spells"]}
+
+    for spell_name in ("Command", "Identify", "Augury", "Suggestion"):
+        assert spells_by_name[spell_name]["is_always_prepared"] is True
+        assert spells_by_name[spell_name]["mark"] == ""
+    assert spells_by_name["Cure Wounds"].get("is_always_prepared") is not True
+    assert spells_by_name["Cure Wounds"]["mark"] == "Known"
+
+
+def test_normalize_definition_restores_legacy_always_prepared_flags_from_source_labels():
+    bless = _systems_entry("spell", "phb-spell-bless", "Bless", metadata={"level": 1})
+    cure_wounds = _systems_entry("spell", "phb-spell-cure-wounds", "Cure Wounds", metadata={"level": 1})
+    definition = _minimal_character_definition("arden-march", "Arden March")
+    definition.profile["class_level_text"] = "Cleric 5"
+    definition.profile["classes"][0]["class_name"] = "Cleric"
+    definition.profile["classes"][0]["level"] = 5
+    definition.spellcasting = {
+        "spellcasting_class": "Cleric",
+        "spellcasting_ability": "Wisdom",
+        "spells": [
+            {
+                "name": "Bless",
+                "mark": "P",
+                "source": "Cleric (Always Prepared)",
+                "systems_ref": _systems_ref(bless),
+            },
+            {
+                "name": "Cure Wounds",
+                "mark": "Prepared",
+                "source": "Cleric",
+                "systems_ref": _systems_ref(cure_wounds),
+            },
+        ],
+    }
+
+    normalized = normalize_definition_to_native_model(definition)
+    spells_by_name = {spell["name"]: spell for spell in normalized.spellcasting["spells"]}
+
+    assert spells_by_name["Bless"]["is_always_prepared"] is True
+    assert spells_by_name["Bless"]["source"] == "Cleric (Always Prepared)"
+    assert spells_by_name["Bless"]["mark"] == "P"
+    assert spells_by_name["Cure Wounds"].get("is_always_prepared") is not True
+
 def _builder_field_names(builder_context: dict[str, object]) -> set[str]:
     return {
         str(field.get("name") or "")

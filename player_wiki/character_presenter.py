@@ -6,7 +6,12 @@ from typing import Any
 
 import markdown
 
-from .character_builder import _format_weight_value, _spell_access_badge_label, _spell_payload_map_key
+from .character_builder import (
+    _format_weight_value,
+    _spell_access_badge_label,
+    _spell_payload_is_always_prepared,
+    _spell_payload_map_key,
+)
 from .character_models import CharacterRecord
 from .character_profile import (
     profile_class_level_text,
@@ -309,10 +314,11 @@ def present_character_detail(
             else ""
         )
         for spell in list(spellcasting_payload.get("spells") or []):
+            always_prepared = _spell_payload_is_always_prepared(dict(spell or {}))
             badges = []
             if bool(spell.get("is_bonus_known")):
                 badges.append("Feature granted")
-            if bool(spell.get("is_always_prepared")) or normalize_lookup("Always prepared") in normalize_lookup(str(spell.get("source") or "").strip()):
+            if always_prepared:
                 badges.append("Always prepared")
             if bool(spell.get("is_ritual")):
                 badges.append("Ritual")
@@ -324,7 +330,7 @@ def present_character_detail(
                 badges.append(mark)
             source_label = str(spell.get("grant_source_label") or spell.get("source") or "").strip()
             management_note = ""
-            if bool(spell.get("is_always_prepared")) and source_label:
+            if always_prepared and source_label:
                 management_note = f"Always prepared from {source_label}."
             elif bool(spell.get("is_bonus_known")) and source_label:
                 management_note = f"Granted by {source_label}."
@@ -360,18 +366,18 @@ def present_character_detail(
             is_prepared = bool(
                 not is_cantrip
                 and (
-                    bool(spell.get("is_always_prepared"))
+                    always_prepared
                     or "prepared" in normalized_mark
                 )
             )
             in_spellbook = bool(not is_cantrip and "spellbook" in normalized_mark)
-            is_fixed = bool(spell.get("is_always_prepared") or spell.get("is_bonus_known"))
+            is_fixed = bool(always_prepared or spell.get("is_bonus_known"))
             can_toggle_prepared = bool(
                 row_kind == "class"
                 and row_mode == "wizard"
                 and not is_cantrip
                 and in_spellbook
-                and not bool(spell.get("is_always_prepared"))
+                and not always_prepared
             )
             can_remove = bool((row_kind == "class" or row_mode == "ritual_book") and not is_fixed)
             presented_spell["spell_key"] = _spell_payload_map_key(dict(spell or {}))

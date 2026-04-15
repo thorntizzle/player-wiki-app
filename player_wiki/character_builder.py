@@ -10506,7 +10506,11 @@ def _spell_support_feature_entries_from_progressions(
         }:
             return
         metadata = dict(entry.metadata or {})
-        if not metadata.get("additional_spells") and not metadata.get("spell_support"):
+        if not _spell_metadata_value(metadata, "additional_spells", "additionalSpells") and not _spell_metadata_value(
+            metadata,
+            "spell_support",
+            "spellSupport",
+        ):
             return
         entry_key = str(entry.entry_key or entry.slug or entry.title or "").strip()
         if not entry_key or entry_key in seen_keys:
@@ -16778,7 +16782,7 @@ def _additional_spell_metadata_entries(
     seen_entries: set[str] = set()
     for entry in (selected_class, selected_subclass):
         metadata = dict((entry.metadata if entry is not None else {}) or {})
-        additional_spells = metadata.get("additional_spells")
+        additional_spells = _spell_metadata_value(metadata, "additional_spells", "additionalSpells")
         if additional_spells:
             values.append(additional_spells)
         if isinstance(entry, SystemsEntryRecord):
@@ -16787,14 +16791,14 @@ def _additional_spell_metadata_entries(
         entry = feature_entry.get("entry")
         if not isinstance(entry, SystemsEntryRecord):
             campaign_option = dict(feature_entry.get("campaign_option") or {})
-            additional_spells = campaign_option.get("additional_spells")
+            additional_spells = _spell_metadata_value(campaign_option, "additional_spells", "additionalSpells")
             if additional_spells:
                 values.append(additional_spells)
             continue
         entry_key = str(entry.entry_key or entry.slug or entry.title or "").strip()
         if not entry_key or entry_key in seen_entries:
             continue
-        additional_spells = dict(entry.metadata or {}).get("additional_spells")
+        additional_spells = _spell_metadata_value(dict(entry.metadata or {}), "additional_spells", "additionalSpells")
         if not additional_spells:
             continue
         values.append(additional_spells)
@@ -16812,7 +16816,7 @@ def _spell_support_metadata_entries(
     seen_entries: set[str] = set()
     for entry in (selected_class, selected_subclass):
         metadata = dict((entry.metadata if entry is not None else {}) or {})
-        spell_support = metadata.get("spell_support")
+        spell_support = _spell_metadata_value(metadata, "spell_support", "spellSupport")
         if spell_support:
             values.append(spell_support)
         if isinstance(entry, SystemsEntryRecord):
@@ -16821,17 +16825,65 @@ def _spell_support_metadata_entries(
         entry = feature_entry.get("entry")
         if not isinstance(entry, SystemsEntryRecord):
             campaign_option = dict(feature_entry.get("campaign_option") or {})
-            spell_support = campaign_option.get("spell_support")
+            spell_support = _spell_metadata_value(campaign_option, "spell_support", "spellSupport")
             if spell_support:
                 values.append(spell_support)
             continue
         entry_key = str(entry.entry_key or entry.slug or entry.title or "").strip()
         if entry_key and entry_key not in seen_entries:
-            spell_support = dict(entry.metadata or {}).get("spell_support")
+            spell_support = _spell_metadata_value(dict(entry.metadata or {}), "spell_support", "spellSupport")
             if spell_support:
                 values.append(spell_support)
                 seen_entries.add(entry_key)
     return values
+
+
+def _spell_metadata_value(payload: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in payload and payload.get(key) is not None:
+            return payload.get(key)
+    return None
+
+
+def _spell_flag_is_truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in {0, 1}:
+        return bool(value)
+    if isinstance(value, str):
+        return normalize_lookup(value) in {"1", "true", "yes", "always", "prepared", "always prepared"}
+    return False
+
+
+def _raw_spell_grant_is_always_prepared(raw_value: Any, *, category: str = "") -> bool:
+    payload = dict(raw_value or {}) if isinstance(raw_value, dict) else {}
+    if not payload:
+        return normalize_lookup(category) == "prepared"
+    for key in (
+        "is_always_prepared",
+        "always_prepared",
+        "isAlwaysPrepared",
+        "alwaysPrepared",
+        "prepared",
+    ):
+        if _spell_flag_is_truthy(payload.get(key)):
+            return True
+    return normalize_lookup(category) == "prepared"
+
+
+def _spell_payload_has_legacy_always_prepared_source_label(spell_payload: dict[str, Any]) -> bool:
+    source_label = str(
+        spell_payload.get("grant_source_label")
+        or spell_payload.get("source")
+        or ""
+    ).strip()
+    return normalize_lookup("always prepared") in normalize_lookup(source_label)
+
+
+def _spell_payload_is_always_prepared(spell_payload: dict[str, Any]) -> bool:
+    return bool(spell_payload.get("is_always_prepared")) or _spell_payload_has_legacy_always_prepared_source_label(
+        spell_payload
+    )
 
 
 def _spell_support_choice_field_name(
@@ -16980,6 +17032,7 @@ def _extract_spell_support_grants_from_value(
         return grants
     normalized_mark = str(raw_value.get("mark") or "").strip()
     bonus_known = bool(raw_value.get("bonus_known") or raw_value.get("is_bonus_known"))
+    grant_category = normalize_lookup(str(raw_value.get("category") or raw_value.get("kind") or "").strip())
     if not bonus_known and normalize_lookup(normalized_mark) in {"known", "cantrip"}:
         bonus_known = True
         normalized_mark = ""
@@ -16991,7 +17044,7 @@ def _extract_spell_support_grants_from_value(
         {
             "value": clean_value,
             "mark": normalized_mark,
-            "always_prepared": bool(raw_value.get("always_prepared") or raw_value.get("prepared")),
+            "always_prepared": _raw_spell_grant_is_always_prepared(raw_value, category=grant_category),
             "ritual": bool(raw_value.get("ritual") or raw_value.get("is_ritual")),
             "bonus_known": bonus_known,
             **support_kwargs,
@@ -17110,7 +17163,7 @@ def _extract_spell_support_choice_specs_from_value(
             "count": max(int(raw_value.get("count") or 1), 1),
             "label_prefix": str(raw_value.get("label_prefix") or "").strip(),
             "help_text": str(raw_value.get("help_text") or "").strip(),
-            "always_prepared": bool(raw_value.get("always_prepared") or raw_value.get("prepared") or category == "prepared"),
+            "always_prepared": _raw_spell_grant_is_always_prepared(raw_value, category=category),
             "ritual": bool(raw_value.get("ritual") or raw_value.get("is_ritual")),
             "mark": str(raw_value.get("mark") or ("Granted" if category == "granted" else "")).strip(),
             "spell_source_row_id": str(support_kwargs.get("spell_source_row_id") or "").strip(),
@@ -17192,7 +17245,10 @@ def _extract_spell_support_replacement_specs_from_value(raw_value: Any) -> list[
             "to_filter": to_filter,
             "to_options": to_options,
             "mark": str(raw_value.get("mark") or to_payload.get("mark") or "").strip(),
-            "always_prepared": bool(raw_value.get("always_prepared") or to_payload.get("always_prepared")),
+            "always_prepared": (
+                _raw_spell_grant_is_always_prepared(raw_value, category=category)
+                or _raw_spell_grant_is_always_prepared(to_payload, category=category)
+            ),
             "ritual": bool(raw_value.get("ritual") or to_payload.get("ritual")),
             "help_text_from": str(raw_value.get("help_text_from") or "").strip(),
             "help_text_to": str(raw_value.get("help_text_to") or "").strip(),
@@ -17332,6 +17388,18 @@ def _automatic_prepared_spell_values(
                 exact_level=exact_level,
             )
         )
+    for grant in _automatic_spell_support_grants(
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        target_level=target_level,
+        exact_level=exact_level,
+        feature_entries=feature_entries,
+    ):
+        if not bool(grant.get("always_prepared")):
+            continue
+        grant_value = str(grant.get("value") or "").strip()
+        if grant_value:
+            values.append(grant_value)
     if not values and exact_level in {None, 1} and target_level >= 1 and selected_subclass is not None:
         subclass_key = normalize_lookup(selected_subclass.title)
         values.extend(LEVEL_ONE_ALWAYS_PREPARED_SPELLS_BY_SUBCLASS.get(subclass_key, []))
@@ -17821,6 +17889,7 @@ def _normalize_spell_payloads(
         if not payload_key:
             continue
         payload["name"] = name
+        payload["is_always_prepared"] = _spell_payload_is_always_prepared(payload)
         payload["id"] = str(payload.get("id") or "").strip() or f"{slugify(name)}-{len(normalized_spells) + 1}"
         class_row_id = _spell_payload_class_row_id(payload)
         if class_row_id:
