@@ -1459,6 +1459,8 @@ def test_dm_status_page_renders_only_selected_pc_detail(app, client, sign_in, us
     assert "Encounter roster" not in body
     assert "combat-turn-order-row--selected" in body
     assert f"/campaigns/linden-pass/combat/status?combatant={arden.id}" in body
+    assert 'id="combat-status-snapshot"' in body
+    assert "Compact encounter status first" in body
     assert "Character detail" in body
     assert "Arden March" in body
     assert "Resources" in body
@@ -1515,6 +1517,7 @@ def test_dm_status_page_can_render_systems_monster_detail(app, client, sign_in, 
 
     assert response.status_code == 200
     body = response.get_data(as_text=True)
+    assert 'id="combat-status-snapshot"' in body
     assert "Systems monster" in body
     assert "Open Systems entry" in body
     assert "Scimitar" in body
@@ -1536,6 +1539,7 @@ def test_dm_status_page_can_render_dm_content_statblock_detail(app, client, sign
 
     assert response.status_code == 200
     body = response.get_data(as_text=True)
+    assert 'id="combat-status-snapshot"' in body
     assert "DM Content statblock" in body
     assert "Source file: brass-hound.md" in body
     assert "Bite" in body

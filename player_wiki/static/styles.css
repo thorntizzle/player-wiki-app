@@ -2135,6 +2135,14 @@ button {
   gap: 1rem;
 }
 
+.combat-status-snapshot,
+.combat-status-snapshot__top,
+.combat-status-snapshot__meta,
+.combat-status-detail-heading {
+  display: grid;
+  gap: 0.85rem;
+}
+
 .combat-workspace-nav,
 .combat-workspace-sidebar {
   display: grid;

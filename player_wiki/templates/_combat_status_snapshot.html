@@ -1,0 +1,101 @@
+{% if selected_combatant %}
+  {% set has_status_actions = (
+    (combat_status_source_mode == "character" and combat_status_character_url)
+    or (combat_status_source_mode == "character" and can_view_full_character_sheet and full_character_sheet_url)
+    or (combat_status_source_mode == "systems_monster" and combat_status_systems_entry and combat_status_systems_entry.href)
+  ) %}
+  <article class="card combat-character-snapshot combat-status-snapshot" id="combat-status-snapshot">
+    <div class="combat-status-snapshot__top">
+      <div class="section-heading">
+        <div class="combat-status-snapshot__meta">
+          <p class="card-kicker">Encounter status</p>
+          <h2>{{ selected_combatant.name }}</h2>
+          {% if selected_combatant.subtitle %}
+            <p class="meta">{{ selected_combatant.subtitle }}</p>
+          {% endif %}
+          <p class="meta">{{ selected_combatant.type_label }} | {{ combat_status_source_label or selected_combatant.source_label }}</p>
+          {% if combat_status_source_mode == "dm_statblock" and combat_status_statblock %}
+            <p class="meta">Source file: {{ combat_status_statblock.source_filename }}</p>
+          {% elif combat_status_source_mode == "systems_monster" and combat_status_systems_entry %}
+            <p class="meta">Systems source {{ combat_status_systems_entry.source_id }}</p>
+          {% elif combat_status_source_mode == "character" %}
+            <p class="meta">Compact encounter status first, with deeper sheet detail directly below.</p>
+          {% endif %}
+        </div>
+        <div class="combatant-badges">
+          <span class="combat-badge">Round {{ combat_tracker.round_number }}</span>
+          <span class="combat-badge">Turn {{ selected_combatant.turn_value }}</span>
+          {% if selected_combatant.initiative_bonus_label != "0" %}
+            <span class="combat-badge combat-badge--muted">Init {{ selected_combatant.initiative_bonus_label }}</span>
+          {% endif %}
+          {% if selected_combatant.is_current_turn %}
+            <span class="combat-badge combat-badge--active">Current turn</span>
+          {% endif %}
+        </div>
+      </div>
+
+      {% if has_status_actions %}
+        <div class="hero-actions combat-status-snapshot__actions">
+          {% if combat_status_source_mode == "character" and combat_status_character_url %}
+            <a class="ghost-button" href="{{ combat_status_character_url }}">Open Character</a>
+          {% endif %}
+          {% if combat_status_source_mode == "character" and can_view_full_character_sheet and full_character_sheet_url %}
+            <a class="ghost-button" href="{{ full_character_sheet_url }}">Open full sheet</a>
+          {% endif %}
+          {% if combat_status_source_mode == "systems_monster" and combat_status_systems_entry and combat_status_systems_entry.href %}
+            <a class="ghost-button" href="{{ combat_status_systems_entry.href }}">Open Systems entry</a>
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="combat-summary-grid combat-summary-grid--snapshot">
+      <div class="combat-stat">
+        <span class="meta">HP</span>
+        <strong>{{ selected_combatant.current_hp }} / {{ selected_combatant.max_hp }}</strong>
+      </div>
+      <div class="combat-stat">
+        <span class="meta">Temp HP</span>
+        <strong>{{ selected_combatant.temp_hp }}</strong>
+      </div>
+      <div class="combat-stat">
+        <span class="meta">Movement</span>
+        <strong>{{ selected_combatant.movement_remaining }} / {{ selected_combatant.movement_total }}</strong>
+      </div>
+      <div class="combat-stat">
+        <span class="meta">Speed</span>
+        <strong>{{ selected_combatant.speed_label }}</strong>
+      </div>
+    </div>
+
+    <div class="combat-resource-strip">
+      <span class="combat-resource{% if selected_combatant.has_action %} combat-resource--ready{% endif %}">Action</span>
+      <span class="combat-resource{% if selected_combatant.has_bonus_action %} combat-resource--ready{% endif %}">Bonus Action</span>
+      <span class="combat-resource{% if selected_combatant.has_reaction %} combat-resource--ready{% endif %}">Reaction</span>
+      <span class="combat-resource combat-resource--movement">Movement {{ selected_combatant.movement_remaining }}/{{ selected_combatant.movement_total }}</span>
+    </div>
+
+    <section class="combat-conditions combat-conditions--compact">
+      <div class="section-heading">
+        <h3>Conditions</h3>
+        <p class="meta">Live encounter conditions on this combatant.</p>
+      </div>
+      {% if selected_combatant.conditions %}
+        <div class="combat-condition-list">
+          {% for condition in selected_combatant.conditions %}
+            <div class="combat-condition-item">
+              <div>
+                <strong>{{ condition.name }}</strong>
+                {% if condition.duration_text %}
+                  <p class="meta">{{ condition.duration_text }}</p>
+                {% endif %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="meta">No conditions are active on this combatant.</p>
+      {% endif %}
+    </section>
+  </article>
+{% endif %}

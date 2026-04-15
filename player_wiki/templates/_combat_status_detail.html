@@ -1,23 +1,15 @@
 {% if selected_combatant %}
   <section class="section-list">
     <div>
-      {% include "_combat_character_snapshot.html" %}
+      {% include "_combat_status_snapshot.html" %}
     </div>
 
     {% if combat_status_source_mode == "character" and selected_combat_character %}
-      <section class="card combat-status-detail-card">
+      <section class="combat-status-detail-heading">
         <div class="section-heading">
           <div>
             <h2>Character detail</h2>
             <p class="meta">Combat-relevant sheet detail for the selected tracked player character.</p>
-          </div>
-          <div class="hero-actions">
-            {% if combat_status_character_url %}
-              <a class="ghost-button" href="{{ combat_status_character_url }}">Open Character</a>
-            {% endif %}
-            {% if can_view_full_character_sheet and full_character_sheet_url %}
-              <a class="ghost-button" href="{{ full_character_sheet_url }}">Open full sheet</a>
-            {% endif %}
           </div>
         </div>
       </section>
@@ -27,15 +19,7 @@
         <div class="section-heading">
           <div>
             <h2>DM Content statblock</h2>
-            <p class="meta">Source file: {{ combat_status_statblock.source_filename }}</p>
-          </div>
-          <div class="badge-list">
-            {% if combat_status_statblock.armor_class is not none %}
-              <span class="meta-badge">AC {{ combat_status_statblock.armor_class }}</span>
-            {% endif %}
-            <span class="meta-badge">HP {{ combat_status_statblock.max_hp }}</span>
-            <span class="meta-badge">Speed {{ combat_status_statblock.speed_text }}</span>
-            <span class="meta-badge">Init {{ combat_status_statblock.initiative_bonus_label }}</span>
+            <p class="meta">Rendered source detail for the selected DM Content combatant.</p>
           </div>
         </div>
         {% if combat_status_statblock.body_html %}
@@ -49,16 +33,8 @@
         <div class="section-heading">
           <div>
             <h2>Systems monster</h2>
-            <p class="meta">Source {{ combat_status_systems_entry.source_id }}</p>
+            <p class="meta">Rendered source detail for the selected Systems monster combatant.</p>
           </div>
-          <div class="hero-actions">
-            <a class="ghost-button" href="{{ combat_status_systems_entry.href }}">Open Systems entry</a>
-          </div>
-        </div>
-        <div class="badge-list">
-          <span class="meta-badge">HP {{ combat_status_systems_entry.max_hp }}</span>
-          <span class="meta-badge">Speed {{ combat_status_systems_entry.speed_label }}</span>
-          <span class="meta-badge">Init {{ combat_status_systems_entry.initiative_bonus_label }}</span>
         </div>
         {% if combat_status_systems_entry.body_html %}
           <div class="article-body article-body--compact">{{ combat_status_systems_entry.body_html | safe }}</div>
