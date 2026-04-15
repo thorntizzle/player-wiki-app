@@ -85,6 +85,37 @@
             </nav>
           </section>
 
+          {% if session_character_active_edit_scope %}
+            <section class="card combat-workspace-card">
+              <div class="section-heading">
+                <div>
+                  <h2>Session editing scope</h2>
+                  <p class="meta">
+                    Keep the Session character surface focused on live play. Use the full character page for broader sheet maintenance.
+                  </p>
+                </div>
+              </div>
+              <div class="detail-grid">
+                <article class="detail-card">
+                  <h3>Edit here during an active session</h3>
+                  <ul class="plain-list slot-list">
+                    {% for item in session_character_active_edit_scope %}
+                      <li>{{ item }}</li>
+                    {% endfor %}
+                  </ul>
+                </article>
+                <article class="detail-card">
+                  <h3>Use the full character page for</h3>
+                  <ul class="plain-list slot-list">
+                    {% for item in session_character_outside_edit_scope %}
+                      <li>{{ item }}</li>
+                    {% endfor %}
+                  </ul>
+                </article>
+              </div>
+            </section>
+          {% endif %}
+
           {% set show_overview_sections = character_subpage == 'overview' %}
           {% set show_quick_sections = show_overview_sections %}
           {% set show_spellcasting_sections = character_subpage == 'spells' %}

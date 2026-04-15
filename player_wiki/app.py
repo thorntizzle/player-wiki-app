@@ -206,6 +206,22 @@ SESSION_CHARACTER_FULL_SHEET_PAGE_MAP = {
     "notes": ("notes", ""),
     "personal": ("personal", ""),
 }
+SESSION_CHARACTER_ACTIVE_EDIT_SCOPE = (
+    "Vitals and rests on Overview",
+    "Tracked resource counts and spell slot usage",
+    "Inventory quantities and currency totals",
+    "Player notes",
+)
+SESSION_CHARACTER_FULL_PAGE_ONLY_SCOPE = (
+    "Portrait, physical description, and background details",
+    "Spell-list changes and other non-slot spell management",
+    "Equipment state and broader inventory or equipment maintenance",
+    "Advanced character edit, level-up, retraining, and controls",
+)
+SESSION_CHARACTER_PERSONAL_EDIT_BLOCK_MESSAGE = (
+    "Portrait, physical description, and background changes stay on the full character page so "
+    "this Session surface stays focused on live play."
+)
 COMBAT_SUBPAGE_LABELS = {
     "combat": "Combat",
     "character": "Character",
@@ -2934,6 +2950,9 @@ def create_app() -> Flask:
         session_surface_return_url = ""
         session_surface_short_rest_url = ""
         session_surface_long_rest_url = ""
+        session_personal_editing_enabled = False
+        session_personal_edit_block_message = ""
+        session_personal_edit_block_href = ""
 
         if selected_character_slug:
             record = accessible_records_by_slug[selected_character_slug]
@@ -3027,6 +3046,17 @@ def create_app() -> Flask:
                 page=character_subpage,
                 confirm_rest="long",
             )
+            session_personal_edit_block_href = (
+                build_session_character_read_view_url(
+                    campaign.slug,
+                    selected_character_slug,
+                    "personal",
+                )
+                if can_view_full_character_sheet
+                else ""
+            )
+            if session_character_editing_enabled:
+                session_personal_edit_block_message = SESSION_CHARACTER_PERSONAL_EDIT_BLOCK_MESSAGE
 
         return {
             "campaign": campaign,
@@ -3057,6 +3087,15 @@ def create_app() -> Flask:
             "is_session_mode": session_character_editing_enabled,
             "rest_preview": rest_preview,
             "session_character_editing_enabled": session_character_editing_enabled,
+            "session_character_active_edit_scope": (
+                SESSION_CHARACTER_ACTIVE_EDIT_SCOPE if session_character_editing_enabled else ()
+            ),
+            "session_character_outside_edit_scope": (
+                SESSION_CHARACTER_FULL_PAGE_ONLY_SCOPE if session_character_editing_enabled else ()
+            ),
+            "session_personal_editing_enabled": session_personal_editing_enabled,
+            "session_personal_edit_block_message": session_personal_edit_block_message,
+            "session_personal_edit_block_href": session_personal_edit_block_href,
             "session_return_view": "session-character",
             "session_surface_return_url": session_surface_return_url,
             "session_surface_short_rest_url": session_surface_short_rest_url,
@@ -8786,6 +8825,13 @@ def create_app() -> Flask:
         physical_description_markdown = request.form.get("physical_description_markdown", "")
         background_markdown = request.form.get("background_markdown", "")
         return_to_session_mode = request.form.get("mode", "").strip().lower() == "session"
+        if is_session_character_return_requested(campaign_slug, character_slug):
+            flash(SESSION_CHARACTER_PERSONAL_EDIT_BLOCK_MESSAGE, "error")
+            return redirect_to_campaign_session_character(
+                campaign_slug,
+                character_slug,
+                anchor="session-personal-guidance",
+            )
         inactive_session_redirect = ensure_active_session_for_session_character_mutation(
             campaign_slug,
             character_slug,

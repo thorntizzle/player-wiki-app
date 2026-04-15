@@ -206,35 +206,47 @@
   </section>
   {% endif %}
 
-  {% if show_personal_sections %}
-  <section class="read-section" id="session-personal">
-    <div class="section-heading">
-      <h2>Personal</h2>
-    </div>
-    <article class="detail-card session-card">
-      <form
-        class="stack-form"
-        method="post"
-        action="{{ url_for('character_session_personal', campaign_slug=campaign.slug, character_slug=character.slug) }}"
-      >
-        <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
-        <input type="hidden" name="mode" value="session">
-        <input type="hidden" name="page" value="{{ character_subpage }}">
-        {% if session_return_view %}
-          <input type="hidden" name="return_view" value="{{ session_return_view }}">
+  {% if show_personal_sections and (session_personal_editing_enabled | default(true)) %}
+    <section class="read-section" id="session-personal">
+      <div class="section-heading">
+        <h2>Personal</h2>
+      </div>
+      <article class="detail-card session-card">
+        <form
+          class="stack-form"
+          method="post"
+          action="{{ url_for('character_session_personal', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+        >
+          <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+          <input type="hidden" name="mode" value="session">
+          <input type="hidden" name="page" value="{{ character_subpage }}">
+          {% if session_return_view %}
+            <input type="hidden" name="return_view" value="{{ session_return_view }}">
+          {% endif %}
+          <label class="field">
+            <span>Physical Description</span>
+            <textarea name="physical_description_markdown">{{ character.physical_description_markdown }}</textarea>
+          </label>
+          <label class="field">
+            <span>Background</span>
+            <textarea name="background_markdown">{{ character.personal_background_markdown }}</textarea>
+          </label>
+          <button type="submit">Save personal details</button>
+        </form>
+      </article>
+    </section>
+  {% elif show_personal_sections and (session_personal_edit_block_message | default("")) %}
+    <section class="read-section" id="session-personal-guidance">
+      <div class="section-heading">
+        <h2>Personal</h2>
+      </div>
+      <article class="detail-card session-card">
+        <p>{{ session_personal_edit_block_message }}</p>
+        {% if session_personal_edit_block_href | default("") %}
+          <a class="ghost-button" href="{{ session_personal_edit_block_href }}">Open full character page</a>
         {% endif %}
-        <label class="field">
-          <span>Physical Description</span>
-          <textarea name="physical_description_markdown">{{ character.physical_description_markdown }}</textarea>
-        </label>
-        <label class="field">
-          <span>Background</span>
-          <textarea name="background_markdown">{{ character.personal_background_markdown }}</textarea>
-        </label>
-        <button type="submit">Save personal details</button>
-      </form>
-    </article>
-  </section>
+      </article>
+    </section>
   {% endif %}
 
   {% if show_note_sections %}

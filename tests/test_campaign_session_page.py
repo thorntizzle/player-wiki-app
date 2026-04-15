@@ -322,6 +322,86 @@ def test_session_character_page_shows_edit_controls_only_while_session_is_active
     ) in html
 
 
+def test_session_character_page_explains_active_session_edit_scope(
+    client, sign_in, users, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    response = client.get(
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&page=overview"
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Session editing scope" in html
+    assert "Edit here during an active session" in html
+    assert "Vitals and rests on Overview" in html
+    assert "Tracked resource counts and spell slot usage" in html
+    assert "Inventory quantities and currency totals" in html
+    assert "Player notes" in html
+    assert "Use the full character page for" in html
+    assert "Portrait, physical description, and background details" in html
+    assert "Spell-list changes and other non-slot spell management" in html
+
+
+def test_session_character_personal_updates_stay_on_full_character_page(
+    client, sign_in, users, get_character, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    personal_page = client.get(
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&page=personal"
+    )
+
+    assert personal_page.status_code == 200
+    personal_html = personal_page.get_data(as_text=True)
+    assert "Save personal details" not in personal_html
+    assert (
+        "Portrait, physical description, and background changes stay on the full character page "
+        "so this Session surface stays focused on live play."
+    ) in personal_html
+    assert f'/campaigns/linden-pass/characters/{ASSIGNED_CHARACTER_SLUG}?page=personal' in personal_html
+
+    record = get_character(ASSIGNED_CHARACTER_SLUG)
+    assert record is not None
+    original_notes = dict(record.state_record.state.get("notes") or {})
+
+    response = client.post(
+        f"/campaigns/linden-pass/characters/{ASSIGNED_CHARACTER_SLUG}/session/personal",
+        data={
+            "expected_revision": record.state_record.revision,
+            "physical_description_markdown": "Session-only personal edit.",
+            "background_markdown": "Should stay off the Session tab.",
+            "mode": "session",
+            "page": "personal",
+            "return_view": "session-character",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Save personal details" not in html
+    assert (
+        "Portrait, physical description, and background changes stay on the full character page "
+        "so this Session surface stays focused on live play."
+    ) in html
+
+    updated = get_character(ASSIGNED_CHARACTER_SLUG)
+    assert updated is not None
+    updated_notes = dict(updated.state_record.state.get("notes") or {})
+    assert updated_notes.get("physical_description_markdown") == original_notes.get("physical_description_markdown")
+    assert updated_notes.get("background_markdown") == original_notes.get("background_markdown")
+
+
 def test_session_character_state_save_redirects_back_to_session_surface(
     client, sign_in, users, get_character, set_campaign_visibility
 ):
