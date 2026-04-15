@@ -420,14 +420,11 @@ def test_dm_page_async_mutations_return_controls_partial_and_non_async_redirects
     assert redirect_response.headers["Location"].endswith("/campaigns/linden-pass/combat/dm#combat-tracker")
 
 
-def test_dm_combat_tracker_cards_use_inline_edit_controls(app, client, sign_in, users):
+def test_dm_pages_split_tactical_status_edits_from_control_authority_actions(
+    app, client, sign_in, users
+):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
-    client.post(
-        "/campaigns/linden-pass/combat/player-combatants",
-        data={"character_slug": "arden-march", "turn_value": 18},
-        follow_redirects=False,
-    )
     client.post(
         "/campaigns/linden-pass/combat/npc-combatants",
         data={
@@ -440,17 +437,81 @@ def test_dm_combat_tracker_cards_use_inline_edit_controls(app, client, sign_in, 
         },
         follow_redirects=False,
     )
+    hound = _find_combatant(app, name="Clockwork Hound")
+    assert hound is not None
 
-    response = client.get("/campaigns/linden-pass/combat/dm")
+    status_response = client.get(f"/campaigns/linden-pass/combat/status?combatant={hound.id}")
+    controls_response = client.get(f"/campaigns/linden-pass/combat/dm?combatant={hound.id}")
+
+    assert status_response.status_code == 200
+    assert controls_response.status_code == 200
+
+    status_body = status_response.get_data(as_text=True)
+    controls_body = controls_response.get_data(as_text=True)
+
+    assert "Status edits" in status_body
+    assert 'name="combat_view" value="status"' in status_body
+    assert "Save HP" in status_body
+    assert "Save temp HP" in status_body
+    assert "Save movement" in status_body
+    assert "Save action economy" in status_body
+    assert "Set current turn" in status_body
+    assert "combat-status-mutation" in status_body
+    assert "hasFocusedFormControl" in status_body
+
+    assert "Selected combatant authority" in controls_body
+    assert "Open Encounter status" in controls_body
+    assert "Save turn value" in controls_body
+    assert "Show NPC detail to players" in controls_body
+    assert "Save NPC structure" in controls_body
+    assert "Remove combatant" in controls_body
+    assert "Save HP" not in controls_body
+    assert "Save temp HP" not in controls_body
+    assert "Save movement" not in controls_body
+    assert "Save action economy" not in controls_body
+
+
+def test_status_page_async_mutations_return_status_partials_and_keep_selected_target(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+    hound = _find_combatant(app, name="Clockwork Hound")
+    assert hound is not None
+
+    response = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{hound.id}/resources",
+        data={
+            "combat_view": "status",
+            "combatant": hound.id,
+            "has_action": "1",
+            "movement_remaining": 10,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
 
     assert response.status_code == 200
-    body = response.get_data(as_text=True)
-    assert "combat-badge--editable" in body
-    assert 'data-combat-inline-autosubmit' in body
-    assert 'data-combat-inline-submit-on-change="1"' in body
-    assert "Save vitals" not in body
-    assert "Save resources" not in body
-    assert "Save turn" not in body
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["selected_combatant_id"] == hound.id
+    assert "Combat resources updated." in payload["flash_html"]
+    assert "Status edits" in payload["detail_html"]
+    assert 'name="combat_view" value="status"' in payload["detail_html"]
+    assert "Save movement" in payload["detail_html"]
+    assert "Turn order" in payload["board_html"]
 
 
 def test_dm_can_add_player_character_and_npc_combatants_and_turn_order_sorts_high_to_low(

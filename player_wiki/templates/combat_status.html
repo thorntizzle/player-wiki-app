@@ -20,6 +20,12 @@
       <p>This campaign uses {{ campaign.system or "an unknown system" }}, and the current combat tracker is only implemented for DND-5E right now.</p>
     </section>
   {% else %}
+    <datalist id="combat-condition-options">
+      {% for option in combat_condition_options %}
+        <option value="{{ option }}"></option>
+      {% endfor %}
+    </datalist>
+
     <div
       class="page-layout combat-status-layout"
       data-combat-status-live-root

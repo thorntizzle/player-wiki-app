@@ -1,0 +1,222 @@
+{% if selected_combatant and can_manage_combat %}
+  <section class="card combat-status-edit-card">
+    <div class="section-heading">
+      <div>
+        <h2>Status edits</h2>
+        <p class="meta">Encounter status owns current HP, temp HP, movement, action economy, conditions, and setting the active turn for the selected combatant. Encounter controls keeps initiative changes, structural NPC edits, player-visibility toggles, removal, seeding, and cleanup.</p>
+      </div>
+      <div class="hero-actions">
+        {% if not selected_combatant.is_current_turn %}
+          <form
+            method="post"
+            action="{{ url_for('campaign_combat_set_current_turn', campaign_slug=campaign.slug, combatant_id=selected_combatant.id) }}"
+            data-combat-async
+          >
+            <input type="hidden" name="combat_view" value="status">
+            <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
+            <button type="submit">Set current turn</button>
+          </form>
+        {% else %}
+          <span class="combat-badge combat-badge--active">Current turn</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="combat-stat-grid">
+      {% if selected_combatant.can_edit_vitals %}
+        <form
+          method="post"
+          action="{{ url_for('campaign_combat_update_vitals', campaign_slug=campaign.slug, combatant_id=selected_combatant.id) }}"
+          class="combat-stat combat-stat--editable"
+          data-combat-async
+        >
+          <input type="hidden" name="combat_view" value="status">
+          <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
+          {% if selected_combatant.state_revision is not none %}
+            <input type="hidden" name="expected_revision" value="{{ selected_combatant.state_revision }}">
+          {% endif %}
+          <input type="hidden" name="temp_hp" value="{{ selected_combatant.temp_hp }}">
+          {% if selected_combatant.can_manage_combat and not selected_combatant.character_slug %}
+            <input type="hidden" name="max_hp" value="{{ selected_combatant.max_hp }}">
+            <input type="hidden" name="movement_total" value="{{ selected_combatant.movement_total }}">
+          {% endif %}
+          <span class="meta">HP</span>
+          <div class="combat-inline-value">
+            <input
+              class="combat-stat-input combat-stat-input--number"
+              type="number"
+              name="current_hp"
+              value="{{ selected_combatant.current_hp }}"
+              aria-label="Current HP for {{ selected_combatant.name }}"
+            >
+            <span class="combat-inline-divider">/</span>
+            <strong>{{ selected_combatant.max_hp }}</strong>
+          </div>
+          <div class="combat-form-actions">
+            <button type="submit">Save HP</button>
+          </div>
+        </form>
+        <form
+          method="post"
+          action="{{ url_for('campaign_combat_update_vitals', campaign_slug=campaign.slug, combatant_id=selected_combatant.id) }}"
+          class="combat-stat combat-stat--editable"
+          data-combat-async
+        >
+          <input type="hidden" name="combat_view" value="status">
+          <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
+          {% if selected_combatant.state_revision is not none %}
+            <input type="hidden" name="expected_revision" value="{{ selected_combatant.state_revision }}">
+          {% endif %}
+          <input type="hidden" name="current_hp" value="{{ selected_combatant.current_hp }}">
+          {% if selected_combatant.can_manage_combat and not selected_combatant.character_slug %}
+            <input type="hidden" name="max_hp" value="{{ selected_combatant.max_hp }}">
+            <input type="hidden" name="movement_total" value="{{ selected_combatant.movement_total }}">
+          {% endif %}
+          <span class="meta">Temp HP</span>
+          <input
+            class="combat-stat-input combat-stat-input--single"
+            type="number"
+            name="temp_hp"
+            value="{{ selected_combatant.temp_hp }}"
+            aria-label="Temp HP for {{ selected_combatant.name }}"
+          >
+          <div class="combat-form-actions">
+            <button type="submit">Save temp HP</button>
+          </div>
+        </form>
+      {% else %}
+        <div class="combat-stat">
+          <span class="meta">HP</span>
+          <strong>{{ selected_combatant.current_hp }} / {{ selected_combatant.max_hp }}</strong>
+        </div>
+        <div class="combat-stat">
+          <span class="meta">Temp HP</span>
+          <strong>{{ selected_combatant.temp_hp }}</strong>
+        </div>
+      {% endif %}
+
+      {% if selected_combatant.can_edit_resources %}
+        <form
+          method="post"
+          action="{{ url_for('campaign_combat_update_resources', campaign_slug=campaign.slug, combatant_id=selected_combatant.id) }}"
+          class="combat-stat combat-stat--editable"
+          data-combat-async
+        >
+          <input type="hidden" name="combat_view" value="status">
+          <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
+          <input type="hidden" name="has_action" value="{{ '1' if selected_combatant.has_action else '0' }}">
+          <input type="hidden" name="has_bonus_action" value="{{ '1' if selected_combatant.has_bonus_action else '0' }}">
+          <input type="hidden" name="has_reaction" value="{{ '1' if selected_combatant.has_reaction else '0' }}">
+          <span class="meta">Movement</span>
+          <div class="combat-inline-value">
+            <input
+              class="combat-stat-input combat-stat-input--number"
+              type="number"
+              name="movement_remaining"
+              value="{{ selected_combatant.movement_remaining or 0 }}"
+              aria-label="Remaining movement for {{ selected_combatant.name }}"
+            >
+            <span class="combat-inline-divider">/</span>
+            <strong>{{ selected_combatant.movement_total }}</strong>
+          </div>
+          <div class="combat-form-actions">
+            <button type="submit">Save movement</button>
+          </div>
+        </form>
+      {% else %}
+        <div class="combat-stat">
+          <span class="meta">Movement</span>
+          <strong>{{ selected_combatant.movement_remaining }} / {{ selected_combatant.movement_total }}</strong>
+        </div>
+      {% endif %}
+
+      <div class="combat-stat">
+        <span class="meta">Speed</span>
+        <strong>{{ selected_combatant.speed_label }}</strong>
+      </div>
+    </div>
+
+    {% if selected_combatant.can_edit_resources %}
+      <form
+        method="post"
+        action="{{ url_for('campaign_combat_update_resources', campaign_slug=campaign.slug, combatant_id=selected_combatant.id) }}"
+        class="combat-resource-strip combat-inline-resource-form"
+        data-combat-async
+      >
+        <input type="hidden" name="combat_view" value="status">
+        <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
+        <input type="hidden" name="movement_remaining" value="{{ selected_combatant.movement_remaining or 0 }}">
+        <label class="combat-resource-toggle">
+          <input type="checkbox" name="has_action" value="1" {% if selected_combatant.has_action %}checked{% endif %}>
+          <span class="combat-resource">Action</span>
+        </label>
+        <label class="combat-resource-toggle">
+          <input type="checkbox" name="has_bonus_action" value="1" {% if selected_combatant.has_bonus_action %}checked{% endif %}>
+          <span class="combat-resource">Bonus Action</span>
+        </label>
+        <label class="combat-resource-toggle">
+          <input type="checkbox" name="has_reaction" value="1" {% if selected_combatant.has_reaction %}checked{% endif %}>
+          <span class="combat-resource">Reaction</span>
+        </label>
+        <div class="combat-form-actions">
+          <button type="submit">Save action economy</button>
+        </div>
+      </form>
+    {% endif %}
+
+    <section class="combat-conditions combat-conditions--compact">
+      <div class="section-heading">
+        <h3>Conditions</h3>
+        <p class="meta">Use Encounter controls for visibility policy or removing the combatant entirely; use Encounter status to keep tactical condition state current.</p>
+      </div>
+      {% if selected_combatant.conditions %}
+        <div class="combat-condition-list">
+          {% for condition in selected_combatant.conditions %}
+            <div class="combat-condition-item">
+              <div>
+                <strong>{{ condition.name }}</strong>
+                {% if condition.duration_text %}
+                  <p class="meta">{{ condition.duration_text }}</p>
+                {% endif %}
+              </div>
+              <form
+                method="post"
+                action="{{ url_for('campaign_combat_delete_condition', campaign_slug=campaign.slug, condition_id=condition.id) }}"
+                data-combat-async
+              >
+                <input type="hidden" name="combat_view" value="status">
+                <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
+                <button class="ghost-button" type="submit">Remove</button>
+              </form>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="meta">No conditions are active on this combatant.</p>
+      {% endif %}
+
+      <form
+        method="post"
+        action="{{ url_for('campaign_combat_add_condition', campaign_slug=campaign.slug, combatant_id=selected_combatant.id) }}"
+        class="stack-form combat-form"
+        data-combat-async
+      >
+        <input type="hidden" name="combat_view" value="status">
+        <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
+        <div class="combat-form-grid">
+          <label class="field">
+            <span>Condition</span>
+            <input type="text" name="condition_name" list="combat-condition-options" placeholder="Condition name">
+          </label>
+          <label class="field">
+            <span>Duration</span>
+            <input type="text" name="duration_text" placeholder="Until end of next turn">
+          </label>
+        </div>
+        <div class="combat-form-actions">
+          <button type="submit">Add condition</button>
+        </div>
+      </form>
+    </section>
+  </section>
+{% endif %}

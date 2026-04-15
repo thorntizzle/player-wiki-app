@@ -4,6 +4,10 @@
       {% include "_combat_status_snapshot.html" %}
     </div>
 
+    <div>
+      {% include "_combat_status_edit_panel.html" %}
+    </div>
+
     {% if combat_status_source_mode == "character" and selected_combat_character %}
       {% with
         combat_workspace_title="Character sections",

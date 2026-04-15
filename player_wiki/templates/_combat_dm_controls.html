@@ -3,6 +3,88 @@
   <p class="meta">Use this page for setup, seeding, cleanup, and other DM authority actions while Encounter status stays focused on one selected combatant.</p>
 </section>
 
+{% if selected_combatant %}
+  <section class="card sidebar-card">
+    <h2>Selected combatant authority</h2>
+    <p class="meta">Encounter status owns current HP, temp HP, movement, action economy, and conditions. Keep initiative/order changes, structural NPC edits, player visibility, and removal here.</p>
+
+    <form
+      method="post"
+      action="{{ url_for('campaign_combat_update_turn_value', campaign_slug=campaign.slug, combatant_id=selected_combatant.id) }}"
+      class="stack-form"
+      data-combat-async
+    >
+      <input type="hidden" name="combat_view" value="dm">
+      <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
+      <label class="field">
+        <span>Turn value</span>
+        <input type="number" name="turn_value" value="{{ selected_combatant.turn_value }}">
+      </label>
+      <button type="submit">Save turn value</button>
+    </form>
+
+    {% if selected_combatant.can_toggle_player_detail_visibility %}
+      <form
+        method="post"
+        action="{{ url_for('campaign_combat_update_player_detail_visibility', campaign_slug=campaign.slug, combatant_id=selected_combatant.id) }}"
+        class="stack-form combat-form combat-form--compact"
+        data-combat-async
+      >
+        <input type="hidden" name="combat_view" value="dm">
+        <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
+        <input type="hidden" name="player_detail_visible" value="{{ '0' if selected_combatant.player_detail_visible else '1' }}">
+        <p class="meta">
+          {% if selected_combatant.player_detail_visible %}
+            Players can currently see this NPC's vitals and action economy.
+          {% else %}
+            Players currently see only this NPC's name, turn information, and conditions.
+          {% endif %}
+        </p>
+        <button type="submit">
+          {% if selected_combatant.player_detail_visible %}
+            Hide NPC detail from players
+          {% else %}
+            Show NPC detail to players
+          {% endif %}
+        </button>
+      </form>
+    {% endif %}
+
+    {% if selected_combatant.can_manage_combat and not selected_combatant.character_slug %}
+      <form
+        method="post"
+        action="{{ url_for('campaign_combat_update_vitals', campaign_slug=campaign.slug, combatant_id=selected_combatant.id) }}"
+        class="stack-form"
+        data-combat-async
+      >
+        <input type="hidden" name="combat_view" value="dm">
+        <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
+        <input type="hidden" name="current_hp" value="{{ selected_combatant.current_hp }}">
+        <input type="hidden" name="temp_hp" value="{{ selected_combatant.temp_hp }}">
+        <label class="field">
+          <span>Max HP</span>
+          <input type="number" name="max_hp" value="{{ selected_combatant.max_hp }}">
+        </label>
+        <label class="field">
+          <span>Speed</span>
+          <input type="number" name="movement_total" value="{{ selected_combatant.movement_total }}">
+        </label>
+        <button type="submit">Save NPC structure</button>
+      </form>
+    {% endif %}
+
+    <form
+      method="post"
+      action="{{ url_for('campaign_combat_delete_combatant', campaign_slug=campaign.slug, combatant_id=selected_combatant.id) }}"
+      data-combat-async
+    >
+      <input type="hidden" name="combat_view" value="dm">
+      <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
+      <button class="ghost-button" type="submit">Remove combatant</button>
+    </form>
+  </section>
+{% endif %}
+
 <section class="card sidebar-card">
   <h2>Add player character</h2>
   {% if available_character_choices %}

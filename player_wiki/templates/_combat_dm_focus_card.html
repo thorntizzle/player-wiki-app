@@ -1,0 +1,90 @@
+<section class="section-block" id="combat-tracker">
+  <div class="section-heading">
+    <div>
+      <h2>Selected combatant</h2>
+      <p class="meta">Encounter status handles tactical state changes for the focused combatant. Encounter controls stays focused on initiative, authority, seeding, cleanup, and selected-combatant policy actions.</p>
+    </div>
+  </div>
+
+  {% if selected_combatant %}
+    <article class="card combatant-card{% if selected_combatant.is_current_turn %} combatant-card--current{% endif %}" id="combatant-{{ selected_combatant.id }}">
+      <div class="combatant-card__header">
+        <div>
+          <p class="card-kicker">{{ selected_combatant.type_label }}</p>
+          <h3>{{ selected_combatant.name }}</h3>
+          {% if selected_combatant.subtitle %}
+            <p class="meta">{{ selected_combatant.subtitle }}</p>
+          {% endif %}
+        </div>
+        <div class="combatant-badges">
+          <span class="combat-badge">Turn {{ selected_combatant.turn_value }}</span>
+          {% if selected_combatant.initiative_bonus_label and selected_combatant.initiative_bonus_label != "0" %}
+            <span class="combat-badge combat-badge--muted">Init {{ selected_combatant.initiative_bonus_label }}</span>
+          {% endif %}
+          {% if selected_combatant.is_current_turn %}
+            <span class="combat-badge combat-badge--active">Current turn</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="combat-stat-grid">
+        <div class="combat-stat">
+          <span class="meta">HP</span>
+          <strong>{{ selected_combatant.current_hp }} / {{ selected_combatant.max_hp }}</strong>
+        </div>
+        <div class="combat-stat">
+          <span class="meta">Temp HP</span>
+          <strong>{{ selected_combatant.temp_hp }}</strong>
+        </div>
+        <div class="combat-stat">
+          <span class="meta">Movement</span>
+          <strong>{{ selected_combatant.movement_remaining }} / {{ selected_combatant.movement_total }}</strong>
+        </div>
+        <div class="combat-stat">
+          <span class="meta">Speed</span>
+          <strong>{{ selected_combatant.speed_label }}</strong>
+        </div>
+      </div>
+
+      <div class="combat-resource-strip">
+        <span class="combat-resource{% if selected_combatant.has_action %} combat-resource--ready{% endif %}">Action</span>
+        <span class="combat-resource{% if selected_combatant.has_bonus_action %} combat-resource--ready{% endif %}">Bonus Action</span>
+        <span class="combat-resource{% if selected_combatant.has_reaction %} combat-resource--ready{% endif %}">Reaction</span>
+      </div>
+
+      <section class="combat-conditions combat-conditions--compact">
+        <div class="section-heading">
+          <h4>Conditions</h4>
+          <p class="meta">Condition edits now live on Encounter status with the rest of the tactical status state.</p>
+        </div>
+        {% if selected_combatant.conditions %}
+          <div class="combat-condition-list">
+            {% for condition in selected_combatant.conditions %}
+              <div class="combat-condition-item">
+                <div>
+                  <strong>{{ condition.name }}</strong>
+                  {% if condition.duration_text %}
+                    <p class="meta">{{ condition.duration_text }}</p>
+                  {% endif %}
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="meta">No conditions are active on this combatant.</p>
+        {% endif %}
+      </section>
+
+      {% if selected_combatant_status_url %}
+        <div class="hero-actions">
+          <a class="button-link" href="{{ selected_combatant_status_url }}">Open Encounter status</a>
+        </div>
+      {% endif %}
+    </article>
+  {% else %}
+    <article class="card">
+      <h3>No selected combatant yet</h3>
+      <p>Add combatants to the tracker, then choose one from the focus picker above to inspect it here or open its Encounter status workspace.</p>
+    </article>
+  {% endif %}
+</section>
