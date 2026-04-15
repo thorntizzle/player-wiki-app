@@ -1499,6 +1499,37 @@ def test_status_live_state_renders_player_workspace_sections_for_selected_pc(
     assert 'data-combat-section-panel="resources"' in payload["detail_html"]
 
 
+def test_status_live_state_renders_npc_workspace_sections_for_selected_systems_monster(
+    app, client, sign_in, users, tmp_path
+):
+    goblin_entry_key = _import_systems_goblin(app, tmp_path)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/systems-monsters",
+        data={"entry_key": goblin_entry_key},
+        follow_redirects=False,
+    )
+
+    goblin = _find_combatant(app, name="Goblin")
+    assert goblin is not None
+
+    response = client.get(
+        f"/campaigns/linden-pass/combat/status/live-state?combatant={goblin.id}",
+        headers=_async_headers(),
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["selected_combatant_id"] == goblin.id
+    assert "NPC sections" in payload["detail_html"]
+    assert 'data-combat-section-group' in payload["detail_html"]
+    assert 'data-combat-section-toggle="actions"' in payload["detail_html"]
+    assert 'data-combat-section-toggle="legendary_actions"' in payload["detail_html"]
+    assert 'data-combat-section-toggle="lair_actions"' in payload["detail_html"]
+    assert 'data-combat-section-toggle="abilities_skills"' in payload["detail_html"]
+    assert 'data-combat-section-panel="traits"' in payload["detail_html"]
+
+
 def test_dm_status_page_sidebar_selection_is_wired_for_in_place_detail_swaps(
     app, client, sign_in, users, tmp_path
 ):
@@ -1553,7 +1584,17 @@ def test_dm_status_page_can_render_systems_monster_detail(app, client, sign_in, 
     assert response.status_code == 200
     body = response.get_data(as_text=True)
     assert 'id="combat-status-snapshot"' in body
-    assert "Systems monster" in body
+    assert "NPC sections" in body
+    assert "Systems monster detail" in body
+    assert 'data-combat-section-group' in body
+    assert 'data-combat-section-toggle="actions"' in body
+    assert 'data-combat-section-toggle="bonus_actions"' in body
+    assert 'data-combat-section-toggle="reactions"' in body
+    assert 'data-combat-section-toggle="legendary_actions"' in body
+    assert 'data-combat-section-toggle="lair_actions"' in body
+    assert 'data-combat-section-toggle="traits"' in body
+    assert 'data-combat-section-toggle="resources"' in body
+    assert 'data-combat-section-toggle="abilities_skills"' in body
     assert "Open Systems entry" in body
     assert "Scimitar" in body
 
@@ -1575,7 +1616,17 @@ def test_dm_status_page_can_render_dm_content_statblock_detail(app, client, sign
     assert response.status_code == 200
     body = response.get_data(as_text=True)
     assert 'id="combat-status-snapshot"' in body
-    assert "DM Content statblock" in body
+    assert "NPC sections" in body
+    assert "DM Content statblock detail" in body
+    assert 'data-combat-section-group' in body
+    assert 'data-combat-section-toggle="actions"' in body
+    assert 'data-combat-section-toggle="bonus_actions"' in body
+    assert 'data-combat-section-toggle="reactions"' in body
+    assert 'data-combat-section-toggle="legendary_actions"' in body
+    assert 'data-combat-section-toggle="lair_actions"' in body
+    assert 'data-combat-section-toggle="traits"' in body
+    assert 'data-combat-section-toggle="resources"' in body
+    assert 'data-combat-section-toggle="abilities_skills"' in body
     assert "Source file: brass-hound.md" in body
     assert "Bite" in body
 

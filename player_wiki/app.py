@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from html import unescape
 import hashlib
 from io import BytesIO
 import json
 import logging
 import mimetypes
 from pathlib import Path
+import re
 import secrets
 import time
 
@@ -185,6 +187,65 @@ COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS = {
     "inventory": "Inventory",
     "abilities_skills": "Abilities and Skills",
 }
+COMBAT_NPC_WORKSPACE_SECTION_LABELS = {
+    "actions": "Actions",
+    "bonus_actions": "Bonus Actions",
+    "reactions": "Reactions",
+    "legendary_actions": "Legendary Actions",
+    "lair_actions": "Lair Actions",
+    "traits": "Traits",
+    "resources": "Resources",
+    "abilities_skills": "Abilities and Skills",
+}
+COMBAT_NPC_WORKSPACE_SECTION_ORDER = tuple(COMBAT_NPC_WORKSPACE_SECTION_LABELS.keys())
+COMBAT_NPC_WORKSPACE_SECTION_EMPTY_MESSAGES = {
+    "actions": "No source-backed actions are recorded for this combatant.",
+    "bonus_actions": "No bonus actions are recorded for this combatant.",
+    "reactions": "No reactions are recorded for this combatant.",
+    "legendary_actions": "No legendary actions are recorded for this combatant.",
+    "lair_actions": "No lair actions are recorded for this combatant.",
+    "traits": "No source-backed traits are recorded for this combatant.",
+    "resources": "No source-backed resources are recorded for this combatant.",
+    "abilities_skills": "No ability or skill detail is recorded for this combatant.",
+}
+COMBAT_NPC_WORKSPACE_SECTION_HEADING_ALIASES = {
+    normalize_lookup("action"): "actions",
+    normalize_lookup("actions"): "actions",
+    normalize_lookup("bonus action"): "bonus_actions",
+    normalize_lookup("bonus actions"): "bonus_actions",
+    normalize_lookup("reaction"): "reactions",
+    normalize_lookup("reactions"): "reactions",
+    normalize_lookup("legendary action"): "legendary_actions",
+    normalize_lookup("legendary actions"): "legendary_actions",
+    normalize_lookup("lair action"): "lair_actions",
+    normalize_lookup("lair actions"): "lair_actions",
+    normalize_lookup("trait"): "traits",
+    normalize_lookup("traits"): "traits",
+    normalize_lookup("resource"): "resources",
+    normalize_lookup("resources"): "resources",
+    normalize_lookup("abilities and skills"): "abilities_skills",
+    normalize_lookup("abilities & skills"): "abilities_skills",
+    normalize_lookup("ability scores"): "abilities_skills",
+    normalize_lookup("skills"): "abilities_skills",
+    normalize_lookup("saving throws"): "abilities_skills",
+}
+COMBAT_NPC_ABILITY_LABELS = {
+    "str": "Strength",
+    "dex": "Dexterity",
+    "con": "Constitution",
+    "int": "Intelligence",
+    "wis": "Wisdom",
+    "cha": "Charisma",
+}
+COMBAT_NPC_ABILITY_ORDER = tuple(COMBAT_NPC_ABILITY_LABELS.keys())
+COMBAT_NPC_HTML_HEADING_PATTERN = re.compile(
+    r"<h(?P<level>[1-6])\b[^>]*>(?P<title>.*?)</h(?P=level)>",
+    re.IGNORECASE | re.DOTALL,
+)
+COMBAT_NPC_HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
+COMBAT_NPC_STATBLOCK_ABILITY_PATTERN = re.compile(
+    r"(?i)\b(?P<key>STR|DEX|CON|INT|WIS|CHA)\s+(?P<score>\d+)(?:\s*\((?P<modifier>[+-]?\d+)\))?"
+)
 BUILDER_RELEVANT_CAMPAIGN_SECTIONS = frozenset(
     {
         CAMPAIGN_MECHANICS_SECTION,
@@ -2627,6 +2688,260 @@ def create_app() -> Flask:
 
         return selected_target
 
+    def _combat_npc_heading_text(value: object) -> str:
+        return " ".join(
+            unescape(COMBAT_NPC_HTML_TAG_PATTERN.sub("", str(value or ""))).split()
+        )
+
+    def _combat_npc_heading_slug(value: object) -> str:
+        return COMBAT_NPC_WORKSPACE_SECTION_HEADING_ALIASES.get(
+            normalize_lookup(_combat_npc_heading_text(value)),
+            "",
+        )
+
+    def _combat_npc_format_bonus(value: object) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            normalized = value.strip()
+            if not normalized:
+                return ""
+            if re.fullmatch(r"[+-]?\d+", normalized):
+                return format_signed(int(normalized))
+            return normalized
+        if isinstance(value, (int, float)):
+            return format_signed(int(value))
+        return str(value).strip()
+
+    def _combat_npc_format_named_value(name: object) -> str:
+        raw_name = str(name or "").strip().replace("_", " ")
+        if not raw_name:
+            return ""
+        normalized = normalize_lookup(raw_name)
+        if normalized in COMBAT_NPC_ABILITY_LABELS:
+            return COMBAT_NPC_ABILITY_LABELS[normalized]
+        return raw_name.title()
+
+    def _combat_npc_extract_statblock_line(markdown_text: str, label: str) -> str:
+        pattern = re.compile(
+            rf"(?im)^\s*\*{{0,2}}{re.escape(label)}\*{{0,2}}\s*:?\s*(?P<value>.+?)\s*$"
+        )
+        match = pattern.search(markdown_text or "")
+        return str(match.group("value") if match is not None else "").strip()
+
+    def _combat_npc_parse_named_bonus_items(markdown_text: str, label: str) -> list[dict[str, str]]:
+        line = _combat_npc_extract_statblock_line(markdown_text, label)
+        if not line:
+            return []
+        entries: list[dict[str, str]] = []
+        for match in re.finditer(r"(?P<name>[A-Za-z][A-Za-z' /()-]*?)\s*(?P<bonus>[+-]\d+)\b", line):
+            name = _combat_npc_format_named_value(match.group("name"))
+            bonus = _combat_npc_format_bonus(match.group("bonus"))
+            if not name or not bonus:
+                continue
+            entries.append({"name": name, "bonus": bonus})
+        return entries
+
+    def _combat_npc_build_ability_rows(
+        raw_scores: dict[str, object],
+        *,
+        raw_saves: dict[str, object] | None = None,
+    ) -> list[dict[str, str]]:
+        rows: list[dict[str, str]] = []
+        save_lookup = raw_saves or {}
+        for ability_key in COMBAT_NPC_ABILITY_ORDER:
+            raw_score = raw_scores.get(ability_key)
+            try:
+                score = int(raw_score)
+            except (TypeError, ValueError):
+                continue
+            modifier = (score - 10) // 2
+            save_bonus = _combat_npc_format_bonus(save_lookup.get(ability_key))
+            if not save_bonus:
+                save_bonus = format_signed(modifier)
+            rows.append(
+                {
+                    "abbr": ability_key.upper(),
+                    "name": COMBAT_NPC_ABILITY_LABELS[ability_key],
+                    "score": str(score),
+                    "modifier": format_signed(modifier),
+                    "save_bonus": save_bonus,
+                }
+            )
+        return rows
+
+    def _combat_npc_parse_statblock_abilities(markdown_text: str) -> dict[str, int]:
+        score_lookup: dict[str, int] = {}
+        for match in COMBAT_NPC_STATBLOCK_ABILITY_PATTERN.finditer(markdown_text or ""):
+            ability_key = normalize_lookup(match.group("key"))
+            if ability_key not in COMBAT_NPC_ABILITY_LABELS:
+                continue
+            if ability_key in score_lookup:
+                continue
+            score_lookup[ability_key] = int(match.group("score"))
+        return score_lookup
+
+    def _combat_npc_parse_html_blocks_by_section(body_html: str) -> dict[str, list[dict[str, str]]]:
+        section_blocks = {slug: [] for slug in COMBAT_NPC_WORKSPACE_SECTION_ORDER}
+        normalized_html = str(body_html or "").strip()
+        if not normalized_html:
+            return section_blocks
+
+        heading_matches = list(COMBAT_NPC_HTML_HEADING_PATTERN.finditer(normalized_html))
+        if not heading_matches:
+            section_blocks["actions"].append({"title": "", "body_html": normalized_html})
+            return section_blocks
+
+        active_slug = ""
+        for index, heading_match in enumerate(heading_matches):
+            next_start = (
+                heading_matches[index + 1].start()
+                if index + 1 < len(heading_matches)
+                else len(normalized_html)
+            )
+            title = _combat_npc_heading_text(heading_match.group("title"))
+            section_slug = _combat_npc_heading_slug(heading_match.group("title"))
+            body_fragment = normalized_html[heading_match.end() : next_start].strip()
+            if section_slug:
+                active_slug = section_slug
+                if body_fragment:
+                    section_blocks[section_slug].append({"title": "", "body_html": body_fragment})
+                continue
+            target_slug = active_slug or "actions"
+            if not title and not body_fragment:
+                continue
+            section_blocks[target_slug].append(
+                {
+                    "title": title,
+                    "body_html": body_fragment,
+                }
+            )
+        return section_blocks
+
+    def _combat_npc_build_systems_abilities_skills_payload(
+        metadata: dict[str, object],
+    ) -> dict[str, object]:
+        raw_abilities_value = metadata.get("abilities")
+        raw_saving_throws_value = metadata.get("saving_throws")
+        raw_skills_value = metadata.get("skills")
+        raw_abilities = dict(raw_abilities_value) if isinstance(raw_abilities_value, dict) else {}
+        raw_saving_throws = (
+            dict(raw_saving_throws_value) if isinstance(raw_saving_throws_value, dict) else {}
+        )
+        raw_skills = dict(raw_skills_value) if isinstance(raw_skills_value, dict) else {}
+        skills = [
+            {
+                "name": _combat_npc_format_named_value(skill_name),
+                "bonus": _combat_npc_format_bonus(skill_bonus),
+            }
+            for skill_name, skill_bonus in raw_skills.items()
+            if _combat_npc_format_named_value(skill_name)
+            and _combat_npc_format_bonus(skill_bonus)
+        ]
+        skills.sort(key=lambda item: item["name"])
+        supplemental_rows = []
+        for label, raw_value in (
+            ("Senses", metadata.get("senses")),
+            ("Languages", metadata.get("languages")),
+            ("Challenge", metadata.get("cr")),
+        ):
+            if isinstance(raw_value, list):
+                value = ", ".join(str(item).strip() for item in raw_value if str(item).strip())
+            elif isinstance(raw_value, dict):
+                challenge_rating = str(raw_value.get("cr") or "").strip()
+                challenge_xp = str(raw_value.get("xp") or "").strip()
+                if challenge_rating and challenge_xp:
+                    value = f"{challenge_rating} ({challenge_xp} XP)"
+                else:
+                    value = challenge_rating or challenge_xp
+            else:
+                value = str(raw_value or "").strip()
+            if value:
+                supplemental_rows.append({"label": label, "value": value})
+        return {
+            "abilities": _combat_npc_build_ability_rows(
+                raw_abilities,
+                raw_saves=raw_saving_throws,
+            ),
+            "skills": skills,
+            "supplemental_rows": supplemental_rows,
+            "suppress_html_blocks": True,
+        }
+
+    def _combat_npc_build_statblock_abilities_skills_payload(
+        markdown_text: str,
+    ) -> dict[str, object]:
+        saving_throws = _combat_npc_parse_named_bonus_items(markdown_text, "Saving Throws")
+        save_lookup = {
+            normalize_lookup(entry["name"]): entry["bonus"]
+            for entry in saving_throws
+            if entry.get("name") and entry.get("bonus")
+        }
+        skills = _combat_npc_parse_named_bonus_items(markdown_text, "Skills")
+        supplemental_rows = []
+        for label in ("Senses", "Languages", "Challenge"):
+            value = _combat_npc_extract_statblock_line(markdown_text, label)
+            if value:
+                supplemental_rows.append({"label": label, "value": value})
+        return {
+            "abilities": _combat_npc_build_ability_rows(
+                _combat_npc_parse_statblock_abilities(markdown_text),
+                raw_saves=save_lookup,
+            ),
+            "skills": skills,
+            "supplemental_rows": supplemental_rows,
+            "suppress_html_blocks": False,
+        }
+
+    def build_combat_npc_workspace_sections(
+        *,
+        body_html: str,
+        abilities_skills_payload: dict[str, object] | None = None,
+    ) -> tuple[list[dict[str, object]], str]:
+        parsed_blocks = _combat_npc_parse_html_blocks_by_section(body_html)
+        abilities_payload = dict(abilities_skills_payload or {})
+        abilities = [dict(item or {}) for item in list(abilities_payload.get("abilities") or [])]
+        skills = [dict(item or {}) for item in list(abilities_payload.get("skills") or [])]
+        supplemental_rows = [
+            dict(item or {}) for item in list(abilities_payload.get("supplemental_rows") or [])
+        ]
+        suppress_html_blocks = bool(abilities_payload.get("suppress_html_blocks"))
+        sections: list[dict[str, object]] = []
+        for slug in COMBAT_NPC_WORKSPACE_SECTION_ORDER:
+            blocks = [dict(item or {}) for item in list(parsed_blocks.get(slug) or [])]
+            section_payload: dict[str, object] = {
+                "slug": slug,
+                "label": COMBAT_NPC_WORKSPACE_SECTION_LABELS[slug],
+                "count": len(blocks),
+                "has_content": bool(blocks),
+                "entry_blocks": blocks,
+                "empty_message": COMBAT_NPC_WORKSPACE_SECTION_EMPTY_MESSAGES[slug],
+            }
+            if slug == "abilities_skills":
+                section_payload.update(
+                    {
+                        "abilities": abilities,
+                        "skills": skills,
+                        "supplemental_rows": supplemental_rows,
+                        "suppress_html_blocks": suppress_html_blocks,
+                    }
+                )
+                section_payload["count"] = (
+                    len(skills)
+                    or len(abilities)
+                    or len(supplemental_rows)
+                    or len(blocks)
+                )
+                section_payload["has_content"] = bool(
+                    abilities or skills or supplemental_rows or blocks
+                )
+            sections.append(section_payload)
+
+        default_section = next((section["slug"] for section in sections if section["has_content"]), "actions")
+        for section in sections:
+            section["is_default"] = section["slug"] == default_section
+        return sections, default_section
+
     def build_combat_character_workspace_sections(
         character_detail: dict[str, object],
         equipment_state_manager: dict[str, object],
@@ -3251,6 +3566,13 @@ def create_app() -> Flask:
                     "The linked DM Content statblock is no longer available."
                 )
                 return source_context
+            body_html = render_campaign_markdown(campaign, statblock.body_markdown)
+            workspace_sections, workspace_default_section = build_combat_npc_workspace_sections(
+                body_html=body_html,
+                abilities_skills_payload=_combat_npc_build_statblock_abilities_skills_payload(
+                    statblock.body_markdown
+                ),
+            )
             source_context["combat_status_statblock"] = {
                 "id": statblock.id,
                 "title": statblock.title,
@@ -3263,7 +3585,9 @@ def create_app() -> Flask:
                     if statblock.initiative_bonus > 0
                     else str(statblock.initiative_bonus)
                 ),
-                "body_html": render_campaign_markdown(campaign, statblock.body_markdown),
+                "body_html": body_html,
+                "workspace_sections": workspace_sections,
+                "workspace_default_section": workspace_default_section,
             }
             return source_context
 
@@ -3279,6 +3603,13 @@ def create_app() -> Flask:
                 )
                 return source_context
             monster_seed = get_systems_service().build_monster_combat_seed(systems_entry)
+            body_html = str(systems_entry.rendered_html or "").strip()
+            workspace_sections, workspace_default_section = build_combat_npc_workspace_sections(
+                body_html=body_html,
+                abilities_skills_payload=_combat_npc_build_systems_abilities_skills_payload(
+                    dict(systems_entry.metadata or {})
+                ),
+            )
             source_context["combat_status_systems_entry"] = {
                 "entry_key": systems_entry.entry_key,
                 "entry_slug": systems_entry.slug,
@@ -3296,7 +3627,9 @@ def create_app() -> Flask:
                     if monster_seed.initiative_bonus > 0
                     else str(monster_seed.initiative_bonus)
                 ),
-                "body_html": str(systems_entry.rendered_html or "").strip(),
+                "body_html": body_html,
+                "workspace_sections": workspace_sections,
+                "workspace_default_section": workspace_default_section,
             }
             return source_context
 

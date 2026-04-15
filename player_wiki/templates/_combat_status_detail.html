@@ -12,33 +12,23 @@
         {% include "_combat_player_workspace_sections.html" %}
       {% endwith %}
     {% elif combat_status_source_mode == "dm_statblock" and combat_status_source_available and combat_status_statblock %}
-      <section class="card combat-status-detail-card">
-        <div class="section-heading">
-          <div>
-            <h2>DM Content statblock</h2>
-            <p class="meta">Rendered source detail for the selected DM Content combatant.</p>
-          </div>
-        </div>
-        {% if combat_status_statblock.body_html %}
-          <div class="article-body article-body--compact">{{ combat_status_statblock.body_html | safe }}</div>
-        {% else %}
-          <p class="meta">This statblock does not currently have rendered body text.</p>
-        {% endif %}
-      </section>
+      {% with
+        combat_npc_workspace_sections=combat_status_statblock.workspace_sections,
+        combat_workspace_default_section=combat_status_statblock.workspace_default_section,
+        combat_workspace_title="NPC sections",
+        combat_workspace_meta="Review source-backed DM Content statblock detail through section toggles without leaving Encounter status."
+      %}
+        {% include "_combat_npc_workspace_sections.html" %}
+      {% endwith %}
     {% elif combat_status_source_mode == "systems_monster" and combat_status_source_available and combat_status_systems_entry %}
-      <section class="card combat-status-detail-card">
-        <div class="section-heading">
-          <div>
-            <h2>Systems monster</h2>
-            <p class="meta">Rendered source detail for the selected Systems monster combatant.</p>
-          </div>
-        </div>
-        {% if combat_status_systems_entry.body_html %}
-          <div class="article-body article-body--compact">{{ combat_status_systems_entry.body_html | safe }}</div>
-        {% else %}
-          <p class="meta">This Systems monster does not currently have rendered detail text.</p>
-        {% endif %}
-      </section>
+      {% with
+        combat_npc_workspace_sections=combat_status_systems_entry.workspace_sections,
+        combat_workspace_default_section=combat_status_systems_entry.workspace_default_section,
+        combat_workspace_title="NPC sections",
+        combat_workspace_meta="Review source-backed Systems monster detail through section toggles without leaving Encounter status."
+      %}
+        {% include "_combat_npc_workspace_sections.html" %}
+      {% endwith %}
     {% else %}
       <section class="card combat-status-detail-card">
         <h2>Source detail unavailable</h2>

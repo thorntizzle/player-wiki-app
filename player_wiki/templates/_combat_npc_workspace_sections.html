@@ -1,0 +1,138 @@
+{% if combat_npc_workspace_sections %}
+  {% set workspace_title = combat_workspace_title | default("NPC sections", true) %}
+  {% set workspace_meta = combat_workspace_meta | default("Review source-backed NPC detail without leaving Encounter status.", true) %}
+  <div data-combat-workspace-root>
+    <section class="card combat-workspace-card">
+      <div class="section-heading">
+        <div>
+          <h2>{{ workspace_title }}</h2>
+          {% if workspace_meta %}
+            <p class="meta">{{ workspace_meta }}</p>
+          {% endif %}
+        </div>
+      </div>
+      <nav
+        class="combat-workspace-nav"
+        aria-label="NPC detail sections"
+        data-combat-section-group
+        data-combat-default-section="{{ combat_workspace_default_section }}"
+      >
+        {% for section in combat_npc_workspace_sections %}
+          <button
+            type="button"
+            class="ghost-button combat-workspace-button{% if section.is_default %} combat-workspace-button--active{% endif %}"
+            data-combat-section-toggle="{{ section.slug }}"
+            aria-pressed="{{ 'true' if section.is_default else 'false' }}"
+          >
+            <span>{{ section.label }}</span>
+            {% if section.count %}
+              <span class="meta-badge">{{ section.count }}</span>
+            {% endif %}
+          </button>
+        {% endfor %}
+      </nav>
+    </section>
+
+    {% for section in combat_npc_workspace_sections %}
+      <section
+        class="read-section combat-workspace-panel"
+        data-combat-section-panel="{{ section.slug }}"
+        {% if not section.is_default %}hidden{% endif %}
+      >
+        <div class="section-heading">
+          <h2>{{ section.label }}</h2>
+        </div>
+
+        {% if section.slug == 'abilities_skills' %}
+          {% if section.abilities or section.skills or section.supplemental_rows or section.entry_blocks %}
+            {% if section.abilities %}
+              <div class="ability-grid">
+                {% for ability in section.abilities %}
+                  <article class="ability-card">
+                    <p class="card-kicker">{{ ability.abbr }}</p>
+                    <h3>{{ ability.score }}</h3>
+                    <p>{{ ability.name }}</p>
+                    <p class="meta">Modifier {{ ability.modifier }} | Save {{ ability.save_bonus }}</p>
+                  </article>
+                {% endfor %}
+              </div>
+            {% endif %}
+
+            {% if section.skills %}
+              <div class="detail-cluster">
+                <div>
+                  <h3>Skills</h3>
+                  <div class="skill-grid">
+                    {% for skill in section.skills %}
+                      <div class="skill-pill">
+                        <span>{{ skill.name }}</span>
+                        <strong>{{ skill.bonus }}</strong>
+                      </div>
+                    {% endfor %}
+                  </div>
+                </div>
+              </div>
+            {% endif %}
+
+            {% if section.supplemental_rows %}
+              <div class="detail-grid">
+                {% for row in section.supplemental_rows %}
+                  <article class="detail-card">
+                    <h3>{{ row.label }}</h3>
+                    <p>{{ row.value }}</p>
+                  </article>
+                {% endfor %}
+              </div>
+            {% endif %}
+
+            {% if section.entry_blocks and not section.suppress_html_blocks %}
+              <div class="feature-stack">
+                {% for block in section.entry_blocks %}
+                  <article class="feature-row">
+                    {% if block.title %}
+                      <div class="feature-row__header">
+                        <div>
+                          <h3>{{ block.title }}</h3>
+                        </div>
+                      </div>
+                    {% endif %}
+                    {% if block.body_html %}
+                      <div class="article-body article-body--compact">{{ block.body_html | safe }}</div>
+                    {% endif %}
+                  </article>
+                {% endfor %}
+              </div>
+            {% endif %}
+          {% else %}
+            <article class="detail-card">
+              <p class="meta">{{ section.empty_message }}</p>
+            </article>
+          {% endif %}
+        {% else %}
+          {% if section.entry_blocks %}
+            <div class="feature-stack">
+              {% for block in section.entry_blocks %}
+                <article class="feature-row">
+                  {% if block.title %}
+                    <div class="feature-row__header">
+                      <div>
+                        <h3>{{ block.title }}</h3>
+                      </div>
+                    </div>
+                  {% endif %}
+                  {% if block.body_html %}
+                    <div class="article-body article-body--compact">{{ block.body_html | safe }}</div>
+                  {% endif %}
+                </article>
+              {% endfor %}
+            </div>
+          {% else %}
+            <article class="detail-card">
+              <p class="meta">{{ section.empty_message }}</p>
+            </article>
+          {% endif %}
+        {% endif %}
+      </section>
+    {% endfor %}
+  </div>
+{% endif %}
