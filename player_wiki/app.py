@@ -1818,6 +1818,25 @@ def create_app() -> Flask:
             if can_access_session_character_surface(campaign_slug, record.definition.character_slug)
         ]
 
+    def get_default_session_character_slug(
+        campaign_slug: str,
+        *,
+        accessible_records=None,
+    ) -> str | None:
+        owned_character_slugs = get_owned_character_slugs(campaign_slug)
+        if not owned_character_slugs:
+            return None
+        records = (
+            accessible_records
+            if accessible_records is not None
+            else list_session_accessible_character_records(campaign_slug)
+        )
+        for record in records:
+            character_slug = record.definition.character_slug
+            if character_slug in owned_character_slugs:
+                return character_slug
+        return None
+
     def build_combat_route_values(
         campaign_slug: str,
         *,
@@ -2635,7 +2654,12 @@ def create_app() -> Flask:
         session_poll_settings = build_session_poll_settings(normalized_session_subpage)
         session_live_revision = session_service.get_live_revision(campaign_slug)
         session_live_view_token = build_session_live_view_token(campaign_slug, normalized_session_subpage)
-        show_session_character_tab = bool(list_session_accessible_character_records(campaign_slug))
+        accessible_session_character_records = list_session_accessible_character_records(campaign_slug)
+        show_session_character_tab = bool(accessible_session_character_records)
+        default_session_character_slug = get_default_session_character_slug(
+            campaign_slug,
+            accessible_records=accessible_session_character_records,
+        )
 
         return {
             "campaign": campaign,
@@ -2664,7 +2688,11 @@ def create_app() -> Flask:
             "session_subpage": normalized_session_subpage,
             "show_session_character_tab": show_session_character_tab,
             "session_character_switch_href": (
-                url_for("campaign_session_character_view", campaign_slug=campaign.slug)
+                url_for(
+                    "campaign_session_character_view",
+                    campaign_slug=campaign.slug,
+                    character=default_session_character_slug,
+                )
                 if show_session_character_tab
                 else ""
             ),
@@ -2689,9 +2717,16 @@ def create_app() -> Flask:
                 message_count=len(live_messages),
             )
 
-        selected_character_slug = request.args.get("character", "").strip()
-        if selected_character_slug and selected_character_slug not in accessible_records_by_slug:
+        requested_character_slug = request.args.get("character", "").strip()
+        if requested_character_slug and requested_character_slug not in accessible_records_by_slug:
             abort(403)
+        selected_character_slug = requested_character_slug or (
+            get_default_session_character_slug(
+                campaign_slug,
+                accessible_records=accessible_records,
+            )
+            or ""
+        )
 
         session_character_cards = []
         for card in present_character_roster(accessible_records):
