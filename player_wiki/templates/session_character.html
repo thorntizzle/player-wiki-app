@@ -60,13 +60,27 @@
             {% endif %}
           </header>
 
-          <nav class="character-subpage-nav" aria-label="Character subpages">
-            {% for subpage in character_subpages %}
-              <a class="{% if subpage.is_active %}button-link{% else %}ghost-button{% endif %}" href="{{ subpage.href }}">
-                {{ subpage.label }}
-              </a>
-            {% endfor %}
-          </nav>
+          <section class="card combat-workspace-card">
+            <div class="section-heading">
+              <div>
+                <h2>Character sections</h2>
+                <p class="meta">
+                  Use the same sectioned-sheet layout as combat while keeping this Session surface trimmed to the non-combat read-only parts of the sheet.
+                </p>
+              </div>
+            </div>
+            <nav class="combat-workspace-nav" aria-label="Session character sections">
+              {% for subpage in character_subpages %}
+                <a
+                  class="ghost-button combat-workspace-button{% if subpage.is_active %} combat-workspace-button--active{% endif %}"
+                  href="{{ subpage.href }}"
+                  {% if subpage.is_active %}aria-current="page"{% endif %}
+                >
+                  {{ subpage.label }}
+                </a>
+              {% endfor %}
+            </nav>
+          </section>
 
           {% set show_quick_sections = character_subpage == 'quick' %}
           {% set show_spellcasting_sections = character_subpage == 'spellcasting' %}
