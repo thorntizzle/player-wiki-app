@@ -32,7 +32,7 @@
         >
           <label class="field">
             <span>Combat participant</span>
-            <select name="combatant" data-combat-navigation-select aria-label="Focus combatant on the DM page">
+            <select name="combatant" data-combat-navigation-select aria-label="Focus combatant on Encounter controls">
               {% for choice in dm_focus_combatant_choices %}
                 <option value="{{ choice.id }}" {% if choice.id == selected_combatant_id %}selected{% endif %}>{{ choice.label }}</option>
               {% endfor %}

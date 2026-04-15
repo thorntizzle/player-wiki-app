@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 
-{% block title %}Combat Status | {{ campaign.title }}{% endblock %}
+{% block title %}Encounter status | {{ campaign.title }}{% endblock %}
 
 {% block content %}
   <section class="hero compact">
-    <p class="eyebrow">Combat Status</p>
-    <h1>{{ campaign.title }} Combat Status</h1>
+    <p class="eyebrow">Encounter status</p>
+    <h1>{{ campaign.title }} Encounter status</h1>
     <p class="lede">
-      Inspect active combatants in detail without leaving the combat feature.
+      Inspect one selected combatant in detail while keeping the encounter order visible in the sidebar.
     </p>
     <div class="hero-actions">
       {% include "_combat_view_switch.html" %}

@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 
-{% block title %}Combat DM | {{ campaign.title }}{% endblock %}
+{% block title %}Encounter controls | {{ campaign.title }}{% endblock %}
 
 {% block content %}
   <section class="hero compact">
-    <p class="eyebrow">Combat DM</p>
-    <h1>{{ campaign.title }} Combat DM</h1>
+    <p class="eyebrow">Encounter controls</p>
+    <h1>{{ campaign.title }} Encounter controls</h1>
     <p class="lede">
-      Manage encounter setup and roster seeding without crowding the main combat board.
+      Manage encounter setup, seeding, cleanup, and other authority-heavy changes without crowding the live status view.
     </p>
     <div class="hero-actions">
       {% include "_combat_view_switch.html" %}

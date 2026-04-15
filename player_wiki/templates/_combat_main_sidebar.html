@@ -5,15 +5,15 @@
     <p class="meta">The Character page focuses on your tracked player character during combat.</p>
   {% endif %}
   {% if can_manage_combat %}
-    <p class="meta">Encounter setup, seeding, and cleanup live on the DM page, while the Status page is the DM inspection board.</p>
+    <p class="meta">Encounter setup, seeding, and cleanup live on Encounter controls, while Encounter status is the DM inspection board.</p>
   {% endif %}
   <div class="hero-actions">
     {% if combat_character_entry_url %}
       <a class="ghost-button" href="{{ combat_character_entry_url }}">Character</a>
     {% endif %}
     {% if can_manage_combat %}
-      <a class="ghost-button" href="{{ url_for('campaign_combat_status_view', campaign_slug=campaign.slug, combatant=selected_combatant_id) }}">Status</a>
-      <a class="ghost-button" href="{{ url_for('campaign_combat_dm_view', campaign_slug=campaign.slug, combatant=selected_combatant_id) }}">DM page</a>
+      <a class="ghost-button" href="{{ url_for('campaign_combat_status_view', campaign_slug=campaign.slug, combatant=selected_combatant_id) }}">Encounter status</a>
+      <a class="ghost-button" href="{{ url_for('campaign_combat_dm_view', campaign_slug=campaign.slug, combatant=selected_combatant_id) }}">Encounter controls</a>
     {% endif %}
   </div>
 </section>
@@ -23,6 +23,6 @@
   <p class="meta">This tracker is tuned for DND-5E action economy and combat conditions.</p>
   <p class="meta">Systems monster entries can seed NPC combatants directly from the shared DND 5E library.</p>
   <p class="meta">Uploaded DM Content statblocks can seed NPC combatants, and custom DM Content conditions appear in the combat condition picker.</p>
-  <p class="meta">NPC detail stays DM-controlled by default, and the DM page can reveal it per NPC when players should see more than names, turn order, and conditions.</p>
+  <p class="meta">NPC detail stays DM-controlled by default, and Encounter controls can reveal it per NPC when players should see more than names, turn order, and conditions.</p>
   <p class="meta">Tracked player characters can edit combat vitals and action economy directly in the tracker cards, and owners can also manage their broader resources and spell slots from the combat Character page.</p>
 </section>

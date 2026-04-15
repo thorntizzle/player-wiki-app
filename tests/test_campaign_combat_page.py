@@ -170,11 +170,11 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
     assert dm_page.status_code == 200
     assert status_page.status_code == 200
     dm_html = dm_page.get_data(as_text=True)
-    assert "Combat DM" in dm_html
+    assert "Encounter controls" in dm_html
     assert "Combat" in dm_html
     assert "/campaigns/linden-pass/combat/character" not in dm_html
-    assert "Status" in dm_html
-    assert "DM page" in dm_html
+    assert "Encounter status" in dm_html
+    assert "Encounter controls" in dm_html
     assert "Add player character" in dm_html
     assert "Add NPC from Systems" in dm_html
     assert "Add custom NPC combatant" in dm_html
@@ -1454,7 +1454,7 @@ def test_dm_status_page_renders_only_selected_pc_detail(app, client, sign_in, us
 
     assert response.status_code == 200
     body = response.get_data(as_text=True)
-    assert "Combat Status" in body
+    assert "Encounter status" in body
     assert "Character detail" in body
     assert "Arden March" in body
     assert "Resources" in body

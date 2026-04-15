@@ -164,8 +164,8 @@ CHARACTER_CONTROLS_SUBPAGE_LABELS = {
 COMBAT_SUBPAGE_LABELS = {
     "combat": "Combat",
     "character": "Character",
-    "status": "Status",
-    "dm": "DM page",
+    "status": "Encounter status",
+    "dm": "Encounter controls",
 }
 COMBAT_SOURCE_LABELS = {
     COMBAT_SOURCE_KIND_CHARACTER: "Character",
