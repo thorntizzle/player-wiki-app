@@ -278,7 +278,8 @@ def test_dm_can_open_character_roster_and_read_sheet(client, sign_in, users):
     sheet_html = sheet.get_data(as_text=True)
     assert "At a glance" in sheet_html
     assert "Active session" not in sheet_html
-    assert "Enter session mode" in sheet_html
+    assert "Open sheet edit view" in sheet_html
+    assert "Enter session mode" not in sheet_html
     assert "Alignment:" in sheet_html
     assert "Chaotic Good" in sheet_html
     assert "Campaign:" in sheet_html
@@ -382,6 +383,7 @@ def test_non_5e_roster_hides_native_character_builder_affordances(app, client, s
     assert "Create character" not in html
     assert "/campaigns/linden-pass/characters/new" not in html
     assert "PHB level 1 character" not in html
+    assert "open the sheet edit view when you have edit access" in html
     assert "Native character creation and progression stay hidden here" in html
 
 
@@ -400,7 +402,8 @@ def test_non_5e_read_sheet_hides_native_authoring_affordances_and_skips_readines
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Enter session mode" in html
+    assert "Open sheet edit view" in html
+    assert "Enter session mode" not in html
     assert "Edit character" not in html
     assert "Level up" not in html
     assert "Prepare for level-up" not in html
@@ -418,7 +421,9 @@ def test_non_5e_session_mode_still_works_for_owner_player(
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert "Active session" in html
-    assert "Back to read mode" in html
+    assert "Sheet edit view" in html
+    assert "Back to character sheet" in html
+    assert "Back to read mode" not in html
     assert "Edit character" not in html
 
 
@@ -506,7 +511,8 @@ def test_owner_player_can_open_session_mode_when_character_visibility_allows_pla
     html = response.get_data(as_text=True)
     assert "Active session" in html
     assert "Save vitals" in html
-    assert "Back to read mode" in html
+    assert "Back to character sheet" in html
+    assert "Back to read mode" not in html
     assert "?mode=session&amp;page=quick" in html
     assert "?mode=session&amp;page=personal" in html
     assert "Save personal details" not in html
@@ -1793,6 +1799,7 @@ def test_dm_controls_subpage_shows_management_controls(client, sign_in, users):
     assert "Controls" in html
     assert "?page=controls" in html
     assert "Player controls" in html
+    assert "main character sheet edit view" in html
     assert "Current owner" in html
     assert "Owner Player" in html
     assert "Delete character" in html
@@ -1813,6 +1820,7 @@ def test_owner_player_controls_subpage_holds_future_player_controls_without_admi
     assert "Controls" in html
     assert "Player controls" in html
     assert "?page=controls" in html
+    assert "main character sheet edit view" in html
     assert "Delete character" not in html
     assert "Assignment controls" not in html
     assert "Owner Player" in html
@@ -2792,8 +2800,9 @@ def test_editable_users_default_to_read_mode(client, sign_in, users, set_campaig
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert "Active session" not in html
-    assert "Enter session mode" in html
-    assert "Back to read mode" not in html
+    assert "Open sheet edit view" in html
+    assert "Enter session mode" not in html
+    assert "Back to character sheet" not in html
 
 
 def test_session_active_widget_stays_on_quick_reference_only(client, sign_in, users, set_campaign_visibility):
