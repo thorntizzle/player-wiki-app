@@ -275,7 +275,7 @@ def test_session_character_page_defaults_to_viewer_assigned_character(client, si
     assert "Character sections" in html
     assert "combat-workspace-card" in html
     assert "combat-workspace-nav" in html
-    assert f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&amp;page=spellcasting" in html
+    assert f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&amp;page=spells" in html
     assert f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&amp;page=features" in html
 
 
@@ -293,7 +293,7 @@ def test_owner_can_open_session_character_subpage_without_leaving_session_featur
     assert "Character sections" in html
     assert "Arden March" in html
     assert "Features and traits" in html
-    assert f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&amp;page=spellcasting" in html
+    assert f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&amp;page=spells" in html
     assert f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&amp;page=features" in html
     assert "Enter session mode" not in html
     assert "Save personal details" not in html
@@ -308,13 +308,17 @@ def test_session_character_page_uses_combat_style_non_combat_section_nav(client,
     html = response.get_data(as_text=True)
     assert "combat-workspace-card" in html
     assert "combat-workspace-nav" in html
-    assert "Quick Reference" in html
-    assert "Spellcasting" in html
+    assert "Overview" in html
+    assert "Spells" in html
+    assert "Resources" in html
     assert "Features" in html
     assert "Equipment" in html
     assert "Inventory" in html
-    assert "Personal" in html
+    assert "Abilities and Skills" in html
     assert "Notes" in html
+    assert "Personal" in html
+    assert ">Quick Reference<" not in html
+    assert ">Spellcasting<" not in html
     assert ">Actions<" not in html
     assert ">Bonus Actions<" not in html
     assert ">Reactions<" not in html
@@ -328,6 +332,41 @@ def test_session_character_route_blocks_unassigned_player_from_explicit_characte
     )
 
     assert response.status_code == 403
+
+
+def test_session_character_legacy_page_aliases_stay_compatible(client, sign_in, users):
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    overview_response = client.get(
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&page=quick"
+    )
+    assert overview_response.status_code == 200
+    overview_html = overview_response.get_data(as_text=True)
+    assert "At a glance" in overview_html
+    assert f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&amp;page=overview" in overview_html
+
+    spells_response = client.get(
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&page=spellcasting"
+    )
+    assert spells_response.status_code == 200
+    spells_html = spells_response.get_data(as_text=True)
+    assert "Spells" in spells_html
+    assert f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&amp;page=spells" in spells_html
+
+
+def test_session_character_full_page_link_uses_nearest_sheet_context(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get(
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&page=resources"
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert (
+        f'/campaigns/linden-pass/characters/{ASSIGNED_CHARACTER_SLUG}?page=quick#character-quick-resources'
+        in html
+    )
 
 
 def test_player_session_page_preserves_lookup_preview_during_article_load(client, sign_in, users):

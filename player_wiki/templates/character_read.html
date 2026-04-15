@@ -117,7 +117,7 @@
         {% if is_session_mode %}
           {% include "_character_session_bar.html" %}
         {% endif %}
-        <section class="read-section">
+        <section class="read-section" id="character-quick-overview">
           <h2>At a glance</h2>
           <div class="glance-grid">
             {% for stat in character.overview_stats %}
@@ -194,7 +194,7 @@
       {% endif %}
 
       {% if show_quick_sections and character.resources and not is_session_mode %}
-        <section class="read-section">
+        <section class="read-section" id="character-quick-resources">
           <div class="section-heading">
             <h2>Resources</h2>
           </div>
@@ -214,7 +214,7 @@
       {% endif %}
 
       {% if show_quick_sections %}
-        <section class="read-section">
+        <section class="read-section" id="character-quick-abilities-skills">
           <div class="section-heading">
             <h2>Abilities and skills</h2>
           </div>

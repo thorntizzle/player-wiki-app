@@ -163,6 +163,49 @@ CHARACTER_READ_SUBPAGE_LABELS = {
 CHARACTER_CONTROLS_SUBPAGE_LABELS = {
     "controls": "Controls",
 }
+SESSION_CHARACTER_SECTION_LABELS = {
+    "overview": "Overview",
+    "spells": "Spells",
+    "resources": "Resources",
+    "features": "Features",
+    "equipment": "Equipment",
+    "inventory": "Inventory",
+    "abilities_skills": "Abilities and Skills",
+    "notes": "Notes",
+    "personal": "Personal",
+}
+SESSION_CHARACTER_SECTION_ALIASES = {
+    normalize_lookup("overview"): "overview",
+    normalize_lookup("quick"): "overview",
+    normalize_lookup("quick reference"): "overview",
+    normalize_lookup("spells"): "spells",
+    normalize_lookup("spell"): "spells",
+    normalize_lookup("spellcasting"): "spells",
+    normalize_lookup("resources"): "resources",
+    normalize_lookup("resource"): "resources",
+    normalize_lookup("features"): "features",
+    normalize_lookup("feature"): "features",
+    normalize_lookup("equipment"): "equipment",
+    normalize_lookup("inventory"): "inventory",
+    normalize_lookup("abilities and skills"): "abilities_skills",
+    normalize_lookup("abilities & skills"): "abilities_skills",
+    normalize_lookup("abilities_skills"): "abilities_skills",
+    normalize_lookup("ability scores"): "abilities_skills",
+    normalize_lookup("skills"): "abilities_skills",
+    normalize_lookup("notes"): "notes",
+    normalize_lookup("personal"): "personal",
+}
+SESSION_CHARACTER_FULL_SHEET_PAGE_MAP = {
+    "overview": ("quick", "#character-quick-overview"),
+    "spells": ("spellcasting", ""),
+    "resources": ("quick", "#character-quick-resources"),
+    "features": ("features", ""),
+    "equipment": ("equipment", ""),
+    "inventory": ("inventory", ""),
+    "abilities_skills": ("quick", "#character-quick-abilities-skills"),
+    "notes": ("notes", ""),
+    "personal": ("personal", ""),
+}
 COMBAT_SUBPAGE_LABELS = {
     "combat": "Combat",
     "character": "Character",
@@ -358,6 +401,44 @@ def normalize_character_read_subpage(
     ):
         return normalized
     return "quick"
+
+
+def get_session_character_subpage_labels(
+    *,
+    include_spellcasting: bool = False,
+) -> dict[str, str]:
+    labels = {
+        "overview": SESSION_CHARACTER_SECTION_LABELS["overview"],
+    }
+    if include_spellcasting:
+        labels["spells"] = SESSION_CHARACTER_SECTION_LABELS["spells"]
+    labels.update(
+        {
+            "resources": SESSION_CHARACTER_SECTION_LABELS["resources"],
+            "features": SESSION_CHARACTER_SECTION_LABELS["features"],
+            "equipment": SESSION_CHARACTER_SECTION_LABELS["equipment"],
+            "inventory": SESSION_CHARACTER_SECTION_LABELS["inventory"],
+            "abilities_skills": SESSION_CHARACTER_SECTION_LABELS["abilities_skills"],
+            "notes": SESSION_CHARACTER_SECTION_LABELS["notes"],
+            "personal": SESSION_CHARACTER_SECTION_LABELS["personal"],
+        }
+    )
+    return labels
+
+
+def normalize_session_character_subpage(
+    value: str,
+    *,
+    include_spellcasting: bool = False,
+) -> str:
+    allowed_labels = get_session_character_subpage_labels(
+        include_spellcasting=include_spellcasting
+    )
+    normalized = normalize_lookup(value)
+    candidate = SESSION_CHARACTER_SECTION_ALIASES.get(normalized, "")
+    if candidate in allowed_labels:
+        return candidate
+    return "overview"
 
 
 def normalize_combat_return_view(value: str) -> str:
@@ -1837,6 +1918,23 @@ def create_app() -> Flask:
                 return character_slug
         return None
 
+    def build_session_character_read_view_url(
+        campaign_slug: str,
+        character_slug: str,
+        session_subpage: str,
+    ) -> str:
+        read_page, anchor = SESSION_CHARACTER_FULL_SHEET_PAGE_MAP.get(
+            session_subpage,
+            ("quick", ""),
+        )
+        href = url_for(
+            "character_read_view",
+            campaign_slug=campaign_slug,
+            character_slug=character_slug,
+            page=read_page,
+        )
+        return f"{href}{anchor}" if anchor else href
+
     def build_combat_route_values(
         campaign_slug: str,
         *,
@@ -2744,7 +2842,7 @@ def create_app() -> Flask:
             )
 
         character = None
-        character_subpage = "quick"
+        character_subpage = "overview"
         character_subpages = []
         equipment_state_manager = None
         spell_manager = None
@@ -2766,10 +2864,9 @@ def create_app() -> Flask:
                 if spellcasting_placeholder is not None:
                     character["spellcasting"] = spellcasting_placeholder
             include_spellcasting_subpage = bool(character.get("spellcasting"))
-            character_subpage = normalize_character_read_subpage(
+            character_subpage = normalize_session_character_subpage(
                 request.args.get("page", ""),
                 include_spellcasting=include_spellcasting_subpage,
-                include_controls=False,
             )
             equipment_state_manager = build_character_equipment_state_context(
                 campaign_slug,
@@ -2778,30 +2875,31 @@ def create_app() -> Flask:
             )
             character_subpages = [
                 {
-                    "slug": slug,
-                    "label": label,
+                    "slug": str(section.get("slug") or ""),
+                    "label": str(section.get("label") or ""),
+                    "count": int(section.get("count") or 0),
                     "href": url_for(
                         "campaign_session_character_view",
                         campaign_slug=campaign.slug,
                         character=selected_character_slug,
-                        page=slug,
+                        page=section.get("slug"),
                     ),
-                    "is_active": slug == character_subpage,
+                    "is_active": str(section.get("slug") or "") == character_subpage,
                 }
-                for slug, label in get_character_read_subpage_labels(
+                for section in build_session_character_sections(
+                    character,
+                    equipment_state_manager=equipment_state_manager,
                     include_spellcasting=include_spellcasting_subpage,
-                    include_controls=False,
-                ).items()
+                )
             ]
             can_view_full_character_sheet = bool(
                 selected_character_slug and can_access_campaign_scope(campaign_slug, "characters")
             )
             full_character_sheet_url = (
-                url_for(
-                    "character_read_view",
-                    campaign_slug=campaign.slug,
-                    character_slug=selected_character_slug,
-                    page=character_subpage,
+                build_session_character_read_view_url(
+                    campaign.slug,
+                    selected_character_slug,
+                    character_subpage,
                 )
                 if can_view_full_character_sheet
                 else ""
@@ -3158,6 +3256,95 @@ def create_app() -> Flask:
         for section in sections:
             section["is_default"] = section["slug"] == default_section
         return sections, default_section
+
+    def build_session_character_sections(
+        character_detail: dict[str, object],
+        *,
+        equipment_state_manager: dict[str, object] | None = None,
+        include_spellcasting: bool = False,
+    ) -> list[dict[str, object]]:
+        spellcasting = dict(character_detail.get("spellcasting") or {})
+        resources = [dict(item or {}) for item in list(character_detail.get("resources") or [])]
+        feature_groups = [dict(group or {}) for group in list(character_detail.get("feature_groups") or [])]
+        overview_stats = [dict(item or {}) for item in list(character_detail.get("overview_stats") or [])]
+        defensive_rules = [dict(item or {}) for item in list(character_detail.get("defensive_rules") or [])]
+        equipment_rows = [
+            dict(item or {})
+            for item in list((equipment_state_manager or {}).get("rows") or [])
+        ]
+        inventory_rows = [dict(item or {}) for item in list(character_detail.get("inventory") or [])]
+        skills = [dict(item or {}) for item in list(character_detail.get("skills") or [])]
+        reference_sections = [
+            dict(item or {}) for item in list(character_detail.get("reference_sections") or [])
+        ]
+        spell_count = sum(
+            len(list(section.get("spells") or []))
+            for section in list(spellcasting.get("row_sections") or [])
+            if isinstance(section, dict)
+        )
+
+        sections = [
+            {
+                "slug": "overview",
+                "label": SESSION_CHARACTER_SECTION_LABELS["overview"],
+                "count": len(overview_stats) + len(defensive_rules),
+            },
+        ]
+        if include_spellcasting:
+            sections.append(
+                {
+                    "slug": "spells",
+                    "label": SESSION_CHARACTER_SECTION_LABELS["spells"],
+                    "count": spell_count,
+                }
+            )
+        sections.extend(
+            [
+                {
+                    "slug": "resources",
+                    "label": SESSION_CHARACTER_SECTION_LABELS["resources"],
+                    "count": len(resources),
+                },
+                {
+                    "slug": "features",
+                    "label": SESSION_CHARACTER_SECTION_LABELS["features"],
+                    "count": sum(
+                        len(list(group.get("entries") or [])) for group in feature_groups
+                    ),
+                },
+                {
+                    "slug": "equipment",
+                    "label": SESSION_CHARACTER_SECTION_LABELS["equipment"],
+                    "count": len(equipment_rows),
+                },
+                {
+                    "slug": "inventory",
+                    "label": SESSION_CHARACTER_SECTION_LABELS["inventory"],
+                    "count": len(inventory_rows),
+                },
+                {
+                    "slug": "abilities_skills",
+                    "label": SESSION_CHARACTER_SECTION_LABELS["abilities_skills"],
+                    "count": len(skills),
+                },
+                {
+                    "slug": "notes",
+                    "label": SESSION_CHARACTER_SECTION_LABELS["notes"],
+                    "count": int(bool(character_detail.get("player_notes_html")))
+                    + len(reference_sections),
+                },
+                {
+                    "slug": "personal",
+                    "label": SESSION_CHARACTER_SECTION_LABELS["personal"],
+                    "count": (
+                        int(bool(character_detail.get("portrait")))
+                        + int(bool(character_detail.get("physical_description_html")))
+                        + int(bool(character_detail.get("personal_background_html")))
+                    ),
+                },
+            ]
+        )
+        return sections
 
     def build_combat_character_workspace_sections(
         character_detail: dict[str, object],
