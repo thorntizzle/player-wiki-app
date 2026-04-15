@@ -977,6 +977,26 @@
           return text ? parseInt(text, 10) : 0;
         };
 
+        const getNamedField = (form, name) => {
+          if (!(form instanceof HTMLFormElement) || !name) {
+            return null;
+          }
+          const field = form.elements.namedItem(name);
+          return field instanceof RadioNodeList ? null : field;
+        };
+
+        const setFieldValue = (form, name, value) => {
+          const field = getNamedField(form, name);
+          if (
+            !(field instanceof HTMLInputElement)
+            && !(field instanceof HTMLTextAreaElement)
+            && !(field instanceof HTMLSelectElement)
+          ) {
+            return;
+          }
+          field.value = value === null || value === undefined ? "" : String(value);
+        };
+
         const resetPendingInputs = (form) => {
           const fields = Array.from(form.querySelectorAll("input, textarea"));
           for (const field of fields) {
@@ -1155,6 +1175,115 @@
 
         const trackedForms = Array.from(document.querySelectorAll("[data-character-sheet-edit-form]"));
 
+        const persistSavedState = (state) => {
+          window.sessionStorage.setItem(restoreStateKey, JSON.stringify(state));
+        };
+
+        const restoreDraftPayload = (payload) => {
+          if (!payload || typeof payload !== "object") {
+            return;
+          }
+
+          const vitalsForm = document.querySelector(formSelectors.vitals);
+          if (vitalsForm instanceof HTMLFormElement && payload.vitals && typeof payload.vitals === "object") {
+            if (Object.prototype.hasOwnProperty.call(payload.vitals, "current_hp")) {
+              setFieldValue(vitalsForm, "current_hp", payload.vitals.current_hp);
+            }
+            if (Object.prototype.hasOwnProperty.call(payload.vitals, "temp_hp")) {
+              setFieldValue(vitalsForm, "temp_hp", payload.vitals.temp_hp);
+            }
+          }
+
+          if (Array.isArray(payload.resources)) {
+            const resourceForms = Array.from(document.querySelectorAll(formSelectors.resources));
+            for (const entry of payload.resources) {
+              if (!entry || typeof entry !== "object") {
+                continue;
+              }
+              const resourceId = String(entry.id ?? "").trim();
+              if (!resourceId) {
+                continue;
+              }
+              const resourceForm = resourceForms.find(
+                (form) => form instanceof HTMLFormElement && (form.dataset.characterSheetEditRowId || "") === resourceId
+              );
+              if (resourceForm instanceof HTMLFormElement && Object.prototype.hasOwnProperty.call(entry, "current")) {
+                setFieldValue(resourceForm, "current", entry.current);
+              }
+            }
+          }
+
+          if (Array.isArray(payload.spell_slots)) {
+            const spellSlotForms = Array.from(document.querySelectorAll(formSelectors.spellSlots));
+            for (const entry of payload.spell_slots) {
+              if (!entry || typeof entry !== "object") {
+                continue;
+              }
+              const targetLevel = parseInt(String(entry.level ?? ""), 10);
+              if (!Number.isFinite(targetLevel)) {
+                continue;
+              }
+              const targetLaneId = String(entry.slot_lane_id ?? "").trim();
+              const spellSlotForm = spellSlotForms.find((form) => {
+                if (!(form instanceof HTMLFormElement)) {
+                  return false;
+                }
+                const formLevel = parseInt(form.dataset.characterSheetEditLevel || "", 10);
+                const formLaneId = String(form.dataset.characterSheetEditSlotLaneId || "").trim();
+                return formLevel === targetLevel && formLaneId === targetLaneId;
+              });
+              if (spellSlotForm instanceof HTMLFormElement && Object.prototype.hasOwnProperty.call(entry, "used")) {
+                setFieldValue(spellSlotForm, "used", entry.used);
+              }
+            }
+          }
+
+          if (Array.isArray(payload.inventory)) {
+            const inventoryForms = Array.from(document.querySelectorAll(formSelectors.inventory));
+            for (const entry of payload.inventory) {
+              if (!entry || typeof entry !== "object") {
+                continue;
+              }
+              const itemId = String(entry.id ?? "").trim();
+              if (!itemId) {
+                continue;
+              }
+              const inventoryForm = inventoryForms.find(
+                (form) => form instanceof HTMLFormElement && (form.dataset.characterSheetEditRowId || "") === itemId
+              );
+              if (inventoryForm instanceof HTMLFormElement && Object.prototype.hasOwnProperty.call(entry, "quantity")) {
+                setFieldValue(inventoryForm, "quantity", entry.quantity);
+              }
+            }
+          }
+
+          const currencyForm = document.querySelector(formSelectors.currency);
+          if (currencyForm instanceof HTMLFormElement && payload.currency && typeof payload.currency === "object") {
+            for (const coin of ["cp", "sp", "ep", "gp", "pp"]) {
+              if (Object.prototype.hasOwnProperty.call(payload.currency, coin)) {
+                setFieldValue(currencyForm, coin, payload.currency[coin]);
+              }
+            }
+          }
+
+          const personalForm = document.querySelector(formSelectors.personal);
+          if (personalForm instanceof HTMLFormElement && payload.personal && typeof payload.personal === "object") {
+            if (Object.prototype.hasOwnProperty.call(payload.personal, "physical_description_markdown")) {
+              setFieldValue(personalForm, "physical_description_markdown", payload.personal.physical_description_markdown);
+            }
+            if (Object.prototype.hasOwnProperty.call(payload.personal, "background_markdown")) {
+              setFieldValue(personalForm, "background_markdown", payload.personal.background_markdown);
+            }
+          }
+
+          const notesForm = document.querySelector(formSelectors.notes);
+          if (notesForm instanceof HTMLFormElement && payload.notes && typeof payload.notes === "object") {
+            if (Object.prototype.hasOwnProperty.call(payload.notes, "player_notes_markdown")) {
+              setFieldValue(notesForm, "player_notes_markdown", payload.notes.player_notes_markdown);
+            }
+          }
+        };
+
         const discardPendingChanges = () => {
           for (const form of trackedForms) {
             if (!(form instanceof HTMLFormElement)) {
@@ -1185,8 +1314,18 @@
           window.sessionStorage.removeItem(restoreStateKey);
           try {
             const savedState = JSON.parse(rawState);
+            let restoredPayload = null;
+            if (savedState && savedState.restore_payload && typeof savedState.restore_payload === "object") {
+              restoreDraftPayload(savedState.restore_payload);
+              restoredPayload = updatePendingState({ preserveStatus: true });
+            }
             if (savedState && typeof savedState.message === "string" && savedState.message) {
-              setStatus(savedState.message, "success");
+              setStatus(
+                savedState.message,
+                typeof savedState.kind === "string" && savedState.kind
+                  ? savedState.kind
+                  : (restoredPayload ? "error" : "success")
+              );
             }
             if (savedState && typeof savedState.scrollY === "number") {
               window.requestAnimationFrame(() => {
@@ -1269,6 +1408,17 @@
               });
               const responsePayload = await response.json().catch(() => ({}));
               if (!response.ok) {
+                if (response.status === 409) {
+                  allowPageUnload = true;
+                  persistSavedState({
+                    message: "This sheet changed in another session. The latest sheet was reloaded and your pending changes were restored locally. Review them and save again.",
+                    kind: "error",
+                    restore_payload: payload,
+                    scrollY: window.scrollY,
+                  });
+                  window.location.reload();
+                  return;
+                }
                 const errorMessage = responsePayload && responsePayload.error && typeof responsePayload.error.message === "string"
                   ? responsePayload.error.message
                   : "Could not save pending changes right now.";
@@ -1280,10 +1430,10 @@
 
               hasPendingChanges = false;
               allowPageUnload = true;
-              window.sessionStorage.setItem(restoreStateKey, JSON.stringify({
+              persistSavedState({
                 message: "Saved pending changes.",
                 scrollY: window.scrollY,
-              }));
+              });
               window.location.reload();
             } catch (error) {
               saveInFlight = false;

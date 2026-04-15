@@ -2860,6 +2860,8 @@ def test_sheet_edit_view_exposes_cancel_and_unsaved_change_warning_copy(client, 
     assert "Cancel pending changes" in html
     assert "stay local until you save or cancel them" in html
     assert "the browser will warn you" in html
+    assert "this page reloads the latest" in html
+    assert "pending changes were restored locally" in html
     assert "beforeunload" in html
     assert "Pending changes on this page. Save or cancel before you leave." in html
 
