@@ -1524,10 +1524,15 @@ def test_status_live_state_renders_npc_workspace_sections_for_selected_systems_m
     assert "NPC sections" in payload["detail_html"]
     assert 'data-combat-section-group' in payload["detail_html"]
     assert 'data-combat-section-toggle="actions"' in payload["detail_html"]
-    assert 'data-combat-section-toggle="legendary_actions"' in payload["detail_html"]
-    assert 'data-combat-section-toggle="lair_actions"' in payload["detail_html"]
     assert 'data-combat-section-toggle="abilities_skills"' in payload["detail_html"]
-    assert 'data-combat-section-panel="traits"' in payload["detail_html"]
+    assert 'data-combat-section-toggle="bonus_actions"' not in payload["detail_html"]
+    assert 'data-combat-section-toggle="reactions"' not in payload["detail_html"]
+    assert 'data-combat-section-toggle="legendary_actions"' not in payload["detail_html"]
+    assert 'data-combat-section-toggle="lair_actions"' not in payload["detail_html"]
+    assert 'data-combat-section-toggle="traits"' not in payload["detail_html"]
+    assert 'data-combat-section-toggle="resources"' not in payload["detail_html"]
+    assert 'data-combat-section-panel="actions"' in payload["detail_html"]
+    assert 'data-combat-section-panel="traits"' not in payload["detail_html"]
 
 
 def test_dm_status_page_sidebar_selection_is_wired_for_in_place_detail_swaps(
@@ -1588,13 +1593,13 @@ def test_dm_status_page_can_render_systems_monster_detail(app, client, sign_in, 
     assert "Systems monster detail" in body
     assert 'data-combat-section-group' in body
     assert 'data-combat-section-toggle="actions"' in body
-    assert 'data-combat-section-toggle="bonus_actions"' in body
-    assert 'data-combat-section-toggle="reactions"' in body
-    assert 'data-combat-section-toggle="legendary_actions"' in body
-    assert 'data-combat-section-toggle="lair_actions"' in body
-    assert 'data-combat-section-toggle="traits"' in body
-    assert 'data-combat-section-toggle="resources"' in body
     assert 'data-combat-section-toggle="abilities_skills"' in body
+    assert 'data-combat-section-toggle="bonus_actions"' not in body
+    assert 'data-combat-section-toggle="reactions"' not in body
+    assert 'data-combat-section-toggle="legendary_actions"' not in body
+    assert 'data-combat-section-toggle="lair_actions"' not in body
+    assert 'data-combat-section-toggle="traits"' not in body
+    assert 'data-combat-section-toggle="resources"' not in body
     assert "Open Systems entry" in body
     assert "Scimitar" in body
 
@@ -1620,13 +1625,13 @@ def test_dm_status_page_can_render_dm_content_statblock_detail(app, client, sign
     assert "DM Content statblock detail" in body
     assert 'data-combat-section-group' in body
     assert 'data-combat-section-toggle="actions"' in body
-    assert 'data-combat-section-toggle="bonus_actions"' in body
-    assert 'data-combat-section-toggle="reactions"' in body
-    assert 'data-combat-section-toggle="legendary_actions"' in body
-    assert 'data-combat-section-toggle="lair_actions"' in body
-    assert 'data-combat-section-toggle="traits"' in body
-    assert 'data-combat-section-toggle="resources"' in body
-    assert 'data-combat-section-toggle="abilities_skills"' in body
+    assert 'data-combat-section-toggle="bonus_actions"' not in body
+    assert 'data-combat-section-toggle="reactions"' not in body
+    assert 'data-combat-section-toggle="legendary_actions"' not in body
+    assert 'data-combat-section-toggle="lair_actions"' not in body
+    assert 'data-combat-section-toggle="traits"' not in body
+    assert 'data-combat-section-toggle="resources"' not in body
+    assert 'data-combat-section-toggle="abilities_skills"' not in body
     assert "Source file: brass-hound.md" in body
     assert "Bite" in body
 

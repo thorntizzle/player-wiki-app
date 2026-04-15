@@ -2937,7 +2937,8 @@ def create_app() -> Flask:
                 )
             sections.append(section_payload)
 
-        default_section = next((section["slug"] for section in sections if section["has_content"]), "actions")
+        sections = [section for section in sections if section["has_content"]]
+        default_section = next((section["slug"] for section in sections), "")
         for section in sections:
             section["is_default"] = section["slug"] == default_section
         return sections, default_section
