@@ -1760,7 +1760,7 @@ def create_app() -> Flask:
                 "idle_threshold_ms": 30000,
             }
         return {
-            "active_interval_ms": 1000,
+            "active_interval_ms": 500,
             "idle_interval_ms": 3000,
             "idle_threshold_ms": 30000,
         }

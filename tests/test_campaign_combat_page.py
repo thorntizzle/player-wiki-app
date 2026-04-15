@@ -159,6 +159,8 @@ def test_campaign_member_can_open_combat_page_and_campaign_links_to_it(client, s
     assert "Add player character" not in combat_html
     assert "Add NPC from Systems" not in combat_html
     assert "Add custom NPC combatant" not in combat_html
+    assert 'data-live-active-interval-ms="500"' in combat_html
+    assert 'data-live-idle-interval-ms="3000"' in combat_html
 
 
 def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, sign_in, users):
@@ -191,6 +193,10 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
     assert "window.location.assign(nextUrl);" not in dm_html
     assert "Encounter status (formerly Status)" in status_html
     assert "Formerly Status. Existing /combat/status links and bookmarks still work during the transition." in status_html
+    assert 'data-live-active-interval-ms="500"' in dm_html
+    assert 'data-live-idle-interval-ms="3000"' in dm_html
+    assert 'data-live-active-interval-ms="1500"' in status_html
+    assert 'data-live-idle-interval-ms="4000"' in status_html
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["party"]["email"], users["party"]["password"])
@@ -784,6 +790,8 @@ def test_owner_player_can_open_combat_character_page_for_assigned_tracked_pc(app
     assert "Combat snapshot" in body
     assert "Tracked player characters" in body
     assert "Open full sheet" not in body
+    assert 'data-live-active-interval-ms="500"' in body
+    assert 'data-live-idle-interval-ms="3000"' in body
 
 
 def test_dm_combat_character_route_redirects_to_status_for_selected_target(app, client, sign_in, users):

@@ -728,6 +728,8 @@ def test_player_session_page_preserves_lookup_preview_during_article_load(client
     assert 'liveRoot.dataset.loading = "1";' in session_html
     assert 'previewRoot.dataset.loading = isBusy ? "1" : "0";' in session_html
     assert 'previewRoot.setAttribute("aria-busy", isBusy ? "true" : "false");' in session_html
+    assert 'data-live-active-interval-ms="3000"' in session_html
+    assert 'data-live-idle-interval-ms="6000"' in session_html
 
 
 def test_session_loading_styles_do_not_dim_live_session_surfaces():
@@ -779,6 +781,8 @@ def test_dm_can_open_session_page_and_session_dm_page(client, sign_in, users):
     assert "Chat logs" in dm_html
     assert "Back to wiki" not in dm_html
     assert "Open DM page" not in dm_html
+    assert 'data-live-active-interval-ms="2000"' in dm_html
+    assert 'data-live-idle-interval-ms="5000"' in dm_html
 
 
 def test_dm_can_start_session_and_player_can_post_messages(client, sign_in, users):
