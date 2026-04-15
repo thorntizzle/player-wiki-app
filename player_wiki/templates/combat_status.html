@@ -30,7 +30,7 @@
       class="page-layout combat-status-layout"
       data-combat-status-live-root
       data-loading="0"
-      data-combat-live-url="{{ url_for('campaign_combat_status_live_state', campaign_slug=campaign.slug) }}"
+      data-combat-live-url="{{ url_for('campaign_combat_status_live_state', campaign_slug=campaign.slug, combatant=selected_combatant_id) }}"
       data-combat-status-base-url="{{ url_for('campaign_combat_status_view', campaign_slug=campaign.slug) }}"
       data-combat-state-token="{{ combat_live_state_token }}"
       data-selected-combatant-id="{{ selected_combatant_id or '' }}"

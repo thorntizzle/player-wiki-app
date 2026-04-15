@@ -246,6 +246,29 @@
       }
     };
 
+    const buildCanonicalPageUrl = (pageUrl) => {
+      const nextUrl = new URL(pageUrl, window.location.origin);
+      if (!nextUrl.hash && window.location.hash) {
+        nextUrl.hash = window.location.hash;
+      }
+      return `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
+    };
+
+    const syncViewUrls = (payload = {}) => {
+      if (typeof payload.live_url === "string" && payload.live_url) {
+        pollUrl = payload.live_url;
+        liveRoot.dataset.combatLiveUrl = pollUrl;
+      }
+      if (typeof payload.page_url !== "string" || !payload.page_url) {
+        return;
+      }
+      const nextPageUrl = buildCanonicalPageUrl(payload.page_url);
+      const currentPageUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      if (nextPageUrl !== currentPageUrl) {
+        window.history.replaceState(null, "", nextPageUrl);
+      }
+    };
+
     const initializeSystemsMonsterSearch = (savedState = null) => {
       if (!controlsRoot) {
         return;
@@ -447,6 +470,7 @@
       const controlsFormState = captureControlsFormState();
       const systemsMonsterSearchState = captureSystemsMonsterSearchState();
       if (!force && nextToken === combatStateToken) {
+        syncViewUrls(payload);
         if (forceFlash && flashRoot && typeof payload.flash_html === "string") {
           flashRoot.innerHTML = payload.flash_html;
         }
@@ -482,6 +506,7 @@
       markInlineFormState(liveRoot);
       combatStateToken = nextToken;
       liveRoot.dataset.combatStateToken = combatStateToken;
+      syncViewUrls(payload);
       if (uiStateTools) {
         uiStateTools.restoreFocus(liveRoot, focusState);
         uiStateTools.restoreViewportAnchor(liveRoot, viewportAnchor);

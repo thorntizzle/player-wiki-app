@@ -1498,6 +1498,48 @@ def test_non_async_combat_mutations_preserve_explicit_combatant_focus_in_redirec
     assert f"combatant={hound.id}" in dm_redirect.headers["Location"]
 
 
+def test_selected_combatant_pages_seed_canonical_focus_urls(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+
+    hound = _find_combatant(app, name="Clockwork Hound")
+    assert hound is not None
+
+    combat_response = client.get(f"/campaigns/linden-pass/combat?combatant={hound.id}")
+    controls_response = client.get(f"/campaigns/linden-pass/combat/dm?combatant={hound.id}")
+    status_response = client.get(f"/campaigns/linden-pass/combat/status?combatant={hound.id}")
+
+    assert combat_response.status_code == 200
+    assert controls_response.status_code == 200
+    assert status_response.status_code == 200
+
+    combat_body = combat_response.get_data(as_text=True)
+    controls_body = controls_response.get_data(as_text=True)
+    status_body = status_response.get_data(as_text=True)
+
+    assert f'data-combat-live-url="/campaigns/linden-pass/combat/live-state?combatant={hound.id}"' in combat_body
+    assert f"/campaigns/linden-pass/combat/status?combatant={hound.id}" in combat_body
+    assert f"/campaigns/linden-pass/combat/dm?combatant={hound.id}" in combat_body
+    assert f'data-combat-live-url="/campaigns/linden-pass/combat/dm/live-state?combatant={hound.id}"' in controls_body
+    assert f'data-combat-live-url="/campaigns/linden-pass/combat/status/live-state?combatant={hound.id}"' in status_body
+
+
 def test_dm_status_page_returns_404_for_invalid_explicit_target(client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
@@ -1847,6 +1889,97 @@ def test_status_live_state_short_circuits_for_unchanged_selected_target(
     assert unchanged_live_state.headers["X-Live-State-Changed"] == "false"
     _assert_live_diagnostics_headers(initial_live_state)
     _assert_live_diagnostics_headers(unchanged_live_state)
+
+
+def test_combat_surface_live_payloads_report_canonical_focus_urls(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+
+    hound = _find_combatant(app, name="Clockwork Hound")
+    assert hound is not None
+
+    combat_payload = client.get(
+        f"/campaigns/linden-pass/combat/live-state?combatant={hound.id}",
+        headers=_async_headers(),
+    ).get_json()
+    controls_payload = client.get(
+        f"/campaigns/linden-pass/combat/dm/live-state?combatant={hound.id}",
+        headers=_async_headers(),
+    ).get_json()
+    status_payload = client.get(
+        f"/campaigns/linden-pass/combat/status/live-state?combatant={hound.id}",
+        headers=_async_headers(),
+    ).get_json()
+
+    assert combat_payload["page_url"] == f"/campaigns/linden-pass/combat?combatant={hound.id}"
+    assert combat_payload["live_url"] == f"/campaigns/linden-pass/combat/live-state?combatant={hound.id}"
+    assert controls_payload["page_url"] == f"/campaigns/linden-pass/combat/dm?combatant={hound.id}"
+    assert controls_payload["live_url"] == f"/campaigns/linden-pass/combat/dm/live-state?combatant={hound.id}"
+    assert status_payload["page_url"] == f"/campaigns/linden-pass/combat/status?combatant={hound.id}"
+    assert status_payload["live_url"] == f"/campaigns/linden-pass/combat/status/live-state?combatant={hound.id}"
+
+
+def test_status_live_state_falls_back_to_remaining_target_when_selected_combatant_disappears(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    hound = _find_combatant(app, name="Clockwork Hound")
+    assert arden is not None
+    assert hound is not None
+
+    delete_response = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{hound.id}/delete",
+        follow_redirects=False,
+    )
+    assert delete_response.status_code == 302
+
+    fallback_response = client.get(
+        f"/campaigns/linden-pass/combat/status/live-state?combatant={hound.id}",
+        headers=_async_headers(),
+    )
+
+    assert fallback_response.status_code == 200
+    fallback_payload = fallback_response.get_json()
+    assert fallback_payload["selected_combatant_id"] == arden.id
+    assert fallback_payload["page_url"] == f"/campaigns/linden-pass/combat/status?combatant={arden.id}"
+    assert fallback_payload["live_url"] == f"/campaigns/linden-pass/combat/status/live-state?combatant={arden.id}"
+    assert "Arden March" in fallback_payload["detail_html"]
+    assert "Clockwork Hound" not in fallback_payload["detail_html"]
 
 
 def test_combat_loading_styles_do_not_dim_live_combat_surfaces():

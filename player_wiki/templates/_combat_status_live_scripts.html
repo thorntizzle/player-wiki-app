@@ -8,7 +8,7 @@
     const flashRoot = document.querySelector("[data-flash-stack-root]");
     const boardRoot = document.querySelector("[data-combat-status-board-root]");
     const detailRoot = document.querySelector("[data-combat-status-detail-root]");
-    const liveUrl = liveRoot.dataset.combatLiveUrl || "";
+    let liveUrl = liveRoot.dataset.combatLiveUrl || "";
     const baseViewUrl = liveRoot.dataset.combatStatusBaseUrl || "";
     const uiStateTools = window.__playerWikiLiveUiTools || null;
     const workspaceTools = window.__playerWikiCombatWorkspace || null;
@@ -141,6 +141,30 @@
       return url.toString();
     };
 
+    const buildCanonicalPageUrl = (pageUrl) => {
+      const nextUrl = new URL(pageUrl, window.location.origin);
+      if (!nextUrl.hash && window.location.hash) {
+        nextUrl.hash = window.location.hash;
+      }
+      return `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
+    };
+
+    const syncViewUrls = (payload = {}) => {
+      if (typeof payload.live_url === "string" && payload.live_url) {
+        liveUrl = payload.live_url;
+        liveRoot.dataset.combatLiveUrl = liveUrl;
+      }
+      if (typeof payload.page_url !== "string" || !payload.page_url) {
+        return false;
+      }
+      const nextPageUrl = buildCanonicalPageUrl(payload.page_url);
+      const currentPageUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      if (nextPageUrl !== currentPageUrl) {
+        window.history.replaceState({}, "", nextPageUrl);
+      }
+      return true;
+    };
+
     const hasFocusedFormControl = () => {
       const activeElement = document.activeElement;
       if (!activeElement || !liveRoot.contains(activeElement)) {
@@ -165,6 +189,7 @@
       const focusState = uiStateTools ? uiStateTools.captureFocus(liveRoot) : null;
       const viewportAnchor = uiStateTools ? uiStateTools.captureViewportAnchor(liveRoot) : null;
       if (!force && nextToken === combatStateToken) {
+        syncViewUrls(payload);
         return;
       }
 
@@ -195,7 +220,8 @@
         uiStateTools.restoreViewportAnchor(liveRoot, viewportAnchor);
       }
 
-      if (updateHistory && baseViewUrl) {
+      const didSyncViewUrls = syncViewUrls(payload);
+      if (updateHistory && !didSyncViewUrls && baseViewUrl) {
         window.history.replaceState({}, "", buildUrl(baseViewUrl, selectedCombatantId));
       }
     };

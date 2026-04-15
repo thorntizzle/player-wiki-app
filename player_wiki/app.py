@@ -1817,6 +1817,33 @@ def create_app() -> Flask:
             route_values["character"] = selected_character_slug
         return route_values
 
+    def build_combat_surface_urls(
+        campaign_slug: str,
+        *,
+        combat_subpage: str,
+        selected_combatant_id: int | None = None,
+    ) -> dict[str, str]:
+        route_values = build_combat_route_values(
+            campaign_slug,
+            selected_combatant_id=selected_combatant_id,
+        )
+        view_endpoint = {
+            "combat": "campaign_combat_view",
+            "dm": "campaign_combat_dm_view",
+            "status": "campaign_combat_status_view",
+        }.get(combat_subpage)
+        live_endpoint = {
+            "combat": "campaign_combat_live_state",
+            "dm": "campaign_combat_dm_live_state",
+            "status": "campaign_combat_status_live_state",
+        }.get(combat_subpage)
+        if view_endpoint is None or live_endpoint is None:
+            return {"page_url": "", "live_url": ""}
+        return {
+            "page_url": url_for(view_endpoint, **route_values),
+            "live_url": url_for(live_endpoint, **route_values),
+        }
+
     def parse_requested_combatant_id(
         *,
         raw_value: str | None = None,
@@ -3645,6 +3672,7 @@ def create_app() -> Flask:
         *,
         selected_combatant_id: int | None = None,
         sync_player_character_snapshots: bool = True,
+        strict_selected_combatant: bool = True,
     ) -> dict[str, object]:
         if not can_manage_campaign_combat(campaign_slug):
             abort(403)
@@ -3652,7 +3680,7 @@ def create_app() -> Flask:
         explicit_combatant_id = (
             selected_combatant_id
             if selected_combatant_id is not None
-            else parse_requested_combatant_id(strict=True)
+            else parse_requested_combatant_id(strict=strict_selected_combatant)
         )
         context = build_campaign_combat_page_context(
             campaign_slug,
@@ -3668,7 +3696,7 @@ def create_app() -> Flask:
             tracker_view,
             combatants,
             explicit_combatant_id=explicit_combatant_id,
-            strict_explicit=explicit_combatant_id is not None,
+            strict_explicit=explicit_combatant_id is not None and strict_selected_combatant,
         )
         selected_combatant_id = (
             selected_combatant_record.id if selected_combatant_record is not None else None
@@ -4513,6 +4541,13 @@ def create_app() -> Flask:
             "context_html": render_template(sidebar_template, **context),
             "selected_combatant_id": context["selected_combatant_id"],
         }
+        payload.update(
+            build_combat_surface_urls(
+                campaign_slug,
+                combat_subpage="combat",
+                selected_combatant_id=context["selected_combatant_id"],
+            )
+        )
         if include_flash:
             payload["flash_html"] = render_flash_stack_html()
         if mutation_succeeded is not None:
@@ -4553,6 +4588,13 @@ def create_app() -> Flask:
             "controls_html": render_template("_combat_dm_controls.html", **context),
             "selected_combatant_id": context["selected_combatant_id"],
         }
+        payload.update(
+            build_combat_surface_urls(
+                campaign_slug,
+                combat_subpage="dm",
+                selected_combatant_id=context["selected_combatant_id"],
+            )
+        )
         if include_flash:
             payload["flash_html"] = render_flash_stack_html()
         if mutation_succeeded is not None:
@@ -4598,6 +4640,7 @@ def create_app() -> Flask:
             campaign_slug,
             selected_combatant_id=selected_combatant_id,
             sync_player_character_snapshots=sync_player_character_snapshots,
+            strict_selected_combatant=False,
         )
         if live_revision is None:
             live_revision = int(context["combat_live_revision"] or 0)
@@ -4612,6 +4655,13 @@ def create_app() -> Flask:
             "detail_html": render_template("_combat_status_detail.html", **context),
             "selected_combatant_id": context["selected_combatant_id"],
         }
+        payload.update(
+            build_combat_surface_urls(
+                campaign_slug,
+                combat_subpage="status",
+                selected_combatant_id=context["selected_combatant_id"],
+            )
+        )
         if include_flash:
             payload["flash_html"] = render_flash_stack_html()
         if mutation_succeeded is not None:
