@@ -497,12 +497,8 @@
         </article>
       {% else %}
         <article class="card">
-          <h2>No session character available</h2>
-          {% if can_manage_session %}
-            <p>No active visible characters are available to open from the Session feature right now.</p>
-          {% else %}
-            <p>This account does not currently have a session-enabled character assigned in this campaign.</p>
-          {% endif %}
+          <h2>{{ session_character_empty_state_title }}</h2>
+          <p>{{ session_character_empty_state_message }}</p>
         </article>
       {% endif %}
     </section>
@@ -534,6 +530,21 @@
             When the DM starts a session, the live chat and article lookup stay on the main Session page.
           {% endif %}
         </p>
+      </article>
+
+      <article class="card session-sidebar-card">
+        <div class="section-heading">
+          <div>
+            <h2>Permission behavior</h2>
+            <p class="meta">{{ session_character_access_summary }}</p>
+          </div>
+        </div>
+        <p class="meta">{{ session_character_permission_note }}</p>
+        <ul class="plain-list slot-list">
+          {% for rule in session_character_permission_rules %}
+            <li><strong>{{ rule.label }}:</strong> {{ rule.description }}</li>
+          {% endfor %}
+        </ul>
       </article>
 
       {% set show_character_chooser = can_manage_session or session_character_cards|length > 1 %}

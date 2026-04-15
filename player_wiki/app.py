@@ -34,6 +34,7 @@ from .auth import (
     clear_campaign_visibility_cache,
     get_accessible_campaign_entries,
     get_auth_store,
+    get_campaign_role,
     get_current_user,
     get_current_user_preferences,
     get_effective_campaign_visibility,
@@ -221,6 +222,28 @@ SESSION_CHARACTER_FULL_PAGE_ONLY_SCOPE = (
 SESSION_CHARACTER_PERSONAL_EDIT_BLOCK_MESSAGE = (
     "Portrait, physical description, and background changes stay on the full character page so "
     "this Session surface stays focused on live play."
+)
+SESSION_CHARACTER_PERMISSION_RULES = (
+    {
+        "label": "Assigned players",
+        "description": "Open only their own session-enabled character here.",
+    },
+    {
+        "label": "DMs",
+        "description": "Open any session-enabled character in the campaign and use the chooser to switch sheets.",
+    },
+    {
+        "label": "Observers",
+        "description": "Stay on the main Session page and do not get a character sheet here.",
+    },
+    {
+        "label": "Admins",
+        "description": "Keep the same cross-character access as DMs.",
+    },
+)
+SESSION_CHARACTER_PERMISSION_NOTE = (
+    "Editing controls appear only during an active DM-started session and stay limited to the "
+    "session-safe slice."
 )
 COMBAT_SUBPAGE_LABELS = {
     "combat": "Combat",
@@ -2011,6 +2034,73 @@ def create_app() -> Flask:
         )
         return f"{href}{anchor}" if anchor else href
 
+    def build_session_character_access_summary(
+        campaign_slug: str,
+        *,
+        can_manage_session: bool,
+        accessible_records: list[object],
+    ) -> str:
+        current_user = get_current_user()
+        role = get_campaign_role(campaign_slug)
+        if current_user is not None and current_user.is_admin:
+            return (
+                "Current access: admin cross-character access. You can open any "
+                "session-enabled character here."
+            )
+        if can_manage_session:
+            return (
+                "Current access: DM cross-character access. You can open any "
+                "session-enabled character here."
+            )
+        if accessible_records:
+            return (
+                "Current access: assigned-player access. This page stays scoped to your "
+                "own session-enabled character."
+            )
+        if role == "observer":
+            return (
+                "Current access: observers stay on the main Session page and do not get a "
+                "session character sheet."
+            )
+        if role == "player":
+            return "Current access: no session-enabled character is assigned to this account yet."
+        return "Current access: only assigned players, DMs, and admins can open this surface."
+
+    def build_session_character_empty_state(
+        campaign_slug: str,
+        *,
+        can_manage_session: bool,
+        accessible_records: list[object],
+    ) -> tuple[str, str]:
+        if can_manage_session:
+            return (
+                "No session character available",
+                "No active visible characters are available to open from the Session feature right now.",
+            )
+
+        role = get_campaign_role(campaign_slug)
+        if role == "observer":
+            return (
+                "Character tab unavailable",
+                "Observers stay on the main Session page. Only assigned players, DMs, and admins "
+                "can open the Character surface.",
+            )
+        if role == "player":
+            return (
+                "No session character available",
+                "This account does not currently have a session-enabled character assigned in this "
+                "campaign. Assigned players can open only their own session-enabled character here.",
+            )
+        if accessible_records:
+            return (
+                "No session character available",
+                "No session-enabled character is available to open right now.",
+            )
+        return (
+            "Character tab unavailable",
+            "Only assigned players, DMs, and admins can open the Session character surface.",
+        )
+
     def build_combat_route_values(
         campaign_slug: str,
         *,
@@ -2953,6 +3043,8 @@ def create_app() -> Flask:
         session_personal_editing_enabled = False
         session_personal_edit_block_message = ""
         session_personal_edit_block_href = ""
+        session_character_empty_state_title = ""
+        session_character_empty_state_message = ""
 
         if selected_character_slug:
             record = accessible_records_by_slug[selected_character_slug]
@@ -3057,6 +3149,15 @@ def create_app() -> Flask:
             )
             if session_character_editing_enabled:
                 session_personal_edit_block_message = SESSION_CHARACTER_PERSONAL_EDIT_BLOCK_MESSAGE
+        else:
+            (
+                session_character_empty_state_title,
+                session_character_empty_state_message,
+            ) = build_session_character_empty_state(
+                campaign_slug,
+                can_manage_session=can_manage_session,
+                accessible_records=accessible_records,
+            )
 
         return {
             "campaign": campaign,
@@ -3076,6 +3177,15 @@ def create_app() -> Flask:
                 else ""
             ),
             "session_character_cards": session_character_cards,
+            "session_character_access_summary": build_session_character_access_summary(
+                campaign_slug,
+                can_manage_session=can_manage_session,
+                accessible_records=accessible_records,
+            ),
+            "session_character_permission_note": SESSION_CHARACTER_PERMISSION_NOTE,
+            "session_character_permission_rules": SESSION_CHARACTER_PERMISSION_RULES,
+            "session_character_empty_state_title": session_character_empty_state_title,
+            "session_character_empty_state_message": session_character_empty_state_message,
             "character": character,
             "character_subpage": character_subpage,
             "character_subpages": character_subpages,

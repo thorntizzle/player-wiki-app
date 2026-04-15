@@ -335,6 +335,92 @@ def test_dm_session_character_page_keeps_character_chooser_for_cross_character_a
     assert "Open any session-enabled character sheet from the current campaign." in html
 
 
+def test_session_character_page_spells_out_role_permissions_for_assigned_player(client, sign_in, users):
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get("/campaigns/linden-pass/session/character")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Permission behavior" in html
+    assert (
+        "Current access: assigned-player access. This page stays scoped to your own "
+        "session-enabled character."
+    ) in html
+    assert (
+        "Editing controls appear only during an active DM-started session and stay limited "
+        "to the session-safe slice."
+    ) in html
+    assert "Open only their own session-enabled character here." in html
+    assert "Open any session-enabled character in the campaign and use the chooser to switch sheets." in html
+    assert "Stay on the main Session page and do not get a character sheet here." in html
+    assert "Keep the same cross-character access as DMs." in html
+
+
+def test_dm_session_character_page_explains_dm_cross_character_access(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get("/campaigns/linden-pass/session/character")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert (
+        "Current access: DM cross-character access. You can open any session-enabled "
+        "character here."
+    ) in html
+
+
+def test_admin_session_character_page_explains_admin_cross_character_access(client, sign_in, users):
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+
+    response = client.get("/campaigns/linden-pass/session/character")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Permission behavior" in html
+    assert (
+        "Current access: admin cross-character access. You can open any session-enabled "
+        "character here."
+    ) in html
+
+
+def test_unassigned_player_session_character_page_explains_assignment_requirement(client, sign_in, users):
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    response = client.get("/campaigns/linden-pass/session/character")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "No session character available" in html
+    assert (
+        "This account does not currently have a session-enabled character assigned in this "
+        "campaign. Assigned players can open only their own session-enabled character here."
+    ) in html
+    assert "Current access: no session-enabled character is assigned to this account yet." in html
+
+
+def test_observer_session_character_page_explains_character_tab_is_unavailable(
+    client, sign_in, users, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", session="public")
+
+    sign_in(users["observer"]["email"], users["observer"]["password"])
+
+    response = client.get("/campaigns/linden-pass/session/character")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Character tab unavailable" in html
+    assert (
+        "Observers stay on the main Session page. Only assigned players, DMs, and admins can "
+        "open the Character surface."
+    ) in html
+    assert (
+        "Current access: observers stay on the main Session page and do not get a session "
+        "character sheet."
+    ) in html
+
+
 def test_session_character_page_shows_edit_controls_only_while_session_is_active(
     client, sign_in, users, set_campaign_visibility
 ):
