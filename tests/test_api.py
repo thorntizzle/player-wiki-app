@@ -450,6 +450,150 @@ def test_api_character_endpoints_allow_assigned_owner_updates(client, app, users
     assert blocked_response.get_json()["error"]["code"] == "forbidden"
 
 
+def test_api_character_sheet_edit_batch_updates_state_backed_sections_in_one_revision(
+    client, app, users, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+
+    owner_token = issue_api_token(app, users["owner"]["email"], label="owner-sheet-edit-api")
+
+    character_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march",
+        headers=api_headers(owner_token),
+    )
+
+    assert character_response.status_code == 200
+    character_payload = character_response.get_json()["character"]
+    starting_revision = character_payload["state_record"]["revision"]
+    second_level_slot = next(
+        item
+        for item in character_payload["state_record"]["state"]["spell_slots"]
+        if int(item.get("level") or 0) == 2
+    )
+
+    batch_response = client.patch(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/sheet-edit",
+        headers=api_headers(owner_token),
+        json={
+            "expected_revision": starting_revision,
+            "vitals": {
+                "current_hp": 35,
+                "temp_hp": 4,
+            },
+            "resources": [
+                {
+                    "id": "sorcery-points",
+                    "current": 3,
+                }
+            ],
+            "spell_slots": [
+                {
+                    "level": 2,
+                    "slot_lane_id": second_level_slot.get("slot_lane_id", ""),
+                    "used": 2,
+                }
+            ],
+            "inventory": [
+                {
+                    "id": "crossbow-bolts-4",
+                    "quantity": 18,
+                }
+            ],
+            "currency": {
+                "sp": 7,
+                "gp": 125,
+            },
+            "notes": {
+                "player_notes_markdown": "Batch note test",
+            },
+            "personal": {
+                "physical_description_markdown": "Lean and weathered.",
+                "background_markdown": "Raised around the salt docks.",
+            },
+        },
+    )
+
+    assert batch_response.status_code == 200
+    updated_character = batch_response.get_json()["character"]
+    updated_state = updated_character["state_record"]["state"]
+    assert updated_character["state_record"]["revision"] == starting_revision + 1
+    assert updated_state["vitals"]["current_hp"] == 35
+    assert updated_state["vitals"]["temp_hp"] == 4
+    assert {item["id"]: item for item in updated_state["resources"]}["sorcery-points"]["current"] == 3
+    assert next(
+        item
+        for item in updated_state["spell_slots"]
+        if int(item.get("level") or 0) == 2
+        and str(item.get("slot_lane_id") or "") == str(second_level_slot.get("slot_lane_id") or "")
+    )["used"] == 2
+    assert {item["id"]: item for item in updated_state["inventory"]}["crossbow-bolts-4"]["quantity"] == 18
+    assert updated_state["currency"]["gp"] == 125
+    assert updated_state["currency"]["sp"] == 7
+    assert updated_state["notes"]["player_notes_markdown"] == "Batch note test"
+    assert updated_state["notes"]["physical_description_markdown"] == "Lean and weathered."
+    assert updated_state["notes"]["background_markdown"] == "Raised around the salt docks."
+
+    stale_response = client.patch(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/sheet-edit",
+        headers=api_headers(owner_token),
+        json={
+            "expected_revision": starting_revision,
+            "notes": {
+                "player_notes_markdown": "This stale batch should conflict.",
+            },
+        },
+    )
+
+    assert stale_response.status_code == 409
+    assert stale_response.get_json()["error"]["code"] == "state_conflict"
+
+
+def test_api_character_sheet_edit_batch_rejects_delta_actions(
+    client, app, users, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+
+    owner_token = issue_api_token(app, users["owner"]["email"], label="owner-sheet-edit-delta-api")
+
+    character_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march",
+        headers=api_headers(owner_token),
+    )
+
+    assert character_response.status_code == 200
+    character_payload = character_response.get_json()["character"]
+    starting_revision = character_payload["state_record"]["revision"]
+
+    delta_response = client.patch(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/sheet-edit",
+        headers=api_headers(owner_token),
+        json={
+            "expected_revision": starting_revision,
+            "resources": [
+                {
+                    "id": "sorcery-points",
+                    "delta": -1,
+                }
+            ],
+        },
+    )
+
+    assert delta_response.status_code == 400
+    assert delta_response.get_json()["error"]["code"] == "validation_error"
+    assert "absolute current values" in delta_response.get_json()["error"]["message"]
+
+    unchanged_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march",
+        headers=api_headers(owner_token),
+    )
+
+    assert unchanged_response.status_code == 200
+    unchanged_state = unchanged_response.get_json()["character"]["state_record"]["state"]
+    assert {item["id"]: item for item in unchanged_state["resources"]}["sorcery-points"]["current"] == (
+        {item["id"]: item for item in character_payload["state_record"]["state"]["resources"]}["sorcery-points"]["current"]
+    )
+
+
 def test_api_character_list_derives_multiclass_summary_from_class_rows(client, app, users):
     def _mutate(payload: dict) -> None:
         profile = dict(payload.get("profile") or {})

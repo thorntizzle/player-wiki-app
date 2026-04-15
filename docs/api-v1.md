@@ -106,6 +106,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:5000/api/v1/me" -Headers $headers
 - `GET /api/v1/campaigns/<campaign_slug>/characters`
 - `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>`
 - `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/rest-preview/<rest_type>`
+- `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/sheet-edit`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/vitals`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/resources/<resource_id>`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/spell-slots/<level>`
@@ -139,4 +140,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:5000/api/v1/me" -Headers $headers
 - Systems read endpoints follow the same source-level and entry-level visibility rules as the browser UI. Systems source updates and entry-override writes are DM/admin only.
 - Combat reads return a structured tracker payload. Combat mutations are DM/admin only except for player-character vitals, which can also be updated by the assigned owner player when they provide the current sheet revision.
 - Character session mutations require `expected_revision` and return `409 state_conflict` when the sheet changed first.
+- `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/sheet-edit` is the first-save contract for out-of-session Character-page batching. It accepts one `expected_revision` plus absolute-value section payloads for the state-backed Character-page fields (`vitals`, `resources`, `spell_slots`, `inventory`, `currency`, `notes`, and `personal`).
+- The `sheet-edit` batch route is intentionally absolute-value only. Delta actions such as `hp_delta`, resource `delta`, spell-slot `delta_used`, currency `delta`, and rest actions stay on the immediate live-edit routes instead of mixing relative and batched writes.
+- `sheet-edit` batches use one shared revision check for the whole request. If any other actor changed the character first, the entire batch is rejected with `409 state_conflict` rather than partially applying the payload.
 - API reads and writes use the same visibility and role checks as the app. A DM token can do DM work; a player token only sees or edits what that player could in the site.

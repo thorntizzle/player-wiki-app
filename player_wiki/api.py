@@ -2775,10 +2775,16 @@ def register_api(app) -> None:
             }
         )
 
-    def run_character_mutation(campaign_slug: str, character_slug: str, action):
+    def run_character_mutation(
+        campaign_slug: str,
+        character_slug: str,
+        action,
+        *,
+        forbidden_message: str = "You do not have permission to edit this character in session mode.",
+    ):
         record = load_character_record(campaign_slug, character_slug)
         if not has_session_mode_access(campaign_slug, character_slug):
-            return json_error("You do not have permission to edit this character in session mode.", 403, code="forbidden")
+            return json_error(forbidden_message, 403, code="forbidden")
 
         user = get_current_user()
         if user is None:
@@ -2801,6 +2807,28 @@ def register_api(app) -> None:
             return json_error(str(exc), 400, code="validation_error")
 
         return serialize_updated_character(campaign_slug, character_slug)
+
+    @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/sheet-edit")
+    @api_campaign_scope_access_required("characters")
+    @api_login_required
+    def character_sheet_edit_update(campaign_slug: str, character_slug: str):
+        return run_character_mutation(
+            campaign_slug,
+            character_slug,
+            lambda record, payload, user_id: get_character_state_service().save_character_sheet_edit(
+                record,
+                expected_revision=int(payload.get("expected_revision")),
+                vitals=payload.get("vitals"),
+                resources=payload.get("resources"),
+                spell_slots=payload.get("spell_slots"),
+                inventory=payload.get("inventory"),
+                currency=payload.get("currency"),
+                notes=payload.get("notes"),
+                personal=payload.get("personal"),
+                updated_by_user_id=user_id,
+            ),
+            forbidden_message="You do not have permission to use the Character page sheet edit view for this character.",
+        )
 
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/vitals")
     @api_campaign_scope_access_required("characters")
