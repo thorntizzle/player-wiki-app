@@ -1455,6 +1455,10 @@ def test_dm_status_page_renders_only_selected_pc_detail(app, client, sign_in, us
     assert response.status_code == 200
     body = response.get_data(as_text=True)
     assert "Encounter status" in body
+    assert "Turn order" in body
+    assert "Encounter roster" not in body
+    assert "combat-turn-order-row--selected" in body
+    assert f"/campaigns/linden-pass/combat/status?combatant={arden.id}" in body
     assert "Character detail" in body
     assert "Arden March" in body
     assert "Resources" in body
@@ -1574,6 +1578,10 @@ def test_status_live_state_preserves_selected_target_and_returns_selected_detail
     assert first_live_state.status_code == 200
     first_payload = first_live_state.get_json()
     assert first_payload["selected_combatant_id"] == goblin.id
+    assert "Turn order" in first_payload["board_html"]
+    assert "Encounter roster" not in first_payload["board_html"]
+    assert "combat-turn-order-row--selected" in first_payload["board_html"]
+    assert f"/campaigns/linden-pass/combat/status?combatant={goblin.id}" in first_payload["board_html"]
     assert "Goblin" in first_payload["detail_html"]
     assert "Scimitar" in first_payload["detail_html"]
     assert "Arden March" not in first_payload["detail_html"]
@@ -1590,6 +1598,8 @@ def test_status_live_state_preserves_selected_target_and_returns_selected_detail
     assert second_live_state.status_code == 200
     second_payload = second_live_state.get_json()
     assert second_payload["selected_combatant_id"] == goblin.id
+    assert "Turn order" in second_payload["board_html"]
+    assert "combat-turn-order-row--selected" in second_payload["board_html"]
     assert "Goblin" in second_payload["detail_html"]
     assert "Scimitar" in second_payload["detail_html"]
 
