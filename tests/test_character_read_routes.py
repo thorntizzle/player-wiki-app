@@ -2843,6 +2843,10 @@ def test_sheet_edit_view_makes_first_pass_bounded_scope_explicit(client, sign_in
     assert "the browser will warn you" in html
     assert "Rests and quick +/- actions still" in html
     assert "Keep using the standard character page for" in html
+    assert "Compatibility note" in html
+    assert "Older Character-page links that still use" in html
+    assert "?mode=session" in html
+    assert "an old Session-only label" in html
     assert "Rests and other relative quick actions" in html
     assert "Spell-list changes and other non-slot spell management" in html
     assert "Equipment state, portrait changes, and broader inventory or equipment maintenance" in html

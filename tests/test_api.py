@@ -448,6 +448,7 @@ def test_api_character_endpoints_allow_assigned_owner_updates(client, app, users
 
     assert blocked_response.status_code == 403
     assert blocked_response.get_json()["error"]["code"] == "forbidden"
+    assert blocked_response.get_json()["error"]["message"] == "You do not have permission to update this character from this view."
 
 
 def test_api_character_sheet_edit_batch_updates_state_backed_sections_in_one_revision(

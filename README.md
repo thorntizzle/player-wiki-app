@@ -398,7 +398,7 @@ The detail route renders the structured character definition plus live SQLite-ba
 
 - subpage navigation for `Quick Reference`, `Features`, `Equipment`, `Personal`, and `Notes`
 - a read-mode `Equipment` manager for editable users so they can add Systems-linked or custom supplemental gear without opening the advanced editor
-- a portrait slot on `Personal`, stored as a campaign asset and shown in both read mode and session mode
+- a portrait slot on `Personal`, stored as a campaign asset and shown in both read mode and the Character-page `Sheet edit view`
 - a permissioned `Controls` subpage for editable users, with room for current admin/DM controls and future player-owned controls
 - current HP and temp HP
 - resource trackers
@@ -408,23 +408,24 @@ The detail route renders the structured character definition plus live SQLite-ba
 - inventory and currency
 - reference notes and biography
 
-## Character Session Mode
+## Character Sheet Edit View
 
-Character sheets now support an in-session edit layer on the same detail route:
+Character sheets now support a first-pass Character-page edit lane on the same detail route. The user-facing label is
+`Sheet edit view`; older compatibility links still use:
 
 - `/campaigns/<campaign-slug>/characters/<character-slug>?mode=session`
 
-Session mode is available only to:
+The Character-page sheet edit view is available only to:
 
 - app `admin`
 - campaign `dm`
 - assigned `player` owner of that character
 
-Campaign `observer` users remain read-only and cannot activate session mode.
+Campaign `observer` users remain read-only and do not get the Character-page sheet edit entry point.
 
 ### Editable MVP State
 
-Session mode supports:
+The current Character-page sheet edit view supports:
 
 - current HP
 - temp HP
@@ -447,7 +448,7 @@ If a stale write is submitted, the app shows a conflict message and asks the use
 
 ### Rest Actions
 
-Session mode includes short-rest and long-rest confirmation flows.
+The Character-page sheet edit view still includes short-rest and long-rest confirmation flows.
 
 The app applies only modeled rest behavior:
 
@@ -695,7 +696,7 @@ The current tests cover:
 - admin membership and assignment workflow actions
 - wiki access for members versus outsiders
 - character roster and read-mode behavior
-- session-mode access rules
+- Character-page sheet-edit access rules
 - mutable state writes
 - rest previews and applies
 - local backup and restore helpers

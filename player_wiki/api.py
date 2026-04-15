@@ -2750,7 +2750,7 @@ def register_api(app) -> None:
     def character_rest_preview(campaign_slug: str, character_slug: str, rest_type: str):
         record = load_character_record(campaign_slug, character_slug)
         if not has_session_mode_access(campaign_slug, character_slug):
-            return json_error("You do not have permission to edit this character in session mode.", 403, code="forbidden")
+            return json_error("You do not have permission to use rest actions for this character.", 403, code="forbidden")
 
         try:
             preview = get_character_state_service().preview_rest(record, rest_type)
@@ -2780,7 +2780,7 @@ def register_api(app) -> None:
         character_slug: str,
         action,
         *,
-        forbidden_message: str = "You do not have permission to edit this character in session mode.",
+        forbidden_message: str = "You do not have permission to update this character from this view.",
     ):
         record = load_character_record(campaign_slug, character_slug)
         if not has_session_mode_access(campaign_slug, character_slug):
