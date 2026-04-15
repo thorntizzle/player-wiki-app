@@ -116,6 +116,43 @@
             </section>
           {% endif %}
 
+          {% if session_combat_relationship_available %}
+            <section class="card combat-workspace-card">
+              <div class="section-heading">
+                <div>
+                  <h2>Combat relationship</h2>
+                  <p class="meta">
+                    This character is also in the combat tracker. When both views are open, prefer {{ session_combat_relationship_surface_label }} for turn-by-turn encounter edits and keep Session for the broader live-session workflow.
+                  </p>
+                </div>
+              </div>
+              <div class="detail-grid">
+                <article class="detail-card">
+                  <h3>Prefer {{ session_combat_relationship_surface_label }} for</h3>
+                  <ul class="plain-list slot-list">
+                    {% for item in combat_and_session_combat_scope %}
+                      <li>{{ item }}</li>
+                    {% endfor %}
+                  </ul>
+                </article>
+                <article class="detail-card">
+                  <h3>Keep Session for</h3>
+                  <ul class="plain-list slot-list">
+                    {% for item in combat_and_session_session_scope %}
+                      <li>{{ item }}</li>
+                    {% endfor %}
+                  </ul>
+                </article>
+              </div>
+              <div class="hero-actions">
+                <a class="button-link" href="{{ session_combat_relationship_href }}">{{ session_combat_relationship_action_label }}</a>
+              </div>
+              <p class="meta">
+                The combat link keeps this character selected through the matching combatant deep link.
+              </p>
+            </section>
+          {% endif %}
+
           {% set show_overview_sections = character_subpage == 'overview' %}
           {% set show_quick_sections = show_overview_sections %}
           {% set show_spellcasting_sections = character_subpage == 'spells' %}

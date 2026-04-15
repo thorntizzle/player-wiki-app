@@ -1,0 +1,37 @@
+{% if combat_session_relationship_available %}
+  <section class="card sidebar-card">
+    <div class="section-heading">
+      <div>
+        <h2>Session relationship</h2>
+        <p class="meta">
+          Keep turn-by-turn encounter edits here while Session keeps the broader live-session workflow close at hand.
+        </p>
+      </div>
+    </div>
+    <div class="detail-grid">
+      <article class="detail-card">
+        <h3>Keep Combat for</h3>
+        <ul class="plain-list slot-list">
+          {% for item in combat_and_session_combat_scope %}
+            <li>{{ item }}</li>
+          {% endfor %}
+        </ul>
+      </article>
+      <article class="detail-card">
+        <h3>Keep Session for</h3>
+        <ul class="plain-list slot-list">
+          {% for item in combat_and_session_session_scope %}
+            <li>{{ item }}</li>
+          {% endfor %}
+        </ul>
+      </article>
+    </div>
+    <div class="hero-actions">
+      <a class="button-link" href="{{ combat_session_character_url }}">Open Session Character</a>
+      <a class="ghost-button" href="{{ combat_session_page_url }}">Open Session</a>
+    </div>
+    <p class="meta">
+      The Session Character link keeps this same sheet selected from the Session feature.
+    </p>
+  </section>
+{% endif %}

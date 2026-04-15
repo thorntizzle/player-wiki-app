@@ -103,6 +103,14 @@ def _import_systems_goblin(app, tmp_path) -> str:
         return entry.slug
 
 
+def _find_combatant(app, *, character_slug: str):
+    with app.app_context():
+        for combatant in app.extensions["campaign_combat_service"].list_combatants("linden-pass"):
+            if combatant.character_slug == character_slug:
+                return combatant
+    return None
+
+
 def seed_test_users(app):
     with app.app_context():
         store = AuthStore()
@@ -468,6 +476,41 @@ def test_session_character_page_explains_active_session_edit_scope(
     assert "Use the full character page for" in html
     assert "Portrait, physical description, and background details" in html
     assert "Spell-list changes and other non-slot spell management" in html
+
+
+def test_session_character_page_links_tracked_character_to_combat_workspace_when_both_are_live(
+    app, client, sign_in, users, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": ASSIGNED_CHARACTER_SLUG, "turn_value": 18},
+        follow_redirects=False,
+    )
+    combatant = _find_combatant(app, character_slug=ASSIGNED_CHARACTER_SLUG)
+    assert combatant is not None
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get(
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&page=overview"
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Combat relationship" in html
+    assert "Prefer Combat for" in html
+    assert "HP, temp HP, movement, and action economy" in html
+    assert "Tracked resource spends and spell slot usage" in html
+    assert "Keep Session for" in html
+    assert "Rests, inventory quantities, currency, and player notes" in html
+    assert f'/campaigns/linden-pass/combat?combatant={combatant.id}' in html
+    assert ">Open Combat<" in html
+    assert "The combat link keeps this character selected through the matching combatant deep link." in html
 
 
 def test_session_character_personal_updates_stay_on_full_character_page(

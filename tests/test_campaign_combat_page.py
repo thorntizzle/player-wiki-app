@@ -730,6 +730,34 @@ def test_owner_player_combat_page_uses_character_workspace_layout(app, client, s
     assert "Encounter context" not in body
 
 
+def test_owner_player_combat_workspace_links_back_to_session_character_when_session_is_active(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get("/campaigns/linden-pass/combat")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "Session relationship" in body
+    assert "Keep Combat for" in body
+    assert "Keep Session for" in body
+    assert "Rests, inventory quantities, currency, and player notes" in body
+    assert '/campaigns/linden-pass/session/character?character=arden-march' in body
+    assert '>Open Session Character<' in body
+    assert '>Open Session<' in body
+    assert "The Session Character link keeps this same sheet selected from the Session feature." in body
+
+
 def test_owner_player_can_open_combat_character_page_for_assigned_tracked_pc(app, client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
     client.post(

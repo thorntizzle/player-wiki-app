@@ -219,6 +219,16 @@ SESSION_CHARACTER_FULL_PAGE_ONLY_SCOPE = (
     "Equipment state and broader inventory or equipment maintenance",
     "Advanced character edit, level-up, retraining, and controls",
 )
+COMBAT_AND_SESSION_COMBAT_SCOPE = (
+    "HP, temp HP, movement, and action economy",
+    "Tracked resource spends and spell slot usage",
+    "Turn order and other combat-only encounter context",
+)
+COMBAT_AND_SESSION_SESSION_SCOPE = (
+    "Chat, revealed articles, and wiki lookup on the main Session page",
+    "Rests, inventory quantities, currency, and player notes",
+    "Broader in-play character reference outside the encounter view",
+)
 SESSION_CHARACTER_PERSONAL_EDIT_BLOCK_MESSAGE = (
     "Portrait, physical description, and background changes stay on the full character page so "
     "this Session surface stays focused on live play."
@@ -2034,6 +2044,25 @@ def create_app() -> Flask:
         )
         return f"{href}{anchor}" if anchor else href
 
+    def find_tracked_player_combatant_for_character(
+        campaign_slug: str,
+        character_slug: str,
+        *,
+        campaign=None,
+    ):
+        if not character_slug:
+            return None
+        campaign = campaign if campaign is not None else load_campaign_context(campaign_slug)
+        if campaign.system != SUPPORTED_COMBAT_SYSTEM:
+            return None
+        for combatant in get_campaign_combat_service().list_combatants(
+            campaign_slug,
+            sync_player_character_snapshots=False,
+        ):
+            if combatant.is_player_character and combatant.character_slug == character_slug:
+                return combatant
+        return None
+
     def build_session_character_access_summary(
         campaign_slug: str,
         *,
@@ -2984,6 +3013,7 @@ def create_app() -> Flask:
         campaign = load_campaign_context(campaign_slug)
         session_service = get_campaign_session_service()
         can_manage_session = can_manage_campaign_session(campaign_slug)
+        can_manage_combat = can_manage_campaign_combat(campaign_slug)
         accessible_records = list_session_accessible_character_records(campaign_slug)
         accessible_records_by_slug = {
             record.definition.character_slug: record for record in accessible_records
@@ -3045,6 +3075,10 @@ def create_app() -> Flask:
         session_personal_edit_block_href = ""
         session_character_empty_state_title = ""
         session_character_empty_state_message = ""
+        session_combat_relationship_available = False
+        session_combat_relationship_surface_label = ""
+        session_combat_relationship_action_label = ""
+        session_combat_relationship_href = ""
 
         if selected_character_slug:
             record = accessible_records_by_slug[selected_character_slug]
@@ -3149,6 +3183,31 @@ def create_app() -> Flask:
             )
             if session_character_editing_enabled:
                 session_personal_edit_block_message = SESSION_CHARACTER_PERSONAL_EDIT_BLOCK_MESSAGE
+                if can_access_campaign_scope(campaign_slug, "combat"):
+                    tracked_combatant = find_tracked_player_combatant_for_character(
+                        campaign_slug,
+                        selected_character_slug,
+                        campaign=campaign,
+                    )
+                    if tracked_combatant is not None:
+                        if can_manage_combat:
+                            session_combat_relationship_available = True
+                            session_combat_relationship_surface_label = "Encounter status"
+                            session_combat_relationship_action_label = "Open encounter status"
+                            session_combat_relationship_href = url_for(
+                                "campaign_combat_status_view",
+                                campaign_slug=campaign.slug,
+                                combatant=tracked_combatant.id,
+                            )
+                        elif selected_character_slug in get_owned_character_slugs(campaign_slug):
+                            session_combat_relationship_available = True
+                            session_combat_relationship_surface_label = "Combat"
+                            session_combat_relationship_action_label = "Open Combat"
+                            session_combat_relationship_href = url_for(
+                                "campaign_combat_view",
+                                campaign_slug=campaign.slug,
+                                combatant=tracked_combatant.id,
+                            )
         else:
             (
                 session_character_empty_state_title,
@@ -3206,6 +3265,12 @@ def create_app() -> Flask:
             "session_personal_editing_enabled": session_personal_editing_enabled,
             "session_personal_edit_block_message": session_personal_edit_block_message,
             "session_personal_edit_block_href": session_personal_edit_block_href,
+            "session_combat_relationship_available": session_combat_relationship_available,
+            "session_combat_relationship_surface_label": session_combat_relationship_surface_label,
+            "session_combat_relationship_action_label": session_combat_relationship_action_label,
+            "session_combat_relationship_href": session_combat_relationship_href,
+            "combat_and_session_combat_scope": COMBAT_AND_SESSION_COMBAT_SCOPE,
+            "combat_and_session_session_scope": COMBAT_AND_SESSION_SESSION_SCOPE,
             "session_return_view": "session-character",
             "session_surface_return_url": session_surface_return_url,
             "session_surface_short_rest_url": session_surface_short_rest_url,
@@ -3804,12 +3869,34 @@ def create_app() -> Flask:
             if stat.get("label") not in {"Current HP", "Temp HP"}
         ]
         selected_character_slug = record.definition.character_slug
+        combat_session_relationship_available = False
+        combat_session_character_url = ""
+        combat_session_page_url = ""
+        if (
+            get_campaign_session_service().get_active_session(campaign_slug) is not None
+            and can_access_session_character_surface(campaign_slug, selected_character_slug)
+        ):
+            combat_session_relationship_available = True
+            combat_session_character_url = url_for(
+                "campaign_session_character_view",
+                campaign_slug=campaign.slug,
+                character=selected_character_slug,
+            )
+            combat_session_page_url = url_for(
+                "campaign_session_view",
+                campaign_slug=campaign.slug,
+            )
         return {
             "selected_combat_character": character_detail,
             "selected_combat_overview_stats": overview_stats,
             "combat_equipment_state_manager": equipment_state_manager,
             "combat_workspace_sections": workspace_sections,
             "combat_workspace_default_section": workspace_default_section,
+            "combat_session_relationship_available": combat_session_relationship_available,
+            "combat_session_character_url": combat_session_character_url,
+            "combat_session_page_url": combat_session_page_url,
+            "combat_and_session_combat_scope": COMBAT_AND_SESSION_COMBAT_SCOPE,
+            "combat_and_session_session_scope": COMBAT_AND_SESSION_SESSION_SCOPE,
             "can_view_full_character_sheet": bool(selected_character_slug)
             and can_access_campaign_scope(campaign_slug, "characters"),
             "full_character_sheet_url": (
