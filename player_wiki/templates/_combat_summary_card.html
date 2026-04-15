@@ -44,7 +44,7 @@
       {% endif %}
     </div>
   {% endif %}
-  {% if can_manage_combat %}
+  {% if can_manage_combat and combat_subpage == "dm" %}
     <div class="hero-actions">
       <form
         method="post"

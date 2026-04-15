@@ -1,11 +1,11 @@
 <section class="card sidebar-card">
   <h2>Combat pages</h2>
-  <p class="meta">Use the main board for quick encounter state changes and turn order.</p>
+  <p class="meta">Use the main board for quick tactical state checks and shared turn-order context.</p>
   {% if combat_character_entry_url %}
     <p class="meta">The Character page focuses on your tracked player character during combat.</p>
   {% endif %}
   {% if can_manage_combat %}
-    <p class="meta">Encounter setup, seeding, and cleanup live on Encounter controls, while Encounter status is the DM inspection board.</p>
+    <p class="meta">Encounter status handles one focused combatant at a time, while Encounter controls owns setup, seeding, turn-order authority, structural NPC edits, removal, and cleanup.</p>
   {% endif %}
   <div class="hero-actions">
     {% if combat_character_entry_url %}

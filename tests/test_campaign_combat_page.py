@@ -1341,12 +1341,23 @@ def test_combat_page_renders_context_panel_and_dm_page_focuses_selected_combatan
     dm_html = dm_page.get_data(as_text=True)
     assert "Encounter context" in combat_html
     assert "Arden March" in combat_html
+    assert "Advance turn" not in combat_html
+    assert "Clear tracker" not in combat_html
+    assert "Set current" not in combat_html
+    assert "Remove combatant" not in combat_html
+    assert 'class="combat-badge combat-badge--editable"' not in combat_html
+    assert 'aria-label="Speed for Clockwork Hound"' not in combat_html
+    assert "Encounter controls owns setup, seeding, turn-order authority, structural NPC edits, removal, and cleanup." in combat_html
     assert "Focus combatant" in dm_html
     assert "Clockwork Hound - NPC - Turn 12" in dm_html
     assert "Arden March - Player character - Turn 18 - Current turn" in dm_html
     assert f'id="combatant-{hound.id}"' in dm_html
     assert f'id="combatant-{arden.id}"' not in dm_html
     assert dm_html.count('class="card combatant-card') == 1
+    assert "Advance turn" in dm_html
+    assert "Clear tracker" in dm_html
+    assert "Save turn value" in dm_html
+    assert "Remove combatant" in dm_html
 
 
 def test_dm_live_state_renders_only_selected_combatant_card(app, client, sign_in, users):

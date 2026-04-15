@@ -38,7 +38,7 @@
               {% endif %}
             </div>
             <div class="combatant-badges">
-              {% if combatant.can_manage_combat %}
+              {% if return_to_dm and combatant.can_manage_combat %}
                 <form
                   method="post"
                   action="{{ url_for('campaign_combat_update_turn_value', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
@@ -64,7 +64,7 @@
               {% if combatant.initiative_bonus_label and combatant.initiative_bonus_label != "0" %}
                 <span class="combat-badge combat-badge--muted">Init {{ combatant.initiative_bonus_label }}</span>
               {% endif %}
-              {% if combatant.can_manage_combat %}
+              {% if return_to_dm and combatant.can_manage_combat %}
                 <form
                   method="post"
                   action="{{ url_for('campaign_combat_set_current_turn', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
@@ -192,7 +192,7 @@
                 </div>
               {% endif %}
 
-              {% if combatant.can_manage_combat and not combatant.character_slug %}
+              {% if return_to_dm and combatant.can_manage_combat and not combatant.character_slug %}
                 <form
                   method="post"
                   action="{{ url_for('campaign_combat_update_vitals', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
@@ -352,19 +352,19 @@
                   <button type="submit">Add condition</button>
                 </div>
               </form>
-              <form
-                method="post"
-                action="{{ url_for('campaign_combat_delete_combatant', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
-                data-combat-async
-              >
-                {% if return_to_dm %}
+              {% if return_to_dm %}
+                <form
+                  method="post"
+                  action="{{ url_for('campaign_combat_delete_combatant', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
+                  data-combat-async
+                >
                   <input type="hidden" name="combat_view" value="dm">
-                {% endif %}
-                {% if requested_combatant_id %}
-                  <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
-                {% endif %}
-                <button class="ghost-button" type="submit">Remove combatant</button>
-              </form>
+                  {% if requested_combatant_id %}
+                    <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
+                  {% endif %}
+                  <button class="ghost-button" type="submit">Remove combatant</button>
+                </form>
+              {% endif %}
             {% endif %}
           </section>
         </article>
