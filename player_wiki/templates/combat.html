@@ -7,7 +7,11 @@
     <p class="eyebrow">Combat tracker</p>
     <h1>{{ campaign.title }} Combat</h1>
     <p class="lede">
-      Track turn order, HP, action economy, and conditions for live DND-5E encounters without leaving the campaign space.
+      {% if show_player_combat_workspace %}
+        Keep your tracked character open as your in-combat workspace while turn order stays pinned in the sidebar.
+      {% else %}
+        Track turn order, HP, action economy, and conditions for live DND-5E encounters without leaving the campaign space.
+      {% endif %}
     </p>
     <div class="hero-actions">
       {% include "_combat_view_switch.html" %}
@@ -27,7 +31,7 @@
     </datalist>
 
     <div
-      class="page-layout combat-layout"
+      class="page-layout combat-layout{% if show_player_combat_workspace %} combat-layout--workspace{% endif %}"
       data-combat-live-root
       data-loading="0"
       data-combat-live-url="{{ url_for('campaign_combat_live_state', campaign_slug=campaign.slug, combatant=requested_combatant_id) }}"
@@ -41,19 +45,33 @@
     >
       <section class="section-list">
         <div data-combat-summary-root>
-          {% include "_combat_summary_card.html" %}
+          {% if show_player_combat_workspace %}
+            {% include "_combat_character_snapshot.html" %}
+          {% else %}
+            {% include "_combat_summary_card.html" %}
+          {% endif %}
         </div>
 
         <div data-combat-tracker-root>
-          {% include "_combat_tracker_section.html" %}
+          {% if show_player_combat_workspace %}
+            {% include "_combat_player_workspace_sections.html" %}
+          {% else %}
+            {% include "_combat_tracker_section.html" %}
+          {% endif %}
         </div>
       </section>
 
-      <aside class="sidebar combat-sidebar-stack">
+      <aside class="sidebar {% if show_player_combat_workspace %}combat-workspace-sidebar{% else %}combat-sidebar-stack{% endif %}">
         <div data-combat-context-root>
-          {% include "_combat_context_panel.html" %}
+          {% if show_player_combat_workspace %}
+            {% include "_combat_player_workspace_sidebar.html" %}
+          {% else %}
+            {% include "_combat_context_panel.html" %}
+          {% endif %}
         </div>
-        {% include "_combat_main_sidebar.html" %}
+        {% if not show_player_combat_workspace %}
+          {% include "_combat_main_sidebar.html" %}
+        {% endif %}
       </aside>
     </div>
   {% endif %}
@@ -62,5 +80,6 @@
 {% block scripts %}
   {% include "_live_diagnostics_helper.html" %}
   {% include "_live_ui_helper.html" %}
+  {% include "_combat_workspace_scripts.html" %}
   {% include "_combat_live_scripts.html" %}
 {% endblock %}

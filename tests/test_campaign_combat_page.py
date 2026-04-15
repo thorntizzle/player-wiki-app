@@ -625,6 +625,45 @@ def test_owner_player_sees_inline_edit_controls_on_owned_tracked_pc(app, client,
     assert "Save resources" not in body
 
 
+def test_owner_player_combat_page_uses_character_workspace_layout(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get("/campaigns/linden-pass/combat")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "Combat workspace" in body
+    assert "Combat sections" in body
+    assert "Turn order" in body
+    assert "Actions" in body
+    assert "Bonus Actions" in body
+    assert "Reactions" in body
+    assert "Abilities and Skills" in body
+    assert "Your workspace" in body
+    assert "Current limits" not in body
+    assert "Encounter context" not in body
+
+
 def test_owner_player_can_open_combat_character_page_for_assigned_tracked_pc(app, client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
     client.post(
@@ -792,6 +831,54 @@ def test_owner_player_can_update_own_pc_resources_from_combat_views(
     record = get_character("arden-march")
     spell_slots = {item["level"]: item for item in record.state_record.state["spell_slots"]}
     assert spell_slots[2]["used"] == 2
+
+
+def test_owner_player_combat_workspace_resource_mutations_redirect_back_to_combat(
+    app, client, sign_in, users, get_character
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    combatant = _find_combatant(app, character_slug="arden-march")
+    assert combatant is not None
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    record = get_character("arden-march")
+    resource_response = client.post(
+        f"/campaigns/linden-pass/combat/character/combatants/{combatant.id}/resources/sorcery-points",
+        data={
+            "expected_revision": record.state_record.revision,
+            "current": 3,
+            "combat_view": "combat",
+        },
+        follow_redirects=False,
+    )
+
+    assert resource_response.status_code == 302
+    assert resource_response.headers["Location"].endswith(
+        f"/campaigns/linden-pass/combat?combatant={combatant.id}#combat-character-resources"
+    )
+
+    record = get_character("arden-march")
+    spell_response = client.post(
+        f"/campaigns/linden-pass/combat/character/combatants/{combatant.id}/spell-slots/2",
+        data={
+            "expected_revision": record.state_record.revision,
+            "used": 2,
+            "combat_view": "combat",
+        },
+        follow_redirects=False,
+    )
+
+    assert spell_response.status_code == 302
+    assert spell_response.headers["Location"].endswith(
+        f"/campaigns/linden-pass/combat?combatant={combatant.id}#combat-character-spell-slots"
+    )
 
 
 def test_unassigned_player_cannot_update_other_pc_combat_resources_or_spell_slots(

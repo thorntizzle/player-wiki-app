@@ -42,7 +42,7 @@
           </div>
         </div>
 
-        {% include "_combat_character_detail_sections.html" %}
+        {% include "_combat_player_workspace_sections.html" %}
       </section>
 
       <aside class="sidebar combat-character-sidebar">
@@ -79,6 +79,7 @@
 {% block scripts %}
   {% include "_live_diagnostics_helper.html" %}
   {% include "_live_ui_helper.html" %}
+  {% include "_combat_workspace_scripts.html" %}
   <script>
     (() => {
       const liveRoot = document.querySelector("[data-combat-character-live-root]");

@@ -1,8 +1,17 @@
+{% macro combat_workspace_fields(selected_combatant_id, expected_revision=None) -%}
+  {% if selected_combatant_id %}
+    <input type="hidden" name="combatant" value="{{ selected_combatant_id }}">
+  {% endif %}
+  {% if expected_revision is not none %}
+    <input type="hidden" name="expected_revision" value="{{ expected_revision }}">
+  {% endif %}
+{%- endmacro %}
 {% if selected_combatant %}
+  {% set show_inline_editing = combat_subpage == 'combat' and can_edit_combat_character_state %}
   <article class="card combat-character-snapshot" id="combat-character-snapshot">
     <div class="section-heading">
       <div>
-        <p class="card-kicker">Combat snapshot</p>
+        <p class="card-kicker">{% if show_inline_editing %}Combat workspace{% else %}Combat snapshot{% endif %}</p>
         <h2>{{ selected_combatant.name }}</h2>
         {% if selected_combatant.subtitle %}
           <p class="meta">{{ selected_combatant.subtitle }}</p>
@@ -21,30 +30,129 @@
     </div>
 
     <div class="combat-summary-grid combat-summary-grid--snapshot">
-      <div class="combat-stat">
-        <span class="meta">HP</span>
-        <strong>{{ selected_combatant.current_hp }} / {{ selected_combatant.max_hp }}</strong>
-      </div>
-      <div class="combat-stat">
-        <span class="meta">Temp HP</span>
-        <strong>{{ selected_combatant.temp_hp }}</strong>
-      </div>
-      <div class="combat-stat">
-        <span class="meta">Movement</span>
-        <strong>{{ selected_combatant.movement_remaining }} / {{ selected_combatant.movement_total }}</strong>
-      </div>
+      {% if show_inline_editing and selected_combatant.can_edit_vitals %}
+        <form
+          method="post"
+          action="{{ url_for('campaign_combat_update_vitals', campaign_slug=campaign.slug, combatant_id=selected_combatant.id) }}"
+          class="combat-stat combat-stat--editable"
+          data-combat-async
+          data-combat-inline-autosubmit
+        >
+          {{ combat_workspace_fields(selected_combatant_id, selected_combatant.state_revision) }}
+          <input type="hidden" name="temp_hp" value="{{ selected_combatant.temp_hp }}">
+          <span class="meta">HP</span>
+          <div class="combat-inline-value">
+            <input
+              class="combat-stat-input combat-stat-input--number"
+              type="number"
+              name="current_hp"
+              value="{{ selected_combatant.current_hp }}"
+              aria-label="Current HP for {{ selected_combatant.name }}"
+            >
+            <span class="combat-inline-divider">/</span>
+            <strong>{{ selected_combatant.max_hp }}</strong>
+          </div>
+        </form>
+        <form
+          method="post"
+          action="{{ url_for('campaign_combat_update_vitals', campaign_slug=campaign.slug, combatant_id=selected_combatant.id) }}"
+          class="combat-stat combat-stat--editable"
+          data-combat-async
+          data-combat-inline-autosubmit
+        >
+          {{ combat_workspace_fields(selected_combatant_id, selected_combatant.state_revision) }}
+          <input type="hidden" name="current_hp" value="{{ selected_combatant.current_hp }}">
+          <span class="meta">Temp HP</span>
+          <input
+            class="combat-stat-input combat-stat-input--single"
+            type="number"
+            name="temp_hp"
+            value="{{ selected_combatant.temp_hp }}"
+            aria-label="Temp HP for {{ selected_combatant.name }}"
+          >
+        </form>
+      {% else %}
+        <div class="combat-stat">
+          <span class="meta">HP</span>
+          <strong>{{ selected_combatant.current_hp }} / {{ selected_combatant.max_hp }}</strong>
+        </div>
+        <div class="combat-stat">
+          <span class="meta">Temp HP</span>
+          <strong>{{ selected_combatant.temp_hp }}</strong>
+        </div>
+      {% endif %}
+
+      {% if show_inline_editing and selected_combatant.can_edit_resources %}
+        <form
+          method="post"
+          action="{{ url_for('campaign_combat_update_resources', campaign_slug=campaign.slug, combatant_id=selected_combatant.id) }}"
+          class="combat-stat combat-stat--editable"
+          data-combat-async
+          data-combat-inline-autosubmit
+        >
+          {{ combat_workspace_fields(selected_combatant_id) }}
+          <input type="hidden" name="has_action" value="{{ '1' if selected_combatant.has_action else '0' }}">
+          <input type="hidden" name="has_bonus_action" value="{{ '1' if selected_combatant.has_bonus_action else '0' }}">
+          <input type="hidden" name="has_reaction" value="{{ '1' if selected_combatant.has_reaction else '0' }}">
+          <span class="meta">Movement</span>
+          <div class="combat-inline-value">
+            <input
+              class="combat-stat-input combat-stat-input--number"
+              type="number"
+              name="movement_remaining"
+              value="{{ selected_combatant.movement_remaining or 0 }}"
+              aria-label="Remaining movement for {{ selected_combatant.name }}"
+            >
+            <span class="combat-inline-divider">/</span>
+            <strong>{{ selected_combatant.movement_total }}</strong>
+          </div>
+        </form>
+      {% else %}
+        <div class="combat-stat">
+          <span class="meta">Movement</span>
+          <strong>{{ selected_combatant.movement_remaining }} / {{ selected_combatant.movement_total }}</strong>
+        </div>
+      {% endif %}
+
       <div class="combat-stat">
         <span class="meta">Speed</span>
         <strong>{{ selected_combatant.speed_label }}</strong>
       </div>
     </div>
 
-    <div class="combat-resource-strip">
-      <span class="combat-resource{% if selected_combatant.has_action %} combat-resource--ready{% endif %}">Action</span>
-      <span class="combat-resource{% if selected_combatant.has_bonus_action %} combat-resource--ready{% endif %}">Bonus Action</span>
-      <span class="combat-resource{% if selected_combatant.has_reaction %} combat-resource--ready{% endif %}">Reaction</span>
-      <span class="combat-resource combat-resource--movement">Movement {{ selected_combatant.movement_remaining }}/{{ selected_combatant.movement_total }}</span>
-    </div>
+    {% if show_inline_editing and selected_combatant.can_edit_resources %}
+      <form
+        method="post"
+        action="{{ url_for('campaign_combat_update_resources', campaign_slug=campaign.slug, combatant_id=selected_combatant.id) }}"
+        class="combat-resource-strip combat-inline-resource-form"
+        data-combat-async
+        data-combat-inline-autosubmit
+        data-combat-inline-submit-on-change="1"
+      >
+        {{ combat_workspace_fields(selected_combatant_id) }}
+        <input type="hidden" name="movement_remaining" value="{{ selected_combatant.movement_remaining or 0 }}">
+        <label class="combat-resource-toggle">
+          <input type="checkbox" name="has_action" value="1" {% if selected_combatant.has_action %}checked{% endif %}>
+          <span class="combat-resource">Action</span>
+        </label>
+        <label class="combat-resource-toggle">
+          <input type="checkbox" name="has_bonus_action" value="1" {% if selected_combatant.has_bonus_action %}checked{% endif %}>
+          <span class="combat-resource">Bonus Action</span>
+        </label>
+        <label class="combat-resource-toggle">
+          <input type="checkbox" name="has_reaction" value="1" {% if selected_combatant.has_reaction %}checked{% endif %}>
+          <span class="combat-resource">Reaction</span>
+        </label>
+        <span class="combat-resource combat-resource--movement">Movement {{ selected_combatant.movement_remaining }}/{{ selected_combatant.movement_total }}</span>
+      </form>
+    {% else %}
+      <div class="combat-resource-strip">
+        <span class="combat-resource{% if selected_combatant.has_action %} combat-resource--ready{% endif %}">Action</span>
+        <span class="combat-resource{% if selected_combatant.has_bonus_action %} combat-resource--ready{% endif %}">Bonus Action</span>
+        <span class="combat-resource{% if selected_combatant.has_reaction %} combat-resource--ready{% endif %}">Reaction</span>
+        <span class="combat-resource combat-resource--movement">Movement {{ selected_combatant.movement_remaining }}/{{ selected_combatant.movement_total }}</span>
+      </div>
+    {% endif %}
 
     <section class="combat-conditions combat-conditions--compact">
       <div class="section-heading">

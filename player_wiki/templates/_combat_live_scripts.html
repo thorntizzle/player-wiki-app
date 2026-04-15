@@ -12,6 +12,7 @@
     const controlsRoot = document.querySelector("[data-combat-controls-root]");
     let pollUrl = liveRoot.dataset.combatLiveUrl || "";
     const uiStateTools = window.__playerWikiLiveUiTools || null;
+    const combatWorkspaceTools = window.__playerWikiCombatWorkspace || null;
     let combatStateToken = liveRoot.dataset.combatStateToken || "";
     let liveRevision = Number.parseInt(liveRoot.dataset.liveRevision || "0", 10);
     if (!Number.isFinite(liveRevision) || liveRevision < 0) {
@@ -442,6 +443,7 @@
       const nextToken = payload.combat_state_token ? String(payload.combat_state_token) : "";
       const focusState = uiStateTools ? uiStateTools.captureFocus(liveRoot) : null;
       const viewportAnchor = uiStateTools ? uiStateTools.captureViewportAnchor(liveRoot) : null;
+      const workspaceSectionState = combatWorkspaceTools ? combatWorkspaceTools.capture(liveRoot) : "";
       const controlsFormState = captureControlsFormState();
       const systemsMonsterSearchState = captureSystemsMonsterSearchState();
       if (!force && nextToken === combatStateToken) {
@@ -474,6 +476,9 @@
         flashRoot.innerHTML = payload.flash_html;
       }
 
+      if (combatWorkspaceTools) {
+        combatWorkspaceTools.restore(liveRoot, workspaceSectionState);
+      }
       markInlineFormState(liveRoot);
       combatStateToken = nextToken;
       liveRoot.dataset.combatStateToken = combatStateToken;
@@ -701,6 +706,9 @@
     });
 
     initializeSystemsMonsterSearch();
+    if (combatWorkspaceTools) {
+      combatWorkspaceTools.restore(liveRoot);
+    }
     markInlineFormState(liveRoot);
     if (diagnosticsEnabled && diagnosticsTools) {
       diagnosticsTools.ensureMetricsStore();

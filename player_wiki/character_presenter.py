@@ -510,6 +510,7 @@ def present_character_detail(
                     systems_ref=feature.get("systems_ref"),
                     page_ref=feature.get("page_ref"),
                 ),
+                "activation_type": str(feature.get("activation_type") or "").strip().lower(),
                 "metadata": [part for part in metadata if part],
                 "description_html": resolve_feature_description_html(
                     campaign,

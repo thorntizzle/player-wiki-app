@@ -1,0 +1,543 @@
+{% if selected_combat_character and combat_workspace_sections %}
+  <div data-combat-workspace-root>
+  <section class="card combat-workspace-card">
+    <div class="section-heading">
+      <div>
+        <h2>Combat sections</h2>
+        <p class="meta">Keep the main combat page open and swap between the parts of the sheet you need most in play.</p>
+      </div>
+    </div>
+    <nav
+      class="combat-workspace-nav"
+      aria-label="Combat workspace sections"
+      data-combat-section-group
+      data-combat-default-section="{{ combat_workspace_default_section }}"
+    >
+      {% for section in combat_workspace_sections %}
+        <button
+          type="button"
+          class="ghost-button combat-workspace-button{% if section.is_default %} combat-workspace-button--active{% endif %}"
+          data-combat-section-toggle="{{ section.slug }}"
+          aria-pressed="{{ 'true' if section.is_default else 'false' }}"
+        >
+          <span>{{ section.label }}</span>
+          {% if section.count %}
+            <span class="meta-badge">{{ section.count }}</span>
+          {% endif %}
+        </button>
+      {% endfor %}
+    </nav>
+  </section>
+
+  {% for section in combat_workspace_sections %}
+    <section
+      class="read-section combat-workspace-panel"
+      data-combat-section-panel="{{ section.slug }}"
+      {% if not section.is_default %}hidden{% endif %}
+      {% if section.slug == 'resources' %}id="combat-character-resources"{% endif %}
+    >
+      <div class="section-heading">
+        <h2>{{ section.label }}</h2>
+      </div>
+
+      {% if section.slug in ['actions', 'bonus_actions', 'reactions'] %}
+        {% if section.features %}
+          <div class="feature-stack">
+            {% for feature in section.features %}
+              <article class="feature-row">
+                <div class="feature-row__header">
+                  <div>
+                    <h3>
+                      {% if feature.href %}
+                        <a href="{{ feature.href }}">{{ feature.name }}</a>
+                      {% else %}
+                        {{ feature.name }}
+                      {% endif %}
+                    </h3>
+                    <p class="meta">{{ feature.group_title }}</p>
+                  </div>
+                  {% if feature.metadata %}
+                    <p class="meta">{{ feature.metadata | join(" | ") }}</p>
+                  {% endif %}
+                </div>
+                {% if feature.description_html %}
+                  <div class="article-body article-body--compact">{{ feature.description_html | safe }}</div>
+                {% endif %}
+              </article>
+            {% endfor %}
+          </div>
+        {% else %}
+          <article class="detail-card">
+            <p class="meta">{{ section.empty_message }}</p>
+          </article>
+        {% endif %}
+      {% elif section.slug == 'attacks' %}
+        {% if section.attack_reminders %}
+          <div class="detail-grid">
+            {% for rule in section.attack_reminders %}
+              <article class="detail-card">
+                <div class="section-heading">
+                  <h3>{{ rule.title }}</h3>
+                  <span class="meta">{{ rule.status_label }}</span>
+                </div>
+                {% for effect in rule.effects %}
+                  <p><strong>{{ effect.label }}:</strong> {{ effect.summary }}</p>
+                {% endfor %}
+                {% if rule.eligible_attacks %}
+                  <p class="meta">Eligible attacks: {{ rule.eligible_attacks | join(", ") }}</p>
+                {% elif rule.scope_label %}
+                  <p class="meta">Scope: {{ rule.scope_label }}</p>
+                {% endif %}
+                {% if rule.condition %}
+                  <p class="meta">{{ rule.condition }}</p>
+                {% endif %}
+                {% if rule.availability_note %}
+                  <p class="meta">{{ rule.availability_note }}</p>
+                {% endif %}
+              </article>
+            {% endfor %}
+          </div>
+        {% endif %}
+        {% if section.attacks %}
+          <div class="attack-grid">
+            {% for attack in section.attacks %}
+              <article class="attack-card">
+                <div class="section-heading">
+                  <h3>
+                    {% if attack.href %}
+                      <a href="{{ attack.href }}">{{ attack.name }}</a>
+                    {% else %}
+                      {{ attack.name }}
+                    {% endif %}
+                  </h3>
+                  <span class="meta">{{ attack.category }}</span>
+                </div>
+                {% if attack.attack_bonus %}
+                  <p><strong>{{ attack.attack_bonus }}</strong> to hit</p>
+                {% endif %}
+                {% if attack.damage %}
+                  <p><strong>{{ attack.damage }}</strong></p>
+                {% endif %}
+                {% if attack.notes %}
+                  <p class="meta">{{ attack.notes }}</p>
+                {% endif %}
+              </article>
+            {% endfor %}
+          </div>
+        {% elif not section.attack_reminders %}
+          <article class="detail-card">
+            <p class="meta">{{ section.empty_message }}</p>
+          </article>
+        {% endif %}
+        {% if section.hidden_attacks %}
+          <p class="meta">Hidden until equipped: {{ section.hidden_attacks | join(", ") }}.</p>
+        {% endif %}
+      {% elif section.slug == 'spells' %}
+        {% if section.spellcasting %}
+          <div class="detail-grid">
+            <article class="detail-card">
+              {% if section.spellcasting.is_multiclass %}
+                <h3>Multiclass Spellcasting</h3>
+                <p>{{ section.spellcasting.multiclass_summary }}</p>
+              {% else %}
+                {% set primary_section = (section.spellcasting.row_sections | list | first) if section.spellcasting.row_sections else none %}
+                <h3>{{ (primary_section.title if primary_section else section.spellcasting.spellcasting_class) or "Spellcasting" }}</h3>
+                <p>
+                  {{ (primary_section.spellcasting_ability if primary_section else section.spellcasting.spellcasting_ability) }} spellcasting
+                  {% if (primary_section.spell_save_dc if primary_section else section.spellcasting.spell_save_dc) %}
+                    | Save DC {{ primary_section.spell_save_dc if primary_section else section.spellcasting.spell_save_dc }}
+                  {% endif %}
+                  {% if (primary_section.spell_attack_bonus if primary_section else section.spellcasting.spell_attack_bonus) %}
+                    | Attack {{ primary_section.spell_attack_bonus if primary_section else section.spellcasting.spell_attack_bonus }}
+                  {% endif %}
+                </p>
+              {% endif %}
+            </article>
+            {% for slot_pool in section.spellcasting.slot_pools %}
+              {% if slot_pool.slots %}
+                {% if can_edit_combat_character_state and selected_combatant_id %}
+                  <article class="detail-card" {% if loop.first %}id="combat-character-spell-slots"{% endif %}>
+                    <h3>{{ slot_pool.title or section.spellcasting.slots_title or "Spell slots" }}</h3>
+                    <div class="spell-slot-editor-list">
+                      {% for slot in slot_pool.slots %}
+                        <article class="detail-card">
+                          <form
+                            class="session-inline-form"
+                            method="post"
+                            action="{{ url_for('campaign_combat_character_spell_slots', campaign_slug=campaign.slug, combatant_id=selected_combatant_id, level=slot.level) }}"
+                          >
+                            <input type="hidden" name="expected_revision" value="{{ selected_combat_character.state_revision }}">
+                            <input type="hidden" name="slot_lane_id" value="{{ slot.slot_lane_id }}">
+                            {% if combat_subpage == 'combat' %}
+                              <input type="hidden" name="combat_view" value="combat">
+                            {% endif %}
+                            <div class="section-heading">
+                              <h3>{{ slot.label }}</h3>
+                              <span class="meta">{{ slot.available }} available / {{ slot.max }}</span>
+                            </div>
+                            <label class="session-field">
+                              <span>Used</span>
+                              <input type="number" name="used" value="{{ slot.used }}" min="0" max="{{ slot.max }}">
+                            </label>
+                            <div class="session-stepper">
+                              <button type="submit" name="delta_used" value="-1">Restore 1</button>
+                              <button type="submit" name="delta_used" value="1">Use 1</button>
+                              <button type="submit">Save</button>
+                            </div>
+                          </form>
+                        </article>
+                      {% endfor %}
+                    </div>
+                  </article>
+                {% else %}
+                  <article class="detail-card" {% if loop.first %}id="combat-character-spell-slots"{% endif %}>
+                    <h3>{{ slot_pool.title or section.spellcasting.slots_title or "Spell slots" }}</h3>
+                    <ul class="plain-list slot-list">
+                      {% for slot in slot_pool.slots %}
+                        <li>
+                          <span>{{ slot.label }}</span>
+                          <strong>{{ slot.available }} available / {{ slot.max }}</strong>
+                        </li>
+                      {% endfor %}
+                    </ul>
+                  </article>
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+          </div>
+
+          {% if section.spellcasting.row_sections %}
+            {% for spell_section in section.spellcasting.row_sections %}
+              <div class="section-heading">
+                <div>
+                  <h3>{{ spell_section.title }}</h3>
+                  {% if spell_section.spellcasting_ability %}
+                    <p class="meta">
+                      {{ spell_section.spellcasting_ability }} spellcasting
+                      {% if spell_section.spell_save_dc %}| Save DC {{ spell_section.spell_save_dc }}{% endif %}
+                      {% if spell_section.spell_attack_bonus %}| Attack {{ spell_section.spell_attack_bonus }}{% endif %}
+                    </p>
+                  {% endif %}
+                </div>
+              </div>
+              {% if spell_section.counts %}
+                <ul class="plain-list slot-list">
+                  {% for count in spell_section.counts %}
+                    <li>
+                      <span>{{ count.label }}</span>
+                      <strong>{{ count.value }}</strong>
+                    </li>
+                  {% endfor %}
+                </ul>
+              {% endif %}
+              {% if spell_section.spells %}
+                <div class="spell-list">
+                  {% for spell in spell_section.spells %}
+                    <article class="spell-row">
+                      <div class="spell-row__header">
+                        <h3>
+                          {% if spell.href %}
+                            <a href="{{ spell.href }}">{{ spell.name }}</a>
+                          {% else %}
+                            {{ spell.name }}
+                          {% endif %}
+                        </h3>
+                        {% if spell.badges %}
+                          <div class="badge-list">
+                            {% for badge in spell.badges %}
+                              <span class="meta-badge">{{ badge }}</span>
+                            {% endfor %}
+                          </div>
+                        {% endif %}
+                      </div>
+                      <p class="meta">
+                        {{ spell.casting_time }} | {{ spell.range }} | {{ spell.duration }} | {{ spell.components }}
+                        {% if spell.save_or_hit and spell.save_or_hit != '--' %}
+                          | {{ spell.save_or_hit }}
+                        {% endif %}
+                      </p>
+                    </article>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <p class="meta">No spells recorded yet for this class row.</p>
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+        {% else %}
+          <article class="detail-card">
+            <p class="meta">{{ section.empty_message }}</p>
+          </article>
+        {% endif %}
+      {% elif section.slug == 'resources' %}
+        {% if section.resources %}
+          <div class="resource-grid">
+            {% for resource in section.resources %}
+              <article class="resource-card">
+                {% if can_edit_combat_character_state and selected_combatant_id %}
+                  <form
+                    class="session-inline-form"
+                    method="post"
+                    action="{{ url_for('campaign_combat_character_resource', campaign_slug=campaign.slug, combatant_id=selected_combatant_id, resource_id=resource.id) }}"
+                  >
+                    <input type="hidden" name="expected_revision" value="{{ selected_combat_character.state_revision }}">
+                    {% if combat_subpage == 'combat' %}
+                      <input type="hidden" name="combat_view" value="combat">
+                    {% endif %}
+                    <div class="section-heading">
+                      <h3>{{ resource.label }}</h3>
+                      <span class="meta">{{ resource.reset_label }}</span>
+                    </div>
+                    <label class="session-field">
+                      <span>Current</span>
+                      <input
+                        type="number"
+                        name="current"
+                        value="{{ resource.current }}"
+                        min="0"
+                        {% if resource.max is not none %}max="{{ resource.max }}"{% endif %}
+                      >
+                    </label>
+                    <p class="resource-card__value">{{ resource.value }}</p>
+                    <div class="session-stepper">
+                      <button type="submit" name="delta" value="-1">-1</button>
+                      <button type="submit" name="delta" value="1">+1</button>
+                      <button type="submit">Save</button>
+                    </div>
+                    {% if resource.notes %}
+                      <p class="meta">{{ resource.notes }}</p>
+                    {% endif %}
+                  </form>
+                {% else %}
+                  <h3>{{ resource.label }}</h3>
+                  <p class="resource-card__value">{{ resource.value }}</p>
+                  <p class="meta">Resets: {{ resource.reset_label }}</p>
+                  {% if resource.notes %}
+                    <p class="meta">{{ resource.notes }}</p>
+                  {% endif %}
+                {% endif %}
+              </article>
+            {% endfor %}
+          </div>
+        {% else %}
+          <article class="detail-card">
+            <p class="meta">{{ section.empty_message }}</p>
+          </article>
+        {% endif %}
+      {% elif section.slug == 'features' %}
+        {% if section.defensive_rules %}
+          <div class="detail-grid">
+            {% for rule in section.defensive_rules %}
+              <article class="detail-card">
+                <div class="section-heading">
+                  <h3>{{ rule.title }}</h3>
+                  <span class="meta">{{ rule.status_label }}</span>
+                </div>
+                {% for effect in rule.effects %}
+                  <p><strong>{{ effect.label }}:</strong> {{ effect.summary }}</p>
+                {% endfor %}
+                {% if rule.condition %}
+                  <p class="meta">{{ rule.condition }}</p>
+                {% endif %}
+                {% if not rule.is_active and rule.inactive_reason %}
+                  <p class="meta">{{ rule.inactive_reason }}</p>
+                {% endif %}
+              </article>
+            {% endfor %}
+          </div>
+        {% endif %}
+        {% if section.feature_groups %}
+          <div class="feature-groups">
+            {% for group in section.feature_groups %}
+              <section class="feature-group">
+                <h3>{{ group.title }}</h3>
+                <div class="feature-stack">
+                  {% for feature in group.entries %}
+                    <article class="feature-row">
+                      <div class="feature-row__header">
+                        <h4>
+                          {% if feature.href %}
+                            <a href="{{ feature.href }}">{{ feature.name }}</a>
+                          {% else %}
+                            {{ feature.name }}
+                          {% endif %}
+                        </h4>
+                        {% if feature.metadata %}
+                          <p class="meta">{{ feature.metadata | join(" | ") }}</p>
+                        {% endif %}
+                      </div>
+                      {% if feature.description_html %}
+                        <div class="article-body article-body--compact">{{ feature.description_html | safe }}</div>
+                      {% endif %}
+                    </article>
+                  {% endfor %}
+                </div>
+              </section>
+            {% endfor %}
+          </div>
+        {% elif not section.defensive_rules %}
+          <article class="detail-card">
+            <p class="meta">{{ section.empty_message }}</p>
+          </article>
+        {% endif %}
+      {% elif section.slug == 'equipment' %}
+        {% set equipment_state = section.equipment_state_manager %}
+        {% if equipment_state.rows %}
+          <div class="detail-grid">
+            <article class="detail-card">
+              <h3>Attuned items</h3>
+              <p><strong>{{ equipment_state.attuned_count }} / {{ equipment_state.max_attuned_items }}</strong></p>
+              <p class="meta">Attunement is separate from equipped state and usually has room for up to {{ equipment_state.max_attuned_items }} items.</p>
+              {% if equipment_state.over_attunement_limit %}
+                <p class="meta">This sheet is currently over the normal attunement limit.</p>
+              {% endif %}
+            </article>
+            <article class="detail-card">
+              <h3>Equipped items</h3>
+              <p><strong>{{ equipment_state.equipped_count }}</strong></p>
+              <p class="meta">Use equipped for items that are worn, wielded, or actively granting their usual benefits.</p>
+            </article>
+          </div>
+          <div class="character-edit-stack">
+            {% for item in equipment_state.rows %}
+              <article class="detail-card character-edit-row">
+                <div class="section-heading">
+                  <h3>
+                    {% if item.href %}
+                      <a href="{{ item.href }}">{{ item.name }}</a>
+                    {% else %}
+                      {{ item.name }}
+                    {% endif %}
+                  </h3>
+                  <span class="meta">{{ item.source_label }}</span>
+                </div>
+                <p class="meta">
+                  x{{ item.quantity }}
+                  {% if item.weight %} | {{ item.weight }}{% endif %}
+                  {% if item.requires_attunement %} | Requires attunement{% endif %}
+                </p>
+                <p class="meta">
+                  {% if item.is_equipped %}Equipped{% else %}Not equipped{% endif %}
+                  {% if item.is_attuned %} | Attuned{% else %} | Not attuned{% endif %}
+                </p>
+                {% if item.tags %}
+                  <p class="meta">{{ item.tags | join(", ") }}</p>
+                {% endif %}
+                {% if item.notes %}
+                  <p>{{ item.notes }}</p>
+                {% endif %}
+              </article>
+            {% endfor %}
+          </div>
+        {% else %}
+          <article class="detail-card">
+            <p class="meta">{{ section.empty_message }}</p>
+          </article>
+        {% endif %}
+      {% elif section.slug == 'inventory' %}
+        {% if section.currency or section.other_currency %}
+          <div class="detail-grid">
+            <article class="detail-card">
+              <h3>Currency</h3>
+              <p>
+                {% for coin in section.currency %}
+                  {% if not loop.first %} | {% endif %}
+                  {{ coin.label }} {{ coin.amount }}
+                {% endfor %}
+              </p>
+              {% if section.other_currency %}
+                <p class="meta">{{ section.other_currency | join(", ") }}</p>
+              {% endif %}
+            </article>
+          </div>
+        {% endif %}
+        {% if section.inventory %}
+          <div class="inventory-list">
+            {% for item in section.inventory %}
+              <article class="inventory-row">
+                <div class="inventory-row__header">
+                  <h3>
+                    {% if item.href %}
+                      <a href="{{ item.href }}">{{ item.name }}</a>
+                    {% else %}
+                      {{ item.name }}
+                    {% endif %}
+                  </h3>
+                  <div class="badge-list">
+                    <span class="meta-badge">x{{ item.quantity }}</span>
+                    {% if item.weight %}
+                      <span class="meta-badge">{{ item.weight }}</span>
+                    {% endif %}
+                    {% if item.is_equipped %}
+                      <span class="meta-badge">Equipped</span>
+                    {% endif %}
+                    {% if item.is_attuned %}
+                      <span class="meta-badge">Attuned</span>
+                    {% endif %}
+                  </div>
+                </div>
+                {% if item.tags %}
+                  <p class="meta">{{ item.tags | join(", ") }}</p>
+                {% endif %}
+                {% if item.notes %}
+                  <p>{{ item.notes }}</p>
+                {% endif %}
+              </article>
+            {% endfor %}
+          </div>
+        {% elif not section.currency and not section.other_currency %}
+          <article class="detail-card">
+            <p class="meta">{{ section.empty_message }}</p>
+          </article>
+        {% endif %}
+      {% elif section.slug == 'abilities_skills' %}
+        {% if section.abilities or section.skills or section.proficiency_groups %}
+          <div class="ability-grid">
+            {% for ability in section.abilities %}
+              <article class="ability-card">
+                <p class="card-kicker">{{ ability.abbr }}</p>
+                <h3>{{ ability.score }}</h3>
+                <p>{{ ability.name }}</p>
+                <p class="meta">Modifier {{ ability.modifier }} | Save {{ ability.save_bonus }}</p>
+              </article>
+            {% endfor %}
+          </div>
+          <div class="detail-cluster">
+            <div>
+              <h3>Skills</h3>
+              <div class="skill-grid">
+                {% for skill in section.skills %}
+                  <div class="skill-pill {% if skill.is_proficient %}skill-pill--proficient{% endif %}">
+                    <span>{{ skill.name }}</span>
+                    <strong>{{ skill.bonus }}</strong>
+                    {% if skill.proficiency_label and skill.proficiency_label != 'None' %}
+                      <span class="meta">{{ skill.proficiency_label }}</span>
+                    {% endif %}
+                  </div>
+                {% endfor %}
+              </div>
+            </div>
+            {% if section.proficiency_groups %}
+              <div>
+                <h3>Proficiencies</h3>
+                <div class="detail-grid">
+                  {% for group in section.proficiency_groups %}
+                    <article class="detail-card">
+                      <h4>{{ group.title }}</h4>
+                      <p>{{ group.values_list | join(", ") }}</p>
+                    </article>
+                  {% endfor %}
+                </div>
+              </div>
+            {% endif %}
+          </div>
+        {% else %}
+          <article class="detail-card">
+            <p class="meta">{{ section.empty_message }}</p>
+          </article>
+        {% endif %}
+      {% endif %}
+    </section>
+  {% endfor %}
+  </div>
+{% endif %}

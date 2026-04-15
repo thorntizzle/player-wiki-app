@@ -173,6 +173,18 @@ COMBAT_SOURCE_LABELS = {
     COMBAT_SOURCE_KIND_DM_STATBLOCK: "DM Content",
     COMBAT_SOURCE_KIND_SYSTEMS_MONSTER: "Systems",
 }
+COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS = {
+    "actions": "Actions",
+    "bonus_actions": "Bonus Actions",
+    "reactions": "Reactions",
+    "attacks": "Attacks",
+    "spells": "Spells",
+    "resources": "Resources",
+    "features": "Features",
+    "equipment": "Equipment",
+    "inventory": "Inventory",
+    "abilities_skills": "Abilities and Skills",
+}
 BUILDER_RELEVANT_CAMPAIGN_SECTIONS = frozenset(
     {
         CAMPAIGN_MECHANICS_SECTION,
@@ -2398,6 +2410,13 @@ def create_app() -> Flask:
         else:
             flash(success_message, "success")
 
+        if str(request.form.get("combat_view") or "").strip().lower() == "combat":
+            return redirect_to_campaign_combat(
+                campaign_slug,
+                combatant_id=combatant_id,
+                anchor=anchor,
+            )
+
         return redirect_to_campaign_combat_character(
             campaign_slug,
             combatant_id=combatant_id,
@@ -2543,12 +2562,224 @@ def create_app() -> Flask:
             "active_nav": "session",
         }
 
+    def resolve_combat_character_target(
+        tracker_view: dict[str, object],
+        allowed_target_rows: list[dict[str, object]],
+        *,
+        explicit_combatant_id_raw: str = "",
+        explicit_character_slug: str = "",
+        strict_explicit: bool = False,
+    ) -> dict[str, object] | None:
+        selected_target = None
+        normalized_combatant_id = explicit_combatant_id_raw.strip()
+        normalized_character_slug = explicit_character_slug.strip()
+
+        if normalized_combatant_id:
+            try:
+                explicit_combatant_id = int(normalized_combatant_id)
+            except ValueError:
+                if strict_explicit:
+                    abort(403)
+                explicit_combatant_id = None
+            if explicit_combatant_id is not None:
+                selected_target = next(
+                    (
+                        row
+                        for row in allowed_target_rows
+                        if row["combatant_record"].id == explicit_combatant_id
+                    ),
+                    None,
+                )
+                if selected_target is None and strict_explicit:
+                    abort(403)
+        elif normalized_character_slug:
+            selected_target = next(
+                (
+                    row
+                    for row in allowed_target_rows
+                    if row["record"].definition.character_slug == normalized_character_slug
+                ),
+                None,
+            )
+            if selected_target is None and strict_explicit:
+                abort(403)
+
+        if selected_target is None:
+            current_turn_id = next(
+                (
+                    int(combatant["id"])
+                    for combatant in list(tracker_view.get("combatants") or [])
+                    if combatant.get("is_current_turn")
+                ),
+                None,
+            )
+            if current_turn_id is not None:
+                selected_target = next(
+                    (
+                        row
+                        for row in allowed_target_rows
+                        if row["combatant_record"].id == current_turn_id
+                    ),
+                    None,
+                )
+            if selected_target is None and allowed_target_rows:
+                selected_target = allowed_target_rows[0]
+
+        return selected_target
+
+    def build_combat_character_workspace_sections(
+        character_detail: dict[str, object],
+        equipment_state_manager: dict[str, object],
+    ) -> tuple[list[dict[str, object]], str]:
+        action_features: list[dict[str, object]] = []
+        bonus_action_features: list[dict[str, object]] = []
+        reaction_features: list[dict[str, object]] = []
+        feature_groups = [dict(group or {}) for group in list(character_detail.get("feature_groups") or [])]
+        for group in feature_groups:
+            group_title = str(group.get("title") or "Features").strip() or "Features"
+            for feature in list(group.get("entries") or []):
+                feature_payload = dict(feature or {})
+                feature_payload["group_title"] = group_title
+                activation_type = str(feature_payload.get("activation_type") or "").strip().lower()
+                if activation_type == "action":
+                    action_features.append(feature_payload)
+                elif activation_type == "bonus_action":
+                    bonus_action_features.append(feature_payload)
+                elif activation_type == "reaction":
+                    reaction_features.append(feature_payload)
+
+        attack_reminders = [dict(item or {}) for item in list(character_detail.get("attack_reminders") or [])]
+        defensive_rules = [dict(item or {}) for item in list(character_detail.get("defensive_rules") or [])]
+        spellcasting = dict(character_detail.get("spellcasting") or {})
+        resources = [dict(item or {}) for item in list(character_detail.get("resources") or [])]
+        attacks = [dict(item or {}) for item in list(character_detail.get("attacks") or [])]
+        hidden_attacks = [str(item).strip() for item in list(character_detail.get("hidden_attacks") or []) if str(item).strip()]
+        equipment_rows = [dict(item or {}) for item in list(equipment_state_manager.get("rows") or [])]
+        inventory_rows = [dict(item or {}) for item in list(character_detail.get("inventory") or [])]
+        currency_rows = [dict(item or {}) for item in list(character_detail.get("currency") or [])]
+        other_currency = [str(item).strip() for item in list(character_detail.get("other_currency") or []) if str(item).strip()]
+        abilities = [dict(item or {}) for item in list(character_detail.get("abilities") or [])]
+        skills = [dict(item or {}) for item in list(character_detail.get("skills") or [])]
+        proficiency_groups = [dict(item or {}) for item in list(character_detail.get("proficiency_groups") or [])]
+
+        spell_count = sum(
+            len(list(section.get("spells") or []))
+            for section in list(spellcasting.get("row_sections") or [])
+            if isinstance(section, dict)
+        )
+        sections = [
+            {
+                "slug": "actions",
+                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["actions"],
+                "count": len(action_features),
+                "has_content": bool(action_features),
+                "features": action_features,
+                "empty_message": "No action-specific features are recorded on this sheet yet.",
+            },
+            {
+                "slug": "bonus_actions",
+                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["bonus_actions"],
+                "count": len(bonus_action_features),
+                "has_content": bool(bonus_action_features),
+                "features": bonus_action_features,
+                "empty_message": "No bonus-action features are recorded on this sheet yet.",
+            },
+            {
+                "slug": "reactions",
+                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["reactions"],
+                "count": len(reaction_features),
+                "has_content": bool(reaction_features),
+                "features": reaction_features,
+                "empty_message": "No reaction features are recorded on this sheet yet.",
+            },
+            {
+                "slug": "attacks",
+                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["attacks"],
+                "count": len(attacks),
+                "has_content": bool(attacks or hidden_attacks or attack_reminders),
+                "attacks": attacks,
+                "hidden_attacks": hidden_attacks,
+                "attack_reminders": attack_reminders,
+                "empty_message": "No attacks are currently active on this sheet.",
+            },
+            {
+                "slug": "spells",
+                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["spells"],
+                "count": spell_count,
+                "has_content": bool(spellcasting),
+                "spellcasting": spellcasting,
+                "empty_message": "No spellcasting details are recorded on this sheet.",
+            },
+            {
+                "slug": "resources",
+                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["resources"],
+                "count": len(resources),
+                "has_content": bool(resources),
+                "resources": resources,
+                "empty_message": "No tracked limited-use resources are recorded on this sheet.",
+            },
+            {
+                "slug": "features",
+                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["features"],
+                "count": sum(len(list(group.get("entries") or [])) for group in feature_groups),
+                "has_content": bool(feature_groups or defensive_rules),
+                "feature_groups": feature_groups,
+                "defensive_rules": defensive_rules,
+                "empty_message": "No feature details are recorded on this sheet yet.",
+            },
+            {
+                "slug": "equipment",
+                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["equipment"],
+                "count": len(equipment_rows),
+                "has_content": bool(equipment_rows),
+                "equipment_state_manager": equipment_state_manager,
+                "empty_message": "No equipment is listed on this sheet yet.",
+            },
+            {
+                "slug": "inventory",
+                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["inventory"],
+                "count": len(inventory_rows),
+                "has_content": bool(
+                    inventory_rows
+                    or any(int(item.get("amount") or 0) for item in currency_rows)
+                    or other_currency
+                ),
+                "inventory": inventory_rows,
+                "currency": currency_rows,
+                "other_currency": other_currency,
+                "empty_message": "No inventory or currency is listed on this sheet yet.",
+            },
+            {
+                "slug": "abilities_skills",
+                "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["abilities_skills"],
+                "count": len(skills),
+                "has_content": bool(abilities or skills or proficiency_groups),
+                "abilities": abilities,
+                "skills": skills,
+                "proficiency_groups": proficiency_groups,
+                "empty_message": "No ability or skill details are recorded on this sheet yet.",
+            },
+        ]
+        default_section = next((section["slug"] for section in sections if section["has_content"]), "actions")
+        for section in sections:
+            section["is_default"] = section["slug"] == default_section
+        return sections, default_section
+
     def build_combat_character_detail_context(campaign_slug: str, campaign, record) -> dict[str, object]:
         character_detail = present_character_detail(
             campaign,
             record,
             include_player_notes_section=False,
             systems_service=get_systems_service(),
+        )
+        equipment_state_manager = build_character_equipment_state_context(
+            campaign_slug,
+            campaign,
+            record,
+        )
+        workspace_sections, workspace_default_section = build_combat_character_workspace_sections(
+            character_detail,
+            equipment_state_manager,
         )
         overview_stats = [
             stat
@@ -2559,6 +2790,9 @@ def create_app() -> Flask:
         return {
             "selected_combat_character": character_detail,
             "selected_combat_overview_stats": overview_stats,
+            "combat_equipment_state_manager": equipment_state_manager,
+            "combat_workspace_sections": workspace_sections,
+            "combat_workspace_default_section": workspace_default_section,
             "can_view_full_character_sheet": bool(selected_character_slug)
             and can_access_campaign_scope(campaign_slug, "characters"),
             "full_character_sheet_url": (
@@ -2680,6 +2914,56 @@ def create_app() -> Flask:
         selected_combatant_id = (
             selected_combatant_record.id if selected_combatant_record is not None else None
         )
+        accessible_combat_character_rows = list_accessible_combat_character_rows(
+            combatants,
+            tracker_view,
+            character_records_by_slug,
+            campaign_slug=campaign_slug,
+            can_manage_combat=can_manage_combat,
+        )
+        show_player_combat_workspace = False
+        combat_workspace_targets: list[dict[str, object]] = []
+        combat_character_state_token = ""
+        can_edit_combat_character_state = False
+        player_workspace_detail_context: dict[str, object] = {}
+        if combat_subpage == "combat" and not can_manage_combat and accessible_combat_character_rows:
+            selected_target = resolve_combat_character_target(
+                tracker_view,
+                accessible_combat_character_rows,
+                explicit_combatant_id_raw=request.args.get("combatant", ""),
+                strict_explicit=False,
+            )
+            if selected_target is not None:
+                selected_combatant_record = selected_target["combatant_record"]
+                selected_combatant = selected_target["combatant"]
+                selected_combatant_id = selected_combatant_record.id
+                requested_combatant_id = selected_combatant_id
+                show_player_combat_workspace = True
+                can_edit_combat_character_state = True
+                combat_character_state_token = build_selected_combatant_state_token(
+                    tracker_view,
+                    selected_combatant,
+                )
+                player_workspace_detail_context = build_combat_character_detail_context(
+                    campaign_slug,
+                    campaign,
+                    selected_target["record"],
+                )
+                combat_workspace_targets = [
+                    {
+                        "combatant_id": row["combatant_record"].id,
+                        "character_slug": row["record"].definition.character_slug,
+                        "name": row["combatant"]["name"],
+                        "subtitle": row["combatant"]["subtitle"],
+                        "href": url_for(
+                            "campaign_combat_view",
+                            campaign_slug=campaign.slug,
+                            combatant=row["combatant_record"].id,
+                        ),
+                        "is_active": row["combatant_record"].id == selected_combatant_id,
+                    }
+                    for row in accessible_combat_character_rows
+                ]
         if combat_subpage == "dm":
             requested_combatant_id = selected_combatant_id
             dm_focus_combatant_choices = [
@@ -2708,13 +2992,6 @@ def create_app() -> Flask:
             campaign_slug,
             combat_subpage,
             selected_combatant_id=requested_combatant_id,
-        )
-        accessible_combat_character_rows = list_accessible_combat_character_rows(
-            combatants,
-            tracker_view,
-            character_records_by_slug,
-            campaign_slug=campaign_slug,
-            can_manage_combat=can_manage_combat,
         )
         selected_combat_character_row = next(
             (
@@ -2765,7 +3042,7 @@ def create_app() -> Flask:
             else ""
         )
 
-        return {
+        context = {
             "campaign": campaign,
             "combat_system_supported": combat_system_supported,
             "combat_tracker": tracker_view,
@@ -2808,12 +3085,18 @@ def create_app() -> Flask:
             "combat_character_entry_url": combat_character_entry_url,
             "selected_combatant_character_url": selected_combatant_character_url,
             "selected_combatant_status_url": selected_combatant_status_url,
+            "show_player_combat_workspace": show_player_combat_workspace,
+            "combat_workspace_targets": combat_workspace_targets,
+            "combat_character_state_token": combat_character_state_token,
+            "can_edit_combat_character_state": can_edit_combat_character_state,
             "active_nav": "combat",
             "_combatant_records": combatants,
             "_combat_conditions_by_combatant": conditions_by_combatant,
             "_combat_character_records_by_slug": character_records_by_slug,
             "_selected_combatant_record": selected_combatant_record,
         }
+        context.update(player_workspace_detail_context)
+        return context
 
     def build_campaign_combat_character_context(
         campaign_slug: str,
@@ -2839,52 +3122,13 @@ def create_app() -> Flask:
             can_manage_combat=can_manage_combat,
             owned_character_slugs=owned_character_slugs,
         )
-        selected_target = None
-        explicit_combatant_id_raw = request.args.get("combatant", "").strip()
-        explicit_character_slug = request.args.get("character", "").strip()
-
-        if explicit_combatant_id_raw:
-            try:
-                explicit_combatant_id = int(explicit_combatant_id_raw)
-            except ValueError:
-                abort(403)
-            selected_target = next(
-                (row for row in allowed_target_rows if row["combatant_record"].id == explicit_combatant_id),
-                None,
-            )
-            if selected_target is None:
-                abort(403)
-        elif explicit_character_slug:
-            selected_target = next(
-                (
-                    row
-                    for row in allowed_target_rows
-                    if row["record"].definition.character_slug == explicit_character_slug
-                ),
-                None,
-            )
-            if selected_target is None:
-                abort(403)
-        else:
-            current_turn_id = next(
-                (
-                    int(combatant["id"])
-                    for combatant in list(tracker_view.get("combatants") or [])
-                    if combatant.get("is_current_turn")
-                ),
-                None,
-            )
-            if current_turn_id is not None:
-                selected_target = next(
-                    (
-                        row
-                        for row in allowed_target_rows
-                        if row["combatant_record"].id == current_turn_id
-                    ),
-                    None,
-                )
-            if selected_target is None and allowed_target_rows:
-                selected_target = allowed_target_rows[0]
+        selected_target = resolve_combat_character_target(
+            tracker_view,
+            allowed_target_rows,
+            explicit_combatant_id_raw=request.args.get("combatant", ""),
+            explicit_character_slug=request.args.get("character", ""),
+            strict_explicit=True,
+        )
 
         selected_combatant = selected_target["combatant"] if selected_target is not None else None
         selected_record = selected_target["record"] if selected_target is not None else None
@@ -3905,14 +4149,29 @@ def create_app() -> Flask:
             live_revision = int(context["combat_live_revision"] or 0)
         if live_view_token is None:
             live_view_token = str(context["combat_live_view_token"] or "")
+        summary_template = (
+            "_combat_character_snapshot.html"
+            if context.get("show_player_combat_workspace")
+            else "_combat_summary_card.html"
+        )
+        tracker_template = (
+            "_combat_player_workspace_sections.html"
+            if context.get("show_player_combat_workspace")
+            else "_combat_tracker_section.html"
+        )
+        sidebar_template = (
+            "_combat_player_workspace_sidebar.html"
+            if context.get("show_player_combat_workspace")
+            else "_combat_context_panel.html"
+        )
         payload = {
             "changed": True,
             "live_revision": live_revision,
             "live_view_token": live_view_token,
             "combat_state_token": context["combat_live_state_token"],
-            "summary_html": render_template("_combat_summary_card.html", **context),
-            "tracker_html": render_template("_combat_tracker_section.html", **context),
-            "context_html": render_template("_combat_context_panel.html", **context),
+            "summary_html": render_template(summary_template, **context),
+            "tracker_html": render_template(tracker_template, **context),
+            "context_html": render_template(sidebar_template, **context),
             "selected_combatant_id": context["selected_combatant_id"],
         }
         if include_flash:

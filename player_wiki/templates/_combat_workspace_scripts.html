@@ -1,0 +1,112 @@
+<script>
+  (() => {
+    if (window.__playerWikiCombatWorkspace) {
+      window.__playerWikiCombatWorkspace.init(document);
+      return;
+    }
+
+    const activateSection = (group, requestedSlug = "") => {
+      if (!(group instanceof HTMLElement)) {
+        return "";
+      }
+      const toggles = Array.from(group.querySelectorAll("[data-combat-section-toggle]"));
+      const availableSlugs = toggles
+        .map((toggle) => String(toggle.getAttribute("data-combat-section-toggle") || ""))
+        .filter(Boolean);
+      if (!availableSlugs.length) {
+        return "";
+      }
+
+      const nextSlug = availableSlugs.includes(requestedSlug)
+        ? requestedSlug
+        : availableSlugs.includes(group.dataset.activeSection || "")
+          ? String(group.dataset.activeSection || "")
+          : availableSlugs.includes(group.dataset.combatDefaultSection || "")
+            ? String(group.dataset.combatDefaultSection || "")
+            : availableSlugs[0];
+      group.dataset.activeSection = nextSlug;
+
+      toggles.forEach((toggle) => {
+        if (!(toggle instanceof HTMLElement)) {
+          return;
+        }
+        const slug = String(toggle.getAttribute("data-combat-section-toggle") || "");
+        const isActive = slug === nextSlug;
+        toggle.classList.toggle("combat-workspace-button--active", isActive);
+        toggle.setAttribute("aria-pressed", isActive ? "true" : "false");
+      });
+
+      const scopeRoot = group.closest("[data-combat-workspace-root]") || document;
+      Array.from(scopeRoot.querySelectorAll("[data-combat-section-panel]")).forEach((panel) => {
+        if (!(panel instanceof HTMLElement)) {
+          return;
+        }
+        panel.hidden = String(panel.getAttribute("data-combat-section-panel") || "") !== nextSlug;
+      });
+
+      return nextSlug;
+    };
+
+    const initGroup = (group) => {
+      if (!(group instanceof HTMLElement) || group.dataset.combatSectionInit === "1") {
+        return;
+      }
+      group.dataset.combatSectionInit = "1";
+      group.addEventListener("click", (event) => {
+        const toggle = event.target instanceof HTMLElement
+          ? event.target.closest("[data-combat-section-toggle]")
+          : null;
+        if (!(toggle instanceof HTMLElement) || !group.contains(toggle)) {
+          return;
+        }
+        event.preventDefault();
+        activateSection(group, String(toggle.getAttribute("data-combat-section-toggle") || ""));
+      });
+      activateSection(group);
+    };
+
+    const init = (root = document) => {
+      if (!(root instanceof Document) && !(root instanceof HTMLElement)) {
+        return;
+      }
+      root.querySelectorAll("[data-combat-section-group]").forEach((group) => {
+        initGroup(group);
+        activateSection(group);
+      });
+    };
+
+    const capture = (root = document) => {
+      if (!(root instanceof Document) && !(root instanceof HTMLElement)) {
+        return "";
+      }
+      const group = root.querySelector("[data-combat-section-group]");
+      if (!(group instanceof HTMLElement)) {
+        return "";
+      }
+      return String(group.dataset.activeSection || "");
+    };
+
+    const restore = (root = document, activeSection = "") => {
+      if (!(root instanceof Document) && !(root instanceof HTMLElement)) {
+        return "";
+      }
+      let restored = "";
+      root.querySelectorAll("[data-combat-section-group]").forEach((group) => {
+        if (!(group instanceof HTMLElement)) {
+          return;
+        }
+        initGroup(group);
+        restored = activateSection(group, activeSection) || restored;
+      });
+      return restored;
+    };
+
+    window.__playerWikiCombatWorkspace = {
+      init,
+      capture,
+      restore,
+    };
+
+    init(document);
+  })();
+</script>

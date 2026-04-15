@@ -1,0 +1,59 @@
+<div class="combat-workspace-sidebar">
+  <section class="card sidebar-card">
+    <div class="section-heading">
+      <div>
+        <h2>Turn order</h2>
+        <p class="meta">Initiative stays pinned here while the main panel stays focused on your tracked character.</p>
+      </div>
+    </div>
+    {% if combat_tracker.combatants %}
+      <div class="combat-turn-order-list">
+        {% for combatant in combat_tracker.combatants %}
+          <article
+            class="combat-turn-order-row{% if combatant.id == selected_combatant_id %} combat-turn-order-row--selected{% endif %}{% if combatant.is_current_turn %} combat-turn-order-row--current{% endif %}"
+          >
+            <div class="combat-turn-order-row__header">
+              <div>
+                <p class="card-kicker">{{ combatant.type_label }}</p>
+                <h3>{{ combatant.name }}</h3>
+                {% if combatant.subtitle %}
+                  <p class="meta">{{ combatant.subtitle }}</p>
+                {% endif %}
+              </div>
+              <div class="badge-list">
+                <span class="meta-badge">Turn {{ combatant.turn_value }}</span>
+                {% if combatant.is_current_turn %}
+                  <span class="meta-badge">Current turn</span>
+                {% endif %}
+              </div>
+            </div>
+            <div class="combat-turn-order-row__meta">
+              <span>Conditions {{ combatant.conditions | length }}</span>
+              {% if combatant.id == selected_combatant_id %}
+                <span>Your workspace</span>
+              {% endif %}
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="meta">Once the DM seeds the tracker, initiative order will appear here.</p>
+    {% endif %}
+  </section>
+
+  {% if combat_workspace_targets and combat_workspace_targets | length > 1 %}
+    <section class="card sidebar-card">
+      <h2>Your tracked characters</h2>
+      <div class="combat-target-list">
+        {% for target in combat_workspace_targets %}
+          <a class="{% if target.is_active %}button-link{% else %}ghost-button{% endif %}" href="{{ target.href }}">
+            {{ target.name }}
+          </a>
+          {% if target.subtitle %}
+            <p class="meta">{{ target.subtitle }}</p>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+</div>
