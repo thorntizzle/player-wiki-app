@@ -47,6 +47,8 @@
           <article class="resource-card session-resource-card {% if resource.is_manual %}session-resource-card--manual{% endif %}">
             <form
               class="session-inline-form"
+              data-character-sheet-edit-form="resource"
+              data-character-sheet-edit-row-id="{{ resource.id }}"
               method="post"
               action="{{ url_for('character_session_resource', campaign_slug=campaign.slug, character_slug=character.slug, resource_id=resource.id) }}"
             >
@@ -72,9 +74,11 @@
               </label>
               <p class="resource-card__value">{{ resource.value }}</p>
               <div class="session-stepper">
-                <button type="submit" name="delta" value="-1">-1</button>
-                <button type="submit" name="delta" value="1">+1</button>
-                <button type="submit">Save</button>
+                <button type="submit" name="delta" value="-1" data-character-sheet-immediate-action="1" data-character-sheet-reset-pending="1">-1</button>
+                <button type="submit" name="delta" value="1" data-character-sheet-immediate-action="1" data-character-sheet-reset-pending="1">+1</button>
+                {% if not (character_sheet_batch_save_enabled | default(false)) %}
+                  <button type="submit">Save</button>
+                {% endif %}
               </div>
               {% if resource.notes %}
                 <p class="meta">{{ resource.notes }}</p>
@@ -101,6 +105,9 @@
               <article class="detail-card">
                 <form
                   class="session-inline-form"
+                  data-character-sheet-edit-form="spell-slot"
+                  data-character-sheet-edit-level="{{ slot.level }}"
+                  data-character-sheet-edit-slot-lane-id="{{ slot.slot_lane_id }}"
                   method="post"
                   action="{{ url_for('character_session_spell_slots', campaign_slug=campaign.slug, character_slug=character.slug, level=slot.level) }}"
                 >
@@ -120,9 +127,11 @@
                     <input type="number" name="used" value="{{ slot.used }}" min="0" max="{{ slot.max }}">
                   </label>
                   <div class="session-stepper">
-                    <button type="submit" name="delta_used" value="-1">Restore 1</button>
-                    <button type="submit" name="delta_used" value="1">Use 1</button>
-                    <button type="submit">Save</button>
+                    <button type="submit" name="delta_used" value="-1" data-character-sheet-immediate-action="1" data-character-sheet-reset-pending="1">Restore 1</button>
+                    <button type="submit" name="delta_used" value="1" data-character-sheet-immediate-action="1" data-character-sheet-reset-pending="1">Use 1</button>
+                    {% if not (character_sheet_batch_save_enabled | default(false)) %}
+                      <button type="submit">Save</button>
+                    {% endif %}
                   </div>
                 </form>
               </article>
@@ -143,6 +152,8 @@
           <article class="inventory-row">
             <form
               class="session-inline-form"
+              data-character-sheet-edit-form="inventory"
+              data-character-sheet-edit-row-id="{{ item.id }}"
               method="post"
               action="{{ url_for('character_session_inventory', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
             >
@@ -161,9 +172,11 @@
                 <input type="number" name="quantity" value="{{ item.quantity }}" min="0">
               </label>
               <div class="session-stepper">
-                <button type="submit" name="delta" value="-1">-1</button>
-                <button type="submit" name="delta" value="1">+1</button>
-                <button type="submit">Save</button>
+                <button type="submit" name="delta" value="-1" data-character-sheet-immediate-action="1" data-character-sheet-reset-pending="1">-1</button>
+                <button type="submit" name="delta" value="1" data-character-sheet-immediate-action="1" data-character-sheet-reset-pending="1">+1</button>
+                {% if not (character_sheet_batch_save_enabled | default(false)) %}
+                  <button type="submit">Save</button>
+                {% endif %}
               </div>
               {% if item.notes %}
                 <p class="meta">{{ item.notes }}</p>
@@ -183,6 +196,7 @@
     <article class="detail-card session-card">
       <form
         class="currency-form"
+        data-character-sheet-edit-form="currency"
         method="post"
         action="{{ url_for('character_session_currency', campaign_slug=campaign.slug, character_slug=character.slug) }}"
       >
@@ -200,7 +214,9 @@
             </label>
           </article>
         {% endfor %}
-        <button type="submit">Save currency</button>
+        {% if not (character_sheet_batch_save_enabled | default(false)) %}
+          <button type="submit">Save currency</button>
+        {% endif %}
       </form>
     </article>
   </section>
@@ -214,6 +230,7 @@
       <article class="detail-card session-card">
         <form
           class="stack-form"
+          data-character-sheet-edit-form="personal"
           method="post"
           action="{{ url_for('character_session_personal', campaign_slug=campaign.slug, character_slug=character.slug) }}"
         >
@@ -231,7 +248,9 @@
             <span>Background</span>
             <textarea name="background_markdown">{{ character.personal_background_markdown }}</textarea>
           </label>
-          <button type="submit">Save personal details</button>
+          {% if not (character_sheet_batch_save_enabled | default(false)) %}
+            <button type="submit">Save personal details</button>
+          {% endif %}
         </form>
       </article>
     </section>
@@ -257,6 +276,7 @@
     <article class="detail-card session-card">
       <form
         class="stack-form"
+        data-character-sheet-edit-form="notes"
         method="post"
         action="{{ url_for('character_session_notes', campaign_slug=campaign.slug, character_slug=character.slug) }}"
       >
@@ -270,7 +290,9 @@
           <span>Markdown note</span>
           <textarea name="player_notes_markdown">{{ character.player_notes_markdown }}</textarea>
         </label>
-        <button type="submit">Save note</button>
+        {% if not (character_sheet_batch_save_enabled | default(false)) %}
+          <button type="submit">Save note</button>
+        {% endif %}
       </form>
     </article>
   </section>

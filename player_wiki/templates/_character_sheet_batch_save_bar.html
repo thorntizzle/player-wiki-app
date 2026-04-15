@@ -1,0 +1,22 @@
+<section
+  class="sheet-edit-save-bar card"
+  data-character-sheet-save-bar
+  data-character-sheet-edit-endpoint="{{ url_for('api.character_sheet_edit_update', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+>
+  <div class="sheet-edit-save-bar__content">
+    <div>
+      <p class="eyebrow">Sheet edit save</p>
+      <p class="sheet-edit-save-bar__title">Save pending changes</p>
+      <p class="meta">
+        The first-pass fields on this page stay pending until you save them together. Rests and quick +/- actions still
+        apply immediately.
+      </p>
+    </div>
+    <div class="sheet-edit-save-bar__actions">
+      <p class="sheet-edit-save-bar__status meta" data-character-sheet-save-status aria-live="polite">
+        No pending changes on this page.
+      </p>
+      <button type="button" class="button-link" data-character-sheet-save-action disabled>Save pending changes</button>
+    </div>
+  </div>
+</section>

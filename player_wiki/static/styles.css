@@ -955,6 +955,53 @@ button {
   grid-template-columns: minmax(0, 2fr) minmax(120px, 0.8fr) minmax(140px, 1fr);
 }
 
+.sheet-edit-save-bar {
+  border-color: var(--border-accent);
+  background: var(--surface-soft-strong);
+  box-shadow: var(--shadow-soft);
+}
+
+.sheet-edit-save-bar__content {
+  display: grid;
+  gap: 1rem;
+}
+
+.sheet-edit-save-bar__title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.sheet-edit-save-bar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sheet-edit-save-bar__status {
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.sheet-edit-save-bar__status[data-state="pending"] {
+  border-color: var(--border-accent);
+}
+
+.sheet-edit-save-bar__status[data-state="success"] {
+  border-color: var(--success-border);
+  background: var(--success-bg);
+}
+
+.sheet-edit-save-bar__status[data-state="error"] {
+  border-color: var(--error-border);
+  background: var(--error-bg);
+}
+
 .session-bar,
 .session-panels {
   display: grid;

@@ -144,6 +144,11 @@
       {% set show_personal_sections = character_subpage == 'personal' %}
       {% set show_note_sections = character_subpage == 'notes' %}
       {% set show_control_sections = character_subpage == 'controls' %}
+      {% set character_sheet_batch_save_enabled = is_session_mode and character_subpage in ('quick', 'inventory', 'personal', 'notes') %}
+
+      {% if character_sheet_batch_save_enabled %}
+        {% include "_character_sheet_batch_save_bar.html" %}
+      {% endif %}
 
       {% if show_quick_sections %}
         {% if is_session_mode %}
@@ -223,6 +228,10 @@
 
       {% if is_session_mode %}
         {% include "_character_session_panels.html" %}
+      {% endif %}
+
+      {% if character_sheet_batch_save_enabled %}
+        {% include "_character_sheet_batch_save_bar.html" %}
       {% endif %}
 
       {% if show_quick_sections and character.resources and not is_session_mode %}
@@ -895,6 +904,340 @@
 {% endblock %}
 
 {% block scripts %}
+  {% if character_sheet_batch_save_enabled %}
+    <script>
+      (() => {
+        const saveBars = Array.from(document.querySelectorAll("[data-character-sheet-save-bar]"));
+        if (!saveBars.length) {
+          return;
+        }
+
+        const endpoint = saveBars[0].dataset.characterSheetEditEndpoint || "";
+        const saveButtons = Array.from(document.querySelectorAll("[data-character-sheet-save-action]"));
+        const statusNodes = Array.from(document.querySelectorAll("[data-character-sheet-save-status]"));
+        if (!endpoint || !saveButtons.length || !statusNodes.length) {
+          return;
+        }
+
+        const formSelectors = {
+          vitals: '[data-character-sheet-edit-form="vitals"]',
+          resources: '[data-character-sheet-edit-form="resource"]',
+          spellSlots: '[data-character-sheet-edit-form="spell-slot"]',
+          inventory: '[data-character-sheet-edit-form="inventory"]',
+          currency: '[data-character-sheet-edit-form="currency"]',
+          personal: '[data-character-sheet-edit-form="personal"]',
+          notes: '[data-character-sheet-edit-form="notes"]',
+        };
+        const restoreStateKey = `playerWikiSheetEditSave:${window.location.pathname}${window.location.search}`;
+        let saveInFlight = false;
+
+        const setStatus = (message, kind = "idle") => {
+          for (const node of statusNodes) {
+            node.textContent = message;
+            node.dataset.state = kind;
+          }
+        };
+
+        const setSaveDisabled = (disabled) => {
+          for (const button of saveButtons) {
+            button.disabled = disabled;
+          }
+        };
+
+        const normalizeNumber = (value) => {
+          const text = String(value ?? "").trim();
+          if (!text) {
+            return "";
+          }
+          const parsed = Number(text);
+          return Number.isFinite(parsed) ? String(parsed) : text;
+        };
+
+        const hasFieldChanged = (field) => {
+          if (field instanceof HTMLInputElement && field.type === "number") {
+            return normalizeNumber(field.value) !== normalizeNumber(field.defaultValue);
+          }
+          return field.value !== field.defaultValue;
+        };
+
+        const parseInteger = (field) => {
+          const text = String(field.value ?? "").trim();
+          return text ? parseInt(text, 10) : 0;
+        };
+
+        const resetPendingInputs = (form) => {
+          const fields = Array.from(form.querySelectorAll("input, textarea"));
+          for (const field of fields) {
+            if (field instanceof HTMLInputElement) {
+              if (field.type === "hidden" || field.type === "submit" || field.type === "button" || field.type === "checkbox" || field.type === "file") {
+                continue;
+              }
+              field.value = field.defaultValue;
+            } else if (field instanceof HTMLTextAreaElement) {
+              field.value = field.defaultValue;
+            }
+          }
+        };
+
+        const buildPayload = () => {
+          const expectedRevisionField = document.querySelector(`${formSelectors.vitals} input[name="expected_revision"], ${formSelectors.resources} input[name="expected_revision"], ${formSelectors.inventory} input[name="expected_revision"], ${formSelectors.personal} input[name="expected_revision"], ${formSelectors.notes} input[name="expected_revision"]`);
+          if (!(expectedRevisionField instanceof HTMLInputElement)) {
+            return null;
+          }
+
+          const payload = {
+            expected_revision: parseInt(expectedRevisionField.value || "0", 10),
+          };
+          let hasChanges = false;
+
+          const vitalsForm = document.querySelector(formSelectors.vitals);
+          if (vitalsForm instanceof HTMLFormElement) {
+            const currentHpField = vitalsForm.querySelector('input[name="current_hp"]');
+            const tempHpField = vitalsForm.querySelector('input[name="temp_hp"]');
+            const vitals = {};
+            if (currentHpField instanceof HTMLInputElement && hasFieldChanged(currentHpField)) {
+              vitals.current_hp = parseInteger(currentHpField);
+            }
+            if (tempHpField instanceof HTMLInputElement && hasFieldChanged(tempHpField)) {
+              vitals.temp_hp = parseInteger(tempHpField);
+            }
+            if (Object.keys(vitals).length) {
+              payload.vitals = vitals;
+              hasChanges = true;
+            }
+          }
+
+          const resourceForms = Array.from(document.querySelectorAll(formSelectors.resources));
+          const resources = [];
+          for (const form of resourceForms) {
+            if (!(form instanceof HTMLFormElement)) {
+              continue;
+            }
+            const currentField = form.querySelector('input[name="current"]');
+            const resourceId = form.dataset.characterSheetEditRowId || "";
+            if (!(currentField instanceof HTMLInputElement) || !resourceId || !hasFieldChanged(currentField)) {
+              continue;
+            }
+            resources.push({
+              id: resourceId,
+              current: parseInteger(currentField),
+            });
+          }
+          if (resources.length) {
+            payload.resources = resources;
+            hasChanges = true;
+          }
+
+          const spellSlotForms = Array.from(document.querySelectorAll(formSelectors.spellSlots));
+          const spellSlots = [];
+          for (const form of spellSlotForms) {
+            if (!(form instanceof HTMLFormElement)) {
+              continue;
+            }
+            const usedField = form.querySelector('input[name="used"]');
+            const levelText = form.dataset.characterSheetEditLevel || "";
+            if (!(usedField instanceof HTMLInputElement) || !levelText || !hasFieldChanged(usedField)) {
+              continue;
+            }
+            spellSlots.push({
+              level: parseInt(levelText, 10),
+              slot_lane_id: form.dataset.characterSheetEditSlotLaneId || "",
+              used: parseInteger(usedField),
+            });
+          }
+          if (spellSlots.length) {
+            payload.spell_slots = spellSlots;
+            hasChanges = true;
+          }
+
+          const inventoryForms = Array.from(document.querySelectorAll(formSelectors.inventory));
+          const inventory = [];
+          for (const form of inventoryForms) {
+            if (!(form instanceof HTMLFormElement)) {
+              continue;
+            }
+            const quantityField = form.querySelector('input[name="quantity"]');
+            const itemId = form.dataset.characterSheetEditRowId || "";
+            if (!(quantityField instanceof HTMLInputElement) || !itemId || !hasFieldChanged(quantityField)) {
+              continue;
+            }
+            inventory.push({
+              id: itemId,
+              quantity: parseInteger(quantityField),
+            });
+          }
+          if (inventory.length) {
+            payload.inventory = inventory;
+            hasChanges = true;
+          }
+
+          const currencyForm = document.querySelector(formSelectors.currency);
+          if (currencyForm instanceof HTMLFormElement) {
+            const currencyFields = Array.from(currencyForm.querySelectorAll('input[type="number"]'));
+            const changedCurrencyFields = currencyFields.filter((field) => field instanceof HTMLInputElement && hasFieldChanged(field));
+            if (changedCurrencyFields.length) {
+              const currency = {};
+              for (const field of currencyFields) {
+                if (!(field instanceof HTMLInputElement) || !field.name) {
+                  continue;
+                }
+                currency[field.name] = parseInteger(field);
+              }
+              payload.currency = currency;
+              hasChanges = true;
+            }
+          }
+
+          const personalForm = document.querySelector(formSelectors.personal);
+          if (personalForm instanceof HTMLFormElement) {
+            const physicalField = personalForm.querySelector('textarea[name="physical_description_markdown"]');
+            const backgroundField = personalForm.querySelector('textarea[name="background_markdown"]');
+            const personal = {};
+            if (physicalField instanceof HTMLTextAreaElement && hasFieldChanged(physicalField)) {
+              personal.physical_description_markdown = physicalField.value;
+            }
+            if (backgroundField instanceof HTMLTextAreaElement && hasFieldChanged(backgroundField)) {
+              personal.background_markdown = backgroundField.value;
+            }
+            if (Object.keys(personal).length) {
+              payload.personal = personal;
+              hasChanges = true;
+            }
+          }
+
+          const notesForm = document.querySelector(formSelectors.notes);
+          if (notesForm instanceof HTMLFormElement) {
+            const notesField = notesForm.querySelector('textarea[name="player_notes_markdown"]');
+            if (notesField instanceof HTMLTextAreaElement && hasFieldChanged(notesField)) {
+              payload.notes = {
+                player_notes_markdown: notesField.value,
+              };
+              hasChanges = true;
+            }
+          }
+
+          return hasChanges ? payload : null;
+        };
+
+        const updatePendingState = () => {
+          if (saveInFlight) {
+            return;
+          }
+          const payload = buildPayload();
+          if (payload) {
+            setStatus("Pending changes on this page.", "pending");
+            setSaveDisabled(false);
+            return;
+          }
+          setStatus("No pending changes on this page.", "idle");
+          setSaveDisabled(true);
+        };
+
+        const restoreSavedState = () => {
+          const rawState = window.sessionStorage.getItem(restoreStateKey);
+          if (!rawState) {
+            return;
+          }
+          window.sessionStorage.removeItem(restoreStateKey);
+          try {
+            const savedState = JSON.parse(rawState);
+            if (savedState && typeof savedState.message === "string" && savedState.message) {
+              setStatus(savedState.message, "success");
+            }
+            if (savedState && typeof savedState.scrollY === "number") {
+              window.requestAnimationFrame(() => {
+                window.requestAnimationFrame(() => {
+                  window.scrollTo(0, savedState.scrollY);
+                });
+              });
+            }
+          } catch (error) {
+            window.sessionStorage.removeItem(restoreStateKey);
+          }
+        };
+
+        const trackedForms = Array.from(document.querySelectorAll("[data-character-sheet-edit-form]"));
+        for (const form of trackedForms) {
+          if (!(form instanceof HTMLFormElement)) {
+            continue;
+          }
+          form.addEventListener("submit", (event) => {
+            const submitter = event.submitter;
+            if (!(submitter instanceof HTMLButtonElement) || submitter.dataset.characterSheetImmediateAction !== "1") {
+              event.preventDefault();
+              updatePendingState();
+              return;
+            }
+            if (submitter.dataset.characterSheetResetPending === "1") {
+              resetPendingInputs(form);
+            }
+          });
+
+          const editableFields = Array.from(form.querySelectorAll("input, textarea"));
+          for (const field of editableFields) {
+            if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) {
+              continue;
+            }
+            if (field instanceof HTMLInputElement && (field.type === "hidden" || field.type === "submit" || field.type === "button" || field.type === "checkbox" || field.type === "file")) {
+              continue;
+            }
+            field.addEventListener("input", updatePendingState);
+            field.addEventListener("change", updatePendingState);
+          }
+        }
+
+        for (const button of saveButtons) {
+          button.addEventListener("click", async () => {
+            const payload = buildPayload();
+            if (!payload || saveInFlight) {
+              updatePendingState();
+              return;
+            }
+
+            saveInFlight = true;
+            setStatus("Saving pending changes...", "pending");
+            setSaveDisabled(true);
+            try {
+              const response = await fetch(endpoint, {
+                method: "PATCH",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Accept": "application/json",
+                  "X-Requested-With": "XMLHttpRequest",
+                },
+                credentials: "same-origin",
+                cache: "no-store",
+                body: JSON.stringify(payload),
+              });
+              const responsePayload = await response.json().catch(() => ({}));
+              if (!response.ok) {
+                const errorMessage = responsePayload && responsePayload.error && typeof responsePayload.error.message === "string"
+                  ? responsePayload.error.message
+                  : "Could not save pending changes right now.";
+                setStatus(errorMessage, "error");
+                saveInFlight = false;
+                setSaveDisabled(false);
+                return;
+              }
+
+              window.sessionStorage.setItem(restoreStateKey, JSON.stringify({
+                message: "Saved pending changes.",
+                scrollY: window.scrollY,
+              }));
+              window.location.reload();
+            } catch (error) {
+              setStatus("Could not save pending changes right now.", "error");
+              saveInFlight = false;
+              setSaveDisabled(false);
+            }
+          });
+        }
+
+        updatePendingState();
+        restoreSavedState();
+      })();
+    </script>
+  {% endif %}
   {% if character_subpage == 'spellcasting' and spell_manager and can_use_session_mode and not is_session_mode %}
     <script>
       (() => {

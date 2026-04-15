@@ -510,7 +510,8 @@ def test_owner_player_can_open_session_mode_when_character_visibility_allows_pla
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert "Active session" in html
-    assert "Save vitals" in html
+    assert "Save pending changes" in html
+    assert "Save vitals" not in html
     assert "Back to character sheet" in html
     assert "Back to read mode" not in html
     assert "?mode=session&amp;page=quick" in html
@@ -2786,7 +2787,8 @@ def test_session_mode_uses_same_subpage_ui_as_read_mode(client, sign_in, users, 
     assert "?mode=session&amp;page=inventory" in html
     assert "?mode=session&amp;page=personal" in html
     assert "?mode=session&amp;page=notes" in html
-    assert "Save personal details" in html
+    assert "Save pending changes" in html
+    assert "Save personal details" not in html
     assert "Save note" not in html
     assert "At a glance" not in html
 
@@ -2815,12 +2817,13 @@ def test_session_active_widget_stays_on_quick_reference_only(client, sign_in, us
     assert quick_response.status_code == 200
     quick_html = quick_response.get_data(as_text=True)
     assert "Active session" in quick_html
-    assert "Save vitals" in quick_html
+    assert "Save pending changes" in quick_html
+    assert "Save vitals" not in quick_html
 
     assert features_response.status_code == 200
     features_html = features_response.get_data(as_text=True)
     assert "Active session" not in features_html
-    assert "Save vitals" not in features_html
+    assert "Save pending changes" not in features_html
 
 
 def test_sheet_edit_view_makes_first_pass_bounded_scope_explicit(client, sign_in, users, set_campaign_visibility):
@@ -2836,6 +2839,8 @@ def test_sheet_edit_view_makes_first_pass_bounded_scope_explicit(client, sign_in
     assert "Current HP, temp HP, tracked resources, and spell slot usage" in html
     assert "Inventory quantities and currency totals" in html
     assert "Physical description, background, and player notes" in html
+    assert "The first-pass fields on this page stay pending until you save them together." in html
+    assert "Rests and quick +/- actions still" in html
     assert "Keep using the standard character page for" in html
     assert "Rests and other relative quick actions" in html
     assert "Spell-list changes and other non-slot spell management" in html
