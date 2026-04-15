@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Encounter controls | {{ campaign.title }}{% endblock %}
+{% block title %}Encounter controls (formerly DM page) | {{ campaign.title }}{% endblock %}
 
 {% block content %}
   <section class="hero compact">
@@ -9,6 +9,7 @@
     <p class="lede">
       Manage encounter setup, seeding, cleanup, and other authority-heavy changes without crowding the live status view.
     </p>
+    <p class="meta">Formerly DM page. Existing /combat/dm links and bookmarks still work during the transition.</p>
     <div class="hero-actions">
       {% include "_combat_view_switch.html" %}
     </div>

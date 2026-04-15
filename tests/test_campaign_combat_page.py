@@ -170,11 +170,13 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
     assert dm_page.status_code == 200
     assert status_page.status_code == 200
     dm_html = dm_page.get_data(as_text=True)
+    status_html = status_page.get_data(as_text=True)
     assert "Encounter controls" in dm_html
     assert "Combat" in dm_html
     assert "/campaigns/linden-pass/combat/character" not in dm_html
     assert "Encounter status" in dm_html
     assert "Encounter controls" in dm_html
+    assert "Formerly DM page. Existing /combat/dm links and bookmarks still work during the transition." in dm_html
     assert "Add player character" in dm_html
     assert "Add NPC from Systems" in dm_html
     assert "Add custom NPC combatant" in dm_html
@@ -187,6 +189,8 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
     assert "window.history.replaceState(null, \"\", nextPageUrl);" in dm_html
     assert "buildLiveHeaders({ allowShortCircuit: false })" in dm_html
     assert "window.location.assign(nextUrl);" not in dm_html
+    assert "Encounter status (formerly Status)" in status_html
+    assert "Formerly Status. Existing /combat/status links and bookmarks still work during the transition." in status_html
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["party"]["email"], users["party"]["password"])

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Encounter status | {{ campaign.title }}{% endblock %}
+{% block title %}Encounter status (formerly Status) | {{ campaign.title }}{% endblock %}
 
 {% block content %}
   <section class="hero compact">
@@ -9,6 +9,7 @@
     <p class="lede">
       Inspect one selected combatant in detail while keeping the encounter order visible in the sidebar.
     </p>
+    <p class="meta">Formerly Status. Existing /combat/status links and bookmarks still work during the transition.</p>
     <div class="hero-actions">
       {% include "_combat_view_switch.html" %}
     </div>
