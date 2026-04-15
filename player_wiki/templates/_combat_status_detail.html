@@ -5,15 +5,12 @@
     </div>
 
     {% if combat_status_source_mode == "character" and selected_combat_character %}
-      <section class="combat-status-detail-heading">
-        <div class="section-heading">
-          <div>
-            <h2>Character detail</h2>
-            <p class="meta">Combat-relevant sheet detail for the selected tracked player character.</p>
-          </div>
-        </div>
-      </section>
-      {% include "_combat_character_detail_sections.html" %}
+      {% with
+        combat_workspace_title="Character sections",
+        combat_workspace_meta="Reuse the player-style combat section model for the selected tracked player character while keeping Encounter status focused on one combatant."
+      %}
+        {% include "_combat_player_workspace_sections.html" %}
+      {% endwith %}
     {% elif combat_status_source_mode == "dm_statblock" and combat_status_source_available and combat_status_statblock %}
       <section class="card combat-status-detail-card">
         <div class="section-heading">

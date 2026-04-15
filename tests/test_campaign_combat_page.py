@@ -205,6 +205,7 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
     assert "/campaigns/linden-pass/combat/status" in status_html
     assert 'data-combat-status-live-root' in status_html
     assert 'data-loading="0"' in status_html
+    assert "window.__playerWikiCombatWorkspace" in status_html
     assert "window.__playerWikiLiveUiTools" in status_html
     assert "uiStateTools.captureViewportAnchor(liveRoot)" in status_html
 
@@ -1461,10 +1462,41 @@ def test_dm_status_page_renders_only_selected_pc_detail(app, client, sign_in, us
     assert f"/campaigns/linden-pass/combat/status?combatant={arden.id}" in body
     assert 'id="combat-status-snapshot"' in body
     assert "Compact encounter status first" in body
-    assert "Character detail" in body
+    assert "Character sections" in body
+    assert 'data-combat-section-group' in body
+    assert 'data-combat-section-toggle="actions"' in body
+    assert 'data-combat-section-toggle="resources"' in body
+    assert 'data-combat-section-panel="spells"' in body
     assert "Arden March" in body
     assert "Resources" in body
     assert "Scimitar" not in body
+
+
+def test_status_live_state_renders_player_workspace_sections_for_selected_pc(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    assert arden is not None
+
+    response = client.get(
+        f"/campaigns/linden-pass/combat/status/live-state?combatant={arden.id}",
+        headers=_async_headers(),
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["selected_combatant_id"] == arden.id
+    assert "Character sections" in payload["detail_html"]
+    assert 'data-combat-section-group' in payload["detail_html"]
+    assert 'data-combat-section-toggle="actions"' in payload["detail_html"]
+    assert 'data-combat-section-panel="resources"' in payload["detail_html"]
 
 
 def test_dm_status_page_sidebar_selection_is_wired_for_in_place_detail_swaps(
@@ -1499,6 +1531,9 @@ def test_dm_status_page_sidebar_selection_is_wired_for_in_place_detail_swaps(
     assert 'fetch(buildUrl(liveUrl, nextCombatantId), {' in body
     assert 'renderPayload(payload, { force: true, updateHistory: true });' in body
     assert 'window.history.replaceState({}, "", buildUrl(baseViewUrl, selectedCombatantId));' in body
+    assert "const workspaceTools = window.__playerWikiCombatWorkspace || null;" in body
+    assert "workspaceTools.capture(detailRoot)" in body
+    assert "workspaceTools.restore(" in body
 
 
 def test_dm_status_page_can_render_systems_monster_detail(app, client, sign_in, users, tmp_path):

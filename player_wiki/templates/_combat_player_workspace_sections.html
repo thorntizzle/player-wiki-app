@@ -1,10 +1,14 @@
 {% if selected_combat_character and combat_workspace_sections %}
+  {% set workspace_title = combat_workspace_title | default("Combat sections", true) %}
+  {% set workspace_meta = combat_workspace_meta | default("Keep the main combat page open and swap between the parts of the sheet you need most in play.", true) %}
   <div data-combat-workspace-root>
   <section class="card combat-workspace-card">
     <div class="section-heading">
       <div>
-        <h2>Combat sections</h2>
-        <p class="meta">Keep the main combat page open and swap between the parts of the sheet you need most in play.</p>
+        <h2>{{ workspace_title }}</h2>
+        {% if workspace_meta %}
+          <p class="meta">{{ workspace_meta }}</p>
+        {% endif %}
       </div>
     </div>
     <nav

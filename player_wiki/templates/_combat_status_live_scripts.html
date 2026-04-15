@@ -11,8 +11,10 @@
     const liveUrl = liveRoot.dataset.combatLiveUrl || "";
     const baseViewUrl = liveRoot.dataset.combatStatusBaseUrl || "";
     const uiStateTools = window.__playerWikiLiveUiTools || null;
+    const workspaceTools = window.__playerWikiCombatWorkspace || null;
     let combatStateToken = liveRoot.dataset.combatStateToken || "";
     let selectedCombatantId = liveRoot.dataset.selectedCombatantId || "";
+    let activeCombatSection = workspaceTools ? workspaceTools.capture(detailRoot) : "";
     let liveRevision = Number.parseInt(liveRoot.dataset.liveRevision || "0", 10);
     if (!Number.isFinite(liveRevision) || liveRevision < 0) {
       liveRevision = 0;
@@ -149,6 +151,9 @@
 
     const renderPayload = (payload, { force = false, forceFlash = false, updateHistory = false } = {}) => {
       const nextToken = payload.combat_state_token ? String(payload.combat_state_token) : "";
+      const requestedCombatSection = workspaceTools
+        ? (workspaceTools.capture(detailRoot) || activeCombatSection)
+        : "";
       const focusState = uiStateTools ? uiStateTools.captureFocus(liveRoot) : null;
       const viewportAnchor = uiStateTools ? uiStateTools.captureViewportAnchor(liveRoot) : null;
       if (!force && nextToken === combatStateToken) {
@@ -169,6 +174,14 @@
       combatStateToken = nextToken;
       liveRoot.dataset.selectedCombatantId = selectedCombatantId;
       liveRoot.dataset.combatStateToken = combatStateToken;
+      if (workspaceTools) {
+        const restoredCombatSection = workspaceTools.restore(
+          detailRoot instanceof HTMLElement ? detailRoot : liveRoot,
+          requestedCombatSection,
+        );
+        activeCombatSection =
+          restoredCombatSection || requestedCombatSection || activeCombatSection;
+      }
       if (uiStateTools) {
         uiStateTools.restoreFocus(liveRoot, focusState);
         uiStateTools.restoreViewportAnchor(liveRoot, viewportAnchor);
