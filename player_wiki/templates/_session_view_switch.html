@@ -4,6 +4,14 @@
 >
   Session
 </a>
+{% if show_session_character_tab %}
+  <a
+    class="{% if session_subpage == 'character' %}button-link{% else %}ghost-button{% endif %}"
+    href="{{ session_character_switch_href or url_for('campaign_session_character_view', campaign_slug=campaign.slug) }}"
+  >
+    Character
+  </a>
+{% endif %}
 {% if can_manage_session %}
   <a
     class="{% if session_subpage == 'dm' %}button-link{% else %}ghost-button{% endif %}"

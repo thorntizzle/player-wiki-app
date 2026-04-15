@@ -1804,6 +1804,20 @@ def create_app() -> Flask:
         )
         return {assignment.character_slug for assignment in assignments}
 
+    def can_access_session_character_surface(campaign_slug: str, character_slug: str) -> bool:
+        if not can_access_campaign_scope(campaign_slug, "session"):
+            return False
+        if can_manage_campaign_session(campaign_slug):
+            return True
+        return character_slug in get_owned_character_slugs(campaign_slug)
+
+    def list_session_accessible_character_records(campaign_slug: str):
+        return [
+            record
+            for record in get_character_repository().list_visible_characters(campaign_slug)
+            if can_access_session_character_surface(campaign_slug, record.definition.character_slug)
+        ]
+
     def build_combat_route_values(
         campaign_slug: str,
         *,
@@ -2621,6 +2635,7 @@ def create_app() -> Flask:
         session_poll_settings = build_session_poll_settings(normalized_session_subpage)
         session_live_revision = session_service.get_live_revision(campaign_slug)
         session_live_view_token = build_session_live_view_token(campaign_slug, normalized_session_subpage)
+        show_session_character_tab = bool(list_session_accessible_character_records(campaign_slug))
 
         return {
             "campaign": campaign,
@@ -2647,6 +2662,145 @@ def create_app() -> Flask:
             "session_poll_idle_interval_ms": session_poll_settings["idle_interval_ms"],
             "session_poll_idle_threshold_ms": session_poll_settings["idle_threshold_ms"],
             "session_subpage": normalized_session_subpage,
+            "show_session_character_tab": show_session_character_tab,
+            "session_character_switch_href": (
+                url_for("campaign_session_character_view", campaign_slug=campaign.slug)
+                if show_session_character_tab
+                else ""
+            ),
+            "active_nav": "session",
+        }
+
+    def build_campaign_session_character_page_context(campaign_slug: str) -> dict[str, object]:
+        campaign = load_campaign_context(campaign_slug)
+        session_service = get_campaign_session_service()
+        can_manage_session = can_manage_campaign_session(campaign_slug)
+        accessible_records = list_session_accessible_character_records(campaign_slug)
+        accessible_records_by_slug = {
+            record.definition.character_slug: record for record in accessible_records
+        }
+
+        active_session_record = session_service.get_active_session(campaign_slug)
+        active_session = None
+        if active_session_record is not None:
+            live_messages = session_service.list_messages(active_session_record.id)
+            active_session = present_session_record(
+                active_session_record,
+                message_count=len(live_messages),
+            )
+
+        selected_character_slug = request.args.get("character", "").strip()
+        if selected_character_slug and selected_character_slug not in accessible_records_by_slug:
+            abort(403)
+
+        session_character_cards = []
+        for card in present_character_roster(accessible_records):
+            card_slug = str(card.get("slug") or "").strip()
+            session_character_cards.append(
+                {
+                    **card,
+                    "is_selected": card_slug == selected_character_slug,
+                    "href": url_for(
+                        "campaign_session_character_view",
+                        campaign_slug=campaign.slug,
+                        character=card_slug,
+                    ),
+                }
+            )
+
+        character = None
+        character_subpage = "quick"
+        character_subpages = []
+        equipment_state_manager = None
+        spell_manager = None
+        can_view_full_character_sheet = False
+        full_character_sheet_url = ""
+
+        if selected_character_slug:
+            record = accessible_records_by_slug[selected_character_slug]
+            character = present_character_detail(
+                campaign,
+                record,
+                include_player_notes_section=True,
+                systems_service=get_systems_service(),
+            )
+            character["portrait"] = build_character_portrait_context(campaign, record.definition)
+            spell_manager = build_character_spell_manager_context(campaign_slug, campaign, record)
+            if not character.get("spellcasting") and spell_manager is not None:
+                spellcasting_placeholder = build_character_spellcasting_placeholder(spell_manager)
+                if spellcasting_placeholder is not None:
+                    character["spellcasting"] = spellcasting_placeholder
+            include_spellcasting_subpage = bool(character.get("spellcasting"))
+            character_subpage = normalize_character_read_subpage(
+                request.args.get("page", ""),
+                include_spellcasting=include_spellcasting_subpage,
+                include_controls=False,
+            )
+            equipment_state_manager = build_character_equipment_state_context(
+                campaign_slug,
+                campaign,
+                record,
+            )
+            character_subpages = [
+                {
+                    "slug": slug,
+                    "label": label,
+                    "href": url_for(
+                        "campaign_session_character_view",
+                        campaign_slug=campaign.slug,
+                        character=selected_character_slug,
+                        page=slug,
+                    ),
+                    "is_active": slug == character_subpage,
+                }
+                for slug, label in get_character_read_subpage_labels(
+                    include_spellcasting=include_spellcasting_subpage,
+                    include_controls=False,
+                ).items()
+            ]
+            can_view_full_character_sheet = bool(
+                selected_character_slug and can_access_campaign_scope(campaign_slug, "characters")
+            )
+            full_character_sheet_url = (
+                url_for(
+                    "character_read_view",
+                    campaign_slug=campaign.slug,
+                    character_slug=selected_character_slug,
+                    page=character_subpage,
+                )
+                if can_view_full_character_sheet
+                else ""
+            )
+
+        return {
+            "campaign": campaign,
+            "active_session": active_session,
+            "active_session_id": active_session_record.id if active_session_record is not None else None,
+            "can_manage_session": can_manage_session,
+            "session_subpage": "character",
+            "show_session_character_tab": bool(accessible_records),
+            "session_character_switch_href": (
+                url_for(
+                    "campaign_session_character_view",
+                    campaign_slug=campaign.slug,
+                    character=selected_character_slug or None,
+                    page=character_subpage if selected_character_slug else None,
+                )
+                if accessible_records
+                else ""
+            ),
+            "session_character_cards": session_character_cards,
+            "character": character,
+            "character_subpage": character_subpage,
+            "character_subpages": character_subpages,
+            "equipment_state_manager": equipment_state_manager,
+            "spell_manager": spell_manager,
+            "inventory_manager": None,
+            "character_controls": None,
+            "can_use_session_mode": False,
+            "is_session_mode": False,
+            "can_view_full_character_sheet": can_view_full_character_sheet,
+            "full_character_sheet_url": full_character_sheet_url,
             "active_nav": "session",
         }
 
@@ -6250,6 +6404,12 @@ def create_app() -> Flask:
 
         context = build_campaign_session_page_context(campaign_slug, session_subpage="dm")
         return render_template("session_dm.html", **context)
+
+    @app.get("/campaigns/<campaign_slug>/session/character")
+    @campaign_scope_access_required("session")
+    def campaign_session_character_view(campaign_slug: str):
+        context = build_campaign_session_character_page_context(campaign_slug)
+        return render_template("session_character.html", **context)
 
     @app.get("/campaigns/<campaign_slug>/session/live-state")
     @campaign_scope_access_required("session")

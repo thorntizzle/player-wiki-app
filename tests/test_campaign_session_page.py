@@ -241,6 +241,55 @@ def test_player_session_page_includes_lazy_wiki_lookup_widget(client, sign_in, u
     assert "Search and choose a player-visible wiki article to read it here." in session_html
 
 
+def test_session_page_only_shows_character_tab_for_users_with_session_character_access(client, sign_in, users):
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    party_page = client.get("/campaigns/linden-pass/session")
+
+    assert party_page.status_code == 200
+    party_html = party_page.get_data(as_text=True)
+    assert "/campaigns/linden-pass/session/character" not in party_html
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    owner_page = client.get("/campaigns/linden-pass/session")
+
+    assert owner_page.status_code == 200
+    owner_html = owner_page.get_data(as_text=True)
+    assert "/campaigns/linden-pass/session/character" in owner_html
+    assert ">Character<" in owner_html
+
+
+def test_owner_can_open_session_character_subpage_without_leaving_session_feature(client, sign_in, users):
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get(
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&page=features"
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Session Character" in html
+    assert "Character chooser" in html
+    assert "Arden March" in html
+    assert "Features and traits" in html
+    assert f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&amp;page=spellcasting" in html
+    assert f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&amp;page=features" in html
+    assert "Enter session mode" not in html
+    assert "Save personal details" not in html
+
+
+def test_session_character_route_blocks_unassigned_player_from_explicit_character_access(client, sign_in, users):
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    response = client.get(
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}"
+    )
+
+    assert response.status_code == 403
+
+
 def test_player_session_page_preserves_lookup_preview_during_article_load(client, sign_in, users):
     sign_in(users["party"]["email"], users["party"]["password"])
 

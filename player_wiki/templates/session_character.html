@@ -1,0 +1,575 @@
+{% extends "base.html" %}
+
+{% block title %}Session Character | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Session Character</p>
+    <h1>{{ campaign.title }} Character</h1>
+    <p class="lede">
+      Open a session-enabled character sheet here without leaving the Session feature. This first slice keeps the Session Character page read-only while later session-specific editing rules stay on the roadmap.
+    </p>
+    <div class="hero-actions">
+      {% include "_session_view_switch.html" %}
+    </div>
+  </section>
+
+  <div class="page-layout session-layout">
+    <section class="session-column">
+      {% if character %}
+        <article class="article card character-sheet">
+          <header class="character-header">
+            <p class="eyebrow">Session character</p>
+            <h2>{{ character.name }}</h2>
+            <p class="lede">
+              {% if character.header_segments %}
+                {% for segment in character.header_segments %}
+                  {% if not loop.first %} | {% endif %}
+                  {% if segment.href %}
+                    <a href="{{ segment.href }}">{{ segment.text }}</a>
+                  {% else %}
+                    {{ segment.text }}
+                  {% endif %}
+                {% endfor %}
+              {% else %}
+                {{ character.class_level_text }}
+                {% if character.species %} | {{ character.species }}{% endif %}
+                {% if character.background %} | {{ character.background }}{% endif %}
+              {% endif %}
+            </p>
+            {% if character.alignment or character.identity_details or campaign.title %}
+              <div class="character-meta-line">
+                {% if character.alignment %}
+                  <span class="character-meta-item"><span class="meta">Alignment:</span> {{ character.alignment }}</span>
+                {% endif %}
+                {% for detail in character.identity_details if detail.value %}
+                  <span class="character-meta-item"><span class="meta">{{ detail.label }}:</span> {{ detail.value }}</span>
+                {% endfor %}
+                {% if campaign.title %}
+                  <span class="character-meta-item"><span class="meta">Campaign:</span> {{ campaign.title }}</span>
+                {% endif %}
+              </div>
+            {% endif %}
+            {% if character.death_save_summary %}
+              <p class="meta">Death saves: {{ character.death_save_summary }}</p>
+            {% endif %}
+            {% if can_view_full_character_sheet and full_character_sheet_url %}
+              <div class="hero-actions">
+                <a class="ghost-button" href="{{ full_character_sheet_url }}">Open full character page</a>
+              </div>
+            {% endif %}
+          </header>
+
+          <nav class="character-subpage-nav" aria-label="Character subpages">
+            {% for subpage in character_subpages %}
+              <a class="{% if subpage.is_active %}button-link{% else %}ghost-button{% endif %}" href="{{ subpage.href }}">
+                {{ subpage.label }}
+              </a>
+            {% endfor %}
+          </nav>
+
+          {% set show_quick_sections = character_subpage == 'quick' %}
+          {% set show_spellcasting_sections = character_subpage == 'spellcasting' %}
+          {% set show_feature_sections = character_subpage == 'features' %}
+          {% set show_equipment_sections = character_subpage == 'equipment' %}
+          {% set show_inventory_sections = character_subpage == 'inventory' %}
+          {% set show_personal_sections = character_subpage == 'personal' %}
+          {% set show_note_sections = character_subpage == 'notes' %}
+
+          {% if show_quick_sections %}
+            <section class="read-section">
+              <h2>At a glance</h2>
+              <div class="glance-grid">
+                {% for stat in character.overview_stats %}
+                  <div class="glance-card">
+                    <span class="meta">{{ stat.label }}</span>
+                    <strong>{{ stat.value }}</strong>
+                  </div>
+                {% endfor %}
+              </div>
+            </section>
+          {% endif %}
+
+          {% if show_quick_sections and character.defensive_rules %}
+            <section class="read-section">
+              <div class="section-heading">
+                <h2>Defensive rules</h2>
+              </div>
+              <div class="detail-grid">
+                {% for rule in character.defensive_rules %}
+                  <article class="detail-card">
+                    <div class="section-heading">
+                      <h3>{{ rule.title }}</h3>
+                      <span class="meta">{{ rule.status_label }}</span>
+                    </div>
+                    {% for effect in rule.effects %}
+                      <p><strong>{{ effect.label }}:</strong> {{ effect.summary }}</p>
+                    {% endfor %}
+                    {% if rule.condition %}
+                      <p class="meta">{{ rule.condition }}</p>
+                    {% endif %}
+                    {% if not rule.is_active and rule.inactive_reason %}
+                      <p class="meta">{{ rule.inactive_reason }}</p>
+                    {% endif %}
+                  </article>
+                {% endfor %}
+              </div>
+            </section>
+          {% endif %}
+
+          {% if show_quick_sections and character.attack_reminders %}
+            <section class="read-section">
+              <div class="section-heading">
+                <h2>Combat reminders</h2>
+              </div>
+              <div class="detail-grid">
+                {% for rule in character.attack_reminders %}
+                  <article class="detail-card">
+                    <div class="section-heading">
+                      <h3>{{ rule.title }}</h3>
+                      <span class="meta">{{ rule.status_label }}</span>
+                    </div>
+                    {% for effect in rule.effects %}
+                      <p><strong>{{ effect.label }}:</strong> {{ effect.summary }}</p>
+                    {% endfor %}
+                    {% if rule.eligible_attacks %}
+                      <p class="meta">Eligible attacks: {{ rule.eligible_attacks | join(", ") }}</p>
+                    {% elif rule.scope_label %}
+                      <p class="meta">Scope: {{ rule.scope_label }}</p>
+                    {% endif %}
+                    {% if rule.condition %}
+                      <p class="meta">{{ rule.condition }}</p>
+                    {% endif %}
+                    {% if rule.availability_note %}
+                      <p class="meta">{{ rule.availability_note }}</p>
+                    {% endif %}
+                  </article>
+                {% endfor %}
+              </div>
+            </section>
+          {% endif %}
+
+          {% if show_quick_sections and character.resources %}
+            <section class="read-section">
+              <div class="section-heading">
+                <h2>Resources</h2>
+              </div>
+              <div class="resource-grid">
+                {% for resource in character.resources %}
+                  <article class="resource-card">
+                    <h3>{{ resource.label }}</h3>
+                    <p class="resource-card__value">{{ resource.value }}</p>
+                    <p class="meta">Resets: {{ resource.reset_label }}</p>
+                    {% if resource.notes %}
+                      <p class="meta">{{ resource.notes }}</p>
+                    {% endif %}
+                  </article>
+                {% endfor %}
+              </div>
+            </section>
+          {% endif %}
+
+          {% if show_quick_sections %}
+            <section class="read-section">
+              <div class="section-heading">
+                <h2>Abilities and skills</h2>
+              </div>
+              <div class="ability-grid">
+                {% for ability in character.abilities %}
+                  <article class="ability-card">
+                    <p class="card-kicker">{{ ability.abbr }}</p>
+                    <h3>{{ ability.score }}</h3>
+                    <p>{{ ability.name }}</p>
+                    <p class="meta">Modifier {{ ability.modifier }} | Save {{ ability.save_bonus }}</p>
+                  </article>
+                {% endfor %}
+              </div>
+
+              <div class="detail-cluster">
+                <div>
+                  <h3>Skills</h3>
+                  <div class="skill-grid">
+                    {% for skill in character.skills %}
+                      <div class="skill-pill {% if skill.is_proficient %}skill-pill--proficient{% endif %}">
+                        <span>{{ skill.name }}</span>
+                        <strong>{{ skill.bonus }}</strong>
+                        {% if skill.proficiency_label and skill.proficiency_label != 'None' %}
+                          <span class="meta">{{ skill.proficiency_label }}</span>
+                        {% endif %}
+                      </div>
+                    {% endfor %}
+                  </div>
+                </div>
+
+                {% if character.proficiency_groups %}
+                  <div>
+                    <h3>Proficiencies</h3>
+                    <div class="detail-grid">
+                      {% for group in character.proficiency_groups %}
+                        <article class="detail-card">
+                          <h4>{{ group.title }}</h4>
+                          <p>{{ group.values_list | join(", ") }}</p>
+                        </article>
+                      {% endfor %}
+                    </div>
+                  </div>
+                {% endif %}
+              </div>
+            </section>
+          {% endif %}
+
+          {% if show_quick_sections and (character.attacks or character.hidden_attacks) %}
+            <section class="read-section">
+              <div class="section-heading">
+                <h2>Attacks</h2>
+              </div>
+              {% if character.attacks %}
+                <div class="attack-grid">
+                  {% for attack in character.attacks %}
+                    <article class="attack-card">
+                      <div class="section-heading">
+                        <h3>
+                          {% if attack.href %}
+                            <a href="{{ attack.href }}">{{ attack.name }}</a>
+                          {% else %}
+                            {{ attack.name }}
+                          {% endif %}
+                        </h3>
+                        <span class="meta">{{ attack.category }}</span>
+                      </div>
+                      {% if attack.attack_bonus %}
+                        <p><strong>{{ attack.attack_bonus }}</strong> to hit</p>
+                      {% endif %}
+                      {% if attack.damage %}
+                        <p><strong>{{ attack.damage }}</strong></p>
+                      {% endif %}
+                      {% if attack.notes %}
+                        <p class="meta">{{ attack.notes }}</p>
+                      {% endif %}
+                    </article>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <article class="detail-card">
+                  <p class="meta">No equipped or untracked attacks are currently active on this sheet.</p>
+                </article>
+              {% endif %}
+              {% if character.hidden_attacks %}
+                <p class="meta">Hidden until equipped: {{ character.hidden_attacks | join(", ") }}.</p>
+              {% endif %}
+            </section>
+          {% endif %}
+
+          {% if show_quick_sections and character.spellcasting %}
+            {% set show_spell_list = false %}
+            {% include "_character_spellcasting_section.html" %}
+          {% endif %}
+
+          {% if show_feature_sections and character.feature_groups %}
+            <section class="read-section">
+              <div class="section-heading">
+                <h2>Features and traits</h2>
+              </div>
+              <div class="feature-groups">
+                {% for group in character.feature_groups %}
+                  <section class="feature-group">
+                    <h3>{{ group.title }}</h3>
+                    <div class="feature-stack">
+                      {% for feature in group.entries %}
+                        <article class="feature-row">
+                          <div class="feature-row__header">
+                            <h4>
+                              {% if feature.href %}
+                                <a href="{{ feature.href }}">{{ feature.name }}</a>
+                              {% else %}
+                                {{ feature.name }}
+                              {% endif %}
+                            </h4>
+                            {% if feature.metadata %}
+                              <p class="meta">{{ feature.metadata | join(" | ") }}</p>
+                            {% endif %}
+                          </div>
+                          {% if feature.description_html %}
+                            <div class="article-body article-body--compact">{{ feature.description_html | safe }}</div>
+                          {% endif %}
+                        </article>
+                      {% endfor %}
+                    </div>
+                  </section>
+                {% endfor %}
+              </div>
+            </section>
+          {% endif %}
+
+          {% if show_spellcasting_sections and character.spellcasting %}
+            {% set show_spell_list = true %}
+            {% include "_character_spellcasting_section.html" %}
+          {% endif %}
+
+          {% if show_equipment_sections %}
+            <section class="read-section">
+              <div class="section-heading">
+                <h2>Equipment</h2>
+              </div>
+              <div class="detail-grid">
+                <article class="detail-card">
+                  <h3>Attuned items</h3>
+                  <p><strong>{{ equipment_state_manager.attuned_count }} / {{ equipment_state_manager.max_attuned_items }}</strong></p>
+                  <p class="meta">Attunement is separate from equipped state and usually has room for up to {{ equipment_state_manager.max_attuned_items }} items.</p>
+                  {% if equipment_state_manager.over_attunement_limit %}
+                    <p class="meta">This sheet is currently over the normal attunement limit.</p>
+                  {% endif %}
+                </article>
+                <article class="detail-card">
+                  <h3>Equipped items</h3>
+                  <p><strong>{{ equipment_state_manager.equipped_count }}</strong></p>
+                  <p class="meta">Use equipped for items that are worn, wielded, or otherwise actively granting their normal benefits.</p>
+                </article>
+              </div>
+
+              {% if equipment_state_manager.rows %}
+                <div class="character-edit-stack" id="character-equipment-state">
+                  {% for item in equipment_state_manager.rows %}
+                    <article class="detail-card character-edit-row">
+                      <div class="section-heading">
+                        <h3>
+                          {% if item.href %}
+                            <a href="{{ item.href }}">{{ item.name }}</a>
+                          {% else %}
+                            {{ item.name }}
+                          {% endif %}
+                        </h3>
+                        <span class="meta">{{ item.source_label }}</span>
+                      </div>
+                      <p class="meta">
+                        x{{ item.quantity }}
+                        {% if item.weight %} | {{ item.weight }}{% endif %}
+                        {% if item.requires_attunement %} | Requires attunement{% endif %}
+                      </p>
+                      <p class="meta">
+                        {% if item.is_equipped %}Equipped{% else %}Not equipped{% endif %}
+                        {% if item.is_attuned %} | Attuned{% else %} | Not attuned{% endif %}
+                      </p>
+                      {% if item.tags %}
+                        <p class="meta">{{ item.tags | join(", ") }}</p>
+                      {% endif %}
+                      {% if item.notes %}
+                        <p>{{ item.notes }}</p>
+                      {% endif %}
+                    </article>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <article class="detail-card">
+                  <p class="meta">No equipment is listed on this sheet yet.</p>
+                </article>
+              {% endif %}
+            </section>
+          {% endif %}
+
+          {% if show_inventory_sections %}
+            <section class="read-section">
+              <div class="section-heading">
+                <h2>Inventory and currency</h2>
+              </div>
+              {% if character.inventory %}
+                <div class="inventory-list">
+                  {% for item in character.inventory %}
+                    <article class="inventory-row">
+                      <div class="inventory-row__header">
+                        <h3>
+                          {% if item.href %}
+                            <a href="{{ item.href }}">{{ item.name }}</a>
+                          {% else %}
+                            {{ item.name }}
+                          {% endif %}
+                        </h3>
+                        <strong>x{{ item.quantity }}</strong>
+                      </div>
+                      <p class="meta">
+                        {% if item.weight %}{{ item.weight }}{% else %}Tracked item{% endif %}
+                      </p>
+                      {% if item.tags %}
+                        <p class="meta">{{ item.tags | join(", ") }}</p>
+                      {% endif %}
+                      {% if item.notes %}
+                        <p>{{ item.notes }}</p>
+                      {% endif %}
+                    </article>
+                  {% endfor %}
+                </div>
+              {% endif %}
+
+              <div class="detail-grid">
+                <article class="detail-card">
+                  <h3>Currency</h3>
+                  <ul class="plain-list slot-list">
+                    {% for coin in character.currency %}
+                      <li>
+                        <span>{{ coin.label }}</span>
+                        <strong>{{ coin.amount }}</strong>
+                      </li>
+                    {% endfor %}
+                  </ul>
+                </article>
+                {% if character.other_currency %}
+                  <article class="detail-card">
+                    <h3>Other currency</h3>
+                    <p>{{ character.other_currency | join(", ") }}</p>
+                  </article>
+                {% endif %}
+              </div>
+              {% if not character.inventory %}
+                <article class="detail-card">
+                  <p class="meta">No inventory is listed on this sheet yet.</p>
+                </article>
+              {% endif %}
+            </section>
+          {% endif %}
+
+          {% if show_personal_sections %}
+            <section class="read-section">
+              <div class="section-heading">
+                <h2>Personal</h2>
+              </div>
+              <div class="reference-stack">
+                {% if character.portrait %}
+                  <article class="detail-card" id="character-personal-portrait">
+                    <figure>
+                      <img class="article-image" src="{{ character.portrait.url }}" alt="{{ character.portrait.alt }}">
+                      {% if character.portrait.caption %}
+                        <figcaption class="meta article-image__caption">{{ character.portrait.caption }}</figcaption>
+                      {% endif %}
+                    </figure>
+                  </article>
+                {% endif %}
+                {% if character.physical_description_html %}
+                  <article class="detail-card">
+                    <h3>Physical Description</h3>
+                    <div class="article-body article-body--compact">{{ character.physical_description_html | safe }}</div>
+                  </article>
+                {% endif %}
+                {% if character.personal_background_html %}
+                  <article class="detail-card">
+                    <h3>Background</h3>
+                    <div class="article-body article-body--compact">{{ character.personal_background_html | safe }}</div>
+                  </article>
+                {% endif %}
+                {% if not character.portrait and not character.physical_description_html and not character.personal_background_html %}
+                  <article class="detail-card">
+                    <p class="meta">No personal details yet.</p>
+                  </article>
+                {% endif %}
+              </div>
+            </section>
+          {% endif %}
+
+          {% if show_note_sections %}
+            <section class="read-section">
+              <div class="section-heading">
+                <h2>Notes</h2>
+              </div>
+              <div class="reference-stack">
+                {% if character.player_notes_html %}
+                  <article class="detail-card">
+                    <h3>Note</h3>
+                    <div class="article-body article-body--compact">{{ character.player_notes_html | safe }}</div>
+                  </article>
+                {% endif %}
+                {% for section in character.reference_sections %}
+                  <article class="detail-card">
+                    <h3>{{ section.title }}</h3>
+                    <div class="article-body article-body--compact">{{ section.html | safe }}</div>
+                  </article>
+                {% endfor %}
+                {% if not character.player_notes_html and not character.reference_sections %}
+                  <article class="detail-card">
+                    <p class="meta">No notes yet.</p>
+                  </article>
+                {% endif %}
+              </div>
+            </section>
+          {% endif %}
+        </article>
+      {% elif session_character_cards %}
+        <article class="card">
+          <h2>Choose a character</h2>
+          <p>Select a session-enabled character from the sidebar to open its sheet here.</p>
+        </article>
+      {% else %}
+        <article class="card">
+          <h2>No session character available</h2>
+          {% if can_manage_session %}
+            <p>No active visible characters are available to open from the Session feature right now.</p>
+          {% else %}
+            <p>This account does not currently have a session-enabled character assigned in this campaign.</p>
+          {% endif %}
+        </article>
+      {% endif %}
+    </section>
+
+    <aside class="session-sidebar">
+      <article class="card session-status-card">
+        {% include "_session_status_card.html" %}
+      </article>
+
+      <article class="card session-sidebar-card">
+        <div class="section-heading">
+          <div>
+            <h2>Character chooser</h2>
+            <p class="meta">
+              {% if can_manage_session %}
+                Open any session-enabled character sheet from the current campaign.
+              {% else %}
+                Open your session-enabled character sheet without leaving Session.
+              {% endif %}
+            </p>
+          </div>
+        </div>
+        {% if session_character_cards %}
+          <div class="session-sidebar">
+            {% for card in session_character_cards %}
+              <article class="detail-card">
+                <div class="section-heading">
+                  <div>
+                    <h3>{{ card.name }}</h3>
+                    <p class="meta">{{ card.class_level_text }}</p>
+                  </div>
+                  {% if card.is_selected %}
+                    <span class="meta-badge">Open</span>
+                  {% endif %}
+                </div>
+                <p class="meta">
+                  {% if card.species %}{{ card.species }}{% endif %}
+                  {% if card.background %}{% if card.species %} | {% endif %}{{ card.background }}{% endif %}
+                </p>
+                <p class="meta">HP {{ card.current_hp }} / {{ card.max_hp }}{% if card.temp_hp %} | Temp {{ card.temp_hp }}{% endif %}</p>
+                {% if card.resource_preview %}
+                  <ul class="plain-list resource-preview-list">
+                    {% for resource in card.resource_preview %}
+                      <li>
+                        <span>{{ resource.label }}</span>
+                        <strong>{{ resource.value }}</strong>
+                      </li>
+                    {% endfor %}
+                  </ul>
+                {% endif %}
+                <a class="{% if card.is_selected %}button-link{% else %}ghost-button{% endif %}" href="{{ card.href }}">
+                  Open in Session
+                </a>
+              </article>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="meta">
+            {% if can_manage_session %}
+              Add or unhide a character first, then reopen this page.
+            {% else %}
+              Ask the DM or an admin to assign a character to this account if you should have one here.
+            {% endif %}
+          </p>
+        {% endif %}
+      </article>
+    </aside>
+  </div>
+{% endblock %}
