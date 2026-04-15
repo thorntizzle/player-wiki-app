@@ -1339,9 +1339,14 @@ def native_level_up_readiness(
 
     spell_repair_rows: list[dict[str, Any]] = []
     if is_imported:
+        spell_catalog = _effective_spell_catalog_for_definition(
+            definition,
+            systems_service=systems_service,
+        )
         spell_repair_rows = _build_imported_spell_repair_rows(
             definition,
             selected_class_rows=selected_class_rows,
+            spell_catalog=spell_catalog,
         )
         if spell_repair_rows:
             repair_reasons.append("Classify the current imported spell rows so native spell progression can trust them.")
@@ -1565,10 +1570,29 @@ def _build_imported_spell_repair_rows(
                 ),
                 "spell_mode": spell_mode,
                 "class_entry": selected_class,
+                "subclass_entry": selected_subclass,
+                "row_level": row_level,
+                "class_progression": list(row_context.get("class_progression") or []),
+                "subclass_progression": list(row_context.get("subclass_progression") or []),
             }
         )
     if not spell_row_contexts:
         return []
+
+    automatic_prepared_lookup_keys_by_row: dict[str, set[str]] = {}
+    resolved_spell_catalog = dict(spell_catalog or {})
+    for row_context in spell_row_contexts:
+        row_id = str(row_context.get("row_id") or "").strip()
+        if not row_id:
+            continue
+        automatic_prepared_lookup_keys_by_row[row_id] = _automatic_prepared_spell_lookup_keys_for_row(
+            selected_class=row_context.get("class_entry"),
+            selected_subclass=row_context.get("subclass_entry"),
+            spell_catalog=resolved_spell_catalog,
+            target_level=int(row_context.get("row_level") or 0),
+            class_progression=list(row_context.get("class_progression") or []),
+            subclass_progression=list(row_context.get("subclass_progression") or []),
+        )
 
     rows: list[dict[str, Any]] = []
     row_option_lookup = {
@@ -1593,6 +1617,14 @@ def _build_imported_spell_repair_rows(
         )
         if not candidate_row_ids:
             candidate_row_ids = list(row_option_lookup.keys())
+        payload_key = _spell_payload_key(payload)
+        automatic_prepared_row_ids = [
+            row_id
+            for row_id in candidate_row_ids
+            if payload_key and payload_key in automatic_prepared_lookup_keys_by_row.get(row_id, set())
+        ]
+        if len(automatic_prepared_row_ids) == 1:
+            continue
         selected_row_id = str(payload.get("class_row_id") or "").strip()
         if selected_row_id not in candidate_row_ids:
             selected_row_id = candidate_row_ids[0] if len(candidate_row_ids) == 1 else ""
@@ -1652,6 +1684,57 @@ def _canonical_automatic_prepared_spell_mark(mark: str) -> str:
     return " + ".join(parts)
 
 
+def _automatic_prepared_feature_entries(
+    *,
+    feature_entries: list[dict[str, Any]] | None = None,
+    class_progression: list[dict[str, Any]] | None = None,
+    subclass_progression: list[dict[str, Any]] | None = None,
+    target_level: int,
+    selected_choices: dict[str, list[str]] | None = None,
+    optionalfeature_catalog: dict[str, SystemsEntryRecord] | None = None,
+) -> list[dict[str, Any]]:
+    merged_feature_entries = [dict(feature_entry or {}) for feature_entry in list(feature_entries or [])]
+    if class_progression or subclass_progression:
+        merged_feature_entries.extend(
+            _spell_feature_entries_from_progressions(
+                class_progression=list(class_progression or []),
+                subclass_progression=list(subclass_progression or []),
+                target_level=target_level,
+                selected_choices=selected_choices,
+                optionalfeature_catalog=optionalfeature_catalog,
+            )
+        )
+    return _dedupe_spell_feature_entries(merged_feature_entries)
+
+
+def _automatic_prepared_spell_lookup_keys_for_row(
+    *,
+    selected_class: SystemsEntryRecord | None,
+    selected_subclass: SystemsEntryRecord | None,
+    spell_catalog: dict[str, Any],
+    target_level: int,
+    feature_entries: list[dict[str, Any]] | None = None,
+    class_progression: list[dict[str, Any]] | None = None,
+    subclass_progression: list[dict[str, Any]] | None = None,
+    selected_choices: dict[str, list[str]] | None = None,
+    optionalfeature_catalog: dict[str, SystemsEntryRecord] | None = None,
+) -> set[str]:
+    return _automatic_prepared_spell_lookup_keys(
+        selected_class=selected_class,
+        selected_subclass=selected_subclass,
+        spell_catalog=spell_catalog,
+        target_level=target_level,
+        feature_entries=_automatic_prepared_feature_entries(
+            feature_entries=feature_entries,
+            class_progression=class_progression,
+            subclass_progression=subclass_progression,
+            target_level=target_level,
+            selected_choices=selected_choices,
+            optionalfeature_catalog=optionalfeature_catalog,
+        ),
+    )
+
+
 def _apply_automatic_prepared_spell_flags(
     spell_payloads: list[dict[str, Any]],
     *,
@@ -1673,29 +1756,27 @@ def _apply_automatic_prepared_spell_flags(
             else None
         )
         row_level = max(int(row.get("row_level") or 0), 0)
-        row_feature_entries = [dict(feature_entry or {}) for feature_entry in list(feature_entries or [])]
+        class_progression = []
+        subclass_progression = []
         if systems_service is not None:
-            row_feature_entries.extend(
-                _spell_support_feature_entries_from_progressions(
-                    class_progression=_class_progression_for_builder(
-                        systems_service,
-                        campaign_slug,
-                        selected_class,
-                    ),
-                    subclass_progression=_subclass_progression_for_builder(
-                        systems_service,
-                        campaign_slug,
-                        selected_subclass,
-                    ),
-                    target_level=row_level,
-                )
+            class_progression = _class_progression_for_builder(
+                systems_service,
+                campaign_slug,
+                selected_class,
             )
-        row_lookup_keys[row_id] = _automatic_prepared_spell_lookup_keys(
+            subclass_progression = _subclass_progression_for_builder(
+                systems_service,
+                campaign_slug,
+                selected_subclass,
+            )
+        row_lookup_keys[row_id] = _automatic_prepared_spell_lookup_keys_for_row(
             selected_class=selected_class,
             selected_subclass=selected_subclass,
             spell_catalog=spell_catalog,
             target_level=row_level,
-            feature_entries=row_feature_entries,
+            feature_entries=feature_entries,
+            class_progression=class_progression,
+            subclass_progression=subclass_progression,
         )
 
     if not row_lookup_keys:
@@ -2348,6 +2429,14 @@ def build_native_level_up_character_definition(
         values=values,
         field_prefix_base="levelup_campaign_spell_manager",
     )
+    new_automatic_prepared_feature_entries = _automatic_prepared_feature_entries(
+        feature_entries=new_feature_entries,
+        class_progression=class_progression,
+        subclass_progression=subclass_progression,
+        target_level=row_target_level,
+        selected_choices=selected_choices,
+        optionalfeature_catalog=optionalfeature_catalog,
+    )
     selected_campaign_option_payloads = (
         _campaign_option_payloads_from_feat_selections(feat_selections)
         + _campaign_option_payloads_from_feature_entries(new_feature_entries)
@@ -2509,6 +2598,7 @@ def build_native_level_up_character_definition(
             spell_catalog=spell_catalog,
             target_level=row_target_level,
             feature_entries=new_feature_entries,
+            automatic_prepared_feature_entries=new_automatic_prepared_feature_entries,
             selected_campaign_option_payloads=selected_campaign_option_payloads,
             class_row_id=target_class_row_id,
         ),
@@ -5708,10 +5798,15 @@ def _derive_definition_core_sheet_payloads(
         definition,
         selected_class=resolved_entries.get("selected_class"),
     )
-    del spell_catalog
     effective_item_catalog = _effective_item_catalog_for_definition(
         sanitized_definition,
         item_catalog=item_catalog,
+        systems_service=systems_service,
+        campaign_page_records=campaign_page_records,
+    )
+    effective_spell_catalog = _effective_spell_catalog_for_definition(
+        sanitized_definition,
+        spell_catalog=spell_catalog,
         systems_service=systems_service,
         campaign_page_records=campaign_page_records,
     )
@@ -5764,6 +5859,21 @@ def _derive_definition_core_sheet_payloads(
     derived_payload["skills"] = skills
     derived_payload["stats"] = stats
     derived_definition = CharacterDefinition.from_dict(derived_payload)
+    derived_spellcasting = _derive_definition_spellcasting(
+        derived_definition,
+        ability_scores=ability_scores,
+        proficiency_bonus=proficiency_bonus,
+        current_level=max(current_level, 1),
+        selected_class=resolved_entries.get("selected_class"),
+        selected_class_rows=list(resolved_entries.get("selected_class_rows") or []),
+    )
+    derived_spellcasting["spells"] = _apply_automatic_prepared_spell_flags(
+        list(derived_spellcasting.get("spells") or []),
+        campaign_slug=definition.campaign_slug,
+        systems_service=systems_service,
+        resolved_class_rows=list(resolved_entries.get("selected_class_rows") or []),
+        spell_catalog=effective_spell_catalog,
+    )
     return {
         "features": normalized_features,
         "equipment_catalog": normalized_equipment,
@@ -5773,14 +5883,7 @@ def _derive_definition_core_sheet_payloads(
             derived_definition,
             item_catalog=effective_item_catalog,
         ),
-        "spellcasting": _derive_definition_spellcasting(
-            derived_definition,
-            ability_scores=ability_scores,
-            proficiency_bonus=proficiency_bonus,
-            current_level=max(current_level, 1),
-            selected_class=resolved_entries.get("selected_class"),
-            selected_class_rows=list(resolved_entries.get("selected_class_rows") or []),
-        ),
+        "spellcasting": derived_spellcasting,
         "resource_templates": _normalize_resource_template_payloads(
             _merge_resource_templates(
                 list(sanitized_definition.resource_templates or []),
@@ -6536,6 +6639,14 @@ def _build_level_up_choice_sections(
             optionalfeature_catalog=optionalfeature_catalog,
         )
     )
+    preview_automatic_prepared_feature_entries = _automatic_prepared_feature_entries(
+        feature_entries=preview_feature_entries,
+        class_progression=class_progression,
+        subclass_progression=subclass_progression,
+        target_level=target_level,
+        selected_choices=preview_selected_choices,
+        optionalfeature_catalog=optionalfeature_catalog,
+    )
     spell_fields = _build_level_up_spell_choice_fields(
         definition=definition,
         selected_class=selected_class,
@@ -6546,6 +6657,7 @@ def _build_level_up_choice_sections(
         ability_scores=preview_ability_scores,
         values=values,
         feature_entries=preview_feature_entries,
+        automatic_prepared_feature_entries=preview_automatic_prepared_feature_entries,
         class_row_id=class_row_id,
     )
     if spell_fields:
@@ -10485,7 +10597,43 @@ def _campaign_option_payloads_from_definition(definition: CharacterDefinition) -
     return payloads
 
 
-def _spell_support_feature_entries_from_progressions(
+def _spell_feature_entry_identity(feature_entry: dict[str, Any]) -> tuple[str, str]:
+    entry = feature_entry.get("entry")
+    if isinstance(entry, SystemsEntryRecord):
+        return ("systems", str(entry.entry_key or entry.slug or entry.title or "").strip())
+    campaign_option = dict(feature_entry.get("campaign_option") or {})
+    if campaign_option:
+        return (
+            "campaign",
+            str(
+                campaign_option.get("page_ref")
+                or campaign_option.get("id")
+                or feature_entry.get("page_ref")
+                or feature_entry.get("label")
+                or feature_entry.get("name")
+                or ""
+            ).strip(),
+        )
+    return (
+        "label",
+        str(feature_entry.get("page_ref") or feature_entry.get("label") or feature_entry.get("name") or "").strip(),
+    )
+
+
+def _dedupe_spell_feature_entries(feature_entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for feature_entry in list(feature_entries or []):
+        payload = dict(feature_entry or {})
+        marker = _spell_feature_entry_identity(payload)
+        if not marker[1] or marker in seen:
+            continue
+        seen.add(marker)
+        deduped.append(payload)
+    return deduped
+
+
+def _spell_feature_entries_from_progressions(
     *,
     class_progression: list[dict[str, Any]],
     subclass_progression: list[dict[str, Any]],
@@ -10494,7 +10642,6 @@ def _spell_support_feature_entries_from_progressions(
     optionalfeature_catalog: dict[str, SystemsEntryRecord] | None = None,
 ) -> list[dict[str, Any]]:
     feature_entries: list[dict[str, Any]] = []
-    seen_keys: set[str] = set()
 
     def append_entry(entry: SystemsEntryRecord | None) -> None:
         if not isinstance(entry, SystemsEntryRecord):
@@ -10505,17 +10652,6 @@ def _spell_support_feature_entries_from_progressions(
             normalize_lookup("optionalfeature"),
         }:
             return
-        metadata = dict(entry.metadata or {})
-        if not _spell_metadata_value(metadata, "additional_spells", "additionalSpells") and not _spell_metadata_value(
-            metadata,
-            "spell_support",
-            "spellSupport",
-        ):
-            return
-        entry_key = str(entry.entry_key or entry.slug or entry.title or "").strip()
-        if not entry_key or entry_key in seen_keys:
-            return
-        seen_keys.add(entry_key)
         feature_entries.append({"entry": entry})
 
     for progression in (class_progression, subclass_progression):
@@ -10557,7 +10693,7 @@ def _spell_support_feature_entries_from_progressions(
             optionalfeature_catalog=optionalfeature_catalog,
         ):
             append_entry(feature_entry.get("entry"))
-    return feature_entries
+    return _dedupe_spell_feature_entries(feature_entries)
 
 
 def _build_selected_campaign_item_specs(
@@ -10911,6 +11047,7 @@ def _build_level_up_spell_choice_fields(
     ability_scores: dict[str, int],
     values: dict[str, str],
     feature_entries: list[dict[str, Any]] | None = None,
+    automatic_prepared_feature_entries: list[dict[str, Any]] | None = None,
     class_row_id: str = "",
 ) -> list[dict[str, Any]]:
     class_name = selected_class.title
@@ -10994,7 +11131,7 @@ def _build_level_up_spell_choice_fields(
         selected_subclass=selected_subclass,
         spell_catalog=spell_catalog,
         target_level=target_level,
-        feature_entries=feature_entries,
+        feature_entries=automatic_prepared_feature_entries or feature_entries,
     )
     target_known_bonus_values = _automatic_known_spell_lookup_keys(
         selected_class=selected_class,
@@ -14183,6 +14320,14 @@ def _build_native_level_up_preview(
             optionalfeature_catalog=optionalfeature_catalog,
         )
     )
+    gained_automatic_prepared_feature_entries = _automatic_prepared_feature_entries(
+        feature_entries=gained_feature_entries,
+        class_progression=class_progression,
+        subclass_progression=subclass_progression,
+        target_level=target_level,
+        selected_choices=selected_choices,
+        optionalfeature_catalog=optionalfeature_catalog,
+    )
     selected_campaign_option_payloads = (
         _campaign_option_payloads_from_feat_selections(feat_selections)
         + _campaign_option_payloads_from_feature_entries(gained_feature_entries)
@@ -14216,6 +14361,7 @@ def _build_native_level_up_preview(
         spell_catalog=spell_catalog,
         target_level=target_level,
         feature_entries=gained_feature_entries,
+        automatic_prepared_feature_entries=gained_automatic_prepared_feature_entries,
         extra_option_payloads=selected_campaign_option_payloads,
         class_row_id=class_row_id or "",
     )
@@ -14456,6 +14602,7 @@ def _build_level_up_spellcasting(
     spell_catalog: dict[str, Any],
     target_level: int,
     feature_entries: list[dict[str, Any]] | None = None,
+    automatic_prepared_feature_entries: list[dict[str, Any]] | None = None,
     selected_campaign_option_payloads: list[dict[str, Any]] | None = None,
     class_row_id: str = "",
 ) -> dict[str, Any]:
@@ -14482,6 +14629,7 @@ def _build_level_up_spellcasting(
         spell_catalog=spell_catalog,
         target_level=target_level,
         feature_entries=feature_entries,
+        automatic_prepared_feature_entries=automatic_prepared_feature_entries,
         selected_campaign_option_payloads=selected_campaign_option_payloads,
         class_row_id=class_row_id,
     )
@@ -14521,6 +14669,7 @@ def _build_level_up_spell_payloads(
     spell_catalog: dict[str, Any],
     target_level: int,
     feature_entries: list[dict[str, Any]] | None = None,
+    automatic_prepared_feature_entries: list[dict[str, Any]] | None = None,
     selected_campaign_option_payloads: list[dict[str, Any]] | None = None,
     class_row_id: str = "",
 ) -> list[dict[str, Any]]:
@@ -14658,7 +14807,7 @@ def _build_level_up_spell_payloads(
         selected_class=selected_class,
         selected_subclass=selected_subclass,
         target_level=target_level,
-        feature_entries=feature_entries,
+        feature_entries=automatic_prepared_feature_entries or feature_entries,
     ):
         _add_spell_to_payloads(
             spells_by_key,
@@ -16803,6 +16952,9 @@ def _additional_spell_metadata_entries(
             continue
         values.append(additional_spells)
         seen_entries.add(entry_key)
+    inferred_blocks = _inferred_always_prepared_additional_spell_blocks(feature_entries)
+    if inferred_blocks:
+        values.append(inferred_blocks)
     return values
 
 
@@ -16884,6 +17036,202 @@ def _spell_payload_is_always_prepared(spell_payload: dict[str, Any]) -> bool:
     return bool(spell_payload.get("is_always_prepared")) or _spell_payload_has_legacy_always_prepared_source_label(
         spell_payload
     )
+
+
+def _collect_entry_body_text_fragments(raw_value: Any) -> list[str]:
+    if isinstance(raw_value, str):
+        cleaned = _clean_embedded_text(raw_value)
+        return [cleaned] if cleaned else []
+    if isinstance(raw_value, list):
+        values: list[str] = []
+        for item in raw_value:
+            values.extend(_collect_entry_body_text_fragments(item))
+        return values
+    if not isinstance(raw_value, dict):
+        return []
+    values: list[str] = []
+    for key in ("name", "caption"):
+        cleaned = _clean_embedded_text(str(raw_value.get(key) or ""))
+        if cleaned:
+            values.append(cleaned)
+    for key in ("entries", "entry", "items"):
+        if key in raw_value:
+            values.extend(_collect_entry_body_text_fragments(raw_value.get(key)))
+    return values
+
+
+def _collect_entry_body_tables(raw_value: Any) -> list[dict[str, Any]]:
+    if isinstance(raw_value, list):
+        tables: list[dict[str, Any]] = []
+        for item in raw_value:
+            tables.extend(_collect_entry_body_tables(item))
+        return tables
+    if not isinstance(raw_value, dict):
+        return []
+    tables: list[dict[str, Any]] = []
+    if normalize_lookup(str(raw_value.get("type") or "")) == "table":
+        tables.append(dict(raw_value))
+    for key in ("entries", "entry", "items"):
+        if key in raw_value:
+            tables.extend(_collect_entry_body_tables(raw_value.get(key)))
+    return tables
+
+
+def _normalized_entry_body_text(entry: SystemsEntryRecord | None) -> str:
+    if not isinstance(entry, SystemsEntryRecord):
+        return ""
+    return normalize_lookup(" ".join(_collect_entry_body_text_fragments((entry.body or {}).get("entries"))))
+
+
+def _entry_body_has_self_contained_always_prepared_context(entry: SystemsEntryRecord | None) -> bool:
+    body_text = _normalized_entry_body_text(entry)
+    if not body_text:
+        return False
+    return normalize_lookup("always have it prepared") in body_text or (
+        normalize_lookup("always have") in body_text
+        and normalize_lookup("prepared") in body_text
+        and normalize_lookup("spell") in body_text
+    )
+
+
+def _entry_body_has_domain_spell_grant_context(entry: SystemsEntryRecord | None) -> bool:
+    body_text = _normalized_entry_body_text(entry)
+    if normalize_lookup("domain spell") not in body_text:
+        return False
+    return (
+        normalize_lookup("add the listed spells to your spells prepared") in body_text
+        or normalize_lookup("you gain domain spells") in body_text
+        or normalize_lookup("see the divine domain class feature") in body_text
+    )
+
+
+def _feature_entries_have_domain_spell_always_prepared_context(
+    feature_entries: list[dict[str, Any]] | None,
+    *,
+    excluded_entry_key: str = "",
+) -> bool:
+    excluded_key = str(excluded_entry_key or "").strip()
+    for feature_entry in list(feature_entries or []):
+        entry = feature_entry.get("entry")
+        if not isinstance(entry, SystemsEntryRecord):
+            continue
+        entry_key = str(entry.entry_key or entry.slug or entry.title or "").strip()
+        if entry_key and entry_key == excluded_key:
+            continue
+        body_text = _normalized_entry_body_text(entry)
+        if normalize_lookup("domain spell") not in body_text:
+            continue
+        if normalize_lookup("always have it prepared") in body_text or (
+            normalize_lookup("always have") in body_text and normalize_lookup("prepared") in body_text
+        ):
+            return True
+    return False
+
+
+def _extract_spell_titles_from_table_cell(raw_value: Any) -> list[str]:
+    if isinstance(raw_value, list):
+        values: list[str] = []
+        for item in raw_value:
+            values.extend(_extract_spell_titles_from_table_cell(item))
+        return _dedupe_preserve_order(values)
+    if isinstance(raw_value, dict):
+        values: list[str] = []
+        for key in ("_", "entries", "entry", "items"):
+            if key in raw_value:
+                values.extend(_extract_spell_titles_from_table_cell(raw_value.get(key)))
+        return _dedupe_preserve_order(values)
+    clean_value = str(raw_value or "").strip()
+    if not clean_value:
+        return []
+    matches = re.findall(r"\{@spell ([^}]+)\}", clean_value)
+    if matches:
+        return _dedupe_preserve_order([_normalize_additional_spell_reference(match) for match in matches])
+    cleaned = _clean_embedded_text(clean_value)
+    if not cleaned:
+        return []
+    return _dedupe_preserve_order([part.strip() for part in re.split(r"[,;]", cleaned) if part.strip()])
+
+
+def _extract_prepared_spells_from_supported_table(raw_table: dict[str, Any] | None) -> dict[str, list[str]]:
+    table = dict(raw_table or {})
+    if normalize_lookup(str(table.get("type") or "")) != "table":
+        return {}
+    labels = [
+        normalize_lookup(_clean_embedded_text(str(label or "")))
+        for label in list(table.get("colLabels") or [])
+    ]
+    level_index = next((index for index, label in enumerate(labels) if "level" in label), -1)
+    spell_indices = [index for index, label in enumerate(labels) if label in {"spell", "spells"} or "spell" in label]
+    if level_index < 0 or not spell_indices:
+        return {}
+    prepared: dict[str, list[str]] = {}
+    for raw_row in list(table.get("rows") or []):
+        if not isinstance(raw_row, (list, tuple)):
+            continue
+        row = list(raw_row)
+        if level_index >= len(row):
+            continue
+        unlock_level = _parse_additional_spell_unlock_level(row[level_index])
+        if unlock_level is None:
+            continue
+        values: list[str] = []
+        for spell_index in spell_indices:
+            if spell_index >= len(row):
+                continue
+            values.extend(_extract_spell_titles_from_table_cell(row[spell_index]))
+        if not values:
+            continue
+        prepared.setdefault(str(unlock_level), [])
+        prepared[str(unlock_level)].extend(values)
+    return {level: _dedupe_preserve_order(values) for level, values in prepared.items() if values}
+
+
+def _inferred_always_prepared_additional_spell_blocks(
+    feature_entries: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    inferred_blocks: list[dict[str, Any]] = []
+    seen_entries: set[str] = set()
+    for feature_entry in list(feature_entries or []):
+        entry = feature_entry.get("entry")
+        if not isinstance(entry, SystemsEntryRecord):
+            continue
+        if normalize_lookup(entry.entry_type) not in {
+            normalize_lookup("classfeature"),
+            normalize_lookup("subclassfeature"),
+        }:
+            continue
+        entry_key = str(entry.entry_key or entry.slug or entry.title or "").strip()
+        if not entry_key or entry_key in seen_entries:
+            continue
+        seen_entries.add(entry_key)
+        metadata = dict(entry.metadata or {})
+        if _spell_metadata_value(metadata, "additional_spells", "additionalSpells") or _spell_metadata_value(
+            metadata,
+            "spell_support",
+            "spellSupport",
+        ):
+            continue
+        prepared: dict[str, list[str]] = {}
+        for table in _collect_entry_body_tables((entry.body or {}).get("entries")):
+            for level, values in _extract_prepared_spells_from_supported_table(table).items():
+                prepared.setdefault(level, [])
+                prepared[level].extend(values)
+        prepared = {level: _dedupe_preserve_order(values) for level, values in prepared.items() if values}
+        if not prepared:
+            continue
+        if not (
+            _entry_body_has_self_contained_always_prepared_context(entry)
+            or (
+                _entry_body_has_domain_spell_grant_context(entry)
+                and _feature_entries_have_domain_spell_always_prepared_context(
+                    feature_entries,
+                    excluded_entry_key=entry_key,
+                )
+            )
+        ):
+            continue
+        inferred_blocks.append({"prepared": prepared})
+    return inferred_blocks
 
 
 def _spell_support_choice_field_name(
@@ -17617,6 +17965,7 @@ def _summarize_level_up_spell_choices(
     spell_catalog: dict[str, Any],
     target_level: int,
     feature_entries: list[dict[str, Any]] | None = None,
+    automatic_prepared_feature_entries: list[dict[str, Any]] | None = None,
     extra_option_payloads: list[dict[str, Any]] | None = None,
     class_row_id: str = "",
 ) -> list[str]:
@@ -17645,6 +17994,7 @@ def _summarize_level_up_spell_choices(
         spell_catalog=spell_catalog,
         target_level=target_level,
         feature_entries=feature_entries,
+        automatic_prepared_feature_entries=automatic_prepared_feature_entries,
         selected_campaign_option_payloads=extra_option_payloads,
         class_row_id=class_row_id,
     )

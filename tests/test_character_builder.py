@@ -3949,14 +3949,33 @@ def test_imported_progression_repair_restores_armorer_always_prepared_spells():
         metadata={
             "class_name": "Artificer",
             "class_source": "TCE",
-            "additional_spells": [
+        },
+    )
+    armorer_spells = _systems_entry(
+        "subclassfeature",
+        "tce-subclassfeature-armorer-spells",
+        "Armorer Spells",
+        source_id="TCE",
+        metadata={
+            "level": 3,
+            "class_name": "Artificer",
+            "class_source": "TCE",
+            "subclass_name": "Armorer",
+        },
+        body={
+            "entries": [
+                "You always have certain spells prepared after you reach particular levels in this class, as shown in the Armorer Spells table.",
+                "These spells count as artificer spells for you, but they don't count against the number of artificer spells you prepare.",
                 {
-                    "prepared": {
-                        "3": ["Magic Missile", "Thunderwave"],
-                        "5": ["Mirror Image", "Shatter"],
-                    }
-                }
-            ],
+                    "type": "table",
+                    "caption": "Armorer Spells",
+                    "colLabels": ["Artificer Level", "Spells"],
+                    "rows": [
+                        ["3rd", "{@spell magic missile}, {@spell thunderwave}"],
+                        ["5th", "{@spell mirror image}, {@spell shatter}"],
+                    ],
+                },
+            ]
         },
     )
     human = _systems_entry("race", "phb-race-human", "Human")
@@ -3977,6 +3996,7 @@ def test_imported_progression_repair_restores_armorer_always_prepared_spells():
             "spell": [message, fire_bolt, magic_missile, thunderwave, mirror_image, shatter, cure_wounds],
         },
         class_progression=[{"level": 3, "feature_rows": [{"label": "Artificer Specialist"}]}],
+        subclass_progression=[{"level": 3, "feature_rows": [{"label": "Armorer Spells", "entry": armorer_spells}]}],
     )
     definition = _minimal_imported_character_definition("armorer-import", "Armorer Import")
     definition.profile["class_level_text"] = "Artificer 5"
@@ -4015,8 +4035,10 @@ def test_imported_progression_repair_restores_armorer_always_prepared_spells():
         "linden-pass",
         definition,
     )
+    repair_spell_names = {str(row.get("name") or "").strip() for row in repair_context["spell_rows"]}
 
     assert repair_context["readiness"]["status"] == "repairable"
+    assert repair_spell_names == {"Message", "Fire Bolt", "Cure Wounds"}
 
     repaired_definition, _ = apply_imported_progression_repairs(
         "linden-pass",
@@ -4070,14 +4092,36 @@ def test_imported_progression_repair_restores_grave_domain_always_prepared_spell
             "class_name": "Cleric",
             "class_source": "PHB",
             "subclass_name": "Grave Domain",
-            "additional_spells": [
+        },
+        body={
+            "entries": [
+                "You gain domain spells at the cleric levels listed in the Grave Domain Spells table. See the Divine Domain class feature for how domain spells work.",
                 {
-                    "prepared": {
-                        "1": ["Bane", "False Life"],
-                        "3": ["Gentle Repose", "Ray of Enfeeblement"],
-                    }
+                    "type": "table",
+                    "caption": "Grave Domain Spells",
+                    "colLabels": ["Cleric Level", "Spells"],
+                    "rows": [
+                        ["1st", "{@spell bane}, {@spell false life}"],
+                        ["3rd", "{@spell gentle repose}, {@spell ray of enfeeblement}"],
+                    ],
+                },
+            ]
+        },
+    )
+    divine_domain = _systems_entry(
+        "classfeature",
+        "phb-classfeature-divine-domain",
+        "Divine Domain",
+        metadata={"level": 1},
+        body={
+            "entries": [
+                {
+                    "name": "Domain Spells",
+                    "entries": [
+                        "Each domain has a list of spells. Once you gain a domain spell, you always have it prepared, and it doesn't count against the number of spells you can prepare each day.",
+                    ],
                 }
-            ],
+            ]
         },
     )
     human = _systems_entry("race", "phb-race-human", "Human")
@@ -4097,7 +4141,7 @@ def test_imported_progression_repair_restores_grave_domain_always_prepared_spell
             "background": [acolyte],
             "spell": [sacred_flame, guidance, bane, false_life, gentle_repose, ray_of_enfeeblement, cure_wounds],
         },
-        class_progression=[{"level": 1, "feature_rows": [{"label": "Divine Domain"}]}],
+        class_progression=[{"level": 1, "feature_rows": [{"label": "Divine Domain", "entry": divine_domain}]}],
         subclass_progression=[{"level": 1, "feature_rows": [{"label": "Grave Domain Spells", "entry": grave_domain_spells}]}],
     )
     definition = _minimal_imported_character_definition("grave-import", "Grave Import")
@@ -4137,8 +4181,10 @@ def test_imported_progression_repair_restores_grave_domain_always_prepared_spell
         "linden-pass",
         definition,
     )
+    repair_spell_names = {str(row.get("name") or "").strip() for row in repair_context["spell_rows"]}
 
     assert repair_context["readiness"]["status"] == "repairable"
+    assert repair_spell_names == {"Sacred Flame", "Guidance", "Cure Wounds"}
 
     repaired_definition, _ = apply_imported_progression_repairs(
         "linden-pass",
@@ -4319,6 +4365,100 @@ def test_normalize_definition_restores_legacy_always_prepared_flags_from_source_
     assert spells_by_name["Bless"]["source"] == "Cleric (Always Prepared)"
     assert spells_by_name["Bless"]["mark"] == "P"
     assert spells_by_name["Cure Wounds"].get("is_always_prepared") is not True
+
+
+def test_normalize_definition_restores_body_only_artillerist_always_prepared_spells():
+    artificer = _systems_entry(
+        "class",
+        "tce-class-artificer",
+        "Artificer",
+        source_id="TCE",
+        metadata={
+            "hit_die": {"faces": 8},
+            "proficiency": ["con", "int"],
+            "subclass_title": "Artificer Specialist",
+        },
+    )
+    artillerist = _systems_entry(
+        "subclass",
+        "tce-subclass-artillerist-artificer",
+        "Artillerist",
+        source_id="TCE",
+        metadata={"class_name": "Artificer", "class_source": "TCE"},
+    )
+    artillerist_spells = _systems_entry(
+        "subclassfeature",
+        "tce-subclassfeature-artillerist-spells",
+        "Artillerist Spells",
+        source_id="TCE",
+        metadata={
+            "level": 3,
+            "class_name": "Artificer",
+            "class_source": "TCE",
+            "subclass_name": "Artillerist",
+        },
+        body={
+            "entries": [
+                "You always have certain spells prepared after you reach particular levels in this class, as shown in the Artillerist Spells table.",
+                "These spells count as artificer spells for you, but they don't count against the number of artificer spells you prepare.",
+                {
+                    "type": "table",
+                    "caption": "Artillerist Spells",
+                    "colLabels": ["Artificer Level", "Spells"],
+                    "rows": [
+                        ["3rd", "{@spell shield}, {@spell thunderwave}"],
+                        ["5th", "{@spell scorching ray}, {@spell shatter}"],
+                    ],
+                },
+            ]
+        },
+    )
+    shield = _systems_entry("spell", "phb-spell-shield", "Shield", metadata={"level": 1})
+    thunderwave = _systems_entry("spell", "phb-spell-thunderwave", "Thunderwave", metadata={"level": 1})
+    scorching_ray = _systems_entry("spell", "phb-spell-scorching-ray", "Scorching Ray", metadata={"level": 2})
+    shatter = _systems_entry("spell", "phb-spell-shatter", "Shatter", metadata={"level": 2})
+    cure_wounds = _systems_entry("spell", "phb-spell-cure-wounds", "Cure Wounds", metadata={"level": 1, "class_lists": {"TCE": ["Artificer"]}})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [artificer],
+            "subclass": [artillerist],
+            "spell": [shield, thunderwave, scorching_ray, shatter, cure_wounds],
+        },
+        class_progression=[{"level": 3, "feature_rows": [{"label": "Artificer Specialist"}]}],
+        subclass_progression=[{"level": 3, "feature_rows": [{"label": "Artillerist Spells", "entry": artillerist_spells}]}],
+    )
+    definition = _minimal_character_definition("ember-volt", "Ember Volt")
+    definition.profile["class_level_text"] = "Artificer 5"
+    definition.profile["classes"][0] = {
+        "row_id": "class-row-1",
+        "class_name": "Artificer",
+        "subclass_name": "Artillerist",
+        "level": 5,
+        "systems_ref": _systems_ref(artificer),
+        "subclass_ref": _systems_ref(artillerist),
+    }
+    definition.profile["class_ref"] = _systems_ref(artificer)
+    definition.profile["subclass_ref"] = _systems_ref(artillerist)
+    definition.spellcasting = {
+        "spellcasting_class": "Artificer",
+        "spellcasting_ability": "Intelligence",
+        "spells": [
+            {"name": "Shield", "mark": "", "systems_ref": _systems_ref(shield)},
+            {"name": "Thunderwave", "mark": "", "systems_ref": _systems_ref(thunderwave)},
+            {"name": "Scorching Ray", "mark": "", "systems_ref": _systems_ref(scorching_ray)},
+            {"name": "Shatter", "mark": "", "systems_ref": _systems_ref(shatter)},
+            {"name": "Cure Wounds", "mark": "Prepared", "systems_ref": _systems_ref(cure_wounds)},
+        ],
+    }
+
+    normalized = normalize_definition_to_native_model(definition, systems_service=systems_service)
+    spells_by_name = {spell["name"]: spell for spell in normalized.spellcasting["spells"]}
+
+    for spell_name in ("Shield", "Thunderwave", "Scorching Ray", "Shatter"):
+        assert spells_by_name[spell_name]["is_always_prepared"] is True
+    assert spells_by_name["Cure Wounds"].get("is_always_prepared") is not True
+
 
 def _builder_field_names(builder_context: dict[str, object]) -> set[str]:
     return {
@@ -13431,6 +13571,197 @@ def test_level_one_builder_adds_structured_subclass_prepared_spells():
     assert spells_by_name["Cure Wounds"]["is_always_prepared"] is True
 
 
+def test_level_one_builder_adds_body_only_grave_domain_prepared_spells():
+    cleric = _systems_entry(
+        "class",
+        "phb-class-cleric",
+        "Cleric",
+        metadata={
+            "hit_die": {"faces": 8},
+            "proficiency": ["wis", "cha"],
+            "subclass_title": "Divine Domain",
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "shield"],
+                "weapons": ["simple"],
+                "skills": [{"choose": {"count": 2, "from": ["history", "insight", "medicine", "religion"]}}],
+            },
+        },
+    )
+    grave_domain = _systems_entry(
+        "subclass",
+        "xge-subclass-cleric-grave-domain",
+        "Grave Domain",
+        source_id="XGE",
+        metadata={
+            "class_name": "Cleric",
+            "class_source": "PHB",
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry(
+        "background",
+        "phb-background-acolyte",
+        "Acolyte",
+        metadata={"skill_proficiencies": [{"insight": True, "religion": True}]},
+    )
+    spellcasting_feature = _systems_entry(
+        "classfeature",
+        "phb-classfeature-spellcasting",
+        "Spellcasting",
+        metadata={"level": 1},
+    )
+    divine_domain = _systems_entry(
+        "classfeature",
+        "phb-classfeature-divine-domain",
+        "Divine Domain",
+        metadata={"level": 1},
+        body={
+            "entries": [
+                {
+                    "name": "Domain Spells",
+                    "entries": [
+                        "Each domain has a list of spells. Once you gain a domain spell, you always have it prepared, and it doesn't count against the number of spells you can prepare each day.",
+                    ],
+                }
+            ]
+        },
+    )
+    grave_domain_spells = _systems_entry(
+        "subclassfeature",
+        "xge-subclassfeature-grave-domain-spells",
+        "Grave Domain Spells",
+        source_id="XGE",
+        metadata={
+            "level": 1,
+            "class_name": "Cleric",
+            "class_source": "PHB",
+            "subclass_name": "Grave Domain",
+        },
+        body={
+            "entries": [
+                "You gain domain spells at the cleric levels listed in the Grave Domain Spells table. See the Divine Domain class feature for how domain spells work.",
+                {
+                    "type": "table",
+                    "caption": "Grave Domain Spells",
+                    "colLabels": ["Cleric Level", "Spells"],
+                    "rows": [
+                        ["1st", "{@spell bane}, {@spell false life}"],
+                        ["3rd", "{@spell gentle repose}, {@spell ray of enfeeblement}"],
+                    ],
+                },
+            ]
+        },
+    )
+    light = _systems_entry("spell", "phb-spell-light", "Light", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    sacred_flame = _systems_entry("spell", "phb-spell-sacred-flame", "Sacred Flame", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    thaumaturgy = _systems_entry("spell", "phb-spell-thaumaturgy", "Thaumaturgy", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    bane = _systems_entry("spell", "phb-spell-bane", "Bane", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    false_life = _systems_entry("spell", "phb-spell-false-life", "False Life", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    detect_magic = _systems_entry("spell", "phb-spell-detect-magic", "Detect Magic", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    guiding_bolt = _systems_entry("spell", "phb-spell-guiding-bolt", "Guiding Bolt", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+    healing_word = _systems_entry("spell", "phb-spell-healing-word", "Healing Word", metadata={"casting_time": [{"number": 1, "unit": "bonus"}]})
+    cure_wounds = _systems_entry("spell", "phb-spell-cure-wounds", "Cure Wounds", metadata={"casting_time": [{"number": 1, "unit": "action"}]})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [cleric],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [grave_domain],
+            "item": [],
+            "spell": [
+                light,
+                sacred_flame,
+                thaumaturgy,
+                bane,
+                false_life,
+                detect_magic,
+                guiding_bolt,
+                healing_word,
+                cure_wounds,
+            ],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Spellcasting", "entry": spellcasting_feature, "embedded_card": {"option_groups": []}},
+                    {"label": "Divine Domain", "entry": divine_domain, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+        subclass_progression=[
+            {
+                "level": 1,
+                "level_label": "Level 1",
+                "feature_rows": [
+                    {"label": "Grave Domain Spells", "entry": grave_domain_spells, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+    )
+
+    base_form_values = {
+        "name": "Mira Voss",
+        "character_slug": "mira-voss",
+        "alignment": "Neutral Good",
+        "experience_model": "Milestone",
+        "class_slug": cleric.slug,
+        "subclass_slug": grave_domain.slug,
+        "species_slug": human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "history",
+        "class_skill_2": "medicine",
+        "str": "10",
+        "dex": "12",
+        "con": "14",
+        "int": "11",
+        "wis": "16",
+        "cha": "13",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", base_form_values)
+    prepared_spell_field = next(
+        field
+        for section in context["choice_sections"]
+        if section["title"] == "Spell Choices"
+        for field in section["fields"]
+        if field["name"] == "spell_level_one_1"
+    )
+    option_labels = {option["label"] for option in prepared_spell_field["options"]}
+
+    assert "Bane" not in option_labels
+    assert "False Life" not in option_labels
+
+    form_values = {
+        **base_form_values,
+        "spell_cantrip_1": _field_value_for_label(context, "spell_cantrip_1", "Light"),
+        "spell_cantrip_2": _field_value_for_label(context, "spell_cantrip_2", "Sacred Flame"),
+        "spell_cantrip_3": _field_value_for_label(context, "spell_cantrip_3", "Thaumaturgy"),
+        "spell_level_one_1": _field_value_for_label(context, "spell_level_one_1", "Detect Magic"),
+        "spell_level_one_2": _field_value_for_label(context, "spell_level_one_2", "Guiding Bolt"),
+        "spell_level_one_3": _field_value_for_label(context, "spell_level_one_3", "Healing Word"),
+        "spell_level_one_4": _field_value_for_label(context, "spell_level_one_4", "Cure Wounds"),
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    definition, _ = build_level_one_character_definition("linden-pass", context, form_values)
+    spells_by_name = {spell["name"]: spell for spell in definition.spellcasting["spells"]}
+
+    assert "Bane (Always prepared)" in context["preview"]["spells"]
+    assert "False Life (Always prepared)" in context["preview"]["spells"]
+    assert spells_by_name["Detect Magic"]["mark"] == "Prepared"
+    assert spells_by_name["Bane"]["is_always_prepared"] is True
+    assert spells_by_name["False Life"]["is_always_prepared"] is True
+
+
 def test_level_one_builder_adds_known_spell_choice_fields_from_additional_spells():
     cleric = _systems_entry(
         "class",
@@ -17809,6 +18140,218 @@ def test_native_level_up_adds_structured_subclass_prepared_spells():
     assert spells_by_name["Command"]["mark"] == "Prepared"
     assert spells_by_name["Protection from Evil and Good"]["is_always_prepared"] is True
     assert spells_by_name["Sanctuary"]["is_always_prepared"] is True
+
+
+def test_native_level_up_adds_body_only_artillerist_spells_from_prior_feature_table():
+    artificer = _systems_entry(
+        "class",
+        "tce-class-artificer",
+        "Artificer",
+        source_id="TCE",
+        metadata={
+            "hit_die": {"faces": 8},
+            "proficiency": ["con", "int"],
+            "subclass_title": "Artificer Specialist",
+            "starting_proficiencies": {
+                "armor": ["light", "medium", "shield"],
+                "weapons": ["simple"],
+                "tools": ["thieves' tools", "tinker's tools"],
+                "skills": [{"choose": {"count": 2, "from": ["arcana", "history", "investigation", "medicine"]}}],
+            },
+        },
+    )
+    artillerist = _systems_entry(
+        "subclass",
+        "tce-subclass-artillerist-artificer",
+        "Artillerist",
+        source_id="TCE",
+        metadata={"class_name": "Artificer", "class_source": "TCE"},
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    sage = _systems_entry(
+        "background",
+        "phb-background-sage",
+        "Sage",
+        metadata={"skill_proficiencies": [{"arcana": True, "history": True}]},
+    )
+    artificer_specialist = _systems_entry(
+        "classfeature",
+        "tce-classfeature-artificer-specialist",
+        "Artificer Specialist",
+        source_id="TCE",
+        metadata={"level": 3},
+    )
+    artillerist_spells = _systems_entry(
+        "subclassfeature",
+        "tce-subclassfeature-artillerist-spells",
+        "Artillerist Spells",
+        source_id="TCE",
+        metadata={
+            "level": 3,
+            "class_name": "Artificer",
+            "class_source": "TCE",
+            "subclass_name": "Artillerist",
+        },
+        body={
+            "entries": [
+                "You always have certain spells prepared after you reach particular levels in this class, as shown in the Artillerist Spells table.",
+                "These spells count as artificer spells for you, but they don't count against the number of artificer spells you prepare.",
+                {
+                    "type": "table",
+                    "caption": "Artillerist Spells",
+                    "colLabels": ["Artificer Level", "Spells"],
+                    "rows": [
+                        ["3rd", "{@spell shield}, {@spell thunderwave}"],
+                        ["5th", "{@spell scorching ray}, {@spell shatter}"],
+                    ],
+                },
+            ]
+        },
+    )
+    arcane_firearm = _systems_entry(
+        "subclassfeature",
+        "tce-subclassfeature-arcane-firearm",
+        "Arcane Firearm",
+        source_id="TCE",
+        metadata={
+            "level": 5,
+            "class_name": "Artificer",
+            "class_source": "TCE",
+            "subclass_name": "Artillerist",
+        },
+    )
+    message = _systems_entry("spell", "phb-spell-message", "Message", metadata={"level": 0, "class_lists": {"TCE": ["Artificer"]}})
+    fire_bolt = _systems_entry("spell", "phb-spell-fire-bolt", "Fire Bolt", metadata={"level": 0, "class_lists": {"TCE": ["Artificer"]}})
+    absorb_elements = _systems_entry("spell", "xge-spell-absorb-elements", "Absorb Elements", source_id="XGE", metadata={"level": 1, "class_lists": {"TCE": ["Artificer"]}})
+    aid = _systems_entry("spell", "phb-spell-aid", "Aid", metadata={"level": 2, "class_lists": {"TCE": ["Artificer"]}})
+    cure_wounds = _systems_entry("spell", "phb-spell-cure-wounds", "Cure Wounds", metadata={"level": 1, "class_lists": {"TCE": ["Artificer"]}})
+    faerie_fire = _systems_entry("spell", "phb-spell-faerie-fire", "Faerie Fire", metadata={"level": 1, "class_lists": {"TCE": ["Artificer"]}})
+    feather_fall = _systems_entry("spell", "phb-spell-feather-fall", "Feather Fall", metadata={"level": 1, "class_lists": {"TCE": ["Artificer"]}})
+    shield = _systems_entry("spell", "phb-spell-shield", "Shield", metadata={"level": 1})
+    thunderwave = _systems_entry("spell", "phb-spell-thunderwave", "Thunderwave", metadata={"level": 1})
+    scorching_ray = _systems_entry("spell", "phb-spell-scorching-ray", "Scorching Ray", metadata={"level": 2})
+    shatter = _systems_entry("spell", "phb-spell-shatter", "Shatter", metadata={"level": 2, "class_lists": {"TCE": ["Artificer"]}})
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [artificer],
+            "race": [human],
+            "background": [sage],
+            "feat": [],
+            "subclass": [artillerist],
+            "item": [],
+            "spell": [
+                message,
+                fire_bolt,
+                absorb_elements,
+                aid,
+                cure_wounds,
+                faerie_fire,
+                feather_fall,
+                shield,
+                thunderwave,
+                scorching_ray,
+                shatter,
+            ],
+        },
+        class_progression=[
+            {
+                "level": 3,
+                "level_label": "Level 3",
+                "feature_rows": [
+                    {"label": "Artificer Specialist", "entry": artificer_specialist, "embedded_card": {"option_groups": []}},
+                ],
+            }
+        ],
+        subclass_progression=[
+            {
+                "level": 3,
+                "level_label": "Level 3",
+                "feature_rows": [
+                    {"label": "Artillerist Spells", "entry": artillerist_spells, "embedded_card": {"option_groups": []}},
+                ],
+            },
+            {
+                "level": 5,
+                "level_label": "Level 5",
+                "feature_rows": [
+                    {"label": "Arcane Firearm", "entry": arcane_firearm, "embedded_card": {"option_groups": []}},
+                ],
+            },
+        ],
+    )
+
+    current_definition = _minimal_character_definition("ember-volt", "Ember Volt")
+    current_definition.profile["class_level_text"] = "Artificer 4"
+    current_definition.profile["classes"][0] = {
+        "row_id": "class-row-1",
+        "class_name": "Artificer",
+        "subclass_name": "Artillerist",
+        "level": 4,
+        "systems_ref": _systems_ref(artificer),
+        "subclass_ref": _systems_ref(artillerist),
+    }
+    current_definition.profile["class_ref"] = _systems_ref(artificer)
+    current_definition.profile["subclass_ref"] = _systems_ref(artillerist)
+    current_definition.profile["species"] = "Human"
+    current_definition.profile["species_ref"] = _systems_ref(human)
+    current_definition.profile["background"] = "Sage"
+    current_definition.profile["background_ref"] = _systems_ref(sage)
+    current_definition.stats["max_hp"] = 31
+    current_definition.stats["proficiency_bonus"] = 2
+    current_definition.stats["ability_scores"] = {
+        "str": {"score": 10, "modifier": 0, "save_bonus": 0},
+        "dex": {"score": 12, "modifier": 1, "save_bonus": 1},
+        "con": {"score": 14, "modifier": 2, "save_bonus": 4},
+        "int": {"score": 16, "modifier": 3, "save_bonus": 5},
+        "wis": {"score": 11, "modifier": 0, "save_bonus": 0},
+        "cha": {"score": 8, "modifier": -1, "save_bonus": -1},
+    }
+    current_definition.spellcasting = {
+        "spellcasting_class": "Artificer",
+        "spellcasting_ability": "Intelligence",
+        "spell_save_dc": 13,
+        "spell_attack_bonus": 5,
+        "slot_progression": [{"level": 1, "max_slots": 3}],
+        "spells": [
+            {"name": "Message", "mark": "Cantrip", "systems_ref": _systems_ref(message)},
+            {"name": "Fire Bolt", "mark": "Cantrip", "systems_ref": _systems_ref(fire_bolt)},
+            {"name": "Absorb Elements", "mark": "Prepared", "systems_ref": _systems_ref(absorb_elements)},
+            {"name": "Aid", "mark": "Prepared", "systems_ref": _systems_ref(aid)},
+            {"name": "Cure Wounds", "mark": "Prepared", "systems_ref": _systems_ref(cure_wounds)},
+            {"name": "Faerie Fire", "mark": "Prepared", "systems_ref": _systems_ref(faerie_fire)},
+            {"name": "Feather Fall", "mark": "Prepared", "systems_ref": _systems_ref(feather_fall)},
+            {"name": "Shield", "mark": "", "is_always_prepared": True, "systems_ref": _systems_ref(shield)},
+            {"name": "Thunderwave", "mark": "", "is_always_prepared": True, "systems_ref": _systems_ref(thunderwave)},
+        ],
+    }
+    current_definition.source["source_path"] = "builder://native-level-4"
+
+    form_values = {"hp_gain": "5"}
+    level_up_context = build_native_level_up_context(
+        systems_service,
+        "linden-pass",
+        current_definition,
+        form_values,
+    )
+    leveled_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        level_up_context,
+        form_values,
+    )
+    spells_by_name = {spell["name"]: spell for spell in leveled_definition.spellcasting["spells"]}
+
+    assert level_up_context["preview"]["new_spells"] == ["Scorching Ray", "Shatter"]
+    assert spells_by_name["Scorching Ray"]["is_always_prepared"] is True
+    assert spells_by_name["Scorching Ray"]["mark"] == ""
+    assert spells_by_name["Shatter"]["is_always_prepared"] is True
+    assert spells_by_name["Shatter"]["mark"] == ""
 
 
 def test_native_level_up_adds_feature_level_additional_spells():
