@@ -2851,6 +2851,41 @@ def test_sheet_edit_view_makes_first_pass_bounded_scope_explicit(client, sign_in
     assert "Spell-list changes and other non-slot spell management" in html
     assert "Equipment state, portrait changes, and broader inventory or equipment maintenance" in html
     assert "Advanced character edit, level-up, retraining, and controls" in html
+    assert "Session-enabled editing" in html
+    assert "This lane appears when a live session is active." in html
+    assert "Combat-context editing" in html
+    assert "This lane appears when the character is actively tracked in combat." in html
+
+
+def test_sheet_edit_view_links_to_session_character_and_combat_when_both_are_live(
+    client, sign_in, users, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=inventory")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Character-page sheet edit" in html
+    assert "This page batches one page-local draft through" in html
+    assert "Session-enabled editing" in html
+    assert '/campaigns/linden-pass/session/character?character=arden-march&amp;page=inventory' in html
+    assert ">Open Session Character<" in html
+    assert "Combat-context editing" in html
+    assert "selected <code>combatant</code> deep link" in html
+    assert '/campaigns/linden-pass/combat?combatant=' in html
+    assert ">Open Combat<" in html
 
 
 def test_sheet_edit_view_explains_player_dm_and_admin_authority(client, sign_in, users, set_campaign_visibility):

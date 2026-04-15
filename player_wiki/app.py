@@ -207,6 +207,16 @@ SESSION_CHARACTER_FULL_SHEET_PAGE_MAP = {
     "notes": ("notes", ""),
     "personal": ("personal", ""),
 }
+CHARACTER_READ_TO_SESSION_CHARACTER_PAGE_MAP = {
+    "quick": "overview",
+    "spellcasting": "spells",
+    "features": "features",
+    "equipment": "equipment",
+    "inventory": "inventory",
+    "personal": "personal",
+    "notes": "notes",
+    "controls": "overview",
+}
 SESSION_CHARACTER_ACTIVE_EDIT_SCOPE = (
     "Vitals and rests on Overview",
     "Tracked resource counts and spell slot usage",
@@ -2517,6 +2527,47 @@ def create_app() -> Flask:
             }
             for slug, label in available_character_subpages.items()
         ]
+        character_session_surface_href = ""
+        if (
+            is_session_mode
+            and get_campaign_session_service().get_active_session(campaign_slug) is not None
+            and can_access_session_character_surface(campaign_slug, character_slug)
+        ):
+            character_session_surface_href = url_for(
+                "campaign_session_character_view",
+                campaign_slug=campaign.slug,
+                character=character_slug,
+                page=CHARACTER_READ_TO_SESSION_CHARACTER_PAGE_MAP.get(
+                    character_subpage,
+                    "overview",
+                ),
+            )
+        character_combat_surface_href = ""
+        character_combat_surface_label = ""
+        character_combat_surface_action_label = ""
+        if is_session_mode and can_access_campaign_scope(campaign_slug, "combat"):
+            tracked_combatant = find_tracked_player_combatant_for_character(
+                campaign_slug,
+                character_slug,
+                campaign=campaign,
+            )
+            if tracked_combatant is not None:
+                if can_manage_campaign_combat(campaign_slug):
+                    character_combat_surface_label = "Encounter status"
+                    character_combat_surface_action_label = "Open encounter status"
+                    character_combat_surface_href = url_for(
+                        "campaign_combat_status_view",
+                        campaign_slug=campaign.slug,
+                        combatant=tracked_combatant.id,
+                    )
+                elif character_slug in get_owned_character_slugs(campaign_slug):
+                    character_combat_surface_label = "Combat"
+                    character_combat_surface_action_label = "Open Combat"
+                    character_combat_surface_href = url_for(
+                        "campaign_combat_view",
+                        campaign_slug=campaign.slug,
+                        combatant=tracked_combatant.id,
+                    )
 
         return (
             render_template(
@@ -2538,6 +2589,16 @@ def create_app() -> Flask:
                 character_sheet_edit_outside_first_pass_scope=(
                     CHARACTER_SHEET_EDIT_OUTSIDE_FIRST_PASS_SCOPE if is_session_mode else ()
                 ),
+                session_character_active_edit_scope=(
+                    SESSION_CHARACTER_ACTIVE_EDIT_SCOPE if is_session_mode else ()
+                ),
+                combat_and_session_combat_scope=(
+                    COMBAT_AND_SESSION_COMBAT_SCOPE if is_session_mode else ()
+                ),
+                character_session_surface_href=character_session_surface_href,
+                character_combat_surface_href=character_combat_surface_href,
+                character_combat_surface_label=character_combat_surface_label,
+                character_combat_surface_action_label=character_combat_surface_action_label,
                 rest_preview=rest_preview,
                 character_controls=character_controls,
                 inventory_manager=inventory_manager,

@@ -117,20 +117,74 @@
           </div>
           <div class="detail-grid">
             <article class="detail-card">
-              <h3>Edit here in the first pass</h3>
+              <h3>Character-page sheet edit</h3>
+              <p>
+                Use this out-of-session Character-page lane for the first-pass fields that stay local until you save or
+                cancel them.
+              </p>
               <ul class="plain-list slot-list">
                 {% for item in character_sheet_edit_first_pass_scope %}
                   <li>{{ item }}</li>
                 {% endfor %}
               </ul>
+              <p class="meta">
+                This page batches one page-local draft through <code>sheet-edit</code> instead of applying immediate
+                Session or Combat deltas.
+              </p>
             </article>
             <article class="detail-card">
-              <h3>Keep using the standard character page for</h3>
+              <h3>Keep the Character page for</h3>
               <ul class="plain-list slot-list">
                 {% for item in character_sheet_edit_outside_first_pass_scope %}
                   <li>{{ item }}</li>
                 {% endfor %}
               </ul>
+            </article>
+            <article class="detail-card">
+              <h3>Session-enabled editing</h3>
+              <p>
+                Use <code>Session Character</code> during an active session when you need live-play edits without
+                leaving the Session feature.
+              </p>
+              <ul class="plain-list slot-list">
+                {% for item in session_character_active_edit_scope %}
+                  <li>{{ item }}</li>
+                {% endfor %}
+              </ul>
+              <p class="meta">
+                Session updates stay on the live Session character routes, and the main <code>Session</code> page keeps
+                chat, revealed articles, and wiki lookup.
+              </p>
+              {% if character_session_surface_href %}
+                <div class="hero-actions">
+                  <a class="ghost-button" href="{{ character_session_surface_href }}">Open Session Character</a>
+                </div>
+              {% else %}
+                <p class="meta">This lane appears when a live session is active.</p>
+              {% endif %}
+            </article>
+            <article class="detail-card">
+              <h3>Combat-context editing</h3>
+              <p>
+                Use {{ character_combat_surface_label or "Combat" }} when this character is in the tracker and the
+                encounter context matters.
+              </p>
+              <ul class="plain-list slot-list">
+                {% for item in combat_and_session_combat_scope %}
+                  <li>{{ item }}</li>
+                {% endfor %}
+              </ul>
+              <p class="meta">
+                Combat updates stay tied to the selected <code>combatant</code> deep link and the current turn-order
+                context.
+              </p>
+              {% if character_combat_surface_href and character_combat_surface_action_label %}
+                <div class="hero-actions">
+                  <a class="ghost-button" href="{{ character_combat_surface_href }}">{{ character_combat_surface_action_label }}</a>
+                </div>
+              {% else %}
+                <p class="meta">This lane appears when the character is actively tracked in combat.</p>
+              {% endif %}
             </article>
             <article class="detail-card">
               <h3>Compatibility note</h3>

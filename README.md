@@ -423,6 +423,12 @@ The Character-page sheet edit view is available only to:
 
 Campaign `observer` users remain read-only and do not get the Character-page sheet edit entry point.
 
+The app now keeps the three editing lanes explicit in the browser UI:
+
+- Character-page `Sheet edit view` is the out-of-session batch-save lane on the normal character route
+- `Session Character` is the active-session lane for in-play sheet access and immediate live-session edits
+- `Combat` or DM-side `Encounter status` is the encounter-context lane tied to the selected `combatant=<id>` deep link
+
 ### Editable MVP State
 
 The current Character-page sheet edit view supports:
