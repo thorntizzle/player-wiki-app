@@ -1465,6 +1465,40 @@ def test_dm_status_page_renders_only_selected_pc_detail(app, client, sign_in, us
     assert "Scimitar" not in body
 
 
+def test_dm_status_page_sidebar_selection_is_wired_for_in_place_detail_swaps(
+    app, client, sign_in, users, tmp_path
+):
+    goblin_entry_key = _import_systems_goblin(app, tmp_path)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/systems-monsters",
+        data={"entry_key": goblin_entry_key},
+        follow_redirects=False,
+    )
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    goblin = _find_combatant(app, name="Goblin")
+    assert arden is not None
+    assert goblin is not None
+
+    response = client.get(f"/campaigns/linden-pass/combat/status?combatant={arden.id}")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "data-combat-status-select" in body
+    assert f'data-combatant-id="{arden.id}"' in body
+    assert f'data-combatant-id="{goblin.id}"' in body
+    assert "event.preventDefault();" in body
+    assert 'fetch(buildUrl(liveUrl, nextCombatantId), {' in body
+    assert 'renderPayload(payload, { force: true, updateHistory: true });' in body
+    assert 'window.history.replaceState({}, "", buildUrl(baseViewUrl, selectedCombatantId));' in body
+
+
 def test_dm_status_page_can_render_systems_monster_detail(app, client, sign_in, users, tmp_path):
     goblin_entry_key = _import_systems_goblin(app, tmp_path)
     sign_in(users["dm"]["email"], users["dm"]["password"])
