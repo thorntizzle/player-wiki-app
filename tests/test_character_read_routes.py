@@ -2839,13 +2839,29 @@ def test_sheet_edit_view_makes_first_pass_bounded_scope_explicit(client, sign_in
     assert "Current HP, temp HP, tracked resources, and spell slot usage" in html
     assert "Inventory quantities and currency totals" in html
     assert "Physical description, background, and player notes" in html
-    assert "The first-pass fields on this page stay pending until you save them together." in html
+    assert "The first-pass fields on this page stay local until you save or cancel them." in html
+    assert "the browser will warn you" in html
     assert "Rests and quick +/- actions still" in html
     assert "Keep using the standard character page for" in html
     assert "Rests and other relative quick actions" in html
     assert "Spell-list changes and other non-slot spell management" in html
     assert "Equipment state, portrait changes, and broader inventory or equipment maintenance" in html
     assert "Advanced character edit, level-up, retraining, and controls" in html
+
+
+def test_sheet_edit_view_exposes_cancel_and_unsaved_change_warning_copy(client, sign_in, users, set_campaign_visibility):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=quick")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Cancel pending changes" in html
+    assert "stay local until you save or cancel them" in html
+    assert "the browser will warn you" in html
+    assert "beforeunload" in html
+    assert "Pending changes on this page. Save or cancel before you leave." in html
 
 
 def test_quick_reference_hides_item_backed_attacks_when_the_linked_item_is_not_equipped(app, client, sign_in, users):

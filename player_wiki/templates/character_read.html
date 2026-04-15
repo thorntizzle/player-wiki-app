@@ -904,6 +904,7 @@
 {% endblock %}
 
 {% block scripts %}
+  {% set character_sheet_batch_save_enabled = is_session_mode and character_subpage in ('quick', 'inventory', 'personal', 'notes') %}
   {% if character_sheet_batch_save_enabled %}
     <script>
       (() => {
@@ -914,6 +915,7 @@
 
         const endpoint = saveBars[0].dataset.characterSheetEditEndpoint || "";
         const saveButtons = Array.from(document.querySelectorAll("[data-character-sheet-save-action]"));
+        const cancelButtons = Array.from(document.querySelectorAll("[data-character-sheet-cancel-action]"));
         const statusNodes = Array.from(document.querySelectorAll("[data-character-sheet-save-status]"));
         if (!endpoint || !saveButtons.length || !statusNodes.length) {
           return;
@@ -930,6 +932,8 @@
         };
         const restoreStateKey = `playerWikiSheetEditSave:${window.location.pathname}${window.location.search}`;
         let saveInFlight = false;
+        let allowPageUnload = false;
+        let hasPendingChanges = false;
 
         const setStatus = (message, kind = "idle") => {
           for (const node of statusNodes) {
@@ -938,10 +942,18 @@
           }
         };
 
-        const setSaveDisabled = (disabled) => {
-          for (const button of saveButtons) {
+        const setDisabled = (buttons, disabled) => {
+          for (const button of buttons) {
             button.disabled = disabled;
           }
+        };
+
+        const setSaveDisabled = (disabled) => {
+          setDisabled(saveButtons, disabled);
+        };
+
+        const setCancelDisabled = (disabled) => {
+          setDisabled(cancelButtons, disabled);
         };
 
         const normalizeNumber = (value) => {
@@ -1119,19 +1131,51 @@
           return hasChanges ? payload : null;
         };
 
-        const updatePendingState = () => {
+        const updatePendingState = ({ preserveStatus = false } = {}) => {
           if (saveInFlight) {
-            return;
+            return buildPayload();
           }
           const payload = buildPayload();
+          hasPendingChanges = Boolean(payload);
           if (payload) {
-            setStatus("Pending changes on this page.", "pending");
+            if (!preserveStatus) {
+              setStatus("Pending changes on this page. Save or cancel before you leave.", "pending");
+            }
             setSaveDisabled(false);
+            setCancelDisabled(false);
+            return payload;
+          }
+          if (!preserveStatus) {
+            setStatus("No pending changes on this page.", "idle");
+          }
+          setSaveDisabled(true);
+          setCancelDisabled(true);
+          return null;
+        };
+
+        const trackedForms = Array.from(document.querySelectorAll("[data-character-sheet-edit-form]"));
+
+        const discardPendingChanges = () => {
+          for (const form of trackedForms) {
+            if (!(form instanceof HTMLFormElement)) {
+              continue;
+            }
+            resetPendingInputs(form);
+          }
+          hasPendingChanges = false;
+          setStatus("Discarded pending changes on this page.", "idle");
+          setSaveDisabled(true);
+          setCancelDisabled(true);
+        };
+
+        const beforeUnloadHandler = (event) => {
+          if (!hasPendingChanges || allowPageUnload) {
             return;
           }
-          setStatus("No pending changes on this page.", "idle");
-          setSaveDisabled(true);
+          event.preventDefault();
+          event.returnValue = "";
         };
+        window.addEventListener("beforeunload", beforeUnloadHandler);
 
         const restoreSavedState = () => {
           const rawState = window.sessionStorage.getItem(restoreStateKey);
@@ -1156,7 +1200,6 @@
           }
         };
 
-        const trackedForms = Array.from(document.querySelectorAll("[data-character-sheet-edit-form]"));
         for (const form of trackedForms) {
           if (!(form instanceof HTMLFormElement)) {
             continue;
@@ -1170,6 +1213,7 @@
             }
             if (submitter.dataset.characterSheetResetPending === "1") {
               resetPendingInputs(form);
+              updatePendingState();
             }
           });
 
@@ -1186,9 +1230,22 @@
           }
         }
 
+        for (const button of cancelButtons) {
+          button.addEventListener("click", () => {
+            if (saveInFlight) {
+              return;
+            }
+            if (!hasPendingChanges) {
+              updatePendingState();
+              return;
+            }
+            discardPendingChanges();
+          });
+        }
+
         for (const button of saveButtons) {
           button.addEventListener("click", async () => {
-            const payload = buildPayload();
+            const payload = updatePendingState({ preserveStatus: true });
             if (!payload || saveInFlight) {
               updatePendingState();
               return;
@@ -1197,6 +1254,7 @@
             saveInFlight = true;
             setStatus("Saving pending changes...", "pending");
             setSaveDisabled(true);
+            setCancelDisabled(true);
             try {
               const response = await fetch(endpoint, {
                 method: "PATCH",
@@ -1214,21 +1272,23 @@
                 const errorMessage = responsePayload && responsePayload.error && typeof responsePayload.error.message === "string"
                   ? responsePayload.error.message
                   : "Could not save pending changes right now.";
-                setStatus(errorMessage, "error");
                 saveInFlight = false;
-                setSaveDisabled(false);
+                updatePendingState({ preserveStatus: true });
+                setStatus(errorMessage, "error");
                 return;
               }
 
+              hasPendingChanges = false;
+              allowPageUnload = true;
               window.sessionStorage.setItem(restoreStateKey, JSON.stringify({
                 message: "Saved pending changes.",
                 scrollY: window.scrollY,
               }));
               window.location.reload();
             } catch (error) {
-              setStatus("Could not save pending changes right now.", "error");
               saveInFlight = false;
-              setSaveDisabled(false);
+              updatePendingState({ preserveStatus: true });
+              setStatus("Could not save pending changes right now.", "error");
             }
           });
         }

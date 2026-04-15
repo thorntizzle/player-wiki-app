@@ -980,6 +980,13 @@ button {
   justify-content: space-between;
 }
 
+.sheet-edit-save-bar__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
 .sheet-edit-save-bar__status {
   margin: 0;
   padding: 0.75rem 0.9rem;
