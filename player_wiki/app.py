@@ -301,6 +301,7 @@ COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS = {
     "abilities_skills": "Abilities and Skills",
 }
 COMBAT_NPC_WORKSPACE_SECTION_LABELS = {
+    "reference": "Reference",
     "actions": "Actions",
     "bonus_actions": "Bonus Actions",
     "reactions": "Reactions",
@@ -312,6 +313,7 @@ COMBAT_NPC_WORKSPACE_SECTION_LABELS = {
 }
 COMBAT_NPC_WORKSPACE_SECTION_ORDER = tuple(COMBAT_NPC_WORKSPACE_SECTION_LABELS.keys())
 COMBAT_NPC_WORKSPACE_SECTION_EMPTY_MESSAGES = {
+    "reference": "No source-backed reference detail is recorded for this combatant.",
     "actions": "No source-backed actions are recorded for this combatant.",
     "bonus_actions": "No bonus actions are recorded for this combatant.",
     "reactions": "No reactions are recorded for this combatant.",
@@ -322,6 +324,7 @@ COMBAT_NPC_WORKSPACE_SECTION_EMPTY_MESSAGES = {
     "abilities_skills": "No ability or skill detail is recorded for this combatant.",
 }
 COMBAT_NPC_WORKSPACE_SECTION_HEADING_ALIASES = {
+    normalize_lookup("reference"): "reference",
     normalize_lookup("action"): "actions",
     normalize_lookup("actions"): "actions",
     normalize_lookup("bonus action"): "bonus_actions",
@@ -341,6 +344,16 @@ COMBAT_NPC_WORKSPACE_SECTION_HEADING_ALIASES = {
     normalize_lookup("ability scores"): "abilities_skills",
     normalize_lookup("skills"): "abilities_skills",
     normalize_lookup("saving throws"): "abilities_skills",
+}
+COMBAT_NPC_WORKSPACE_SECTION_ENTRY_ALIASES = {
+    normalize_lookup("at-a-glance"): "reference",
+    normalize_lookup("statblock"): "reference",
+    normalize_lookup("tactics"): "reference",
+    normalize_lookup("scaling notes"): "reference",
+    normalize_lookup("scaling note"): "reference",
+    normalize_lookup("notes"): "reference",
+    normalize_lookup("note"): "reference",
+    normalize_lookup("changeling"): "reference",
 }
 COMBAT_NPC_ABILITY_LABELS = {
     "str": "Strength",
@@ -3448,11 +3461,17 @@ def create_app() -> Flask:
             unescape(COMBAT_NPC_HTML_TAG_PATTERN.sub("", str(value or ""))).split()
         )
 
-    def _combat_npc_heading_slug(value: object) -> str:
-        return COMBAT_NPC_WORKSPACE_SECTION_HEADING_ALIASES.get(
-            normalize_lookup(_combat_npc_heading_text(value)),
-            "",
-        )
+    def _combat_npc_heading_section(value: object) -> tuple[str, bool]:
+        normalized = normalize_lookup(_combat_npc_heading_text(value))
+        if not normalized:
+            return "", False
+        section_slug = COMBAT_NPC_WORKSPACE_SECTION_HEADING_ALIASES.get(normalized, "")
+        if section_slug:
+            return section_slug, False
+        entry_section_slug = COMBAT_NPC_WORKSPACE_SECTION_ENTRY_ALIASES.get(normalized, "")
+        if entry_section_slug:
+            return entry_section_slug, True
+        return "", False
 
     def _combat_npc_format_bonus(value: object) -> str:
         if value is None:
@@ -3555,12 +3574,17 @@ def create_app() -> Flask:
                 else len(normalized_html)
             )
             title = _combat_npc_heading_text(heading_match.group("title"))
-            section_slug = _combat_npc_heading_slug(heading_match.group("title"))
+            section_slug, preserve_title = _combat_npc_heading_section(heading_match.group("title"))
             body_fragment = normalized_html[heading_match.end() : next_start].strip()
             if section_slug:
                 active_slug = section_slug
                 if body_fragment:
-                    section_blocks[section_slug].append({"title": "", "body_html": body_fragment})
+                    section_blocks[section_slug].append(
+                        {
+                            "title": title if preserve_title else "",
+                            "body_html": body_fragment,
+                        }
+                    )
                 continue
             target_slug = active_slug or "actions"
             if not title and not body_fragment:

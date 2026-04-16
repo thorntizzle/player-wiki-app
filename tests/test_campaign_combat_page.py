@@ -111,8 +111,14 @@ def _import_systems_goblin(app, tmp_path) -> str:
         return goblin.entry_key
 
 
-def _create_dm_statblock(app, *, created_by_user_id: int | None = None):
-    markdown_text = """---
+def _create_dm_statblock(
+    app,
+    *,
+    created_by_user_id: int | None = None,
+    markdown_text: str | None = None,
+    filename: str = "brass-hound.md",
+):
+    markdown_text = markdown_text or """---
 title: Brass Hound
 armor_class: 15
 hp: 30
@@ -127,7 +133,7 @@ initiative_bonus: 2
     with app.app_context():
         return app.extensions["campaign_dm_content_service"].create_statblock(
             TEST_CAMPAIGN_SLUG,
-            filename="brass-hound.md",
+            filename=filename,
             data_blob=markdown_text.encode("utf-8"),
             created_by_user_id=created_by_user_id,
         )
@@ -1788,6 +1794,83 @@ def test_dm_status_page_can_render_dm_content_statblock_detail(app, client, sign
     assert 'data-combat-section-toggle="abilities_skills"' not in body
     assert "Source file: brass-hound.md" in body
     assert "Bite" in body
+
+
+def test_dm_status_page_groups_reference_npc_sections_under_reference_tab(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    statblock = _create_dm_statblock(
+        app,
+        created_by_user_id=users["dm"]["id"],
+        filename="mirror-spy.md",
+        markdown_text="""---
+title: Mirror Spy
+armor_class: 14
+hp: 27
+speed: 30 ft.
+initiative_bonus: 3
+---
+
+## At-A-Glance
+
+A cautious infiltrator who prefers disguise, distance, and retreat routes over fair fights.
+
+## Statblock
+
+Medium humanoid, neutral
+
+## Tactics
+
+Mirror Spy opens from range and only closes when an ally has already pinned the target.
+
+## Scaling Notes
+
+Increase hit points to 36 and add one extra reaction each round for a tougher version.
+
+## Notes
+
+Tracks party rumors and tries to escape instead of fighting to the death.
+
+## Changeling
+
+Can alter appearance between encounters to re-enter a scene under a different identity.
+
+## Actions
+
+### Dagger
+
++5 to hit, 5 piercing damage.
+""",
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/statblock-combatants",
+        data={"statblock_id": statblock.id},
+        follow_redirects=False,
+    )
+
+    mirror_spy = _find_combatant(app, name="Mirror Spy")
+    assert mirror_spy is not None
+
+    response = client.get(
+        f"/campaigns/linden-pass/combat/status/live-state?combatant={mirror_spy.id}",
+        headers=_async_headers(),
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["selected_combatant_id"] == mirror_spy.id
+    assert 'data-combat-default-section="reference"' in payload["detail_html"]
+    assert 'data-combat-section-toggle="reference"' in payload["detail_html"]
+    assert 'data-combat-section-panel="reference"' in payload["detail_html"]
+    assert 'data-combat-section-toggle="actions"' in payload["detail_html"]
+    assert "At-A-Glance" in payload["detail_html"]
+    assert "Statblock" in payload["detail_html"]
+    assert "Tactics" in payload["detail_html"]
+    assert "Scaling Notes" in payload["detail_html"]
+    assert "Notes" in payload["detail_html"]
+    assert "Changeling" in payload["detail_html"]
+    assert "Dagger" in payload["detail_html"]
 
 
 def test_dm_status_page_shows_manual_npc_fallback_and_missing_source_fallback(
