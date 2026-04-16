@@ -31,6 +31,21 @@ if (-not [string]::IsNullOrWhiteSpace($DbPath)) {
     $env:PLAYER_WIKI_DB_PATH = $DbPath
 }
 
+function Set-LocalTempEnvironment {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ScopeName
+    )
+
+    $tempRoot = Join-Path $projectRoot ".local\tmp\$ScopeName"
+    New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+
+    $env:PLAYER_WIKI_TEMP_DIR = $tempRoot
+    $env:TEMP = $tempRoot
+    $env:TMP = $tempRoot
+    $env:TMPDIR = $tempRoot
+}
+
 function Invoke-Python {
     param(
         [Parameter(Mandatory = $true)]
@@ -303,6 +318,7 @@ function Deploy-Fly {
 }
 
 Ensure-Python
+Set-LocalTempEnvironment -ScopeName $Action
 
 switch ($Action) {
     "install" {

@@ -34,8 +34,8 @@ def build_source_form(app, campaign_slug: str = "linden-pass") -> dict[str, str]
 
 
 def build_repo_local_test_root(name: str) -> Path:
-    root = Path(__file__).resolve().parents[1] / ".tmp-pytest-egw-data"
-    root.mkdir(exist_ok=True)
+    root = Path(__file__).resolve().parents[1] / ".local" / "pytest-temp" / "repo-local"
+    root.mkdir(parents=True, exist_ok=True)
     path = root / f"{name}-{uuid4().hex}"
     path.mkdir()
     return path

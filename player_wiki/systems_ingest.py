@@ -4,8 +4,9 @@ from contextlib import contextmanager
 from io import BytesIO
 from pathlib import Path, PurePosixPath
 import shutil
-import tempfile
 import zipfile
+
+from .local_temp import temporary_directory
 
 
 class SystemsIngestError(ValueError):
@@ -46,7 +47,7 @@ def extracted_systems_archive(data_blob: bytes):
         raise SystemsIngestError("Import archive must be a valid ZIP file.") from exc
 
     with archive:
-        with tempfile.TemporaryDirectory(prefix="player-wiki-systems-import-") as temp_dir:
+        with temporary_directory(prefix="player-wiki-systems-import-") as temp_dir:
             extract_root = Path(temp_dir) / "archive"
             extract_root.mkdir(parents=True, exist_ok=True)
             wrote_any_files = False

@@ -7,7 +7,6 @@ import shutil
 import sqlite3
 import subprocess
 import tarfile
-import tempfile
 import zipfile
 from contextlib import closing
 from dataclasses import dataclass
@@ -15,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 from .db import SCHEMA
+from .local_temp import temporary_directory
 
 BACKUP_FORMAT_VERSION = 1
 
@@ -112,7 +112,7 @@ def create_backup_archive(
     campaigns_dir = campaigns_dir.resolve()
     database_filename = db_path.name or "player_wiki.sqlite3"
 
-    with tempfile.TemporaryDirectory() as temp_dir_name:
+    with temporary_directory(prefix="player-wiki-backup-") as temp_dir_name:
         temp_dir = Path(temp_dir_name)
         database_snapshot = temp_dir / database_filename
         snapshot_database(db_path=db_path, destination_path=database_snapshot)
@@ -152,7 +152,7 @@ def restore_backup_archive(
     if not archive_path.exists():
         raise FileNotFoundError(f"Backup archive not found: {archive_path}")
 
-    with tempfile.TemporaryDirectory() as temp_dir_name:
+    with temporary_directory(prefix="player-wiki-restore-") as temp_dir_name:
         temp_dir = Path(temp_dir_name)
         with zipfile.ZipFile(archive_path, "r") as archive:
             extract_archive(archive, temp_dir)
@@ -332,7 +332,7 @@ def sync_local_state_from_fly(
     )
     pre_sync_backup_path: Path | None = None
 
-    with tempfile.TemporaryDirectory() as temp_dir_name:
+    with temporary_directory(prefix="player-wiki-fly-sync-") as temp_dir_name:
         temp_dir = Path(temp_dir_name)
         downloaded_db_path = temp_dir / (Path(remote_db_path).name or "player_wiki.fly.sqlite3")
         downloaded_campaigns_archive = temp_dir / "fly-campaigns.tar.gz"

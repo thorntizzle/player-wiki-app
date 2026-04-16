@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -16,6 +17,14 @@ from player_wiki.auth_store import AuthStore
 from player_wiki.config import Config
 from player_wiki.db import init_database
 from tests.sample_data import ASSIGNED_CHARACTER_SLUG, TEST_CAMPAIGN_SLUG, build_test_campaigns_dir
+
+
+def pytest_configure(config):
+    if config.option.basetemp:
+        return
+    basetemp = PROJECT_ROOT / ".local" / "pytest-temp" / f"run-{os.getpid()}"
+    basetemp.mkdir(parents=True, exist_ok=True)
+    config.option.basetemp = str(basetemp)
 
 
 @pytest.fixture()

@@ -83,6 +83,8 @@ Useful actions:
 - `sync-fly`: mirror Fly's live DB and campaign content into the active local app paths
 - `deploy-fly`: deploy to the real Fly app using a locally supplied `PLAYER_WIKI_FLY_APP` value
 
+`local.ps1` also routes disposable runtime temp files into `campaign_player_wiki\.local\tmp\<action>\` so local work does not spill scratch folders across the repo root.
+
 The script assumes your local interpreter is:
 
 ```text
@@ -691,6 +693,13 @@ Run the suite from the directory that contains `campaign_player_wiki`:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest .\campaign_player_wiki
+```
+
+Pytest temp and cache output now stays under:
+
+```text
+campaign_player_wiki/.local/pytest-temp
+campaign_player_wiki/.local/pytest-cache
 ```
 
 The current tests cover:
