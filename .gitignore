@@ -5,8 +5,14 @@ __pycache__/
 /.pytest-tmp*/
 /.tmp-*/
 /codex*/
+/codex*.tmp
 /pytest-cache-files-*/
+/pytest_tmp*/
 /pytesttmp*/
+/manualtmp/
+/sheet_edit*/
+/tempcombat*/
+/campaign_player_wiki/
 /tmp*/
 /python_probe*
 campaigns/*
