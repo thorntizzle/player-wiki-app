@@ -2189,6 +2189,12 @@ button {
   gap: 1rem;
 }
 
+.combat-workspace-stack {
+  align-self: start;
+  align-content: start;
+  grid-auto-rows: max-content;
+}
+
 .combat-status-snapshot,
 .combat-status-snapshot__top,
 .combat-status-snapshot__meta,

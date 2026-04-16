@@ -43,7 +43,7 @@
       data-live-idle-threshold-ms="{{ combat_poll_idle_threshold_ms }}"
       data-live-diagnostics-enabled="{{ '1' if live_diagnostics_enabled else '0' }}"
     >
-      <section class="section-list">
+      <section class="section-list combat-workspace-stack">
         <div data-combat-summary-root>
           {% if show_player_combat_workspace %}
             {% include "_combat_character_snapshot.html" %}

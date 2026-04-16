@@ -733,6 +733,7 @@ def test_owner_player_combat_page_uses_character_workspace_layout(app, client, s
     assert "Combat workspace" in body
     assert "Combat sections" in body
     assert "Turn order" in body
+    assert 'class="section-list combat-workspace-stack"' in body
     assert "Actions" in body
     assert "Bonus Actions" in body
     assert "Reactions" in body
@@ -795,6 +796,7 @@ def test_owner_player_can_open_combat_character_page_for_assigned_tracked_pc(app
     assert "Arden March" in body
     assert "Combat snapshot" in body
     assert "Tracked player characters" in body
+    assert 'class="section-list combat-workspace-stack"' in body
     assert "Open full sheet" not in body
     assert 'data-live-active-interval-ms="500"' in body
     assert 'data-live-idle-interval-ms="3000"' in body
