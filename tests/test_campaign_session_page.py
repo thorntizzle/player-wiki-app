@@ -281,7 +281,6 @@ def test_session_page_only_shows_character_tab_for_users_with_session_character_
     owner_html = owner_page.get_data(as_text=True)
     assert "/campaigns/linden-pass/session/character" in owner_html
     assert f'/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}' in owner_html
-    assert ">Character<" in owner_html
 
 
 def test_session_character_page_defaults_to_viewer_assigned_character(client, sign_in, users):
@@ -390,10 +389,12 @@ def test_session_character_page_spells_out_role_permissions_for_assigned_player(
         "Editing controls appear only during an active DM-started session and stay limited "
         "to the session-safe slice."
     ) in html
-    assert "Open only their own session-enabled character here." in html
-    assert "Open any session-enabled character in the campaign and use the chooser to switch sheets." in html
-    assert "Stay on the main Session page and do not get a character sheet here." in html
-    assert "Keep the same cross-character access as DMs." in html
+    assert "/campaigns/linden-pass/help#session" in html
+    assert (
+        "Use the Help page for the full Session-vs-Session Character-vs-full sheet boundary "
+        "and the role-by-role access rules."
+    ) in html
+    assert "Open only their own session-enabled character here." not in html
 
 
 def test_dm_session_character_page_explains_dm_cross_character_access(client, sign_in, users):

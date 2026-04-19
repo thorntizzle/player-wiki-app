@@ -40,6 +40,9 @@
               <a class="{% if active_nav == 'wiki' %}is-active{% endif %}" href="{{ url_for('campaign_view', campaign_slug=campaign.slug) }}">
                 Campaign Home
               </a>
+              <a class="{% if active_nav == 'help' %}is-active{% endif %}" href="{{ url_for('campaign_help_view', campaign_slug=campaign.slug) }}">
+                Help
+              </a>
               {% if can_access_campaign_scope(campaign.slug, 'systems') %}
                 <a class="{% if active_nav == 'systems' %}is-active{% endif %}" href="{{ url_for('campaign_systems_index', campaign_slug=campaign.slug) }}">
                   Systems

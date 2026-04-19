@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+
+{% block title %}Help | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Help</p>
+    <h1>{{ campaign.title }} Help</h1>
+    <p class="lede">
+      Use this page for what each app surface is for, what the current access rules allow,
+      and which first-pass limits still shape the workflow.
+    </p>
+    <div class="hero-actions">
+      {% for surface in help_surfaces %}
+        <a class="ghost-button" href="#{{ surface.anchor }}">{{ surface.label }}</a>
+      {% endfor %}
+    </div>
+  </section>
+
+  <div class="page-layout">
+    <section class="session-column">
+      <article class="card">
+        <div class="section-heading">
+          <div>
+            <h2>Current access</h2>
+            <p class="meta">
+              This page now holds the broader workflow notes so the main UI can stay focused on actions.
+            </p>
+          </div>
+        </div>
+        <div class="detail-grid">
+          <article class="detail-card">
+            <h3>Viewer role</h3>
+            <p><strong>{{ help_viewer_role_label }}</strong></p>
+            <p class="meta">{{ help_viewer_role_summary }}</p>
+          </article>
+          <article class="detail-card">
+            <h3>Campaign system</h3>
+            <p><strong>{{ help_campaign_system_label }}</strong></p>
+            <p class="meta">Some workflows below stay narrower when the campaign is not using DND-5E.</p>
+          </article>
+          <article class="detail-card">
+            <h3>Open now</h3>
+            {% if help_available_surface_labels %}
+              <p>{{ help_available_surface_labels | join(", ") }}</p>
+            {% else %}
+              <p class="meta">No additional campaign surfaces are open to this viewer right now.</p>
+            {% endif %}
+          </article>
+        </div>
+      </article>
+
+      {% for surface in help_surfaces %}
+        <article class="card" id="{{ surface.anchor }}">
+          <div class="section-heading">
+            <div>
+              <h2>{{ surface.label }}</h2>
+              <p class="meta">{{ surface.summary }}</p>
+            </div>
+            <span class="meta-badge">{{ surface.status_label }}</span>
+          </div>
+
+          {% if surface.links %}
+            <div class="hero-actions">
+              {% for link in surface.links %}
+                <a class="{% if loop.first %}button-link{% else %}ghost-button{% endif %}" href="{{ link.href }}">
+                  {{ link.label }}
+                </a>
+              {% endfor %}
+            </div>
+          {% endif %}
+
+          <div class="detail-grid">
+            <article class="detail-card">
+              <h3>Use it for</h3>
+              <ul class="plain-list slot-list">
+                {% for capability in surface.capabilities %}
+                  <li>{{ capability }}</li>
+                {% endfor %}
+              </ul>
+            </article>
+            <article class="detail-card">
+              <h3>Current limits</h3>
+              <ul class="plain-list slot-list">
+                {% for limitation in surface.limits %}
+                  <li>{{ limitation }}</li>
+                {% endfor %}
+              </ul>
+            </article>
+            <article class="detail-card">
+              <h3>Access</h3>
+              <p><strong>{{ surface.status_label }}</strong></p>
+              <p class="meta">{{ surface.access_note }}</p>
+            </article>
+          </div>
+        </article>
+      {% endfor %}
+    </section>
+
+    <aside class="session-sidebar">
+      <article class="card session-sidebar-card">
+        <div class="section-heading">
+          <div>
+            <h2>Visibility by scope</h2>
+            <p class="meta">The effective visibility here is the current floor after campaign-level and scope-level rules combine.</p>
+          </div>
+        </div>
+        <div class="reference-stack">
+          {% for row in help_visibility_rows %}
+            <article class="detail-card">
+              <div class="section-heading">
+                <h3>{{ row.label }}</h3>
+                <span class="meta-badge">{{ row.visibility_label }}</span>
+              </div>
+              <p class="meta">
+                {% if row.viewer_can_open %}
+                  This viewer can currently open this scope.
+                {% else %}
+                  This viewer cannot currently open this scope.
+                {% endif %}
+              </p>
+            </article>
+          {% endfor %}
+        </div>
+      </article>
+
+      <article class="card session-sidebar-card">
+        <div class="section-heading">
+          <div>
+            <h2>Cross-cutting limits</h2>
+            <p class="meta">These are the app-level constraints most likely to affect multiple surfaces.</p>
+          </div>
+        </div>
+        <ul class="plain-list slot-list">
+          {% for limitation in help_cross_cutting_limits %}
+            <li>{{ limitation }}</li>
+          {% endfor %}
+        </ul>
+      </article>
+
+      <article class="card session-sidebar-card">
+        <div class="section-heading">
+          <div>
+            <h2>Account settings</h2>
+            <p class="meta">{{ help_account_note }}</p>
+          </div>
+        </div>
+        <div class="hero-actions">
+          {% if current_user %}
+            <a class="button-link" href="{{ url_for('account_settings_view') }}">Open Account</a>
+          {% else %}
+            <a class="button-link" href="{{ url_for('sign_in', next=request.path) }}">Sign in</a>
+          {% endif %}
+        </div>
+      </article>
+    </aside>
+  </div>
+{% endblock %}

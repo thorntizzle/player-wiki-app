@@ -2423,6 +2423,479 @@ def create_app() -> Flask:
             )
         )
 
+    def build_help_surface(
+        *,
+        anchor: str,
+        label: str,
+        summary: str,
+        status_label: str,
+        access_note: str,
+        capabilities: list[str],
+        limits: list[str],
+        links: list[dict[str, str]] | None = None,
+    ) -> dict[str, object]:
+        return {
+            "anchor": anchor,
+            "label": label,
+            "summary": summary,
+            "status_label": status_label,
+            "access_note": access_note,
+            "capabilities": capabilities,
+            "limits": limits,
+            "links": list(links or []),
+        }
+
+    def build_campaign_help_viewer_context(campaign_slug: str) -> dict[str, str]:
+        current_user = get_current_user()
+        role = get_campaign_role(campaign_slug)
+        if current_user is not None and current_user.is_admin:
+            return {
+                "role_label": "Admin",
+                "role_summary": (
+                    "Admins can open every campaign surface even when the normal visibility "
+                    "floor would hide it for other viewers."
+                ),
+            }
+        if role == "dm":
+            return {
+                "role_label": "Dungeon Master",
+                "role_summary": (
+                    "DMs can use the player-facing surfaces plus campaign management routes "
+                    "such as Session DM, Encounter status, Encounter controls, DM Content, "
+                    "and Control."
+                ),
+            }
+        if role == "player":
+            return {
+                "role_label": "Player",
+                "role_summary": (
+                    "Players can use the currently visible campaign surfaces, but write "
+                    "actions stay limited to the character and encounter workflows the app "
+                    "explicitly allows."
+                ),
+            }
+        if role == "observer":
+            return {
+                "role_label": "Observer",
+                "role_summary": (
+                    "Observers can read only the surfaces whose current visibility allows "
+                    "them, while live posting and GM management stay disabled."
+                ),
+            }
+        if current_user is not None:
+            return {
+                "role_label": "Signed-in visitor",
+                "role_summary": (
+                    "This account does not currently have an active membership in this "
+                    "campaign, so only the public surfaces are available."
+                ),
+            }
+        return {
+            "role_label": "Public visitor",
+            "role_summary": (
+                "You are viewing the public portion of this campaign. Member-only surfaces "
+                "stay hidden until you sign in with the right campaign access."
+            ),
+        }
+
+    def build_campaign_help_context(campaign_slug: str) -> dict[str, object]:
+        campaign = load_campaign_context(campaign_slug)
+        viewer_context = build_campaign_help_viewer_context(campaign_slug)
+        current_user = get_current_user()
+
+        wiki_visibility_label = VISIBILITY_LABELS[get_effective_campaign_visibility(campaign_slug, "wiki")]
+        systems_visibility_label = VISIBILITY_LABELS[get_effective_campaign_visibility(campaign_slug, "systems")]
+        session_visibility_label = VISIBILITY_LABELS[get_effective_campaign_visibility(campaign_slug, "session")]
+        combat_visibility_label = VISIBILITY_LABELS[get_effective_campaign_visibility(campaign_slug, "combat")]
+        dm_content_visibility_label = VISIBILITY_LABELS[
+            get_effective_campaign_visibility(campaign_slug, "dm_content")
+        ]
+        characters_visibility_label = VISIBILITY_LABELS[
+            get_effective_campaign_visibility(campaign_slug, "characters")
+        ]
+
+        can_view_wiki = can_access_campaign_scope(campaign_slug, "wiki")
+        can_view_systems = can_access_campaign_scope(campaign_slug, "systems")
+        can_view_session = can_access_campaign_scope(campaign_slug, "session")
+        can_view_combat = can_access_campaign_scope(campaign_slug, "combat")
+        can_view_dm_content = can_access_campaign_scope(campaign_slug, "dm_content")
+        can_view_characters = can_access_campaign_scope(campaign_slug, "characters")
+
+        can_manage_systems = can_manage_campaign_systems(campaign_slug)
+        can_manage_session = can_manage_campaign_session(campaign_slug)
+        can_manage_combat = can_manage_campaign_combat(campaign_slug)
+        can_manage_visibility = can_manage_campaign_visibility(campaign_slug)
+
+        native_character_tools_supported = campaign_supports_native_character_tools(campaign)
+        combat_system_supported = campaign.system == SUPPORTED_COMBAT_SYSTEM
+        system_label = str(getattr(campaign, "system", "") or "").strip() or "Unspecified"
+
+        help_surfaces = [
+            build_help_surface(
+                anchor="campaign-home",
+                label="Campaign Home",
+                summary="Published player-facing wiki hub and header search.",
+                status_label="Open" if can_view_wiki else "Limited",
+                access_note=(
+                    f"You can browse published wiki content here. Current Wiki visibility: {wiki_visibility_label}."
+                    if can_view_wiki
+                    else (
+                        "You can still open the campaign shell, but published wiki browsing "
+                        f"currently requires {wiki_visibility_label} access."
+                    )
+                ),
+                capabilities=[
+                    "Browse published sections and article pages from the campaign hub.",
+                    "Use the header search to match titles, aliases, summaries, and page body text.",
+                    "Treat this as the safest player-facing starting point for campaign reference.",
+                ],
+                limits=[
+                    "Only published player-safe content appears here.",
+                    "GM vault notes, Inbox drafts, and other unpublished material do not surface here.",
+                    "This route is read-only; publishing and reveal timing happen on other surfaces.",
+                ],
+                links=[
+                    {
+                        "label": "Open Campaign Home",
+                        "href": url_for("campaign_view", campaign_slug=campaign.slug),
+                    }
+                ],
+            ),
+            build_help_surface(
+                anchor="systems",
+                label="Systems",
+                summary="Shared mechanics library for rules, creatures, spells, items, and other imported entries.",
+                status_label="Open" if can_view_systems else "Hidden",
+                access_note=(
+                    (
+                        f"You can open Systems right now. Current Systems visibility: {systems_visibility_label}."
+                        + (
+                            " You can also adjust source visibility from Systems Policy."
+                            if can_manage_systems
+                            else ""
+                        )
+                    )
+                    if can_view_systems
+                    else f"Systems currently requires {systems_visibility_label} access."
+                ),
+                capabilities=[
+                    "Browse enabled sources and categories without loading the whole rules library at once.",
+                    "Open linked mechanics from character sheets, combat sources, and campaign overlays.",
+                    "Use Rules Reference Search for chapter headings, aliases, formulas, and other curated rule metadata.",
+                ],
+                limits=[
+                    "Systems is currently a DND-5E-first shared library.",
+                    "Global Systems search matches title, entry type, and source rather than full body text.",
+                    "Rules Reference Search is metadata-driven instead of generic body-text search.",
+                ],
+                links=(
+                    [
+                        {
+                            "label": "Open Systems",
+                            "href": url_for("campaign_systems_index", campaign_slug=campaign.slug),
+                        }
+                    ]
+                    + (
+                        [
+                            {
+                                "label": "Open Systems Policy",
+                                "href": url_for(
+                                    "campaign_systems_control_panel_view",
+                                    campaign_slug=campaign.slug,
+                                ),
+                            }
+                        ]
+                        if can_manage_systems
+                        else []
+                    )
+                ),
+            ),
+            build_help_surface(
+                anchor="session",
+                label="Session",
+                summary="Live play surface for chat, revealed articles, and in-session lookup.",
+                status_label="Open" if can_view_session else "Hidden",
+                access_note=(
+                    (
+                        f"You can open Session right now. Current Session visibility: {session_visibility_label}."
+                        + (
+                            " This viewer can post chat during an active session."
+                            if can_post_campaign_session_messages(campaign_slug)
+                            else " This viewer can read the surface but cannot post live chat messages."
+                        )
+                    )
+                    if can_view_session
+                    else f"Session currently requires {session_visibility_label} access."
+                ),
+                capabilities=[
+                    "Follow the live session feed for chat and DM-revealed articles.",
+                    "Use the wiki lookup widget to preview player-visible published pages without leaving Session.",
+                    (
+                        "DMs can stage manual, upload, or wiki-backed articles, reveal them live, and convert session-only content into published wiki pages."
+                        if can_manage_session
+                        else "Assigned players, DMs, and admins can use the separate Session Character surface for in-play sheet access while chat and article tools stay on the main Session page."
+                    ),
+                ],
+                limits=[
+                    "Live updates use lightweight polling rather than websockets.",
+                    "Session-only articles stay out of the published wiki and search until a DM converts them.",
+                    "The Session Character surface intentionally keeps a smaller in-play slice than the full character page.",
+                ],
+                links=(
+                    [
+                        {
+                            "label": "Open Session",
+                            "href": url_for("campaign_session_view", campaign_slug=campaign.slug),
+                        }
+                    ]
+                    + (
+                        [
+                            {
+                                "label": "Open DM Page",
+                                "href": url_for(
+                                    "campaign_session_dm_view",
+                                    campaign_slug=campaign.slug,
+                                ),
+                            }
+                        ]
+                        if can_manage_session
+                        else []
+                    )
+                ),
+            ),
+            build_help_surface(
+                anchor="combat",
+                label="Combat",
+                summary="Encounter tracker and in-combat character workspace.",
+                status_label=(
+                    "Open"
+                    if can_view_combat and combat_system_supported
+                    else "Limited"
+                    if can_view_combat
+                    else "Hidden"
+                ),
+                access_note=(
+                    (
+                        f"You can open Combat right now. Current Combat visibility: {combat_visibility_label}."
+                        + (
+                            ""
+                            if combat_system_supported
+                            else f" This campaign uses {system_label}, so combat stays limited until non-{SUPPORTED_COMBAT_SYSTEM} support exists."
+                        )
+                    )
+                    if can_view_combat
+                    else f"Combat currently requires {combat_visibility_label} access."
+                ),
+                capabilities=[
+                    "Track turn order, HP, conditions, movement, and encounter state during play.",
+                    (
+                        "DMs split encounter work between Encounter status for selected-combatant state and Encounter controls for setup, seeding, structural edits, and cleanup."
+                        if can_manage_combat
+                        else "Players with a tracked combatant get a character-first workspace on the main Combat surface instead of only a tracker readout."
+                    ),
+                    "Systems monsters and DM Content statblocks can seed NPC combatants when those libraries are available.",
+                ],
+                limits=[
+                    f"Combat is currently implemented for {SUPPORTED_COMBAT_SYSTEM} campaigns.",
+                    "Player edits stay limited to their own allowed combat-facing character state.",
+                    "NPC detail visibility remains DM-controlled.",
+                ],
+                links=(
+                    [
+                        {
+                            "label": "Open Combat",
+                            "href": url_for("campaign_combat_view", campaign_slug=campaign.slug),
+                        }
+                    ]
+                    + (
+                        [
+                            {
+                                "label": "Open Encounter Status",
+                                "href": url_for(
+                                    "campaign_combat_status_view",
+                                    campaign_slug=campaign.slug,
+                                ),
+                            },
+                            {
+                                "label": "Open Encounter Controls",
+                                "href": url_for(
+                                    "campaign_combat_dm_view",
+                                    campaign_slug=campaign.slug,
+                                ),
+                            },
+                        ]
+                        if can_manage_combat
+                        else []
+                    )
+                ),
+            ),
+            build_help_surface(
+                anchor="dm-content",
+                label="DM Content",
+                summary="DM-only prep library for uploaded statblocks and custom conditions.",
+                status_label=(
+                    "Open"
+                    if can_view_dm_content and combat_system_supported
+                    else "Limited"
+                    if can_view_dm_content
+                    else "Hidden"
+                ),
+                access_note=(
+                    (
+                        f"You can open DM Content right now. Current DM Content visibility: {dm_content_visibility_label}."
+                        + (
+                            ""
+                            if combat_system_supported
+                            else f" Statblock upload is currently built only for {SUPPORTED_COMBAT_SYSTEM} campaigns."
+                        )
+                    )
+                    if can_view_dm_content
+                    else f"DM Content currently requires {dm_content_visibility_label} access."
+                ),
+                capabilities=[
+                    "Store uploaded statblocks for later encounter seeding.",
+                    "Maintain custom combat conditions alongside the built-in DND-5E list.",
+                    "Keep reusable encounter prep separate from published player-facing wiki content.",
+                ],
+                limits=[
+                    "The statblock parser is currently implemented for DND-5E-style markdown.",
+                    "Uploads should be UTF-8 markdown with recognizable Armor Class, Hit Points, and Speed lines.",
+                    "Custom conditions augment the built-in list rather than replacing it.",
+                ],
+                links=(
+                    [
+                        {
+                            "label": "Open DM Content",
+                            "href": url_for("campaign_dm_content_view", campaign_slug=campaign.slug),
+                        }
+                    ]
+                    if can_view_dm_content
+                    else []
+                ),
+            ),
+            build_help_surface(
+                anchor="characters",
+                label="Characters",
+                summary="Full read-mode character sheets plus the broader maintenance surface.",
+                status_label=(
+                    "Open"
+                    if can_view_characters and native_character_tools_supported
+                    else "Limited"
+                    if can_view_characters
+                    else "Hidden"
+                ),
+                access_note=(
+                    (
+                        f"You can open Characters right now. Current Characters visibility: {characters_visibility_label}."
+                        + (
+                            " Native create/edit/level-up tools are available for this campaign system."
+                            if native_character_tools_supported
+                            else f" Native authoring stays limited because this campaign is not using {SUPPORTED_NATIVE_CHARACTER_SYSTEM}."
+                        )
+                    )
+                    if can_view_characters
+                    else f"Characters currently requires {characters_visibility_label} access."
+                ),
+                capabilities=[
+                    "Browse full character sheets and their read-mode subpages.",
+                    (
+                        "Use native DND-5E create, edit, level-up, and progression-repair flows where your role allows them."
+                        if native_character_tools_supported
+                        else "Use read-mode, Session Character, and combat-linked views for character reference even though native authoring is unavailable here."
+                    ),
+                    "Use the full character page for portraits, equipment state, spell-list maintenance, and broader sheet upkeep.",
+                ],
+                limits=[
+                    f"Native authoring tools are currently only supported for {SUPPORTED_NATIVE_CHARACTER_SYSTEM} campaigns.",
+                    "Imported characters may need progression repair before native level-up is available.",
+                    "Session and Combat intentionally keep only a smaller quick-edit slice instead of replacing the full character page.",
+                ],
+                links=(
+                    [
+                        {
+                            "label": "Open Characters",
+                            "href": url_for("character_roster_view", campaign_slug=campaign.slug),
+                        }
+                    ]
+                    if can_view_characters
+                    else []
+                ),
+            ),
+            build_help_surface(
+                anchor="control",
+                label="Control",
+                summary="Visibility management for the campaign and each campaign-owned scope.",
+                status_label="Open" if can_manage_visibility else "Hidden",
+                access_note=(
+                    "You can open Control because this viewer can manage campaign visibility."
+                    if can_manage_visibility
+                    else "Only the campaign DM or an admin can open this surface."
+                ),
+                capabilities=[
+                    "Set the campaign-wide visibility floor and the per-scope defaults for wiki, systems, session, combat, DM Content, and characters.",
+                    "Review the effective visibility each scope currently resolves to.",
+                    "Use this page to decide which surfaces are public, player-visible, DM-only, or private.",
+                ],
+                limits=[
+                    "The more private value between Campaign and an individual scope wins.",
+                    "`Private` is reserved for admins.",
+                    "Changing visibility does not rewrite content; it only changes who can see the route.",
+                ],
+                links=(
+                    [
+                        {
+                            "label": "Open Control",
+                            "href": url_for(
+                                "campaign_control_panel_view",
+                                campaign_slug=campaign.slug,
+                            ),
+                        }
+                    ]
+                    if can_manage_visibility
+                    else []
+                ),
+            ),
+        ]
+
+        visibility_rows = []
+        for scope in CAMPAIGN_VISIBILITY_SCOPES:
+            visibility_rows.append(
+                {
+                    "label": CAMPAIGN_VISIBILITY_SCOPE_LABELS[scope],
+                    "visibility_label": VISIBILITY_LABELS[get_effective_campaign_visibility(campaign_slug, scope)],
+                    "viewer_can_open": can_access_campaign_scope(campaign_slug, scope),
+                }
+            )
+
+        available_surface_labels = [
+            surface["label"]
+            for surface in help_surfaces
+            if surface["status_label"] in {"Open", "Limited"}
+        ]
+
+        return {
+            "campaign": campaign,
+            "help_surfaces": help_surfaces,
+            "help_viewer_role_label": viewer_context["role_label"],
+            "help_viewer_role_summary": viewer_context["role_summary"],
+            "help_campaign_system_label": system_label,
+            "help_available_surface_labels": available_surface_labels,
+            "help_cross_cutting_limits": [
+                "Campaign visibility can hide a feature even when the route exists for other roles.",
+                "Native character authoring, combat, DM Content statblocks, and Systems-backed combat seeding are currently DND-5E-first workflows.",
+                "Systems search is intentionally narrow: global search matches title, type, and source, while Rules Reference Search uses metadata.",
+                "Live Session and Combat refresh with polling instead of websockets.",
+                "Session-only articles stay separate from the published wiki until a DM converts them.",
+            ],
+            "help_visibility_rows": visibility_rows,
+            "help_account_note": (
+                "Account settings let signed-in users change their color theme and preferred live Session chat order."
+                if current_user is not None
+                else "Sign in to save theme preferences, choose a live Session chat order, and open member-only surfaces."
+            ),
+            "active_nav": "help",
+        }
+
     def merge_condition_options(*option_sets: list[str] | tuple[str, ...]) -> list[str]:
         merged: list[str] = []
         seen: set[str] = set()
@@ -5808,6 +6281,12 @@ def create_app() -> Flask:
             wiki_visibility_label=VISIBILITY_LABELS[get_effective_campaign_visibility(campaign_slug, "wiki")],
             active_nav="wiki",
         )
+
+    @app.get("/campaigns/<campaign_slug>/help")
+    @campaign_scope_access_required("campaign")
+    def campaign_help_view(campaign_slug: str):
+        context = build_campaign_help_context(campaign_slug)
+        return render_template("campaign_help.html", **context)
 
     @app.get("/campaigns/<campaign_slug>/assets/<path:asset_path>")
     @campaign_scope_access_required("wiki")

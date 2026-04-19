@@ -518,6 +518,7 @@
           {% if can_manage_session %}
             <a class="ghost-button" href="{{ url_for('campaign_session_dm_view', campaign_slug=campaign.slug) }}">Open DM page</a>
           {% endif %}
+          <a class="ghost-button" href="{{ url_for('campaign_help_view', campaign_slug=campaign.slug) }}#session">Open Help</a>
         </div>
         <p class="meta">
           {% if active_session %}
@@ -534,13 +535,12 @@
             <h2>Permission behavior</h2>
             <p class="meta">{{ session_character_access_summary }}</p>
           </div>
+          <a class="ghost-button" href="{{ url_for('campaign_help_view', campaign_slug=campaign.slug) }}#session">Open Help</a>
         </div>
         <p class="meta">{{ session_character_permission_note }}</p>
-        <ul class="plain-list slot-list">
-          {% for rule in session_character_permission_rules %}
-            <li><strong>{{ rule.label }}:</strong> {{ rule.description }}</li>
-          {% endfor %}
-        </ul>
+        <p class="meta">
+          Use the Help page for the full Session-vs-Session Character-vs-full sheet boundary and the role-by-role access rules.
+        </p>
       </article>
 
       {% set show_character_chooser = can_manage_session or session_character_cards|length > 1 %}

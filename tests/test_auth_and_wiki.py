@@ -22,6 +22,7 @@ def test_anonymous_user_can_browse_public_campaign_content(client):
     assert TEST_CAMPAIGN_TITLE in body
     assert "Operations Brief" in body
     assert "Campaign Home" in body
+    assert 'href="/campaigns/linden-pass/help"' in body
     assert 'href="/campaigns/linden-pass/session"' not in body
     assert 'href="/campaigns/linden-pass/combat"' not in body
     assert 'href="/campaigns/linden-pass/characters"' not in body
@@ -78,6 +79,8 @@ def test_campaign_member_can_browse_visible_wiki_content(client, sign_in, users)
     assert "Harbor Row" in body
     assert "Session" in body
     assert "Combat" in body
+    assert "Help" in body
+    assert 'href="/campaigns/linden-pass/help"' in body
     assert 'href="/campaigns/linden-pass/session"' in body
     assert 'href="/campaigns/linden-pass/combat"' in body
     assert 'href="/campaigns/linden-pass/dm-content"' not in body
@@ -88,6 +91,30 @@ def test_campaign_member_can_browse_visible_wiki_content(client, sign_in, users)
     assert "Visible through session" not in body
     assert "pages visible" not in body
     assert page.get_data(as_text=True).count("Echoes of the Alloy Coast") >= 1
+
+
+def test_campaign_help_page_collects_surface_guidance_and_limits(client, sign_in, users):
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    response = client.get("/campaigns/linden-pass/help")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert f"{TEST_CAMPAIGN_TITLE} Help" in body
+    assert "Current access" in body
+    assert "Campaign Home" in body
+    assert "Systems" in body
+    assert "Session" in body
+    assert "Combat" in body
+    assert "DM Content" in body
+    assert "Characters" in body
+    assert "Control" in body
+    assert "Cross-cutting limits" in body
+    assert "Visibility by scope" in body
+    assert "Live Session and Combat refresh with polling instead of websockets." in body
+    assert 'href="/campaigns/linden-pass/session"' in body
+    assert 'href="/campaigns/linden-pass/combat"' in body
+    assert 'href="/campaigns/linden-pass/dm-content"' not in body
 
 
 def test_signed_in_user_can_save_theme_preference(app, client, sign_in, users):

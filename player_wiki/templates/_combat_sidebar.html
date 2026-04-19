@@ -141,11 +141,12 @@
   {% endif %}
 
   <section class="card sidebar-card">
-    <h2>Current limits</h2>
-    <p class="meta">This first pass is tuned for DND-5E action economy and combat conditions.</p>
-    <p class="meta">Systems monster entries can now seed NPC combatants directly from the shared DND 5E library.</p>
-    <p class="meta">Uploaded DM Content statblocks can seed NPC combatants, and custom DM Content conditions appear in the combat condition picker.</p>
-    <p class="meta">Inline sheet/statblock viewing is still a TODO, as is a dedicated player-only combat resource interface.</p>
-    <p class="meta">Player-character HP and temp HP edits made here sync back into the existing character state.</p>
+    <h2>Combat help</h2>
+    <p class="meta">
+      Use the Help page for the current combat workflow split, source seeding rules, and the remaining first-pass limits.
+    </p>
+    <div class="hero-actions">
+      <a class="ghost-button" href="{{ url_for('campaign_help_view', campaign_slug=campaign.slug) }}#combat">Open Help</a>
+    </div>
   </section>
 </aside>

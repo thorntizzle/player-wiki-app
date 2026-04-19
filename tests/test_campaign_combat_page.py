@@ -154,7 +154,7 @@ def test_campaign_member_can_open_combat_page_and_campaign_links_to_it(client, s
     combat_html = combat_page.get_data(as_text=True)
     assert "Combat tracker" in combat_html
     assert "Turn order" in combat_html
-    assert "Current limits" in combat_html
+    assert "/campaigns/linden-pass/help#combat" in combat_html
     assert "/campaigns/linden-pass/combat/character" not in combat_html
     assert 'data-combat-live-root' in combat_html
     assert 'data-loading="0"' in combat_html

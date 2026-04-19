@@ -15,14 +15,9 @@
       <a class="ghost-button" href="{{ url_for('campaign_combat_status_view', campaign_slug=campaign.slug, combatant=selected_combatant_id) }}">Encounter status</a>
       <a class="ghost-button" href="{{ url_for('campaign_combat_dm_view', campaign_slug=campaign.slug, combatant=selected_combatant_id) }}">Encounter controls</a>
     {% endif %}
+    <a class="ghost-button" href="{{ url_for('campaign_help_view', campaign_slug=campaign.slug) }}#combat">Help</a>
   </div>
-</section>
-
-<section class="card sidebar-card">
-  <h2>Current limits</h2>
-  <p class="meta">This tracker is tuned for DND-5E action economy and combat conditions.</p>
-  <p class="meta">Systems monster entries can seed NPC combatants directly from the shared DND 5E library.</p>
-  <p class="meta">Uploaded DM Content statblocks can seed NPC combatants, and custom DM Content conditions appear in the combat condition picker.</p>
-  <p class="meta">NPC detail stays DM-controlled by default, and Encounter controls can reveal it per NPC when players should see more than names, turn order, and conditions.</p>
-  <p class="meta">Tracked player characters can edit combat vitals and action economy directly in the tracker cards, and owners can also manage their broader resources and spell slots from the combat Character page.</p>
+  <p class="meta">
+    Use Help for the current combat workflow split, player-versus-DM boundaries, and the remaining first-pass limits.
+  </p>
 </section>
