@@ -2233,6 +2233,21 @@ button {
   color: var(--accent-deep);
 }
 
+.session-character-lane-note {
+  display: grid;
+  gap: 0.45rem;
+  padding-top: 0.2rem;
+  border-top: 1px solid var(--border-soft);
+}
+
+.session-character-lane-note p {
+  margin: 0;
+}
+
+.session-character-lane-note__actions {
+  padding-top: 0.15rem;
+}
+
 .combat-workspace-panel[hidden] {
   display: none !important;
 }

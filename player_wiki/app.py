@@ -223,6 +223,9 @@ SESSION_CHARACTER_ACTIVE_EDIT_SCOPE = (
     "Inventory quantities and currency totals",
     "Player notes",
 )
+SESSION_CHARACTER_ACTIVE_EDIT_SUMMARY = (
+    "Vitals, rests, tracked resources, spell slots, inventory quantities, currency, and player notes"
+)
 CHARACTER_SHEET_EDIT_FIRST_PASS_SCOPE = (
     "Current HP, temp HP, tracked resources, and spell slot usage",
     "Inventory quantities and currency totals",
@@ -240,15 +243,24 @@ SESSION_CHARACTER_FULL_PAGE_ONLY_SCOPE = (
     "Equipment state and broader inventory or equipment maintenance",
     "Advanced character edit, level-up, retraining, and controls",
 )
+SESSION_CHARACTER_FULL_PAGE_ONLY_SUMMARY = (
+    "Portrait/background details, spell-list changes, equipment or broader inventory work, and advanced maintenance"
+)
 COMBAT_AND_SESSION_COMBAT_SCOPE = (
     "HP, temp HP, movement, and action economy",
     "Tracked resource spends and spell slot usage",
     "Turn order and other combat-only encounter context",
 )
+COMBAT_AND_SESSION_COMBAT_SUMMARY = (
+    "Turn-by-turn HP, movement, action economy, tracked resource spends, spell slots, and turn order"
+)
 COMBAT_AND_SESSION_SESSION_SCOPE = (
     "Chat, revealed articles, and wiki lookup on the main Session page",
     "Rests, inventory quantities, currency, and player notes",
     "Broader in-play character reference outside the encounter view",
+)
+COMBAT_AND_SESSION_SESSION_SUMMARY = (
+    "the broader live-session workflow, rests, inventory quantities, currency, and player notes"
 )
 SESSION_CHARACTER_PERSONAL_EDIT_BLOCK_MESSAGE = (
     "Portrait, physical description, and background changes stay on the full character page so "
@@ -3350,8 +3362,14 @@ def create_app() -> Flask:
             "session_character_active_edit_scope": (
                 SESSION_CHARACTER_ACTIVE_EDIT_SCOPE if session_character_editing_enabled else ()
             ),
+            "session_character_active_edit_summary": (
+                SESSION_CHARACTER_ACTIVE_EDIT_SUMMARY if session_character_editing_enabled else ""
+            ),
             "session_character_outside_edit_scope": (
                 SESSION_CHARACTER_FULL_PAGE_ONLY_SCOPE if session_character_editing_enabled else ()
+            ),
+            "session_character_full_page_only_summary": (
+                SESSION_CHARACTER_FULL_PAGE_ONLY_SUMMARY if session_character_editing_enabled else ""
             ),
             "session_personal_editing_enabled": session_personal_editing_enabled,
             "session_personal_edit_block_message": session_personal_edit_block_message,
@@ -3361,7 +3379,13 @@ def create_app() -> Flask:
             "session_combat_relationship_action_label": session_combat_relationship_action_label,
             "session_combat_relationship_href": session_combat_relationship_href,
             "combat_and_session_combat_scope": COMBAT_AND_SESSION_COMBAT_SCOPE,
+            "combat_and_session_combat_scope_summary": (
+                COMBAT_AND_SESSION_COMBAT_SUMMARY if session_combat_relationship_available else ""
+            ),
             "combat_and_session_session_scope": COMBAT_AND_SESSION_SESSION_SCOPE,
+            "combat_and_session_session_scope_summary": (
+                COMBAT_AND_SESSION_SESSION_SUMMARY if session_combat_relationship_available else ""
+            ),
             "session_return_view": "session-character",
             "session_surface_return_url": session_surface_return_url,
             "session_surface_short_rest_url": session_surface_short_rest_url,

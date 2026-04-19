@@ -467,15 +467,15 @@ def test_session_character_page_explains_active_session_edit_scope(
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Session editing scope" in html
-    assert "Edit here during an active session" in html
-    assert "Vitals and rests on Overview" in html
-    assert "Tracked resource counts and spell slot usage" in html
-    assert "Inventory quantities and currency totals" in html
-    assert "Player notes" in html
-    assert "Use the full character page for" in html
-    assert "Portrait, physical description, and background details" in html
-    assert "Spell-list changes and other non-slot spell management" in html
+    assert "Session editing scope" not in html
+    assert "Edit here during an active session" not in html
+    assert "Session edits:" in html
+    assert "Vitals, rests, tracked resources, spell slots, inventory quantities, currency, and player notes." in html
+    assert "Full character page:" in html
+    assert (
+        "Portrait/background details, spell-list changes, equipment or broader inventory work, "
+        "and advanced maintenance."
+    ) in html
 
 
 def test_session_character_page_links_tracked_character_to_combat_workspace_when_both_are_live(
@@ -502,12 +502,16 @@ def test_session_character_page_links_tracked_character_to_combat_workspace_when
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Combat relationship" in html
-    assert "Prefer Combat for" in html
-    assert "HP, temp HP, movement, and action economy" in html
-    assert "Tracked resource spends and spell slot usage" in html
-    assert "Keep Session for" in html
-    assert "Rests, inventory quantities, currency, and player notes" in html
+    assert "Combat relationship" not in html
+    assert "Prefer Combat:" in html
+    assert (
+        "Turn-by-turn HP, movement, action economy, tracked resource spends, spell slots, "
+        "and turn order."
+    ) in html
+    assert (
+        "Keep Session for the broader live-session workflow, rests, inventory quantities, "
+        "currency, and player notes."
+    ) in html
     assert f'/campaigns/linden-pass/combat?combatant={combatant.id}' in html
     assert ">Open Combat<" in html
     assert "The combat link keeps this character selected through the matching combatant deep link." in html
