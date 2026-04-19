@@ -1,45 +1,43 @@
 {% if selected_combatant %}
-  <section class="section-list">
-    <div>
-      {% include "_combat_status_snapshot.html" %}
-    </div>
+  <div>
+    {% include "_combat_status_snapshot.html" %}
+  </div>
 
-    <div>
-      {% include "_combat_status_edit_panel.html" %}
-    </div>
+  <div>
+    {% include "_combat_status_edit_panel.html" %}
+  </div>
 
-    {% if combat_status_source_mode == "character" and selected_combat_character %}
-      {% with
-        combat_workspace_title="Character sections",
-        combat_workspace_meta="Reuse the player-style combat section model for the selected tracked player character while keeping Encounter status focused on one combatant."
-      %}
-        {% include "_combat_player_workspace_sections.html" %}
-      {% endwith %}
-    {% elif combat_status_source_mode == "dm_statblock" and combat_status_source_available and combat_status_statblock %}
-      {% with
-        combat_npc_workspace_sections=combat_status_statblock.workspace_sections,
-        combat_workspace_default_section=combat_status_statblock.workspace_default_section,
-        combat_workspace_title="NPC sections",
-        combat_workspace_meta="Review source-backed DM Content statblock detail through section toggles without leaving Encounter status."
-      %}
-        {% include "_combat_npc_workspace_sections.html" %}
-      {% endwith %}
-    {% elif combat_status_source_mode == "systems_monster" and combat_status_source_available and combat_status_systems_entry %}
-      {% with
-        combat_npc_workspace_sections=combat_status_systems_entry.workspace_sections,
-        combat_workspace_default_section=combat_status_systems_entry.workspace_default_section,
-        combat_workspace_title="NPC sections",
-        combat_workspace_meta="Review source-backed Systems monster detail through section toggles without leaving Encounter status."
-      %}
-        {% include "_combat_npc_workspace_sections.html" %}
-      {% endwith %}
-    {% else %}
-      <section class="card combat-status-detail-card">
-        <h2>Source detail unavailable</h2>
-        <p>{{ combat_status_source_unavailable_message }}</p>
-      </section>
-    {% endif %}
-  </section>
+  {% if combat_status_source_mode == "character" and selected_combat_character %}
+    {% with
+      combat_workspace_title="Character sections",
+      combat_workspace_meta="Reuse the player-style combat section model for the selected tracked player character while keeping Encounter status focused on one combatant."
+    %}
+      {% include "_combat_player_workspace_sections.html" %}
+    {% endwith %}
+  {% elif combat_status_source_mode == "dm_statblock" and combat_status_source_available and combat_status_statblock %}
+    {% with
+      combat_npc_workspace_sections=combat_status_statblock.workspace_sections,
+      combat_workspace_default_section=combat_status_statblock.workspace_default_section,
+      combat_workspace_title="NPC sections",
+      combat_workspace_meta="Review source-backed DM Content statblock detail through section toggles without leaving Encounter status."
+    %}
+      {% include "_combat_npc_workspace_sections.html" %}
+    {% endwith %}
+  {% elif combat_status_source_mode == "systems_monster" and combat_status_source_available and combat_status_systems_entry %}
+    {% with
+      combat_npc_workspace_sections=combat_status_systems_entry.workspace_sections,
+      combat_workspace_default_section=combat_status_systems_entry.workspace_default_section,
+      combat_workspace_title="NPC sections",
+      combat_workspace_meta="Review source-backed Systems monster detail through section toggles without leaving Encounter status."
+    %}
+      {% include "_combat_npc_workspace_sections.html" %}
+    {% endwith %}
+  {% else %}
+    <section class="card combat-status-detail-card">
+      <h2>Source detail unavailable</h2>
+      <p>{{ combat_status_source_unavailable_message }}</p>
+    </section>
+  {% endif %}
 {% else %}
   <section class="card auth-card">
     <h2>No combatant selected</h2>

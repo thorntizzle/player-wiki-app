@@ -1621,6 +1621,8 @@ def test_dm_status_page_renders_only_selected_pc_detail(app, client, sign_in, us
     assert "Turn order" in body
     assert "Encounter roster" not in body
     assert "combat-turn-order-row--selected" in body
+    assert 'class="section-list combat-workspace-stack" data-combat-status-detail-root' in body
+    assert body.index("data-combat-status-detail-root") < body.index("data-combat-status-board-root")
     assert f"/campaigns/linden-pass/combat/status?combatant={arden.id}" in body
     assert 'id="combat-status-snapshot"' in body
     assert "Compact encounter status first" in body

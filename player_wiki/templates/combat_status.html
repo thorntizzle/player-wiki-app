@@ -42,13 +42,13 @@
       data-live-idle-threshold-ms="{{ combat_poll_idle_threshold_ms }}"
       data-live-diagnostics-enabled="{{ '1' if live_diagnostics_enabled else '0' }}"
     >
+      <section class="section-list combat-workspace-stack" data-combat-status-detail-root>
+        {% include "_combat_status_detail.html" %}
+      </section>
+
       <aside class="sidebar combat-status-sidebar" data-combat-status-board-root>
         {% include "_combat_status_board.html" %}
       </aside>
-
-      <div data-combat-status-detail-root>
-        {% include "_combat_status_detail.html" %}
-      </div>
     </div>
   {% endif %}
 {% endblock %}
