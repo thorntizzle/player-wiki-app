@@ -2445,6 +2445,16 @@ def create_app() -> Flask:
             "links": list(links or []),
         }
 
+    def format_help_label_list(labels: list[str]) -> str:
+        normalized_labels = [str(label).strip() for label in labels if str(label).strip()]
+        if not normalized_labels:
+            return ""
+        if len(normalized_labels) == 1:
+            return normalized_labels[0]
+        if len(normalized_labels) == 2:
+            return f"{normalized_labels[0]} and {normalized_labels[1]}"
+        return f"{', '.join(normalized_labels[:-1])}, and {normalized_labels[-1]}"
+
     def build_campaign_help_viewer_context(campaign_slug: str) -> dict[str, str]:
         current_user = get_current_user()
         role = get_campaign_role(campaign_slug)
@@ -2529,6 +2539,21 @@ def create_app() -> Flask:
         native_character_tools_supported = campaign_supports_native_character_tools(campaign)
         combat_system_supported = campaign.system == SUPPORTED_COMBAT_SYSTEM
         system_label = str(getattr(campaign, "system", "") or "").strip() or "Unspecified"
+        combat_source_seed_capability = (
+            "NPC combatants can be seeded from Systems monsters and DM Content statblocks when those source libraries are available."
+        )
+        if can_view_systems and not can_view_dm_content:
+            combat_source_seed_capability = (
+                "Systems monsters can seed NPC combatants when that library is available to this viewer."
+            )
+        elif can_view_dm_content and not can_view_systems:
+            combat_source_seed_capability = (
+                "DM Content statblocks can seed NPC combatants when that library is available to this viewer."
+            )
+        elif not can_view_systems and not can_view_dm_content:
+            combat_source_seed_capability = (
+                "NPC combatants can be added from linked source libraries when those sources are available to this viewer."
+            )
 
         help_surfaces = [
             build_help_surface(
@@ -2693,7 +2718,7 @@ def create_app() -> Flask:
                         if can_manage_combat
                         else "Players with a tracked combatant get a character-first workspace on the main Combat surface instead of only a tracker readout."
                     ),
-                    "Systems monsters and DM Content statblocks can seed NPC combatants when those libraries are available.",
+                    combat_source_seed_capability,
                 ],
                 limits=[
                     f"Combat is currently implemented for {SUPPORTED_COMBAT_SYSTEM} campaigns.",
@@ -2857,36 +2882,74 @@ def create_app() -> Flask:
             ),
         ]
 
+        visible_help_surfaces = [
+            surface for surface in help_surfaces if surface["status_label"] in {"Open", "Limited"}
+        ]
+
         visibility_rows = []
         for scope in CAMPAIGN_VISIBILITY_SCOPES:
+            viewer_can_open = can_access_campaign_scope(campaign_slug, scope)
+            if not viewer_can_open:
+                continue
             visibility_rows.append(
                 {
                     "label": CAMPAIGN_VISIBILITY_SCOPE_LABELS[scope],
                     "visibility_label": VISIBILITY_LABELS[get_effective_campaign_visibility(campaign_slug, scope)],
-                    "viewer_can_open": can_access_campaign_scope(campaign_slug, scope),
+                    "viewer_can_open": viewer_can_open,
                 }
             )
 
         available_surface_labels = [
             surface["label"]
-            for surface in help_surfaces
-            if surface["status_label"] in {"Open", "Limited"}
+            for surface in visible_help_surfaces
         ]
+
+        help_cross_cutting_limits = [
+            "Campaign visibility can hide a feature even when the route exists for other roles.",
+        ]
+
+        dnd5e_first_features: list[str] = []
+        if can_view_characters:
+            dnd5e_first_features.append("native character authoring")
+        if can_view_combat:
+            dnd5e_first_features.append("combat")
+        if can_view_dm_content:
+            dnd5e_first_features.append("DM Content statblocks")
+        if can_view_combat and can_view_systems:
+            dnd5e_first_features.append("Systems-backed combat seeding")
+        if dnd5e_first_features:
+            help_cross_cutting_limits.append(
+                f"{format_help_label_list(dnd5e_first_features)} {'is' if len(dnd5e_first_features) == 1 else 'are'} currently DND-5E-first workflow{'s' if len(dnd5e_first_features) != 1 else ''}."
+            )
+
+        if can_view_systems:
+            help_cross_cutting_limits.append(
+                "Systems search is intentionally narrow: global search matches title, type, and source, while Rules Reference Search uses metadata."
+            )
+
+        if can_view_session or can_view_combat:
+            live_surfaces: list[str] = []
+            if can_view_session:
+                live_surfaces.append("Session")
+            if can_view_combat:
+                live_surfaces.append("Combat")
+            help_cross_cutting_limits.append(
+                f"{format_help_label_list(live_surfaces)} refresh{'es' if len(live_surfaces) == 1 else ''} with polling instead of websockets."
+            )
+
+        if can_view_session and can_manage_session:
+            help_cross_cutting_limits.append(
+                "Session-only articles stay separate from the published wiki until a DM converts them."
+            )
 
         return {
             "campaign": campaign,
-            "help_surfaces": help_surfaces,
+            "help_surfaces": visible_help_surfaces,
             "help_viewer_role_label": viewer_context["role_label"],
             "help_viewer_role_summary": viewer_context["role_summary"],
             "help_campaign_system_label": system_label,
             "help_available_surface_labels": available_surface_labels,
-            "help_cross_cutting_limits": [
-                "Campaign visibility can hide a feature even when the route exists for other roles.",
-                "Native character authoring, combat, DM Content statblocks, and Systems-backed combat seeding are currently DND-5E-first workflows.",
-                "Systems search is intentionally narrow: global search matches title, type, and source, while Rules Reference Search uses metadata.",
-                "Live Session and Combat refresh with polling instead of websockets.",
-                "Session-only articles stay separate from the published wiki until a DM converts them.",
-            ],
+            "help_cross_cutting_limits": help_cross_cutting_limits,
             "help_visibility_rows": visibility_rows,
             "help_account_note": (
                 "Account settings let signed-in users change their color theme and preferred live Session chat order."

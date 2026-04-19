@@ -106,15 +106,31 @@ def test_campaign_help_page_collects_surface_guidance_and_limits(client, sign_in
     assert "Systems" in body
     assert "Session" in body
     assert "Combat" in body
-    assert "DM Content" in body
-    assert "Characters" in body
-    assert "Control" in body
+    assert "DM Content" not in body
+    assert "Characters" not in body
+    assert "Control" not in body
     assert "Cross-cutting limits" in body
     assert "Visibility by scope" in body
-    assert "Live Session and Combat refresh with polling instead of websockets." in body
+    assert "Session and Combat refresh with polling instead of websockets." in body
     assert 'href="/campaigns/linden-pass/session"' in body
     assert 'href="/campaigns/linden-pass/combat"' in body
     assert 'href="/campaigns/linden-pass/dm-content"' not in body
+    assert 'href="/campaigns/linden-pass/characters"' not in body
+    assert 'href="/campaigns/linden-pass/control-panel"' not in body
+    assert "This viewer cannot currently open this scope." not in body
+
+
+def test_dm_campaign_help_page_still_shows_dm_only_surfaces(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get("/campaigns/linden-pass/help")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "DM Content" in body
+    assert "Characters" in body
+    assert "Control" in body
+    assert "Session-only articles stay separate from the published wiki until a DM converts them." in body
 
 
 def test_signed_in_user_can_save_theme_preference(app, client, sign_in, users):
