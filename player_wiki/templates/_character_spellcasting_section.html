@@ -1,44 +1,118 @@
 <section class="read-section">
+  {% set is_session_character_spell_page = (session_return_view | default("")) == "session-character" %}
+  {% set has_session_spell_workspace = is_session_character_spell_page and show_spell_list and character.spellcasting.slot_pools %}
   <div class="section-heading">
     <h2>{{ spell_section_title | default("Spellcasting", true) }}</h2>
   </div>
-  <div class="detail-grid">
-    <article class="detail-card">
-      {% if character.spellcasting.is_multiclass %}
-        <h3>Multiclass Spellcasting</h3>
-        <p>{{ character.spellcasting.multiclass_summary }}</p>
-      {% else %}
-        {% set primary_section = (character.spellcasting.row_sections | list | first) if character.spellcasting.row_sections else none %}
-        <h3>{{ (primary_section.title if primary_section else character.spellcasting.spellcasting_class) or "Spellcasting" }}</h3>
-        <p>
-          {{ (primary_section.spellcasting_ability if primary_section else character.spellcasting.spellcasting_ability) }} spellcasting
-          {% if (primary_section.spell_save_dc if primary_section else character.spellcasting.spell_save_dc) %}
-            | Save DC {{ primary_section.spell_save_dc if primary_section else character.spellcasting.spell_save_dc }}
-          {% endif %}
-          {% if (primary_section.spell_attack_bonus if primary_section else character.spellcasting.spell_attack_bonus) %}
-            | Attack {{ primary_section.spell_attack_bonus if primary_section else character.spellcasting.spell_attack_bonus }}
-          {% endif %}
-        </p>
-      {% endif %}
-    </article>
-    {% for slot_pool in character.spellcasting.slot_pools %}
-      {% if slot_pool.slots %}
-        <article class="detail-card">
-          <h3>{{ slot_pool.title or character.spellcasting.slots_title or "Spell slots" }}</h3>
-          <ul class="plain-list slot-list">
-            {% for slot in slot_pool.slots %}
-              <li>
-                <span>{{ slot.label }}</span>
-                <strong>{{ slot.available }} available / {{ slot.max }}</strong>
-              </li>
-            {% endfor %}
-          </ul>
-        </article>
-      {% endif %}
-    {% endfor %}
-  </div>
+  {% if has_session_spell_workspace %}
+    <div class="session-spellcasting-workspace">
+      {% for slot_pool in character.spellcasting.slot_pools %}
+        {% if slot_pool.slots %}
+          {% set pool_sections = namespace(items=[]) %}
+          {% set slot_pool_row_ids = slot_pool.row_ids | default([], true) %}
+          {% for spell_section in character.spellcasting.row_sections %}
+            {% if (slot_pool_row_ids and spell_section.class_row_id in slot_pool_row_ids) or (not slot_pool_row_ids and character.spellcasting.row_sections | length == 1) %}
+              {% set pool_sections.items = pool_sections.items + [spell_section] %}
+            {% endif %}
+          {% endfor %}
+          <article class="detail-card session-spellcasting-card">
+            <div class="section-heading">
+              <div>
+                <h3>{{ slot_pool.title or character.spellcasting.slots_title or "Spell slots" }}</h3>
+                {% if character.spellcasting.is_multiclass and pool_sections.items | length > 1 %}
+                  <p class="meta">Spells stay grouped by class row below.</p>
+                {% endif %}
+              </div>
+            </div>
+            {% if pool_sections.items %}
+              <div class="session-spellcasting-card__summaries">
+                {% for spell_section in pool_sections.items %}
+                  <section class="session-spellcasting-summary">
+                    <p class="session-spellcasting-summary__title">{{ spell_section.title }}</p>
+                    {% if spell_section.spellcasting_ability %}
+                      <p class="meta">
+                        {{ spell_section.spellcasting_ability }} spellcasting
+                        {% if spell_section.spell_save_dc %}| Save DC {{ spell_section.spell_save_dc }}{% endif %}
+                        {% if spell_section.spell_attack_bonus %}| Attack {{ spell_section.spell_attack_bonus }}{% endif %}
+                      </p>
+                    {% endif %}
+                    {% if spell_section.counts %}
+                      <ul class="plain-list session-spellcasting-summary__counts">
+                        {% for count in spell_section.counts %}
+                          <li>
+                            <span>{{ count.label }}</span>
+                            <strong>{{ count.value }}</strong>
+                          </li>
+                        {% endfor %}
+                      </ul>
+                    {% endif %}
+                  </section>
+                {% endfor %}
+              </div>
+            {% else %}
+              {% set primary_section = (character.spellcasting.row_sections | list | first) if character.spellcasting.row_sections else none %}
+              {% if primary_section and primary_section.spellcasting_ability %}
+                <section class="session-spellcasting-summary">
+                  <p class="session-spellcasting-summary__title">{{ primary_section.title or character.spellcasting.spellcasting_class or "Spellcasting" }}</p>
+                  <p class="meta">
+                    {{ primary_section.spellcasting_ability }} spellcasting
+                    {% if primary_section.spell_save_dc %}| Save DC {{ primary_section.spell_save_dc }}{% endif %}
+                    {% if primary_section.spell_attack_bonus %}| Attack {{ primary_section.spell_attack_bonus }}{% endif %}
+                  </p>
+                </section>
+              {% endif %}
+            {% endif %}
+            <ul class="plain-list slot-list session-spellcasting-slot-list">
+              {% for slot in slot_pool.slots %}
+                <li>
+                  <span>{{ slot.label }}</span>
+                  <strong>{{ slot.available }} available / {{ slot.max }}</strong>
+                </li>
+              {% endfor %}
+            </ul>
+          </article>
+        {% endif %}
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="detail-grid">
+      <article class="detail-card">
+        {% if character.spellcasting.is_multiclass %}
+          <h3>Multiclass Spellcasting</h3>
+          <p>{{ character.spellcasting.multiclass_summary }}</p>
+        {% else %}
+          {% set primary_section = (character.spellcasting.row_sections | list | first) if character.spellcasting.row_sections else none %}
+          <h3>{{ (primary_section.title if primary_section else character.spellcasting.spellcasting_class) or "Spellcasting" }}</h3>
+          <p>
+            {{ (primary_section.spellcasting_ability if primary_section else character.spellcasting.spellcasting_ability) }} spellcasting
+            {% if (primary_section.spell_save_dc if primary_section else character.spellcasting.spell_save_dc) %}
+              | Save DC {{ primary_section.spell_save_dc if primary_section else character.spellcasting.spell_save_dc }}
+            {% endif %}
+            {% if (primary_section.spell_attack_bonus if primary_section else character.spellcasting.spell_attack_bonus) %}
+              | Attack {{ primary_section.spell_attack_bonus if primary_section else character.spellcasting.spell_attack_bonus }}
+            {% endif %}
+          </p>
+        {% endif %}
+      </article>
+      {% for slot_pool in character.spellcasting.slot_pools %}
+        {% if slot_pool.slots %}
+          <article class="detail-card">
+            <h3>{{ slot_pool.title or character.spellcasting.slots_title or "Spell slots" }}</h3>
+            <ul class="plain-list slot-list">
+              {% for slot in slot_pool.slots %}
+                <li>
+                  <span>{{ slot.label }}</span>
+                  <strong>{{ slot.available }} available / {{ slot.max }}</strong>
+                </li>
+              {% endfor %}
+            </ul>
+          </article>
+        {% endif %}
+      {% endfor %}
+    </div>
+  {% endif %}
 
-  {% if show_spell_list and spell_manager %}
+  {% if show_spell_list and spell_manager and not has_session_spell_workspace %}
     <div class="detail-grid" id="character-spell-manager">
       {% for manager_section in spell_manager.sections %}
         <article class="detail-card session-card">
@@ -217,7 +291,7 @@
         <div class="section-heading">
           <div>
             <h3>{{ spell_section.title }}</h3>
-            {% if spell_section.spellcasting_ability %}
+            {% if spell_section.spellcasting_ability and not has_session_spell_workspace %}
               <p class="meta">
                 {{ spell_section.spellcasting_ability }} spellcasting
                 {% if spell_section.spell_save_dc %}| Save DC {{ spell_section.spell_save_dc }}{% endif %}
@@ -226,7 +300,7 @@
             {% endif %}
           </div>
         </div>
-        {% if spell_section.counts %}
+        {% if spell_section.counts and not has_session_spell_workspace %}
           <ul class="plain-list slot-list">
             {% for count in spell_section.counts %}
               <li>

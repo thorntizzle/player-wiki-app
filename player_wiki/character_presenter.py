@@ -256,6 +256,11 @@ def present_character_detail(
                     "id": lane_id,
                     "title": str(lane.get("title") or "").strip() or "Spell slots",
                     "shared": bool(lane.get("shared")),
+                    "row_ids": [
+                        str(row_id).strip()
+                        for row_id in list(lane.get("row_ids") or [])
+                        if str(row_id).strip()
+                    ],
                     "slots": pool_slots,
                 }
             )

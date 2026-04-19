@@ -1480,6 +1480,53 @@ button {
   gap: 1rem;
 }
 
+.session-spellcasting-workspace,
+.session-spellcasting-card__summaries {
+  display: grid;
+  gap: 1rem;
+}
+
+.session-spellcasting-workspace {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.session-spellcasting-card {
+  align-content: start;
+}
+
+.session-spellcasting-summary {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.session-spellcasting-summary__title {
+  margin: 0;
+  font-weight: 700;
+}
+
+.session-spellcasting-summary__counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session-spellcasting-summary__counts li {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft-muted);
+}
+
+.session-spellcasting-slot-list {
+  margin-top: 0.25rem;
+}
+
 .skill-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

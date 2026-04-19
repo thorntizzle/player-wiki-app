@@ -4,6 +4,7 @@ import json
 import shutil
 from io import BytesIO
 from pathlib import Path
+import yaml
 
 import pytest
 from werkzeug.security import generate_password_hash
@@ -52,6 +53,19 @@ def _assert_live_diagnostics_headers(response):
 def _write_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _write_character_definition(app, character_slug: str, mutator) -> None:
+    definition_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "characters"
+        / character_slug
+        / "definition.yaml"
+    )
+    payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
+    mutator(payload)
+    definition_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
 def _import_systems_goblin(app, tmp_path) -> str:
@@ -515,6 +529,157 @@ def test_session_character_page_links_tracked_character_to_combat_workspace_when
     assert f'/campaigns/linden-pass/combat?combatant={combatant.id}' in html
     assert ">Open Combat<" in html
     assert "The combat link keeps this character selected through the matching combatant deep link." in html
+
+
+def test_session_character_spells_page_combines_single_row_stats_into_slot_workspace(client, sign_in, users):
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get(
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&page=spells"
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Spells" in html
+    assert html.count("Charisma spellcasting") == 1
+    assert html.count("Save DC 15") == 1
+    assert html.count("Attack +7") == 1
+    assert "Spell slots" in html
+    assert "1st level" in html
+    assert "4 available / 4" in html
+    assert "2nd level" in html
+    assert "3 available / 3" in html
+
+
+def test_session_character_spells_page_keeps_multiclass_slot_pools_legible(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        profile = dict(payload.get("profile") or {})
+        profile["class_level_text"] = "Wizard 3 / Warlock 2"
+        profile["classes"] = [
+            {
+                "row_id": "class-row-1",
+                "class_name": "Wizard",
+                "level": 3,
+                "systems_ref": {
+                    "entry_key": "dnd-5e|class|phb|phb-class-wizard",
+                    "entry_type": "class",
+                    "title": "Wizard",
+                    "slug": "phb-class-wizard",
+                    "source_id": "PHB",
+                },
+            },
+            {
+                "row_id": "class-row-2",
+                "class_name": "Warlock",
+                "level": 2,
+                "systems_ref": {
+                    "entry_key": "dnd-5e|class|phb|phb-class-warlock",
+                    "entry_type": "class",
+                    "title": "Warlock",
+                    "slug": "phb-class-warlock",
+                    "source_id": "PHB",
+                },
+            },
+        ]
+        payload["profile"] = profile
+        payload["spellcasting"] = {
+            "spellcasting_class": "",
+            "spellcasting_ability": "",
+            "spell_save_dc": None,
+            "spell_attack_bonus": None,
+            "slot_progression": [],
+            "slot_lanes": [
+                {
+                    "id": "class-row-1-slots",
+                    "title": "Wizard spell slots",
+                    "shared": False,
+                    "row_ids": ["class-row-1"],
+                    "slot_progression": [
+                        {"level": 1, "max_slots": 4},
+                        {"level": 2, "max_slots": 2},
+                    ],
+                },
+                {
+                    "id": "class-row-2-slots",
+                    "title": "Warlock Pact Magic slots",
+                    "shared": False,
+                    "row_ids": ["class-row-2"],
+                    "slot_progression": [
+                        {"level": 1, "max_slots": 2},
+                    ],
+                },
+            ],
+            "class_rows": [
+                {
+                    "class_row_id": "class-row-1",
+                    "class_name": "Wizard",
+                    "level": 3,
+                    "caster_progression": "full",
+                    "spell_mode": "wizard",
+                    "spellcasting_ability": "Intelligence",
+                    "spell_save_dc": 14,
+                    "spell_attack_bonus": 6,
+                    "slot_lane_id": "class-row-1-slots",
+                },
+                {
+                    "class_row_id": "class-row-2",
+                    "class_name": "Warlock",
+                    "level": 2,
+                    "caster_progression": "pact",
+                    "spell_mode": "known",
+                    "spellcasting_ability": "Charisma",
+                    "spell_save_dc": 13,
+                    "spell_attack_bonus": 5,
+                    "slot_lane_id": "class-row-2-slots",
+                },
+            ],
+            "spells": [
+                {
+                    "name": "Detect Magic",
+                    "casting_time": "1 action",
+                    "range": "Self",
+                    "duration": "10 minutes",
+                    "components": "V, S",
+                    "save_or_hit": "",
+                    "source": "Wizard",
+                    "reference": "page 20",
+                    "mark": "Spellbook",
+                    "class_row_id": "class-row-1",
+                },
+                {
+                    "name": "Hex",
+                    "casting_time": "1 bonus action",
+                    "range": "90 feet",
+                    "duration": "Concentration, up to 1 hour",
+                    "components": "V, S, M",
+                    "save_or_hit": "",
+                    "source": "Warlock",
+                    "reference": "page 24",
+                    "mark": "Known",
+                    "class_row_id": "class-row-2",
+                },
+            ],
+        }
+
+    _write_character_definition(app, ASSIGNED_CHARACTER_SLUG, _mutate)
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get(
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&page=spells"
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Wizard spell slots" in html
+    assert "Warlock Pact Magic slots" in html
+    assert "Wizard 3" in html
+    assert "Warlock 2" in html
+    assert html.count("Intelligence spellcasting") == 1
+    assert html.count("Charisma spellcasting") == 1
+    assert "Spell slot pools are shown below" not in html
 
 
 def test_session_character_personal_updates_stay_on_full_character_page(
