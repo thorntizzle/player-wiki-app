@@ -40,14 +40,6 @@
               <a class="{% if active_nav == 'wiki' %}is-active{% endif %}" href="{{ url_for('campaign_view', campaign_slug=campaign.slug) }}">
                 Campaign Home
               </a>
-              <a class="{% if active_nav == 'help' %}is-active{% endif %}" href="{{ url_for('campaign_help_view', campaign_slug=campaign.slug) }}">
-                Help
-              </a>
-              {% if can_access_campaign_scope(campaign.slug, 'systems') %}
-                <a class="{% if active_nav == 'systems' %}is-active{% endif %}" href="{{ url_for('campaign_systems_index', campaign_slug=campaign.slug) }}">
-                  Systems
-                </a>
-              {% endif %}
               {% if can_access_campaign_scope(campaign.slug, 'session') %}
                 <a class="{% if active_nav == 'session' %}is-active{% endif %}" href="{{ url_for('campaign_session_view', campaign_slug=campaign.slug) }}">
                   Session
@@ -58,14 +50,19 @@
                   Combat
                 </a>
               {% endif %}
-              {% if can_access_campaign_scope(campaign.slug, 'dm_content') %}
-                <a class="{% if active_nav == 'dm_content' %}is-active{% endif %}" href="{{ url_for('campaign_dm_content_view', campaign_slug=campaign.slug) }}">
-                  DM Content
-                </a>
-              {% endif %}
               {% if can_access_campaign_scope(campaign.slug, 'characters') %}
                 <a class="{% if active_nav == 'characters' %}is-active{% endif %}" href="{{ url_for('character_roster_view', campaign_slug=campaign.slug) }}">
                   Characters
+                </a>
+              {% endif %}
+              {% if can_access_campaign_scope(campaign.slug, 'systems') %}
+                <a class="{% if active_nav == 'systems' %}is-active{% endif %}" href="{{ url_for('campaign_systems_index', campaign_slug=campaign.slug) }}">
+                  Systems
+                </a>
+              {% endif %}
+              {% if can_access_campaign_scope(campaign.slug, 'dm_content') %}
+                <a class="{% if active_nav == 'dm_content' %}is-active{% endif %}" href="{{ url_for('campaign_dm_content_view', campaign_slug=campaign.slug) }}">
+                  DM Content
                 </a>
               {% endif %}
               {% if can_manage_campaign_visibility(campaign.slug) %}
@@ -73,6 +70,9 @@
                   Control
                 </a>
               {% endif %}
+              <a class="{% if active_nav == 'help' %}is-active{% endif %}" href="{{ url_for('campaign_help_view', campaign_slug=campaign.slug) }}">
+                Help
+              </a>
             </nav>
             {% if header_secondary_content | trim %}
               {{ header_secondary_content | safe }}

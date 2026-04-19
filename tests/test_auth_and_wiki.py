@@ -426,6 +426,29 @@ def test_dm_can_open_visibility_control_panel_and_player_cannot(client, sign_in,
     assert player_panel.status_code == 403
 
 
+def test_dm_campaign_nav_uses_the_expected_button_order(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get("/campaigns/linden-pass")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+
+    expected_order = [
+        'href="/campaigns/linden-pass">',
+        'href="/campaigns/linden-pass/session"',
+        'href="/campaigns/linden-pass/combat"',
+        'href="/campaigns/linden-pass/characters"',
+        'href="/campaigns/linden-pass/systems"',
+        'href="/campaigns/linden-pass/dm-content"',
+        'href="/campaigns/linden-pass/control-panel"',
+        'href="/campaigns/linden-pass/help"',
+    ]
+
+    positions = [body.index(marker) for marker in expected_order]
+    assert positions == sorted(positions)
+
+
 def test_campaign_level_visibility_floor_can_hide_public_wiki_from_players_and_anonymous_users(client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
