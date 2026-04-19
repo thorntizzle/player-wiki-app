@@ -8569,11 +8569,47 @@ def _default_equipment_item_equipped(
 ) -> bool:
     if bool(item.get("is_currency_only")):
         return False
-    if _resolve_weapon_profile(item, item_catalog or {}) is not None:
-        return True
-    if _resolve_armor_profile(item, item_catalog or {}) is not None:
-        return True
-    return False
+    return bool(
+        describe_equipment_state_support(
+            item,
+            item_catalog=item_catalog,
+        ).get("supports_equipped_state")
+    )
+
+
+def describe_equipment_state_support(
+    item: dict[str, Any],
+    *,
+    item_catalog: dict[str, Any] | None = None,
+    entry: SystemsEntryRecord | None = None,
+) -> dict[str, Any]:
+    if bool(dict(item or {}).get("is_currency_only")):
+        return {
+            "supports_equipped_state": False,
+            "supports_attunement": False,
+            "requires_attunement": False,
+            "is_weapon": False,
+            "is_armor": False,
+            "is_magic_item": False,
+        }
+
+    resolved_catalog = dict(item_catalog or {})
+    resolved_entry = entry if isinstance(entry, SystemsEntryRecord) else _resolve_item_entry(item, resolved_catalog)
+    weapon_profile = _resolve_weapon_profile(item, resolved_catalog)
+    armor_profile = _resolve_armor_profile(item, resolved_catalog)
+    metadata = dict((resolved_entry.metadata if isinstance(resolved_entry, SystemsEntryRecord) else {}) or {})
+    requires_attunement = _metadata_requires_attunement(metadata.get("attunement"))
+    is_magic_item = _metadata_is_magic_item(metadata)
+    supports_equipped_state = bool(weapon_profile is not None or armor_profile is not None or is_magic_item)
+    supports_attunement = bool(supports_equipped_state and requires_attunement)
+    return {
+        "supports_equipped_state": supports_equipped_state,
+        "supports_attunement": supports_attunement,
+        "requires_attunement": supports_attunement,
+        "is_weapon": weapon_profile is not None,
+        "is_armor": armor_profile is not None,
+        "is_magic_item": is_magic_item,
+    }
 
 
 def _build_level_one_attacks(
@@ -9668,6 +9704,15 @@ def _metadata_requires_attunement(value: Any) -> bool:
         normalized = value.strip().lower()
         if not normalized or normalized in {"false", "none", "no", "not required"}:
             return False
+    return True
+
+
+def _metadata_is_magic_item(metadata: dict[str, Any]) -> bool:
+    if _metadata_requires_attunement(metadata.get("attunement")):
+        return True
+    rarity = str(metadata.get("rarity") or "").strip().lower()
+    if not rarity or rarity in {"false", "none", "no", "not required", "unknown", "mundane"}:
+        return False
     return True
 
 

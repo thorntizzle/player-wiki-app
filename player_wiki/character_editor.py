@@ -62,6 +62,7 @@ from .character_builder import (
     _spellcasting_mode_for_class,
     _strip_definition_campaign_feat_effects,
     _with_native_progression_event,
+    describe_equipment_state_support,
     normalize_definition_to_native_model,
 )
 from .character_campaign_options import (
@@ -1410,8 +1411,20 @@ def apply_equipment_state_edit(
     for item in list(current_definition.equipment_catalog or []):
         item_payload = dict(item or {})
         if str(item_payload.get("id") or "").strip() == normalized_target_item_id:
+            equipment_support = describe_equipment_state_support(
+                item_payload,
+                item_catalog=item_catalog,
+            )
+            if not bool(equipment_support.get("supports_equipped_state")):
+                raise CharacterEditValidationError(
+                    "That inventory row stays on Inventory because it does not support equipment state."
+                )
+            if bool(is_attuned) and not bool(equipment_support.get("supports_attunement")):
+                raise CharacterEditValidationError(
+                    "Only items whose durable metadata explicitly requires attunement can be attuned."
+                )
             item_payload["is_equipped"] = bool(is_equipped)
-            item_payload["is_attuned"] = bool(is_attuned)
+            item_payload["is_attuned"] = bool(is_attuned and equipment_support.get("supports_attunement"))
             found_target = True
         next_equipment_catalog.append(item_payload)
 

@@ -327,6 +327,23 @@ def test_owner_can_open_session_character_subpage_without_leaving_session_featur
     ) in html
 
 
+def test_session_character_equipment_page_filters_inventory_only_rows(client, sign_in, users):
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get(
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&page=equipment"
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Light Crossbow" in html
+    assert "Quarterstaff" in html
+    assert "Backpack" not in html
+    assert "Crossbow Bolts" not in html
+    assert "Chalk" not in html
+    assert "Not attuned" not in html
+
+
 def test_session_character_page_keeps_single_sheet_players_out_of_a_redundant_roster_sidebar(
     client, sign_in, users
 ):

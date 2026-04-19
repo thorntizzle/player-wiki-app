@@ -57,6 +57,7 @@ from .character_builder import (
     build_imported_progression_repair_context,
     build_level_one_builder_context,
     build_level_one_character_definition,
+    describe_equipment_state_support,
     native_level_up_readiness,
     supports_native_level_up,
 )
@@ -1157,15 +1158,6 @@ def create_app() -> Flask:
         payload = dict(item or {}) if isinstance(item, dict) else {}
         return str(payload.get("catalog_ref") or payload.get("id") or "").strip()
 
-    def systems_item_requires_attunement(value: object) -> bool:
-        if value in (None, "", False, [], {}):
-            return False
-        if isinstance(value, str):
-            normalized = value.strip().lower()
-            if not normalized or normalized in {"false", "none", "no", "not required"}:
-                return False
-        return True
-
     def build_character_item_catalog(campaign_slug: str) -> dict[str, object]:
         return _build_item_catalog(
             _list_campaign_enabled_entries(
@@ -1174,6 +1166,31 @@ def create_app() -> Flask:
                 "item",
             )
         )
+
+    def build_record_equipment_support_lookup(
+        record,
+        *,
+        item_catalog: dict[str, object],
+    ) -> tuple[dict[str, dict[str, object]], dict[str, dict[str, object]]]:
+        definition_item_lookup = {
+            str(item.get("id") or "").strip(): dict(item)
+            for item in list(record.definition.equipment_catalog or [])
+            if str(item.get("id") or "").strip()
+        }
+        support_lookup: dict[str, dict[str, object]] = {}
+        for inventory_item in list((record.state_record.state or {}).get("inventory") or []):
+            item_ref = build_character_inventory_item_ref(inventory_item)
+            if not item_ref:
+                continue
+            definition_item = dict(definition_item_lookup.get(item_ref) or {})
+            support_item = dict(definition_item or inventory_item or {})
+            if not str(support_item.get("name") or "").strip():
+                support_item["name"] = str(dict(inventory_item or {}).get("name") or "").strip()
+            support_lookup[item_ref] = describe_equipment_state_support(
+                support_item,
+                item_catalog=item_catalog,
+            )
+        return definition_item_lookup, support_lookup
 
     def build_character_inventory_manager_context(
         campaign_slug: str,
@@ -1251,27 +1268,23 @@ def create_app() -> Flask:
         campaign,
         record,
     ) -> dict[str, object]:
-        systems_service = get_systems_service()
-        definition_item_lookup = {
-            str(item.get("id") or "").strip(): dict(item)
-            for item in list(record.definition.equipment_catalog or [])
-            if str(item.get("id") or "").strip()
-        }
+        item_catalog = build_character_item_catalog(campaign_slug)
+        definition_item_lookup, support_lookup = build_record_equipment_support_lookup(
+            record,
+            item_catalog=item_catalog,
+        )
         equipment_items: list[dict[str, object]] = []
         for inventory_item in list((record.state_record.state or {}).get("inventory") or []):
             item_ref = build_character_inventory_item_ref(inventory_item)
             if not item_ref:
                 continue
             definition_item = definition_item_lookup.get(item_ref, {})
+            support = dict(support_lookup.get(item_ref) or {})
+            if not bool(support.get("supports_equipped_state")):
+                continue
             systems_ref = dict(definition_item.get("systems_ref") or {})
             page_ref = normalize_character_page_ref(definition_item.get("page_ref"))
-            systems_entry = None
-            entry_slug = str(systems_ref.get("slug") or "").strip()
-            if entry_slug and str(systems_ref.get("entry_type") or "").strip() == "item":
-                systems_entry = systems_service.get_entry_by_slug_for_campaign(campaign_slug, entry_slug)
-            requires_attunement = systems_item_requires_attunement(
-                ((systems_entry.metadata or {}).get("attunement") if systems_entry is not None else None)
-            )
+            requires_attunement = bool(support.get("requires_attunement"))
             equipment_items.append(
                 {
                     "id": item_ref,
@@ -1290,13 +1303,10 @@ def create_app() -> Flask:
                         page_ref=definition_item.get("page_ref"),
                     ),
                     "is_equipped": bool(inventory_item.get("is_equipped", False)),
-                    "is_attuned": bool(inventory_item.get("is_attuned", False)),
+                    "is_attuned": bool(inventory_item.get("is_attuned", False)) if requires_attunement else False,
                     "requires_attunement": requires_attunement,
-                    "attunement_hint": (
-                        "Requires attunement"
-                        if requires_attunement
-                        else "Use attunement only when the item's rules call for it."
-                    ),
+                    "supports_attunement": requires_attunement,
+                    "attunement_hint": "Requires attunement" if requires_attunement else "",
                     "source_label": (
                         f"Systems item ({systems_ref.get('source_id') or 'Unknown source'})"
                         if systems_ref
@@ -1318,6 +1328,12 @@ def create_app() -> Flask:
             "attuned_count": attuned_count,
             "equipped_count": equipped_count,
             "max_attuned_items": max_attuned_items,
+            "equipment_item_refs": [str(item.get("id") or "").strip() for item in equipment_items if str(item.get("id") or "").strip()],
+            "attunable_item_refs": [
+                str(item.get("id") or "").strip()
+                for item in equipment_items
+                if bool(item.get("requires_attunement")) and str(item.get("id") or "").strip()
+            ],
             "at_attunement_limit": attuned_count >= max_attuned_items if max_attuned_items > 0 else True,
             "over_attunement_limit": attuned_count > max_attuned_items,
         }
@@ -3864,6 +3880,20 @@ def create_app() -> Flask:
         hidden_attacks = [str(item).strip() for item in list(character_detail.get("hidden_attacks") or []) if str(item).strip()]
         equipment_rows = [dict(item or {}) for item in list(equipment_state_manager.get("rows") or [])]
         inventory_rows = [dict(item or {}) for item in list(character_detail.get("inventory") or [])]
+        equipment_item_refs = {
+            str(item_ref).strip()
+            for item_ref in list(equipment_state_manager.get("equipment_item_refs") or [])
+            if str(item_ref).strip()
+        }
+        attunable_item_refs = {
+            str(item_ref).strip()
+            for item_ref in list(equipment_state_manager.get("attunable_item_refs") or [])
+            if str(item_ref).strip()
+        }
+        for item in inventory_rows:
+            item_ref = str(item.get("item_ref") or item.get("id") or "").strip()
+            item["show_equipped_badge"] = bool(item_ref in equipment_item_refs and item.get("is_equipped"))
+            item["show_attuned_badge"] = bool(item_ref in attunable_item_refs and item.get("is_attuned"))
         currency_rows = [dict(item or {}) for item in list(character_detail.get("currency") or [])]
         other_currency = [str(item).strip() for item in list(character_detail.get("other_currency") or []) if str(item).strip()]
         abilities = [dict(item or {}) for item in list(character_detail.get("abilities") or [])]
@@ -8776,15 +8806,33 @@ def create_app() -> Flask:
             }
             if item_id not in inventory_by_ref:
                 raise CharacterEditValidationError("Choose a valid equipment entry to update.")
+            _, support_lookup = build_record_equipment_support_lookup(
+                record,
+                item_catalog=item_catalog,
+            )
+            target_support = dict(support_lookup.get(item_id) or {})
+            if not bool(target_support.get("supports_equipped_state")):
+                raise CharacterEditValidationError(
+                    "That inventory row stays on Inventory because it does not support equipment state."
+                )
 
             is_equipped = bool(request.form.get("is_equipped"))
-            is_attuned = bool(request.form.get("is_attuned"))
+            requested_attunement = bool(request.form.get("is_attuned"))
+            if requested_attunement and not bool(target_support.get("supports_attunement")):
+                raise CharacterEditValidationError(
+                    "Only items whose durable metadata explicitly requires attunement can be attuned."
+                )
+            is_attuned = bool(requested_attunement and target_support.get("supports_attunement"))
             attunement_payload = dict((record.state_record.state or {}).get("attunement") or {})
             max_attuned_items = int(attunement_payload.get("max_attuned_items") or 3)
             currently_attuned_refs = {
                 item_ref
                 for item_ref, item in inventory_by_ref.items()
-                if item_ref != item_id and bool(item.get("is_attuned", False))
+                if (
+                    item_ref != item_id
+                    and bool(item.get("is_attuned", False))
+                    and bool(dict(support_lookup.get(item_ref) or {}).get("supports_attunement"))
+                )
             }
             next_attuned_count = len(currently_attuned_refs) + (1 if is_attuned else 0)
             if max_attuned_items >= 0 and next_attuned_count > max_attuned_items:

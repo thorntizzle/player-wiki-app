@@ -568,6 +568,7 @@ def present_character_detail(
     inventory = [
         {
             "id": str(item.get("id") or ""),
+            "item_ref": str(item.get("catalog_ref") or item.get("id") or "").strip(),
             "name": str(item.get("name") or "Item"),
             "href": build_character_entry_href(
                 campaign.slug,

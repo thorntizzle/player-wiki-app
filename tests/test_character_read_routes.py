@@ -104,11 +104,30 @@ def _seed_systems_item_entry(
             public_visibility_allowed=True,
             requires_unofficial_notice=False,
         )
+        existing_entries = [
+            {
+                "entry_key": record.entry_key,
+                "entry_type": record.entry_type,
+                "slug": record.slug,
+                "title": record.title,
+                "source_page": record.source_page,
+                "source_path": record.source_path,
+                "search_text": record.search_text,
+                "player_safe_default": record.player_safe_default,
+                "dm_heavy": record.dm_heavy,
+                "metadata": dict(record.metadata or {}),
+                "body": dict(record.body or {}),
+                "rendered_html": record.rendered_html,
+            }
+            for record in systems_store.list_entries_for_source("DND-5E", "PHB", entry_type="item")
+            if str(record.slug or "").strip() != slug
+        ]
         systems_store.replace_entries_for_source(
             "DND-5E",
             "PHB",
             entry_types=["item"],
-            entries=[
+            entries=existing_entries
+            + [
                 {
                     "entry_key": f"dnd-5e|item|phb|{slug}",
                     "entry_type": "item",
@@ -2018,21 +2037,37 @@ def test_equipment_subpage_is_separate_from_inventory_manager(
     assert "Inventory and currency" not in html
 
 
-def test_equipment_subpage_can_update_equipped_and_attuned_state(app, client, sign_in, users):
-    entry = _seed_systems_item_entry(
+def test_equipment_subpage_filters_inventory_only_rows_and_only_shows_attunement_for_required_magic_items(
+    app, client, sign_in, users
+):
+    boots_entry = _seed_systems_item_entry(
+        app,
+        slug="phb-item-boots-of-elvenkind",
+        title="Boots of Elvenkind",
+        metadata={"weight": 1, "rarity": "uncommon"},
+    )
+    compass_entry = _seed_systems_item_entry(
         app,
         slug="phb-item-stormglass-compass",
         title="Stormglass Compass",
-        metadata={"weight": 1, "attunement": "requires attunement"},
+        metadata={"weight": 1, "rarity": "rare", "attunement": "requires attunement"},
     )
 
     def _mutate_definition(payload: dict) -> None:
         equipment_catalog = list(payload.get("equipment_catalog") or [])
+        equipment_catalog[2] = {
+            **dict(equipment_catalog[2]),
+            "name": "Boots of Elvenkind",
+            "weight": "1 lb.",
+            "systems_ref": _systems_ref(boots_entry),
+            "is_equipped": False,
+            "is_attuned": False,
+        }
         equipment_catalog[4] = {
             **dict(equipment_catalog[4]),
             "name": "Stormglass Compass",
             "weight": "1 lb.",
-            "systems_ref": _systems_ref(entry),
+            "systems_ref": _systems_ref(compass_entry),
             "is_equipped": False,
             "is_attuned": False,
         }
@@ -2040,6 +2075,13 @@ def test_equipment_subpage_can_update_equipped_and_attuned_state(app, client, si
 
     def _mutate_state(payload: dict) -> None:
         inventory = list(payload.get("inventory") or [])
+        inventory[2] = {
+            **dict(inventory[2]),
+            "name": "Boots of Elvenkind",
+            "weight": "1 lb.",
+            "is_equipped": False,
+            "is_attuned": False,
+        }
         inventory[4] = {
             **dict(inventory[4]),
             "name": "Stormglass Compass",
@@ -2057,7 +2099,21 @@ def test_equipment_subpage_can_update_equipped_and_attuned_state(app, client, si
 
     page_response = client.get("/campaigns/linden-pass/characters/arden-march?page=equipment")
     assert page_response.status_code == 200
-    assert "Requires attunement" in page_response.get_data(as_text=True)
+    html = page_response.get_data(as_text=True)
+    assert "Light Crossbow" in html
+    assert "Quarterstaff" in html
+    assert "Boots of Elvenkind" in html
+    assert "Stormglass Compass" in html
+    assert "Courier Satchel" not in html
+    assert "Crossbow Bolts" not in html
+    assert "Chalk" not in html
+    assert html.count("Save equipment state") == 4
+    assert html.count('name="is_attuned"') == 1
+    assert "Use attunement only when the item's rules call for it." not in html
+
+
+def test_equipment_state_update_rejects_inventory_only_rows(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
 
     update_response = client.post(
         "/campaigns/linden-pass/characters/arden-march/equipment/backpack-5/state",
@@ -2089,11 +2145,90 @@ def test_equipment_subpage_can_update_equipped_and_attuned_state(app, client, si
             for item in list(record.state_record.state.get("inventory") or [])
             if str(item.get("catalog_ref") or item.get("id") or "") == "backpack-5"
         )
-        assert definition_item["is_equipped"] is True
-        assert definition_item["is_attuned"] is True
-        assert state_item["is_equipped"] is True
-        assert state_item["is_attuned"] is True
-        assert record.state_record.state["attunement"]["attuned_item_refs"] == ["backpack-5"]
+        assert definition_item.get("is_equipped") is not True
+        assert definition_item.get("is_attuned") is not True
+        assert state_item.get("is_equipped") is not True
+        assert state_item.get("is_attuned") is not True
+        assert record.state_record.state["attunement"]["attuned_item_refs"] == []
+
+
+def test_equipment_state_update_preserves_three_item_attunement_limit_for_qualifying_items(
+    app, client, sign_in, users
+):
+    item_ids = ["light-crossbow-1", "quarterstaff-2", "satchel-3", "crossbow-bolts-4"]
+    entries = [
+        _seed_systems_item_entry(
+            app,
+            slug=f"phb-item-attuned-relic-{index}",
+            title=f"Attuned Relic {index}",
+            metadata={"weight": 1, "rarity": "rare", "attunement": "requires attunement"},
+        )
+        for index in range(1, 5)
+    ]
+
+    def _mutate_definition(payload: dict) -> None:
+        equipment_catalog = list(payload.get("equipment_catalog") or [])
+        for index, entry in enumerate(entries):
+            equipment_catalog[index] = {
+                **dict(equipment_catalog[index]),
+                "name": f"Attuned Relic {index + 1}",
+                "weight": "1 lb.",
+                "systems_ref": _systems_ref(entry),
+                "is_equipped": index < 3,
+                "is_attuned": index < 3,
+            }
+        payload["equipment_catalog"] = equipment_catalog
+
+    def _mutate_state(payload: dict) -> None:
+        inventory = list(payload.get("inventory") or [])
+        for index in range(4):
+            inventory[index] = {
+                **dict(inventory[index]),
+                "name": f"Attuned Relic {index + 1}",
+                "weight": "1 lb.",
+                "is_equipped": index < 3,
+                "is_attuned": index < 3,
+            }
+        payload["inventory"] = inventory
+        payload["attunement"] = {"max_attuned_items": 3, "attuned_item_refs": item_ids[:3]}
+
+    _write_character_definition(app, "arden-march", _mutate_definition)
+    _write_character_state(app, "arden-march", _mutate_state)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    update_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/equipment/crossbow-bolts-4/state",
+        data={
+            "expected_revision": _character_state_revision(app, "arden-march"),
+            "mode": "read",
+            "page": "equipment",
+            "is_equipped": "1",
+            "is_attuned": "1",
+        },
+        follow_redirects=False,
+    )
+
+    assert update_response.status_code == 302
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert record is not None
+        definition_item = next(
+            item
+            for item in list(record.definition.equipment_catalog or [])
+            if str(item.get("id") or "") == "crossbow-bolts-4"
+        )
+        state_item = next(
+            item
+            for item in list(record.state_record.state.get("inventory") or [])
+            if str(item.get("catalog_ref") or item.get("id") or "") == "crossbow-bolts-4"
+        )
+        assert definition_item["is_equipped"] is False
+        assert definition_item["is_attuned"] is False
+        assert state_item["is_equipped"] is False
+        assert state_item["is_attuned"] is False
+        assert record.state_record.state["attunement"]["attuned_item_refs"] == item_ids[:3]
 
 
 def test_native_equipment_state_update_recalculates_attunement_gated_magic_weapon_attacks(
