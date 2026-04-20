@@ -1263,6 +1263,11 @@ def create_app() -> Flask:
                 character_slug=record.definition.character_slug,
             ),
             "campaign_item_page_options": campaign_item_page_options,
+            "removable_item_refs": [
+                str(item.get("id") or "").strip()
+                for item in supplemental_items
+                if str(item.get("id") or "").strip()
+            ],
             "supplemental_items": sorted(
                 supplemental_items,
                 key=lambda item: (str(item["name"]).lower(), str(item["id"]).lower()),

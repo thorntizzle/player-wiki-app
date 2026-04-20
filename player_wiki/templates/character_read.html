@@ -479,7 +479,15 @@
       {% if show_inventory_sections and not is_session_mode %}
         <section class="read-section">
           <div class="section-heading">
-            <h2>Inventory and currency</h2>
+            <div>
+              <h2>Inventory and currency</h2>
+              {% if can_use_session_mode and inventory_manager and inventory_manager.removable_item_refs %}
+                <p class="meta">
+                  Supplemental inventory rows can be removed directly here. Builder/import baseline gear stays
+                  read-only in this surface.
+                </p>
+              {% endif %}
+            </div>
           </div>
           {% if character.inventory %}
             <div class="inventory-list">
@@ -503,6 +511,17 @@
                   {% endif %}
                   {% if item.notes %}
                     <p>{{ item.notes }}</p>
+                  {% endif %}
+                  {% if can_use_session_mode and inventory_manager and item.item_ref in inventory_manager.removable_item_refs %}
+                    <form
+                      method="post"
+                      action="{{ url_for('character_equipment_remove', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.item_ref) }}"
+                    >
+                      <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                      <input type="hidden" name="mode" value="read">
+                      <input type="hidden" name="page" value="{{ character_subpage }}">
+                      <button type="submit" class="ghost-button">Remove from inventory</button>
+                    </form>
                   {% endif %}
                 </article>
               {% endfor %}

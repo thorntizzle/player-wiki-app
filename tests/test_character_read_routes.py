@@ -2019,6 +2019,62 @@ def test_equipment_manager_campaign_item_picker_only_lists_item_pages(
     assert "Captain Lyra Vale - NPCs" not in html
 
 
+def test_inventory_subpage_shows_direct_remove_controls_only_to_editable_users(
+    app, client, sign_in, users, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    _write_character_definition(
+        app,
+        "arden-march",
+        lambda payload: payload.__setitem__(
+            "source",
+            {"source_type": "native_character_builder", "source_path": "builder://arden-march"},
+        ),
+    )
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert record is not None
+        revision = record.state_record.revision
+
+    add_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/equipment/add-manual",
+        data={
+            "expected_revision": revision,
+            "mode": "read",
+            "page": "inventory",
+            "name": "Dock Ledger",
+            "quantity": "1",
+            "weight": "",
+            "notes": "Tracked on the inventory page.",
+        },
+        follow_redirects=False,
+    )
+
+    assert add_response.status_code == 302
+
+    owner_response = client.get("/campaigns/linden-pass/characters/arden-march?page=inventory")
+    owner_html = owner_response.get_data(as_text=True)
+
+    assert owner_response.status_code == 200
+    assert "Dock Ledger" in owner_html
+    assert "Remove from inventory" in owner_html
+    assert "baseline gear stays" in owner_html
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    read_only_response = client.get("/campaigns/linden-pass/characters/arden-march?page=inventory")
+    read_only_html = read_only_response.get_data(as_text=True)
+
+    assert read_only_response.status_code == 200
+    assert "Dock Ledger" in read_only_html
+    assert "Remove from inventory" not in read_only_html
+    assert "baseline gear stays" not in read_only_html
+
+
 def test_equipment_subpage_is_separate_from_inventory_manager(
     client, sign_in, users, set_campaign_visibility
 ):
@@ -2533,6 +2589,7 @@ def test_imported_character_equipment_controls_can_search_and_add_systems_items_
     html = landing.get_data(as_text=True)
     assert "Rope" in html
     assert "Emergency climbing bundle." in html
+    assert "Remove from inventory" in html
     assert "Remove item" in html
 
 
