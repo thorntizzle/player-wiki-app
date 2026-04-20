@@ -247,6 +247,12 @@ SESSION_CHARACTER_FULL_PAGE_ONLY_SCOPE = (
 SESSION_CHARACTER_FULL_PAGE_ONLY_SUMMARY = (
     "Portrait/background details, spell-list changes, equipment or broader inventory work, and advanced maintenance"
 )
+CHARACTER_SHEET_EDIT_ACCESS_RULES = (
+    "Assigned player owners can use this same sheet edit view for their own characters on the first-pass Character-page sections.",
+    "DMs can open the same sheet edit view for characters they manage without reassigning ownership just to make a sheet correction.",
+    "Admins can always use this sheet edit view. Owner assignment stays admin-only on Controls, and character deletion stays on Controls for DM/admin users.",
+    "Observers and unassigned players stay on the standard character sheet and do not get this edit lane.",
+)
 COMBAT_AND_SESSION_COMBAT_SCOPE = (
     "HP, temp HP, movement, and action economy",
     "Tracked resource spends and spell slot usage",
@@ -2433,6 +2439,7 @@ def create_app() -> Flask:
         capabilities: list[str],
         limits: list[str],
         links: list[dict[str, str]] | None = None,
+        guidance_cards: list[dict[str, object]] | None = None,
     ) -> dict[str, object]:
         return {
             "anchor": anchor,
@@ -2443,6 +2450,7 @@ def create_app() -> Flask:
             "capabilities": capabilities,
             "limits": limits,
             "links": list(links or []),
+            "guidance_cards": list(guidance_cards or []),
         }
 
     def format_help_label_list(labels: list[str]) -> str:
@@ -2554,6 +2562,61 @@ def create_app() -> Flask:
             combat_source_seed_capability = (
                 "NPC combatants can be added from linked source libraries when those sources are available to this viewer."
             )
+        character_guidance_cards: list[dict[str, object]] = [
+            {
+                "title": "Sheet edit view",
+                "body": "Use the out-of-session Character page sheet edit view for the first-pass fields that stay local until you save or cancel them.",
+                "items": list(CHARACTER_SHEET_EDIT_FIRST_PASS_SCOPE),
+                "meta": "This lane batches one page-local draft through sheet-edit instead of applying immediate Session or Combat deltas.",
+            },
+            {
+                "title": "Keep the full character page for",
+                "body": "",
+                "items": list(CHARACTER_SHEET_EDIT_OUTSIDE_FIRST_PASS_SCOPE),
+                "meta": "",
+            },
+        ]
+        if can_view_session:
+            character_guidance_cards.append(
+                {
+                    "title": "Session Character",
+                    "body": "Use Session Character during an active session when you need live-play edits without leaving the Session feature.",
+                    "items": list(SESSION_CHARACTER_ACTIVE_EDIT_SCOPE),
+                    "meta": (
+                        "Keep the full character page for "
+                        f"{SESSION_CHARACTER_FULL_PAGE_ONLY_SUMMARY.lower()}."
+                    ),
+                }
+            )
+        if can_view_combat:
+            character_guidance_cards.append(
+                {
+                    "title": "Combat",
+                    "body": "Use Combat when the character is in the tracker and encounter context matters.",
+                    "items": list(COMBAT_AND_SESSION_COMBAT_SCOPE),
+                    "meta": f"Keep Session for {COMBAT_AND_SESSION_SESSION_SUMMARY}.",
+                }
+            )
+        character_guidance_cards.extend(
+            [
+                {
+                    "title": "Who can use sheet edit view",
+                    "body": "",
+                    "items": list(CHARACTER_SHEET_EDIT_ACCESS_RULES),
+                    "meta": "",
+                },
+                {
+                    "title": "Compatibility note",
+                    "body": (
+                        "Older Character-page links that still use ?mode=session open this same sheet edit view. "
+                        "The user-facing label stays Sheet edit view so the compatibility route does not keep "
+                        "teaching an old Session-only label."
+                    ),
+                    "items": [],
+                    "meta": "",
+                },
+            ]
+        )
 
         help_surfaces = [
             build_help_surface(
@@ -2835,6 +2898,7 @@ def create_app() -> Flask:
                     "Imported characters may need progression repair before native level-up is available.",
                     "Session and Combat intentionally keep only a smaller quick-edit slice instead of replacing the full character page.",
                 ],
+                guidance_cards=character_guidance_cards,
                 links=(
                     [
                         {
@@ -3120,7 +3184,6 @@ def create_app() -> Flask:
                 ),
             )
         character_combat_surface_href = ""
-        character_combat_surface_label = ""
         character_combat_surface_action_label = ""
         if is_session_mode and can_access_campaign_scope(campaign_slug, "combat"):
             tracked_combatant = find_tracked_player_combatant_for_character(
@@ -3130,7 +3193,6 @@ def create_app() -> Flask:
             )
             if tracked_combatant is not None:
                 if can_manage_campaign_combat(campaign_slug):
-                    character_combat_surface_label = "Encounter status"
                     character_combat_surface_action_label = "Open encounter status"
                     character_combat_surface_href = url_for(
                         "campaign_combat_status_view",
@@ -3138,7 +3200,6 @@ def create_app() -> Flask:
                         combatant=tracked_combatant.id,
                     )
                 elif character_slug in get_owned_character_slugs(campaign_slug):
-                    character_combat_surface_label = "Combat"
                     character_combat_surface_action_label = "Open Combat"
                     character_combat_surface_href = url_for(
                         "campaign_combat_view",
@@ -3160,21 +3221,8 @@ def create_app() -> Flask:
                 can_retrain=can_retrain,
                 level_up_readiness=level_up_readiness,
                 is_session_mode=is_session_mode,
-                character_sheet_edit_first_pass_scope=(
-                    CHARACTER_SHEET_EDIT_FIRST_PASS_SCOPE if is_session_mode else ()
-                ),
-                character_sheet_edit_outside_first_pass_scope=(
-                    CHARACTER_SHEET_EDIT_OUTSIDE_FIRST_PASS_SCOPE if is_session_mode else ()
-                ),
-                session_character_active_edit_scope=(
-                    SESSION_CHARACTER_ACTIVE_EDIT_SCOPE if is_session_mode else ()
-                ),
-                combat_and_session_combat_scope=(
-                    COMBAT_AND_SESSION_COMBAT_SCOPE if is_session_mode else ()
-                ),
                 character_session_surface_href=character_session_surface_href,
                 character_combat_surface_href=character_combat_surface_href,
-                character_combat_surface_label=character_combat_surface_label,
                 character_combat_surface_action_label=character_combat_surface_action_label,
                 rest_preview=rest_preview,
                 character_controls=character_controls,

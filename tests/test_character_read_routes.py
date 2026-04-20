@@ -2969,27 +2969,17 @@ def test_sheet_edit_view_makes_first_pass_bounded_scope_explicit(client, sign_in
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Sheet edit scope" in html
-    assert "Edit here in the first pass" in html
-    assert "Current HP, temp HP, tracked resources, and spell slot usage" in html
-    assert "Inventory quantities and currency totals" in html
-    assert "Physical description, background, and player notes" in html
-    assert "The first-pass fields on this page stay local until you save or cancel them." in html
-    assert "the browser will warn you" in html
-    assert "Rests and quick +/- actions still" in html
-    assert "Keep using the standard character page for" in html
-    assert "Compatibility note" in html
-    assert "Older Character-page links that still use" in html
-    assert "?mode=session" in html
-    assert "an old Session-only label" in html
-    assert "Rests and other relative quick actions" in html
-    assert "Spell-list changes and other non-slot spell management" in html
-    assert "Equipment state, portrait changes, and broader inventory or equipment maintenance" in html
-    assert "Advanced character edit, level-up, retraining, and controls" in html
-    assert "Session-enabled editing" in html
-    assert "This lane appears when a live session is active." in html
-    assert "Combat-context editing" in html
-    assert "This lane appears when the character is actively tracked in combat." in html
+    assert "Keep first-pass Character-page edits here." in html
+    assert "Help page for the full sheet-edit scope" in html
+    assert "Character versus Session Character versus Combat boundary" in html
+    assert 'href="/campaigns/linden-pass/help#characters"' in html
+    assert "Open Character Help" in html
+    assert "Sheet edit scope" not in html
+    assert "Character-page sheet edit" not in html
+    assert "Compatibility note" not in html
+    assert "Player self-editing" not in html
+    assert "Session-enabled editing" not in html
+    assert "Combat-context editing" not in html
 
 
 def test_sheet_edit_view_links_to_session_character_and_combat_when_both_are_live(
@@ -3012,32 +3002,31 @@ def test_sheet_edit_view_links_to_session_character_and_combat_when_both_are_liv
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Character-page sheet edit" in html
-    assert "This page batches one page-local draft through" in html
-    assert "Session-enabled editing" in html
+    assert "Open Character Help" in html
+    assert 'href="/campaigns/linden-pass/help#characters"' in html
     assert '/campaigns/linden-pass/session/character?character=arden-march&amp;page=inventory' in html
     assert ">Open Session Character<" in html
-    assert "Combat-context editing" in html
-    assert "selected <code>combatant</code> deep link" in html
     assert '/campaigns/linden-pass/combat?combatant=' in html
     assert ">Open Combat<" in html
+    assert "Character-page sheet edit" not in html
+    assert "Combat-context editing" not in html
 
 
 def test_sheet_edit_view_explains_player_dm_and_admin_authority(client, sign_in, users, set_campaign_visibility):
     set_campaign_visibility("linden-pass", characters="players")
     sign_in(users["owner"]["email"], users["owner"]["password"])
 
-    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=quick")
+    response = client.get("/campaigns/linden-pass/help")
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Player self-editing" in html
+    assert "Who can use sheet edit view" in html
+    assert "Current HP, temp HP, tracked resources, and spell slot usage" in html
+    assert "Compatibility note" in html
+    assert "Older Character-page links that still use ?mode=session" in html
     assert "Assigned player owners can use this same sheet edit view for their own characters" in html
-    assert "DM editing" in html
     assert "DMs can open the same sheet edit view for characters they manage" in html
-    assert "Admin authority" in html
     assert "Owner assignment stays admin-only on Controls" in html
-    assert "Read-only viewers" in html
     assert "Observers and unassigned players stay on the standard character sheet" in html
 
 

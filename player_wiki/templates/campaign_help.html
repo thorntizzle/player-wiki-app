@@ -93,6 +93,29 @@
               <p class="meta">{{ surface.access_note }}</p>
             </article>
           </div>
+
+          {% if surface.guidance_cards %}
+            <div class="detail-grid">
+              {% for card in surface.guidance_cards %}
+                <article class="detail-card">
+                  <h3>{{ card["title"] }}</h3>
+                  {% if card["body"] %}
+                    <p>{{ card["body"] }}</p>
+                  {% endif %}
+                  {% if card["items"] %}
+                    <ul class="plain-list slot-list">
+                      {% for item in card["items"] %}
+                        <li>{{ item }}</li>
+                      {% endfor %}
+                    </ul>
+                  {% endif %}
+                  {% if card["meta"] %}
+                    <p class="meta">{{ card["meta"] }}</p>
+                  {% endif %}
+                </article>
+              {% endfor %}
+            </div>
+          {% endif %}
         </article>
       {% endfor %}
     </section>
