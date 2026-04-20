@@ -1289,6 +1289,15 @@ def apply_equipment_catalog_edit(
     page_ref: str = "",
     systems_ref: dict[str, Any] | None = None,
 ) -> tuple[CharacterDefinition, CharacterImportMetadata, dict[str, int]]:
+    all_items = [
+        dict(item)
+        for item in list(current_definition.equipment_catalog or [])
+    ]
+    item_lookup = {
+        str(item.get("id") or "").strip(): dict(item)
+        for item in all_items
+        if str(item.get("id") or "").strip()
+    }
     manual_items = _manual_equipment_entries(current_definition)
     equipment_linked_page_refs = {
         _extract_page_ref_value(item.get("page_ref"))
@@ -1308,11 +1317,11 @@ def apply_equipment_catalog_edit(
 
     normalized_remove_item_id = str(remove_item_id or "").strip()
     if normalized_remove_item_id:
-        if normalized_remove_item_id not in manual_item_lookup:
-            raise CharacterEditValidationError("Choose a valid supplemental equipment entry to remove.")
-        next_manual_items = [
+        if normalized_remove_item_id not in item_lookup:
+            raise CharacterEditValidationError("Choose a valid inventory entry to remove.")
+        next_equipment_catalog = [
             dict(item)
-            for item in manual_items
+            for item in all_items
             if str(item.get("id") or "").strip() != normalized_remove_item_id
         ]
         quantity_overrides: dict[str, int] = {}
@@ -1356,15 +1365,16 @@ def apply_equipment_catalog_edit(
         ]
         next_manual_items.append(next_item)
         quantity_overrides = {str(next_item.get("id") or "").strip(): parsed_quantity}
+        next_equipment_catalog = [
+            dict(item)
+            for item in list(current_definition.equipment_catalog or [])
+            if str(item.get("source_kind") or "") != CUSTOM_EQUIPMENT_SOURCE_KIND
+        ] + next_manual_items
 
     payload = deepcopy(current_definition.to_dict())
     payload["campaign_slug"] = campaign_slug
     payload["character_slug"] = current_definition.character_slug
-    payload["equipment_catalog"] = [
-        dict(item)
-        for item in list(current_definition.equipment_catalog or [])
-        if str(item.get("source_kind") or "") != CUSTOM_EQUIPMENT_SOURCE_KIND
-    ] + next_manual_items
+    payload["equipment_catalog"] = next_equipment_catalog
 
     definition = CharacterDefinition.from_dict(payload)
     source_type = str((current_definition.source or {}).get("source_type") or "").strip()

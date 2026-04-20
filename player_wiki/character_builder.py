@@ -5813,7 +5813,10 @@ def _derive_definition_core_sheet_payloads(
         systems_service=systems_service,
         campaign_page_records=campaign_page_records,
     )
-    normalized_equipment = _normalize_equipment_payloads(list(sanitized_definition.equipment_catalog or []))
+    normalized_equipment = _normalize_equipment_payloads(
+        list(sanitized_definition.equipment_catalog or []),
+        item_catalog=effective_item_catalog,
+    )
     item_effect_entries = _active_item_effect_entries(
         normalized_equipment,
         item_catalog=effective_item_catalog,
@@ -11137,6 +11140,8 @@ def _build_campaign_item_choice_fields(
 def _extract_campaign_page_ref(payload: Any) -> str:
     if isinstance(payload, dict):
         return str(payload.get("page_ref") or payload.get("slug") or "").strip()
+    if isinstance(payload, str):
+        return str(payload).strip()
     return str(getattr(payload, "page_ref", "") or "").strip()
 
 
@@ -19308,6 +19313,8 @@ def _normalize_attack_equipment_refs(
 
 def _normalize_equipment_payloads(
     equipment_payloads: list[dict[str, Any]] | None,
+    *,
+    item_catalog: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     normalized_equipment: list[dict[str, Any]] = []
     index_by_key: dict[tuple[str, str, str, str, bool], int] = {}
@@ -19330,12 +19337,14 @@ def _normalize_equipment_payloads(
         payload["charges_current"] = payload.get("charges_current")
         payload["charges_max"] = payload.get("charges_max")
         payload["tags"] = [str(tag).strip() for tag in list(payload.get("tags") or []) if str(tag).strip()]
-        systems_ref = dict(payload.get("systems_ref") or {})
+        systems_ref, normalized_page_ref = _recover_equipment_link_payloads(
+            payload,
+            item_catalog=item_catalog,
+        )
         if systems_ref:
             payload["systems_ref"] = systems_ref
         else:
             payload.pop("systems_ref", None)
-        normalized_page_ref = _normalize_page_ref_payload(payload.get("page_ref"))
         if normalized_page_ref is not None:
             payload["page_ref"] = normalized_page_ref
         else:
@@ -19428,6 +19437,36 @@ def _normalize_equipment_payloads(
         for candidate_key in updated_keys:
             index_by_key[candidate_key] = existing_index
     return normalized_equipment
+
+
+def _recover_equipment_link_payloads(
+    payload: dict[str, Any],
+    *,
+    item_catalog: dict[str, Any] | None,
+) -> tuple[dict[str, Any], Any]:
+    systems_ref = dict(payload.get("systems_ref") or {})
+    normalized_page_ref = _normalize_page_ref_payload(payload.get("page_ref"))
+    resolved_page_ref = _extract_campaign_page_ref(normalized_page_ref)
+    campaign_item_support = _resolve_campaign_item_page_support(payload, item_catalog)
+    if isinstance(campaign_item_support, dict):
+        support_page_ref = str(campaign_item_support.get("page_ref") or "").strip()
+        support_title = str(campaign_item_support.get("title") or payload.get("name") or "").strip()
+        if support_page_ref and (not resolved_page_ref or resolved_page_ref == support_page_ref):
+            normalized_page_ref = (
+                {
+                    "slug": support_page_ref,
+                    "title": support_title,
+                }
+                if support_title
+                else support_page_ref
+            )
+            resolved_page_ref = support_page_ref
+    if not systems_ref and not resolved_page_ref:
+        recovered_entry = _resolve_item_entry(payload, item_catalog)
+        recovered_systems_ref = _systems_ref_from_entry(recovered_entry)
+        if recovered_systems_ref:
+            systems_ref = recovered_systems_ref
+    return systems_ref, normalized_page_ref
 
 
 def _normalize_page_ref_payload(page_ref: Any) -> Any:

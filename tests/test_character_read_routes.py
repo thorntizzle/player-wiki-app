@@ -2061,7 +2061,7 @@ def test_inventory_subpage_shows_direct_remove_controls_only_to_editable_users(
     assert owner_response.status_code == 200
     assert "Dock Ledger" in owner_html
     assert "Remove from inventory" in owner_html
-    assert "baseline gear stays" in owner_html
+    assert "Tracked inventory rows can be removed directly here." in owner_html
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["party"]["email"], users["party"]["password"])
@@ -2072,7 +2072,45 @@ def test_inventory_subpage_shows_direct_remove_controls_only_to_editable_users(
     assert read_only_response.status_code == 200
     assert "Dock Ledger" in read_only_html
     assert "Remove from inventory" not in read_only_html
-    assert "baseline gear stays" not in read_only_html
+    assert "Tracked inventory rows can be removed directly here." not in read_only_html
+
+
+def test_imported_inventory_rows_can_be_removed_from_inventory_page(
+    app, client, sign_in, users, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    inventory_response = client.get("/campaigns/linden-pass/characters/arden-march?page=inventory")
+    inventory_html = inventory_response.get_data(as_text=True)
+
+    assert inventory_response.status_code == 200
+    assert "Backpack" in inventory_html
+    assert "Remove from inventory" in inventory_html
+
+    remove_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/equipment/backpack-5/remove",
+        data={
+            "expected_revision": _character_state_revision(app, "arden-march"),
+            "mode": "read",
+            "page": "inventory",
+        },
+        follow_redirects=False,
+    )
+
+    assert remove_response.status_code == 302
+
+    updated_definition = _read_character_definition(app, "arden-march")
+    assert "Backpack" not in {str(item.get("name") or "") for item in list(updated_definition.get("equipment_catalog") or [])}
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert record is not None
+        inventory_names = {
+            str(item.get("name") or "")
+            for item in list((record.state_record.state or {}).get("inventory") or [])
+        }
+        assert "Backpack" not in inventory_names
 
 
 def test_equipment_subpage_is_separate_from_inventory_manager(
@@ -3745,6 +3783,92 @@ def test_character_sheet_renders_campaign_page_links_when_present(app, client, s
     assert '/campaigns/linden-pass/pages/items/consecrated-huran-blade' in equipment_html
     assert '>Consecrated Huran Blade</a>' in quick_html
     assert '>Consecrated Huran Blade</a>' in equipment_html
+
+
+def test_character_sheet_recovers_missing_equipment_links_for_inventory_and_equipment_rows(
+    app, client, sign_in, users, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    _seed_systems_item_entry(
+        app,
+        slug="phb-item-chain-mail",
+        title="Chain Mail",
+        metadata={"type": "HA", "ac": 16},
+    )
+    _seed_systems_item_entry(
+        app,
+        slug="phb-item-stormglass-compass",
+        title="Stormglass Compass",
+        metadata={"weight": 1, "rarity": "rare"},
+    )
+
+    def _mutate_definition(payload: dict) -> None:
+        payload["equipment_catalog"] = [
+            {
+                "id": "chain-mail-1",
+                "name": "Chain Mail",
+                "default_quantity": 1,
+                "weight": "55 lb.",
+                "notes": "",
+                "is_equipped": True,
+                "systems_ref": None,
+            },
+            {
+                "id": "stormglass-compass-2",
+                "name": "Stormglass Compass",
+                "default_quantity": 1,
+                "weight": "1 lb.",
+                "notes": "",
+                "page_ref": None,
+                "systems_ref": None,
+            },
+        ]
+
+    def _mutate_state(payload: dict) -> None:
+        payload["inventory"] = [
+            {
+                "id": "chain-mail-1",
+                "catalog_ref": "chain-mail-1",
+                "name": "Chain Mail",
+                "quantity": 1,
+                "weight": "55 lb.",
+                "is_equipped": True,
+                "is_attuned": False,
+                "charges_current": None,
+                "charges_max": None,
+                "notes": "",
+                "tags": [],
+            },
+            {
+                "id": "stormglass-compass-2",
+                "catalog_ref": "stormglass-compass-2",
+                "name": "Stormglass Compass",
+                "quantity": 1,
+                "weight": "1 lb.",
+                "is_equipped": False,
+                "is_attuned": False,
+                "charges_current": None,
+                "charges_max": None,
+                "notes": "",
+                "tags": [],
+            },
+        ]
+
+    _write_character_definition(app, "arden-march", _mutate_definition)
+    _write_character_state(app, "arden-march", _mutate_state)
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    inventory_response = client.get("/campaigns/linden-pass/characters/arden-march?page=inventory")
+    equipment_response = client.get("/campaigns/linden-pass/characters/arden-march?page=equipment")
+
+    assert inventory_response.status_code == 200
+    assert equipment_response.status_code == 200
+
+    inventory_html = inventory_response.get_data(as_text=True)
+    equipment_html = equipment_response.get_data(as_text=True)
+
+    assert '/campaigns/linden-pass/systems/entries/phb-item-stormglass-compass' in inventory_html
+    assert '/campaigns/linden-pass/systems/entries/phb-item-chain-mail' in equipment_html
 
 
 def test_character_sheet_shows_systems_feature_text_inline_and_hides_source_metadata(

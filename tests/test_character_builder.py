@@ -13,6 +13,7 @@ from player_wiki.character_builder import (
     ABILITY_LABELS,
     CHARACTER_BUILDER_VERSION,
     _attach_campaign_item_page_support,
+    _build_item_catalog,
     _build_spell_catalog,
     _list_campaign_enabled_entries,
     _prepared_spell_count_for_level,
@@ -8979,6 +8980,66 @@ def test_normalize_definition_to_native_model_merges_linked_duplicate_equipment_
     assert normalized.equipment_catalog[0]["name"] == "Huron Blade"
     assert normalized.equipment_catalog[0]["default_quantity"] == 2
     assert normalized.equipment_catalog[0]["systems_ref"]["slug"] == "phb-item-longsword"
+
+
+def test_normalize_definition_to_native_model_recovers_missing_systems_item_links_for_equipment():
+    definition = _minimal_imported_character_definition("mira-salt", "Mira Salt")
+    definition.stats["armor_class"] = 9
+    definition.equipment_catalog = [
+        {
+            "id": "chain-mail-1",
+            "name": "Chain Mail",
+            "default_quantity": 1,
+            "weight": "55 lb.",
+            "notes": "",
+            "is_equipped": True,
+        }
+    ]
+    item_catalog = _build_item_catalog(
+        [
+            _systems_entry(
+                "item",
+                "phb-item-chain-mail",
+                "Chain Mail",
+                metadata={"type": "HA", "ac": 16},
+            )
+        ]
+    )
+
+    normalized = normalize_definition_to_native_model(definition, item_catalog=item_catalog)
+
+    assert normalized.stats["armor_class"] == 16
+    assert normalized.equipment_catalog[0]["systems_ref"]["slug"] == "phb-item-chain-mail"
+
+
+def test_normalize_definition_to_native_model_recovers_missing_campaign_item_page_links_for_equipment():
+    definition = _minimal_imported_character_definition("mira-salt", "Mira Salt")
+    definition.equipment_catalog = [
+        {
+            "id": "stormglass-compass-1",
+            "name": "Stormglass Compass",
+            "default_quantity": 1,
+            "weight": "1 lb.",
+            "notes": "",
+        }
+    ]
+    item_catalog = _attach_campaign_item_page_support(
+        _build_item_catalog([]),
+        [
+            SimpleNamespace(
+                page_ref="items/stormglass-compass",
+                page=SimpleNamespace(title="Stormglass Compass", section="Items"),
+                body_markdown="*Wondrous item, rare*",
+            )
+        ],
+    )
+
+    normalized = normalize_definition_to_native_model(definition, item_catalog=item_catalog)
+
+    page_ref = normalized.equipment_catalog[0]["page_ref"]
+    assert page_ref["slug"] == "items/stormglass-compass"
+    assert page_ref["title"] == "Stormglass Compass"
+    assert normalized.equipment_catalog[0].get("systems_ref") in (None, {})
 
 
 def test_normalize_definition_to_native_model_derives_imported_armor_class_from_equipped_armor_and_shield():

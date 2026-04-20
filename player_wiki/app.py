@@ -49,6 +49,7 @@ from .character_builder import (
     CAMPAIGN_MECHANICS_SECTION,
     _attach_campaign_item_page_support,
     _build_item_catalog,
+    _normalize_equipment_payloads,
     _build_spell_catalog,
     _list_campaign_enabled_entries,
     CharacterBuildError,
@@ -1122,7 +1123,7 @@ def create_app() -> Flask:
     def list_visible_character_page_records(campaign_slug: str, campaign) -> list[object]:
         return [
             page_record
-            for page_record in get_campaign_page_store().list_page_records(campaign_slug)
+            for page_record in get_campaign_page_store().list_page_records(campaign_slug, include_body=True)
             if campaign.is_page_visible(page_record.page)
             and str(page_record.page.section or "").strip() != "Sessions"
         ]
@@ -1186,9 +1187,13 @@ def create_app() -> Flask:
         *,
         item_catalog: dict[str, object],
     ) -> tuple[dict[str, dict[str, object]], dict[str, dict[str, object]]]:
+        normalized_definition_equipment = _normalize_equipment_payloads(
+            list(record.definition.equipment_catalog or []),
+            item_catalog=item_catalog,
+        )
         definition_item_lookup = {
             str(item.get("id") or "").strip(): dict(item)
-            for item in list(record.definition.equipment_catalog or [])
+            for item in normalized_definition_equipment
             if str(item.get("id") or "").strip()
         }
         support_lookup: dict[str, dict[str, object]] = {}
@@ -1213,6 +1218,11 @@ def create_app() -> Flask:
         *,
         campaign_page_records: list[object],
     ) -> dict[str, object]:
+        item_catalog = build_character_item_catalog(campaign_slug)
+        normalized_definition_equipment = _normalize_equipment_payloads(
+            list(record.definition.equipment_catalog or []),
+            item_catalog=item_catalog,
+        )
         campaign_item_page_options = build_character_page_link_options(
             campaign_page_records,
             section=CHARACTER_ITEMS_SECTION,
@@ -1223,10 +1233,13 @@ def create_app() -> Flask:
             if build_character_inventory_item_ref(item)
         }
         supplemental_items: list[dict[str, object]] = []
-        for item in list(record.definition.equipment_catalog or []):
+        removable_item_refs: list[str] = []
+        for item in normalized_definition_equipment:
+            item_id = str(item.get("id") or "").strip()
+            if item_id and item_id in inventory_by_ref and not bool(item.get("is_currency_only")):
+                removable_item_refs.append(item_id)
             if str(item.get("source_kind") or "").strip() != "manual_edit":
                 continue
-            item_id = str(item.get("id") or "").strip()
             if not item_id:
                 continue
             inventory_item = inventory_by_ref.get(item_id, {})
@@ -1271,11 +1284,7 @@ def create_app() -> Flask:
                 character_slug=record.definition.character_slug,
             ),
             "campaign_item_page_options": campaign_item_page_options,
-            "removable_item_refs": [
-                str(item.get("id") or "").strip()
-                for item in supplemental_items
-                if str(item.get("id") or "").strip()
-            ],
+            "removable_item_refs": sorted({item_ref for item_ref in removable_item_refs if item_ref}),
             "supplemental_items": sorted(
                 supplemental_items,
                 key=lambda item: (str(item["name"]).lower(), str(item["id"]).lower()),
@@ -9487,7 +9496,7 @@ def create_app() -> Flask:
             campaign_slug,
             character_slug,
             anchor="character-inventory-manager",
-            success_message="Supplemental equipment removed.",
+            success_message="Inventory item removed.",
             action=lambda record: apply_equipment_catalog_edit(
                 campaign_slug,
                 record.definition,
