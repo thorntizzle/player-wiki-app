@@ -85,6 +85,49 @@ function Resolve-FlyctlExecutable {
     throw "flyctl executable not found. Pass -FlyctlPath or install flyctl."
 }
 
+function Get-SavedFlyAccessToken {
+    $configPath = Join-Path $HOME ".fly\config.yml"
+    if (-not (Test-Path $configPath)) {
+        return $null
+    }
+
+    try {
+        $configContent = Get-Content $configPath -Raw -ErrorAction Stop
+    } catch {
+        return $null
+    }
+
+    $match = [regex]::Match($configContent, '(?m)^access_token:\s*(.+?)\s*$')
+    if (-not $match.Success) {
+        return $null
+    }
+
+    $token = $match.Groups[1].Value.Trim().Trim("'").Trim('"')
+    if ([string]::IsNullOrWhiteSpace($token)) {
+        return $null
+    }
+
+    return $token
+}
+
+function Ensure-FlyAccessToken {
+    if (-not [string]::IsNullOrWhiteSpace($env:FLY_ACCESS_TOKEN)) {
+        return
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($env:FLYCTL_ACCESS_TOKEN)) {
+        return
+    }
+
+    $savedToken = Get-SavedFlyAccessToken
+    if ([string]::IsNullOrWhiteSpace($savedToken)) {
+        return
+    }
+
+    $env:FLY_ACCESS_TOKEN = $savedToken
+    Write-Host "Using saved Fly access token from local config for this process."
+}
+
 function Resolve-GitExecutable {
     $command = Get-Command "git" -ErrorAction SilentlyContinue
     if ($command) {
@@ -241,6 +284,7 @@ function Restore-LocalState {
 }
 
 function Prepare-FlyCampaigns {
+    Ensure-FlyAccessToken
     Write-Host "Preparing Fly campaigns volume..."
     $arguments = @(
         (Join-Path $projectRoot "ops.py"),
@@ -263,6 +307,7 @@ function Sync-FromFly {
         throw "Sync is destructive. Re-run with -ForceSyncFromFly."
     }
 
+    Ensure-FlyAccessToken
     Write-Host "Mirroring live Fly state into the local app..."
     $arguments = @(
         (Join-Path $projectRoot "ops.py"),
@@ -295,6 +340,7 @@ function Deploy-Fly {
         throw "Set PLAYER_WIKI_FLY_APP or pass -FlyApp with the real Fly app name before deploying."
     }
 
+    Ensure-FlyAccessToken
     $resolvedFlyctl = Resolve-FlyctlExecutable
     $configPath = Join-Path $projectRoot "fly.toml"
     $metadata = Get-DeployBuildMetadata

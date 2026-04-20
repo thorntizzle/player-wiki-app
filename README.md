@@ -169,6 +169,8 @@ Recommended workflow for real deploys:
 
 That keeps the real app identifier out of Git while still making the normal deploy path deterministic.
 
+If `flyctl auth whoami` starts reporting `no access token available` in a shell even though `C:\Users\thorn\.fly\config.yml` still has a saved login, `local.ps1` and the shared Python Fly helpers now fall back to that saved token for the current process. That keeps normal deploy and sync flows working without storing the token in tracked repo files or rewriting the persisted Fly login state.
+
 For live content automation, use bearer tokens against `/api/v1/campaigns/<campaign-slug>/...`. DM/admin tokens can manage:
 
 - campaign config values such as `current_session`

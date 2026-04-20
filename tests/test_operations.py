@@ -10,9 +10,11 @@ from pathlib import Path
 
 from player_wiki.operations import (
     FlyDatabasePullResult,
+    build_flyctl_environment,
     create_backup_archive,
     resolve_fly_machine_id,
     restore_backup_archive,
+    run_flyctl_command,
     sync_local_state_from_fly,
 )
 
@@ -164,6 +166,68 @@ def test_resolve_fly_machine_id_prefers_started_machine(monkeypatch):
     monkeypatch.setattr("player_wiki.operations.run_flyctl_command", fake_run_flyctl_command)
 
     assert resolve_fly_machine_id(flyctl_path="flyctl", app_name="example-app") == "started-id"
+
+
+def test_build_flyctl_environment_loads_saved_token_from_local_fly_config(tmp_path):
+    fly_dir = tmp_path / ".fly"
+    fly_dir.mkdir()
+    (fly_dir / "config.yml").write_text('access_token: "saved-token"\n', encoding="utf-8")
+
+    env = {
+        "HOME": str(tmp_path),
+        "USERPROFILE": str(tmp_path),
+    }
+
+    resolved_env = build_flyctl_environment(env)
+
+    assert resolved_env["FLY_ACCESS_TOKEN"] == "saved-token"
+
+
+def test_build_flyctl_environment_keeps_existing_shell_token(tmp_path):
+    fly_dir = tmp_path / ".fly"
+    fly_dir.mkdir()
+    (fly_dir / "config.yml").write_text('access_token: "saved-token"\n', encoding="utf-8")
+
+    env = {
+        "HOME": str(tmp_path),
+        "USERPROFILE": str(tmp_path),
+        "FLY_ACCESS_TOKEN": "shell-token",
+    }
+
+    resolved_env = build_flyctl_environment(env)
+
+    assert resolved_env["FLY_ACCESS_TOKEN"] == "shell-token"
+
+
+def test_run_flyctl_command_passes_resolved_environment(monkeypatch, tmp_path):
+    fly_dir = tmp_path / ".fly"
+    fly_dir.mkdir()
+    (fly_dir / "config.yml").write_text("access_token: saved-token\n", encoding="utf-8")
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.delenv("FLY_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("FLYCTL_ACCESS_TOKEN", raising=False)
+
+    captured = {}
+
+    def fake_run(command, *, check, capture_output, text, env):
+        captured["command"] = command
+        captured["check"] = check
+        captured["capture_output"] = capture_output
+        captured["text"] = text
+        captured["env"] = env
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    run_flyctl_command("flyctl", ["status", "-a", "example-app"])
+
+    assert captured["command"] == ["flyctl", "status", "-a", "example-app"]
+    assert captured["check"] is True
+    assert captured["capture_output"] is True
+    assert captured["text"] is True
+    assert captured["env"]["FLY_ACCESS_TOKEN"] == "saved-token"
 
 
 def test_sync_local_state_from_fly_restores_db_and_campaigns(tmp_path, monkeypatch):

@@ -85,6 +85,47 @@ def default_flyctl_path() -> str:
     return "flyctl"
 
 
+def load_saved_fly_access_token(env: dict[str, str] | None = None) -> str | None:
+    effective_env = dict(os.environ if env is None else env)
+    if str(effective_env.get("FLY_ACCESS_TOKEN", "")).strip():
+        return None
+    if str(effective_env.get("FLYCTL_ACCESS_TOKEN", "")).strip():
+        return None
+
+    home_dir = str(effective_env.get("HOME") or effective_env.get("USERPROFILE") or Path.home()).strip()
+    if not home_dir:
+        return None
+
+    config_path = Path(home_dir) / ".fly" / "config.yml"
+    if not config_path.exists():
+        return None
+
+    try:
+        config_content = config_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+    match = re.search(r"(?m)^access_token:\s*(.+?)\s*$", config_content)
+    if match is None:
+        return None
+
+    token = match.group(1).strip().strip("'\"")
+    return token or None
+
+
+def build_flyctl_environment(env: dict[str, str] | None = None) -> dict[str, str]:
+    resolved_env = dict(os.environ if env is None else env)
+    if str(resolved_env.get("FLY_ACCESS_TOKEN", "")).strip():
+        return resolved_env
+    if str(resolved_env.get("FLYCTL_ACCESS_TOKEN", "")).strip():
+        return resolved_env
+
+    saved_token = load_saved_fly_access_token(env=resolved_env)
+    if saved_token:
+        resolved_env["FLY_ACCESS_TOKEN"] = saved_token
+    return resolved_env
+
+
 def sanitize_backup_label(label: str | None) -> str:
     if not label:
         return ""
@@ -192,6 +233,7 @@ def run_flyctl_command(
         check=True,
         capture_output=capture_output,
         text=True,
+        env=build_flyctl_environment(),
     )
 
 
