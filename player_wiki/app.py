@@ -3122,6 +3122,7 @@ def create_app() -> Flask:
             record,
             include_player_notes_section=not is_session_mode,
             systems_service=get_systems_service(),
+            campaign_page_records=campaign_page_records,
         )
         if notes_draft is not None:
             character["player_notes_markdown"] = notes_draft
@@ -3372,6 +3373,7 @@ def create_app() -> Flask:
                     record,
                     include_player_notes_section=True,
                     systems_service=get_systems_service(),
+                    campaign_page_records=list_visible_character_page_records(campaign_slug, campaign),
                 ),
                 edit_context=edit_context,
                 active_nav="characters",
@@ -3396,6 +3398,7 @@ def create_app() -> Flask:
                     record,
                     include_player_notes_section=True,
                     systems_service=get_systems_service(),
+                    campaign_page_records=list_visible_character_page_records(campaign_slug, campaign),
                 ),
                 retraining_context=retraining_context,
                 active_nav="characters",
@@ -3803,6 +3806,7 @@ def create_app() -> Flask:
                 record,
                 include_player_notes_section=True,
                 systems_service=get_systems_service(),
+                campaign_page_records=list_visible_character_page_records(campaign_slug, campaign),
             )
             if notes_draft is not None:
                 character["player_notes_markdown"] = notes_draft
@@ -4606,6 +4610,7 @@ def create_app() -> Flask:
             record,
             include_player_notes_section=False,
             systems_service=get_systems_service(),
+            campaign_page_records=list_visible_character_page_records(campaign_slug, campaign),
         )
         equipment_state_manager = build_character_equipment_state_context(
             campaign_slug,

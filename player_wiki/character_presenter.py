@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from copy import deepcopy
 import re
 from typing import Any
 
 import markdown
 
 from .character_builder import (
+    CharacterBuildError,
     _format_weight_value,
     _spell_access_badge_label,
     _spell_payload_is_always_prepared,
     _spell_payload_map_key,
+    normalize_definition_to_native_model,
 )
 from .character_models import CharacterRecord
 from .character_profile import (
@@ -19,6 +22,7 @@ from .character_profile import (
     profile_primary_subclass_name,
     profile_primary_subclass_ref,
 )
+from .character_service import merge_state_with_definition
 from .character_spell_slots import normalize_spell_slot_lane_id, spell_slot_lanes_from_spellcasting
 from .models import Campaign
 from .repository import build_alias_index, normalize_lookup, render_obsidian_links
@@ -116,9 +120,21 @@ def present_character_detail(
     *,
     include_player_notes_section: bool = True,
     systems_service: Any | None = None,
+    campaign_page_records: list[Any] | None = None,
 ) -> dict[str, Any]:
     definition = record.definition
-    state = dict(record.state_record.state or {})
+    state = deepcopy(record.state_record.state or {})
+    if systems_service is not None:
+        try:
+            definition = normalize_definition_to_native_model(
+                definition,
+                systems_service=systems_service,
+                campaign_page_records=campaign_page_records,
+            )
+            state = merge_state_with_definition(definition, state)
+        except (CharacterBuildError, TypeError, ValueError):
+            definition = record.definition
+            state = deepcopy(record.state_record.state or {})
     vitals = dict(state.get("vitals") or {})
     stats = dict(definition.stats or {})
     profile = dict(definition.profile or {})

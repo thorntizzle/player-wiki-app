@@ -3249,7 +3249,10 @@ def _build_common_builder_static_bundle(
             "feat_options": feat_options,
             "feat_catalog": _build_feat_catalog(feat_options),
             "optionalfeature_catalog": _build_entry_slug_catalog(optionalfeature_entries),
-            "item_catalog": _build_item_catalog(item_entries),
+            "item_catalog": _attach_campaign_item_page_support(
+                _build_item_catalog(item_entries),
+                page_records,
+            ),
             "spell_catalog": _build_spell_catalog(spell_entries),
             "campaign_feature_options": _build_campaign_page_choice_options(
                 page_records,
@@ -5810,6 +5813,11 @@ def _derive_definition_core_sheet_payloads(
         systems_service=systems_service,
         campaign_page_records=campaign_page_records,
     )
+    normalized_equipment = _normalize_equipment_payloads(list(sanitized_definition.equipment_catalog or []))
+    item_effect_entries = _active_item_effect_entries(
+        normalized_equipment,
+        item_catalog=effective_item_catalog,
+    )
     ability_scores = _ability_scores_from_definition(sanitized_definition)
     campaign_feat_selections = _campaign_option_feat_selections_from_features(
         list(sanitized_definition.features or [])
@@ -5823,6 +5831,10 @@ def _derive_definition_core_sheet_payloads(
         selected_choices=feat_selected_choices,
         strict=False,
     )
+    ability_scores = _apply_item_effect_ability_score_minimums(
+        ability_scores,
+        item_effect_entries=item_effect_entries,
+    )
     current_level = _resolve_native_character_level(sanitized_definition)
     proficiency_bonus = (
         _proficiency_bonus_for_level(current_level)
@@ -5835,7 +5847,6 @@ def _derive_definition_core_sheet_payloads(
         current_level=max(current_level, 1),
         class_row_levels=_profile_class_row_level_map(sanitized_definition.profile),
     )
-    normalized_equipment = _normalize_equipment_payloads(list(sanitized_definition.equipment_catalog or []))
     normalized_payload = deepcopy(sanitized_definition.to_dict())
     normalized_payload["features"] = normalized_features
     normalized_payload["equipment_catalog"] = normalized_equipment
@@ -5874,6 +5885,25 @@ def _derive_definition_core_sheet_payloads(
         resolved_class_rows=list(resolved_entries.get("selected_class_rows") or []),
         spell_catalog=effective_spell_catalog,
     )
+    derived_spellcasting["spells"] = _apply_item_effect_spell_grants(
+        list(derived_spellcasting.get("spells") or []),
+        item_effect_entries=item_effect_entries,
+        spell_catalog=effective_spell_catalog,
+        current_level=max(current_level, 1),
+    )
+    derived_spellcasting["source_rows"] = _derive_spell_source_rows(
+        list(derived_spellcasting.get("spells") or []),
+        ability_scores=ability_scores,
+        proficiency_bonus=proficiency_bonus,
+    )
+    merged_resource_templates = _merge_resource_templates(
+        list(sanitized_definition.resource_templates or []),
+        derived_resource_templates,
+    )
+    merged_resource_templates = _apply_item_effect_resource_template_bonuses(
+        merged_resource_templates,
+        item_effect_entries=item_effect_entries,
+    )
     return {
         "features": normalized_features,
         "equipment_catalog": normalized_equipment,
@@ -5885,10 +5915,7 @@ def _derive_definition_core_sheet_payloads(
         ),
         "spellcasting": derived_spellcasting,
         "resource_templates": _normalize_resource_template_payloads(
-            _merge_resource_templates(
-                list(sanitized_definition.resource_templates or []),
-                derived_resource_templates,
-            )
+            merged_resource_templates
         ),
     }
 
@@ -7678,6 +7705,104 @@ _CAMPAIGN_ITEM_SHARED_WEAPON_BONUS_PATTERNS = (
 )
 _CAMPAIGN_ITEM_ATTACK_BONUS_PATTERN = re.compile(r"\+(\d+)\s+bonus to attack rolls", re.IGNORECASE)
 _CAMPAIGN_ITEM_DAMAGE_BONUS_PATTERN = re.compile(r"\+(\d+)\s+bonus to damage rolls", re.IGNORECASE)
+_CAMPAIGN_ITEM_SPECIAL_EFFECTS_BY_TITLE = {
+    normalize_lookup("Hourglass Pendant"): {
+        "spell_support": [
+            {
+                "source": {
+                    "id": "spell-source:item:hourglass-pendant",
+                    "title": "Hourglass Pendant",
+                    "kind": "item",
+                    "ability_key": "int",
+                },
+                "grants": {
+                    "_": [
+                        {
+                            "spell": "Gift of Alacrity",
+                            "access_type": SPELL_ACCESS_TYPE_FREE_CAST,
+                            "access_uses": 1,
+                            "access_reset_on": SPELL_ACCESS_RESET_LONG_REST,
+                        }
+                    ]
+                },
+            }
+        ],
+        "resource_template_bonuses": [
+            {
+                "id": "chronal-shift",
+                "bonus": 1,
+            }
+        ],
+    },
+    normalize_lookup("Psionic Circlet"): {
+        "ability_score_minimums": {
+            "int": 14,
+        },
+        "resource_template_bonuses": [
+            {
+                "id": "psionic-power-psionic-energy",
+                "bonus": 1,
+            }
+        ],
+    },
+    normalize_lookup("Censer of Last Light"): {
+        "spell_support": [
+            {
+                "source": {
+                    "id": "spell-source:item:censer-of-last-light",
+                    "title": "Censer of Last Light",
+                    "kind": "item",
+                    "ability_key": "wis",
+                },
+                "grants": {
+                    "_": [
+                        {
+                            "spell": "Spare the Dying",
+                            "mark": "Cantrip",
+                            "access_type": SPELL_ACCESS_TYPE_AT_WILL,
+                        }
+                    ]
+                },
+            }
+        ],
+    },
+    normalize_lookup("Staff of the Crescent Moon"): {
+        "spell_support": [
+            {
+                "source": {
+                    "id": "spell-source:item:staff-of-the-crescent-moon",
+                    "title": "Staff of the Crescent Moon",
+                    "kind": "item",
+                    "ability_key": "cha",
+                },
+                "grants": {
+                    "_": [
+                        {
+                            "spell": "Sleep",
+                            "access_type": SPELL_ACCESS_TYPE_FREE_CAST,
+                            "access_uses": 1,
+                            "access_reset_on": SPELL_ACCESS_RESET_LONG_REST,
+                        }
+                    ]
+                },
+            }
+        ],
+        "defensive_rules": [
+            {
+                "id": "item:staff-of-the-crescent-moon:sleep-ward",
+                "title": "Staff of the Crescent Moon",
+                "condition": "Applies only while the staff is equipped and attuned.",
+                "effects": [
+                    {
+                        "kind": "immunity",
+                        "label": "Sleep ward",
+                        "summary": "You can't be magically put to sleep.",
+                    }
+                ],
+            }
+        ],
+    },
+}
 
 
 def _attach_campaign_item_page_support(
@@ -7734,7 +7859,6 @@ def _build_campaign_item_support_metadata(
     *,
     weapon_profiles: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    del title
     lines = [str(line or "").strip() for line in str(body_markdown or "").splitlines() if str(line or "").strip()]
     classification_line = ""
     for line in lines:
@@ -7788,7 +7912,58 @@ def _build_campaign_item_support_metadata(
     damage_bonus_match = _CAMPAIGN_ITEM_DAMAGE_BONUS_PATTERN.search(body_text)
     if damage_bonus_match is not None:
         metadata["bonus_weapon_damage"] = int(damage_bonus_match.group(1) or 0)
+    special_effect_metadata = _campaign_item_special_effect_metadata(title)
+    if special_effect_metadata:
+        metadata = _merge_campaign_item_support_metadata(
+            metadata,
+            special_effect_metadata,
+        )
     return metadata
+
+
+def _campaign_item_special_effect_metadata(title: str) -> dict[str, Any]:
+    payload = dict(
+        _CAMPAIGN_ITEM_SPECIAL_EFFECTS_BY_TITLE.get(
+            normalize_lookup(str(title or "").strip()),
+            {},
+        )
+    )
+    return deepcopy(payload) if payload else {}
+
+
+def _merge_campaign_item_support_metadata(
+    base_metadata: dict[str, Any],
+    extra_metadata: dict[str, Any] | None,
+) -> dict[str, Any]:
+    merged = dict(base_metadata or {})
+    for key, value in dict(extra_metadata or {}).items():
+        if value is None or value == "" or value == [] or value == {}:
+            continue
+        if key in {"spell_support", "defensive_rules", "resource_template_bonuses"}:
+            merged[key] = [
+                dict(item or {}) if isinstance(item, dict) else item
+                for item in list(merged.get(key) or [])
+            ] + [
+                dict(item or {}) if isinstance(item, dict) else item
+                for item in list(value or [])
+            ]
+            continue
+        if key == "ability_score_minimums":
+            merged[key] = {
+                **{
+                    normalize_lookup(ability_key): int(minimum)
+                    for ability_key, minimum in dict(merged.get(key) or {}).items()
+                    if normalize_lookup(ability_key) in ABILITY_KEYS
+                },
+                **{
+                    normalize_lookup(ability_key): int(minimum)
+                    for ability_key, minimum in dict(value or {}).items()
+                    if normalize_lookup(ability_key) in ABILITY_KEYS
+                },
+            }
+            continue
+        merged[key] = deepcopy(value)
+    return merged
 
 
 def _resolve_campaign_item_weapon_title(
@@ -9791,6 +9966,176 @@ def _resolve_item_support_metadata(
     return dict(dict(resolved_campaign_item_support or {}).get("metadata") or {})
 
 
+def _campaign_item_effect_source_row_ids() -> set[str]:
+    source_row_ids: set[str] = set()
+    for metadata in list(_CAMPAIGN_ITEM_SPECIAL_EFFECTS_BY_TITLE.values()):
+        for block in list(dict(metadata or {}).get("spell_support") or []):
+            support_payload = _spell_source_support_payload(block)
+            source_row_id = str(support_payload.get("spell_source_row_id") or "").strip()
+            if source_row_id:
+                source_row_ids.add(source_row_id)
+    return source_row_ids
+
+
+def _item_effect_metadata(
+    metadata: dict[str, Any] | None,
+) -> dict[str, Any]:
+    payload = dict(metadata or {})
+    effect_payload: dict[str, Any] = {}
+    spell_support = [dict(item or {}) for item in list(payload.get("spell_support") or []) if isinstance(item, dict)]
+    if spell_support:
+        effect_payload["spell_support"] = spell_support
+    ability_score_minimums = {
+        normalize_lookup(ability_key): int(minimum)
+        for ability_key, minimum in dict(payload.get("ability_score_minimums") or {}).items()
+        if normalize_lookup(ability_key) in ABILITY_KEYS
+    }
+    if ability_score_minimums:
+        effect_payload["ability_score_minimums"] = ability_score_minimums
+    resource_template_bonuses = []
+    for entry in list(payload.get("resource_template_bonuses") or []):
+        bonus_payload = dict(entry or {})
+        tracker_id = str(
+            bonus_payload.get("id")
+            or bonus_payload.get("tracker_id")
+            or ""
+        ).strip()
+        if not tracker_id:
+            continue
+        try:
+            bonus_value = int(bonus_payload.get("bonus") or 0)
+        except (TypeError, ValueError):
+            continue
+        if not bonus_value:
+            continue
+        resource_template_bonuses.append({"id": tracker_id, "bonus": bonus_value})
+    if resource_template_bonuses:
+        effect_payload["resource_template_bonuses"] = resource_template_bonuses
+    defensive_rules = [dict(rule or {}) for rule in list(payload.get("defensive_rules") or []) if isinstance(rule, dict)]
+    if defensive_rules:
+        effect_payload["defensive_rules"] = defensive_rules
+    return effect_payload
+
+
+def _item_effect_is_active(item: dict[str, Any], *, metadata: dict[str, Any]) -> bool:
+    if not bool(item.get("is_equipped", False)):
+        return False
+    if _metadata_requires_attunement(metadata.get("attunement")) and not bool(item.get("is_attuned", False)):
+        return False
+    return True
+
+
+def _active_item_effect_entries(
+    equipment_catalog: list[dict[str, Any]] | None,
+    *,
+    item_catalog: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for item in list(equipment_catalog or []):
+        payload = dict(item or {})
+        metadata = _resolve_item_support_metadata(payload, item_catalog)
+        effect_payload = _item_effect_metadata(metadata)
+        if not effect_payload or not _item_effect_is_active(payload, metadata=metadata):
+            continue
+        entries.append(
+            {
+                "item_id": str(payload.get("id") or "").strip(),
+                "item_name": str(payload.get("name") or "").strip(),
+                "page_ref": str(payload.get("page_ref") or "").strip(),
+                **effect_payload,
+            }
+        )
+    return entries
+
+
+def _apply_item_effect_ability_score_minimums(
+    ability_scores: dict[str, int],
+    *,
+    item_effect_entries: list[dict[str, Any]] | None = None,
+) -> dict[str, int]:
+    adjusted_scores = {
+        ability_key: int(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE) or DEFAULT_ABILITY_SCORE)
+        for ability_key in ABILITY_KEYS
+    }
+    for entry in list(item_effect_entries or []):
+        for ability_key, minimum in dict(entry.get("ability_score_minimums") or {}).items():
+            normalized_ability = normalize_lookup(ability_key)
+            if normalized_ability not in adjusted_scores:
+                continue
+            adjusted_scores[normalized_ability] = max(adjusted_scores[normalized_ability], int(minimum or 0))
+    return adjusted_scores
+
+
+def _apply_item_effect_spell_grants(
+    spell_payloads: list[dict[str, Any]] | None,
+    *,
+    item_effect_entries: list[dict[str, Any]] | None = None,
+    spell_catalog: dict[str, Any],
+    current_level: int,
+) -> list[dict[str, Any]]:
+    spells_by_key: dict[str, dict[str, Any]] = {}
+    known_source_row_ids = _campaign_item_effect_source_row_ids()
+    for spell_payload in _normalize_spell_payloads(list(spell_payloads or [])):
+        if str(spell_payload.get("spell_source_row_id") or "").strip() in known_source_row_ids:
+            continue
+        payload_key = _spell_payload_map_key(spell_payload)
+        if payload_key:
+            spells_by_key[payload_key] = dict(spell_payload)
+    feature_entries = [
+        {
+            "campaign_option": {
+                "spell_support": [dict(block or {}) for block in list(entry.get("spell_support") or []) if isinstance(block, dict)]
+            }
+        }
+        for entry in list(item_effect_entries or [])
+        if list(entry.get("spell_support") or [])
+    ]
+    _apply_spell_support_grants_to_payloads(
+        spells_by_key,
+        grants=_automatic_spell_support_grants(
+            selected_class=None,
+            selected_subclass=None,
+            target_level=max(int(current_level or 1), 1),
+            feature_entries=feature_entries,
+        ),
+        spell_catalog=spell_catalog,
+    )
+    return _normalize_spell_payloads(list(spells_by_key.values()))
+
+
+def _apply_item_effect_resource_template_bonuses(
+    resource_templates: list[dict[str, Any]] | None,
+    *,
+    item_effect_entries: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    adjusted_templates = [dict(template or {}) for template in list(resource_templates or [])]
+    bonus_by_template_id: dict[str, int] = {}
+    for entry in list(item_effect_entries or []):
+        for bonus_payload in list(entry.get("resource_template_bonuses") or []):
+            template_id = str(dict(bonus_payload or {}).get("id") or "").strip()
+            if not template_id:
+                continue
+            bonus_by_template_id[template_id] = int(bonus_by_template_id.get(template_id) or 0) + int(
+                dict(bonus_payload or {}).get("bonus") or 0
+            )
+    if not bonus_by_template_id:
+        return adjusted_templates
+    for template in adjusted_templates:
+        template_id = str(template.get("id") or "").strip()
+        bonus = int(bonus_by_template_id.get(template_id) or 0)
+        if not template_id or not bonus:
+            continue
+        max_value = template.get("max")
+        if max_value in {"", None}:
+            continue
+        base_max = int(max_value)
+        initial_current = template.get("initial_current")
+        base_initial = base_max if initial_current in {"", None} else int(initial_current)
+        template["max"] = base_max + bonus
+        template["initial_current"] = base_initial + bonus
+    return adjusted_templates
+
+
 def _active_weapon_profile_bonus(item: dict[str, Any], profile: dict[str, Any], *, key: str) -> int:
     if not bool(item.get("is_equipped", False)):
         return 0
@@ -10287,6 +10632,29 @@ def _derive_defensive_state_from_character_inputs(
                 ],
             }
         )
+    for item_effect_entry in _active_item_effect_entries(
+        equipment_catalog,
+        item_catalog=item_catalog,
+    ):
+        for rule_payload in list(item_effect_entry.get("defensive_rules") or []):
+            rule = dict(rule_payload or {})
+            effects = [
+                dict(effect or {})
+                for effect in list(rule.get("effects") or [])
+                if isinstance(effect, dict)
+            ]
+            if not effects:
+                continue
+            rules.append(
+                {
+                    "id": str(rule.get("id") or f"item:{slugify(str(item_effect_entry.get('item_name') or 'rule'))}").strip(),
+                    "title": str(rule.get("title") or item_effect_entry.get("item_name") or "Item rule").strip() or "Item rule",
+                    "active": True,
+                    "condition": str(rule.get("condition") or "").strip(),
+                    "inactive_reason": "",
+                    "effects": effects,
+                }
+            )
     return {
         "armor_state": armor_state,
         "rules": rules,

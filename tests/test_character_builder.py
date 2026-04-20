@@ -10,8 +10,10 @@ import yaml
 from player_wiki.character_campaign_options import normalize_campaign_character_option
 from player_wiki.character_campaign_progression import build_campaign_page_progression_entries
 from player_wiki.character_builder import (
+    ABILITY_LABELS,
     CHARACTER_BUILDER_VERSION,
     _attach_campaign_item_page_support,
+    _build_spell_catalog,
     _list_campaign_enabled_entries,
     _prepared_spell_count_for_level,
     _recalculate_definition_attacks,
@@ -31,6 +33,7 @@ from player_wiki.character_adjustments import apply_manual_stat_adjustments
 from player_wiki.character_service import build_initial_state, merge_state_with_definition
 from player_wiki.character_models import CharacterDefinition, CharacterImportMetadata
 from player_wiki.managed_resource_registry import MANAGED_RESOURCE_TRACKER_INVENTORY
+from player_wiki.repository import slugify
 from player_wiki.systems_models import SystemsEntryRecord
 
 
@@ -8693,6 +8696,250 @@ def test_recalculate_definition_attacks_uses_campaign_item_page_weapon_bonus_met
     assert attack["damage_type"] == "bludgeoning"
     assert attack["page_ref"] == "items/censer-of-last-light"
     assert attack["equipment_refs"] == ["censer-of-last-light-1"]
+
+
+def test_normalize_definition_to_native_model_applies_hourglass_pendant_spell_and_resource_bonus():
+    gift_of_alacrity = _systems_entry(
+        "spell",
+        "egw-spell-gift-of-alacrity",
+        "Gift of Alacrity",
+        metadata={"level": 1},
+    )
+    definition = _minimal_character_definition("olin-itador", "Olin Itador")
+    definition.profile["class_level_text"] = "Wizard 2"
+    definition.profile["classes"] = [
+        {
+            "row_id": "class-row-1",
+            "class_name": "Wizard",
+            "subclass_name": "Chronurgy Magic",
+            "level": 2,
+        }
+    ]
+    definition.features = [
+        {
+            "id": "chronal-shift-1",
+            "name": "Chronal Shift",
+            "category": "subclass_feature",
+            "source": "EGW",
+            "description_markdown": "",
+            "class_row_id": "class-row-1",
+        }
+    ]
+    definition.equipment_catalog = [
+        {
+            "id": "hourglass-pendant-1",
+            "name": "Hourglass Pendant",
+            "default_quantity": 1,
+            "weight": "--",
+            "notes": "",
+            "is_equipped": True,
+            "is_attuned": True,
+            "page_ref": "items/hourglass-pendant",
+        }
+    ]
+
+    item_catalog = _attach_campaign_item_page_support(
+        {},
+        [
+            _campaign_page_record(
+                "items/hourglass-pendant",
+                "Hourglass Pendant",
+                section="Items",
+                body_markdown=(
+                    "*Wondrous item, very rare (requires attunement by a chronurgy wizard)*\n\n"
+                    "While wearing this pendant, you can cast Gift of Alacrity once without expending a spell slot. "
+                    "You regain that use when you finish a long rest. While attuned to the pendant, you gain one additional use of Chronal Shift.\n"
+                ),
+            )
+        ],
+    )
+
+    normalized = normalize_definition_to_native_model(
+        definition,
+        item_catalog=item_catalog,
+        spell_catalog=_build_spell_catalog([gift_of_alacrity]),
+    )
+    resources_by_id = {resource["id"]: resource for resource in normalized.resource_templates}
+    spells_by_name = {spell["name"]: spell for spell in normalized.spellcasting["spells"]}
+    source_rows = {
+        row["source_row_id"]: row
+        for row in list(normalized.spellcasting.get("source_rows") or [])
+    }
+
+    assert resources_by_id["chronal-shift"]["max"] == 3
+    assert resources_by_id["chronal-shift"]["initial_current"] == 3
+    assert spells_by_name["Gift of Alacrity"]["spell_source_row_id"] == "spell-source:item:hourglass-pendant"
+    assert spells_by_name["Gift of Alacrity"]["spell_access_type"] == "free_cast"
+    assert spells_by_name["Gift of Alacrity"]["spell_access_uses"] == 1
+    assert spells_by_name["Gift of Alacrity"]["spell_access_reset_on"] == "long_rest"
+    assert source_rows["spell-source:item:hourglass-pendant"]["title"] == "Hourglass Pendant"
+    assert source_rows["spell-source:item:hourglass-pendant"]["spellcasting_ability"] == "Intelligence"
+
+
+def test_normalize_definition_to_native_model_applies_psionic_circlet_int_floor_and_resource_bonus():
+    definition = _minimal_character_definition("zigzag-blackscar", "Zigzag Blackscar")
+    definition.profile["class_level_text"] = "Fighter 3"
+    definition.profile["classes"] = [
+        {
+            "row_id": "class-row-1",
+            "class_name": "Fighter",
+            "subclass_name": "Psi Warrior",
+            "level": 3,
+        }
+    ]
+    definition.stats["ability_scores"]["int"] = {
+        "score": 10,
+        "modifier": 0,
+        "save_bonus": 0,
+    }
+    definition.features = [
+        {
+            "id": "psionic-power-1",
+            "name": "Psionic Power",
+            "category": "subclass_feature",
+            "source": "TCE",
+            "description_markdown": "",
+            "class_row_id": "class-row-1",
+            "systems_ref": {
+                "entry_type": "subclassfeature",
+                "slug": "tce-subclassfeature-psionic-power",
+                "title": "Psionic Power",
+                "source_id": "TCE",
+            },
+            "page_ref": "mechanics/psi-warrior/psionic-power",
+        }
+    ]
+    definition.equipment_catalog = [
+        {
+            "id": "psionic-circlet-1",
+            "name": "Psionic Circlet",
+            "default_quantity": 1,
+            "weight": "--",
+            "notes": "",
+            "is_equipped": True,
+            "is_attuned": True,
+            "page_ref": "items/psionic-circlet",
+        }
+    ]
+
+    item_catalog = _attach_campaign_item_page_support(
+        {},
+        [
+            _campaign_page_record(
+                "items/psionic-circlet",
+                "Psionic Circlet",
+                section="Items",
+                body_markdown=(
+                    "*Wondrous item, rare (requires attunement)*\n\n"
+                    "While wearing this circlet, your Intelligence score is 14 if it was lower. "
+                    "You also gain one additional Psionic Energy die.\n"
+                ),
+            )
+        ],
+    )
+
+    normalized = normalize_definition_to_native_model(
+        definition,
+        item_catalog=item_catalog,
+    )
+    resources_by_id = {resource["id"]: resource for resource in normalized.resource_templates}
+
+    assert normalized.stats["ability_scores"]["int"]["score"] == 14
+    assert normalized.stats["ability_scores"]["int"]["modifier"] == 2
+    assert resources_by_id["psionic-power-psionic-energy"]["max"] == 5
+    assert resources_by_id["psionic-power-psionic-energy"]["initial_current"] == 5
+
+
+@pytest.mark.parametrize(
+    ("item_name", "page_ref", "spell_entry", "ability_key", "expected_spell_name", "body_markdown", "expected_rule_title"),
+    [
+        (
+            "Censer of Last Light",
+            "items/censer-of-last-light",
+            _systems_entry("spell", "phb-spell-spare-the-dying", "Spare the Dying", metadata={"level": 0}),
+            "wis",
+            "Spare the Dying",
+            (
+                "*Wondrous item (holy symbol), rare (requires attunement by a cleric of Bryneth)*\n\n"
+                "While holding the censer, you can cast Spare the Dying at a range of 30 feet.\n"
+            ),
+            "",
+        ),
+        (
+            "Staff of the Crescent Moon",
+            "items/staff-of-the-crescent-moon",
+            _systems_entry("spell", "phb-spell-sleep", "Sleep", metadata={"level": 1}),
+            "cha",
+            "Sleep",
+            (
+                "*Weapon (quarterstaff), rare (requires attunement by a sorcerer)*\n\n"
+                "While attuned to the staff, you can't be magically put to sleep. "
+                "You can cast Sleep once without expending a spell slot, and you regain that use when you finish a long rest.\n"
+            ),
+            "Staff of the Crescent Moon",
+        ),
+    ],
+)
+def test_normalize_definition_to_native_model_applies_campaign_item_spell_support(
+    item_name,
+    page_ref,
+    spell_entry,
+    ability_key,
+    expected_spell_name,
+    body_markdown,
+    expected_rule_title,
+):
+    definition = _minimal_character_definition("glenn-hakewood", "Glenn Hakewood")
+    definition.equipment_catalog = [
+        {
+            "id": f"{slugify(item_name)}-1",
+            "name": item_name,
+            "default_quantity": 1,
+            "weight": "--",
+            "notes": "",
+            "is_equipped": True,
+            "is_attuned": True,
+            "page_ref": page_ref,
+        }
+    ]
+    item_catalog = _attach_campaign_item_page_support(
+        {},
+        [
+            _campaign_page_record(
+                page_ref,
+                item_name,
+                section="Items",
+                body_markdown=body_markdown,
+            )
+        ],
+    )
+
+    normalized = normalize_definition_to_native_model(
+        definition,
+        item_catalog=item_catalog,
+        spell_catalog=_build_spell_catalog([spell_entry]),
+    )
+    spells_by_name = {spell["name"]: spell for spell in normalized.spellcasting["spells"]}
+    source_rows = {
+        row["source_row_id"]: row
+        for row in list(normalized.spellcasting.get("source_rows") or [])
+    }
+    source_row_id = f"spell-source:item:{slugify(item_name)}"
+
+    assert spells_by_name[expected_spell_name]["spell_source_row_id"] == source_row_id
+    assert source_rows[source_row_id]["title"] == item_name
+    assert source_rows[source_row_id]["spellcasting_ability"] == ABILITY_LABELS[ability_key]
+    if expected_spell_name == "Spare the Dying":
+        assert spells_by_name[expected_spell_name]["spell_access_type"] == "at_will"
+    else:
+        assert spells_by_name[expected_spell_name]["spell_access_type"] == "free_cast"
+        assert spells_by_name[expected_spell_name]["spell_access_uses"] == 1
+        assert spells_by_name[expected_spell_name]["spell_access_reset_on"] == "long_rest"
+    defensive_rule_titles = [
+        rule["title"]
+        for rule in list((normalized.stats.get("defensive_state") or {}).get("rules") or [])
+    ]
+    assert (expected_rule_title in defensive_rule_titles) is bool(expected_rule_title)
 
 
 def test_normalize_definition_to_native_model_merges_linked_duplicate_equipment_rows_when_names_differ():
