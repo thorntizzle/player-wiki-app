@@ -47,6 +47,7 @@ from .auth import (
 from .character_builder import (
     CAMPAIGN_ITEMS_SECTION,
     CAMPAIGN_MECHANICS_SECTION,
+    _attach_campaign_item_page_support,
     _build_item_catalog,
     _build_spell_catalog,
     _list_campaign_enabled_entries,
@@ -1165,12 +1166,19 @@ def create_app() -> Flask:
         return str(payload.get("catalog_ref") or payload.get("id") or "").strip()
 
     def build_character_item_catalog(campaign_slug: str) -> dict[str, object]:
-        return _build_item_catalog(
-            _list_campaign_enabled_entries(
-                get_systems_service(),
-                campaign_slug,
-                "item",
-            )
+        return _attach_campaign_item_page_support(
+            _build_item_catalog(
+                _list_campaign_enabled_entries(
+                    get_systems_service(),
+                    campaign_slug,
+                    "item",
+                )
+            ),
+            [
+                page_record
+                for page_record in get_campaign_page_store().list_page_records(campaign_slug, include_body=True)
+                if str(getattr(getattr(page_record, "page", None), "section", "") or "").strip() == CHARACTER_ITEMS_SECTION
+            ],
         )
 
     def build_record_equipment_support_lookup(

@@ -7654,7 +7654,158 @@ def _build_item_catalog(item_entries: list[SystemsEntryRecord]) -> dict[str, Any
         "by_slug": by_slug,
         "phb_weapon_profiles": _load_phb_weapon_profiles(),
         "phb_armor_profiles": _load_phb_armor_profiles(),
+        "campaign_item_support_by_page_ref": {},
+        "campaign_item_support_by_title": {},
     }
+
+
+_CAMPAIGN_ITEM_CLASSIFICATION_RARITY_PATTERN = re.compile(
+    r"\b(very rare|legendary|artifact|uncommon|common|rare)\b",
+    re.IGNORECASE,
+)
+_CAMPAIGN_ITEM_CLASSIFICATION_WEAPON_PATTERN = re.compile(
+    r"\bweapon(?:\s*\(([^)]+)\)|\s*,\s*([^,]+))",
+    re.IGNORECASE,
+)
+_CAMPAIGN_ITEM_BODY_WEAPON_PATTERNS = (
+    re.compile(r"\bcan be wielded as (?:an? )?(?:\+\d+\s+)?magic ([a-z][a-z' -]+?)(?: that| which| with|[.,])", re.IGNORECASE),
+    re.compile(r"\bcan be used as (?:an? )?(?:\+\d+\s+)?magic ([a-z][a-z' -]+?)(?: that| which| with|[.,])", re.IGNORECASE),
+    re.compile(r"\bfunctions as (?:an? )?(?:\+\d+\s+)?magic ([a-z][a-z' -]+?)(?: that| which| with|[.,])", re.IGNORECASE),
+)
+_CAMPAIGN_ITEM_SHARED_WEAPON_BONUS_PATTERNS = (
+    re.compile(r"\+(\d+)\s+bonus to attack and damage rolls", re.IGNORECASE),
+    re.compile(r"\+(\d+)\s+bonus to attack rolls and damage rolls", re.IGNORECASE),
+)
+_CAMPAIGN_ITEM_ATTACK_BONUS_PATTERN = re.compile(r"\+(\d+)\s+bonus to attack rolls", re.IGNORECASE)
+_CAMPAIGN_ITEM_DAMAGE_BONUS_PATTERN = re.compile(r"\+(\d+)\s+bonus to damage rolls", re.IGNORECASE)
+
+
+def _attach_campaign_item_page_support(
+    item_catalog: dict[str, Any] | None,
+    campaign_page_records: list[Any] | None,
+) -> dict[str, Any]:
+    resolved_catalog = dict(item_catalog or _build_item_catalog([]))
+    by_page_ref = dict(resolved_catalog.get("campaign_item_support_by_page_ref") or {})
+    by_title = dict(resolved_catalog.get("campaign_item_support_by_title") or {})
+    weapon_profiles = dict(resolved_catalog.get("phb_weapon_profiles") or _load_phb_weapon_profiles())
+    for page_record in list(campaign_page_records or []):
+        support = _build_campaign_item_page_support(page_record, weapon_profiles=weapon_profiles)
+        if support is None:
+            continue
+        page_ref = str(support.get("page_ref") or "").strip()
+        title_key = normalize_lookup(str(support.get("title") or "").strip())
+        if page_ref and page_ref not in by_page_ref:
+            by_page_ref[page_ref] = support
+        if title_key and title_key not in by_title:
+            by_title[title_key] = support
+    resolved_catalog["campaign_item_support_by_page_ref"] = by_page_ref
+    resolved_catalog["campaign_item_support_by_title"] = by_title
+    return resolved_catalog
+
+
+def _build_campaign_item_page_support(
+    page_record: Any,
+    *,
+    weapon_profiles: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    page = getattr(page_record, "page", None)
+    page_ref = str(getattr(page_record, "page_ref", "") or "").strip()
+    title = str(getattr(page, "title", "") or "").strip()
+    section = str(getattr(page, "section", "") or "").strip()
+    if not page_ref or not title or section != CAMPAIGN_ITEMS_SECTION:
+        return None
+    metadata = _build_campaign_item_support_metadata(
+        title,
+        str(getattr(page_record, "body_markdown", "") or ""),
+        weapon_profiles=weapon_profiles,
+    )
+    if not metadata:
+        return None
+    return {
+        "page_ref": page_ref,
+        "title": title,
+        "metadata": metadata,
+    }
+
+
+def _build_campaign_item_support_metadata(
+    title: str,
+    body_markdown: str,
+    *,
+    weapon_profiles: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    del title
+    lines = [str(line or "").strip() for line in str(body_markdown or "").splitlines() if str(line or "").strip()]
+    classification_line = ""
+    for line in lines:
+        if line.startswith("*") and line.endswith("*"):
+            classification_line = line.strip("*").strip()
+            break
+    if not classification_line and lines:
+        classification_line = lines[0]
+
+    metadata: dict[str, Any] = {}
+    if classification_line:
+        rarity_match = _CAMPAIGN_ITEM_CLASSIFICATION_RARITY_PATTERN.search(classification_line)
+        if rarity_match is not None:
+            metadata["rarity"] = rarity_match.group(1).strip().lower()
+        if "requires attunement" in classification_line.lower():
+            metadata["attunement"] = classification_line
+        weapon_match = _CAMPAIGN_ITEM_CLASSIFICATION_WEAPON_PATTERN.search(classification_line)
+        if weapon_match is not None:
+            base_weapon = _resolve_campaign_item_weapon_title(
+                weapon_match.group(1) or weapon_match.group(2) or "",
+                weapon_profiles=weapon_profiles,
+            )
+            if base_weapon:
+                metadata["base_item"] = base_weapon
+
+    body_text = " ".join(lines)
+    if "attunement" not in metadata and "requires attunement" in body_text.lower():
+        metadata["attunement"] = "requires attunement"
+    if "base_item" not in metadata:
+        for pattern in _CAMPAIGN_ITEM_BODY_WEAPON_PATTERNS:
+            match = pattern.search(body_text)
+            if match is None:
+                continue
+            base_weapon = _resolve_campaign_item_weapon_title(match.group(1) or "", weapon_profiles=weapon_profiles)
+            if base_weapon:
+                metadata["base_item"] = base_weapon
+                break
+
+    shared_bonus_match = None
+    for pattern in _CAMPAIGN_ITEM_SHARED_WEAPON_BONUS_PATTERNS:
+        shared_bonus_match = pattern.search(body_text)
+        if shared_bonus_match is not None:
+            break
+    if shared_bonus_match is not None:
+        metadata["bonus_weapon"] = int(shared_bonus_match.group(1) or 0)
+        return metadata
+
+    attack_bonus_match = _CAMPAIGN_ITEM_ATTACK_BONUS_PATTERN.search(body_text)
+    if attack_bonus_match is not None:
+        metadata["bonus_weapon_attack"] = int(attack_bonus_match.group(1) or 0)
+    damage_bonus_match = _CAMPAIGN_ITEM_DAMAGE_BONUS_PATTERN.search(body_text)
+    if damage_bonus_match is not None:
+        metadata["bonus_weapon_damage"] = int(damage_bonus_match.group(1) or 0)
+    return metadata
+
+
+def _resolve_campaign_item_weapon_title(
+    raw_value: Any,
+    *,
+    weapon_profiles: dict[str, dict[str, Any]],
+) -> str:
+    profiles_by_norm = {
+        normalize_lookup(title): str(title or "").strip()
+        for title in list(weapon_profiles.keys())
+        if str(title or "").strip()
+    }
+    for candidate_key in _merge_name_candidates(raw_value):
+        title = profiles_by_norm.get(candidate_key)
+        if title:
+            return title
+    return ""
 
 
 def _build_spell_catalog(spell_entries: list[SystemsEntryRecord]) -> dict[str, Any]:
@@ -8595,9 +8746,15 @@ def describe_equipment_state_support(
 
     resolved_catalog = dict(item_catalog or {})
     resolved_entry = entry if isinstance(entry, SystemsEntryRecord) else _resolve_item_entry(item, resolved_catalog)
+    campaign_item_support = _resolve_campaign_item_page_support(item, resolved_catalog)
     weapon_profile = _resolve_weapon_profile(item, resolved_catalog)
     armor_profile = _resolve_armor_profile(item, resolved_catalog)
-    metadata = dict((resolved_entry.metadata if isinstance(resolved_entry, SystemsEntryRecord) else {}) or {})
+    metadata = _resolve_item_support_metadata(
+        item,
+        resolved_catalog,
+        entry=resolved_entry,
+        campaign_item_support=campaign_item_support,
+    )
     requires_attunement = _metadata_requires_attunement(metadata.get("attunement"))
     is_magic_item = _metadata_is_magic_item(metadata)
     supports_equipped_state = bool(weapon_profile is not None or armor_profile is not None or is_magic_item)
@@ -9402,6 +9559,7 @@ def _build_weapon_attack_contexts(
         profile = _resolve_weapon_profile(item, item_catalog)
         if profile is None:
             continue
+        campaign_item_support = _resolve_campaign_item_page_support(item, item_catalog)
         attack_name = str(item.get("name") or profile.get("title") or "").strip()
         if not attack_name:
             continue
@@ -9410,6 +9568,11 @@ def _build_weapon_attack_contexts(
             {
                 "item": dict(item),
                 "profile": dict(profile),
+                "page_ref": (
+                    dict(item).get("page_ref")
+                    or str((campaign_item_support or {}).get("page_ref") or "").strip()
+                    or None
+                ),
                 "attack_name": attack_name,
                 "ability_key": ability_key,
                 "ability_modifier": _ability_modifier(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE)),
@@ -9445,7 +9608,9 @@ def _build_weapon_attack_payload(
     )
     attack_name = f"{str(context.get('attack_name') or '').strip()}{_attack_name_suffix(clean_variant_label)}"
     equipment_ref = str(dict(context.get("item") or {}).get("id") or "").strip()
-    raw_page_ref = dict(context.get("item") or {}).get("page_ref")
+    raw_page_ref = context.get("page_ref")
+    if raw_page_ref in (None, ""):
+        raw_page_ref = dict(context.get("item") or {}).get("page_ref")
     payload = {
         "id": f"{slugify(attack_name)}-{index}",
         "name": attack_name,
@@ -9547,7 +9712,7 @@ def _resolve_weapon_profile(
     item_catalog: dict[str, Any],
 ) -> dict[str, Any] | None:
     entry = _resolve_item_entry(item, item_catalog)
-    metadata = dict((entry.metadata if isinstance(entry, SystemsEntryRecord) else {}) or {})
+    metadata = _resolve_item_support_metadata(item, item_catalog, entry=entry)
     systems_ref = dict(item.get("systems_ref") or {})
     candidate_titles = [
         str(systems_ref.get("title") or "").strip(),
@@ -9555,22 +9720,75 @@ def _resolve_weapon_profile(
         str(metadata.get("base_item") or "").split("|", 1)[0].strip(),
     ]
     profiles = dict(item_catalog.get("phb_weapon_profiles") or _load_phb_weapon_profiles())
+    profiles_by_norm = {
+        normalize_lookup(title): dict(profile)
+        for title, profile in list(profiles.items())
+        if str(title or "").strip()
+    }
     resolved_requires_attunement = _metadata_requires_attunement(metadata.get("attunement"))
     for title in candidate_titles:
         base_title, parsed_bonus = _split_magic_item_name(title)
-        profile = profiles.get(normalize_lookup(base_title))
-        if profile is None:
-            continue
-        attack_bonus, damage_bonus = _resolve_weapon_bonus_from_metadata(
-            metadata,
-            fallback_bonus=parsed_bonus,
-        )
-        resolved_profile = dict(profile)
-        resolved_profile["item_attack_bonus"] = attack_bonus
-        resolved_profile["item_damage_bonus"] = damage_bonus
-        resolved_profile["requires_attunement"] = resolved_requires_attunement
-        return resolved_profile
+        for candidate_key in _merge_name_candidates(base_title):
+            profile = profiles_by_norm.get(candidate_key)
+            if profile is None:
+                continue
+            attack_bonus, damage_bonus = _resolve_weapon_bonus_from_metadata(
+                metadata,
+                fallback_bonus=parsed_bonus,
+            )
+            resolved_profile = dict(profile)
+            resolved_profile["item_attack_bonus"] = attack_bonus
+            resolved_profile["item_damage_bonus"] = damage_bonus
+            resolved_profile["requires_attunement"] = resolved_requires_attunement
+            return resolved_profile
     return None
+
+
+def _resolve_campaign_item_page_support(
+    item: Any,
+    item_catalog: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not item_catalog:
+        return None
+    by_page_ref = dict(item_catalog.get("campaign_item_support_by_page_ref") or {})
+    by_title = dict(item_catalog.get("campaign_item_support_by_title") or {})
+    if isinstance(item, dict):
+        page_ref = _extract_campaign_page_ref(dict(item).get("page_ref"))
+        if page_ref:
+            support = by_page_ref.get(page_ref)
+            if isinstance(support, dict):
+                return dict(support)
+        candidate_titles = [
+            str(dict(item).get("name") or "").strip(),
+            str(dict(dict(item).get("systems_ref") or {}).get("title") or "").strip(),
+        ]
+    else:
+        raw_reference = str(item or "").strip()
+        candidate_titles = [raw_reference, _humanize_item_reference(raw_reference)] if raw_reference else []
+    for title in candidate_titles:
+        for candidate_key in _merge_name_candidates(title):
+            support = by_title.get(candidate_key)
+            if isinstance(support, dict):
+                return dict(support)
+    return None
+
+
+def _resolve_item_support_metadata(
+    item: Any,
+    item_catalog: dict[str, Any] | None,
+    *,
+    entry: SystemsEntryRecord | None = None,
+    campaign_item_support: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    resolved_entry = entry if isinstance(entry, SystemsEntryRecord) else _resolve_item_entry(item, item_catalog)
+    if isinstance(resolved_entry, SystemsEntryRecord):
+        return dict(resolved_entry.metadata or {})
+    resolved_campaign_item_support = (
+        dict(campaign_item_support or {})
+        if isinstance(campaign_item_support, dict)
+        else _resolve_campaign_item_page_support(item, item_catalog)
+    )
+    return dict(dict(resolved_campaign_item_support or {}).get("metadata") or {})
 
 
 def _active_weapon_profile_bonus(item: dict[str, Any], profile: dict[str, Any], *, key: str) -> int:
@@ -9615,9 +9833,10 @@ def _resolve_item_entry(
     for title in candidate_titles:
         if not title:
             continue
-        entry = by_title.get(normalize_lookup(title))
-        if isinstance(entry, SystemsEntryRecord):
-            return entry
+        for candidate_key in _merge_name_candidates(title):
+            entry = by_title.get(candidate_key)
+            if isinstance(entry, SystemsEntryRecord):
+                return entry
     return None
 
 
@@ -9749,7 +9968,7 @@ def _resolve_armor_profile(
         return entry_profile
 
     armor_profiles = dict((item_catalog or {}).get("phb_armor_profiles") or _load_phb_armor_profiles())
-    metadata = dict((entry.metadata if isinstance(entry, SystemsEntryRecord) else {}) or {})
+    metadata = _resolve_item_support_metadata(item, item_catalog, entry=entry)
     bonus_ac = _parse_optional_int_value(metadata.get("bonus_ac")) or 0
     candidate_titles = []
     base_item = str(metadata.get("base_item") or "").split("|", 1)[0].strip()

@@ -11,6 +11,7 @@ from player_wiki.character_campaign_options import normalize_campaign_character_
 from player_wiki.character_campaign_progression import build_campaign_page_progression_entries
 from player_wiki.character_builder import (
     CHARACTER_BUILDER_VERSION,
+    _attach_campaign_item_page_support,
     _list_campaign_enabled_entries,
     _prepared_spell_count_for_level,
     _recalculate_definition_attacks,
@@ -21,6 +22,7 @@ from player_wiki.character_builder import (
     build_imported_progression_repair_context,
     build_level_one_builder_context,
     build_level_one_character_definition,
+    describe_equipment_state_support,
     native_level_up_readiness,
     normalize_definition_to_native_model,
     supports_native_level_up,
@@ -8597,6 +8599,100 @@ def test_recalculate_definition_attacks_preserves_structured_attack_mode_identit
     assert attacks_by_name["Quarterstaff (precise strike, two-handed)"]["mode_key"] == (
         "effect:attack-mode:melee:precise-strike|weapon:two-handed"
     )
+
+
+def test_describe_equipment_state_support_uses_campaign_item_page_weapon_metadata_by_title():
+    item_catalog = _attach_campaign_item_page_support(
+        {"phb_weapon_profiles": {"Quarterstaff": {"title": "Quarterstaff", "type": "M", "weapon_category": "simple", "properties": ["V"], "damage": "1d6", "versatile_damage": "1d8", "damage_type": "B", "range": ""}}},
+        [
+            _campaign_page_record(
+                "items/staff-of-the-crescent-moon",
+                "Staff of the Crescent Moon",
+                section="Items",
+                body_markdown=(
+                    "*Weapon (quarterstaff), rare (requires attunement by a sorcerer)*\n\n"
+                    "Simple weapon, melee weapon\n\n"
+                    "1d6 bludgeoning, versatile 1d8\n"
+                ),
+            )
+        ],
+    )
+
+    support = describe_equipment_state_support(
+        {
+            "id": "staff-of-the-crescent-moon-1",
+            "name": "Staff of the Crescent Moon",
+            "default_quantity": 1,
+            "weight": "4 lb.",
+            "notes": "",
+        },
+        item_catalog=item_catalog,
+    )
+
+    assert support["supports_equipped_state"] is True
+    assert support["supports_attunement"] is True
+    assert support["requires_attunement"] is True
+    assert support["is_weapon"] is True
+    assert support["is_magic_item"] is True
+
+
+def test_describe_equipment_state_support_recognizes_reordered_weapon_names():
+    support = describe_equipment_state_support(
+        {
+            "id": "crossbow-light-1",
+            "name": "Crossbow, Light",
+            "default_quantity": 1,
+            "weight": "5 lb.",
+            "notes": "",
+        },
+        item_catalog={"phb_weapon_profiles": {"Light Crossbow": {"title": "Light Crossbow", "type": "R", "weapon_category": "simple", "properties": ["A", "LD", "2H"], "damage": "1d8", "versatile_damage": "", "damage_type": "P", "range": "80/320"}}},
+    )
+
+    assert support["supports_equipped_state"] is True
+    assert support["is_weapon"] is True
+
+
+def test_recalculate_definition_attacks_uses_campaign_item_page_weapon_bonus_metadata():
+    definition = _minimal_character_definition("sun-bearer", "Sun Bearer")
+    definition.proficiencies["weapons"] = ["Simple Weapons"]
+    definition.equipment_catalog = [
+        {
+            "id": "censer-of-last-light-1",
+            "name": "Censer of Last Light",
+            "default_quantity": 1,
+            "weight": "--",
+            "notes": "",
+            "is_equipped": True,
+            "is_attuned": True,
+        }
+    ]
+
+    item_catalog = _attach_campaign_item_page_support(
+        {"phb_weapon_profiles": {"Mace": {"title": "Mace", "type": "M", "weapon_category": "simple", "properties": [], "damage": "1d6", "versatile_damage": "", "damage_type": "B", "range": ""}}},
+        [
+            _campaign_page_record(
+                "items/censer-of-last-light",
+                "Censer of Last Light",
+                section="Items",
+                body_markdown=(
+                    "*Wondrous item (holy symbol), rare (requires attunement by a cleric of Bryneth)*\n\n"
+                    "The censer can be wielded as a magic mace that grants a +1 bonus to attack and damage rolls made with it.\n"
+                ),
+            )
+        ],
+    )
+
+    recalculated = _recalculate_definition_attacks(definition, item_catalog=item_catalog)
+
+    assert len(recalculated) == 1
+    attack = recalculated[0]
+    assert attack["name"] == "Censer of Last Light"
+    assert attack["category"] == "melee weapon"
+    assert attack["attack_bonus"] == 6
+    assert attack["damage"] == "1d6+4 bludgeoning"
+    assert attack["damage_type"] == "bludgeoning"
+    assert attack["page_ref"] == "items/censer-of-last-light"
+    assert attack["equipment_refs"] == ["censer-of-last-light-1"]
 
 
 def test_normalize_definition_to_native_model_merges_linked_duplicate_equipment_rows_when_names_differ():
