@@ -23,6 +23,70 @@ def _write_character_definition(app, character_slug: str, mutator) -> None:
     definition_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
+def _clone_character_fixture(
+    app,
+    source_slug: str,
+    target_slug: str,
+    *,
+    definition_mutator=None,
+    import_mutator=None,
+) -> None:
+    source_dir = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "characters" / source_slug
+    target_dir = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "characters" / target_slug
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    definition_payload = yaml.safe_load((source_dir / "definition.yaml").read_text(encoding="utf-8")) or {}
+    definition_payload["character_slug"] = target_slug
+    if definition_mutator is not None:
+        definition_mutator(definition_payload)
+    (target_dir / "definition.yaml").write_text(
+        yaml.safe_dump(definition_payload, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    import_payload = yaml.safe_load((source_dir / "import.yaml").read_text(encoding="utf-8")) or {}
+    import_payload["character_slug"] = target_slug
+    if import_mutator is not None:
+        import_mutator(import_payload)
+    (target_dir / "import.yaml").write_text(
+        yaml.safe_dump(import_payload, sort_keys=False),
+        encoding="utf-8",
+    )
+
+
+def _linked_feat_parity_snapshot(record) -> dict[str, object]:
+    harbor_drill = next(
+        feature
+        for feature in record.definition.features
+        if feature.get("category") == "custom_feature" and feature.get("page_ref") == "mechanics/harbor-drill"
+    )
+    fighting_style = next(
+        feature
+        for feature in record.definition.features
+        if str(dict(feature.get("systems_ref") or {}).get("entry_type") or "").strip() == "optionalfeature"
+    )
+    crossbow = next(attack for attack in record.definition.attacks if "Crossbow" in attack["name"])
+    history = list((record.definition.source or {}).get("native_progression", {}).get("history") or [])
+    snapshot = {
+        "harbor_drill_name": harbor_drill["name"],
+        "harbor_drill_page_ref": harbor_drill.get("page_ref"),
+        "fighting_style_name": fighting_style["name"],
+        "fighting_style_slug": str(dict(fighting_style.get("systems_ref") or {}).get("slug") or "").strip(),
+        "fighting_style_parent_matches": fighting_style.get("native_edit_parent_feature_id") == harbor_drill.get("id"),
+        "fighting_style_section_index": fighting_style.get("native_edit_optionalfeature_section_index"),
+        "fighting_style_choice_index": fighting_style.get("native_edit_optionalfeature_choice_index"),
+        "crossbow_attack_bonus": crossbow["attack_bonus"],
+        "crossbow_damage": crossbow["damage"],
+        "crossbow_notes": crossbow["notes"],
+    }
+    if history and history[-1].get("kind") == "retrain":
+        snapshot["latest_event"] = {
+            "kind": history[-1].get("kind"),
+            "action": history[-1].get("action"),
+        }
+    return snapshot
+
+
 def test_native_character_edits_can_apply_and_remove_campaign_page_spell_grants(
     app, client, sign_in, users, get_character, set_campaign_visibility
 ):
@@ -2071,6 +2135,200 @@ The harbor masters insist on repetition until every motion is clean.
     latest_event = list((record.definition.source or {}).get("native_progression", {}).get("history") or [])[-1]
     assert latest_event["action"] == "retrain"
     assert latest_event["kind"] == "retrain"
+
+
+def test_repaired_imported_character_matches_native_linked_feat_and_retraining_parity(
+    app, client, sign_in, users, get_character, set_campaign_visibility, monkeypatch
+):
+    feat_page_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "content"
+        / "mechanics"
+        / "harbor-drill.md"
+    )
+    feat_page_path.write_text(
+        """---
+title: Harbor Drill
+section: Mechanics
+subsection: Feats
+published: true
+summary: A harbor discipline that grants a fighting style.
+character_option:
+  kind: feat
+  name: Harbor Drill
+  description_markdown: Harbor veterans drill you into a practiced fighting style.
+  optionalfeature_progression:
+    - name: Fighting Style
+      featureType:
+        - FS:F
+      progression:
+        "1": 1
+---
+The harbor masters insist on repetition until every motion is clean.
+""",
+        encoding="utf-8",
+    )
+
+    with app.app_context():
+        systems_store = app.extensions["systems_store"]
+        systems_store.upsert_library("DND-5E", title="DND 5E", system_code="DND-5E")
+        systems_store.upsert_source(
+            "DND-5E",
+            "PHB",
+            title="Player's Handbook",
+            license_class="srd_cc",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        systems_store.replace_entries_for_source(
+            "DND-5E",
+            "PHB",
+            entry_types=["optionalfeature"],
+            entries=[
+                {
+                    "entry_key": "dnd-5e|optionalfeature|phb|archery",
+                    "entry_type": "optionalfeature",
+                    "slug": "phb-optionalfeature-archery",
+                    "title": "Archery",
+                    "source_page": "72",
+                    "source_path": "data/class/class-fighter.json",
+                    "search_text": "archery fighting style",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"feature_type": ["FS:F"]},
+                    "body": {},
+                    "rendered_html": "<p>Archery.</p>",
+                },
+                {
+                    "entry_key": "dnd-5e|optionalfeature|phb|defense",
+                    "entry_type": "optionalfeature",
+                    "slug": "phb-optionalfeature-defense",
+                    "title": "Defense",
+                    "source_page": "72",
+                    "source_path": "data/class/class-fighter.json",
+                    "search_text": "defense fighting style",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"feature_type": ["FS:F"]},
+                    "body": {},
+                    "rendered_html": "<p>Defense.</p>",
+                },
+            ],
+        )
+
+    _clone_character_fixture(
+        app,
+        "arden-march",
+        "arden-native-parity",
+        definition_mutator=lambda payload: payload.update(
+            {
+                "source": {
+                    "source_path": "builder://arden-native-parity",
+                    "source_type": "native_character_builder",
+                    "imported_from": "In-app Native Level 5 Builder",
+                    "imported_at": "2026-04-10T00:00:00Z",
+                    "parse_warnings": [],
+                }
+            }
+        ),
+        import_mutator=lambda payload: payload.update({"source_path": "builder://arden-native-parity"}),
+    )
+    _clone_character_fixture(
+        app,
+        "arden-march",
+        "arden-imported-parity",
+        definition_mutator=lambda payload: payload.update(
+            {
+                "source": {
+                    "source_path": "imports://arden-imported-parity.md",
+                    "source_type": "markdown_character_sheet",
+                    "imported_from": "Arden Imported Parity.md",
+                    "imported_at": "2026-04-10T00:00:00Z",
+                    "parse_warnings": [],
+                    "native_progression": {
+                        "baseline_repaired_at": "2026-04-10T00:00:00Z",
+                        "history": [{"kind": "repair", "action": "repair"}],
+                    },
+                }
+            }
+        ),
+        import_mutator=lambda payload: payload.update({"source_path": "imports://arden-imported-parity.md"}),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "native_level_up_readiness",
+        lambda *args, **kwargs: {"status": "ready", "message": "", "reasons": []},
+    )
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    for character_slug in ("arden-native-parity", "arden-imported-parity"):
+        record = get_character(character_slug)
+        assert record is not None
+        baseline_crossbow = next(attack for attack in record.definition.attacks if "Crossbow" in attack["name"])
+        assert baseline_crossbow["attack_bonus"] == 5
+
+        add_response = client.post(
+            f"/campaigns/linden-pass/characters/{character_slug}/edit",
+            data={
+                "expected_revision": record.state_record.revision,
+                "languages_text": "Common\nElvish",
+                "armor_proficiencies_text": "",
+                "weapon_proficiencies_text": "Daggers\nLight Crossbows\nQuarterstaffs",
+                "tool_proficiencies_text": "Navigator's Tools",
+                "custom_feature_name_1": "",
+                "custom_feature_page_ref_1": "mechanics/harbor-drill",
+                "custom_feature_activation_type_1": "passive",
+                "custom_feature_description_1": "",
+                "custom_feature_optionalfeature_1_1_1": "phb-optionalfeature-archery",
+            },
+            follow_redirects=False,
+        )
+
+        assert add_response.status_code == 302
+
+        read_response = client.get(f"/campaigns/linden-pass/characters/{character_slug}")
+        assert read_response.status_code == 200
+        assert f"/campaigns/linden-pass/characters/{character_slug}/retraining" in read_response.get_data(as_text=True)
+
+    native_after_add = _linked_feat_parity_snapshot(get_character("arden-native-parity"))
+    imported_after_add = _linked_feat_parity_snapshot(get_character("arden-imported-parity"))
+
+    assert native_after_add == imported_after_add
+    assert native_after_add["fighting_style_slug"] == "phb-optionalfeature-archery"
+    assert native_after_add["crossbow_attack_bonus"] == 7
+    assert native_after_add["fighting_style_parent_matches"] is True
+
+    for character_slug in ("arden-native-parity", "arden-imported-parity"):
+        record = get_character(character_slug)
+        assert record is not None
+
+        retraining_page = client.get(f"/campaigns/linden-pass/characters/{character_slug}/retraining")
+        assert retraining_page.status_code == 200
+        retraining_html = retraining_page.get_data(as_text=True)
+        assert "Harbor Drill Fighting Style" in retraining_html
+        assert 'value="phb-optionalfeature-archery" selected' in retraining_html
+
+        retrain_response = client.post(
+            f"/campaigns/linden-pass/characters/{character_slug}/retraining",
+            data={
+                "expected_revision": record.state_record.revision,
+                "custom_feature_optionalfeature_1_1_1": "phb-optionalfeature-defense",
+            },
+            follow_redirects=False,
+        )
+
+        assert retrain_response.status_code == 302
+
+    native_after_retrain = _linked_feat_parity_snapshot(get_character("arden-native-parity"))
+    imported_after_retrain = _linked_feat_parity_snapshot(get_character("arden-imported-parity"))
+
+    assert native_after_retrain == imported_after_retrain
+    assert native_after_retrain["fighting_style_slug"] == "phb-optionalfeature-defense"
+    assert native_after_retrain["crossbow_attack_bonus"] == 5
+    assert native_after_retrain["latest_event"] == {"kind": "retrain", "action": "retrain"}
 
 
 def test_native_character_edits_apply_fixed_page_backed_feat_metadata(

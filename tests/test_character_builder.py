@@ -3677,8 +3677,72 @@ def test_imported_progression_repair_can_restore_refs_and_add_prior_feature_link
             "repair_optionalfeature_1": archery.slug,
         },
     )
+    native_equivalent = _minimal_character_definition("native-fighter-hero", "Native Fighter Hero")
+    native_equivalent.profile["class_level_text"] = "Fighter 4"
+    native_equivalent.profile["classes"][0] = {
+        "row_id": "class-row-1",
+        "class_name": "Fighter",
+        "subclass_name": "Champion",
+        "level": 4,
+        "systems_ref": _systems_ref(fighter),
+        "subclass_ref": _systems_ref(champion),
+    }
+    native_equivalent.profile["class_ref"] = _systems_ref(fighter)
+    native_equivalent.profile["subclass_ref"] = _systems_ref(champion)
+    native_equivalent.profile["species"] = "Human"
+    native_equivalent.profile["species_ref"] = _systems_ref(human)
+    native_equivalent.profile["background"] = "Acolyte"
+    native_equivalent.profile["background_ref"] = _systems_ref(acolyte)
+    native_equivalent.features = [
+        {
+            "id": "native-lucky",
+            "name": "Lucky",
+            "category": "feat",
+            "source": "PHB",
+            "description_markdown": "",
+            "activation_type": "passive",
+            "systems_ref": _systems_ref(lucky),
+        },
+        {
+            "id": "native-archery",
+            "name": "Archery",
+            "category": "optional_feature",
+            "source": "PHB",
+            "description_markdown": "",
+            "activation_type": "passive",
+            "systems_ref": _systems_ref(archery),
+        },
+    ]
 
     repaired_feature_names = {feature["name"] for feature in repaired_definition.features}
+    repaired_normalized = normalize_definition_to_native_model(
+        repaired_definition,
+        systems_service=systems_service,
+    )
+    native_normalized = normalize_definition_to_native_model(
+        native_equivalent,
+        systems_service=systems_service,
+    )
+
+    def comparable_progression_slice(definition: CharacterDefinition) -> dict[str, object]:
+        class_row = dict((definition.profile.get("classes") or [])[0])
+        return {
+            "class_level_text": definition.profile["class_level_text"],
+            "class_slug": str(dict(definition.profile.get("class_ref") or {}).get("slug") or "").strip(),
+            "subclass_slug": str(dict(definition.profile.get("subclass_ref") or {}).get("slug") or "").strip(),
+            "species_slug": str(dict(definition.profile.get("species_ref") or {}).get("slug") or "").strip(),
+            "background_slug": str(dict(definition.profile.get("background_ref") or {}).get("slug") or "").strip(),
+            "class_row": {
+                "class_slug": str(dict(class_row.get("systems_ref") or {}).get("slug") or "").strip(),
+                "subclass_slug": str(dict(class_row.get("subclass_ref") or {}).get("slug") or "").strip(),
+                "level": class_row.get("level"),
+            },
+            "feature_slugs": sorted(
+                str(dict(feature.get("systems_ref") or {}).get("slug") or "").strip()
+                for feature in list(definition.features or [])
+                if str(dict(feature.get("systems_ref") or {}).get("slug") or "").strip()
+            ),
+        }
 
     assert repaired_definition.source["source_type"] == "markdown_character_sheet"
     assert repaired_definition.profile["class_ref"]["slug"] == fighter.slug
@@ -3689,6 +3753,7 @@ def test_imported_progression_repair_can_restore_refs_and_add_prior_feature_link
     assert "Archery" in repaired_feature_names
     assert repaired_definition.source["native_progression"]["baseline_repaired_at"]
     assert repaired_import.source_path == "imports://imported-hero.md"
+    assert comparable_progression_slice(repaired_normalized) == comparable_progression_slice(native_normalized)
 
 
 def test_imported_level_up_preserves_imported_source_and_records_native_progression():
