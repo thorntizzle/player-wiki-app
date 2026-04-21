@@ -5420,6 +5420,10 @@ def _collect_attack_reminder_support_flags(features: list[dict[str, Any]] | None
 def _derive_attack_reminder_state_from_character_inputs(
     *,
     features: list[dict[str, Any]] | None,
+    equipment_catalog: list[dict[str, Any]] | None = None,
+    item_catalog: dict[str, Any] | None = None,
+    ability_scores: dict[str, int] | None = None,
+    proficiency_bonus: int = 0,
 ) -> dict[str, Any]:
     support_flags = _collect_attack_reminder_support_flags(features)
     rules: list[dict[str, Any]] = []
@@ -5548,6 +5552,44 @@ def _derive_attack_reminder_state_from_character_inputs(
                 ],
             }
         )
+    for item_effect_entry in _active_item_effect_entries(
+        equipment_catalog,
+        item_catalog=item_catalog,
+    ):
+        for rule_payload in list(item_effect_entry.get("attack_reminder_rules") or []):
+            rule = dict(rule_payload or {})
+            save_dc = _attack_reminder_rule_save_dc(
+                rule,
+                ability_scores=ability_scores,
+                proficiency_bonus=proficiency_bonus,
+            )
+            effects = []
+            for effect_payload in list(rule.get("effects") or []):
+                if not isinstance(effect_payload, dict):
+                    continue
+                effect = dict(effect_payload)
+                effect["summary"] = _format_dynamic_reminder_text(
+                    effect.get("summary"),
+                    save_dc=save_dc,
+                )
+                if not effect["summary"]:
+                    continue
+                effects.append(effect)
+            if not effects:
+                continue
+            rules.append(
+                {
+                    "id": str(rule.get("id") or f"item:{slugify(str(item_effect_entry.get('item_name') or 'reminder'))}").strip(),
+                    "title": str(rule.get("title") or item_effect_entry.get("item_name") or "Combat reminder").strip()
+                    or "Combat reminder",
+                    "condition": _format_dynamic_reminder_text(
+                        rule.get("condition"),
+                        save_dc=save_dc,
+                    ),
+                    "attack_scope": dict(rule.get("attack_scope") or {}),
+                    "effects": effects,
+                }
+            )
     return {"rules": rules}
 
 
@@ -5730,6 +5772,10 @@ def _derive_definition_stats(
         stats["armor_class"] = derived_armor_class
     stats["attack_reminder_state"] = _derive_attack_reminder_state_from_character_inputs(
         features=features,
+        equipment_catalog=list(definition.equipment_catalog or []),
+        item_catalog=item_catalog,
+        ability_scores=ability_scores,
+        proficiency_bonus=proficiency_bonus,
     )
     stats["defensive_state"] = _derive_defensive_state_from_character_inputs(
         equipment_catalog=list(definition.equipment_catalog or []),
@@ -7826,6 +7872,46 @@ _CAMPAIGN_ITEM_SPECIAL_EFFECTS_BY_TITLE = {
                 "bonus": 1,
             }
         ],
+        "attack_reminder_rules": [
+            {
+                "id": "item:psionic-circlet:psionic-options",
+                "title": "Psionic Circlet",
+                "save_dc_ability_key": "int",
+                "condition": (
+                    "Once on each of your turns, after you hit a target within 30 feet with a weapon attack "
+                    "and deal damage to it, you can expend one Psionic Energy die to use one of these options."
+                ),
+                "attack_scope": {
+                    "label": "Weapon attacks",
+                    "categories": ["melee weapon", "ranged weapon"],
+                },
+                "effects": [
+                    {
+                        "kind": "saving_throw",
+                        "label": "Wisdom save DC",
+                        "summary": "Psychic Hindrance and Psychic Anchor use Wisdom save DC {save_dc}.",
+                    },
+                    {
+                        "kind": "disadvantage",
+                        "label": "Psychic Hindrance",
+                        "summary": (
+                            "On a failed Wisdom save, the target's next attack roll before the end of its next "
+                            "turn is made with disadvantage."
+                        ),
+                    },
+                    {
+                        "kind": "advantage",
+                        "label": "Psychic Opening",
+                        "summary": "The next attack roll made against the target before the start of your next turn has advantage.",
+                    },
+                    {
+                        "kind": "speed_control",
+                        "label": "Psychic Anchor",
+                        "summary": "On a failed Wisdom save, the target's speed becomes 0 until the end of its next turn.",
+                    },
+                ],
+            }
+        ],
     },
     normalize_lookup("Censer of Last Light"): {
         "spell_support": [
@@ -8021,7 +8107,7 @@ def _merge_campaign_item_support_metadata(
     for key, value in dict(extra_metadata or {}).items():
         if value is None or value == "" or value == [] or value == {}:
             continue
-        if key in {"spell_support", "defensive_rules", "resource_template_bonuses"}:
+        if key in {"spell_support", "defensive_rules", "resource_template_bonuses", "attack_reminder_rules"}:
             merged[key] = [
                 dict(item or {}) if isinstance(item, dict) else item
                 for item in list(merged.get(key) or [])
@@ -10096,7 +10182,40 @@ def _item_effect_metadata(
     defensive_rules = [dict(rule or {}) for rule in list(payload.get("defensive_rules") or []) if isinstance(rule, dict)]
     if defensive_rules:
         effect_payload["defensive_rules"] = defensive_rules
+    attack_reminder_rules = [
+        dict(rule or {})
+        for rule in list(payload.get("attack_reminder_rules") or [])
+        if isinstance(rule, dict)
+    ]
+    if attack_reminder_rules:
+        effect_payload["attack_reminder_rules"] = attack_reminder_rules
     return effect_payload
+
+
+def _attack_reminder_rule_save_dc(
+    rule: dict[str, Any],
+    *,
+    ability_scores: dict[str, int] | None,
+    proficiency_bonus: int,
+) -> int | None:
+    ability_key = normalize_lookup(str(rule.get("save_dc_ability_key") or "").strip())
+    if ability_key not in ABILITY_KEYS:
+        return None
+    score = int(dict(ability_scores or {}).get(ability_key) or DEFAULT_ABILITY_SCORE)
+    return 8 + int(proficiency_bonus or 0) + _ability_modifier(score)
+
+
+def _format_dynamic_reminder_text(
+    value: Any,
+    *,
+    save_dc: int | None = None,
+) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if save_dc is not None:
+        return text.replace("{save_dc}", str(save_dc))
+    return text.replace("{save_dc}", "the current save DC")
 
 
 def _item_effect_is_active(item: dict[str, Any], *, metadata: dict[str, Any]) -> bool:
@@ -10800,6 +10919,13 @@ def _recalculate_definition_armor_class(
         stats["armor_class"] = derived_armor_class
     stats["attack_reminder_state"] = _derive_attack_reminder_state_from_character_inputs(
         features=list(definition.features or []),
+        equipment_catalog=list(definition.equipment_catalog or []),
+        item_catalog=item_catalog or {},
+        ability_scores=_ability_scores_from_definition(definition),
+        proficiency_bonus=int(
+            dict(definition.stats or {}).get("proficiency_bonus")
+            or _proficiency_bonus_for_level(_resolve_native_character_level(definition))
+        ),
     )
     stats["defensive_state"] = _derive_defensive_state_from_character_inputs(
         equipment_catalog=list(definition.equipment_catalog or []),
@@ -14281,6 +14407,10 @@ def _build_level_one_stats(
         },
         "attack_reminder_state": _derive_attack_reminder_state_from_character_inputs(
             features=features or [],
+            equipment_catalog=equipment_catalog or [],
+            item_catalog=item_catalog or {},
+            ability_scores=ability_scores,
+            proficiency_bonus=proficiency_bonus,
         ),
         "defensive_state": _derive_defensive_state_from_character_inputs(
             equipment_catalog=equipment_catalog or [],
@@ -14457,6 +14587,10 @@ def _build_leveled_stats(
     )
     stats["attack_reminder_state"] = _derive_attack_reminder_state_from_character_inputs(
         features=features or list(current_definition.features or []),
+        equipment_catalog=equipment_catalog or list(current_definition.equipment_catalog or []),
+        item_catalog=item_catalog or {},
+        ability_scores=ability_scores,
+        proficiency_bonus=proficiency_bonus,
     )
     stats["defensive_state"] = _derive_defensive_state_from_character_inputs(
         equipment_catalog=equipment_catalog or list(current_definition.equipment_catalog or []),

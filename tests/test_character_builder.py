@@ -8993,7 +8993,7 @@ def test_normalize_definition_to_native_model_applies_hourglass_pendant_spell_an
     assert source_rows["spell-source:item:hourglass-pendant"]["spellcasting_ability"] == "Intelligence"
 
 
-def test_normalize_definition_to_native_model_applies_psionic_circlet_int_floor_and_resource_bonus():
+def test_normalize_definition_to_native_model_applies_psionic_circlet_item_effects():
     definition = _minimal_character_definition("zigzag-blackscar", "Zigzag Blackscar")
     definition.profile["class_level_text"] = "Fighter 3"
     definition.profile["classes"] = [
@@ -9060,11 +9060,30 @@ def test_normalize_definition_to_native_model_applies_psionic_circlet_int_floor_
         item_catalog=item_catalog,
     )
     resources_by_id = {resource["id"]: resource for resource in normalized.resource_templates}
+    reminder_state = dict(normalized.stats.get("attack_reminder_state") or {})
+    circlet_rule = next(rule for rule in list(reminder_state.get("rules") or []) if rule["title"] == "Psionic Circlet")
+    reminder_effects = {effect["label"]: effect["summary"] for effect in list(circlet_rule.get("effects") or [])}
 
     assert normalized.stats["ability_scores"]["int"]["score"] == 14
     assert normalized.stats["ability_scores"]["int"]["modifier"] == 2
     assert resources_by_id["psionic-power-psionic-energy"]["max"] == 5
     assert resources_by_id["psionic-power-psionic-energy"]["initial_current"] == 5
+    assert dict(circlet_rule["attack_scope"]) == {
+        "label": "Weapon attacks",
+        "categories": ["melee weapon", "ranged weapon"],
+    }
+    assert "Once on each of your turns" in circlet_rule["condition"]
+    assert reminder_effects["Wisdom save DC"] == "Psychic Hindrance and Psychic Anchor use Wisdom save DC 12."
+    assert reminder_effects["Psychic Hindrance"] == (
+        "On a failed Wisdom save, the target's next attack roll before the end of its next turn is made "
+        "with disadvantage."
+    )
+    assert reminder_effects["Psychic Opening"] == (
+        "The next attack roll made against the target before the start of your next turn has advantage."
+    )
+    assert reminder_effects["Psychic Anchor"] == (
+        "On a failed Wisdom save, the target's speed becomes 0 until the end of its next turn."
+    )
 
 
 @pytest.mark.parametrize(
