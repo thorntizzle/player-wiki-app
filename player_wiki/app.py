@@ -90,7 +90,11 @@ from .character_presenter import (
     render_campaign_markdown,
 )
 from .auth_store import AuthStore
-from .campaign_combat_service import CampaignCombatService, CampaignCombatValidationError
+from .campaign_combat_service import (
+    CampaignCombatRevisionConflictError,
+    CampaignCombatService,
+    CampaignCombatValidationError,
+)
 from .campaign_combat_store import CampaignCombatStore
 from .campaign_content_service import (
     delete_campaign_asset_file,
@@ -2063,6 +2067,12 @@ def create_app() -> Flask:
         raw_value = request.form.get("expected_revision", "").strip()
         if not raw_value:
             raise ValueError("Missing sheet revision. Refresh the page and try again.")
+        return int(raw_value)
+
+    def parse_expected_combatant_revision() -> int | None:
+        raw_value = request.form.get("expected_combatant_revision", "").strip()
+        if not raw_value:
+            return None
         return int(raw_value)
 
     def get_owned_character_slugs(campaign_slug: str) -> set[str]:
@@ -7555,12 +7565,16 @@ def create_app() -> Flask:
 
         mutation_succeeded = False
         try:
+            expected_combatant_revision = parse_expected_combatant_revision()
             get_campaign_combat_service().update_turn_value(
                 campaign_slug,
                 combatant_id,
+                expected_revision=expected_combatant_revision,
                 turn_value=request.form.get("turn_value"),
                 updated_by_user_id=user.id,
             )
+        except CampaignCombatRevisionConflictError:
+            flash("This combatant changed in another combat view. Refresh and try again.", "error")
         except CampaignCombatValidationError as exc:
             flash(str(exc), "error")
         else:
@@ -7626,15 +7640,19 @@ def create_app() -> Flask:
 
         mutation_succeeded = False
         try:
+            expected_combatant_revision = parse_expected_combatant_revision()
             combat_service.update_npc_vitals(
                 campaign_slug,
                 combatant_id,
+                expected_revision=expected_combatant_revision,
                 current_hp=request.form.get("current_hp"),
                 max_hp=request.form.get("max_hp"),
                 temp_hp=request.form.get("temp_hp"),
                 movement_total=request.form.get("movement_total"),
                 updated_by_user_id=user.id,
             )
+        except CampaignCombatRevisionConflictError:
+            flash("This combatant changed in another combat view. Refresh and try again.", "error")
         except CampaignCombatValidationError as exc:
             flash(str(exc), "error")
         else:
@@ -7674,15 +7692,19 @@ def create_app() -> Flask:
 
         mutation_succeeded = False
         try:
+            expected_combatant_revision = parse_expected_combatant_revision()
             combat_service.update_resources(
                 campaign_slug,
                 combatant_id,
+                expected_revision=expected_combatant_revision,
                 has_action=request.form.get("has_action") == "1",
                 has_bonus_action=request.form.get("has_bonus_action") == "1",
                 has_reaction=request.form.get("has_reaction") == "1",
                 movement_remaining=request.form.get("movement_remaining"),
                 updated_by_user_id=user.id,
             )
+        except CampaignCombatRevisionConflictError:
+            flash("This combatant changed in another combat view. Refresh and try again.", "error")
         except CampaignCombatValidationError as exc:
             flash(str(exc), "error")
         else:
@@ -7713,12 +7735,16 @@ def create_app() -> Flask:
 
         mutation_succeeded = False
         try:
+            expected_combatant_revision = parse_expected_combatant_revision()
             get_campaign_combat_service().update_player_detail_visibility(
                 campaign_slug,
                 combatant_id,
+                expected_revision=expected_combatant_revision,
                 player_detail_visible=request.form.get("player_detail_visible") == "1",
                 updated_by_user_id=user.id,
             )
+        except CampaignCombatRevisionConflictError:
+            flash("This combatant changed in another combat view. Refresh and try again.", "error")
         except CampaignCombatValidationError as exc:
             flash(str(exc), "error")
         else:

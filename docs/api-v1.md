@@ -139,6 +139,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:5000/api/v1/me" -Headers $headers
 - Embedded image payloads use JSON objects with `filename`, optional `media_type`, and `data_base64`.
 - Systems read endpoints follow the same source-level and entry-level visibility rules as the browser UI. Systems source updates and entry-override writes are DM/admin only.
 - Combat reads return a structured tracker payload. Combat mutations are DM/admin only except for player-character vitals, which can also be updated by the assigned owner player when they provide the current sheet revision.
+- Combatant-row combat writes can also send `expected_combatant_revision`; when that row changed first, the API returns `409 state_conflict` instead of last-writing stale movement, action-economy, NPC vitals, or turn-value payloads.
 - Character session mutations require `expected_revision` and return `409 state_conflict` when the sheet changed first.
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/sheet-edit` is the first-save contract for out-of-session Character-page batching. It accepts one `expected_revision` plus absolute-value section payloads for the state-backed Character-page fields (`vitals`, `resources`, `spell_slots`, `inventory`, `currency`, `notes`, and `personal`).
 - The `sheet-edit` batch route is intentionally absolute-value only. Delta actions such as `hp_delta`, resource `delta`, spell-slot `delta_used`, currency `delta`, and rest actions stay on the immediate live-edit routes instead of mixing relative and batched writes.

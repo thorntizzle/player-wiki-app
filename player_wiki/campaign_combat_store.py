@@ -15,6 +15,10 @@ class CampaignCombatConflictError(RuntimeError):
     pass
 
 
+class CampaignCombatRevisionConflictError(CampaignCombatConflictError):
+    pass
+
+
 class CampaignCombatStore:
     def get_tracker(self, campaign_slug: str) -> CampaignCombatTrackerRecord | None:
         row = get_db().execute(
@@ -259,6 +263,7 @@ class CampaignCombatStore:
         has_action: bool | None = None,
         has_bonus_action: bool | None = None,
         has_reaction: bool | None = None,
+        expected_revision: int | None = None,
         updated_by_user_id: int | None = None,
     ) -> CampaignCombatantRecord:
         assignments: list[tuple[str, object]] = []
@@ -294,24 +299,31 @@ class CampaignCombatStore:
         assignments.append(("updated_at", isoformat(utcnow())))
         assignments.append(("updated_by_user_id", updated_by_user_id))
 
-        set_clause = ", ".join(f"{column} = ?" for column, _ in assignments)
+        set_clauses = [f"{column} = ?" for column, _ in assignments]
+        set_clauses.append("revision = revision + 1")
         parameters = [value for _, value in assignments]
+        where_clauses = ["campaign_slug = ?", "id = ?"]
         parameters.extend([campaign_slug, combatant_id])
+        if expected_revision is not None:
+            where_clauses.append("revision = ?")
+            parameters.append(expected_revision)
 
         connection = get_db()
         cursor = connection.execute(
             f"""
             UPDATE campaign_combatants
-            SET {set_clause}
-            WHERE campaign_slug = ? AND id = ?
+            SET {", ".join(set_clauses)}
+            WHERE {" AND ".join(where_clauses)}
             """,
             parameters,
         )
         connection.commit()
         if cursor.rowcount != 1:
-            raise CampaignCombatConflictError(
-                f"Unable to update campaign combatant {campaign_slug}/{combatant_id}."
-            )
+            if expected_revision is not None:
+                raise CampaignCombatRevisionConflictError(
+                    f"Combatant update conflict for {campaign_slug}/{combatant_id}."
+                )
+            raise CampaignCombatConflictError(f"Unable to update campaign combatant {campaign_slug}/{combatant_id}.")
 
         combatant = self.get_combatant(campaign_slug, combatant_id)
         if combatant is None:
@@ -545,6 +557,7 @@ class CampaignCombatStore:
             has_action=bool(row["has_action"]),
             has_bonus_action=bool(row["has_bonus_action"]),
             has_reaction=bool(row["has_reaction"]),
+            revision=max(1, int(row["revision"] or 1)),
             created_at=created_at,
             updated_at=updated_at,
             created_by_user_id=int(row["created_by_user_id"]) if row["created_by_user_id"] is not None else None,

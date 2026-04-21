@@ -1135,6 +1135,7 @@ def test_api_combat_endpoints_allow_dm_management_and_owner_player_vitals_update
         f"/api/v1/campaigns/linden-pass/combat/combatants/{hound['id']}/resources",
         headers=api_headers(dm_token),
         json={
+            "expected_combatant_revision": hound["combatant_revision"],
             "has_action": True,
             "has_bonus_action": False,
             "has_reaction": False,
@@ -1164,6 +1165,64 @@ def test_api_combat_endpoints_allow_dm_management_and_owner_player_vitals_update
     )
     assert live_state.status_code == 200
     assert live_state.get_json()["tracker"]["combatant_count"] == 2
+
+
+def test_api_combat_resource_update_rejects_stale_combatant_revision(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-combat-conflict-api")
+
+    add_npc = client.post(
+        "/api/v1/campaigns/linden-pass/combat/npc-combatants",
+        headers=api_headers(dm_token),
+        json={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+    )
+    assert add_npc.status_code == 200
+    hound = _find_tracker_combatant(add_npc.get_json(), name="Clockwork Hound")
+    assert hound is not None
+
+    first_update = client.patch(
+        f"/api/v1/campaigns/linden-pass/combat/combatants/{hound['id']}/resources",
+        headers=api_headers(dm_token),
+        json={
+            "expected_combatant_revision": hound["combatant_revision"],
+            "has_action": True,
+            "has_bonus_action": True,
+            "has_reaction": True,
+            "movement_remaining": 10,
+        },
+    )
+    assert first_update.status_code == 200
+
+    stale_update = client.patch(
+        f"/api/v1/campaigns/linden-pass/combat/combatants/{hound['id']}/resources",
+        headers=api_headers(dm_token),
+        json={
+            "expected_combatant_revision": hound["combatant_revision"],
+            "has_action": True,
+            "has_bonus_action": False,
+            "has_reaction": False,
+            "movement_remaining": 5,
+        },
+    )
+    assert stale_update.status_code == 409
+    assert stale_update.get_json()["error"]["code"] == "state_conflict"
+    assert stale_update.get_json()["error"]["message"] == (
+        "This combatant changed in another combat view. Refresh and try again."
+    )
+
+    live_state = client.get("/api/v1/campaigns/linden-pass/combat/live-state", headers=api_headers(dm_token))
+    assert live_state.status_code == 200
+    refreshed_hound = _find_tracker_combatant(live_state.get_json(), name="Clockwork Hound")
+    assert refreshed_hound is not None
+    assert refreshed_hound["movement_remaining"] == 10
+    assert refreshed_hound["has_bonus_action"] is True
+    assert refreshed_hound["has_reaction"] is True
 
 
 def test_api_combat_systems_monster_search_and_add_use_imported_entries(client, app, users, tmp_path):

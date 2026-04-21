@@ -1,9 +1,12 @@
-{% macro combat_workspace_fields(selected_combatant_id, expected_revision=None) -%}
+{% macro combat_workspace_fields(selected_combatant_id, expected_revision=None, expected_combatant_revision=None) -%}
   {% if selected_combatant_id %}
     <input type="hidden" name="combatant" value="{{ selected_combatant_id }}">
   {% endif %}
   {% if expected_revision is not none %}
     <input type="hidden" name="expected_revision" value="{{ expected_revision }}">
+  {% endif %}
+  {% if expected_combatant_revision is not none %}
+    <input type="hidden" name="expected_combatant_revision" value="{{ expected_combatant_revision }}">
   {% endif %}
 {%- endmacro %}
 {% if selected_combatant %}
@@ -38,7 +41,7 @@
           data-combat-async
           data-combat-inline-autosubmit
         >
-          {{ combat_workspace_fields(selected_combatant_id, selected_combatant.state_revision) }}
+          {{ combat_workspace_fields(selected_combatant_id, selected_combatant.state_revision, selected_combatant.combatant_revision) }}
           <input type="hidden" name="temp_hp" value="{{ selected_combatant.temp_hp }}">
           <span class="meta">HP</span>
           <div class="combat-inline-value">
@@ -60,7 +63,7 @@
           data-combat-async
           data-combat-inline-autosubmit
         >
-          {{ combat_workspace_fields(selected_combatant_id, selected_combatant.state_revision) }}
+          {{ combat_workspace_fields(selected_combatant_id, selected_combatant.state_revision, selected_combatant.combatant_revision) }}
           <input type="hidden" name="current_hp" value="{{ selected_combatant.current_hp }}">
           <span class="meta">Temp HP</span>
           <input
@@ -90,7 +93,7 @@
           data-combat-async
           data-combat-inline-autosubmit
         >
-          {{ combat_workspace_fields(selected_combatant_id) }}
+          {{ combat_workspace_fields(selected_combatant_id, expected_combatant_revision=selected_combatant.combatant_revision) }}
           <input type="hidden" name="has_action" value="{{ '1' if selected_combatant.has_action else '0' }}">
           <input type="hidden" name="has_bonus_action" value="{{ '1' if selected_combatant.has_bonus_action else '0' }}">
           <input type="hidden" name="has_reaction" value="{{ '1' if selected_combatant.has_reaction else '0' }}">
@@ -129,7 +132,7 @@
         data-combat-inline-autosubmit
         data-combat-inline-submit-on-change="1"
       >
-        {{ combat_workspace_fields(selected_combatant_id) }}
+        {{ combat_workspace_fields(selected_combatant_id, expected_combatant_revision=selected_combatant.combatant_revision) }}
         <input type="hidden" name="movement_remaining" value="{{ selected_combatant.movement_remaining or 0 }}">
         <label class="combat-resource-toggle">
           <input type="checkbox" name="has_action" value="1" {% if selected_combatant.has_action %}checked{% endif %}>

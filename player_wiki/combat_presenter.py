@@ -123,6 +123,7 @@ def present_combat_tracker(
                 "can_open_status_page": can_manage_combat,
                 "can_toggle_player_detail_visibility": can_manage_combat and combatant.is_npc,
                 "can_manage_combat": can_manage_combat,
+                "combatant_revision": combatant.revision,
                 "state_revision": (
                     character_record.state_record.revision if character_record is not None else None
                 ),

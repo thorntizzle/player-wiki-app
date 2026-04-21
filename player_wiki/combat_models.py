@@ -45,6 +45,7 @@ class CampaignCombatantRecord:
     has_action: bool
     has_bonus_action: bool
     has_reaction: bool
+    revision: int
     created_at: datetime
     updated_at: datetime
     created_by_user_id: int | None

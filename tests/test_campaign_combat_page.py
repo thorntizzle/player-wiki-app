@@ -418,6 +418,74 @@ def test_dm_page_async_mutations_return_controls_partial_and_non_async_redirects
     assert "Arden March" in async_payload["tracker_html"]
     assert "Add player character" in async_payload["controls_html"]
 
+
+def test_async_combat_resource_update_rejects_stale_combatant_revision(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+
+    combatant = _find_combatant(app, name="Clockwork Hound")
+    assert combatant is not None
+
+    first_response = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{combatant.id}/resources",
+        data={
+            "combat_view": "status",
+            "combatant": combatant.id,
+            "expected_combatant_revision": combatant.revision,
+            "has_action": "1",
+            "has_bonus_action": "1",
+            "has_reaction": "1",
+            "movement_remaining": 10,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert first_response.status_code == 200
+    assert "Combat resources updated." in first_response.get_json()["flash_html"]
+
+    refreshed = _find_combatant(app, name="Clockwork Hound")
+    assert refreshed is not None
+    assert refreshed.movement_remaining == 10
+
+    stale_response = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{combatant.id}/resources",
+        data={
+            "combat_view": "status",
+            "combatant": combatant.id,
+            "expected_combatant_revision": combatant.revision,
+            "has_action": "1",
+            "has_bonus_action": "0",
+            "has_reaction": "0",
+            "movement_remaining": 5,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert stale_response.status_code == 200
+    stale_payload = stale_response.get_json()
+    assert "This combatant changed in another combat view. Refresh and try again." in stale_payload["flash_html"]
+
+    unchanged = _find_combatant(app, name="Clockwork Hound")
+    assert unchanged is not None
+    assert unchanged.revision == refreshed.revision
+    assert unchanged.movement_remaining == 10
+    assert unchanged.has_bonus_action is True
+    assert unchanged.has_reaction is True
+
     redirect_response = client.post(
         "/campaigns/linden-pass/combat/npc-combatants",
         data={
@@ -1259,7 +1327,7 @@ def test_player_cannot_clear_combat_tracker(app, client, sign_in, users):
     assert combatant is not None
 
 
-def test_init_db_backfills_legacy_combatant_source_identity(tmp_path, monkeypatch):
+def test_init_db_backfills_legacy_combatant_source_identity_and_revision(tmp_path, monkeypatch):
     campaigns_dir = build_test_campaigns_dir(tmp_path)
     monkeypatch.setattr(Config, "CAMPAIGNS_DIR", campaigns_dir)
 
@@ -1325,7 +1393,7 @@ def test_init_db_backfills_legacy_combatant_source_identity(tmp_path, monkeypatc
     connection.row_factory = sqlite3.Row
     rows = connection.execute(
         """
-        SELECT display_name, character_slug, source_kind, source_ref
+        SELECT display_name, character_slug, source_kind, source_ref, revision
         FROM campaign_combatants
         ORDER BY id ASC
         """
@@ -1338,12 +1406,14 @@ def test_init_db_backfills_legacy_combatant_source_identity(tmp_path, monkeypatc
             "character_slug": "arden-march",
             "source_kind": "character",
             "source_ref": "arden-march",
+            "revision": 1,
         },
         {
             "display_name": "Clockwork Hound",
             "character_slug": None,
             "source_kind": "manual_npc",
             "source_ref": "",
+            "revision": 1,
         },
     ]
 

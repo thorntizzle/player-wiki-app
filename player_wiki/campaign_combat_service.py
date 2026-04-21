@@ -6,7 +6,11 @@ import time
 from collections import defaultdict
 from typing import Any
 
-from .campaign_combat_store import CampaignCombatConflictError, CampaignCombatStore
+from .campaign_combat_store import (
+    CampaignCombatConflictError,
+    CampaignCombatRevisionConflictError,
+    CampaignCombatStore,
+)
 from .character_repository import CharacterRepository
 from .character_state_service import CharacterStateService
 from .combat_models import (
@@ -211,6 +215,7 @@ class CampaignCombatService:
         campaign_slug: str,
         combatant_id: int,
         *,
+        expected_revision: int | None = None,
         turn_value: Any | None,
         updated_by_user_id: int | None = None,
     ) -> CampaignCombatantRecord:
@@ -226,10 +231,13 @@ class CampaignCombatService:
                 campaign_slug,
                 combatant_id,
                 turn_value=normalized_turn_value,
+                expected_revision=expected_revision,
                 updated_by_user_id=updated_by_user_id,
             )
             self.store.bump_tracker_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
             return combatant
+        except CampaignCombatRevisionConflictError:
+            raise
         except CampaignCombatConflictError as exc:
             raise CampaignCombatValidationError("That turn value could not be saved.") from exc
 
@@ -238,6 +246,7 @@ class CampaignCombatService:
         campaign_slug: str,
         combatant_id: int,
         *,
+        expected_revision: int | None = None,
         current_hp: Any | None,
         max_hp: Any | None,
         temp_hp: Any | None = 0,
@@ -279,10 +288,13 @@ class CampaignCombatService:
                 temp_hp=normalized_temp_hp,
                 movement_total=normalized_movement_total,
                 movement_remaining=min(combatant.movement_remaining, normalized_movement_total),
+                expected_revision=expected_revision,
                 updated_by_user_id=updated_by_user_id,
             )
             self.store.bump_tracker_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
             return updated_combatant
+        except CampaignCombatRevisionConflictError:
+            raise
         except CampaignCombatConflictError as exc:
             raise CampaignCombatValidationError("Those NPC vitals could not be saved.") from exc
 
@@ -337,6 +349,7 @@ class CampaignCombatService:
         campaign_slug: str,
         combatant_id: int,
         *,
+        expected_revision: int | None = None,
         has_action: bool,
         has_bonus_action: bool,
         has_reaction: bool,
@@ -361,10 +374,13 @@ class CampaignCombatService:
                 has_bonus_action=has_bonus_action,
                 has_reaction=has_reaction,
                 movement_remaining=normalized_movement_remaining,
+                expected_revision=expected_revision,
                 updated_by_user_id=updated_by_user_id,
             )
             self.store.bump_tracker_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
             return updated_combatant
+        except CampaignCombatRevisionConflictError:
+            raise
         except CampaignCombatConflictError as exc:
             raise CampaignCombatValidationError("Those combat resources could not be saved.") from exc
 
@@ -373,6 +389,7 @@ class CampaignCombatService:
         campaign_slug: str,
         combatant_id: int,
         *,
+        expected_revision: int | None = None,
         player_detail_visible: bool,
         updated_by_user_id: int | None = None,
     ) -> CampaignCombatantRecord:
@@ -385,10 +402,13 @@ class CampaignCombatService:
                 campaign_slug,
                 combatant_id,
                 player_detail_visible=player_detail_visible,
+                expected_revision=expected_revision,
                 updated_by_user_id=updated_by_user_id,
             )
             self.store.bump_tracker_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
             return updated_combatant
+        except CampaignCombatRevisionConflictError:
+            raise
         except CampaignCombatConflictError as exc:
             raise CampaignCombatValidationError("That NPC visibility setting could not be saved.") from exc
 

@@ -1,4 +1,4 @@
-{% macro combat_tracker_context_fields(return_to_dm, requested_combatant_id, state_revision=None) -%}
+{% macro combat_tracker_context_fields(return_to_dm, requested_combatant_id, state_revision=None, combatant_revision=None) -%}
   {% if return_to_dm %}
     <input type="hidden" name="combat_view" value="dm">
   {% endif %}
@@ -7,6 +7,9 @@
   {% endif %}
   {% if state_revision is not none %}
     <input type="hidden" name="expected_revision" value="{{ state_revision }}">
+  {% endif %}
+  {% if combatant_revision is not none %}
+    <input type="hidden" name="expected_combatant_revision" value="{{ combatant_revision }}">
   {% endif %}
 {%- endmacro %}
 <section class="section-block" id="combat-tracker">
@@ -46,7 +49,7 @@
                   data-combat-async
                   data-combat-inline-autosubmit
                 >
-                  {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id) }}
+                  {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id, combatant_revision=combatant.combatant_revision) }}
                   <label class="combat-badge combat-badge--editable">
                     <span class="combat-inline-label">Turn</span>
                     <input
@@ -99,7 +102,7 @@
                   data-combat-async
                   data-combat-inline-autosubmit
                 >
-                  {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id, combatant.state_revision) }}
+                  {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id, combatant.state_revision, combatant.combatant_revision) }}
                   <input type="hidden" name="temp_hp" value="{{ combatant.temp_hp }}">
                   {% if combatant.can_manage_combat and not combatant.character_slug %}
                     <input type="hidden" name="movement_total" value="{{ combatant.movement_total }}">
@@ -134,7 +137,7 @@
                   data-combat-async
                   data-combat-inline-autosubmit
                 >
-                  {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id, combatant.state_revision) }}
+                  {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id, combatant.state_revision, combatant.combatant_revision) }}
                   <input type="hidden" name="current_hp" value="{{ combatant.current_hp }}">
                   {% if combatant.can_manage_combat and not combatant.character_slug %}
                     <input type="hidden" name="max_hp" value="{{ combatant.max_hp }}">
@@ -168,7 +171,7 @@
                   data-combat-async
                   data-combat-inline-autosubmit
                 >
-                  {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id) }}
+                  {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id, combatant_revision=combatant.combatant_revision) }}
                   <input type="hidden" name="has_action" value="{{ '1' if combatant.has_action else '0' }}">
                   <input type="hidden" name="has_bonus_action" value="{{ '1' if combatant.has_bonus_action else '0' }}">
                   <input type="hidden" name="has_reaction" value="{{ '1' if combatant.has_reaction else '0' }}">
@@ -200,7 +203,7 @@
                   data-combat-async
                   data-combat-inline-autosubmit
                 >
-                  {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id) }}
+                  {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id, combatant_revision=combatant.combatant_revision) }}
                   <input type="hidden" name="current_hp" value="{{ combatant.current_hp }}">
                   <input type="hidden" name="max_hp" value="{{ combatant.max_hp }}">
                   <input type="hidden" name="temp_hp" value="{{ combatant.temp_hp }}">
@@ -266,6 +269,7 @@
               class="stack-form combat-form combat-form--compact"
               data-combat-async
             >
+              <input type="hidden" name="expected_combatant_revision" value="{{ combatant.combatant_revision }}">
               <input type="hidden" name="combat_view" value="dm">
               {% if requested_combatant_id %}
                 <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">

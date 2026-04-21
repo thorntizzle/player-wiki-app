@@ -33,7 +33,7 @@ from .auth import (
     has_session_mode_access,
 )
 from .auth_store import isoformat
-from .campaign_combat_service import CampaignCombatValidationError
+from .campaign_combat_service import CampaignCombatRevisionConflictError, CampaignCombatValidationError
 from .campaign_content_service import (
     CampaignContentError,
     delete_campaign_asset_file,
@@ -2568,11 +2568,23 @@ def register_api(app) -> None:
         try:
             payload = load_json_object()
             require_supported_combat_campaign(campaign_slug)
+            expected_combatant_revision = payload.get("expected_combatant_revision")
             current_app.extensions["campaign_combat_service"].update_turn_value(
                 campaign_slug,
                 combatant_id,
+                expected_revision=(
+                    int(expected_combatant_revision)
+                    if expected_combatant_revision is not None and str(expected_combatant_revision).strip()
+                    else None
+                ),
                 turn_value=payload.get("turn_value"),
                 updated_by_user_id=user.id,
+            )
+        except CampaignCombatRevisionConflictError:
+            return json_error(
+                "This combatant changed in another combat view. Refresh and try again.",
+                409,
+                code="state_conflict",
             )
         except (CampaignCombatValidationError, ValueError) as exc:
             return json_error(str(exc), 400, code="validation_error")
@@ -2609,9 +2621,15 @@ def register_api(app) -> None:
             else:
                 if not can_manage_campaign_combat(campaign_slug):
                     return json_error("You do not have permission to edit this combatant.", 403, code="forbidden")
+                expected_combatant_revision = payload.get("expected_combatant_revision")
                 combat_service.update_npc_vitals(
                     campaign_slug,
                     combatant_id,
+                    expected_revision=(
+                        int(expected_combatant_revision)
+                        if expected_combatant_revision is not None and str(expected_combatant_revision).strip()
+                        else None
+                    ),
                     current_hp=payload.get("current_hp"),
                     max_hp=payload.get("max_hp"),
                     temp_hp=payload.get("temp_hp"),
@@ -2621,6 +2639,12 @@ def register_api(app) -> None:
         except CharacterStateConflictError:
             return json_error(
                 "This sheet changed in another session. Refresh and try again.",
+                409,
+                code="state_conflict",
+            )
+        except CampaignCombatRevisionConflictError:
+            return json_error(
+                "This combatant changed in another combat view. Refresh and try again.",
                 409,
                 code="state_conflict",
             )
@@ -2652,14 +2676,26 @@ def register_api(app) -> None:
         try:
             payload = load_json_object()
             require_supported_combat_campaign(campaign_slug)
+            expected_combatant_revision = payload.get("expected_combatant_revision")
             combat_service.update_resources(
                 campaign_slug,
                 combatant_id,
+                expected_revision=(
+                    int(expected_combatant_revision)
+                    if expected_combatant_revision is not None and str(expected_combatant_revision).strip()
+                    else None
+                ),
                 has_action=coerce_bool(payload["has_action"], label="has_action") if "has_action" in payload else combatant.has_action,
                 has_bonus_action=coerce_bool(payload["has_bonus_action"], label="has_bonus_action") if "has_bonus_action" in payload else combatant.has_bonus_action,
                 has_reaction=coerce_bool(payload["has_reaction"], label="has_reaction") if "has_reaction" in payload else combatant.has_reaction,
                 movement_remaining=payload.get("movement_remaining", combatant.movement_remaining),
                 updated_by_user_id=user.id,
+            )
+        except CampaignCombatRevisionConflictError:
+            return json_error(
+                "This combatant changed in another combat view. Refresh and try again.",
+                409,
+                code="state_conflict",
             )
         except (CampaignCombatValidationError, ValueError) as exc:
             return json_error(str(exc), 400, code="validation_error")

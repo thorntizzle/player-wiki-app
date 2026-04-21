@@ -269,6 +269,7 @@ CREATE TABLE IF NOT EXISTS campaign_combatants (
     has_action INTEGER NOT NULL DEFAULT 1,
     has_bonus_action INTEGER NOT NULL DEFAULT 1,
     has_reaction INTEGER NOT NULL DEFAULT 1,
+    revision INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     created_by_user_id INTEGER,
@@ -596,6 +597,7 @@ def init_database() -> None:
     _migrate_campaign_combat_trackers_for_revision(connection)
     _migrate_campaign_session_states(connection)
     _migrate_campaign_session_articles_for_source_page_ref(connection)
+    _migrate_campaign_combatants_for_revision(connection)
     _migrate_campaign_combatants_for_source_identity(connection)
     connection.commit()
 
@@ -714,6 +716,34 @@ def _migrate_campaign_combat_trackers_for_revision(connection: sqlite3.Connectio
     connection.execute(
         """
         UPDATE campaign_combat_trackers
+        SET revision = CASE
+            WHEN revision IS NULL OR revision < 1
+                THEN 1
+            ELSE revision
+        END
+        """
+    )
+
+
+def _migrate_campaign_combatants_for_revision(connection: sqlite3.Connection) -> None:
+    columns = {
+        str(row["name"] or "")
+        for row in connection.execute("PRAGMA table_info(campaign_combatants)").fetchall()
+    }
+    if not columns:
+        return
+
+    if "revision" not in columns:
+        connection.execute(
+            """
+            ALTER TABLE campaign_combatants
+            ADD COLUMN revision INTEGER NOT NULL DEFAULT 1
+            """
+        )
+
+    connection.execute(
+        """
+        UPDATE campaign_combatants
         SET revision = CASE
             WHEN revision IS NULL OR revision < 1
                 THEN 1
