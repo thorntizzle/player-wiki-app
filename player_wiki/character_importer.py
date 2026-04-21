@@ -1424,18 +1424,31 @@ def _is_native_managed_spell_overlay(payload: dict[str, Any]) -> bool:
     )
 
 
+def _is_native_progression_managed_feature_overlay(payload: dict[str, Any]) -> bool:
+    feature_payload = dict(payload or {})
+    systems_ref = dict(feature_payload.get("systems_ref") or {})
+    entry_type = str(systems_ref.get("entry_type") or "").strip().lower()
+    category = str(feature_payload.get("category") or "").strip().lower()
+    return entry_type in {"feat", "optionalfeature"} or category == "feat"
+
+
 def _merge_existing_native_managed_overlays(
     definition: CharacterDefinition,
     existing_definition: CharacterDefinition,
 ) -> CharacterDefinition:
     payload = deepcopy(definition.to_dict())
     existing_payload = deepcopy(existing_definition.to_dict())
+    preserve_native_progression_features = _has_native_progression_history(dict(existing_payload.get("source") or {}))
 
     merged_features = _merge_existing_native_managed_entries(
         list(payload.get("features") or []),
         list(existing_payload.get("features") or []),
         key_builder=_feature_match_keys,
-        include_entry=_is_native_managed_feature_overlay,
+        include_entry=lambda entry: _is_native_managed_feature_overlay(entry)
+        or (
+            preserve_native_progression_features
+            and _is_native_progression_managed_feature_overlay(entry)
+        ),
     )
     payload["features"] = merged_features
 

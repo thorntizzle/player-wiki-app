@@ -2315,6 +2315,73 @@ def test_converge_imported_definition_does_not_downgrade_native_progression_from
     assert converged.source["native_progression"]["history"][-1]["to_level"] == 4
 
 
+def test_converge_imported_definition_preserves_native_progression_feat_rows_on_same_level_reimport():
+    existing_definition = _minimal_imported_definition(
+        profile={
+            "class_level_text": "Wizard 4",
+            "classes": [{"class_name": "Wizard", "subclass_name": "", "level": 4}],
+        },
+        features=[
+            {
+                "id": "lucky-1",
+                "name": "Lucky",
+                "category": "feat",
+                "source": "PHB",
+                "description_markdown": "",
+                "activation_type": "passive",
+                "tracker_ref": "lucky",
+                "systems_ref": {
+                    "slug": "phb-feat-lucky",
+                    "title": "Lucky",
+                    "entry_type": "feat",
+                    "source_id": "PHB",
+                },
+            }
+        ],
+        resource_templates=[
+            {
+                "id": "lucky",
+                "label": "Lucky",
+                "category": "feat",
+                "initial_current": 3,
+                "max": 3,
+                "reset_on": "long_rest",
+                "reset_to": "max",
+                "rest_behavior": "confirm_before_reset",
+                "notes": "",
+                "display_order": 0,
+            }
+        ],
+    )
+    existing_definition.source["native_progression"] = {
+        "baseline_repaired_at": "2026-03-31T00:00:00Z",
+        "history": [
+            {"kind": "repair", "at": "2026-03-31T00:00:00Z", "target_level": 3},
+            {"kind": "level_up", "at": "2026-03-31T01:00:00Z", "from_level": 3, "to_level": 4, "target_level": 4},
+        ],
+    }
+    incoming_definition = _minimal_imported_definition(
+        profile={
+            "class_level_text": "Wizard 4",
+            "classes": [{"class_name": "Wizard", "subclass_name": "", "level": 4}],
+        },
+        features=[],
+        resource_templates=[],
+    )
+
+    converged = converge_imported_definition(
+        incoming_definition,
+        existing_definition=existing_definition,
+    )
+
+    feature_names = {feature["name"] for feature in converged.features}
+    resource_ids = {template["id"] for template in converged.resource_templates}
+
+    assert "Lucky" in feature_names
+    assert "lucky" in resource_ids
+    assert converged.source["native_progression"]["history"][-1]["to_level"] == 4
+
+
 def test_converge_imported_definition_preserves_egw_subclass_ref_identity():
     existing_definition = _minimal_imported_definition(
         profile={
