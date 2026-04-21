@@ -7833,6 +7833,19 @@ _CAMPAIGN_ITEM_SHARED_WEAPON_BONUS_PATTERNS = (
 )
 _CAMPAIGN_ITEM_ATTACK_BONUS_PATTERN = re.compile(r"\+(\d+)\s+bonus to attack rolls", re.IGNORECASE)
 _CAMPAIGN_ITEM_DAMAGE_BONUS_PATTERN = re.compile(r"\+(\d+)\s+bonus to damage rolls", re.IGNORECASE)
+_CAMPAIGN_ITEM_PAGE_SUPPORT_METADATA_KEYS = (
+    "ability_score_minimums",
+    "attack_reminder_rules",
+    "attunement",
+    "base_item",
+    "bonus_weapon",
+    "bonus_weapon_attack",
+    "bonus_weapon_damage",
+    "defensive_rules",
+    "rarity",
+    "resource_template_bonuses",
+    "spell_support",
+)
 _CAMPAIGN_ITEM_SPECIAL_EFFECTS_BY_TITLE = {
     normalize_lookup("Hourglass Pendant"): {
         "spell_support": [
@@ -7859,57 +7872,6 @@ _CAMPAIGN_ITEM_SPECIAL_EFFECTS_BY_TITLE = {
             {
                 "id": "chronal-shift",
                 "bonus": 1,
-            }
-        ],
-    },
-    normalize_lookup("Psionic Circlet"): {
-        "ability_score_minimums": {
-            "int": 14,
-        },
-        "resource_template_bonuses": [
-            {
-                "id": "psionic-power-psionic-energy",
-                "bonus": 1,
-            }
-        ],
-        "attack_reminder_rules": [
-            {
-                "id": "item:psionic-circlet:psionic-options",
-                "title": "Psionic Circlet",
-                "save_dc_ability_key": "int",
-                "condition": (
-                    "Once on each of your turns, after you hit a target within 30 feet with a weapon attack "
-                    "and deal damage to it, you can expend one Psionic Energy die to use one of these options."
-                ),
-                "attack_scope": {
-                    "label": "Weapon attacks",
-                    "categories": ["melee weapon", "ranged weapon"],
-                },
-                "effects": [
-                    {
-                        "kind": "saving_throw",
-                        "label": "Wisdom save DC",
-                        "summary": "Psychic Hindrance and Psychic Anchor use Wisdom save DC {save_dc}.",
-                    },
-                    {
-                        "kind": "disadvantage",
-                        "label": "Psychic Hindrance",
-                        "summary": (
-                            "On a failed Wisdom save, the target's next attack roll before the end of its next "
-                            "turn is made with disadvantage."
-                        ),
-                    },
-                    {
-                        "kind": "advantage",
-                        "label": "Psychic Opening",
-                        "summary": "The next attack roll made against the target before the start of your next turn has advantage.",
-                    },
-                    {
-                        "kind": "speed_control",
-                        "label": "Psychic Anchor",
-                        "summary": "On a failed Wisdom save, the target's speed becomes 0 until the end of its next turn.",
-                    },
-                ],
             }
         ],
     },
@@ -8012,6 +7974,9 @@ def _build_campaign_item_page_support(
         str(getattr(page_record, "body_markdown", "") or ""),
         weapon_profiles=weapon_profiles,
     )
+    page_support_metadata = _campaign_item_page_support_metadata(page_record)
+    if page_support_metadata:
+        metadata = _merge_campaign_item_support_metadata(metadata, page_support_metadata)
     if not metadata:
         return None
     return {
@@ -8087,6 +8052,17 @@ def _build_campaign_item_support_metadata(
             special_effect_metadata,
         )
     return metadata
+
+
+def _campaign_item_page_support_metadata(page_record: Any) -> dict[str, Any]:
+    metadata = dict(getattr(page_record, "metadata", {}) or {})
+    support_metadata: dict[str, Any] = {}
+    for key in _CAMPAIGN_ITEM_PAGE_SUPPORT_METADATA_KEYS:
+        value = metadata.get(key)
+        if value is None or value == "" or value == [] or value == {}:
+            continue
+        support_metadata[key] = deepcopy(value)
+    return support_metadata
 
 
 def _campaign_item_special_effect_metadata(title: str) -> dict[str, Any]:

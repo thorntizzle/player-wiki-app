@@ -9046,11 +9046,63 @@ def test_normalize_definition_to_native_model_applies_psionic_circlet_item_effec
                 "items/psionic-circlet",
                 "Psionic Circlet",
                 section="Items",
-                body_markdown=(
-                    "*Wondrous item, rare (requires attunement)*\n\n"
-                    "While wearing this circlet, your Intelligence score is 14 if it was lower. "
-                    "You also gain one additional Psionic Energy die.\n"
-                ),
+                metadata={
+                    "ability_score_minimums": {"int": 14},
+                    "resource_template_bonuses": [
+                        {
+                            "id": "psionic-power-psionic-energy",
+                            "bonus": 1,
+                        }
+                    ],
+                    "attack_reminder_rules": [
+                        {
+                            "id": "item:psionic-circlet:psionic-options",
+                            "title": "Psionic Circlet",
+                            "save_dc_ability_key": "int",
+                            "condition": (
+                                "Once on each of your turns, after you hit a target within 30 feet with a weapon "
+                                "attack and deal damage to it, you can expend one Psionic Energy die to use one "
+                                "of these options."
+                            ),
+                            "attack_scope": {
+                                "label": "Weapon attacks",
+                                "categories": ["melee weapon", "ranged weapon"],
+                            },
+                            "effects": [
+                                {
+                                    "kind": "saving_throw",
+                                    "label": "Wisdom save DC",
+                                    "summary": "Psychic Hindrance and Psychic Anchor use Wisdom save DC {save_dc}.",
+                                },
+                                {
+                                    "kind": "disadvantage",
+                                    "label": "Psychic Hindrance",
+                                    "summary": (
+                                        "On a failed Wisdom save, the target's next attack roll before the end of "
+                                        "its next turn is made with disadvantage."
+                                    ),
+                                },
+                                {
+                                    "kind": "advantage",
+                                    "label": "Psychic Opening",
+                                    "summary": (
+                                        "The next attack roll made against the target before the start of your next "
+                                        "turn has advantage."
+                                    ),
+                                },
+                                {
+                                    "kind": "speed_control",
+                                    "label": "Psychic Anchor",
+                                    "summary": (
+                                        "On a failed Wisdom save, the target's speed becomes 0 until the end of "
+                                        "its next turn."
+                                    ),
+                                },
+                            ],
+                        }
+                    ],
+                },
+                body_markdown="*Wondrous item, rare (requires attunement)*\n\nThe circlet stabilizes psionic talent.\n",
             )
         ],
     )
