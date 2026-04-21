@@ -34,7 +34,7 @@ from .managed_resource_registry import resolve_managed_resource_family_and_membe
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_BUILDER_VERSION = "2026-04-11.03"
+CHARACTER_BUILDER_VERSION = "2026-04-20.01"
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
 NATIVE_LEVEL_UP_READY = "ready"
@@ -46,6 +46,8 @@ PROFILE_ENTRY_MATCH_PAGE_REF = "page_ref"
 PROFILE_ENTRY_MATCH_SYSTEMS_SLUG = "systems_slug"
 PROFILE_ENTRY_MATCH_SYSTEMS_SOURCE_TITLE = "systems_source_title"
 PROFILE_ENTRY_MATCH_FALLBACK_TITLE = "fallback_title"
+PROFILE_ENTRY_MATCH_AMBIGUOUS_SYSTEMS_SOURCE_TITLE = "ambiguous_systems_source_title"
+PROFILE_ENTRY_MATCH_AMBIGUOUS_FALLBACK_TITLE = "ambiguous_fallback_title"
 PROFILE_ENTRY_MATCH_UNRESOLVED_SOURCE_LOCKED = "unresolved_source_locked"
 PROFILE_ENTRY_MATCH_UNRESOLVED = "unresolved"
 NATIVE_SOURCE_MATRIX_SUBCLASS_ENTRY_TYPES = frozenset({"subclass", "subclassfeature"})
@@ -1227,20 +1229,16 @@ def native_level_up_readiness(
             )
             continue
 
-        if is_imported and index == 1 and _profile_entry_match_needs_confirmation(selected_class_match):
-            repair_reasons.append(
-                f"Confirm the supported {_profile_link_subject('base class', systems_ref=profile_row_ref or class_row_ref, entry=selected_row_class)} link on the character profile before leveling up."
-            )
         if is_imported:
             class_row_match = _resolve_profile_entry_match(
                 enabled_class_options,
                 class_row_ref,
                 fallback_title=str(class_payload.get("class_name") or selected_row_class.title or "").strip(),
             )
-            if _profile_entry_match_needs_confirmation(class_row_match) or not _systems_ref_slug(class_row_ref):
+            if class_row_match.get("entry") is None:
                 subject = "class row" if index == 1 else f"class row {index}"
                 repair_reasons.append(
-                    f"Confirm the {_profile_link_subject(subject, systems_ref=class_row_ref, entry=selected_row_class)} link so native level-up can extend the imported class baseline cleanly."
+                    f"Choose the {_profile_link_subject(subject, systems_ref=class_row_ref, entry=selected_row_class)} link so native level-up can extend the imported class baseline cleanly."
                 )
 
         class_progression = _class_progression_for_builder(systems_service, campaign_slug, selected_row_class)
@@ -1264,8 +1262,6 @@ def native_level_up_readiness(
         requires_subclass = _class_requires_subclass_at_level(selected_row_class, class_progression, row_level)
         if requires_subclass and selected_row_subclass is None:
             repair_reasons.append(f"Choose a {subclass_subject} link before leveling up.")
-        elif is_imported and requires_subclass and _profile_entry_match_needs_confirmation(selected_subclass_match):
-            repair_reasons.append(f"Confirm the {subclass_subject} link before leveling up.")
 
         multiclass_support = _evaluate_shared_slot_multiclass_support(
             systems_service,
@@ -1307,17 +1303,9 @@ def native_level_up_readiness(
         repair_reasons.append(
             f"Choose a {_profile_link_subject('species', systems_ref=definition.profile.get('species_ref'))} link that the native level-up flow can resolve."
         )
-    elif is_imported and _profile_entry_match_needs_confirmation(selected_species_match):
-        repair_reasons.append(
-            f"Confirm the {_profile_link_subject('species', systems_ref=definition.profile.get('species_ref'), entry=selected_species)} link so native level-up can keep using the imported baseline."
-        )
     if selected_background is None:
         repair_reasons.append(
             f"Choose a {_profile_link_subject('background', systems_ref=definition.profile.get('background_ref'))} link that the native level-up flow can resolve."
-        )
-    elif is_imported and _profile_entry_match_needs_confirmation(selected_background_match):
-        repair_reasons.append(
-            f"Confirm the {_profile_link_subject('background', systems_ref=definition.profile.get('background_ref'), entry=selected_background)} link so native level-up can keep using the imported baseline."
         )
 
     if len(classes) > 1 and not shared_slot_multiclass_ready:
@@ -4159,47 +4147,55 @@ def _resolve_profile_entry_match(
     if selected_page_ref:
         resolved = next((entry for entry in options if _entry_page_ref(entry) == selected_page_ref), None)
         if resolved is not None:
-            return {"entry": resolved, "match_mode": PROFILE_ENTRY_MATCH_PAGE_REF}
+            return {"entry": resolved, "match_mode": PROFILE_ENTRY_MATCH_PAGE_REF, "candidate_count": 1}
 
     selected_slug = _systems_ref_slug(systems_ref)
     if selected_slug:
         resolved = _resolve_selected_entry(options, selected_slug)
         if resolved is not None:
-            return {"entry": resolved, "match_mode": PROFILE_ENTRY_MATCH_SYSTEMS_SLUG}
+            return {"entry": resolved, "match_mode": PROFILE_ENTRY_MATCH_SYSTEMS_SLUG, "candidate_count": 1}
 
     source_locked_title = _systems_ref_title(systems_ref) or str(fallback_title or "").strip()
     normalized_source_locked_title = normalize_lookup(source_locked_title)
     source_id = _systems_ref_source_id(systems_ref)
     if source_id and normalized_source_locked_title:
-        resolved = next(
-            (
-                entry
-                for entry in options
-                if str(entry.source_id or "").strip().upper() == source_id
-                and normalize_lookup(entry.title) == normalized_source_locked_title
-            ),
-            None,
-        )
-        if resolved is not None:
-            return {"entry": resolved, "match_mode": PROFILE_ENTRY_MATCH_SYSTEMS_SOURCE_TITLE}
-        return {"entry": None, "match_mode": PROFILE_ENTRY_MATCH_UNRESOLVED_SOURCE_LOCKED}
+        candidates = [
+            entry
+            for entry in options
+            if str(entry.source_id or "").strip().upper() == source_id
+            and normalize_lookup(entry.title) == normalized_source_locked_title
+        ]
+        if len(candidates) == 1:
+            return {
+                "entry": candidates[0],
+                "match_mode": PROFILE_ENTRY_MATCH_SYSTEMS_SOURCE_TITLE,
+                "candidate_count": 1,
+            }
+        if candidates:
+            return {
+                "entry": None,
+                "match_mode": PROFILE_ENTRY_MATCH_AMBIGUOUS_SYSTEMS_SOURCE_TITLE,
+                "candidate_count": len(candidates),
+            }
+        return {"entry": None, "match_mode": PROFILE_ENTRY_MATCH_UNRESOLVED_SOURCE_LOCKED, "candidate_count": 0}
 
     normalized_title = normalize_lookup(source_locked_title)
     if not normalized_title:
-        return {"entry": None, "match_mode": PROFILE_ENTRY_MATCH_UNRESOLVED}
-    resolved = next((entry for entry in options if normalize_lookup(entry.title) == normalized_title), None)
-    if resolved is not None:
-        return {"entry": resolved, "match_mode": PROFILE_ENTRY_MATCH_FALLBACK_TITLE}
-    return {"entry": None, "match_mode": PROFILE_ENTRY_MATCH_UNRESOLVED}
-
-
-def _profile_entry_match_needs_confirmation(match_result: dict[str, Any] | None) -> bool:
-    match_mode = str((match_result or {}).get("match_mode") or "").strip()
-    return match_mode in {
-        PROFILE_ENTRY_MATCH_SYSTEMS_SOURCE_TITLE,
-        PROFILE_ENTRY_MATCH_FALLBACK_TITLE,
-    }
-
+        return {"entry": None, "match_mode": PROFILE_ENTRY_MATCH_UNRESOLVED, "candidate_count": 0}
+    candidates = [entry for entry in options if normalize_lookup(entry.title) == normalized_title]
+    if len(candidates) == 1:
+        return {
+            "entry": candidates[0],
+            "match_mode": PROFILE_ENTRY_MATCH_FALLBACK_TITLE,
+            "candidate_count": 1,
+        }
+    if candidates:
+        return {
+            "entry": None,
+            "match_mode": PROFILE_ENTRY_MATCH_AMBIGUOUS_FALLBACK_TITLE,
+            "candidate_count": len(candidates),
+        }
+    return {"entry": None, "match_mode": PROFILE_ENTRY_MATCH_UNRESOLVED, "candidate_count": 0}
 
 def _has_profile_entry_link(
     systems_ref: Any,
@@ -4290,18 +4286,15 @@ def _resolve_definition_sheet_entries(
     for index, row in enumerate(ensure_profile_class_rows(definition.profile), start=1):
         row_payload = dict(row or {})
         row_id = str(row_payload.get("row_id") or "").strip() or f"class-row-{index}"
-        row_class = selected_class if index == 1 and selected_class is not None else _resolve_profile_entry(
+        row_class = _resolve_profile_entry(
             list(static_bundle.get("supported_class_entries") or []),
             dict(row_payload.get("systems_ref") or {}),
             fallback_title=str(row_payload.get("class_name") or "").strip(),
         )
+        if row_class is None and index == 1 and selected_class is not None:
+            row_class = selected_class
         row_subclass = (
-            selected_subclass
-            if index == 1 and selected_subclass is not None
-            else None
-        )
-        if row_subclass is None and row_class is not None:
-            row_subclass = _resolve_profile_entry(
+            _resolve_profile_entry(
                 _list_subclass_options(
                     systems_service,
                     definition.campaign_slug,
@@ -4311,6 +4304,15 @@ def _resolve_definition_sheet_entries(
                 dict(row_payload.get("subclass_ref") or {}),
                 fallback_title=str(row_payload.get("subclass_name") or "").strip(),
             )
+            if row_class is not None
+            else None
+        )
+        if row_subclass is None and index == 1 and selected_subclass is not None:
+            row_subclass = selected_subclass
+        if index == 1 and selected_class is None:
+            selected_class = row_class
+        if index == 1 and selected_subclass is None:
+            selected_subclass = row_subclass
         selected_class_rows.append(
             {
                 "row_id": row_id,
@@ -4328,6 +4330,75 @@ def _resolve_definition_sheet_entries(
         "selected_background": selected_background,
         "selected_class_rows": selected_class_rows,
     }
+
+
+def _persist_resolved_profile_links(
+    profile: dict[str, Any] | None,
+    *,
+    resolved_entries: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    resolved_payload = dict(resolved_entries or {})
+    updated_profile = dict(profile or {})
+    selected_class_rows = [
+        dict(row or {})
+        for row in list(resolved_payload.get("selected_class_rows") or [])
+        if isinstance(row, dict)
+    ]
+    if updated_profile:
+        updated_rows: list[dict[str, Any]] = []
+        for index, row in enumerate(ensure_profile_class_rows(updated_profile), start=1):
+            row_payload = dict(row or {})
+            row_id = str(row_payload.get("row_id") or "").strip() or f"class-row-{index}"
+            row_context = next(
+                (
+                    candidate
+                    for candidate in selected_class_rows
+                    if str(candidate.get("row_id") or "").strip() == row_id
+                ),
+                selected_class_rows[index - 1] if index - 1 < len(selected_class_rows) else {},
+            )
+            selected_row_class = (
+                row_context.get("selected_class")
+                if isinstance(row_context.get("selected_class"), SystemsEntryRecord)
+                else None
+            )
+            if selected_row_class is not None:
+                row_payload["class_name"] = selected_row_class.title
+                row_payload["systems_ref"] = _systems_ref_from_entry(selected_row_class)
+            selected_row_subclass = (
+                row_context.get("selected_subclass")
+                if isinstance(row_context.get("selected_subclass"), SystemsEntryRecord)
+                else None
+            )
+            if selected_row_subclass is not None:
+                row_payload["subclass_name"] = selected_row_subclass.title
+                row_payload["subclass_ref"] = _systems_ref_from_entry(selected_row_subclass)
+            updated_rows.append(row_payload)
+        updated_profile = _sync_profile_with_class_rows(updated_profile, updated_rows)
+
+    selected_species = (
+        resolved_payload.get("selected_species")
+        if isinstance(resolved_payload.get("selected_species"), SystemsEntryRecord)
+        else None
+    )
+    if selected_species is not None:
+        species_page_ref = _entry_page_ref(selected_species)
+        updated_profile["species"] = selected_species.title
+        updated_profile["species_ref"] = None if species_page_ref else _systems_ref_from_entry(selected_species)
+        updated_profile["species_page_ref"] = species_page_ref or None
+
+    selected_background = (
+        resolved_payload.get("selected_background")
+        if isinstance(resolved_payload.get("selected_background"), SystemsEntryRecord)
+        else None
+    )
+    if selected_background is not None:
+        background_page_ref = _entry_page_ref(selected_background)
+        updated_profile["background"] = selected_background.title
+        updated_profile["background_ref"] = None if background_page_ref else _systems_ref_from_entry(selected_background)
+        updated_profile["background_page_ref"] = background_page_ref or None
+
+    return sync_profile_class_summary(updated_profile)
 
 
 def _effective_item_catalog_for_definition(
@@ -5787,16 +5858,19 @@ def _derive_definition_core_sheet_payloads(
     resolved_subclass: SystemsEntryRecord | None = None,
     resolved_species: SystemsEntryRecord | None = None,
     resolved_background: SystemsEntryRecord | None = None,
+    resolved_entries: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    resolved_entries = _resolve_definition_sheet_entries(
-        definition,
-        systems_service=systems_service,
-        campaign_page_records=campaign_page_records,
-        resolved_class=resolved_class,
-        resolved_subclass=resolved_subclass,
-        resolved_species=resolved_species,
-        resolved_background=resolved_background,
-    )
+    resolved_entries = dict(resolved_entries or {})
+    if not resolved_entries:
+        resolved_entries = _resolve_definition_sheet_entries(
+            definition,
+            systems_service=systems_service,
+            campaign_page_records=campaign_page_records,
+            resolved_class=resolved_class,
+            resolved_subclass=resolved_subclass,
+            resolved_species=resolved_species,
+            resolved_background=resolved_background,
+        )
     sanitized_definition = _strip_definition_campaign_feat_effects(
         definition,
         selected_class=resolved_entries.get("selected_class"),
@@ -19668,6 +19742,15 @@ def normalize_definition_to_native_model(
     payload = deepcopy(definition.to_dict())
     payload["source"] = _seed_source_hp_baseline_from_definition(payload.get("source"), definition)
     seeded_definition = CharacterDefinition.from_dict(payload)
+    resolved_entries = _resolve_definition_sheet_entries(
+        seeded_definition,
+        systems_service=systems_service,
+        campaign_page_records=campaign_page_records,
+        resolved_class=resolved_class,
+        resolved_subclass=resolved_subclass,
+        resolved_species=resolved_species,
+        resolved_background=resolved_background,
+    )
     payload.update(
         _derive_definition_core_sheet_payloads(
             seeded_definition,
@@ -19679,9 +19762,13 @@ def normalize_definition_to_native_model(
             resolved_subclass=resolved_subclass,
             resolved_species=resolved_species,
             resolved_background=resolved_background,
+            resolved_entries=resolved_entries,
         )
     )
-    payload["profile"] = sync_profile_class_summary(payload.get("profile"))
+    payload["profile"] = _persist_resolved_profile_links(
+        payload.get("profile"),
+        resolved_entries=resolved_entries,
+    )
     return CharacterDefinition.from_dict(payload)
 
 

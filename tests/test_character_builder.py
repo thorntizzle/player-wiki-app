@@ -977,7 +977,7 @@ def test_imported_character_readiness_is_ready_when_required_links_are_present()
     assert readiness["selected_subclass"].slug == champion.slug
 
 
-def test_imported_character_with_missing_progression_links_is_repairable_even_when_titles_match():
+def test_imported_character_with_missing_progression_links_is_ready_when_titles_match_uniquely():
     fighter = _systems_entry(
         "class",
         "phb-class-fighter",
@@ -1011,11 +1011,93 @@ def test_imported_character_with_missing_progression_links_is_repairable_even_wh
 
     readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
 
+    assert readiness["status"] == "ready"
+    assert readiness["selected_class"].slug == fighter.slug
+    assert readiness["selected_subclass"].slug == champion.slug
+    assert readiness["selected_species"].slug == human.slug
+    assert readiness["selected_background"].slug == acolyte.slug
+    assert readiness["reasons"] == []
+
+
+def test_imported_character_with_missing_progression_links_stays_repairable_when_titles_are_ambiguous():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "subclass_title": "Martial Archetype"},
+    )
+    champion = _systems_entry(
+        "subclass",
+        "phb-subclass-champion",
+        "Champion",
+        metadata={"class_name": "Fighter", "class_source": "PHB"},
+    )
+    phb_human = _systems_entry("race", "phb-race-human", "Human", source_id="PHB")
+    tce_human = _systems_entry("race", "tce-race-human", "Human", source_id="TCE")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "subclass": [champion],
+            "race": [phb_human, tce_human],
+            "background": [acolyte],
+        },
+        class_progression=[{"level": 3, "feature_rows": [{"label": "Martial Archetype"}]}],
+        enabled_source_ids=["PHB", "TCE"],
+    )
+    definition = _minimal_imported_character_definition()
+    definition.profile.pop("species_ref", None)
+
+    readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
+
     assert readiness["status"] == "repairable"
-    assert any("base class link" in reason for reason in readiness["reasons"])
+    assert readiness["selected_species"] is None
     assert any("species link" in reason for reason in readiness["reasons"])
-    assert any("background link" in reason for reason in readiness["reasons"])
-    assert any("before leveling up" in reason.lower() and "link" in reason.lower() for reason in readiness["reasons"])
+
+
+def test_normalize_definition_persists_recovered_imported_progression_links():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}, "subclass_title": "Martial Archetype"},
+    )
+    champion = _systems_entry(
+        "subclass",
+        "phb-subclass-champion",
+        "Champion",
+        metadata={"class_name": "Fighter", "class_source": "PHB"},
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "subclass": [champion],
+            "race": [human],
+            "background": [acolyte],
+        },
+        class_progression=[{"level": 3, "feature_rows": [{"label": "Martial Archetype"}]}],
+    )
+    definition = _minimal_imported_character_definition()
+    definition.profile.pop("class_ref", None)
+    definition.profile["classes"][0].pop("systems_ref", None)
+    definition.profile.pop("subclass_ref", None)
+    definition.profile["classes"][0].pop("subclass_ref", None)
+    definition.profile.pop("species_ref", None)
+    definition.profile.pop("background_ref", None)
+
+    normalized = normalize_definition_to_native_model(
+        definition,
+        systems_service=systems_service,
+    )
+
+    assert normalized.profile["class_ref"]["slug"] == fighter.slug
+    assert normalized.profile["classes"][0]["systems_ref"]["slug"] == fighter.slug
+    assert normalized.profile["subclass_ref"]["slug"] == champion.slug
+    assert normalized.profile["classes"][0]["subclass_ref"]["slug"] == champion.slug
+    assert normalized.profile["species_ref"]["slug"] == human.slug
+    assert normalized.profile["background_ref"]["slug"] == acolyte.slug
 
 
 def test_multiclass_readiness_uses_class_rows_for_total_level_even_when_legacy_summary_is_stale():
@@ -2732,7 +2814,7 @@ def test_native_level_up_surfaces_and_applies_structured_subclass_spell_choices(
     assert spells_by_name["Shield"]["class_row_id"] == "class-row-1"
 
 
-def test_imported_multiclass_repair_is_row_aware_and_unlocks_native_advancement():
+def test_imported_multiclass_rows_with_recoverable_links_unlock_native_advancement_without_repair():
     fighter = _systems_entry(
         "class",
         "phb-class-fighter",
@@ -2777,30 +2859,12 @@ def test_imported_multiclass_repair_is_row_aware_and_unlocks_native_advancement(
     definition.profile.pop("subclass_ref", None)
 
     readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
-    repair_context = build_imported_progression_repair_context(
-        systems_service,
-        "linden-pass",
-        definition,
-    )
-
-    assert readiness["status"] == "repairable"
-    assert len(repair_context["class_rows"]) == 2
-    repaired_definition, repaired_import = apply_imported_progression_repairs(
-        "linden-pass",
-        definition,
-        _minimal_import_metadata(definition.character_slug),
-        repair_context,
-        {
-            **repair_context["values"],
-            "repair_class_slug_class-row-1": f"systems:{fighter.slug}",
-            "repair_class_slug_class-row-2": f"systems:{rogue.slug}",
-        },
-    )
-    repaired_readiness = native_level_up_readiness(systems_service, "linden-pass", repaired_definition)
+    assert readiness["status"] == "ready"
+    assert [row["selected_class"].slug for row in readiness["selected_class_rows"]] == [fighter.slug, rogue.slug]
     context = build_native_level_up_context(
         systems_service,
         "linden-pass",
-        repaired_definition,
+        definition,
         {
             "advancement_mode": "advance_existing",
             "target_class_row_id": "class-row-2",
@@ -2809,15 +2873,16 @@ def test_imported_multiclass_repair_is_row_aware_and_unlocks_native_advancement(
     )
     leveled_definition, _managed_import, _hp_delta = build_native_level_up_character_definition(
         "linden-pass",
-        repaired_definition,
+        definition,
         context,
         context["values"],
-        current_import_metadata=repaired_import,
+        current_import_metadata=_minimal_import_metadata(definition.character_slug),
     )
 
-    assert repaired_readiness["status"] == "ready"
-    assert [row["row_id"] for row in repaired_definition.profile["classes"]] == ["class-row-1", "class-row-2"]
+    assert [row["row_id"] for row in leveled_definition.profile["classes"]] == ["class-row-1", "class-row-2"]
     assert [row["level"] for row in leveled_definition.profile["classes"]] == [1, 2]
+    assert leveled_definition.profile["classes"][0]["systems_ref"]["slug"] == fighter.slug
+    assert leveled_definition.profile["classes"][1]["systems_ref"]["slug"] == rogue.slug
     assert any(feature["name"] == "Cunning Action" for feature in leveled_definition.features)
 
 
@@ -3109,7 +3174,7 @@ def test_imported_artificer_with_stale_enabled_class_metadata_uses_reference_pro
     )
 
 
-def test_imported_tce_artificer_with_stale_source_locked_refs_repairs_to_tce_entries():
+def test_imported_tce_artificer_with_stale_source_locked_refs_auto_recover_to_tce_entries():
     artificer = _systems_entry(
         "class",
         "tce-class-artificer",
@@ -3215,19 +3280,9 @@ def test_imported_tce_artificer_with_stale_source_locked_refs_repairs_to_tce_ent
         "source_id": "TCE",
     }
     definition.stats["ability_scores"]["int"] = {"score": 16, "modifier": 3, "save_bonus": 3}
-    import_metadata = CharacterImportMetadata(
-        campaign_slug="linden-pass",
-        character_slug=definition.character_slug,
-        source_path="imports://artificer-repair.md",
-        imported_at_utc="2026-04-08T00:00:00Z",
-        parser_version="fixture",
-        import_status="clean",
-        warnings=[],
-    )
-
     readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
 
-    assert readiness["status"] == "repairable"
+    assert readiness["status"] == "ready"
     assert readiness["selected_class"].slug == artificer.slug
     assert readiness["selected_class"].source_id == "TCE"
     assert readiness["selected_species"].slug == tce_human.slug
@@ -3236,44 +3291,25 @@ def test_imported_tce_artificer_with_stale_source_locked_refs_repairs_to_tce_ent
     assert readiness["selected_background"].source_id == "TCE"
     assert readiness["selected_subclass"].slug == tce_armorer.slug
     assert readiness["selected_subclass"].source_id == "TCE"
-    assert any("base class link" in reason for reason in readiness["reasons"])
-    assert any("class row link" in reason for reason in readiness["reasons"])
-    assert any("species link" in reason for reason in readiness["reasons"])
-    assert any("background link" in reason for reason in readiness["reasons"])
+    assert readiness["reasons"] == []
 
-    repair_context = build_imported_progression_repair_context(
-        systems_service,
-        "linden-pass",
+    normalized = normalize_definition_to_native_model(
         definition,
+        systems_service=systems_service,
     )
 
-    assert repair_context["values"]["repair_class_slug"] == f"systems:{artificer.slug}"
-    assert repair_context["values"]["repair_species_slug"] == f"systems:{tce_human.slug}"
-    assert repair_context["values"]["repair_background_slug"] == f"systems:{tce_sage.slug}"
-    assert repair_context["values"]["repair_subclass_slug"] == f"systems:{tce_armorer.slug}"
-
-    repaired_definition, _ = apply_imported_progression_repairs(
-        "linden-pass",
-        definition,
-        import_metadata,
-        repair_context,
-        repair_context["values"],
-    )
-    repaired_readiness = native_level_up_readiness(systems_service, "linden-pass", repaired_definition)
-
-    assert repaired_definition.profile["class_ref"]["slug"] == artificer.slug
-    assert repaired_definition.profile["class_ref"]["source_id"] == "TCE"
-    assert repaired_definition.profile["classes"][0]["systems_ref"]["slug"] == artificer.slug
-    assert repaired_definition.profile["species_ref"]["slug"] == tce_human.slug
-    assert repaired_definition.profile["species_ref"]["source_id"] == "TCE"
-    assert repaired_definition.profile["background_ref"]["slug"] == tce_sage.slug
-    assert repaired_definition.profile["background_ref"]["source_id"] == "TCE"
-    assert repaired_definition.profile["subclass_ref"]["slug"] == tce_armorer.slug
-    assert repaired_definition.profile["subclass_ref"]["source_id"] == "TCE"
-    assert repaired_readiness["status"] == "ready"
+    assert normalized.profile["class_ref"]["slug"] == artificer.slug
+    assert normalized.profile["class_ref"]["source_id"] == "TCE"
+    assert normalized.profile["classes"][0]["systems_ref"]["slug"] == artificer.slug
+    assert normalized.profile["species_ref"]["slug"] == tce_human.slug
+    assert normalized.profile["species_ref"]["source_id"] == "TCE"
+    assert normalized.profile["background_ref"]["slug"] == tce_sage.slug
+    assert normalized.profile["background_ref"]["source_id"] == "TCE"
+    assert normalized.profile["subclass_ref"]["slug"] == tce_armorer.slug
+    assert normalized.profile["subclass_ref"]["source_id"] == "TCE"
 
 
-def test_imported_xge_subclass_with_stale_source_locked_ref_repairs_to_xge_entry():
+def test_imported_xge_subclass_with_stale_source_locked_ref_auto_recovers_to_xge_entry():
     fighter = _systems_entry(
         "class",
         "phb-class-fighter",
@@ -3356,46 +3392,23 @@ def test_imported_xge_subclass_with_stale_source_locked_ref_repairs_to_xge_entry
         "slug": acolyte.slug,
         "source_id": "PHB",
     }
-    import_metadata = CharacterImportMetadata(
-        campaign_slug="linden-pass",
-        character_slug=definition.character_slug,
-        source_path="imports://xge-archer.md",
-        imported_at_utc="2026-04-08T00:00:00Z",
-        parser_version="fixture",
-        import_status="clean",
-        warnings=[],
-    )
-
     readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
 
-    assert readiness["status"] == "repairable"
+    assert readiness["status"] == "ready"
     assert readiness["selected_subclass"].slug == xge_arcane_archer.slug
     assert readiness["selected_subclass"].source_id == "XGE"
-    assert any("XGE Martial Archetype link" in reason for reason in readiness["reasons"])
+    assert readiness["reasons"] == []
 
-    repair_context = build_imported_progression_repair_context(
-        systems_service,
-        "linden-pass",
+    normalized = normalize_definition_to_native_model(
         definition,
+        systems_service=systems_service,
     )
 
-    assert repair_context["values"]["repair_subclass_slug"] == f"systems:{xge_arcane_archer.slug}"
-
-    repaired_definition, _ = apply_imported_progression_repairs(
-        "linden-pass",
-        definition,
-        import_metadata,
-        repair_context,
-        repair_context["values"],
-    )
-    repaired_readiness = native_level_up_readiness(systems_service, "linden-pass", repaired_definition)
-
-    assert repaired_definition.profile["subclass_ref"]["slug"] == xge_arcane_archer.slug
-    assert repaired_definition.profile["subclass_ref"]["source_id"] == "XGE"
-    assert repaired_readiness["status"] == "ready"
+    assert normalized.profile["subclass_ref"]["slug"] == xge_arcane_archer.slug
+    assert normalized.profile["subclass_ref"]["source_id"] == "XGE"
 
 
-def test_imported_egw_subclass_with_stale_source_locked_ref_repairs_to_egw_entry():
+def test_imported_egw_subclass_with_stale_source_locked_ref_auto_recovers_to_egw_entry():
     wizard = _systems_entry(
         "class",
         "phb-class-wizard",
@@ -3477,46 +3490,23 @@ def test_imported_egw_subclass_with_stale_source_locked_ref_repairs_to_egw_entry
         "slug": sage.slug,
         "source_id": "PHB",
     }
-    import_metadata = CharacterImportMetadata(
-        campaign_slug="linden-pass",
-        character_slug=definition.character_slug,
-        source_path="imports://egw-chronurgist.md",
-        imported_at_utc="2026-04-08T00:00:00Z",
-        parser_version="fixture",
-        import_status="clean",
-        warnings=[],
-    )
-
     readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
 
-    assert readiness["status"] == "repairable"
+    assert readiness["status"] == "ready"
     assert readiness["selected_subclass"].slug == egw_chronurgy.slug
     assert readiness["selected_subclass"].source_id == "EGW"
-    assert any("EGW Arcane Tradition link" in reason for reason in readiness["reasons"])
+    assert readiness["reasons"] == []
 
-    repair_context = build_imported_progression_repair_context(
-        systems_service,
-        "linden-pass",
+    normalized = normalize_definition_to_native_model(
         definition,
+        systems_service=systems_service,
     )
 
-    assert repair_context["values"]["repair_subclass_slug"] == f"systems:{egw_chronurgy.slug}"
-
-    repaired_definition, _ = apply_imported_progression_repairs(
-        "linden-pass",
-        definition,
-        import_metadata,
-        repair_context,
-        repair_context["values"],
-    )
-    repaired_readiness = native_level_up_readiness(systems_service, "linden-pass", repaired_definition)
-
-    assert repaired_definition.profile["subclass_ref"]["slug"] == egw_chronurgy.slug
-    assert repaired_definition.profile["subclass_ref"]["source_id"] == "EGW"
-    assert repaired_readiness["status"] == "ready"
+    assert normalized.profile["subclass_ref"]["slug"] == egw_chronurgy.slug
+    assert normalized.profile["subclass_ref"]["source_id"] == "EGW"
 
 
-def test_imported_dmg_subclass_with_stale_source_locked_ref_repairs_to_dmg_entry():
+def test_imported_dmg_subclass_with_stale_source_locked_ref_auto_recovers_to_dmg_entry():
     cleric = _systems_entry(
         "class",
         "phb-class-cleric",
@@ -3599,43 +3589,20 @@ def test_imported_dmg_subclass_with_stale_source_locked_ref_repairs_to_dmg_entry
         "slug": acolyte.slug,
         "source_id": "PHB",
     }
-    import_metadata = CharacterImportMetadata(
-        campaign_slug="linden-pass",
-        character_slug=definition.character_slug,
-        source_path="imports://dmg-cleric.md",
-        imported_at_utc="2026-04-11T00:00:00Z",
-        parser_version="fixture",
-        import_status="clean",
-        warnings=[],
-    )
-
     readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
 
-    assert readiness["status"] == "repairable"
+    assert readiness["status"] == "ready"
     assert readiness["selected_subclass"].slug == dmg_death_domain.slug
     assert readiness["selected_subclass"].source_id == "DMG"
-    assert any("DMG Divine Domain link" in reason for reason in readiness["reasons"])
+    assert readiness["reasons"] == []
 
-    repair_context = build_imported_progression_repair_context(
-        systems_service,
-        "linden-pass",
+    normalized = normalize_definition_to_native_model(
         definition,
+        systems_service=systems_service,
     )
 
-    assert repair_context["values"]["repair_subclass_slug"] == f"systems:{dmg_death_domain.slug}"
-
-    repaired_definition, _ = apply_imported_progression_repairs(
-        "linden-pass",
-        definition,
-        import_metadata,
-        repair_context,
-        repair_context["values"],
-    )
-    repaired_readiness = native_level_up_readiness(systems_service, "linden-pass", repaired_definition)
-
-    assert repaired_definition.profile["subclass_ref"]["slug"] == dmg_death_domain.slug
-    assert repaired_definition.profile["subclass_ref"]["source_id"] == "DMG"
-    assert repaired_readiness["status"] == "ready"
+    assert normalized.profile["subclass_ref"]["slug"] == dmg_death_domain.slug
+    assert normalized.profile["subclass_ref"]["source_id"] == "DMG"
 
 
 def test_imported_progression_repair_can_restore_refs_and_add_prior_feature_links():
@@ -3695,7 +3662,7 @@ def test_imported_progression_repair_can_restore_refs_and_add_prior_feature_link
         "linden-pass",
         definition,
     )
-    assert repair_context["readiness"]["status"] == "repairable"
+    assert repair_context["readiness"]["status"] == "ready"
     repaired_definition, repaired_import = apply_imported_progression_repairs(
         "linden-pass",
         definition,
