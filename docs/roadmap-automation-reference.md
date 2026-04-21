@@ -20,7 +20,7 @@ Preferred Python:
 
 General notes:
 
-- `run_systems_roadmap.py` and `run_ux_roadmap.py` always start from the first unchecked checkbox in their roadmap.
+- `run_systems_roadmap.py`, `run_ux_roadmap.py`, and `run_character_needed_coverage_roadmap.py` always start from the first unchecked checkbox in their roadmap.
 - `run_feedback_roadmap.py` is selective by design. Use `--item`, `--items`, or `--all-items`.
 - The roadmap runners now grant the nested Codex worker access to `C:\Users\thorn\.codex\skills` by default, so required skill-family doc updates can ship in the same pass instead of blocking on write scope.
 - The default close-out mode is `ship`, which means the nested Codex pass is expected to commit and push verified tracked app changes unless the task ends with no tracked diff.
@@ -149,6 +149,40 @@ Useful options:
 - `--finish-mode local-only`: keep the pass local
 - `--add-dir <path>`: add more writable/readable roots when a feedback item needs extra local context beyond the default app workspace, vault root, and Codex skill tree
 
+## Character Needed Coverage
+
+Script:
+
+```text
+.\run_character_needed_coverage_roadmap.py
+```
+
+Roadmap:
+
+```text
+.\campaign_player_wiki\.local\character-needed-coverage-checklists.md
+```
+
+This runner is sequential like the Systems and UX runners. Each pass targets the first unchecked checkbox in the checklist.
+
+Common commands:
+
+```powershell
+.\.venv\Scripts\python.exe .\run_character_needed_coverage_roadmap.py --dry-run
+.\.venv\Scripts\python.exe .\run_character_needed_coverage_roadmap.py --max-tasks 1
+.\.venv\Scripts\python.exe .\run_character_needed_coverage_roadmap.py --max-tasks 2 --model gpt-5.3-codex
+.\.venv\Scripts\python.exe .\run_character_needed_coverage_roadmap.py --max-tasks 1 --finish-mode local-only
+.\.venv\Scripts\python.exe .\run_character_needed_coverage_roadmap.py --max-tasks 1 --deploy-mode auto --live-sync-mode auto
+```
+
+Useful options:
+
+- `--dry-run`: preview the next prompt and command
+- `--max-tasks N`: stop after `N` targeted checklist passes
+- `--note "..."`: append extra worker instructions
+- `--finish-mode local-only`: keep the whole pass local
+- `--add-dir <path>`: add more writable/readable roots for the nested worker if a pass needs something beyond the default app workspace, vault root, and Codex skill tree
+
 ## Log Output
 
 Each runner creates a timestamped run folder under:
@@ -156,6 +190,7 @@ Each runner creates a timestamped run folder under:
 - Systems: `campaign_player_wiki\.local\roadmap-runs\systems\`
 - UX: `campaign_player_wiki\.local\roadmap-runs\ux\`
 - Feedback: `campaign_player_wiki\.local\roadmap-runs\feedback\`
+- Character Needed Coverage: `campaign_player_wiki\.local\roadmap-runs\character-needed-coverage\`
 
 Typical run artifacts:
 
