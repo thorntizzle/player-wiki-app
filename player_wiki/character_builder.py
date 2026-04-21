@@ -10754,8 +10754,20 @@ def _recalculate_definition_attacks(
     )
     if not recalculated_attacks and existing_attacks:
         return _normalize_attack_payloads(existing_attacks)
+    if existing_attacks and not any(
+        _attack_matches_equipment_catalog(
+            dict(attack or {}),
+            equipment_catalog=equipment_catalog,
+        )
+        for attack in existing_attacks
+    ):
+        return _normalize_attack_payloads(existing_attacks)
     return _normalize_attack_payloads(
-        recalculated_attacks
+        _merge_recalculated_attack_overrides(
+            recalculated_attacks,
+            existing_attacks,
+            equipment_catalog=equipment_catalog,
+        )
     )
 
 
@@ -19309,6 +19321,119 @@ def _normalize_attack_equipment_refs(
         seen.add(clean_value)
         normalized.append(clean_value)
     return normalized
+
+
+def _attack_matches_equipment_catalog(
+    attack_payload: dict[str, Any],
+    *,
+    equipment_catalog: list[dict[str, Any]] | None,
+) -> bool:
+    linked_equipment_refs = set(
+        _normalize_attack_equipment_refs(
+            attack_payload.get("equipment_refs"),
+            fallback=attack_payload.get("equipment_ref"),
+        )
+    )
+    attack_systems_slug = _systems_ref_slug(attack_payload.get("systems_ref"))
+    attack_page_ref = _normalize_page_ref_payload(attack_payload.get("page_ref"))
+    attack_page_slug = _extract_campaign_page_ref(attack_page_ref)
+    attack_name_candidates = set(_merge_name_candidates(attack_payload.get("name")))
+
+    for equipment_payload in list(equipment_catalog or []):
+        equipment_item = dict(equipment_payload or {})
+        equipment_id = str(equipment_item.get("id") or "").strip()
+        if linked_equipment_refs and equipment_id and equipment_id in linked_equipment_refs:
+            return True
+
+        equipment_systems_slug = _systems_ref_slug(equipment_item.get("systems_ref"))
+        if attack_systems_slug and attack_systems_slug == equipment_systems_slug:
+            return True
+
+        equipment_page_ref = _normalize_page_ref_payload(equipment_item.get("page_ref"))
+        equipment_page_slug = _extract_campaign_page_ref(equipment_page_ref)
+        if attack_page_slug and attack_page_slug == equipment_page_slug:
+            return True
+
+        equipment_name_candidates: set[str] = set()
+        for candidate_value in (
+            equipment_item.get("name"),
+            dict(equipment_item.get("systems_ref") or {}).get("title"),
+            dict(equipment_page_ref or {}).get("title"),
+        ):
+            equipment_name_candidates.update(_merge_name_candidates(candidate_value))
+        if attack_name_candidates and equipment_name_candidates and attack_name_candidates.intersection(
+            equipment_name_candidates
+        ):
+            return True
+    return False
+
+
+def _attack_override_match_keys(payload: dict[str, Any]) -> list[tuple[str, str, str]]:
+    normalized_mode_key = _infer_attack_mode_key_from_payload(payload)
+    keys: list[tuple[str, str, str]] = []
+    for equipment_ref in _normalize_attack_equipment_refs(
+        payload.get("equipment_refs"),
+        fallback=payload.get("equipment_ref"),
+    ):
+        keys.append(("equipment", equipment_ref, normalized_mode_key))
+    explicit_identity = _normalize_explicit_link_identity(
+        systems_ref=dict(payload.get("systems_ref") or {}),
+        page_ref=_normalize_page_ref_payload(payload.get("page_ref")),
+    )
+    if explicit_identity:
+        keys.append(("explicit", explicit_identity, normalized_mode_key))
+    for candidate in _merge_name_candidates(payload.get("name")):
+        keys.append(("name", candidate, normalized_mode_key))
+    return keys
+
+
+def _merge_recalculated_attack_overrides(
+    recalculated_attacks: list[dict[str, Any]],
+    existing_attacks: list[dict[str, Any]],
+    *,
+    equipment_catalog: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    existing_lookup: dict[tuple[str, str, str], tuple[int, dict[str, Any]]] = {}
+    for index, attack_payload in enumerate(list(existing_attacks or [])):
+        payload = dict(attack_payload or {})
+        for key in _attack_override_match_keys(payload):
+            existing_lookup.setdefault(key, (index, payload))
+
+    matched_existing_indexes: set[int] = set()
+    merged: list[dict[str, Any]] = []
+    for attack_payload in list(recalculated_attacks or []):
+        payload = dict(attack_payload or {})
+        matched_existing = None
+        for key in _attack_override_match_keys(payload):
+            matched_existing = existing_lookup.get(key)
+            if matched_existing is not None:
+                break
+        if matched_existing is not None:
+            existing_index, existing_payload = matched_existing
+            matched_existing_indexes.add(existing_index)
+            existing_page_ref = _normalize_page_ref_payload(existing_payload.get("page_ref"))
+            if existing_page_ref and not payload.get("page_ref"):
+                payload["page_ref"] = existing_page_ref
+            if dict(existing_payload.get("systems_ref") or {}) and not payload.get("systems_ref") and not payload.get("page_ref"):
+                payload["systems_ref"] = dict(existing_payload.get("systems_ref") or {})
+            merged_equipment_refs = _normalize_attack_equipment_refs(
+                [
+                    *list(payload.get("equipment_refs") or []),
+                    *_normalize_attack_equipment_refs(
+                        existing_payload.get("equipment_refs"),
+                        fallback=existing_payload.get("equipment_ref"),
+                    ),
+                ]
+            )
+            if merged_equipment_refs:
+                payload["equipment_refs"] = merged_equipment_refs
+        merged.append(payload)
+
+    for index, attack_payload in enumerate(list(existing_attacks or [])):
+        if index in matched_existing_indexes:
+            continue
+        merged.append(dict(attack_payload or {}))
+    return merged
 
 
 def _normalize_equipment_payloads(

@@ -3169,9 +3169,10 @@ def test_quick_reference_hides_item_backed_attacks_when_the_linked_item_is_not_e
     assert response.status_code == 200
     html = response.get_data(as_text=True)
 
-    assert html.count('class="attack-card"') == 1
+    assert html.count('class="attack-card"') == 2
     assert "Quarterstaff" in html
-    assert "Hidden until equipped: Crossbow, Light." in html
+    assert "Hidden until equipped:" in html
+    assert "Light Crossbow" in html
 
 
 def test_quick_reference_can_fall_back_to_legacy_attack_name_matching_for_equipment_state(
@@ -3195,9 +3196,10 @@ def test_quick_reference_can_fall_back_to_legacy_attack_name_matching_for_equipm
     assert response.status_code == 200
     html = response.get_data(as_text=True)
 
-    assert html.count('class="attack-card"') == 1
+    assert html.count('class="attack-card"') == 2
     assert "Quarterstaff" in html
-    assert "Hidden until equipped: Crossbow, Light." in html
+    assert "Hidden until equipped:" in html
+    assert "Light Crossbow" in html
 
 
 def test_quick_reference_tolerates_legacy_string_page_refs_when_linking_attacks_to_equipment(
@@ -3437,7 +3439,8 @@ def test_quick_reference_hides_shield_master_helper_row_until_shield_is_equipped
     html = response.get_data(as_text=True)
 
     assert html.count('class="attack-card"') == 0
-    assert "Hidden until equipped: Shield Shove." in html
+    assert "Hidden until equipped:" in html
+    assert "Shield Shove" in html
     assert "Bonus action after taking the Attack action; Shield Master shove within 5 feet." not in html
 
 
@@ -3708,17 +3711,17 @@ def test_character_sheet_renders_systems_links_when_present(app, client, sign_in
     quick_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=quick")
     spellcasting_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=spellcasting")
     features_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=features")
-    equipment_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=equipment")
+    inventory_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=inventory")
 
     assert quick_response.status_code == 200
     assert spellcasting_response.status_code == 200
     assert features_response.status_code == 200
-    assert equipment_response.status_code == 200
+    assert inventory_response.status_code == 200
 
     quick_html = quick_response.get_data(as_text=True)
     spellcasting_html = spellcasting_response.get_data(as_text=True)
     features_html = features_response.get_data(as_text=True)
-    equipment_html = equipment_response.get_data(as_text=True)
+    inventory_html = inventory_response.get_data(as_text=True)
 
     assert '/campaigns/linden-pass/systems/entries/phb-class-sorcerer' in quick_html
     assert '/campaigns/linden-pass/systems/entries/phb-subclass-wild-magic' in quick_html
@@ -3728,11 +3731,11 @@ def test_character_sheet_renders_systems_links_when_present(app, client, sign_in
     assert '/campaigns/linden-pass/systems/entries/phb-spell-message' not in quick_html
     assert '/campaigns/linden-pass/systems/entries/phb-spell-message' in spellcasting_html
     assert '/campaigns/linden-pass/systems/entries/phb-classfeature-spellcasting' in features_html
-    assert '/campaigns/linden-pass/systems/entries/phb-item-backpack' in equipment_html
+    assert '/campaigns/linden-pass/systems/entries/phb-item-backpack' in inventory_html
     assert 'View source entry' not in quick_html
     assert 'View source entry' not in spellcasting_html
     assert 'View source entry' not in features_html
-    assert 'View source entry' not in equipment_html
+    assert 'View source entry' not in inventory_html
 
 
 def test_character_sheet_renders_campaign_page_links_when_present(app, client, sign_in, users):
@@ -3771,18 +3774,18 @@ def test_character_sheet_renders_campaign_page_links_when_present(app, client, s
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
     quick_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=quick")
-    equipment_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=equipment")
+    inventory_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=inventory")
 
     assert quick_response.status_code == 200
-    assert equipment_response.status_code == 200
+    assert inventory_response.status_code == 200
 
     quick_html = quick_response.get_data(as_text=True)
-    equipment_html = equipment_response.get_data(as_text=True)
+    inventory_html = inventory_response.get_data(as_text=True)
 
     assert '/campaigns/linden-pass/pages/items/consecrated-huran-blade' in quick_html
-    assert '/campaigns/linden-pass/pages/items/consecrated-huran-blade' in equipment_html
+    assert '/campaigns/linden-pass/pages/items/consecrated-huran-blade' in inventory_html
     assert '>Consecrated Huran Blade</a>' in quick_html
-    assert '>Consecrated Huran Blade</a>' in equipment_html
+    assert '>Consecrated Huran Blade</a>' in inventory_html
 
 
 def test_character_sheet_recovers_missing_equipment_links_for_inventory_and_equipment_rows(

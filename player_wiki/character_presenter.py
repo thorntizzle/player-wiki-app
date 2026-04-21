@@ -542,8 +542,14 @@ def present_character_detail(
         )
 
     attacks = []
-    hidden_attacks: list[str] = []
+    hidden_attacks: list[dict[str, str]] = []
     for attack in list(definition.attacks or []):
+        attack_name = str(attack.get("name") or "Attack")
+        attack_href = build_character_entry_href(
+            campaign.slug,
+            systems_ref=attack.get("systems_ref"),
+            page_ref=attack.get("page_ref"),
+        )
         linked_item_refs = resolve_attack_linked_item_refs(
             attack,
             inventory_lookup=inventory_lookup,
@@ -555,19 +561,20 @@ def present_character_detail(
             equipment_catalog_lookup=equipment_catalog_lookup,
         )
         if attack_is_equipped is False:
-            hidden_attacks.append(str(attack.get("name") or "Attack"))
+            hidden_attacks.append(
+                {
+                    "name": attack_name,
+                    "href": attack_href,
+                }
+            )
             continue
         raw_attack_bonus = attack.get("attack_bonus")
         attack_bonus = format_signed(raw_attack_bonus) if raw_attack_bonus not in {"", None} else ""
         damage = str(attack.get("damage") or "").strip()
         attacks.append(
             {
-                "name": str(attack.get("name") or "Attack"),
-                "href": build_character_entry_href(
-                    campaign.slug,
-                    systems_ref=attack.get("systems_ref"),
-                    page_ref=attack.get("page_ref"),
-                ),
+                "name": attack_name,
+                "href": attack_href,
                 "attack_bonus": attack_bonus,
                 "damage": damage,
                 "damage_type": str(attack.get("damage_type") or "").strip(),
@@ -707,7 +714,7 @@ def present_character_detail(
         "proficiency_groups": proficiency_groups,
         "resources": resources,
         "attacks": attacks,
-        "hidden_attacks": dedupe_values(hidden_attacks),
+        "hidden_attacks": dedupe_hidden_attacks(hidden_attacks),
         "feature_groups": feature_groups,
         "spellcasting": spellcasting,
         "inventory": inventory,
@@ -867,6 +874,23 @@ def dedupe_values(values: Any) -> list[str]:
             continue
         seen.add(clean_value)
         ordered.append(clean_value)
+    return ordered
+
+
+def dedupe_hidden_attacks(values: Any) -> list[dict[str, str]]:
+    ordered: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for value in list(values or []):
+        payload = dict(value or {}) if isinstance(value, dict) else {"name": str(value or "").strip(), "href": ""}
+        name = str(payload.get("name") or "").strip()
+        href = str(payload.get("href") or "").strip()
+        if not name:
+            continue
+        key = (name, href)
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered.append({"name": name, "href": href})
     return ordered
 
 

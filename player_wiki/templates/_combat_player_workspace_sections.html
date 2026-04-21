@@ -134,7 +134,17 @@
           </article>
         {% endif %}
         {% if section.hidden_attacks %}
-          <p class="meta">Hidden until equipped: {{ section.hidden_attacks | join(", ") }}.</p>
+          <p class="meta">
+            Hidden until equipped:
+            {% for attack in section.hidden_attacks %}
+              {% if not loop.first %}, {% endif %}
+              {% if attack.href %}
+                <a href="{{ attack.href }}">{{ attack.name }}</a>
+              {% else %}
+                {{ attack.name }}
+              {% endif %}
+            {% endfor %}.
+          </p>
         {% endif %}
       {% elif section.slug == 'spells' %}
         {% if section.spellcasting %}

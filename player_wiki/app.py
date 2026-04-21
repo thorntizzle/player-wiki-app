@@ -4487,7 +4487,23 @@ def create_app() -> Flask:
         spellcasting = dict(character_detail.get("spellcasting") or {})
         resources = [dict(item or {}) for item in list(character_detail.get("resources") or [])]
         attacks = [dict(item or {}) for item in list(character_detail.get("attacks") or [])]
-        hidden_attacks = [str(item).strip() for item in list(character_detail.get("hidden_attacks") or []) if str(item).strip()]
+        hidden_attacks = []
+        for item in list(character_detail.get("hidden_attacks") or []):
+            if isinstance(item, dict):
+                name = str(item.get("name") or "").strip()
+                if not name:
+                    continue
+                hidden_attacks.append(
+                    {
+                        "name": name,
+                        "href": str(item.get("href") or "").strip(),
+                    }
+                )
+                continue
+            name = str(item).strip()
+            if not name:
+                continue
+            hidden_attacks.append({"name": name, "href": ""})
         equipment_rows = [dict(item or {}) for item in list(equipment_state_manager.get("rows") or [])]
         inventory_rows = [dict(item or {}) for item in list(character_detail.get("inventory") or [])]
         equipment_item_refs = {

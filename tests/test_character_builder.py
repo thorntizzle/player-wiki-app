@@ -8699,6 +8699,100 @@ def test_recalculate_definition_attacks_uses_campaign_item_page_weapon_bonus_met
     assert attack["equipment_refs"] == ["censer-of-last-light-1"]
 
 
+def test_recalculate_definition_attacks_preserves_existing_systems_link_for_matching_weapon_row():
+    definition = _minimal_character_definition("arden-march", "Arden March")
+    definition.proficiencies["weapons"] = ["Simple Weapons"]
+    definition.equipment_catalog = [
+        {
+            "id": "light-crossbow-1",
+            "name": "Light Crossbow",
+            "default_quantity": 1,
+            "weight": "5 lb.",
+            "notes": "",
+            "is_equipped": True,
+        }
+    ]
+    definition.attacks = [
+        {
+            "id": "legacy-crossbow-attack",
+            "name": "Crossbow, Light",
+            "category": "ranged weapon",
+            "attack_bonus": 5,
+            "damage": "1d8+2 piercing",
+            "damage_type": "piercing",
+            "notes": "Ammunition, loading, range 80/320.",
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-crossbow-light",
+                "title": "Crossbow, Light",
+                "source_id": "PHB",
+            },
+        }
+    ]
+
+    recalculated = _recalculate_definition_attacks(
+        definition,
+        item_catalog={
+            "phb_weapon_profiles": {
+                "Light Crossbow": {
+                    "title": "Light Crossbow",
+                    "type": "R",
+                    "weapon_category": "simple",
+                    "properties": ["A", "LD", "2H"],
+                    "damage": "1d8",
+                    "versatile_damage": "",
+                    "damage_type": "P",
+                    "range": "80/320",
+                }
+            }
+        },
+    )
+
+    attack = next(attack for attack in recalculated if attack["name"] == "Light Crossbow")
+
+    assert attack["systems_ref"]["slug"] == "phb-item-crossbow-light"
+    assert attack["equipment_refs"] == ["light-crossbow-1"]
+
+
+def test_recalculate_definition_attacks_preserves_matching_campaign_page_attack_when_weapon_profile_is_unavailable():
+    definition = _minimal_character_definition("zigzag-blackscar", "Zigzag Blackscar")
+    definition.equipment_catalog = [
+        {
+            "id": "consecrated-huran-blade-1",
+            "name": "Consecrated Huran Blade",
+            "default_quantity": 1,
+            "weight": "3 lb.",
+            "notes": "",
+            "page_ref": {
+                "slug": "items/consecrated-huran-blade",
+                "title": "Consecrated Huran Blade",
+            },
+            "is_equipped": True,
+        }
+    ]
+    definition.attacks = [
+        {
+            "id": "consecrated-huran-blade-attack",
+            "name": "Consecrated Huran Blade",
+            "category": "melee weapon",
+            "attack_bonus": 5,
+            "damage": "1d8+2 slashing",
+            "damage_type": "slashing",
+            "notes": "Consecrated steel that burns the unclean.",
+            "page_ref": {
+                "slug": "items/consecrated-huran-blade",
+                "title": "Consecrated Huran Blade",
+            },
+        }
+    ]
+
+    recalculated = _recalculate_definition_attacks(definition, item_catalog={})
+
+    assert len(recalculated) == 1
+    assert recalculated[0]["name"] == "Consecrated Huran Blade"
+    assert recalculated[0]["page_ref"]["slug"] == "items/consecrated-huran-blade"
+
+
 def test_normalize_definition_to_native_model_applies_hourglass_pendant_spell_and_resource_bonus():
     gift_of_alacrity = _systems_entry(
         "spell",
