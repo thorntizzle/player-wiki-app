@@ -60,6 +60,7 @@ from .character_builder import (
     build_level_one_builder_context,
     build_level_one_character_definition,
     describe_equipment_state_support,
+    normalize_definition_to_native_model,
     native_level_up_readiness,
     supports_native_level_up,
 )
@@ -1599,6 +1600,21 @@ def create_app() -> Flask:
             profile.pop("portrait_caption", None)
         payload["profile"] = profile
         return definition.__class__.from_dict(payload)
+
+    def finalize_character_definition_for_write(
+        campaign_slug: str,
+        definition,
+        *,
+        campaign=None,
+    ):
+        resolved_campaign = campaign or load_campaign_context(campaign_slug)
+        if not campaign_supports_native_character_tools(resolved_campaign):
+            return definition
+        return normalize_definition_to_native_model(
+            definition,
+            item_catalog=build_character_item_catalog(campaign_slug),
+            systems_service=get_systems_service(),
+        )
 
     def redirect_to_character_mode(campaign_slug: str, character_slug: str, *, anchor: str | None = None):
         if is_session_character_return_requested(campaign_slug, character_slug):
@@ -3280,6 +3296,7 @@ def create_app() -> Flask:
                 definition, import_metadata, inventory_quantity_overrides, inventory_state_overrides = result
             else:
                 definition, import_metadata, inventory_quantity_overrides = result
+            definition = finalize_character_definition_for_write(campaign_slug, definition)
             merged_state = merge_state_with_definition(
                 definition,
                 record.state_record.state,
@@ -8496,6 +8513,11 @@ def create_app() -> Flask:
                 builder_context,
                 form_values,
             )
+            definition = finalize_character_definition_for_write(
+                campaign_slug,
+                definition,
+                campaign=campaign,
+            )
         except CharacterBuildError as exc:
             flash(str(exc), "error")
             return render_character_builder_page(campaign_slug, builder_context, status_code=400)
@@ -8597,6 +8619,11 @@ def create_app() -> Flask:
                 form_values,
                 current_import_metadata=record.import_metadata,
             )
+            definition = finalize_character_definition_for_write(
+                campaign_slug,
+                definition,
+                campaign=campaign,
+            )
             merged_state = merge_state_with_definition(
                 definition,
                 record.state_record.state,
@@ -8691,6 +8718,11 @@ def create_app() -> Flask:
                 record.import_metadata,
                 repair_context,
                 form_values,
+            )
+            definition = finalize_character_definition_for_write(
+                campaign_slug,
+                definition,
+                campaign=campaign,
             )
             post_repair_readiness = native_level_up_readiness(
                 get_systems_service(),
@@ -8812,6 +8844,11 @@ def create_app() -> Flask:
                 optionalfeature_catalog=optionalfeature_catalog,
                 spell_catalog=spell_catalog,
                 systems_service=app.extensions["systems_service"],
+            )
+            definition = finalize_character_definition_for_write(
+                campaign_slug,
+                definition,
+                campaign=campaign,
             )
             removed_resource_ids: set[str] = set()
             source_type = str((record.definition.source or {}).get("source_type") or "").strip()
@@ -8938,6 +8975,11 @@ def create_app() -> Flask:
                 optionalfeature_catalog=optionalfeature_catalog,
                 spell_catalog=spell_catalog,
                 systems_service=app.extensions["systems_service"],
+            )
+            definition = finalize_character_definition_for_write(
+                campaign_slug,
+                definition,
+                campaign=campaign,
             )
             removed_resource_ids: set[str] = set()
             source_type = str((record.definition.source or {}).get("source_type") or "").strip()
@@ -9574,6 +9616,11 @@ def create_app() -> Flask:
                 alt_text=alt_text,
                 caption=caption,
             )
+            definition = finalize_character_definition_for_write(
+                campaign_slug,
+                definition,
+                campaign=campaign,
+            )
             import_metadata = build_managed_character_import_metadata(
                 campaign_slug,
                 record.definition.character_slug,
@@ -9621,6 +9668,11 @@ def create_app() -> Flask:
         try:
             expected_revision = parse_expected_revision()
             definition = update_character_portrait_profile(record.definition)
+            definition = finalize_character_definition_for_write(
+                campaign_slug,
+                definition,
+                campaign=campaign,
+            )
             import_metadata = build_managed_character_import_metadata(
                 campaign_slug,
                 record.definition.character_slug,

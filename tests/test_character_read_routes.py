@@ -2929,6 +2929,60 @@ def test_character_personal_portrait_can_be_uploaded_replaced_rendered_and_remov
         assert profile.get("portrait_asset_ref") in (None, "")
 
 
+def test_non_equipment_character_save_persists_recovered_equipment_links(
+    app, client, sign_in, users, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    _seed_systems_item_entry(
+        app,
+        slug="phb-item-chain-mail",
+        title="Chain Mail",
+        metadata={"type": "HA", "ac": 16},
+    )
+
+    def _mutate_definition(payload: dict) -> None:
+        payload["equipment_catalog"] = [
+            {
+                "id": "chain-mail-1",
+                "name": "Chain Mail",
+                "default_quantity": 1,
+                "weight": "55 lb.",
+                "notes": "",
+                "is_equipped": True,
+                "systems_ref": None,
+                "page_ref": None,
+            }
+        ]
+
+    _write_character_definition(app, "arden-march", _mutate_definition)
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    revision = _character_state_revision(app, "arden-march")
+
+    response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/personal/portrait",
+        data={
+            "expected_revision": revision,
+            "mode": "read",
+            "page": "personal",
+            "portrait_alt": "Arden leaning over the harbor rail.",
+            "portrait_caption": "Used on the personal page.",
+            "portrait_file": (BytesIO(TEST_PNG_BYTES), "arden-portrait.png"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+
+    definition = _read_character_definition(app, "arden-march")
+    equipment_item = dict(definition["equipment_catalog"][0] or {})
+    assert equipment_item["systems_ref"]["slug"] == "phb-item-chain-mail"
+    assert equipment_item["systems_ref"]["title"] == "Chain Mail"
+    assert equipment_item["systems_ref"]["entry_type"] == "item"
+    assert equipment_item["systems_ref"]["source_id"] == "PHB"
+
+
 def test_character_sheet_personal_and_notes_subpages_render_markdown_fields_and_hide_legacy_action_sections(
     app, client, sign_in, users
 ):
