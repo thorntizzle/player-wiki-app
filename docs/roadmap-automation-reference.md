@@ -22,7 +22,9 @@ General notes:
 
 - `run_systems_roadmap.py` and `run_ux_roadmap.py` always start from the first unchecked checkbox in their roadmap.
 - `run_feedback_roadmap.py` is selective by design. Use `--item`, `--items`, or `--all-items`.
+- The roadmap runners now grant the nested Codex worker access to `C:\Users\thorn\.codex\skills` by default, so required skill-family doc updates can ship in the same pass instead of blocking on write scope.
 - The default close-out mode is `ship`, which means the nested Codex pass is expected to commit and push verified tracked app changes unless the task ends with no tracked diff.
+- When a shipped pass is only blocked by a transient Git write failure after the diff is already verified, the host wrapper can now finish the commit and push if the worker reports the intended commit subject on the `Commit:` line using the documented format.
 - `--deploy-mode auto` tells the worker to deploy when the completed pass changes shipped app functionality.
 - `--live-sync-mode auto` tells the worker to sync DB-backed or content changes that a code deploy would not carry.
 - `--finish-mode local-only` keeps the pass local and suppresses commit, push, deploy, and live sync.
@@ -88,6 +90,7 @@ Useful options:
 - `--max-tasks N`: stop after `N` targeted UX checkboxes
 - `--note "..."`: append extra worker instructions
 - `--finish-mode local-only`: keep the whole pass local
+- `--add-dir <path>`: add more writable/readable roots for the nested worker if a pass needs something beyond the default app workspace, vault root, and Codex skill tree
 
 ## Feedback Roadmap
 
@@ -144,6 +147,7 @@ Useful options:
 - `--all-items`: opt in to processing every numbered feedback item
 - `--max-tasks N`: stop after `N` targeted checklist passes across the selected item set
 - `--finish-mode local-only`: keep the pass local
+- `--add-dir <path>`: add more writable/readable roots when a feedback item needs extra local context beyond the default app workspace, vault root, and Codex skill tree
 
 ## Log Output
 
@@ -159,6 +163,12 @@ Typical run artifacts:
 - `*-console.log`: streamed command output
 - `*-last-message.md`: the worker's final message
 - `events.jsonl`: per-attempt event log
+
+If the nested worker verifies the change but gets stuck only on commit or push close-out, use this `Commit:` line format in the worker response so the host wrapper can recover it automatically on later runs:
+
+```text
+Commit: intended subject `Describe the shipped change`; local commit/push blocked by <exact error>
+```
 
 ## Recommended Starting Pattern
 
