@@ -2230,6 +2230,86 @@ def test_converge_imported_definition_preserves_native_managed_import_overlays()
     assert manual_items["items/stormglass-compass"]["name"] == "Stormglass Compass"
 
 
+def test_converge_imported_definition_keeps_native_managed_spell_rows_separate_from_same_name_imported_spells():
+    existing_definition = _minimal_imported_definition(
+        features=[
+            {
+                "id": "custom-feature-harbor-ritual-book",
+                "name": "Harbor Ritual Book",
+                "category": "custom_feature",
+                "source": "Campaign",
+                "description_markdown": "The shrine scribes entrust you with a small ritual book.",
+                "activation_type": "special",
+                "page_ref": "mechanics/harbor-ritual-book",
+                "tracker_ref": None,
+                "spell_manager": {
+                    "mode": "ritual_book",
+                    "source_row_id": "feature-spells:harbor-ritual-book",
+                    "title": "Harbor Ritual Book",
+                    "spell_list_class_name": "Wizard",
+                    "source_row_kind": "feature",
+                },
+            }
+        ],
+        spellcasting={
+            "spells": [
+                {
+                    "id": "ritual-book-detect-magic",
+                    "name": "Detect Magic",
+                    "mark": "Ritual Book",
+                    "is_ritual": True,
+                    "spell_source_row_id": "feature-spells:harbor-ritual-book",
+                    "spell_source_row_kind": "feature",
+                    "spell_source_row_title": "Harbor Ritual Book",
+                    "spell_source_mode": "ritual_book",
+                    "spell_source_spell_list_class_name": "Wizard",
+                    "grant_source_label": "Harbor Ritual Book",
+                    "campaign_option_sources": [
+                        {
+                            "source_ref": "mechanics/harbor-ritual-book",
+                            "mode": "spell_manager_choice",
+                            "category": "spell_managed",
+                            "spec_index": 1,
+                            "choice_index": 1,
+                            "mark": "Ritual Book",
+                            "ritual": True,
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    incoming_definition = _minimal_imported_definition(
+        spellcasting={
+            "spells": [
+                {
+                    "id": "wizard-detect-magic",
+                    "name": "Detect Magic",
+                    "mark": "Prepared",
+                    "is_ritual": True,
+                    "class_row_id": "class-row-1",
+                }
+            ]
+        },
+    )
+
+    converged = converge_imported_definition(
+        incoming_definition,
+        existing_definition=existing_definition,
+    )
+
+    detect_magic_rows = [spell for spell in converged.spellcasting["spells"] if spell["name"] == "Detect Magic"]
+    assert len(detect_magic_rows) == 2
+    assert any(str(spell.get("class_row_id") or "").strip() == "class-row-1" for spell in detect_magic_rows)
+    managed_spell = next(
+        spell
+        for spell in detect_magic_rows
+        if str(spell.get("spell_source_row_id") or "").strip() == "feature-spells:harbor-ritual-book"
+    )
+    assert managed_spell["grant_source_label"] == "Harbor Ritual Book"
+    assert managed_spell["campaign_option_sources"][0]["source_ref"] == "mechanics/harbor-ritual-book"
+
+
 def test_converged_imported_definitions_keep_profile_refs_but_remain_level_up_ineligible():
     existing_definition = _minimal_imported_definition(
         profile={

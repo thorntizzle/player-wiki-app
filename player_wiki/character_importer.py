@@ -1277,7 +1277,14 @@ def _equipment_match_keys(payload: dict[str, Any]) -> list[tuple[Any, ...]]:
 def _spell_match_keys(payload: dict[str, Any]) -> list[tuple[Any, ...]]:
     spell_id = str(payload.get("id") or "").strip()
     class_row_id = str(payload.get("class_row_id") or "").strip()
-    tail = (class_row_id,) if class_row_id else ()
+    source_row_id = str(payload.get("spell_source_row_id") or "").strip()
+    source_row_kind = str(payload.get("spell_source_row_kind") or "source").strip() or "source"
+    if class_row_id:
+        tail = ("class", class_row_id)
+    elif source_row_id:
+        tail = (source_row_kind, source_row_id)
+    else:
+        tail = ()
     systems_ref = dict(payload.get("systems_ref") or {})
     page_ref = _normalize_page_ref_payload(payload.get("page_ref"))
     explicit_identity = _normalize_explicit_link_identity(
