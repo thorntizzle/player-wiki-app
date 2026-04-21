@@ -62,6 +62,11 @@ def _list_conditions(app, combatant_id: int):
         )
 
 
+def _assert_expected_combatant_revision_field(html: str, revision: int, *, at_least: int = 1):
+    marker = f'name="expected_combatant_revision" value="{revision}"'
+    assert html.count(marker) >= at_least
+
+
 def _write_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -542,12 +547,14 @@ def test_dm_pages_split_tactical_status_edits_from_control_authority_actions(
     assert "Set current turn" in status_body
     assert "combat-status-mutation" in status_body
     assert "hasFocusedFormControl" in status_body
+    _assert_expected_combatant_revision_field(status_body, hound.revision, at_least=4)
 
     assert "Selected combatant authority" in controls_body
     assert "Open Encounter status" in controls_body
     assert "Save turn value" in controls_body
     assert "Show NPC detail to players" in controls_body
     assert "Save NPC structure" in controls_body
+    _assert_expected_combatant_revision_field(controls_body, hound.revision, at_least=3)
     assert "Remove combatant" in controls_body
     assert "Save HP" not in controls_body
     assert "Save temp HP" not in controls_body
@@ -580,6 +587,7 @@ def test_status_page_async_mutations_return_status_partials_and_keep_selected_ta
         data={
             "combat_view": "status",
             "combatant": hound.id,
+            "expected_combatant_revision": hound.revision,
             "has_action": "1",
             "movement_remaining": 10,
         },
@@ -596,6 +604,9 @@ def test_status_page_async_mutations_return_status_partials_and_keep_selected_ta
     assert 'name="combat_view" value="status"' in payload["detail_html"]
     assert "Save movement" in payload["detail_html"]
     assert "Turn order" in payload["board_html"]
+    refreshed = _find_combatant(app, name="Clockwork Hound")
+    assert refreshed is not None
+    _assert_expected_combatant_revision_field(payload["detail_html"], refreshed.revision, at_least=4)
 
 
 def test_dm_can_add_player_character_and_npc_combatants_and_turn_order_sorts_high_to_low(
@@ -769,6 +780,69 @@ def test_owner_player_sees_inline_edit_controls_on_owned_tracked_pc(app, client,
     assert 'aria-label="Remaining movement for Arden March"' in body
     assert "Save vitals" not in body
     assert "Save resources" not in body
+    arden = _find_combatant(app, character_slug="arden-march")
+    assert arden is not None
+    _assert_expected_combatant_revision_field(body, arden.revision, at_least=4)
+
+
+def test_owner_player_combat_live_state_keeps_combatant_revision_guards_in_workspace_snapshot(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    assert arden is not None
+
+    response = client.get(
+        f"/campaigns/linden-pass/combat/live-state?combatant={arden.id}",
+        headers=_async_headers(),
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["selected_combatant_id"] == arden.id
+    assert "Arden March" in payload["summary_html"]
+    _assert_expected_combatant_revision_field(payload["summary_html"], arden.revision, at_least=4)
+
+
+def test_dm_combat_dm_live_state_keeps_selected_combatant_revision_guards(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+    hound = _find_combatant(app, name="Clockwork Hound")
+    assert hound is not None
+
+    response = client.get(
+        f"/campaigns/linden-pass/combat/dm/live-state?combatant={hound.id}",
+        headers=_async_headers(),
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["selected_combatant_id"] == hound.id
+    assert "Selected combatant authority" in payload["controls_html"]
+    _assert_expected_combatant_revision_field(payload["controls_html"], hound.revision, at_least=3)
 
 
 def test_owner_player_combat_page_uses_character_workspace_layout(app, client, sign_in, users):

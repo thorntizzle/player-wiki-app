@@ -3191,9 +3191,9 @@ def test_sheet_edit_view_exposes_cancel_and_unsaved_change_warning_copy(client, 
     assert "stay local until you save or cancel them" in html
     assert "the browser will warn you" in html
     assert "Session Character, Combat, or another tab changes the sheet first" in html
-    assert "this page reloads the latest" in html
-    assert "pending changes were restored locally" in html
-    assert "does not merge those edits" in html
+    assert "The latest sheet was reloaded" in html
+    assert "pending draft was restored locally for review" in html
+    assert "Compare the refreshed sheet and save again when ready." in html
     assert "Session Character, Combat, or another tab may have changed nearby fields first" in html
     assert "nothing was auto-merged" in html
     assert "beforeunload" in html
