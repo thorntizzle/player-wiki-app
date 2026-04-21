@@ -112,6 +112,8 @@ If you prefer VS Code tasks, the workspace now includes:
 - `Player Wiki: Check`
 - `Player Wiki: Backup Local State`
 
+For Codex-driven roadmap runner commands, see [docs/roadmap-automation-reference.md](docs/roadmap-automation-reference.md).
+
 The app is private by default now:
 
 - anonymous users are redirected to sign-in

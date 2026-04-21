@@ -20,6 +20,7 @@ campaigns/*
 !campaigns/README.md
 docs/*
 !docs/api-v1.md
+!docs/roadmap-automation-reference.md
 tests/fixtures/campaign_characters/
 *.sqlite3
 *.sqlite3-shm
