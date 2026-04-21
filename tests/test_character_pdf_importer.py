@@ -3,11 +3,16 @@
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import yaml
 
 from player_wiki.app import create_app
-from player_wiki.character_builder import normalize_definition_to_native_model, supports_native_level_up
+from player_wiki.character_builder import (
+    _attach_campaign_item_page_support,
+    normalize_definition_to_native_model,
+    supports_native_level_up,
+)
 from player_wiki.character_importer import (
     converge_imported_definition,
     extract_trackers_from_text,
@@ -2228,6 +2233,148 @@ def test_converge_imported_definition_preserves_native_managed_import_overlays()
         "mechanics/harbor-ritual-book"
     )
     assert manual_items["items/stormglass-compass"]["name"] == "Stormglass Compass"
+
+
+def test_converge_imported_definition_reapplies_psionic_circlet_effects_after_preserving_item_page_ref():
+    def _psi_warrior_definition(*, item_name: str, page_ref: object | None = None) -> CharacterDefinition:
+        definition = _minimal_imported_definition(
+            profile={
+                "class_level_text": "Fighter 3",
+                "classes": [
+                    {
+                        "row_id": "class-row-1",
+                        "class_name": "Fighter",
+                        "subclass_name": "Psi Warrior",
+                        "level": 3,
+                    }
+                ],
+            },
+            attacks=[
+                {
+                    "id": "longsword-1",
+                    "name": "Longsword",
+                    "category": "melee weapon",
+                    "attack_bonus": 4,
+                    "damage": "1d8+2 slashing",
+                    "notes": "",
+                }
+            ],
+            features=[
+                {
+                    "id": "psionic-power-1",
+                    "name": "Psionic Power",
+                    "category": "subclass_feature",
+                    "source": "TCE",
+                    "description_markdown": "",
+                    "activation_type": "passive",
+                    "tracker_ref": None,
+                    "class_row_id": "class-row-1",
+                    "systems_ref": {
+                        "slug": "tce-subclassfeature-psionic-power",
+                        "title": "Psionic Power",
+                        "entry_type": "subclassfeature",
+                        "source_id": "TCE",
+                    },
+                }
+            ],
+            spellcasting={},
+            equipment_catalog=[
+                {
+                    "id": "circlet-1",
+                    "name": item_name,
+                    "default_quantity": 1,
+                    "weight": "--",
+                    "notes": "",
+                    "is_equipped": True,
+                    "is_attuned": True,
+                }
+            ],
+            resource_templates=[],
+        )
+        definition.stats["proficiency_bonus"] = 2
+        definition.stats["ability_scores"]["int"] = {"score": 10, "modifier": 0, "save_bonus": 0}
+        if page_ref is not None:
+            definition.equipment_catalog[0]["page_ref"] = page_ref
+        return definition
+
+    item_catalog = _attach_campaign_item_page_support(
+        {},
+        [
+            SimpleNamespace(
+                page_ref="items/psionic-circlet",
+                metadata={
+                    "ability_score_minimums": {"int": 14},
+                    "resource_template_bonuses": [
+                        {"id": "psionic-power-psionic-energy", "bonus": 1}
+                    ],
+                    "attack_reminder_rules": [
+                        {
+                            "id": "item:psionic-circlet:psionic-options",
+                            "title": "Psionic Circlet",
+                            "save_dc_ability_key": "int",
+                            "condition": (
+                                "Once on each of your turns, after you hit a target within 30 feet with a weapon "
+                                "attack and deal damage to it, you can expend one Psionic Energy die to use one "
+                                "of these options."
+                            ),
+                            "attack_scope": {
+                                "label": "Weapon attacks",
+                                "categories": ["melee weapon", "ranged weapon"],
+                            },
+                            "effects": [
+                                {
+                                    "kind": "saving_throw",
+                                    "label": "Wisdom save DC",
+                                    "summary": "Psychic Hindrance and Psychic Anchor use Wisdom save DC {save_dc}.",
+                                },
+                                {
+                                    "kind": "speed_control",
+                                    "label": "Psychic Anchor",
+                                    "summary": (
+                                        "On a failed Wisdom save, the target's speed becomes 0 until the end of "
+                                        "its next turn."
+                                    ),
+                                },
+                            ],
+                        }
+                    ],
+                },
+                body_markdown="*Wondrous item, rare (requires attunement)*\n",
+                page=SimpleNamespace(title="Psionic Circlet", section="Items", subsection="", summary=""),
+            )
+        ],
+    )
+
+    existing_definition = _psi_warrior_definition(
+        item_name="Guild Circlet",
+        page_ref={"slug": "items/psionic-circlet", "title": "Psionic Circlet"},
+    )
+    incoming_definition = _psi_warrior_definition(item_name="Guild Circlet")
+
+    converged = converge_imported_definition(
+        incoming_definition,
+        existing_definition=existing_definition,
+        item_catalog=item_catalog,
+    )
+
+    item = converged.equipment_catalog[0]
+    assert item["name"] == "Guild Circlet"
+    assert item["page_ref"]["slug"] == "items/psionic-circlet"
+    assert converged.stats["ability_scores"]["int"]["score"] == 14
+
+    resources_by_id = {
+        str(template.get("id") or "").strip(): template
+        for template in converged.resource_templates
+    }
+    assert resources_by_id["psionic-power-psionic-energy"]["max"] == 5
+
+    reminder_state = dict(converged.stats.get("attack_reminder_state") or {})
+    circlet_rule = next(rule for rule in list(reminder_state.get("rules") or []) if rule["title"] == "Psionic Circlet")
+    reminder_effects = {effect["label"]: effect["summary"] for effect in list(circlet_rule.get("effects") or [])}
+    assert reminder_effects["Wisdom save DC"] == "Psychic Hindrance and Psychic Anchor use Wisdom save DC 12."
+    assert reminder_effects["Psychic Anchor"] == (
+        "On a failed Wisdom save, the target's speed becomes 0 until the end of its next turn."
+    )
 
 
 def test_converge_imported_definition_preserves_native_edit_generated_followup_features_without_progression_history():

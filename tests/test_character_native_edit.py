@@ -2923,6 +2923,223 @@ def test_owner_player_can_save_native_character_edits_and_reconcile_inventory_st
     assert "/campaigns/linden-pass/pages/items/stormglass-compass" in equipment_html
 
 
+def test_native_character_edit_relinks_manual_psionic_circlet_into_shared_reward_derivation(
+    app, client, sign_in, users, get_character, set_campaign_visibility
+):
+    item_page_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "content"
+        / "items"
+        / "psionic-circlet.md"
+    )
+    item_page_path.parent.mkdir(parents=True, exist_ok=True)
+    item_page_path.write_text(
+        """---
+title: Psionic Circlet
+section: Items
+published: true
+summary: A circlet that sharpens psionic focus.
+ability_score_minimums:
+  int: 14
+resource_template_bonuses:
+  - id: psionic-power-psionic-energy
+    bonus: 1
+attack_reminder_rules:
+  - id: item:psionic-circlet:psionic-options
+    title: Psionic Circlet
+    save_dc_ability_key: int
+    condition: Once on each of your turns, after you hit a target within 30 feet with a weapon attack and deal damage to it, you can expend one Psionic Energy die to use one of these options.
+    attack_scope:
+      label: Weapon attacks
+      categories:
+        - melee weapon
+        - ranged weapon
+    effects:
+      - kind: saving_throw
+        label: Wisdom save DC
+        summary: Psychic Hindrance and Psychic Anchor use Wisdom save DC {save_dc}.
+      - kind: disadvantage
+        label: Psychic Hindrance
+        summary: On a failed Wisdom save, the target's next attack roll before the end of its next turn is made with disadvantage.
+      - kind: advantage
+        label: Psychic Opening
+        summary: The next attack roll made against the target before the start of your next turn has advantage.
+      - kind: speed_control
+        label: Psychic Anchor
+        summary: On a failed Wisdom save, the target's speed becomes 0 until the end of its next turn.
+---
+The circlet stabilizes psionic talent and expands the wearer's combat options.
+""",
+        encoding="utf-8",
+    )
+
+    def _mutate_definition(payload: dict[str, object]) -> None:
+        payload["source"] = {
+            "source_path": "builder://arden-psi-warrior",
+            "source_type": "native_character_builder",
+            "imported_from": "In-app Native Level 3 Builder",
+            "imported_at": "2026-04-21T00:00:00Z",
+            "parse_warnings": [],
+        }
+        payload["profile"] = {
+            "class_level_text": "Fighter 3",
+            "classes": [
+                {
+                    "row_id": "class-row-1",
+                    "class_name": "Fighter",
+                    "subclass_name": "Psi Warrior",
+                    "level": 3,
+                    "systems_ref": {
+                        "entry_type": "class",
+                        "slug": "phb-class-fighter",
+                        "title": "Fighter",
+                        "source_id": "PHB",
+                    },
+                    "subclass_ref": {
+                        "entry_type": "subclass",
+                        "slug": "tce-subclass-psi-warrior",
+                        "title": "Psi Warrior",
+                        "source_id": "TCE",
+                    },
+                }
+            ],
+            "species": "Human",
+            "background": "Courier",
+        }
+        payload["stats"] = {
+            "max_hp": 28,
+            "armor_class": 14,
+            "initiative_bonus": 2,
+            "speed": "30 ft.",
+            "proficiency_bonus": 2,
+            "passive_perception": 12,
+            "passive_insight": 11,
+            "passive_investigation": 12,
+            "ability_scores": {
+                "str": {"score": 10, "modifier": 0, "save_bonus": 0},
+                "dex": {"score": 14, "modifier": 2, "save_bonus": 2},
+                "con": {"score": 14, "modifier": 2, "save_bonus": 4},
+                "int": {"score": 10, "modifier": 0, "save_bonus": 0},
+                "wis": {"score": 12, "modifier": 1, "save_bonus": 1},
+                "cha": {"score": 10, "modifier": 0, "save_bonus": 0},
+            },
+        }
+        payload["features"] = [
+            {
+                "id": "psionic-power-1",
+                "name": "Psionic Power",
+                "category": "subclass_feature",
+                "source": "TCE",
+                "description_markdown": "",
+                "activation_type": "passive",
+                "tracker_ref": None,
+                "class_row_id": "class-row-1",
+                "systems_ref": {
+                    "entry_type": "subclassfeature",
+                    "slug": "tce-subclassfeature-psionic-power",
+                    "title": "Psionic Power",
+                    "source_id": "TCE",
+                },
+            }
+        ]
+        payload["spellcasting"] = {}
+        payload["resource_templates"] = []
+        payload["equipment_catalog"] = [
+            {
+                "id": "light-crossbow-1",
+                "name": "Light Crossbow",
+                "default_quantity": 1,
+                "weight": "5 lb.",
+                "is_equipped": True,
+            },
+            {
+                "id": "quarterstaff-2",
+                "name": "Quarterstaff",
+                "default_quantity": 1,
+                "weight": "4 lb.",
+                "is_equipped": True,
+            },
+            {
+                "id": "manual-item-guild-circlet",
+                "name": "Guild Circlet",
+                "default_quantity": 1,
+                "weight": "--",
+                "notes": "",
+                "source_kind": "manual_edit",
+                "is_equipped": True,
+                "is_attuned": True,
+            },
+        ]
+
+    _write_character_definition(app, "arden-march", _mutate_definition)
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    record = get_character("arden-march")
+    assert record is not None
+
+    response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common",
+            "armor_proficiencies_text": "",
+            "weapon_proficiencies_text": "Simple Weapons\nMartial Weapons",
+            "tool_proficiencies_text": "",
+            "manual_item_id_1": "manual-item-guild-circlet",
+            "manual_item_name_1": "Guild Circlet",
+            "manual_item_page_ref_1": "items/psionic-circlet",
+            "manual_item_quantity_1": "1",
+            "manual_item_weight_1": "--",
+            "manual_item_notes_1": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+
+    circlet_item = next(
+        item
+        for item in record.definition.equipment_catalog
+        if str(item.get("id") or "").strip() == "manual-item-guild-circlet"
+    )
+    page_ref = circlet_item.get("page_ref")
+    assert circlet_item["name"] == "Guild Circlet"
+    if isinstance(page_ref, dict):
+        assert page_ref["slug"] == "items/psionic-circlet"
+    else:
+        assert page_ref == "items/psionic-circlet"
+
+    assert record.definition.stats["ability_scores"]["int"]["score"] == 14
+    assert record.definition.stats["ability_scores"]["int"]["modifier"] == 2
+
+    resources_by_id = {
+        str(template.get("id") or "").strip(): template
+        for template in record.definition.resource_templates
+    }
+    assert resources_by_id["psionic-power-psionic-energy"]["max"] == 5
+
+    reminder_state = dict(record.definition.stats.get("attack_reminder_state") or {})
+    circlet_rule = next(rule for rule in list(reminder_state.get("rules") or []) if rule["title"] == "Psionic Circlet")
+    reminder_effects = {effect["label"]: effect["summary"] for effect in list(circlet_rule.get("effects") or [])}
+    assert reminder_effects["Wisdom save DC"] == "Psychic Hindrance and Psychic Anchor use Wisdom save DC 12."
+    assert reminder_effects["Psychic Opening"] == (
+        "The next attack roll made against the target before the start of your next turn has advantage."
+    )
+
+    quick_response = client.get("/campaigns/linden-pass/characters/arden-march?page=quick")
+    assert quick_response.status_code == 200
+    quick_html = quick_response.get_data(as_text=True)
+    assert "Psionic Circlet" in quick_html
+    assert "Psychic Hindrance" in quick_html
+    assert "Psychic Anchor" in quick_html
+
+
 def test_stale_revision_is_rejected_for_native_character_edits(
     client, sign_in, users, get_character, set_campaign_visibility
 ):

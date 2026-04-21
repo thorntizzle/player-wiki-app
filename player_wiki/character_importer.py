@@ -1884,7 +1884,23 @@ def converge_imported_definition(
         list(existing_spellcasting.get("spells") or []),
     )
     payload["spellcasting"] = spellcasting
-    return CharacterDefinition.from_dict(_assign_missing_imported_ids(payload))
+    renormalized = normalize_definition_to_native_model(
+        CharacterDefinition.from_dict(payload),
+        item_catalog=item_catalog,
+        spell_catalog=spell_catalog,
+        systems_service=systems_service,
+        campaign_page_records=campaign_page_records,
+        resolved_class=resolved_class,
+        resolved_subclass=resolved_subclass,
+        resolved_species=resolved_species,
+        resolved_background=resolved_background,
+    )
+    renormalized_payload = renormalized.to_dict()
+    renormalized_payload["source"] = _preserve_existing_source_metadata(
+        dict(renormalized_payload.get("source") or {}),
+        dict(existing_payload.get("source") or {}),
+    )
+    return CharacterDefinition.from_dict(_assign_missing_imported_ids(renormalized_payload))
 
 
 def preserve_existing_character_overrides(
