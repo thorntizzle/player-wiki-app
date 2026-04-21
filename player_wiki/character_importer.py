@@ -73,6 +73,8 @@ ABILITY_CHOICE_FEATURE_NAMES = {
 NATIVE_MANAGED_CUSTOM_FEATURE_CATEGORY = "custom_feature"
 NATIVE_MANAGED_CUSTOM_EQUIPMENT_SOURCE_KIND = "manual_edit"
 NATIVE_EDIT_PARENT_FEATURE_ID_KEY = "native_edit_parent_feature_id"
+NATIVE_EDIT_OPTIONALFEATURE_SECTION_KEY = "native_edit_optionalfeature_section_index"
+NATIVE_EDIT_OPTIONALFEATURE_CHOICE_KEY = "native_edit_optionalfeature_choice_index"
 
 
 class CharacterImportError(Exception):
@@ -1308,6 +1310,9 @@ def _feature_match_keys(payload: dict[str, Any]) -> list[tuple[Any, ...]]:
     feature_id = str(payload.get("id") or "").strip()
     systems_ref = dict(payload.get("systems_ref") or {})
     page_ref = _normalize_page_ref_payload(payload.get("page_ref"))
+    parent_feature_id = str(payload.get(NATIVE_EDIT_PARENT_FEATURE_ID_KEY) or "").strip()
+    optionalfeature_section = str(payload.get(NATIVE_EDIT_OPTIONALFEATURE_SECTION_KEY) or "").strip()
+    optionalfeature_choice = str(payload.get(NATIVE_EDIT_OPTIONALFEATURE_CHOICE_KEY) or "").strip()
     explicit_identity = _normalize_explicit_link_identity(
         systems_ref=systems_ref,
         page_ref=page_ref,
@@ -1317,6 +1322,15 @@ def _feature_match_keys(payload: dict[str, Any]) -> list[tuple[Any, ...]]:
         keys.append(("id", feature_id))
     if explicit_identity:
         keys.append(("explicit", explicit_identity))
+    if parent_feature_id:
+        keys.append(
+            (
+                "native-edit-parent",
+                parent_feature_id,
+                optionalfeature_section,
+                optionalfeature_choice,
+            )
+        )
     keys.append(
         (
             "feature",

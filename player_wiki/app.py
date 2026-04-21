@@ -72,6 +72,7 @@ from .character_editor import (
     apply_native_character_retraining,
     build_character_spell_management_context,
     apply_native_character_edits,
+    build_linked_feature_authoring_support,
     build_managed_character_import_metadata,
     build_native_character_edit_context,
     build_native_character_retraining_context,
@@ -3088,6 +3089,7 @@ def create_app() -> Flask:
         can_use_session_mode = has_session_mode_access(campaign_slug, character_slug)
         can_manage_character = can_manage_campaign_session(campaign_slug)
         campaign_page_records = list_visible_character_page_records(campaign_slug, campaign)
+        builder_campaign_page_records = list_builder_campaign_page_records(campaign_slug, campaign)
         retraining_page_records = (
             [
                 page_record
@@ -3104,14 +3106,27 @@ def create_app() -> Flask:
                 get_systems_service(),
                 campaign_slug,
                 record.definition,
-                campaign_page_records=campaign_page_records,
+                campaign_page_records=builder_campaign_page_records,
             )
-            if can_manage_character and native_character_tools_supported
+            if can_use_session_mode and native_character_tools_supported
             else None
         )
-        can_level_up = bool(level_up_readiness and level_up_readiness.get("status") == "ready")
+        linked_feature_authoring = build_linked_feature_authoring_support(
+            record.definition,
+            readiness=level_up_readiness,
+        )
+        can_level_up = bool(
+            can_manage_character
+            and level_up_readiness
+            and level_up_readiness.get("status") == "ready"
+        )
+        can_prepare_level_up = bool(
+            can_manage_character
+            and level_up_readiness
+            and level_up_readiness.get("status") == "repairable"
+        )
         can_retrain = False
-        if retraining_page_records:
+        if retraining_page_records and bool(linked_feature_authoring.get("supported")):
             retraining_context = build_native_character_retraining_context(
                 record.definition,
                 campaign_page_records=retraining_page_records,
@@ -3257,8 +3272,14 @@ def create_app() -> Flask:
                 can_use_session_mode=can_use_session_mode,
                 native_character_tools_supported=native_character_tools_supported,
                 can_level_up=can_level_up,
+                can_prepare_level_up=can_prepare_level_up,
                 can_retrain=can_retrain,
                 level_up_readiness=level_up_readiness,
+                linked_feature_authoring_message=(
+                    str(linked_feature_authoring.get("message") or "").strip()
+                    if can_use_session_mode and not bool(linked_feature_authoring.get("supported"))
+                    else ""
+                ),
                 is_session_mode=is_session_mode,
                 character_session_surface_href=character_session_surface_href,
                 character_combat_surface_href=character_combat_surface_href,
@@ -8793,6 +8814,16 @@ def create_app() -> Flask:
                 campaign_slug,
                 character_slug=character_slug,
             )
+        level_up_readiness = native_level_up_readiness(
+            get_systems_service(),
+            campaign_slug,
+            record.definition,
+            campaign_page_records=list_builder_campaign_page_records(campaign_slug, campaign),
+        )
+        linked_feature_authoring = build_linked_feature_authoring_support(
+            record.definition,
+            readiness=level_up_readiness,
+        )
         campaign_page_records = [
             page_record
             for page_record in get_campaign_page_store().list_page_records(campaign_slug)
@@ -8823,6 +8854,7 @@ def create_app() -> Flask:
             form_values=form_values if request.method == "POST" else None,
             optionalfeature_catalog=optionalfeature_catalog,
             spell_catalog=spell_catalog,
+            linked_feature_authoring_support=linked_feature_authoring,
         )
         edit_context["state_revision"] = record.state_record.revision
 
@@ -8844,6 +8876,7 @@ def create_app() -> Flask:
                 optionalfeature_catalog=optionalfeature_catalog,
                 spell_catalog=spell_catalog,
                 systems_service=app.extensions["systems_service"],
+                linked_feature_authoring_support=linked_feature_authoring,
             )
             definition = finalize_character_definition_for_write(
                 campaign_slug,
@@ -8907,6 +8940,28 @@ def create_app() -> Flask:
             return redirect_unsupported_native_character_tools(
                 campaign_slug,
                 character_slug=character_slug,
+            )
+        level_up_readiness = native_level_up_readiness(
+            get_systems_service(),
+            campaign_slug,
+            record.definition,
+            campaign_page_records=list_builder_campaign_page_records(campaign_slug, campaign),
+        )
+        linked_feature_authoring = build_linked_feature_authoring_support(
+            record.definition,
+            readiness=level_up_readiness,
+        )
+        if not bool(linked_feature_authoring.get("supported")):
+            flash(
+                str(linked_feature_authoring.get("message") or "This character cannot use retraining yet."),
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "character_read_view",
+                    campaign_slug=campaign_slug,
+                    character_slug=character_slug,
+                )
             )
         campaign_page_records = [
             page_record

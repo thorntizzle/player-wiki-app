@@ -77,74 +77,79 @@
         <div class="section-heading">
           <h2>Custom Features</h2>
         </div>
-        <p class="meta">Use this for campaign boons, curses, training rewards, or other custom rules text. Optional tracker fields let the sheet and combat-facing state treat the feature as a limited-use resource, and linked feat-like pages can surface structured follow-up choices here when the reward grants one.</p>
-        <div class="character-edit-stack">
-          {% for row in edit_context.feature_rows %}
-            <article class="detail-card character-edit-row">
-              <input type="hidden" name="custom_feature_id_{{ row.index }}" value="{{ row.id }}">
-              <div class="character-edit-row__grid">
-                <label class="field">
-                  <span>Name</span>
-                  <input type="text" name="custom_feature_name_{{ row.index }}" value="{{ row.name }}">
-                </label>
-                <label class="field">
-                  <span>Activation</span>
-                  <select name="custom_feature_activation_type_{{ row.index }}">
-                    {% for option in edit_context.activation_options %}
-                      <option value="{{ option.value }}"{% if option.value == row.activation_type %} selected{% endif %}>{{ option.label }}</option>
-                    {% endfor %}
-                  </select>
-                </label>
-              </div>
-              <label class="field">
-                <span>Linked Page</span>
-                <select name="custom_feature_page_ref_{{ row.index }}">
-                  <option value="" {% if not row.page_ref %}selected{% endif %}>No linked page</option>
-                  {% for option in edit_context.campaign_page_options %}
-                    <option value="{{ option.value }}"{% if option.value == row.page_ref %} selected{% endif %}>{{ option.label }}</option>
-                  {% endfor %}
-                </select>
-              </label>
-              <label class="field">
-                <span>Description (Markdown)</span>
-                <textarea name="custom_feature_description_{{ row.index }}" rows="6">{{ row.description_markdown }}</textarea>
-              </label>
-              <div class="character-edit-row__grid">
-                <label class="field">
-                  <span>Uses / Max</span>
-                  <input type="number" name="custom_feature_resource_max_{{ row.index }}" value="{{ row.resource_max }}" min="0" placeholder="Optional">
-                </label>
-                <label class="field">
-                  <span>Reset On</span>
-                  <select name="custom_feature_resource_reset_on_{{ row.index }}">
-                    {% for option in edit_context.resource_reset_options %}
-                      <option value="{{ option.value }}"{% if option.value == row.resource_reset_on %} selected{% endif %}>{{ option.label }}</option>
-                    {% endfor %}
-                  </select>
-                </label>
-              </div>
-              {% if row.choice_fields %}
-                <div class="detail-grid character-edit-grid">
-                  {% for field in row.choice_fields %}
-                    <label class="field">
-                      <span>{{ field.label }}</span>
-                      <select name="{{ field.name }}">
-                        <option value="" {% if not field.selected %}selected{% endif %}>Choose an option</option>
-                        {% for option in field.options %}
-                          <option value="{{ option.value }}"{% if field.selected == option.value %} selected{% endif %}>{{ option.label }}</option>
-                        {% endfor %}
-                      </select>
-                      {% if field.help_text %}
-                        <small>{{ field.help_text }}</small>
-                      {% endif %}
-                    </label>
-                  {% endfor %}
+        {% if edit_context.linked_feature_authoring_supported %}
+          <p class="meta">Use this for campaign boons, curses, training rewards, or other custom rules text. Optional tracker fields let the sheet and combat-facing state treat the feature as a limited-use resource, and linked feat-like pages can surface structured follow-up choices here when the reward grants one.</p>
+          <div class="character-edit-stack">
+            {% for row in edit_context.feature_rows %}
+              <article class="detail-card character-edit-row">
+                <input type="hidden" name="custom_feature_id_{{ row.index }}" value="{{ row.id }}">
+                <div class="character-edit-row__grid">
+                  <label class="field">
+                    <span>Name</span>
+                    <input type="text" name="custom_feature_name_{{ row.index }}" value="{{ row.name }}">
+                  </label>
+                  <label class="field">
+                    <span>Activation</span>
+                    <select name="custom_feature_activation_type_{{ row.index }}">
+                      {% for option in edit_context.activation_options %}
+                        <option value="{{ option.value }}"{% if option.value == row.activation_type %} selected{% endif %}>{{ option.label }}</option>
+                      {% endfor %}
+                    </select>
+                  </label>
                 </div>
-              {% endif %}
-              <p class="meta">Leave Uses / Max blank for a non-tracked feature. Existing spent values are preserved when you change the limit.</p>
-            </article>
-          {% endfor %}
-        </div>
+                <label class="field">
+                  <span>Linked Page</span>
+                  <select name="custom_feature_page_ref_{{ row.index }}">
+                    <option value="" {% if not row.page_ref %}selected{% endif %}>No linked page</option>
+                    {% for option in edit_context.campaign_page_options %}
+                      <option value="{{ option.value }}"{% if option.value == row.page_ref %} selected{% endif %}>{{ option.label }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Description (Markdown)</span>
+                  <textarea name="custom_feature_description_{{ row.index }}" rows="6">{{ row.description_markdown }}</textarea>
+                </label>
+                <div class="character-edit-row__grid">
+                  <label class="field">
+                    <span>Uses / Max</span>
+                    <input type="number" name="custom_feature_resource_max_{{ row.index }}" value="{{ row.resource_max }}" min="0" placeholder="Optional">
+                  </label>
+                  <label class="field">
+                    <span>Reset On</span>
+                    <select name="custom_feature_resource_reset_on_{{ row.index }}">
+                      {% for option in edit_context.resource_reset_options %}
+                        <option value="{{ option.value }}"{% if option.value == row.resource_reset_on %} selected{% endif %}>{{ option.label }}</option>
+                      {% endfor %}
+                    </select>
+                  </label>
+                </div>
+                {% if row.choice_fields %}
+                  <div class="detail-grid character-edit-grid">
+                    {% for field in row.choice_fields %}
+                      <label class="field">
+                        <span>{{ field.label }}</span>
+                        <select name="{{ field.name }}">
+                          <option value="" {% if not field.selected %}selected{% endif %}>Choose an option</option>
+                          {% for option in field.options %}
+                            <option value="{{ option.value }}"{% if field.selected == option.value %} selected{% endif %}>{{ option.label }}</option>
+                          {% endfor %}
+                        </select>
+                        {% if field.help_text %}
+                          <small>{{ field.help_text }}</small>
+                        {% endif %}
+                      </label>
+                    {% endfor %}
+                  </div>
+                {% endif %}
+                <p class="meta">Leave Uses / Max blank for a non-tracked feature. Existing spent values are preserved when you change the limit.</p>
+              </article>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="meta">{{ edit_context.linked_feature_authoring_message }}</p>
+          <p class="meta">Other edit sections on this page still stay available while the imported baseline is waiting on progression repair.</p>
+        {% endif %}
       </section>
 
       <section class="read-section">

@@ -12,7 +12,10 @@ from .character_adjustments import (
     strip_manual_stat_adjustments,
 )
 from .character_builder import (
+    IMPORTED_CHARACTER_SOURCE_TYPES,
     LINKED_CAMPAIGN_PAGE_ALLOWED_KINDS_BY_FIELD_KIND,
+    NATIVE_LEVEL_UP_READY,
+    NATIVE_LEVEL_UP_REPAIRABLE,
     _add_bonus_known_spell_to_payloads,
     _add_spell_to_payloads,
     _ability_scores_from_definition,
@@ -79,7 +82,7 @@ from .repository import normalize_lookup
 from .repository import slugify
 from .systems_models import SystemsEntryRecord
 
-CHARACTER_EDITOR_VERSION = "2026-04-11.02"
+CHARACTER_EDITOR_VERSION = "2026-04-21.01"
 CUSTOM_FEATURE_CATEGORY = "custom_feature"
 CUSTOM_EQUIPMENT_SOURCE_KIND = "manual_edit"
 CUSTOM_FEATURE_TRACKER_PREFIX = "manual-feature-tracker"
@@ -113,10 +116,50 @@ STAT_ADJUSTMENT_FIELDS = (
     ("passive_insight", "Passive Insight Adjustment", "Apply a persistent bonus or penalty to passive Insight."),
     ("passive_investigation", "Passive Investigation Adjustment", "Apply a persistent bonus or penalty to passive Investigation."),
 )
+IMPORTED_CHARACTER_LINKED_FEATURE_AUTHORING_REPAIR_MESSAGE = (
+    "Finish imported progression repair before adding or reshaping linked custom features, page-backed feat choices, or retraining on this sheet."
+)
+IMPORTED_CHARACTER_LINKED_FEATURE_AUTHORING_UNSUPPORTED_MESSAGE = (
+    "This imported character's current baseline is outside the shipped linked-feature authoring and retraining parity lane."
+)
 
 
 class CharacterEditValidationError(ValueError):
     pass
+
+
+def build_linked_feature_authoring_support(
+    definition: CharacterDefinition,
+    *,
+    readiness: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    source_type = str((definition.source or {}).get("source_type") or "").strip()
+    is_imported = source_type in IMPORTED_CHARACTER_SOURCE_TYPES
+    if not is_imported:
+        return {
+            "supported": True,
+            "is_imported": False,
+            "message": "",
+        }
+
+    readiness_status = str((readiness or {}).get("status") or "").strip()
+    if readiness_status == NATIVE_LEVEL_UP_READY:
+        return {
+            "supported": True,
+            "is_imported": True,
+            "message": "",
+        }
+    if readiness_status == NATIVE_LEVEL_UP_REPAIRABLE:
+        return {
+            "supported": False,
+            "is_imported": True,
+            "message": IMPORTED_CHARACTER_LINKED_FEATURE_AUTHORING_REPAIR_MESSAGE,
+        }
+    return {
+        "supported": False,
+        "is_imported": True,
+        "message": IMPORTED_CHARACTER_LINKED_FEATURE_AUTHORING_UNSUPPORTED_MESSAGE,
+    }
 
 
 def build_character_spell_management_context(
@@ -1477,8 +1520,11 @@ def build_native_character_edit_context(
     optionalfeature_catalog: dict[str, SystemsEntryRecord] | None = None,
     spell_catalog: dict[str, Any] | None = None,
     item_catalog: dict[str, Any] | None = None,
+    linked_feature_authoring_support: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     values = dict(form_values or {})
+    linked_feature_authoring = dict(linked_feature_authoring_support or {})
+    linked_feature_authoring_supported = bool(linked_feature_authoring.get("supported", True))
     optionalfeature_catalog = dict(optionalfeature_catalog or {})
     spell_catalog = dict(spell_catalog or {})
     item_catalog = dict(item_catalog or _build_item_catalog([]))
@@ -1739,6 +1785,8 @@ def build_native_character_edit_context(
         ],
         "campaign_page_options": campaign_page_options,
         "equipment_page_options": equipment_page_options,
+        "linked_feature_authoring_supported": linked_feature_authoring_supported,
+        "linked_feature_authoring_message": str(linked_feature_authoring.get("message") or "").strip(),
         "existing_managed_equipment": [
             {
                 "name": str(item.get("name") or "Item"),
@@ -1942,10 +1990,39 @@ def apply_native_character_edits(
     spell_catalog: dict[str, Any] | None = None,
     item_catalog: dict[str, Any] | None = None,
     systems_service: Any | None = None,
+    linked_feature_authoring_support: dict[str, Any] | None = None,
 ) -> tuple[CharacterDefinition, CharacterImportMetadata, dict[str, int]]:
     values = dict(form_values or {})
+    linked_feature_authoring = dict(linked_feature_authoring_support or {})
+    linked_feature_authoring_supported = bool(linked_feature_authoring.get("supported", True))
     optionalfeature_catalog = dict(optionalfeature_catalog or {})
     item_catalog = dict(item_catalog or _build_item_catalog([]))
+    if not linked_feature_authoring_supported:
+        preserved_edit_context = build_native_character_edit_context(
+            current_definition,
+            campaign_page_records=campaign_page_records,
+            optionalfeature_catalog=optionalfeature_catalog,
+            spell_catalog=spell_catalog,
+            item_catalog=item_catalog,
+        )
+        preserved_values = _native_character_edit_form_values_from_context(preserved_edit_context)
+        custom_feature_field_names = {
+            field_name
+            for field_name in preserved_values
+            if field_name.startswith("custom_feature_")
+        }
+        for field_name in values:
+            if not field_name.startswith("custom_feature_"):
+                continue
+            if str(values.get(field_name) or "").strip() != str(preserved_values.get(field_name) or "").strip():
+                raise CharacterEditValidationError(
+                    str(
+                        linked_feature_authoring.get("message")
+                        or IMPORTED_CHARACTER_LINKED_FEATURE_AUTHORING_REPAIR_MESSAGE
+                    )
+                )
+        for field_name in custom_feature_field_names:
+            values[field_name] = str(preserved_values.get(field_name) or "")
     feature_linked_page_refs = {
         _extract_page_ref_value(feature.get("page_ref"))
         for feature in _manual_custom_features(current_definition)

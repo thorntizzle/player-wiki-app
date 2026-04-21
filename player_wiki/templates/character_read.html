@@ -55,7 +55,7 @@
                 <a class="ghost-button" href="{{ url_for('character_level_up_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
                   Level up
                 </a>
-              {% elif level_up_readiness and level_up_readiness.status == 'repairable' %}
+              {% elif can_prepare_level_up %}
                 <a class="ghost-button" href="{{ url_for('character_progression_repair_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
                   Prepare for level-up
                 </a>
@@ -77,7 +77,7 @@
               Level up
             </a>
           </div>
-        {% elif native_character_tools_supported and level_up_readiness and level_up_readiness.status == 'repairable' %}
+        {% elif native_character_tools_supported and can_prepare_level_up %}
           <div class="hero-actions">
             <a class="ghost-button" href="{{ url_for('character_progression_repair_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
               Prepare for level-up
@@ -93,6 +93,9 @@
               <li>{{ reason }}</li>
             {% endfor %}
           </ul>
+        {% endif %}
+        {% if linked_feature_authoring_message %}
+          <p class="meta">{{ linked_feature_authoring_message }}</p>
         {% endif %}
       </header>
 

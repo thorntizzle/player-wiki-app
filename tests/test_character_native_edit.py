@@ -3,10 +3,24 @@ from __future__ import annotations
 from pathlib import Path
 import re
 
+import player_wiki.app as app_module
 import yaml
 
 from player_wiki.character_importer import import_character
 from player_wiki.config import Config
+
+
+def _write_character_definition(app, character_slug: str, mutator) -> None:
+    definition_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "characters"
+        / character_slug
+        / "definition.yaml"
+    )
+    payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
+    mutator(payload)
+    definition_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
 def test_native_character_edits_can_apply_and_remove_campaign_page_spell_grants(
@@ -1718,6 +1732,339 @@ The harbor masters insist on repetition until every motion is clean.
     }
     retrained_crossbow = next(attack for attack in record.definition.attacks if "Crossbow" in attack["name"])
 
+    assert "phb-optionalfeature-archery" not in feature_slugs
+    assert "phb-optionalfeature-defense" in feature_slugs
+    assert retrained_crossbow["attack_bonus"] == 5
+    latest_event = list((record.definition.source or {}).get("native_progression", {}).get("history") or [])[-1]
+    assert latest_event["action"] == "retrain"
+    assert latest_event["kind"] == "retrain"
+
+
+def test_repairable_imported_character_editor_hides_linked_feature_authoring_and_preserves_existing_features(
+    app, client, sign_in, users, get_character, set_campaign_visibility, monkeypatch
+):
+    _write_character_definition(
+        app,
+        "arden-march",
+        lambda payload: payload.update(
+            {
+                "source": {
+                    "source_path": "imports://arden-march.md",
+                    "source_type": "markdown_character_sheet",
+                    "imported_from": "Arden March - Character Sheet.md",
+                    "parse_warnings": [],
+                },
+                "features": list(payload.get("features") or [])
+                + [
+                    {
+                        "id": "custom-feature-existing-harbor-boon",
+                        "name": "Existing Harbor Boon",
+                        "category": "custom_feature",
+                        "source": "Campaign",
+                        "description_markdown": "A preserved imported overlay.",
+                        "activation_type": "passive",
+                        "tracker_ref": None,
+                    }
+                ],
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "native_level_up_readiness",
+        lambda *args, **kwargs: {
+            "status": "repairable",
+            "message": "This imported character needs a quick progression repair before native level-up.",
+            "reasons": ["Choose a supported base class link for this character."],
+        },
+    )
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    page_response = client.get("/campaigns/linden-pass/characters/arden-march/edit")
+    assert page_response.status_code == 200
+    page_html = page_response.get_data(as_text=True)
+    assert "Finish imported progression repair before adding or reshaping linked custom features" in page_html
+    assert 'name="custom_feature_name_1"' not in page_html
+
+    record = get_character("arden-march")
+    assert record is not None
+
+    save_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "",
+            "weapon_proficiencies_text": "Daggers\nLight Crossbows\nQuarterstaffs",
+            "tool_proficiencies_text": "Navigator's Tools",
+            "biography_markdown": "Updated imported biography.",
+        },
+        follow_redirects=False,
+    )
+
+    assert save_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    assert record.definition.profile["biography_markdown"] == "Updated imported biography."
+    assert any(
+        feature.get("name") == "Existing Harbor Boon"
+        for feature in record.definition.features
+    )
+
+
+def test_repairable_imported_character_editor_rejects_linked_feature_mutation(
+    app, client, sign_in, users, get_character, set_campaign_visibility, monkeypatch
+):
+    _write_character_definition(
+        app,
+        "arden-march",
+        lambda payload: payload.update(
+            {
+                "source": {
+                    "source_path": "imports://arden-march.md",
+                    "source_type": "markdown_character_sheet",
+                    "imported_from": "Arden March - Character Sheet.md",
+                    "parse_warnings": [],
+                }
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "native_level_up_readiness",
+        lambda *args, **kwargs: {
+            "status": "repairable",
+            "message": "This imported character needs a quick progression repair before native level-up.",
+            "reasons": ["Choose a supported base class link for this character."],
+        },
+    )
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    record = get_character("arden-march")
+    assert record is not None
+
+    response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "",
+            "weapon_proficiencies_text": "Daggers\nLight Crossbows\nQuarterstaffs",
+            "tool_proficiencies_text": "Navigator's Tools",
+            "custom_feature_name_1": "Blocked Harbor Boon",
+            "custom_feature_activation_type_1": "passive",
+            "custom_feature_description_1": "Should stay blocked until repair.",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    assert "Finish imported progression repair before adding or reshaping linked custom features" in response.get_data(
+        as_text=True
+    )
+
+
+def test_repairable_imported_character_retraining_route_redirects_until_progression_repair(
+    app, client, sign_in, users, set_campaign_visibility, monkeypatch
+):
+    _write_character_definition(
+        app,
+        "arden-march",
+        lambda payload: payload.update(
+            {
+                "source": {
+                    "source_path": "imports://arden-march.md",
+                    "source_type": "markdown_character_sheet",
+                    "imported_from": "Arden March - Character Sheet.md",
+                    "parse_warnings": [],
+                }
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "native_level_up_readiness",
+        lambda *args, **kwargs: {
+            "status": "repairable",
+            "message": "This imported character needs a quick progression repair before native level-up.",
+            "reasons": ["Choose a supported base class link for this character."],
+        },
+    )
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get(
+        "/campaigns/linden-pass/characters/arden-march/retraining",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/campaigns/linden-pass/characters/arden-march")
+
+
+def test_ready_imported_character_can_add_page_backed_feat_and_retrain(
+    app, client, sign_in, users, get_character, set_campaign_visibility, monkeypatch
+):
+    feat_page_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "content"
+        / "mechanics"
+        / "harbor-drill.md"
+    )
+    feat_page_path.write_text(
+        """---
+title: Harbor Drill
+section: Mechanics
+subsection: Feats
+published: true
+summary: A harbor discipline that grants a fighting style.
+character_option:
+  kind: feat
+  name: Harbor Drill
+  description_markdown: Harbor veterans drill you into a practiced fighting style.
+  optionalfeature_progression:
+    - name: Fighting Style
+      featureType:
+        - FS:F
+      progression:
+        "1": 1
+---
+The harbor masters insist on repetition until every motion is clean.
+""",
+        encoding="utf-8",
+    )
+
+    with app.app_context():
+        systems_store = app.extensions["systems_store"]
+        systems_store.upsert_library("DND-5E", title="DND 5E", system_code="DND-5E")
+        systems_store.upsert_source(
+            "DND-5E",
+            "PHB",
+            title="Player's Handbook",
+            license_class="srd_cc",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        systems_store.replace_entries_for_source(
+            "DND-5E",
+            "PHB",
+            entry_types=["optionalfeature"],
+            entries=[
+                {
+                    "entry_key": "dnd-5e|optionalfeature|phb|archery",
+                    "entry_type": "optionalfeature",
+                    "slug": "phb-optionalfeature-archery",
+                    "title": "Archery",
+                    "source_page": "72",
+                    "source_path": "data/class/class-fighter.json",
+                    "search_text": "archery fighting style",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"feature_type": ["FS:F"]},
+                    "body": {},
+                    "rendered_html": "<p>Archery.</p>",
+                },
+                {
+                    "entry_key": "dnd-5e|optionalfeature|phb|defense",
+                    "entry_type": "optionalfeature",
+                    "slug": "phb-optionalfeature-defense",
+                    "title": "Defense",
+                    "source_page": "72",
+                    "source_path": "data/class/class-fighter.json",
+                    "search_text": "defense fighting style",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"feature_type": ["FS:F"]},
+                    "body": {},
+                    "rendered_html": "<p>Defense.</p>",
+                },
+            ],
+        )
+
+    _write_character_definition(
+        app,
+        "arden-march",
+        lambda payload: payload.update(
+            {
+                "source": {
+                    "source_path": "imports://arden-march.md",
+                    "source_type": "markdown_character_sheet",
+                    "imported_from": "Arden March - Character Sheet.md",
+                    "parse_warnings": [],
+                }
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "native_level_up_readiness",
+        lambda *args, **kwargs: {"status": "ready", "message": "", "reasons": []},
+    )
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    record = get_character("arden-march")
+    assert record is not None
+    baseline_crossbow = next(attack for attack in record.definition.attacks if "Crossbow" in attack["name"])
+    assert baseline_crossbow["attack_bonus"] == 5
+
+    add_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "",
+            "weapon_proficiencies_text": "Daggers\nLight Crossbows\nQuarterstaffs",
+            "tool_proficiencies_text": "Navigator's Tools",
+            "custom_feature_name_1": "",
+            "custom_feature_page_ref_1": "mechanics/harbor-drill",
+            "custom_feature_activation_type_1": "passive",
+            "custom_feature_description_1": "",
+            "custom_feature_optionalfeature_1_1_1": "phb-optionalfeature-archery",
+        },
+        follow_redirects=False,
+    )
+
+    assert add_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    assert record.import_metadata.import_status == "managed"
+    boosted_crossbow = next(attack for attack in record.definition.attacks if "Crossbow" in attack["name"])
+    assert boosted_crossbow["attack_bonus"] == 7
+
+    retraining_page = client.get("/campaigns/linden-pass/characters/arden-march/retraining")
+    assert retraining_page.status_code == 200
+    retraining_html = retraining_page.get_data(as_text=True)
+    assert "Harbor Drill Fighting Style" in retraining_html
+    assert 'value="phb-optionalfeature-archery" selected' in retraining_html
+
+    retrain_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/retraining",
+        data={
+            "expected_revision": record.state_record.revision,
+            "custom_feature_optionalfeature_1_1_1": "phb-optionalfeature-defense",
+        },
+        follow_redirects=False,
+    )
+
+    assert retrain_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    feature_slugs = {
+        str(dict(feature.get("systems_ref") or {}).get("slug") or "").strip()
+        for feature in record.definition.features
+    }
+    retrained_crossbow = next(attack for attack in record.definition.attacks if "Crossbow" in attack["name"])
     assert "phb-optionalfeature-archery" not in feature_slugs
     assert "phb-optionalfeature-defense" in feature_slugs
     assert retrained_crossbow["attack_bonus"] == 5
