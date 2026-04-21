@@ -5968,6 +5968,11 @@ def _derive_definition_core_sheet_payloads(
         spell_catalog=effective_spell_catalog,
         current_level=max(current_level, 1),
     )
+    derived_spellcasting["spells"] = _canonicalize_legacy_spell_payload_marks(
+        list(derived_spellcasting.get("spells") or []),
+        spell_catalog=effective_spell_catalog,
+        spellcasting_rows=list(derived_spellcasting.get("class_rows") or []),
+    )
     derived_spellcasting["source_rows"] = _derive_spell_source_rows(
         list(derived_spellcasting.get("spells") or []),
         ability_scores=ability_scores,
@@ -17789,6 +17794,107 @@ def _spell_payload_is_always_prepared(spell_payload: dict[str, Any]) -> bool:
     return bool(spell_payload.get("is_always_prepared")) or _spell_payload_has_legacy_always_prepared_source_label(
         spell_payload
     )
+
+
+def _spell_mark_tokens(mark: str) -> set[str]:
+    tokens: set[str] = set()
+    for part in re.split(r"\+", str(mark or "")):
+        normalized_part = normalize_lookup(part)
+        if normalized_part:
+            tokens.add(normalized_part)
+    return tokens
+
+
+def _canonicalize_legacy_spell_mark(
+    *,
+    mark: str,
+    spell_level: int | None,
+    spell_mode: str = "",
+) -> str:
+    clean_mark = str(mark or "").strip()
+    tokens = _spell_mark_tokens(clean_mark)
+    if spell_level == 0 or "cantrip" in tokens:
+        return "Cantrip"
+    if spell_mode == "ritual_book":
+        return "Ritual Book"
+    if not clean_mark:
+        return ""
+    if spell_mode == "wizard":
+        if "spellbook" in tokens:
+            return "Prepared + Spellbook" if "prepared" in tokens else "Spellbook"
+        if tokens & {"o", "p", "po", "prepared"}:
+            return "Prepared + Spellbook"
+        return "Spellbook"
+    if spell_mode == "prepared":
+        if "known" in tokens:
+            return "Known"
+        if tokens & {"o", "p", "po", "prepared"}:
+            return "Prepared"
+        return clean_mark
+    if spell_mode == "known":
+        return "Known"
+    if spell_mode == "ritual_book":
+        return "Ritual Book"
+    if "spellbook" in tokens:
+        return "Prepared + Spellbook" if "prepared" in tokens else "Spellbook"
+    if "ritual book" in tokens:
+        return "Ritual Book"
+    if "known" in tokens:
+        return "Known"
+    if tokens == {"o"}:
+        return ""
+    if tokens & {"p", "po", "prepared"}:
+        return "Prepared"
+    return clean_mark
+
+
+def _spell_payload_spell_level(
+    spell_payload: dict[str, Any],
+    *,
+    spell_catalog: dict[str, Any] | None = None,
+) -> int | None:
+    spell_entry = _resolve_spell_entry(_spell_payload_key(spell_payload), dict(spell_catalog or {}))
+    if spell_entry is None:
+        spell_name = str(spell_payload.get("name") or "").strip()
+        if spell_name:
+            spell_entry = _resolve_spell_entry(spell_name, dict(spell_catalog or {}))
+    if spell_entry is not None:
+        return _spell_entry_level(spell_entry)
+    try:
+        return int(spell_payload.get("spell_level") or spell_payload.get("level") or 0)
+    except (TypeError, ValueError):
+        return None
+
+
+def _canonicalize_legacy_spell_payload_marks(
+    spell_payloads: list[dict[str, Any]] | None,
+    *,
+    spell_catalog: dict[str, Any] | None = None,
+    spellcasting_rows: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    row_modes_by_id = {
+        str(row.get("class_row_id") or "").strip(): str(row.get("spell_mode") or "").strip()
+        for row in list(spellcasting_rows or [])
+        if str(row.get("class_row_id") or "").strip()
+    }
+    canonicalized_payloads: list[dict[str, Any]] = []
+    for raw_payload in list(spell_payloads or []):
+        spell_payload = dict(raw_payload or {})
+        class_row_id = _spell_payload_class_row_id(spell_payload)
+        spell_mode = str(
+            spell_payload.get("spell_source_mode")
+            or row_modes_by_id.get(class_row_id)
+            or ""
+        ).strip()
+        canonical_mark = _canonicalize_legacy_spell_mark(
+            mark=str(spell_payload.get("mark") or "").strip(),
+            spell_level=_spell_payload_spell_level(spell_payload, spell_catalog=spell_catalog),
+            spell_mode=spell_mode,
+        )
+        if canonical_mark or "mark" in spell_payload:
+            spell_payload["mark"] = canonical_mark
+        canonicalized_payloads.append(spell_payload)
+    return _normalize_spell_payloads(canonicalized_payloads)
 
 
 def _collect_entry_body_text_fragments(raw_value: Any) -> list[str]:

@@ -4306,12 +4306,36 @@ def test_imported_progression_repair_restores_spell_support_always_prepared_gran
 
 
 def test_normalize_definition_restores_legacy_always_prepared_flags_from_source_labels():
+    cleric = _systems_entry(
+        "class",
+        "phb-class-cleric",
+        "Cleric",
+        metadata={
+            "hit_die": {"faces": 8},
+            "proficiency": ["wis", "cha"],
+        },
+    )
     bless = _systems_entry("spell", "phb-spell-bless", "Bless", metadata={"level": 1})
     cure_wounds = _systems_entry("spell", "phb-spell-cure-wounds", "Cure Wounds", metadata={"level": 1})
+    sacred_flame = _systems_entry(
+        "spell",
+        "phb-spell-sacred-flame",
+        "Sacred Flame",
+        metadata={"level": 0, "class_lists": {"PHB": ["Cleric"]}},
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [cleric],
+            "spell": [bless, cure_wounds, sacred_flame],
+        },
+        class_progression=[],
+    )
     definition = _minimal_character_definition("arden-march", "Arden March")
     definition.profile["class_level_text"] = "Cleric 5"
     definition.profile["classes"][0]["class_name"] = "Cleric"
     definition.profile["classes"][0]["level"] = 5
+    definition.profile["classes"][0]["systems_ref"] = _systems_ref(cleric)
+    definition.profile["class_ref"] = _systems_ref(cleric)
     definition.spellcasting = {
         "spellcasting_class": "Cleric",
         "spellcasting_ability": "Wisdom",
@@ -4328,16 +4352,82 @@ def test_normalize_definition_restores_legacy_always_prepared_flags_from_source_
                 "source": "Cleric",
                 "systems_ref": _systems_ref(cure_wounds),
             },
+            {
+                "name": "Sacred Flame",
+                "mark": "O",
+                "source": "Cleric",
+                "systems_ref": _systems_ref(sacred_flame),
+            },
         ],
     }
 
-    normalized = normalize_definition_to_native_model(definition)
+    normalized = normalize_definition_to_native_model(definition, systems_service=systems_service)
     spells_by_name = {spell["name"]: spell for spell in normalized.spellcasting["spells"]}
 
     assert spells_by_name["Bless"]["is_always_prepared"] is True
     assert spells_by_name["Bless"]["source"] == "Cleric (Always Prepared)"
-    assert spells_by_name["Bless"]["mark"] == "P"
+    assert spells_by_name["Bless"]["mark"] == "Prepared"
     assert spells_by_name["Cure Wounds"].get("is_always_prepared") is not True
+    assert spells_by_name["Sacred Flame"]["mark"] == "Cantrip"
+
+
+def test_normalize_definition_canonicalizes_legacy_wizard_spellbook_marks():
+    wizard = _systems_entry(
+        "class",
+        "phb-class-wizard",
+        "Wizard",
+        metadata={
+            "hit_die": {"faces": 6},
+            "proficiency": ["int", "wis"],
+        },
+    )
+    fire_bolt = _systems_entry(
+        "spell",
+        "phb-spell-fire-bolt",
+        "Fire Bolt",
+        metadata={"level": 0, "class_lists": {"PHB": ["Wizard"]}},
+    )
+    magic_missile = _systems_entry(
+        "spell",
+        "phb-spell-magic-missile",
+        "Magic Missile",
+        metadata={"level": 1, "class_lists": {"PHB": ["Wizard"]}},
+    )
+    shield = _systems_entry(
+        "spell",
+        "phb-spell-shield",
+        "Shield",
+        metadata={"level": 1, "class_lists": {"PHB": ["Wizard"]}},
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [wizard],
+            "spell": [fire_bolt, magic_missile, shield],
+        },
+        class_progression=[],
+    )
+    definition = _minimal_character_definition("ember-volt", "Ember Volt")
+    definition.profile["class_level_text"] = "Wizard 5"
+    definition.profile["classes"][0]["class_name"] = "Wizard"
+    definition.profile["classes"][0]["level"] = 5
+    definition.profile["classes"][0]["systems_ref"] = _systems_ref(wizard)
+    definition.profile["class_ref"] = _systems_ref(wizard)
+    definition.spellcasting = {
+        "spellcasting_class": "Wizard",
+        "spellcasting_ability": "Intelligence",
+        "spells": [
+            {"name": "Fire Bolt", "mark": "O", "systems_ref": _systems_ref(fire_bolt)},
+            {"name": "Magic Missile", "mark": "P + O", "systems_ref": _systems_ref(magic_missile)},
+            {"name": "Shield", "mark": "P", "systems_ref": _systems_ref(shield)},
+        ],
+    }
+
+    normalized = normalize_definition_to_native_model(definition, systems_service=systems_service)
+    spells_by_name = {spell["name"]: spell for spell in normalized.spellcasting["spells"]}
+
+    assert spells_by_name["Fire Bolt"]["mark"] == "Cantrip"
+    assert spells_by_name["Magic Missile"]["mark"] == "Prepared + Spellbook"
+    assert spells_by_name["Shield"]["mark"] == "Prepared + Spellbook"
 
 
 def test_normalize_definition_restores_body_only_artillerist_always_prepared_spells():
