@@ -9306,6 +9306,85 @@ def test_normalize_definition_to_native_model_preserves_imported_armor_class_whe
     assert normalized.stats["armor_class"] == 17
 
 
+def test_normalize_definition_to_native_model_derives_imported_plain_unarmored_armor_class_when_explicit_armor_state_proves_no_armor():
+    definition = _minimal_imported_character_definition("lena-frost", "Lena Frost")
+    definition.stats["armor_class"] = 17
+    definition.stats["ability_scores"]["dex"] = {"score": 14, "modifier": 2, "save_bonus": 2}
+    definition.equipment_catalog = [
+        {
+            "id": "chain-mail-1",
+            "name": "Chain Mail",
+            "default_quantity": 1,
+            "weight": "55 lb.",
+            "notes": "",
+            "is_equipped": False,
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-chain-mail",
+                "title": "Chain Mail",
+                "source_id": "PHB",
+            },
+        },
+        {
+            "id": "shield-1",
+            "name": "Shield",
+            "default_quantity": 1,
+            "weight": "6 lb.",
+            "notes": "",
+            "is_equipped": True,
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-shield",
+                "title": "Shield",
+                "source_id": "PHB",
+            },
+        },
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+
+    assert normalized.stats["armor_class"] == 14
+
+
+def test_normalize_definition_to_native_model_preserves_imported_armor_class_when_armor_presence_is_still_unproven():
+    definition = _minimal_imported_character_definition("orsa-wick", "Orsa Wick")
+    definition.stats["armor_class"] = 17
+    definition.stats["ability_scores"]["dex"] = {"score": 14, "modifier": 2, "save_bonus": 2}
+    definition.equipment_catalog = [
+        {
+            "id": "chain-mail-1",
+            "name": "Chain Mail",
+            "default_quantity": 1,
+            "weight": "55 lb.",
+            "notes": "",
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-chain-mail",
+                "title": "Chain Mail",
+                "source_id": "PHB",
+            },
+        },
+        {
+            "id": "shield-1",
+            "name": "Shield",
+            "default_quantity": 1,
+            "weight": "6 lb.",
+            "notes": "",
+            "is_equipped": True,
+            "systems_ref": {
+                "entry_type": "item",
+                "slug": "phb-item-shield",
+                "title": "Shield",
+                "source_id": "PHB",
+            },
+        },
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+
+    assert normalized.stats["armor_class"] == 17
+
+
 def test_normalize_definition_to_native_model_adds_single_shield_master_helper_row_for_multiple_shields():
     definition = _minimal_character_definition("shield-marshal", "Shield Marshal")
     definition.features = [

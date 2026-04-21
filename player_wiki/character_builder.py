@@ -10433,6 +10433,35 @@ def _equipped_armor_profiles(
     ]
 
 
+def _resolved_armor_profiles(
+    equipment_catalog: list[dict[str, Any]],
+    *,
+    item_catalog: dict[str, Any] | None = None,
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    return [
+        (dict(item or {}), profile)
+        for item in list(equipment_catalog or [])
+        if (profile := _resolve_armor_profile(dict(item or {}), item_catalog)) is not None
+    ]
+
+
+def _imported_character_can_prove_plain_unarmored_base(
+    equipment_catalog: list[dict[str, Any]],
+    *,
+    item_catalog: dict[str, Any] | None = None,
+) -> bool:
+    non_shield_profiles = [
+        (item, profile)
+        for item, profile in _resolved_armor_profiles(equipment_catalog, item_catalog=item_catalog)
+        if not bool(profile.get("is_shield"))
+    ]
+    if not non_shield_profiles:
+        return False
+    if any(not bool(item.get("equipped_state_explicit")) for item, _ in non_shield_profiles):
+        return False
+    return not any(bool(item.get("is_equipped")) for item, _ in non_shield_profiles)
+
+
 def _character_profile_class_names(
     definition: CharacterDefinition,
     *,
@@ -10505,10 +10534,11 @@ def _derive_armor_class_from_character_inputs(
     all_items = [dict(item or {}) for item in list(equipment_catalog or [])]
     equipped_items = [item for item in all_items if bool(item.get("is_equipped"))]
     equipped_armor_profiles = _equipped_armor_profiles(equipment_catalog, item_catalog=item_catalog)
-    if allow_plain_unarmored_base:
-        armor_items = equipped_items
-    else:
-        armor_items = equipped_items if any(not bool(profile.get("is_shield")) for _, profile in equipped_armor_profiles) else all_items
+    proven_plain_unarmored_base = bool(
+        not allow_plain_unarmored_base
+        and _imported_character_can_prove_plain_unarmored_base(equipment_catalog, item_catalog=item_catalog)
+    )
+    armor_items = equipped_items
     resolved_profiles = [
         (item, profile)
         for item in armor_items
@@ -10555,7 +10585,7 @@ def _derive_armor_class_from_character_inputs(
         candidate_values.append(total)
 
     if not has_armor:
-        if allow_plain_unarmored_base:
+        if allow_plain_unarmored_base or proven_plain_unarmored_base:
             candidate_values.append(10 + dex_modifier + shield_bonus)
         if has_barbarian_unarmored_defense:
             candidate_values.append(10 + dex_modifier + con_modifier + shield_bonus)
@@ -19531,6 +19561,7 @@ def _normalize_equipment_payloads(
         payload["weight"] = str(payload.get("weight") or "").strip()
         payload["notes"] = str(payload.get("notes") or "").strip()
         payload["source_kind"] = str(payload.get("source_kind") or "").strip()
+        payload["equipped_state_explicit"] = bool(payload.get("equipped_state_explicit")) or "is_equipped" in payload
         payload["is_equipped"] = bool(payload.get("is_equipped", False))
         payload["is_attuned"] = bool(payload.get("is_attuned", False))
         payload["charges_current"] = payload.get("charges_current")
@@ -19609,6 +19640,9 @@ def _normalize_equipment_payloads(
             existing_payload["source_kind"] = str(payload.get("source_kind") or "").strip()
         if not existing_payload.get("campaign_option") and payload.get("campaign_option"):
             existing_payload["campaign_option"] = dict(payload.get("campaign_option") or {})
+        existing_payload["equipped_state_explicit"] = bool(
+            existing_payload.get("equipped_state_explicit")
+        ) or bool(payload.get("equipped_state_explicit"))
         existing_payload["is_equipped"] = bool(existing_payload.get("is_equipped", False)) or bool(
             payload.get("is_equipped", False)
         )
