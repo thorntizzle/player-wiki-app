@@ -547,6 +547,11 @@ def test_api_character_sheet_edit_batch_updates_state_backed_sections_in_one_rev
 
     assert stale_response.status_code == 409
     assert stale_response.get_json()["error"]["code"] == "state_conflict"
+    assert stale_response.get_json()["error"]["message"] == (
+        "This sheet changed before your batch save finished. Refresh and review the latest sheet before saving "
+        "again. Session Character, Combat, or another tab may have changed nearby fields first; nothing was "
+        "auto-merged."
+    )
 
 
 def test_api_character_sheet_edit_batch_rejects_delta_actions(

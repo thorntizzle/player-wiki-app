@@ -2781,6 +2781,7 @@ def register_api(app) -> None:
         action,
         *,
         forbidden_message: str = "You do not have permission to update this character from this view.",
+        conflict_message: str = "This sheet changed in another session. Refresh and try again.",
     ):
         record = load_character_record(campaign_slug, character_slug)
         if not has_session_mode_access(campaign_slug, character_slug):
@@ -2798,11 +2799,7 @@ def register_api(app) -> None:
         try:
             action(record, payload, user.id)
         except CharacterStateConflictError:
-            return json_error(
-                "This sheet changed in another session. Refresh and try again.",
-                409,
-                code="state_conflict",
-            )
+            return json_error(conflict_message, 409, code="state_conflict")
         except (CharacterStateValidationError, TypeError, ValueError) as exc:
             return json_error(str(exc), 400, code="validation_error")
 
@@ -2828,6 +2825,11 @@ def register_api(app) -> None:
                 updated_by_user_id=user_id,
             ),
             forbidden_message="You do not have permission to use the Character page sheet edit view for this character.",
+            conflict_message=(
+                "This sheet changed before your batch save finished. Refresh and review the latest sheet before "
+                "saving again. Session Character, Combat, or another tab may have changed nearby fields first; "
+                "nothing was auto-merged."
+            ),
         )
 
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/vitals")

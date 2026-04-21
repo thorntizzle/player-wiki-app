@@ -1441,7 +1441,7 @@
                 if (response.status === 409) {
                   allowPageUnload = true;
                   persistSavedState({
-                    message: "This sheet changed in another session. The latest sheet was reloaded and your pending changes were restored locally. Review them and save again.",
+                    message: "This sheet changed before your batch save finished. The latest sheet was reloaded and your pending draft was restored locally for review. Session Character, Combat, or another tab may have changed nearby fields first, and nothing was auto-merged. Compare the refreshed sheet and save again when ready.",
                     kind: "error",
                     restore_payload: payload,
                     scrollY: window.scrollY,
