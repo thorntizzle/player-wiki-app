@@ -72,6 +72,7 @@ ABILITY_CHOICE_FEATURE_NAMES = {
 }
 NATIVE_MANAGED_CUSTOM_FEATURE_CATEGORY = "custom_feature"
 NATIVE_MANAGED_CUSTOM_EQUIPMENT_SOURCE_KIND = "manual_edit"
+NATIVE_EDIT_PARENT_FEATURE_ID_KEY = "native_edit_parent_feature_id"
 
 
 class CharacterImportError(Exception):
@@ -1414,6 +1415,10 @@ def _is_native_managed_feature_overlay(payload: dict[str, Any]) -> bool:
     )
 
 
+def _is_native_edit_generated_feature_overlay(payload: dict[str, Any]) -> bool:
+    return bool(str(payload.get(NATIVE_EDIT_PARENT_FEATURE_ID_KEY) or "").strip())
+
+
 def _is_native_managed_equipment_overlay(payload: dict[str, Any]) -> bool:
     return (
         str(payload.get("source_kind") or "").strip()
@@ -1439,6 +1444,21 @@ def _is_native_progression_managed_feature_overlay(payload: dict[str, Any]) -> b
     return entry_type in {"feat", "optionalfeature"} or category == "feat"
 
 
+def _should_preserve_feature_overlay(
+    payload: dict[str, Any],
+    *,
+    preserve_native_progression_features: bool,
+) -> bool:
+    return (
+        _is_native_managed_feature_overlay(payload)
+        or _is_native_edit_generated_feature_overlay(payload)
+        or (
+            preserve_native_progression_features
+            and _is_native_progression_managed_feature_overlay(payload)
+        )
+    )
+
+
 def _merge_existing_native_managed_overlays(
     definition: CharacterDefinition,
     existing_definition: CharacterDefinition,
@@ -1446,16 +1466,16 @@ def _merge_existing_native_managed_overlays(
     payload = deepcopy(definition.to_dict())
     existing_payload = deepcopy(existing_definition.to_dict())
     preserve_native_progression_features = _has_native_progression_history(dict(existing_payload.get("source") or {}))
+    include_feature_entry = lambda entry: _should_preserve_feature_overlay(
+        entry,
+        preserve_native_progression_features=preserve_native_progression_features,
+    )
 
     merged_features = _merge_existing_native_managed_entries(
         list(payload.get("features") or []),
         list(existing_payload.get("features") or []),
         key_builder=_feature_match_keys,
-        include_entry=lambda entry: _is_native_managed_feature_overlay(entry)
-        or (
-            preserve_native_progression_features
-            and _is_native_progression_managed_feature_overlay(entry)
-        ),
+        include_entry=include_feature_entry,
     )
     payload["features"] = merged_features
 
@@ -1469,7 +1489,7 @@ def _merge_existing_native_managed_overlays(
     native_feature_tracker_refs = {
         str(feature.get("tracker_ref") or "").strip()
         for feature in merged_features
-        if _is_native_managed_feature_overlay(feature)
+        if include_feature_entry(feature)
         and str(feature.get("tracker_ref") or "").strip()
     }
     if native_feature_tracker_refs:

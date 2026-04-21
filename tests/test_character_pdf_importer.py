@@ -2230,6 +2230,80 @@ def test_converge_imported_definition_preserves_native_managed_import_overlays()
     assert manual_items["items/stormglass-compass"]["name"] == "Stormglass Compass"
 
 
+def test_converge_imported_definition_preserves_native_edit_generated_followup_features_without_progression_history():
+    existing_definition = _minimal_imported_definition(
+        features=[
+            {
+                "id": "custom-feature-harbor-drill",
+                "name": "Harbor Drill",
+                "category": "custom_feature",
+                "source": "Campaign",
+                "description_markdown": "Harbor wardens drill a special follow-up technique into you.",
+                "activation_type": "passive",
+                "page_ref": "mechanics/harbor-drill",
+                "tracker_ref": None,
+            },
+            {
+                "id": "harbor-drill-guided-shot",
+                "name": "Guided Shot",
+                "category": "class_feature",
+                "source": "PHB",
+                "description_markdown": "",
+                "activation_type": "special",
+                "tracker_ref": "guided-shot",
+                "systems_ref": {
+                    "slug": "phb-optionalfeature-guided-shot",
+                    "title": "Guided Shot",
+                    "entry_type": "optionalfeature",
+                    "source_id": "PHB",
+                },
+                "native_edit_parent_feature_id": "custom-feature-harbor-drill",
+                "native_edit_optionalfeature_section_index": 1,
+                "native_edit_optionalfeature_choice_index": 1,
+            },
+        ],
+        resource_templates=[
+            {
+                "id": "guided-shot",
+                "label": "Guided Shot",
+                "category": "class_feature",
+                "initial_current": 1,
+                "max": 1,
+                "reset_on": "short_rest",
+                "reset_to": "max",
+                "rest_behavior": "confirm_before_reset",
+                "notes": "",
+                "display_order": 0,
+            }
+        ],
+    )
+    incoming_definition = _minimal_imported_definition(
+        features=[],
+        resource_templates=[],
+    )
+
+    converged = converge_imported_definition(
+        incoming_definition,
+        existing_definition=existing_definition,
+    )
+
+    followup_feature = next(
+        feature
+        for feature in converged.features
+        if str(feature.get("id") or "").strip() == "harbor-drill-guided-shot"
+    )
+
+    assert any(
+        str(feature.get("page_ref") or "").strip() == "mechanics/harbor-drill"
+        for feature in converged.features
+    )
+    assert followup_feature["tracker_ref"] == "guided-shot"
+    assert followup_feature["native_edit_parent_feature_id"] == "custom-feature-harbor-drill"
+    assert followup_feature["native_edit_optionalfeature_section_index"] == 1
+    assert followup_feature["native_edit_optionalfeature_choice_index"] == 1
+    assert {template["id"] for template in converged.resource_templates} == {"guided-shot"}
+
+
 def test_converge_imported_definition_keeps_native_managed_spell_rows_separate_from_same_name_imported_spells():
     existing_definition = _minimal_imported_definition(
         features=[
