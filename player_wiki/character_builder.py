@@ -18313,11 +18313,23 @@ def _spell_payload_spell_level(
         if spell_name:
             spell_entry = _resolve_spell_entry(spell_name, dict(spell_catalog or {}))
     if spell_entry is not None:
-        return _spell_entry_level(spell_entry)
-    try:
-        return int(spell_payload.get("spell_level") or spell_payload.get("level") or 0)
-    except (TypeError, ValueError):
-        return None
+        metadata = dict(spell_entry.metadata or {})
+        if "level" in metadata:
+            try:
+                return int(metadata.get("level") or 0)
+            except (TypeError, ValueError):
+                return None
+    for key in ("spell_level", "level"):
+        if key not in spell_payload:
+            continue
+        raw_level = spell_payload.get(key)
+        if raw_level in {"", None}:
+            return None
+        try:
+            return int(raw_level)
+        except (TypeError, ValueError):
+            return None
+    return None
 
 
 def _canonicalize_legacy_spell_payload_marks(
