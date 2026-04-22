@@ -7,8 +7,11 @@ from typing import Any
 from .auth_store import isoformat, utcnow
 from .character_adjustments import (
     apply_manual_stat_adjustments,
+    apply_recoverable_stat_penalties,
     apply_stat_adjustments,
     normalize_manual_stat_adjustments,
+    normalize_recoverable_penalties,
+    strip_recoverable_stat_penalties,
     strip_manual_stat_adjustments,
 )
 from .character_builder import (
@@ -89,6 +92,7 @@ CUSTOM_FEATURE_TRACKER_PREFIX = "manual-feature-tracker"
 CAMPAIGN_ITEMS_SECTION = "Items"
 MIN_CUSTOM_FEATURE_ROWS = 3
 MIN_CUSTOM_EQUIPMENT_ROWS = 3
+MIN_RECOVERABLE_PENALTY_ROWS = 3
 SPELL_MANAGEMENT_QUERY_MIN_LENGTH = 2
 NATIVE_EDIT_PARENT_FEATURE_ID_KEY = "native_edit_parent_feature_id"
 NATIVE_EDIT_OPTIONALFEATURE_SECTION_KEY = "native_edit_optionalfeature_section_index"
@@ -115,6 +119,15 @@ STAT_ADJUSTMENT_FIELDS = (
     ("passive_perception", "Passive Perception Adjustment", "Apply a persistent bonus or penalty to passive Perception."),
     ("passive_insight", "Passive Insight Adjustment", "Apply a persistent bonus or penalty to passive Insight."),
     ("passive_investigation", "Passive Investigation Adjustment", "Apply a persistent bonus or penalty to passive Investigation."),
+)
+RECOVERABLE_PENALTY_TARGET_OPTIONS = (
+    ("max_hp", "Max HP"),
+    ("ability_score:str", "Strength"),
+    ("ability_score:dex", "Dexterity"),
+    ("ability_score:con", "Constitution"),
+    ("ability_score:int", "Intelligence"),
+    ("ability_score:wis", "Wisdom"),
+    ("ability_score:cha", "Charisma"),
 )
 IMPORTED_CHARACTER_LINKED_FEATURE_AUTHORING_REPAIR_MESSAGE = (
     "Finish imported progression repair before adding or reshaping linked custom features, page-backed feat choices, or retraining on this sheet."
@@ -1541,6 +1554,7 @@ def build_native_character_edit_context(
     proficiency_lists = _display_proficiency_lists_for_editor(definition)
     manual_features = _manual_custom_features(definition)
     manual_items = _manual_equipment_entries(definition)
+    recoverable_penalties = normalize_recoverable_penalties((definition.stats or {}).get("recoverable_penalties"))
     resource_template_lookup = {
         str(template.get("id") or "").strip(): dict(template)
         for template in list(definition.resource_templates or [])
@@ -1656,6 +1670,32 @@ def build_native_character_edit_context(
         }
         for key, label, help_text in STAT_ADJUSTMENT_FIELDS
     ]
+    recoverable_penalty_row_count = max(
+        len(recoverable_penalties) + 1,
+        _max_row_index(values, "recoverable_penalty"),
+        MIN_RECOVERABLE_PENALTY_ROWS,
+    )
+    recoverable_penalty_rows = []
+    for index in range(1, recoverable_penalty_row_count + 1):
+        existing = recoverable_penalties[index - 1] if index - 1 < len(recoverable_penalties) else {}
+        recoverable_penalty_rows.append(
+            {
+                "index": index,
+                "id": str(values.get(f"recoverable_penalty_id_{index}") or existing.get("id") or "").strip(),
+                "source": str(values.get(f"recoverable_penalty_source_{index}") or existing.get("source") or "").strip(),
+                "target": str(
+                    values.get(f"recoverable_penalty_target_{index}")
+                    or _recoverable_penalty_target_value(existing)
+                    or ""
+                ).strip(),
+                "amount": str(
+                    values.get(f"recoverable_penalty_amount_{index}")
+                    or existing.get("amount")
+                    or ""
+                ).strip(),
+                "notes": str(values.get(f"recoverable_penalty_notes_{index}") or existing.get("notes") or ""),
+            }
+        )
 
     feature_row_count = max(
         len(manual_features) + 1,
@@ -1783,6 +1823,7 @@ def build_native_character_edit_context(
         "proficiency_fields": proficiency_fields,
         "reference_fields": reference_fields,
         "stat_adjustment_fields": stat_adjustment_fields,
+        "recoverable_penalty_rows": recoverable_penalty_rows,
         "feature_rows": feature_rows,
         "equipment_rows": equipment_rows,
         "activation_options": [
@@ -1792,6 +1833,10 @@ def build_native_character_edit_context(
         "resource_reset_options": [
             {"value": value, "label": label}
             for value, label in FEATURE_RESOURCE_RESET_OPTIONS
+        ],
+        "recoverable_penalty_target_options": [
+            {"value": value, "label": label}
+            for value, label in RECOVERABLE_PENALTY_TARGET_OPTIONS
         ],
         "campaign_page_options": campaign_page_options,
         "equipment_page_options": equipment_page_options,
@@ -1958,6 +2003,16 @@ def _native_character_edit_form_values_from_context(edit_context: dict[str, Any]
                 continue
             values[field_name] = str(field.get("value") or "")
 
+    for row in list(edit_context.get("recoverable_penalty_rows") or []):
+        row_index = int(row.get("index") or 0)
+        if row_index <= 0:
+            continue
+        values[f"recoverable_penalty_id_{row_index}"] = str(row.get("id") or "").strip()
+        values[f"recoverable_penalty_source_{row_index}"] = str(row.get("source") or "").strip()
+        values[f"recoverable_penalty_target_{row_index}"] = str(row.get("target") or "").strip()
+        values[f"recoverable_penalty_amount_{row_index}"] = str(row.get("amount") or "").strip()
+        values[f"recoverable_penalty_notes_{row_index}"] = str(row.get("notes") or "")
+
     for row in list(edit_context.get("feature_rows") or []):
         row_index = int(row.get("index") or 0)
         if row_index <= 0:
@@ -2097,6 +2152,7 @@ def apply_native_character_edits(
     profile["biography_markdown"] = str(values.get("biography_markdown") or "")
     profile["personality_markdown"] = str(values.get("personality_markdown") or "")
     base_stats, _ = strip_manual_stat_adjustments(dict(stripped_definition.stats or {}))
+    base_stats, existing_recoverable_penalties = strip_recoverable_stat_penalties(base_stats)
     existing_campaign_stat_adjustments = collect_campaign_option_stat_adjustments(existing_campaign_option_payloads)
     if existing_campaign_stat_adjustments:
         base_stats = apply_stat_adjustments(
@@ -2104,6 +2160,7 @@ def apply_native_character_edits(
             {key: -int(value) for key, value in existing_campaign_stat_adjustments.items()},
         )
     stat_adjustments = _parse_stat_adjustments(values)
+    recoverable_penalties = _parse_recoverable_penalties(values, existing_penalties=existing_recoverable_penalties)
 
     used_feature_ids = set(manual_feature_lookup.keys())
     manual_features: list[dict[str, Any]] = []
@@ -2337,12 +2394,12 @@ def apply_native_character_edits(
         feat_selected_choices=feat_selected_choices,
     )
     proficiencies["tool_expertise"] = list((current_definition.proficiencies or {}).get("tool_expertise") or [])
-    stats = apply_manual_stat_adjustments(base_stats, stat_adjustments)
     campaign_stat_adjustments = collect_campaign_option_stat_adjustments(selected_campaign_option_payloads)
+    stats = dict(base_stats or {})
     if campaign_stat_adjustments:
         stats = apply_stat_adjustments(stats, campaign_stat_adjustments)
     updated_ability_scores = _apply_feat_ability_score_bonuses(
-        _ability_scores_from_definition(stripped_definition),
+        _ability_scores_from_definition(stripped_definition, include_recoverable_penalties=False),
         feat_selections=campaign_feat_selections,
         selected_choices=feat_selected_choices,
         strict=False,
@@ -2372,6 +2429,8 @@ def apply_native_character_edits(
         ability_payloads[ability_key] = ability_payload
     if ability_payloads:
         stats["ability_scores"] = ability_payloads
+    stats = apply_recoverable_stat_penalties(stats, recoverable_penalties)
+    stats = apply_manual_stat_adjustments(stats, stat_adjustments)
     spellcasting = _apply_campaign_option_spells_to_spellcasting(
         current_definition.spellcasting,
         existing_campaign_option_payloads=existing_campaign_option_payloads,
@@ -4333,6 +4392,74 @@ def _parse_optional_integer(raw_value: str, *, field_label: str) -> int | None:
         return int(clean_value)
     except ValueError as exc:
         raise CharacterEditValidationError(f"The {field_label} must be a whole number.") from exc
+
+
+def _recoverable_penalty_target_value(penalty: dict[str, Any]) -> str:
+    kind = str(penalty.get("kind") or "").strip()
+    if kind == "max_hp":
+        return "max_hp"
+    if kind == "ability_score":
+        ability_key = str(penalty.get("ability_key") or "").strip().lower()
+        if ability_key:
+            return f"ability_score:{ability_key}"
+    return ""
+
+
+def _parse_recoverable_penalty_target(raw_value: str) -> tuple[str, str]:
+    clean_value = str(raw_value or "").strip().lower()
+    if clean_value == "max_hp":
+        return "max_hp", ""
+    if clean_value.startswith("ability_score:"):
+        ability_key = clean_value.split(":", 1)[1].strip()
+        if ability_key in {"str", "dex", "con", "int", "wis", "cha"}:
+            return "ability_score", ability_key
+    raise CharacterEditValidationError("Choose a valid recoverable-penalty target.")
+
+
+def _parse_recoverable_penalties(
+    values: dict[str, str],
+    *,
+    existing_penalties: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    used_ids = {
+        str(entry.get("id") or "").strip()
+        for entry in list(existing_penalties or [])
+        if str(entry.get("id") or "").strip()
+    }
+    penalties: list[dict[str, Any]] = []
+    for index in range(1, max(_max_row_index(values, "recoverable_penalty"), MIN_RECOVERABLE_PENALTY_ROWS) + 1):
+        raw_id = str(values.get(f"recoverable_penalty_id_{index}") or "").strip()
+        source = str(values.get(f"recoverable_penalty_source_{index}") or "").strip()
+        target = str(values.get(f"recoverable_penalty_target_{index}") or "").strip()
+        amount_text = str(values.get(f"recoverable_penalty_amount_{index}") or "").strip()
+        notes = str(values.get(f"recoverable_penalty_notes_{index}") or "")
+        has_content = bool(raw_id or source or target or amount_text or notes.strip())
+        if not has_content:
+            continue
+        if not source:
+            raise CharacterEditValidationError("Each recoverable penalty needs a source label.")
+        if not target:
+            raise CharacterEditValidationError("Each recoverable penalty needs a target.")
+        amount = _parse_optional_nonnegative_integer(
+            amount_text,
+            field_label=f"recoverable penalty amount for '{source}'",
+        )
+        if amount is None or amount <= 0:
+            raise CharacterEditValidationError("Each recoverable penalty needs a positive amount.")
+        kind, ability_key = _parse_recoverable_penalty_target(target)
+        penalty_id = raw_id or _build_unique_manual_id("recoverable-penalty", source, used_ids)
+        used_ids.add(penalty_id)
+        penalty = {
+            "id": penalty_id,
+            "kind": kind,
+            "amount": amount,
+            "source": source,
+            "notes": notes.strip(),
+        }
+        if ability_key:
+            penalty["ability_key"] = ability_key
+        penalties.append(penalty)
+    return penalties
 
 
 def _parse_stat_adjustments(values: dict[str, str]) -> dict[str, int]:

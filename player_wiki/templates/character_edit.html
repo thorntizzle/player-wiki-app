@@ -75,6 +75,43 @@
 
       <section class="read-section">
         <div class="section-heading">
+          <h2>Recoverable Penalties</h2>
+        </div>
+        <p class="meta">Track sourced max-HP and ability-score reductions here when the penalty can later be reduced or removed. Recovery is handled by lowering the amount or clearing the row, and restoring max HP does not automatically heal current HP.</p>
+        <div class="character-edit-stack">
+          {% for row in edit_context.recoverable_penalty_rows %}
+            <article class="detail-card character-edit-row">
+              <input type="hidden" name="recoverable_penalty_id_{{ row.index }}" value="{{ row.id }}">
+              <div class="character-edit-row__grid">
+                <label class="field">
+                  <span>Source</span>
+                  <input type="text" name="recoverable_penalty_source_{{ row.index }}" value="{{ row.source }}">
+                </label>
+                <label class="field">
+                  <span>Target</span>
+                  <select name="recoverable_penalty_target_{{ row.index }}">
+                    <option value="" {% if not row.target %}selected{% endif %}>Choose a target</option>
+                    {% for option in edit_context.recoverable_penalty_target_options %}
+                      <option value="{{ option.value }}"{% if option.value == row.target %} selected{% endif %}>{{ option.label }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Penalty Amount</span>
+                  <input type="number" name="recoverable_penalty_amount_{{ row.index }}" value="{{ row.amount }}" min="0">
+                </label>
+              </div>
+              <label class="field">
+                <span>Notes</span>
+                <textarea name="recoverable_penalty_notes_{{ row.index }}" rows="3">{{ row.notes }}</textarea>
+              </label>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="read-section">
+        <div class="section-heading">
           <h2>Custom Features</h2>
         </div>
         {% if edit_context.linked_feature_authoring_supported %}

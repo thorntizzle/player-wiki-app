@@ -10,7 +10,16 @@ from typing import Any, Callable
 from flask import g, has_request_context
 
 from .auth_store import isoformat, utcnow
-from .character_adjustments import apply_manual_stat_adjustments, apply_stat_adjustments, strip_manual_stat_adjustments
+from .character_adjustments import (
+    apply_manual_stat_adjustments,
+    apply_recoverable_ability_score_penalties,
+    apply_recoverable_stat_penalties,
+    apply_stat_adjustments,
+    normalize_recoverable_penalties,
+    restore_recoverable_ability_score_penalties,
+    strip_recoverable_stat_penalties,
+    strip_manual_stat_adjustments,
+)
 from .character_campaign_options import (
     build_campaign_page_character_option,
     collect_campaign_option_proficiency_grants,
@@ -4798,6 +4807,7 @@ def _infer_definition_save_proficiencies(
 
 def _definition_base_stats_without_adjustments(definition: CharacterDefinition) -> dict[str, Any]:
     stats, _manual_adjustments = strip_manual_stat_adjustments(dict(definition.stats or {}))
+    stats, _recoverable_penalties = strip_recoverable_stat_penalties(stats)
     campaign_option_adjustments = collect_campaign_option_stat_adjustments(
         _campaign_option_payloads_from_definition(definition)
     )
@@ -5753,6 +5763,7 @@ def _derive_definition_stats(
     selected_species: SystemsEntryRecord | None = None,
 ) -> dict[str, Any]:
     stats, manual_adjustments = strip_manual_stat_adjustments(dict(definition.stats or {}))
+    stats, recoverable_penalties = strip_recoverable_stat_penalties(stats)
     existing_ability_scores = dict(stats.get("ability_scores") or {})
     campaign_option_adjustments = collect_campaign_option_stat_adjustments(
         _campaign_option_payloads_from_definition(definition)
@@ -5853,6 +5864,7 @@ def _derive_definition_stats(
     if derived_max_hp is not None:
         stats["max_hp"] = derived_max_hp
     stats = apply_stat_adjustments(stats, campaign_option_adjustments)
+    stats = apply_recoverable_stat_penalties(stats, recoverable_penalties, adjust_ability_scores=False)
     return apply_manual_stat_adjustments(stats, manual_adjustments)
 
 
@@ -5914,6 +5926,15 @@ def _derive_definition_spellcasting(
         ]
         spellcasting["spellcasting_class"] = str(spellcasting.get("spellcasting_class") or "").strip()
         spellcasting["spellcasting_ability"] = str(spellcasting.get("spellcasting_ability") or "").strip()
+        fallback_ability_name = str(spellcasting.get("spellcasting_ability") or "").strip()
+        fallback_ability_key = next(
+            (key for key, label in ABILITY_LABELS.items() if label == fallback_ability_name),
+            "",
+        )
+        if fallback_ability_key:
+            modifier = _ability_modifier(ability_scores.get(fallback_ability_key, DEFAULT_ABILITY_SCORE))
+            spellcasting["spell_save_dc"] = 8 + proficiency_bonus + modifier
+            spellcasting["spell_attack_bonus"] = proficiency_bonus + modifier
         return spellcasting
 
     if len(spellcasting_rows) == 1:
@@ -5990,7 +6011,11 @@ def _derive_definition_core_sheet_payloads(
         normalized_equipment,
         item_catalog=effective_item_catalog,
     )
-    ability_scores = _ability_scores_from_definition(sanitized_definition)
+    recoverable_penalties = normalize_recoverable_penalties((sanitized_definition.stats or {}).get("recoverable_penalties"))
+    ability_scores = _ability_scores_from_definition(
+        sanitized_definition,
+        include_recoverable_penalties=False,
+    )
     campaign_feat_selections = _campaign_option_feat_selections_from_features(
         list(sanitized_definition.features or [])
     )
@@ -6006,6 +6031,10 @@ def _derive_definition_core_sheet_payloads(
     ability_scores = _apply_item_effect_ability_score_minimums(
         ability_scores,
         item_effect_entries=item_effect_entries,
+    )
+    ability_scores = apply_recoverable_ability_score_penalties(
+        ability_scores,
+        recoverable_penalties,
     )
     current_level = _resolve_native_character_level(sanitized_definition)
     proficiency_bonus = (
@@ -11215,6 +11244,7 @@ def _recalculate_definition_armor_class(
     item_catalog: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     stats, manual_adjustments = strip_manual_stat_adjustments(dict(definition.stats or {}))
+    stats, recoverable_penalties = strip_recoverable_stat_penalties(stats)
     campaign_option_adjustments = collect_campaign_option_stat_adjustments(
         _campaign_option_payloads_from_definition(definition)
     )
@@ -11250,6 +11280,7 @@ def _recalculate_definition_armor_class(
         item_catalog=item_catalog or {},
     )
     stats = apply_stat_adjustments(stats, campaign_option_adjustments)
+    stats = apply_recoverable_stat_penalties(stats, recoverable_penalties, adjust_ability_scores=False)
     return apply_manual_stat_adjustments(stats, manual_adjustments)
 
 
@@ -14974,9 +15005,13 @@ def _proficiency_bonus_for_level(level: int) -> int:
     return 2 + ((clean_level - 1) // 4)
 
 
-def _ability_scores_from_definition(definition: CharacterDefinition) -> dict[str, int]:
+def _ability_scores_from_definition(
+    definition: CharacterDefinition,
+    *,
+    include_recoverable_penalties: bool = True,
+) -> dict[str, int]:
     ability_scores = dict((definition.stats or {}).get("ability_scores") or {})
-    return {
+    resolved_scores = {
         ability_key: int(
             dict(
                 ability_scores.get(ability_key)
@@ -14987,6 +15022,12 @@ def _ability_scores_from_definition(definition: CharacterDefinition) -> dict[str
         )
         for ability_key in ABILITY_KEYS
     }
+    if include_recoverable_penalties:
+        return resolved_scores
+    return restore_recoverable_ability_score_penalties(
+        resolved_scores,
+        (definition.stats or {}).get("recoverable_penalties"),
+    )
 
 
 def _parse_level_up_hit_point_gain(values: dict[str, str]) -> int:
@@ -15021,6 +15062,7 @@ def _build_leveled_stats(
     resulting_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     stats, manual_adjustments = strip_manual_stat_adjustments(dict(current_definition.stats or {}))
+    stats, recoverable_penalties = strip_recoverable_stat_penalties(stats)
     campaign_option_adjustments = collect_campaign_option_stat_adjustments(
         _campaign_option_payloads_from_definition(current_definition)
     )
@@ -15113,6 +15155,7 @@ def _build_leveled_stats(
     for key, value in collect_campaign_option_stat_adjustments(selected_campaign_option_payloads or []).items():
         combined_campaign_option_adjustments[key] = int(combined_campaign_option_adjustments.get(key) or 0) + int(value)
     stats = apply_stat_adjustments(stats, combined_campaign_option_adjustments)
+    stats = apply_recoverable_stat_penalties(stats, recoverable_penalties, adjust_ability_scores=False)
     return apply_manual_stat_adjustments(stats, manual_adjustments)
 
 

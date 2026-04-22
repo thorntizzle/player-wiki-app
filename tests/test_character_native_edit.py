@@ -87,6 +87,18 @@ def _linked_feat_parity_snapshot(record) -> dict[str, object]:
     return snapshot
 
 
+def _base_native_edit_payload(record, **overrides) -> dict[str, str]:
+    payload = {
+        "expected_revision": record.state_record.revision,
+        "languages_text": "Common\nElvish",
+        "armor_proficiencies_text": "",
+        "weapon_proficiencies_text": "Daggers\nLight Crossbows\nQuarterstaffs",
+        "tool_proficiencies_text": "Navigator's Tools",
+    }
+    payload.update(overrides)
+    return payload
+
+
 def test_native_character_edits_can_apply_and_remove_campaign_page_spell_grants(
     app, client, sign_in, users, get_character, set_campaign_visibility
 ):
@@ -3386,6 +3398,148 @@ def test_native_character_edits_can_apply_campaign_stat_adjustments(
     assert read_response.status_code == 200
     read_html = read_response.get_data(as_text=True)
     assert "40 ft." in read_html
+
+
+def test_native_character_edits_can_apply_and_recover_recoverable_penalties(
+    app, client, sign_in, users, get_character, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    with app.app_context():
+        repository = app.extensions["character_repository"]
+        store = app.extensions["character_state_store"]
+        refreshed = repository.get_character("linden-pass", "arden-march")
+        assert refreshed is not None
+        payload = dict(refreshed.state_record.state or {})
+        vitals = dict(payload.get("vitals") or {})
+        vitals["current_hp"] = 38
+        payload["vitals"] = vitals
+        store.replace_state(
+            refreshed.definition,
+            payload,
+            expected_revision=refreshed.state_record.revision,
+        )
+
+    record = get_character("arden-march")
+    assert record is not None
+
+    apply_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data=_base_native_edit_payload(
+            record,
+            recoverable_penalty_source_1="Wight Drain",
+            recoverable_penalty_target_1="max_hp",
+            recoverable_penalty_amount_1="6",
+            recoverable_penalty_notes_1="Restored by stronger healing magic.",
+        ),
+        follow_redirects=False,
+    )
+
+    assert apply_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    penalties = list(record.definition.stats.get("recoverable_penalties") or [])
+    assert len(penalties) == 1
+    penalty = penalties[0]
+    assert penalty["kind"] == "max_hp"
+    assert penalty["amount"] == 6
+    assert penalty["source"] == "Wight Drain"
+    assert penalty["notes"] == "Restored by stronger healing magic."
+    assert record.definition.stats["max_hp"] == 32
+    assert record.state_record.state["vitals"]["current_hp"] == 32
+
+    edit_response = client.get("/campaigns/linden-pass/characters/arden-march/edit")
+    assert edit_response.status_code == 200
+    edit_html = edit_response.get_data(as_text=True)
+    assert "Recoverable Penalties" in edit_html
+    assert "Wight Drain" in edit_html
+
+    reduce_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data=_base_native_edit_payload(
+            record,
+            recoverable_penalty_id_1=penalty["id"],
+            recoverable_penalty_source_1="Wight Drain",
+            recoverable_penalty_target_1="max_hp",
+            recoverable_penalty_amount_1="2",
+            recoverable_penalty_notes_1="Restored by stronger healing magic.",
+        ),
+        follow_redirects=False,
+    )
+
+    assert reduce_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    reduced_penalty = list(record.definition.stats.get("recoverable_penalties") or [])[0]
+    assert reduced_penalty["id"] == penalty["id"]
+    assert reduced_penalty["amount"] == 2
+    assert record.definition.stats["max_hp"] == 36
+    assert record.state_record.state["vitals"]["current_hp"] == 32
+
+    clear_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data=_base_native_edit_payload(record),
+        follow_redirects=False,
+    )
+
+    assert clear_response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    assert list(record.definition.stats.get("recoverable_penalties") or []) == []
+    assert record.definition.stats["max_hp"] == 38
+    assert record.state_record.state["vitals"]["current_hp"] == 32
+
+    quick_response = client.get("/campaigns/linden-pass/characters/arden-march?page=quick")
+    assert quick_response.status_code == 200
+    quick_html = quick_response.get_data(as_text=True)
+    assert "32 / 38" in quick_html
+
+
+def test_native_character_edits_recalculate_downstream_math_for_recoverable_ability_penalties(
+    client, sign_in, users, get_character, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    record = get_character("arden-march")
+    assert record is not None
+
+    response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data=_base_native_edit_payload(
+            record,
+            recoverable_penalty_source_1="Mind Lash",
+            recoverable_penalty_target_1="ability_score:cha",
+            recoverable_penalty_amount_1="2",
+            recoverable_penalty_source_2="Hollowed Eyes",
+            recoverable_penalty_target_2="ability_score:wis",
+            recoverable_penalty_amount_2="2",
+        ),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    ability_scores = record.definition.stats["ability_scores"]
+    assert ability_scores["cha"]["score"] == 16
+    assert ability_scores["cha"]["modifier"] == 3
+    assert ability_scores["cha"]["save_bonus"] == 6
+    assert ability_scores["wis"]["score"] == 10
+    assert ability_scores["wis"]["modifier"] == 0
+    assert ability_scores["wis"]["save_bonus"] == 0
+    assert record.definition.stats["passive_perception"] == 13
+    assert record.definition.stats["passive_insight"] == 13
+    skill_lookup = {skill["name"]: skill for skill in record.definition.skills}
+    assert skill_lookup["Perception"]["bonus"] == 3
+    assert skill_lookup["Insight"]["bonus"] == 3
+    assert record.definition.spellcasting["spell_save_dc"] == 14
+    assert record.definition.spellcasting["spell_attack_bonus"] == 6
 
 
 def test_native_character_edits_preserve_medium_armor_master_ac_and_manual_layering_once(
