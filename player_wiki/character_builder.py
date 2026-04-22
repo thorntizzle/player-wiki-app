@@ -38,6 +38,7 @@ from .character_profile import (
     profile_total_level,
     sync_profile_class_summary,
 )
+from .character_spell_slots import spell_slot_lanes_from_spellcasting
 from .character_source_matrix import DEFAULT_NATIVE_SOURCE_MATRIX_POLICY, PHB_SOURCE_ID
 from .managed_resource_registry import resolve_managed_resource_family_and_member
 from .repository import normalize_lookup, slugify
@@ -5878,6 +5879,28 @@ def _derive_definition_spellcasting(
     selected_class_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     spellcasting = dict(definition.spellcasting or {})
+    saved_spellcasting_rows = [
+        {
+            **dict(row or {}),
+            "class_row_id": str(
+                dict(row or {}).get("class_row_id") or dict(row or {}).get("row_id") or f"class-row-{index}"
+            ).strip()
+            or f"class-row-{index}",
+            "class_name": str(dict(row or {}).get("class_name") or "Spellcasting").strip() or "Spellcasting",
+            "spell_list_class_name": str(dict(row or {}).get("spell_list_class_name") or "").strip(),
+            "spellcasting_ability": str(dict(row or {}).get("spellcasting_ability") or "").strip(),
+            "spell_mode": str(dict(row or {}).get("spell_mode") or "").strip(),
+            "caster_progression": str(dict(row or {}).get("caster_progression") or "").strip(),
+            "slot_lane_id": str(dict(row or {}).get("slot_lane_id") or "").strip(),
+        }
+        for index, row in enumerate(list(spellcasting.get("class_rows") or []), start=1)
+        if isinstance(row, dict)
+    ]
+    saved_slot_lanes = (
+        spell_slot_lanes_from_spellcasting(spellcasting)
+        if saved_spellcasting_rows or list(spellcasting.get("slot_lanes") or [])
+        else []
+    )
     row_contexts = [dict(row or {}) for row in list(selected_class_rows or []) if isinstance(row, dict)]
     if not row_contexts and selected_class is not None:
         row_contexts = [
@@ -5908,6 +5931,11 @@ def _derive_definition_spellcasting(
         total_class_rows=total_class_rows,
         current_level=current_level,
     )
+    if saved_spellcasting_rows and len(spellcasting_rows) < len(saved_spellcasting_rows):
+        spellcasting_rows = saved_spellcasting_rows
+        slot_lanes = saved_slot_lanes
+    elif not spellcasting_rows and saved_slot_lanes:
+        slot_lanes = saved_slot_lanes
     spellcasting["class_rows"] = spellcasting_rows
     spellcasting["spells"] = _assign_spell_payload_class_rows(
         list(spellcasting.get("spells") or []),

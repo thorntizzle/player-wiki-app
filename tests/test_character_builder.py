@@ -1662,6 +1662,138 @@ def test_normalize_definition_to_native_model_derives_separate_slot_lanes_for_wi
     ]
 
 
+def test_normalize_definition_to_native_model_preserves_saved_multiclass_slot_lanes_when_resolution_is_incomplete():
+    wizard = _systems_entry(
+        "class",
+        "phb-class-wizard",
+        "Wizard",
+        metadata={
+            "hit_die": {"faces": 6},
+            "spellcasting_ability": "int",
+            "caster_progression": "full",
+            "spells_known_progression_fixed": [6],
+        },
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [wizard],
+            "race": [],
+            "background": [],
+            "subclass": [],
+        },
+        class_progression=[],
+        enabled_source_ids=["PHB"],
+    )
+    definition = _minimal_character_definition("wizard-warlock-fallback", "Wizard Warlock Fallback")
+    definition.profile["classes"] = [
+        {
+            "row_id": "class-row-1",
+            "class_name": "Wizard",
+            "subclass_name": "",
+            "level": 3,
+            "systems_ref": _systems_ref(wizard),
+        },
+        {
+            "row_id": "class-row-2",
+            "class_name": "Warlock",
+            "subclass_name": "",
+            "level": 2,
+            "systems_ref": {
+                "entry_key": "dnd-5e|class|phb|phb-class-warlock",
+                "entry_type": "class",
+                "title": "Warlock",
+                "slug": "phb-class-warlock",
+                "source_id": "PHB",
+            },
+        },
+    ]
+    definition.profile["class_ref"] = _systems_ref(wizard)
+    definition.profile["class_level_text"] = "Wizard 3 / Warlock 2"
+    definition.spellcasting = {
+        "spellcasting_class": "",
+        "spellcasting_ability": "",
+        "spell_save_dc": None,
+        "spell_attack_bonus": None,
+        "slot_progression": [],
+        "slot_lanes": [
+            {
+                "id": "class-row-1-slots",
+                "title": "Wizard spell slots",
+                "shared": False,
+                "row_ids": ["class-row-1"],
+                "slot_progression": [
+                    {"level": 1, "max_slots": 4},
+                    {"level": 2, "max_slots": 2},
+                ],
+            },
+            {
+                "id": "class-row-2-slots",
+                "title": "Warlock Pact Magic slots",
+                "shared": False,
+                "row_ids": ["class-row-2"],
+                "slot_progression": [
+                    {"level": 1, "max_slots": 2},
+                ],
+            },
+        ],
+        "class_rows": [
+            {
+                "class_row_id": "class-row-1",
+                "class_name": "Wizard",
+                "level": 3,
+                "caster_progression": "full",
+                "spell_mode": "wizard",
+                "spellcasting_ability": "Intelligence",
+                "spell_save_dc": 14,
+                "spell_attack_bonus": 6,
+                "slot_lane_id": "class-row-1-slots",
+            },
+            {
+                "class_row_id": "class-row-2",
+                "class_name": "Warlock",
+                "level": 2,
+                "caster_progression": "pact",
+                "spell_mode": "known",
+                "spellcasting_ability": "Charisma",
+                "spell_save_dc": 13,
+                "spell_attack_bonus": 5,
+                "slot_lane_id": "class-row-2-slots",
+            },
+        ],
+        "spells": [],
+    }
+
+    normalized = normalize_definition_to_native_model(definition, systems_service=systems_service)
+
+    assert [row["class_name"] for row in normalized.spellcasting["class_rows"]] == ["Wizard", "Warlock"]
+    assert [row["slot_lane_id"] for row in normalized.spellcasting["class_rows"]] == [
+        "class-row-1-slots",
+        "class-row-2-slots",
+    ]
+    assert [row["spell_save_dc"] for row in normalized.spellcasting["class_rows"]] == [14, 13]
+    assert normalized.spellcasting["slot_lanes"] == [
+        {
+            "id": "class-row-1-slots",
+            "title": "Wizard spell slots",
+            "shared": False,
+            "row_ids": ["class-row-1"],
+            "slot_progression": [
+                {"level": 1, "max_slots": 4},
+                {"level": 2, "max_slots": 2},
+            ],
+        },
+        {
+            "id": "class-row-2-slots",
+            "title": "Warlock Pact Magic slots",
+            "shared": False,
+            "row_ids": ["class-row-2"],
+            "slot_progression": [
+                {"level": 1, "max_slots": 2},
+            ],
+        },
+    ]
+
+
 def test_normalize_definition_to_native_model_supports_single_class_eldritch_knight_spellcasting():
     fighter = _systems_entry(
         "class",
