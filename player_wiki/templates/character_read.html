@@ -414,7 +414,7 @@
             <article class="detail-card">
               <h3>Equipped items</h3>
               <p><strong>{{ equipment_state_manager.equipped_count }}</strong></p>
-              <p class="meta">Use equipped for items that are worn, wielded, or otherwise actively granting their normal benefits.</p>
+              <p class="meta">Armor and magic items use equipped state; weapons also track an applicable wielding mode.</p>
             </article>
           </div>
 
@@ -438,7 +438,7 @@
                     {% if item.requires_attunement %} | Requires attunement{% endif %}
                   </p>
                   <p class="meta">
-                    {% if item.is_equipped %}Equipped{% else %}Not equipped{% endif %}
+                    {{ item.equipped_label }}
                     {% if item.requires_attunement %}
                       {% if item.is_attuned %} | Attuned{% else %} | Not attuned{% endif %}
                     {% endif %}
@@ -459,10 +459,24 @@
                       <input type="hidden" name="mode" value="read">
                       <input type="hidden" name="page" value="{{ character_subpage }}">
                       <div class="detail-grid">
-                        <label class="checkbox-label">
-                          <input type="checkbox" name="is_equipped" value="1" {% if item.is_equipped %}checked{% endif %}>
-                          Equipped
-                        </label>
+                        {% if item.supports_weapon_wield_mode %}
+                          <label>
+                            Wielding
+                            <select name="weapon_wield_mode">
+                              <option value="">Not equipped</option>
+                              {% for option in item.weapon_wield_options %}
+                                <option value="{{ option.value }}" {% if item.weapon_wield_mode == option.value %}selected{% endif %}>
+                                  {{ option.label }}
+                                </option>
+                              {% endfor %}
+                            </select>
+                          </label>
+                        {% else %}
+                          <label class="checkbox-label">
+                            <input type="checkbox" name="is_equipped" value="1" {% if item.is_equipped %}checked{% endif %}>
+                            Equipped
+                          </label>
+                        {% endif %}
                         {% if item.requires_attunement %}
                           <label class="checkbox-label">
                             <input type="checkbox" name="is_attuned" value="1" {% if item.is_attuned %}checked{% endif %}>

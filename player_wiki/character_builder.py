@@ -66,6 +66,14 @@ ATTACK_NAME_SUFFIX_PATTERN = re.compile(r"\s*\(([^)]*)\)\s*$")
 ATTACK_MODE_WEAPON_THROWN = "weapon:thrown"
 ATTACK_MODE_WEAPON_TWO_HANDED = "weapon:two-handed"
 ATTACK_MODE_WEAPON_OFF_HAND = "weapon:off-hand"
+WEAPON_WIELD_MODE_MAIN_HAND = "main-hand"
+WEAPON_WIELD_MODE_OFF_HAND = "off-hand"
+WEAPON_WIELD_MODE_TWO_HANDED = "two-handed"
+WEAPON_WIELD_MODE_LABELS = {
+    WEAPON_WIELD_MODE_MAIN_HAND: "Main Hand",
+    WEAPON_WIELD_MODE_OFF_HAND: "Off Hand",
+    WEAPON_WIELD_MODE_TWO_HANDED: "Two-Handed",
+}
 ATTACK_MODE_FEAT_CHARGER_PHB = "feat:phb-feat-charger"
 ATTACK_MODE_FEAT_CHARGER_XPHB = "feat:xphb-feat-charger"
 ATTACK_MODE_FEAT_CROSSBOW_EXPERT_BONUS = "feat:phb-feat-crossbow-expert:bonus"
@@ -9047,6 +9055,100 @@ def _default_equipment_item_equipped(
     )
 
 
+def _normalize_weapon_wield_mode_value(value: Any) -> str:
+    normalized = normalize_lookup(str(value or "").replace("_", " ").replace("-", " "))
+    mapping = {
+        normalize_lookup("main hand"): WEAPON_WIELD_MODE_MAIN_HAND,
+        normalize_lookup("off hand"): WEAPON_WIELD_MODE_OFF_HAND,
+        normalize_lookup("two handed"): WEAPON_WIELD_MODE_TWO_HANDED,
+    }
+    return mapping.get(normalized, "")
+
+
+def weapon_wield_mode_label(value: Any) -> str:
+    return WEAPON_WIELD_MODE_LABELS.get(_normalize_weapon_wield_mode_value(value), "")
+
+
+def _weapon_wield_mode_options_for_profile(
+    profile: dict[str, Any] | None,
+) -> list[str]:
+    resolved_profile = dict(profile or {})
+    if not resolved_profile:
+        return []
+    weapon_type = str(resolved_profile.get("type") or "").strip().upper()
+    properties = {str(property_value).strip().upper() for property_value in list(resolved_profile.get("properties") or [])}
+    if "2H" in properties:
+        return [WEAPON_WIELD_MODE_TWO_HANDED]
+    options = [WEAPON_WIELD_MODE_MAIN_HAND]
+    if weapon_type == "M":
+        options.append(WEAPON_WIELD_MODE_OFF_HAND)
+        if "V" in properties and str(resolved_profile.get("versatile_damage") or "").strip():
+            options.append(WEAPON_WIELD_MODE_TWO_HANDED)
+    return options
+
+
+def explicit_weapon_wield_mode(
+    item: dict[str, Any],
+    *,
+    item_catalog: dict[str, Any] | None = None,
+    support: dict[str, Any] | None = None,
+) -> str:
+    resolved_support = dict(support or describe_equipment_state_support(item, item_catalog=item_catalog))
+    allowed_modes = {
+        _normalize_weapon_wield_mode_value(mode_value)
+        for mode_value in list(resolved_support.get("weapon_wield_modes") or [])
+        if _normalize_weapon_wield_mode_value(mode_value)
+    }
+    if not allowed_modes:
+        return ""
+    normalized_mode = _normalize_weapon_wield_mode_value(dict(item or {}).get("weapon_wield_mode"))
+    return normalized_mode if normalized_mode in allowed_modes else ""
+
+
+def resolve_weapon_wield_mode(
+    item: dict[str, Any],
+    *,
+    item_catalog: dict[str, Any] | None = None,
+    support: dict[str, Any] | None = None,
+) -> str:
+    resolved_support = dict(support or describe_equipment_state_support(item, item_catalog=item_catalog))
+    explicit_mode = explicit_weapon_wield_mode(
+        item,
+        item_catalog=item_catalog,
+        support=resolved_support,
+    )
+    if explicit_mode:
+        return explicit_mode
+    allowed_modes = [
+        _normalize_weapon_wield_mode_value(mode_value)
+        for mode_value in list(resolved_support.get("weapon_wield_modes") or [])
+        if _normalize_weapon_wield_mode_value(mode_value)
+    ]
+    if not allowed_modes:
+        return ""
+    if bool(dict(item or {}).get("is_equipped", False)):
+        return allowed_modes[0]
+    return ""
+
+
+def resolve_item_equipped_state(
+    item: dict[str, Any],
+    *,
+    item_catalog: dict[str, Any] | None = None,
+    support: dict[str, Any] | None = None,
+) -> bool:
+    resolved_support = dict(support or describe_equipment_state_support(item, item_catalog=item_catalog))
+    if bool(resolved_support.get("supports_weapon_wield_mode")):
+        return bool(
+            resolve_weapon_wield_mode(
+                item,
+                item_catalog=item_catalog,
+                support=resolved_support,
+            )
+        )
+    return bool(dict(item or {}).get("is_equipped", False))
+
+
 def describe_equipment_state_support(
     item: dict[str, Any],
     *,
@@ -9078,6 +9180,7 @@ def describe_equipment_state_support(
     is_magic_item = _metadata_is_magic_item(metadata)
     supports_equipped_state = bool(weapon_profile is not None or armor_profile is not None or is_magic_item)
     supports_attunement = bool(supports_equipped_state and requires_attunement)
+    weapon_wield_modes = _weapon_wield_mode_options_for_profile(weapon_profile)
     return {
         "supports_equipped_state": supports_equipped_state,
         "supports_attunement": supports_attunement,
@@ -9085,6 +9188,8 @@ def describe_equipment_state_support(
         "is_weapon": weapon_profile is not None,
         "is_armor": armor_profile is not None,
         "is_magic_item": is_magic_item,
+        "supports_weapon_wield_mode": bool(weapon_wield_modes),
+        "weapon_wield_modes": weapon_wield_modes,
     }
 
 
@@ -9155,14 +9260,20 @@ def _build_level_one_attacks(
     off_hand_context = _resolve_off_hand_attack_context(
         attack_contexts,
         allow_non_light=has_dual_wielder,
+        item_catalog=item_catalog,
     )
     crossbow_expert_bonus_context = _resolve_crossbow_expert_bonus_attack_context(attack_contexts)
     shield_item_refs = [
         str(item.get("id") or "").strip()
         for item in equipment_catalog
-        if _is_shield_item(item) and str(item.get("id") or "").strip()
+        if _is_shield_item(item)
+        if resolve_item_equipped_state(item, item_catalog=item_catalog)
+        if str(item.get("id") or "").strip()
     ]
-    has_shield = any(_is_shield_item(item) for item in equipment_catalog)
+    has_shield = any(
+        _is_shield_item(item) and resolve_item_equipped_state(item, item_catalog=item_catalog)
+        for item in equipment_catalog
+    )
 
     for context in attack_contexts:
         profile = dict(context["profile"] or {})
@@ -10007,9 +10118,14 @@ def _resolve_off_hand_attack_context(
     attack_contexts: list[dict[str, Any]],
     *,
     allow_non_light: bool = False,
+    item_catalog: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
+    explicit_contexts: list[dict[str, Any]] = []
     eligible_contexts: list[dict[str, Any]] = []
     for context in attack_contexts:
+        item = dict(context.get("item") or {})
+        if not resolve_item_equipped_state(item, item_catalog=item_catalog):
+            continue
         profile = dict(context.get("profile") or {})
         if str(profile.get("type") or "").strip().upper() != "M":
             continue
@@ -10018,11 +10134,15 @@ def _resolve_off_hand_attack_context(
             continue
         if not allow_non_light and "L" not in properties:
             continue
+        if explicit_weapon_wield_mode(item, item_catalog=item_catalog) == WEAPON_WIELD_MODE_OFF_HAND:
+            explicit_contexts.append(context)
         quantity = max(int(context.get("quantity") or 1), 1)
         for _ in range(quantity):
             eligible_contexts.append(context)
-            if len(eligible_contexts) >= 2:
-                return eligible_contexts[1]
+    if explicit_contexts:
+        return explicit_contexts[0]
+    if len(eligible_contexts) >= 2:
+        return eligible_contexts[1]
     return None
 
 
@@ -19795,6 +19915,20 @@ def _normalize_equipment_payloads(
             payload["page_ref"] = normalized_page_ref
         else:
             payload.pop("page_ref", None)
+        equipment_support = describe_equipment_state_support(
+            payload,
+            item_catalog=item_catalog,
+        )
+        explicit_wield_mode = explicit_weapon_wield_mode(
+            payload,
+            item_catalog=item_catalog,
+            support=equipment_support,
+        )
+        if explicit_wield_mode:
+            payload["weapon_wield_mode"] = explicit_wield_mode
+            payload["is_equipped"] = True
+        else:
+            payload.pop("weapon_wield_mode", None)
         campaign_option = dict(payload.get("campaign_option") or {})
         if campaign_option:
             payload["campaign_option"] = campaign_option
@@ -19862,6 +19996,9 @@ def _normalize_equipment_payloads(
         existing_payload["is_equipped"] = bool(existing_payload.get("is_equipped", False)) or bool(
             payload.get("is_equipped", False)
         )
+        if not existing_payload.get("weapon_wield_mode") and payload.get("weapon_wield_mode"):
+            existing_payload["weapon_wield_mode"] = str(payload.get("weapon_wield_mode") or "").strip()
+            existing_payload["is_equipped"] = True
         existing_payload["is_attuned"] = bool(existing_payload.get("is_attuned", False)) or bool(
             payload.get("is_attuned", False)
         )

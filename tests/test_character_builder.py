@@ -8570,6 +8570,35 @@ def test_normalize_definition_to_native_model_keeps_linked_attack_rows_separate_
     assert attacks_by_name["Longsword (charger)"]["mode_key"] == "feat:xphb-feat-charger"
 
 
+def test_normalize_definition_to_native_model_prefers_explicit_off_hand_weapon_mode_for_bonus_attack():
+    definition = _minimal_character_definition("dual-wielder", "Dual Wielder")
+    definition.proficiencies["weapons"] = ["Simple Weapons", "Martial Weapons"]
+    definition.equipment_catalog = [
+        {
+            "id": "longsword-1",
+            "name": "Longsword",
+            "default_quantity": 1,
+            "weight": "3 lb.",
+            "is_equipped": True,
+            "weapon_wield_mode": "main-hand",
+        },
+        {
+            "id": "handaxe-2",
+            "name": "Handaxe",
+            "default_quantity": 1,
+            "weight": "2 lb.",
+            "is_equipped": True,
+            "weapon_wield_mode": "off-hand",
+        },
+    ]
+
+    normalized = normalize_definition_to_native_model(definition)
+    attacks_by_name = {attack["name"]: attack for attack in normalized.attacks}
+
+    assert "Handaxe (off-hand)" in attacks_by_name
+    assert "Longsword (off-hand)" not in attacks_by_name
+
+
 def test_normalize_definition_to_native_model_infers_legacy_attack_mode_metadata_from_suffix():
     definition = _minimal_character_definition("mira-salt", "Mira Salt")
     definition.attacks = [

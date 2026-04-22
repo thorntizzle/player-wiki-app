@@ -8,12 +8,21 @@ from typing import Any
 import markdown
 
 from .character_builder import (
+    ATTACK_MODE_WEAPON_OFF_HAND,
+    ATTACK_MODE_WEAPON_TWO_HANDED,
+    WEAPON_WIELD_MODE_OFF_HAND,
+    WEAPON_WIELD_MODE_TWO_HANDED,
+    _attack_mode_components,
     CharacterBuildError,
     _format_weight_value,
+    _infer_attack_mode_key_from_payload,
     _spell_access_badge_label,
     _spell_payload_is_always_prepared,
     _spell_payload_map_key,
+    describe_equipment_state_support,
+    explicit_weapon_wield_mode,
     normalize_definition_to_native_model,
+    resolve_item_equipped_state,
 )
 from .character_models import CharacterRecord
 from .character_profile import (
@@ -556,6 +565,7 @@ def present_character_detail(
             equipment_catalog_lookup=equipment_catalog_lookup,
         )
         attack_is_equipped = resolve_attack_equipped_state(
+            attack,
             linked_item_refs,
             inventory_lookup=inventory_lookup,
             equipment_catalog_lookup=equipment_catalog_lookup,
@@ -763,7 +773,40 @@ def resolve_attack_linked_item_refs(
     return dedupe_values(linked_refs)
 
 
+def _attack_matches_weapon_wield_mode(
+    attack: dict[str, Any],
+    *,
+    equipment_item: dict[str, Any],
+    inventory_item: dict[str, Any],
+) -> bool:
+    support_item = {
+        **dict(equipment_item or {}),
+        **dict(inventory_item or {}),
+    }
+    support = describe_equipment_state_support(support_item)
+    if not resolve_item_equipped_state(support_item, support=support):
+        return False
+    if not bool(support.get("supports_weapon_wield_mode")):
+        return True
+
+    mode_components = set(_attack_mode_components(_infer_attack_mode_key_from_payload(attack)))
+    explicit_mode = explicit_weapon_wield_mode(support_item, support=support)
+    if ATTACK_MODE_WEAPON_OFF_HAND in mode_components:
+        return explicit_mode == WEAPON_WIELD_MODE_OFF_HAND if explicit_mode else True
+    if ATTACK_MODE_WEAPON_TWO_HANDED in mode_components:
+        return explicit_mode == WEAPON_WIELD_MODE_TWO_HANDED if explicit_mode else True
+    if explicit_mode == WEAPON_WIELD_MODE_TWO_HANDED:
+        allowed_modes = {
+            str(value).strip()
+            for value in list(support.get("weapon_wield_modes") or [])
+            if str(value).strip()
+        }
+        return allowed_modes == {WEAPON_WIELD_MODE_TWO_HANDED}
+    return True
+
+
 def resolve_attack_equipped_state(
+    attack: dict[str, Any],
     linked_item_refs: list[str],
     *,
     inventory_lookup: dict[str, dict[str, Any]],
@@ -783,7 +826,11 @@ def resolve_attack_equipped_state(
         if quantity <= 0:
             continue
         saw_linked_item = True
-        if bool(inventory_item.get("is_equipped", equipment_item.get("is_equipped", False))):
+        if _attack_matches_weapon_wield_mode(
+            attack,
+            equipment_item=equipment_item,
+            inventory_item=inventory_item,
+        ):
             return True
     if not saw_linked_item:
         return None

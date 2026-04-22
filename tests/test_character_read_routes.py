@@ -2202,7 +2202,12 @@ def test_equipment_subpage_filters_inventory_only_rows_and_only_shows_attunement
     assert "Crossbow Bolts" not in html
     assert "Chalk" not in html
     assert html.count("Save equipment state") == 4
+    assert html.count('name="weapon_wield_mode"') == 2
+    assert html.count('name="is_equipped"') == 2
     assert html.count('name="is_attuned"') == 1
+    assert "Main Hand" in html
+    assert "Off Hand" in html
+    assert "Two-Handed" in html
     assert "Use attunement only when the item's rules call for it." not in html
 
 
@@ -2323,6 +2328,41 @@ def test_equipment_state_update_preserves_three_item_attunement_limit_for_qualif
         assert state_item["is_equipped"] is False
         assert state_item["is_attuned"] is False
         assert record.state_record.state["attunement"]["attuned_item_refs"] == item_ids[:3]
+
+
+def test_equipment_state_update_persists_weapon_wield_mode_for_weapon_rows(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    update_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/equipment/quarterstaff-2/state",
+        data={
+            "expected_revision": _character_state_revision(app, "arden-march"),
+            "mode": "read",
+            "page": "equipment",
+            "weapon_wield_mode": "two-handed",
+        },
+        follow_redirects=False,
+    )
+
+    assert update_response.status_code == 302
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert record is not None
+        definition_item = next(
+            item
+            for item in list(record.definition.equipment_catalog or [])
+            if str(item.get("id") or "") == "quarterstaff-2"
+        )
+        state_item = next(
+            item
+            for item in list(record.state_record.state.get("inventory") or [])
+            if str(item.get("catalog_ref") or item.get("id") or "") == "quarterstaff-2"
+        )
+        assert definition_item["weapon_wield_mode"] == "two-handed"
+        assert definition_item["is_equipped"] is True
+        assert state_item["weapon_wield_mode"] == "two-handed"
+        assert state_item["is_equipped"] is True
 
 
 def test_native_equipment_state_update_recalculates_attunement_gated_magic_weapon_attacks(
@@ -3258,6 +3298,61 @@ def test_quick_reference_can_fall_back_to_legacy_attack_name_matching_for_equipm
     assert "Quarterstaff" in html
     assert "Hidden until equipped:" in html
     assert "Light Crossbow" in html
+
+
+def test_quick_reference_uses_explicit_weapon_wield_mode_for_versatile_attack_rows(app, client, sign_in, users):
+    def _set_quarterstaff_mode(payload: dict, mode: str) -> None:
+        equipment_catalog = list(payload.get("equipment_catalog") or [])
+        for item in equipment_catalog:
+            if str(item.get("id") or "").strip() == "quarterstaff-2":
+                item["is_equipped"] = True
+                if mode:
+                    item["weapon_wield_mode"] = mode
+                else:
+                    item.pop("weapon_wield_mode", None)
+        payload["equipment_catalog"] = equipment_catalog
+
+    def _set_quarterstaff_state(payload: dict, mode: str) -> None:
+        inventory = list(payload.get("inventory") or [])
+        for item in inventory:
+            if str(item.get("catalog_ref") or item.get("id") or "").strip() == "quarterstaff-2":
+                item["is_equipped"] = True
+                if mode:
+                    item["weapon_wield_mode"] = mode
+                else:
+                    item.pop("weapon_wield_mode", None)
+        payload["inventory"] = inventory
+
+    _write_character_definition(app, "arden-march", lambda payload: _set_quarterstaff_mode(payload, "main-hand"))
+    _write_character_state(app, "arden-march", lambda payload: _set_quarterstaff_state(payload, "main-hand"))
+
+    with app.app_context():
+        campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert campaign is not None
+        assert record is not None
+        main_hand_character = app_module.present_character_detail(
+            campaign,
+            record,
+            systems_service=app.extensions["systems_service"],
+        )
+        assert "Quarterstaff (two-handed)" not in {attack["name"] for attack in main_hand_character["attacks"]}
+        assert "Quarterstaff (two-handed)" in {attack["name"] for attack in main_hand_character["hidden_attacks"]}
+
+    _write_character_definition(app, "arden-march", lambda payload: _set_quarterstaff_mode(payload, "two-handed"))
+    _write_character_state(app, "arden-march", lambda payload: _set_quarterstaff_state(payload, "two-handed"))
+
+    with app.app_context():
+        campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert campaign is not None
+        assert record is not None
+        two_handed_character = app_module.present_character_detail(
+            campaign,
+            record,
+            systems_service=app.extensions["systems_service"],
+        )
+        assert "Quarterstaff (two-handed)" in {attack["name"] for attack in two_handed_character["attacks"]}
 
 
 def test_quick_reference_tolerates_legacy_string_page_refs_when_linking_attacks_to_equipment(

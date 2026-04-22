@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from .character_builder import _normalize_weapon_wield_mode_value
 from .character_models import CharacterDefinition
 from .character_spell_slots import (
     normalize_spell_slot_lane_id,
@@ -36,7 +37,7 @@ def build_resource_state(template: dict[str, Any]) -> dict[str, Any]:
 
 def build_inventory_state(item: dict[str, Any], *, quantity: int | None = None) -> dict[str, Any]:
     resolved_quantity = item.get("default_quantity") if quantity is None else quantity
-    return {
+    payload = {
         "id": item.get("id"),
         "catalog_ref": item.get("id"),
         "name": item.get("name"),
@@ -49,6 +50,10 @@ def build_inventory_state(item: dict[str, Any], *, quantity: int | None = None) 
         "notes": item.get("notes", ""),
         "tags": list(item.get("tags") or []),
     }
+    weapon_wield_mode = _normalize_weapon_wield_mode_value(item.get("weapon_wield_mode"))
+    if weapon_wield_mode:
+        payload["weapon_wield_mode"] = weapon_wield_mode
+    return payload
 
 
 def _inventory_item_ref(item: dict[str, Any]) -> str:
@@ -249,12 +254,24 @@ def merge_state_with_definition(
             merged_item["is_attuned"] = bool(existing_item.get("is_attuned", merged_item.get("is_attuned", False)))
             merged_item["charges_current"] = existing_item.get("charges_current", merged_item.get("charges_current"))
             merged_item["charges_max"] = existing_item.get("charges_max", merged_item.get("charges_max"))
+            existing_weapon_wield_mode = _normalize_weapon_wield_mode_value(existing_item.get("weapon_wield_mode"))
+            if existing_weapon_wield_mode:
+                merged_item["weapon_wield_mode"] = existing_weapon_wield_mode
         item_state_override = state_overrides.get(catalog_ref)
         if item_state_override:
             if "is_equipped" in item_state_override:
                 merged_item["is_equipped"] = bool(item_state_override.get("is_equipped"))
             if "is_attuned" in item_state_override:
                 merged_item["is_attuned"] = bool(item_state_override.get("is_attuned"))
+            if "weapon_wield_mode" in item_state_override:
+                override_weapon_wield_mode = _normalize_weapon_wield_mode_value(
+                    item_state_override.get("weapon_wield_mode")
+                )
+                if override_weapon_wield_mode:
+                    merged_item["weapon_wield_mode"] = override_weapon_wield_mode
+                    merged_item["is_equipped"] = True
+                else:
+                    merged_item.pop("weapon_wield_mode", None)
         merged_inventory.append(merged_item)
 
     for item in existing_inventory:
@@ -374,6 +391,9 @@ def validate_state(definition: CharacterDefinition, state: dict[str, Any]) -> di
                 "tags": list(item.get("tags") or []),
             }
         )
+        weapon_wield_mode = _normalize_weapon_wield_mode_value(item.get("weapon_wield_mode"))
+        if weapon_wield_mode:
+            normalized_inventory[-1]["weapon_wield_mode"] = weapon_wield_mode
     payload["inventory"] = normalized_inventory
 
     currency = dict(payload.get("currency") or {})

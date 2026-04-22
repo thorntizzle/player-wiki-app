@@ -1454,6 +1454,7 @@ def apply_equipment_state_edit(
     target_item_id: str,
     is_equipped: bool,
     is_attuned: bool,
+    weapon_wield_mode: str = "",
 ) -> tuple[CharacterDefinition, CharacterImportMetadata]:
     normalized_target_item_id = str(target_item_id or "").strip()
     if not normalized_target_item_id:
@@ -1476,7 +1477,16 @@ def apply_equipment_state_edit(
                 raise CharacterEditValidationError(
                     "Only items whose durable metadata explicitly requires attunement can be attuned."
                 )
-            item_payload["is_equipped"] = bool(is_equipped)
+            if bool(equipment_support.get("supports_weapon_wield_mode")):
+                if weapon_wield_mode:
+                    item_payload["weapon_wield_mode"] = str(weapon_wield_mode or "").strip()
+                    item_payload["is_equipped"] = True
+                else:
+                    item_payload.pop("weapon_wield_mode", None)
+                    item_payload["is_equipped"] = False
+            else:
+                item_payload.pop("weapon_wield_mode", None)
+                item_payload["is_equipped"] = bool(is_equipped)
             item_payload["is_attuned"] = bool(is_attuned and equipment_support.get("supports_attunement"))
             found_target = True
         next_equipment_catalog.append(item_payload)

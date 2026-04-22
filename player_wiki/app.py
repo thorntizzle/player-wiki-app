@@ -50,6 +50,7 @@ from .character_builder import (
     _attach_campaign_item_page_support,
     _build_item_catalog,
     _normalize_equipment_payloads,
+    _normalize_weapon_wield_mode_value,
     _build_spell_catalog,
     _list_campaign_enabled_entries,
     CharacterBuildError,
@@ -62,7 +63,9 @@ from .character_builder import (
     describe_equipment_state_support,
     normalize_definition_to_native_model,
     native_level_up_readiness,
+    resolve_weapon_wield_mode,
     supports_native_level_up,
+    weapon_wield_mode_label,
 )
 from .character_editor import (
     CharacterEditValidationError,
@@ -1316,9 +1319,29 @@ def create_app() -> Flask:
             support = dict(support_lookup.get(item_ref) or {})
             if not bool(support.get("supports_equipped_state")):
                 continue
+            support_item = {
+                **dict(definition_item or {}),
+                **dict(inventory_item or {}),
+            }
             systems_ref = dict(definition_item.get("systems_ref") or {})
             page_ref = normalize_character_page_ref(definition_item.get("page_ref"))
             requires_attunement = bool(support.get("requires_attunement"))
+            resolved_weapon_wield_mode = resolve_weapon_wield_mode(
+                support_item,
+                item_catalog=item_catalog,
+                support=support,
+            )
+            supports_weapon_wield_mode = bool(support.get("supports_weapon_wield_mode"))
+            is_equipped = bool(resolved_weapon_wield_mode) if supports_weapon_wield_mode else bool(
+                inventory_item.get("is_equipped", False)
+            )
+            equipped_label = (
+                weapon_wield_mode_label(resolved_weapon_wield_mode)
+                if supports_weapon_wield_mode and is_equipped
+                else "Equipped"
+                if is_equipped
+                else "Not equipped"
+            )
             equipment_items.append(
                 {
                     "id": item_ref,
@@ -1336,10 +1359,21 @@ def create_app() -> Flask:
                         systems_ref=systems_ref,
                         page_ref=definition_item.get("page_ref"),
                     ),
-                    "is_equipped": bool(inventory_item.get("is_equipped", False)),
+                    "is_equipped": is_equipped,
+                    "equipped_label": equipped_label,
                     "is_attuned": bool(inventory_item.get("is_attuned", False)) if requires_attunement else False,
                     "requires_attunement": requires_attunement,
                     "supports_attunement": requires_attunement,
+                    "supports_weapon_wield_mode": supports_weapon_wield_mode,
+                    "weapon_wield_mode": resolved_weapon_wield_mode,
+                    "weapon_wield_options": [
+                        {
+                            "value": value,
+                            "label": weapon_wield_mode_label(value),
+                        }
+                        for value in list(support.get("weapon_wield_modes") or [])
+                        if weapon_wield_mode_label(value)
+                    ],
                     "attunement_hint": "Requires attunement" if requires_attunement else "",
                     "source_label": (
                         f"Systems item ({systems_ref.get('source_id') or 'Unknown source'})"
@@ -9572,7 +9606,26 @@ def create_app() -> Flask:
                     "That inventory row stays on Inventory because it does not support equipment state."
                 )
 
-            is_equipped = bool(request.form.get("is_equipped"))
+            weapon_wield_mode = ""
+            if bool(target_support.get("supports_weapon_wield_mode")):
+                weapon_wield_mode = _normalize_weapon_wield_mode_value(request.form.get("weapon_wield_mode"))
+                allowed_modes = [
+                    _normalize_weapon_wield_mode_value(value)
+                    for value in list(target_support.get("weapon_wield_modes") or [])
+                    if _normalize_weapon_wield_mode_value(value)
+                ]
+                allowed_mode_set = {
+                    _normalize_weapon_wield_mode_value(value)
+                    for value in list(target_support.get("weapon_wield_modes") or [])
+                    if _normalize_weapon_wield_mode_value(value)
+                }
+                if weapon_wield_mode and weapon_wield_mode not in allowed_mode_set:
+                    raise CharacterEditValidationError("Choose a valid wielding mode for that weapon.")
+                if not weapon_wield_mode and bool(request.form.get("is_equipped")) and allowed_modes:
+                    weapon_wield_mode = allowed_modes[0]
+                is_equipped = bool(weapon_wield_mode)
+            else:
+                is_equipped = bool(request.form.get("is_equipped"))
             requested_attunement = bool(request.form.get("is_attuned"))
             if requested_attunement and not bool(target_support.get("supports_attunement")):
                 raise CharacterEditValidationError(
@@ -9606,6 +9659,7 @@ def create_app() -> Flask:
                 target_item_id=item_id,
                 is_equipped=is_equipped,
                 is_attuned=is_attuned,
+                weapon_wield_mode=weapon_wield_mode,
             )
             return (
                 definition,
@@ -9615,6 +9669,7 @@ def create_app() -> Flask:
                     item_id: {
                         "is_equipped": is_equipped,
                         "is_attuned": is_attuned,
+                        "weapon_wield_mode": weapon_wield_mode,
                     }
                 },
             )

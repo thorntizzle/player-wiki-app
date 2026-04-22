@@ -316,7 +316,7 @@
                 <article class="detail-card">
                   <h3>Equipped items</h3>
                   <p><strong>{{ equipment_state_manager.equipped_count }}</strong></p>
-                  <p class="meta">Use equipped for items that are worn, wielded, or otherwise actively granting their normal benefits.</p>
+                  <p class="meta">Armor and magic items use equipped state; weapons also track an applicable wielding mode.</p>
                 </article>
               </div>
 
@@ -340,7 +340,7 @@
                         {% if item.requires_attunement %} | Requires attunement{% endif %}
                       </p>
                       <p class="meta">
-                        {% if item.is_equipped %}Equipped{% else %}Not equipped{% endif %}
+                        {{ item.equipped_label }}
                         {% if item.requires_attunement %}
                           {% if item.is_attuned %} | Attuned{% else %} | Not attuned{% endif %}
                         {% endif %}
