@@ -32,6 +32,11 @@ def _list_condition_definitions(app):
         return app.extensions["campaign_dm_content_service"].list_condition_definitions("linden-pass")
 
 
+def _list_session_articles(app):
+    with app.app_context():
+        return app.extensions["campaign_session_service"].list_articles("linden-pass")
+
+
 def _list_combatants(app):
     with app.app_context():
         return app.extensions["campaign_combat_service"].list_combatants("linden-pass")
@@ -49,6 +54,8 @@ def test_dm_can_open_dm_content_page_and_players_cannot_by_default(client, sign_
 
     campaign = client.get("/campaigns/linden-pass")
     dm_page = client.get("/campaigns/linden-pass/dm-content")
+    staged_articles_page = client.get("/campaigns/linden-pass/dm-content/staged-articles")
+    conditions_page = client.get("/campaigns/linden-pass/dm-content/conditions")
 
     assert campaign.status_code == 200
     campaign_html = campaign.get_data(as_text=True)
@@ -58,8 +65,20 @@ def test_dm_can_open_dm_content_page_and_players_cannot_by_default(client, sign_
     assert dm_page.status_code == 200
     dm_html = dm_page.get_data(as_text=True)
     assert "Statblock library" in dm_html
-    assert "Custom conditions" in dm_html
+    assert "Staged Articles" in dm_html
+    assert "Conditions" in dm_html
     assert 'name="statblock_file"' in dm_html
+    assert '/campaigns/linden-pass/dm-content/staged-articles' in dm_html
+    assert '/campaigns/linden-pass/dm-content/conditions' in dm_html
+
+    assert staged_articles_page.status_code == 200
+    staged_html = staged_articles_page.get_data(as_text=True)
+    assert "Stage session articles" in staged_html
+    assert "Session reveal queue" in staged_html
+    assert 'action="/campaigns/linden-pass/dm-content/staged-articles"' in staged_html
+
+    assert conditions_page.status_code == 200
+    assert "Custom conditions" in conditions_page.get_data(as_text=True)
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["party"]["email"], users["party"]["password"])
@@ -151,3 +170,46 @@ def test_custom_conditions_flow_from_dm_content_into_combat_picker_and_can_be_de
 
     refreshed_combat = client.get("/campaigns/linden-pass/combat")
     assert '<option value="Marked for Judgment"></option>' not in refreshed_combat.get_data(as_text=True)
+
+
+def test_dm_can_stage_session_article_from_dm_content_and_manage_it_from_session_dm(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_article = client.post(
+        "/campaigns/linden-pass/dm-content/staged-articles",
+        data={
+            "article_mode": "manual",
+            "title": "Harbormaster Letter",
+            "body_markdown": "The seal is fresh and the paper smells faintly of brine.",
+        },
+        follow_redirects=True,
+    )
+
+    assert create_article.status_code == 200
+    create_html = create_article.get_data(as_text=True)
+    assert "Staged article added to the session reveal queue." in create_html
+    assert "Harbormaster Letter" in create_html
+    assert "Open Session DM" in create_html
+
+    articles = _list_session_articles(app)
+    assert len(articles) == 1
+    assert articles[0].title == "Harbormaster Letter"
+    assert not articles[0].is_revealed
+
+    session_dm_page = client.get("/campaigns/linden-pass/session/dm")
+    session_dm_html = session_dm_page.get_data(as_text=True)
+    assert session_dm_page.status_code == 200
+    assert "Harbormaster Letter" in session_dm_html
+    assert "Begin a session before revealing this article." in session_dm_html
+
+    delete_article = client.post(
+        f"/campaigns/linden-pass/dm-content/staged-articles/{articles[0].id}/delete",
+        follow_redirects=True,
+    )
+
+    assert delete_article.status_code == 200
+    delete_html = delete_article.get_data(as_text=True)
+    assert "Staged article deleted from the session reveal queue." in delete_html
+    assert _list_session_articles(app) == []

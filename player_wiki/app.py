@@ -164,6 +164,11 @@ from .systems_store import SystemsStore
 from .version import build_app_metadata
 
 SESSION_ARTICLE_FORM_MODES = {"manual", "upload", "wiki"}
+DM_CONTENT_SUBPAGE_LABELS = {
+    "statblocks": "Statblocks",
+    "staged-articles": "Staged Articles",
+    "conditions": "Conditions",
+}
 CHARACTER_READ_SUBPAGE_LABELS = {
     "quick": "Quick Reference",
     "spellcasting": "Spellcasting",
@@ -475,6 +480,23 @@ def normalize_session_article_form_mode(value: str) -> str:
     if normalized in SESSION_ARTICLE_FORM_MODES:
         return normalized
     return "manual"
+
+
+def normalize_dm_content_subpage(value: str, *, allow_default: bool = False) -> str:
+    normalized = (value or "").strip().lower().replace("_", "-")
+    if not normalized:
+        return "statblocks" if allow_default else ""
+
+    aliases = {
+        "statblock": "statblocks",
+        "statblocks": "statblocks",
+        "staged-article": "staged-articles",
+        "staged-articles": "staged-articles",
+        "stagedarticles": "staged-articles",
+        "condition": "conditions",
+        "conditions": "conditions",
+    }
+    return aliases.get(normalized, "")
 
 
 def get_character_read_subpage_labels(
@@ -1825,11 +1847,25 @@ def create_app() -> Flask:
         campaign_slug: str,
         *,
         anchor: str | None = None,
+        article_mode: str | None = None,
+        subpage: str | None = None,
     ):
+        normalized_subpage = normalize_dm_content_subpage(subpage or "")
+        if normalized_subpage:
+            return redirect(
+                url_for(
+                    "campaign_dm_content_subpage_view",
+                    campaign_slug=campaign_slug,
+                    dm_content_subpage=normalized_subpage,
+                    article_mode=article_mode or None,
+                    _anchor=anchor,
+                )
+            )
         return redirect(
             url_for(
                 "campaign_dm_content_view",
                 campaign_slug=campaign_slug,
+                article_mode=article_mode or None,
                 _anchor=anchor,
             )
         )
@@ -3810,6 +3846,144 @@ def create_app() -> Flask:
             "active_nav": "session",
         }
 
+    def create_session_article_from_request(
+        campaign_slug: str,
+        *,
+        created_by_user_id: int,
+    ):
+        session_service = get_campaign_session_service()
+        article = None
+        article_mode = normalize_session_article_form_mode(request.form.get("article_mode", "manual"))
+        markdown_file = request.files.get("markdown_file")
+        image_file = request.files.get("image_file")
+        referenced_image_file = request.files.get("referenced_image_file")
+        source_kind = ""
+
+        try:
+            if article_mode == "upload":
+                markdown_filename = (markdown_file.filename or "").strip() if markdown_file is not None else ""
+                markdown_upload = session_service.parse_article_markdown_upload(
+                    filename=markdown_filename,
+                    data_blob=markdown_file.read() if markdown_file is not None else b"",
+                )
+                article = session_service.create_article(
+                    campaign_slug,
+                    title=markdown_upload.title,
+                    body_markdown=markdown_upload.body_markdown,
+                    created_by_user_id=created_by_user_id,
+                )
+                referenced_image_filename = (
+                    (referenced_image_file.filename or "").strip() if referenced_image_file is not None else ""
+                )
+                if markdown_upload.image_reference and not referenced_image_filename:
+                    raise CampaignSessionValidationError(
+                        "This markdown file references an image. Upload the referenced image file too."
+                    )
+                if referenced_image_file is not None and referenced_image_filename:
+                    session_service.attach_article_image(
+                        campaign_slug,
+                        article.id,
+                        filename=referenced_image_filename,
+                        media_type=referenced_image_file.mimetype,
+                        data_blob=referenced_image_file.read(),
+                        alt_text=markdown_upload.image_alt,
+                        caption=markdown_upload.image_caption,
+                        updated_by_user_id=created_by_user_id,
+                    )
+            elif article_mode == "wiki":
+                campaign = load_campaign_context(campaign_slug)
+                source_kind, source_ref = parse_session_article_source_ref(
+                    request.form.get("source_ref", "") or request.form.get("wiki_page_ref", "")
+                )
+                if source_kind == SESSION_ARTICLE_SOURCE_KIND_SYSTEMS:
+                    entry = get_pullable_session_systems_entry(campaign_slug, source_ref)
+                    if entry is None:
+                        raise CampaignSessionValidationError(
+                            "Choose a visible published wiki page or Systems entry before pulling it into the session store."
+                        )
+
+                    source_body_html = entry.rendered_html.strip() or str(
+                        ((entry.body or {}).get("rendered") or {}).get("summary_html") or ""
+                    ).strip()
+                    if not source_body_html:
+                        raise CampaignSessionValidationError(
+                            "The selected Systems entry does not have rendered article content to pull into the session store."
+                        )
+
+                    article = session_service.create_article(
+                        campaign_slug,
+                        title=entry.title,
+                        body_markdown=source_body_html,
+                        source_page_ref=build_session_article_systems_source_ref(entry.slug),
+                        created_by_user_id=created_by_user_id,
+                    )
+                else:
+                    page_record = get_pullable_session_wiki_page_record(
+                        campaign,
+                        source_ref,
+                        include_body=True,
+                    )
+                    if page_record is None:
+                        raise CampaignSessionValidationError(
+                            "Choose a visible published wiki page or Systems entry before pulling it into the session store."
+                        )
+
+                    source_body_markdown = page_record.body_markdown.strip() or page_record.page.summary.strip()
+                    if not source_body_markdown:
+                        raise CampaignSessionValidationError(
+                            "The selected wiki page does not have any body text or summary to pull into the session store."
+                        )
+
+                    article = session_service.create_article(
+                        campaign_slug,
+                        title=page_record.page.title,
+                        body_markdown=source_body_markdown,
+                        source_page_ref=build_session_article_page_source_ref(page_record.page_ref),
+                        created_by_user_id=created_by_user_id,
+                    )
+                    if page_record.page.image_path:
+                        image_path = get_campaign_asset_file(campaign, page_record.page.image_path)
+                        if image_path is not None:
+                            media_type, _ = mimetypes.guess_type(image_path.name)
+                            session_service.attach_article_image(
+                                campaign_slug,
+                                article.id,
+                                filename=image_path.name,
+                                media_type=media_type,
+                                data_blob=image_path.read_bytes(),
+                                alt_text=page_record.page.image_alt,
+                                caption=page_record.page.image_caption,
+                                updated_by_user_id=created_by_user_id,
+                            )
+            else:
+                article = session_service.create_article(
+                    campaign_slug,
+                    title=request.form.get("title", ""),
+                    body_markdown=request.form.get("body_markdown", ""),
+                    created_by_user_id=created_by_user_id,
+                )
+                image_filename = (image_file.filename or "").strip() if image_file is not None else ""
+                if image_file is not None and image_filename:
+                    session_service.attach_article_image(
+                        campaign_slug,
+                        article.id,
+                        filename=image_filename,
+                        media_type=image_file.mimetype,
+                        data_blob=image_file.read(),
+                        alt_text=request.form.get("image_alt", ""),
+                        caption=request.form.get("image_caption", ""),
+                        updated_by_user_id=created_by_user_id,
+                    )
+        except CampaignSessionValidationError:
+            if article is not None:
+                try:
+                    session_service.delete_article(campaign_slug, article.id, updated_by_user_id=created_by_user_id)
+                except CampaignSessionValidationError:
+                    pass
+            raise
+
+        return article, article_mode, source_kind
+
     def build_campaign_session_character_page_context(
         campaign_slug: str,
         *,
@@ -5369,12 +5543,61 @@ def create_app() -> Flask:
         context.update(source_context)
         return context
 
-    def build_campaign_dm_content_page_context(campaign_slug: str) -> dict[str, object]:
+    def build_campaign_dm_content_page_context(
+        campaign_slug: str,
+        *,
+        dm_content_subpage: str = "statblocks",
+    ) -> dict[str, object]:
         campaign = load_campaign_context(campaign_slug)
         dm_content_service = get_campaign_dm_content_service()
         can_manage_dm_content = can_manage_campaign_dm_content(campaign_slug)
+        can_manage_session = can_manage_campaign_session(campaign_slug)
+        normalized_subpage = normalize_dm_content_subpage(dm_content_subpage, allow_default=True)
         statblocks = dm_content_service.list_statblocks(campaign_slug)
         custom_conditions = dm_content_service.list_condition_definitions(campaign_slug)
+        session_service = get_campaign_session_service()
+        staged_article_count = (
+            len(session_service.list_articles(campaign_slug, statuses=("staged",)))
+            if can_manage_session
+            else 0
+        )
+        staged_articles = []
+        session_article_form_mode = normalize_session_article_form_mode(
+            request.args.get("article_mode", "manual")
+        )
+        active_session = None
+        chat_is_open = False
+        if normalized_subpage == "staged-articles" and can_manage_session:
+            session_context = build_campaign_session_page_context(campaign_slug, session_subpage="dm")
+            staged_articles = list(session_context["staged_articles"] or [])
+            session_article_form_mode = str(session_context["session_article_form_mode"] or "manual")
+            active_session = session_context["active_session"]
+            chat_is_open = bool(session_context["chat_is_open"])
+
+        dm_content_subpages = []
+        for subpage_key, label in DM_CONTENT_SUBPAGE_LABELS.items():
+            if subpage_key == "staged-articles" and not can_manage_session:
+                continue
+            count = 0
+            if subpage_key == "statblocks":
+                count = len(statblocks)
+            elif subpage_key == "staged-articles":
+                count = staged_article_count
+            else:
+                count = len(custom_conditions)
+            dm_content_subpages.append(
+                {
+                    "key": subpage_key,
+                    "label": label,
+                    "count": count,
+                    "is_active": subpage_key == normalized_subpage,
+                    "href": url_for(
+                        "campaign_dm_content_subpage_view",
+                        campaign_slug=campaign.slug,
+                        dm_content_subpage=subpage_key,
+                    ),
+                }
+            )
 
         return {
             "campaign": campaign,
@@ -5382,6 +5605,15 @@ def create_app() -> Flask:
             "dm_statblocks": statblocks,
             "custom_condition_definitions": custom_conditions,
             "can_manage_dm_content": can_manage_dm_content,
+            "can_manage_session": can_manage_session,
+            "dm_content_subpage": normalized_subpage,
+            "dm_content_subpage_label": DM_CONTENT_SUBPAGE_LABELS[normalized_subpage],
+            "dm_content_subpages": dm_content_subpages,
+            "staged_articles": staged_articles,
+            "staged_article_count": staged_article_count,
+            "session_article_form_mode": session_article_form_mode,
+            "active_session": active_session,
+            "chat_is_open": chat_is_open,
             "active_nav": "dm_content",
         }
 
@@ -6869,8 +7101,89 @@ def create_app() -> Flask:
     @app.get("/campaigns/<campaign_slug>/dm-content")
     @campaign_scope_access_required("dm_content")
     def campaign_dm_content_view(campaign_slug: str):
-        context = build_campaign_dm_content_page_context(campaign_slug)
+        context = build_campaign_dm_content_page_context(campaign_slug, dm_content_subpage="statblocks")
         return render_template("dm_content.html", **context)
+
+    @app.get("/campaigns/<campaign_slug>/dm-content/<dm_content_subpage>")
+    @campaign_scope_access_required("dm_content")
+    def campaign_dm_content_subpage_view(campaign_slug: str, dm_content_subpage: str):
+        normalized_subpage = normalize_dm_content_subpage(dm_content_subpage)
+        if not normalized_subpage:
+            abort(404)
+        context = build_campaign_dm_content_page_context(
+            campaign_slug,
+            dm_content_subpage=normalized_subpage,
+        )
+        return render_template("dm_content.html", **context)
+
+    @app.post("/campaigns/<campaign_slug>/dm-content/staged-articles")
+    @campaign_scope_access_required("dm_content")
+    def campaign_dm_content_create_staged_article(campaign_slug: str):
+        if not can_manage_campaign_session(campaign_slug):
+            abort(403)
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        article_mode = normalize_session_article_form_mode(request.form.get("article_mode", "manual"))
+        source_kind = ""
+        try:
+            _, article_mode, source_kind = create_session_article_from_request(
+                campaign_slug,
+                created_by_user_id=user.id,
+            )
+        except CampaignSessionValidationError as exc:
+            flash(str(exc), "error")
+        else:
+            if article_mode == "wiki":
+                if source_kind == SESSION_ARTICLE_SOURCE_KIND_SYSTEMS:
+                    flash("Systems entry added to staged articles.", "success")
+                else:
+                    flash("Published wiki page added to staged articles.", "success")
+            else:
+                flash("Staged article added to the session reveal queue.", "success")
+
+        return redirect_to_campaign_dm_content(
+            campaign_slug,
+            article_mode=article_mode,
+            subpage="staged-articles",
+            anchor="dm-content-staged-article-store",
+        )
+
+    @app.post("/campaigns/<campaign_slug>/dm-content/staged-articles/<int:article_id>/delete")
+    @campaign_scope_access_required("dm_content")
+    def campaign_dm_content_delete_staged_article(campaign_slug: str, article_id: int):
+        if not can_manage_campaign_session(campaign_slug):
+            abort(403)
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        session_service = get_campaign_session_service()
+        article = session_service.get_article(campaign_slug, article_id)
+        if article is None:
+            flash("That session article could not be found.", "error")
+        elif article.is_revealed:
+            flash("Open Session DM to manage revealed articles.", "error")
+        else:
+            try:
+                session_service.delete_article(
+                    campaign_slug,
+                    article_id,
+                    updated_by_user_id=user.id,
+                )
+            except CampaignSessionValidationError as exc:
+                flash(str(exc), "error")
+            else:
+                flash("Staged article deleted from the session reveal queue.", "success")
+
+        return redirect_to_campaign_dm_content(
+            campaign_slug,
+            subpage="staged-articles",
+            anchor="dm-content-staged-articles-queue",
+        )
 
     @app.post("/campaigns/<campaign_slug>/dm-content/statblocks")
     @campaign_scope_access_required("dm_content")
@@ -6884,7 +7197,11 @@ def create_app() -> Flask:
                 f"Statblock upload is only implemented for {SUPPORTED_COMBAT_SYSTEM} right now.",
                 "error",
             )
-            return redirect_to_campaign_dm_content(campaign_slug, anchor="dm-content-statblocks")
+            return redirect_to_campaign_dm_content(
+                campaign_slug,
+                subpage="statblocks",
+                anchor="dm-content-statblocks",
+            )
 
         user = get_current_user()
         if user is None:
@@ -6905,7 +7222,11 @@ def create_app() -> Flask:
         else:
             flash("Statblock saved to DM Content.", "success")
 
-        return redirect_to_campaign_dm_content(campaign_slug, anchor="dm-content-statblocks")
+        return redirect_to_campaign_dm_content(
+            campaign_slug,
+            subpage="statblocks",
+            anchor="dm-content-statblocks",
+        )
 
     @app.post("/campaigns/<campaign_slug>/dm-content/statblocks/<int:statblock_id>/delete")
     @campaign_scope_access_required("dm_content")
@@ -6920,7 +7241,11 @@ def create_app() -> Flask:
         else:
             flash(f"Deleted {deleted_statblock.title} from DM Content.", "success")
 
-        return redirect_to_campaign_dm_content(campaign_slug, anchor="dm-content-statblocks")
+        return redirect_to_campaign_dm_content(
+            campaign_slug,
+            subpage="statblocks",
+            anchor="dm-content-statblocks",
+        )
 
     @app.post("/campaigns/<campaign_slug>/dm-content/conditions")
     @campaign_scope_access_required("dm_content")
@@ -6944,7 +7269,11 @@ def create_app() -> Flask:
         else:
             flash("Custom condition saved to DM Content.", "success")
 
-        return redirect_to_campaign_dm_content(campaign_slug, anchor="dm-content-conditions")
+        return redirect_to_campaign_dm_content(
+            campaign_slug,
+            subpage="conditions",
+            anchor="dm-content-conditions",
+        )
 
     @app.post("/campaigns/<campaign_slug>/dm-content/conditions/<int:condition_definition_id>/delete")
     @campaign_scope_access_required("dm_content")
@@ -6962,7 +7291,11 @@ def create_app() -> Flask:
         else:
             flash(f"Deleted custom condition {deleted_definition.name}.", "success")
 
-        return redirect_to_campaign_dm_content(campaign_slug, anchor="dm-content-conditions")
+        return redirect_to_campaign_dm_content(
+            campaign_slug,
+            subpage="conditions",
+            anchor="dm-content-conditions",
+        )
 
     @app.get("/campaigns/<campaign_slug>/combat")
     @campaign_scope_access_required("combat")
@@ -8138,140 +8471,18 @@ def create_app() -> Flask:
         if user is None:
             abort(403)
 
-        session_service = get_campaign_session_service()
-        article = None
         article_mode = normalize_session_article_form_mode(request.form.get("article_mode", "manual"))
-        markdown_file = request.files.get("markdown_file")
-        image_file = request.files.get("image_file")
-        referenced_image_file = request.files.get("referenced_image_file")
+        source_kind = ""
         mutation_succeeded = False
         try:
-            if article_mode == "upload":
-                markdown_filename = (markdown_file.filename or "").strip() if markdown_file is not None else ""
-                markdown_upload = session_service.parse_article_markdown_upload(
-                    filename=markdown_filename,
-                    data_blob=markdown_file.read() if markdown_file is not None else b"",
-                )
-                article = session_service.create_article(
-                    campaign_slug,
-                    title=markdown_upload.title,
-                    body_markdown=markdown_upload.body_markdown,
-                    created_by_user_id=user.id,
-                )
-                referenced_image_filename = (
-                    (referenced_image_file.filename or "").strip() if referenced_image_file is not None else ""
-                )
-                if markdown_upload.image_reference and not referenced_image_filename:
-                    raise CampaignSessionValidationError(
-                        "This markdown file references an image. Upload the referenced image file too."
-                    )
-                if referenced_image_file is not None and referenced_image_filename:
-                    session_service.attach_article_image(
-                        campaign_slug,
-                        article.id,
-                        filename=referenced_image_filename,
-                        media_type=referenced_image_file.mimetype,
-                        data_blob=referenced_image_file.read(),
-                        alt_text=markdown_upload.image_alt,
-                        caption=markdown_upload.image_caption,
-                        updated_by_user_id=user.id,
-                    )
-            elif article_mode == "wiki":
-                campaign = load_campaign_context(campaign_slug)
-                source_kind, source_ref = parse_session_article_source_ref(
-                    request.form.get("source_ref", "") or request.form.get("wiki_page_ref", "")
-                )
-                if source_kind == SESSION_ARTICLE_SOURCE_KIND_SYSTEMS:
-                    entry = get_pullable_session_systems_entry(campaign_slug, source_ref)
-                    if entry is None:
-                        raise CampaignSessionValidationError(
-                            "Choose a visible published wiki page or Systems entry before pulling it into the session store."
-                        )
-
-                    source_body_html = entry.rendered_html.strip() or str(
-                        ((entry.body or {}).get("rendered") or {}).get("summary_html") or ""
-                    ).strip()
-                    if not source_body_html:
-                        raise CampaignSessionValidationError(
-                            "The selected Systems entry does not have rendered article content to pull into the session store."
-                        )
-
-                    article = session_service.create_article(
-                        campaign_slug,
-                        title=entry.title,
-                        body_markdown=source_body_html,
-                        source_page_ref=build_session_article_systems_source_ref(entry.slug),
-                        created_by_user_id=user.id,
-                    )
-                else:
-                    page_record = get_pullable_session_wiki_page_record(
-                        campaign,
-                        source_ref,
-                        include_body=True,
-                    )
-                    if page_record is None:
-                        raise CampaignSessionValidationError(
-                            "Choose a visible published wiki page or Systems entry before pulling it into the session store."
-                        )
-
-                    source_body_markdown = page_record.body_markdown.strip() or page_record.page.summary.strip()
-                    if not source_body_markdown:
-                        raise CampaignSessionValidationError(
-                            "The selected wiki page does not have any body text or summary to pull into the session store."
-                        )
-
-                    article = session_service.create_article(
-                        campaign_slug,
-                        title=page_record.page.title,
-                        body_markdown=source_body_markdown,
-                        source_page_ref=build_session_article_page_source_ref(page_record.page_ref),
-                        created_by_user_id=user.id,
-                    )
-                    if page_record.page.image_path:
-                        image_path = get_campaign_asset_file(campaign, page_record.page.image_path)
-                        if image_path is not None:
-                            media_type, _ = mimetypes.guess_type(image_path.name)
-                            session_service.attach_article_image(
-                                campaign_slug,
-                                article.id,
-                                filename=image_path.name,
-                                media_type=media_type,
-                                data_blob=image_path.read_bytes(),
-                                alt_text=page_record.page.image_alt,
-                                caption=page_record.page.image_caption,
-                                updated_by_user_id=user.id,
-                            )
-            else:
-                article = session_service.create_article(
-                    campaign_slug,
-                    title=request.form.get("title", ""),
-                    body_markdown=request.form.get("body_markdown", ""),
-                    created_by_user_id=user.id,
-                )
-                image_filename = (image_file.filename or "").strip() if image_file is not None else ""
-                if image_file is not None and image_filename:
-                    session_service.attach_article_image(
-                        campaign_slug,
-                        article.id,
-                        filename=image_filename,
-                        media_type=image_file.mimetype,
-                        data_blob=image_file.read(),
-                        alt_text=request.form.get("image_alt", ""),
-                        caption=request.form.get("image_caption", ""),
-                        updated_by_user_id=user.id,
-                    )
+            _, article_mode, source_kind = create_session_article_from_request(
+                campaign_slug,
+                created_by_user_id=user.id,
+            )
         except CampaignSessionValidationError as exc:
-            if article is not None:
-                try:
-                    session_service.delete_article(campaign_slug, article.id, updated_by_user_id=user.id)
-                except CampaignSessionValidationError:
-                    pass
             flash(str(exc), "error")
         else:
             if article_mode == "wiki":
-                source_kind, _ = parse_session_article_source_ref(
-                    request.form.get("source_ref", "") or request.form.get("wiki_page_ref", "")
-                )
                 if source_kind == SESSION_ARTICLE_SOURCE_KIND_SYSTEMS:
                     flash("Systems entry pulled into the session store.", "success")
                 else:

@@ -1,0 +1,200 @@
+<script>
+  (() => {
+    const root = document.querySelector("[data-dm-content-staged-articles-root]");
+    if (!(root instanceof HTMLElement)) {
+      return;
+    }
+
+    const updateFileFieldName = (field) => {
+      const input = field.querySelector("[data-session-file-input]");
+      const fileName = field.querySelector("[data-session-file-name]");
+      if (!input || !fileName) {
+        return;
+      }
+      const selectedFile = input.files && input.files.length ? input.files[0] : null;
+      fileName.textContent = selectedFile ? selectedFile.name : "No file selected.";
+    };
+
+    const initializeFileField = (field) => {
+      if (field.dataset.sessionFileInitialized === "1") {
+        updateFileFieldName(field);
+        return;
+      }
+
+      const input = field.querySelector("[data-session-file-input]");
+      const dropzone = field.querySelector("[data-session-file-dropzone]");
+      if (!input || !dropzone) {
+        return;
+      }
+
+      const clearDragging = () => {
+        dropzone.classList.remove("is-dragging");
+      };
+
+      dropzone.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") {
+          return;
+        }
+        event.preventDefault();
+        input.click();
+      });
+
+      dropzone.addEventListener("dragenter", (event) => {
+        event.preventDefault();
+        dropzone.classList.add("is-dragging");
+      });
+
+      dropzone.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        dropzone.classList.add("is-dragging");
+      });
+
+      dropzone.addEventListener("dragleave", (event) => {
+        if (dropzone.contains(event.relatedTarget)) {
+          return;
+        }
+        clearDragging();
+      });
+
+      dropzone.addEventListener("drop", (event) => {
+        event.preventDefault();
+        clearDragging();
+        const droppedFiles = event.dataTransfer && event.dataTransfer.files;
+        if (!droppedFiles || !droppedFiles.length) {
+          return;
+        }
+        const transfer = new DataTransfer();
+        transfer.items.add(droppedFiles[0]);
+        input.files = transfer.files;
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+
+      input.addEventListener("change", () => updateFileFieldName(field));
+      field.dataset.sessionFileInitialized = "1";
+      updateFileFieldName(field);
+    };
+
+    const initializeFileFields = (target = document) => {
+      const fileFields = Array.from(target.querySelectorAll(".session-file-field"));
+      for (const field of fileFields) {
+        initializeFileField(field);
+      }
+    };
+
+    const initializeSessionArticleSourceSearch = (target = document) => {
+      const forms = target instanceof HTMLFormElement
+        ? [target]
+        : Array.from(target.querySelectorAll("[data-session-article-form]"));
+
+      for (const form of forms) {
+        if (!(form instanceof HTMLFormElement)) {
+          continue;
+        }
+
+        const searchInput = form.querySelector("[data-session-article-source-query]");
+        const resultsSelect = form.querySelector("[data-session-article-source-results]");
+        const status = form.querySelector("[data-session-article-source-status]");
+        const searchUrl = form.dataset.sessionArticleSourceSearchUrl || "";
+        const defaultMessage = "Type at least 2 letters to search published wiki pages and Systems entries.";
+
+        if (
+          !(searchInput instanceof HTMLInputElement)
+          || !(resultsSelect instanceof HTMLSelectElement)
+          || !(status instanceof HTMLElement)
+          || !searchUrl
+        ) {
+          continue;
+        }
+
+        let searchAbortController = null;
+        let searchTimerId = 0;
+
+        const setStatus = (message) => {
+          status.textContent = message;
+        };
+
+        const resetResults = (message = defaultMessage) => {
+          resultsSelect.innerHTML = "";
+          const option = document.createElement("option");
+          option.value = "";
+          option.textContent = "Search to load matching articles";
+          resultsSelect.append(option);
+          resultsSelect.disabled = true;
+          setStatus(message);
+        };
+
+        const renderResults = (results, message) => {
+          if (!Array.isArray(results) || !results.length) {
+            resetResults(message || "No published wiki or Systems articles matched that search.");
+            return;
+          }
+
+          resultsSelect.innerHTML = "";
+          for (const result of results) {
+            const option = document.createElement("option");
+            option.value = String(result.source_ref || "");
+            option.textContent = String(result.select_label || result.title || "");
+            resultsSelect.append(option);
+          }
+          resultsSelect.disabled = false;
+          resultsSelect.selectedIndex = 0;
+          setStatus(message || `Found ${results.length} matching articles.`);
+        };
+
+        const runSearch = async () => {
+          const query = searchInput.value.trim();
+          if (searchAbortController) {
+            searchAbortController.abort();
+          }
+          if (query.length < 2) {
+            resetResults(defaultMessage);
+            return;
+          }
+
+          setStatus("Searching published wiki pages and Systems entries...");
+          searchAbortController = new AbortController();
+          try {
+            const response = await fetch(`${searchUrl}?q=${encodeURIComponent(query)}`, {
+              headers: {
+                "X-Requested-With": "XMLHttpRequest",
+                "Accept": "application/json",
+              },
+              cache: "no-store",
+              credentials: "same-origin",
+              signal: searchAbortController.signal,
+            });
+            if (!response.ok) {
+              resetResults("Could not search article sources right now.");
+              return;
+            }
+
+            const payload = await response.json();
+            renderResults(payload.results, typeof payload.message === "string" ? payload.message : "");
+          } catch (error) {
+            if (error instanceof DOMException && error.name === "AbortError") {
+              return;
+            }
+            resetResults("Could not search article sources right now.");
+          } finally {
+            searchAbortController = null;
+          }
+        };
+
+        searchInput.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+          }
+        });
+        searchInput.addEventListener("input", () => {
+          window.clearTimeout(searchTimerId);
+          searchTimerId = window.setTimeout(runSearch, 250);
+        });
+
+        resetResults(defaultMessage);
+      }
+    };
+
+    initializeFileFields(root);
+    initializeSessionArticleSourceSearch(root);
+  })();
+</script>

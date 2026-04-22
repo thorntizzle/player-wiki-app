@@ -1,0 +1,53 @@
+<article class="card" id="dm-content-staged-articles-queue">
+  <div class="section-heading">
+    <div>
+      <h2>Session reveal queue</h2>
+      <p class="meta">Articles created here go straight into the same staged queue used on Session DM.</p>
+    </div>
+    <p class="meta">{{ staged_articles|length }}</p>
+  </div>
+  {% if staged_articles %}
+    <div class="session-article-stack">
+      {% for article in staged_articles %}
+        <details class="feature-detail session-article-detail" data-session-article-id="{{ article.id }}">
+          <summary>
+            <span>{{ article.title }}</span>
+            <span class="meta">Saved {{ article.created_at_label }}</span>
+          </summary>
+          {% if article.image_url %}
+            <figure class="article-figure">
+              <img class="article-image" src="{{ article.image_url }}" alt="{{ article.image_alt or article.title }}">
+              {% if article.image_caption %}
+                <figcaption class="meta article-image__caption">{{ article.image_caption }}</figcaption>
+              {% endif %}
+            </figure>
+          {% endif %}
+          {% if article.source_title %}
+            <p class="meta">
+              Pulled from {{ article.source_label }}:
+              {% if article.source_url %}
+                <a href="{{ article.source_url }}">{{ article.source_title }}</a>
+              {% else %}
+                {{ article.source_title }}
+              {% endif %}
+            </p>
+          {% elif article.source_kind %}
+            <p class="meta">{{ article.source_missing_message }}</p>
+          {% endif %}
+          <div class="article-body article-body--compact">{{ article.body_html | safe }}</div>
+          <div class="session-article-detail__actions">
+            <a class="ghost-button" href="{{ url_for('campaign_session_dm_view', campaign_slug=campaign.slug, _anchor='session-staged-articles') }}">Open Session DM</a>
+            <form
+              method="post"
+              action="{{ url_for('campaign_dm_content_delete_staged_article', campaign_slug=campaign.slug, article_id=article.id) }}"
+            >
+              <button type="submit" class="ghost-button">Delete article</button>
+            </form>
+          </div>
+        </details>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="meta">No unrevealed session articles are waiting right now.</p>
+  {% endif %}
+</article>

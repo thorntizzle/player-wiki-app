@@ -7,133 +7,194 @@
     <p class="eyebrow">DM content</p>
     <h1>{{ campaign.title }} DM Content</h1>
     <p class="lede">
-      Upload DM-side statblocks and maintain custom conditions that feed the combat tracker without exposing them in the player wiki.
+      {% if dm_content_subpage == "statblocks" %}
+        Upload DM-side statblocks that seed Combat NPCs without exposing them in the player wiki.
+      {% elif dm_content_subpage == "staged-articles" %}
+        Build session reveal articles here, then reveal and manage them from Session DM when you are ready.
+      {% else %}
+        Maintain custom conditions that appear in the combat condition picker alongside the standard DND-5E list.
+      {% endif %}
     </p>
+    <nav class="character-subpage-nav" aria-label="DM Content subpages">
+      {% for subpage in dm_content_subpages %}
+        <a class="{% if subpage.is_active %}button-link{% else %}ghost-button{% endif %}" href="{{ subpage.href }}">
+          <span>{{ subpage.label }}</span>
+          <span class="meta-badge">{{ subpage.count }}</span>
+        </a>
+      {% endfor %}
+    </nav>
   </section>
 
   <div class="page-layout dm-content-layout">
     <section class="section-list">
-      <section class="card" id="dm-content-statblocks">
-        <div class="section-heading">
-          <div>
-            <h2>Statblock library</h2>
-            <p class="meta">Uploaded here for DM-side encounter prep. Campaigns can pull these directly into Combat.</p>
+      {% if dm_content_subpage == "statblocks" %}
+        <section class="card" id="dm-content-statblocks">
+          <div class="section-heading">
+            <div>
+              <h2>Statblock library</h2>
+              <p class="meta">Uploaded here for DM-side encounter prep. Campaigns can pull these directly into Combat.</p>
+            </div>
           </div>
-        </div>
 
-        {% if can_manage_dm_content %}
-          {% if dm_content_system_supported %}
-            <form method="post" action="{{ url_for('campaign_dm_content_upload_statblock', campaign_slug=campaign.slug) }}" enctype="multipart/form-data" class="stack-form">
+          {% if can_manage_dm_content %}
+            {% if dm_content_system_supported %}
+              <form method="post" action="{{ url_for('campaign_dm_content_upload_statblock', campaign_slug=campaign.slug) }}" enctype="multipart/form-data" class="stack-form">
+                <label class="field">
+                  <span>Statblock markdown file</span>
+                  <input type="file" name="statblock_file" accept=".md,.markdown,text/markdown,text/plain">
+                </label>
+                <button type="submit">Upload statblock</button>
+              </form>
+            {% else %}
+              <p class="meta">Statblock upload is only implemented for DND-5E right now.</p>
+            {% endif %}
+          {% else %}
+            <p class="meta">This page is visible to you, but only the DM or an admin can manage its contents.</p>
+          {% endif %}
+
+          {% if dm_statblocks %}
+            <div class="dm-content-list">
+              {% for statblock in dm_statblocks %}
+                <article class="dm-content-item" id="dm-statblock-{{ statblock.id }}">
+                  <div class="dm-content-item__header">
+                    <div>
+                      <h3>{{ statblock.title }}</h3>
+                      <p class="meta">Source file: {{ statblock.source_filename }}</p>
+                    </div>
+                    <div class="badge-list">
+                      {% if statblock.armor_class is not none %}
+                        <span class="meta-badge">AC {{ statblock.armor_class }}</span>
+                      {% endif %}
+                      <span class="meta-badge">HP {{ statblock.max_hp }}</span>
+                      <span class="meta-badge">Speed {{ statblock.speed_text }}</span>
+                      <span class="meta-badge">Init {% if statblock.initiative_bonus > 0 %}+{% endif %}{{ statblock.initiative_bonus }}</span>
+                    </div>
+                  </div>
+                  <details class="feature-detail">
+                    <summary>View statblock text</summary>
+                    <pre class="dm-content-preview">{{ statblock.body_markdown }}</pre>
+                  </details>
+                  {% if can_manage_dm_content %}
+                    <form method="post" action="{{ url_for('campaign_dm_content_delete_statblock', campaign_slug=campaign.slug, statblock_id=statblock.id) }}">
+                      <button class="ghost-button" type="submit">Delete statblock</button>
+                    </form>
+                  {% endif %}
+                </article>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="meta">No DM statblocks have been uploaded yet.</p>
+          {% endif %}
+        </section>
+      {% elif dm_content_subpage == "staged-articles" %}
+        {% if can_manage_session %}
+          {% include "_dm_content_staged_article_store_card.html" %}
+          {% include "_dm_content_staged_articles_card.html" %}
+        {% else %}
+          <section class="card" id="dm-content-staged-article-store">
+            <div class="section-heading">
+              <div>
+                <h2>Staged articles</h2>
+                <p class="meta">This lane stays DM-only because it feeds future session reveals.</p>
+              </div>
+            </div>
+            <p class="meta">Only the DM or an admin can stage session reveal articles from DM Content.</p>
+          </section>
+        {% endif %}
+      {% else %}
+        <section class="card" id="dm-content-conditions">
+          <div class="section-heading">
+            <div>
+              <h2>Custom conditions</h2>
+              <p class="meta">These names appear in the combat condition picker alongside the standard DND-5E condition list.</p>
+            </div>
+          </div>
+
+          {% if can_manage_dm_content %}
+            <form method="post" action="{{ url_for('campaign_dm_content_add_condition_definition', campaign_slug=campaign.slug) }}" class="stack-form">
               <label class="field">
-                <span>Statblock markdown file</span>
-                <input type="file" name="statblock_file" accept=".md,.markdown,text/markdown,text/plain">
+                <span>Condition name</span>
+                <input type="text" name="name" placeholder="Marked for Judgment">
               </label>
-              <button type="submit">Upload statblock</button>
+              <label class="field">
+                <span>Description</span>
+                <textarea name="description_markdown" rows="4" placeholder="Optional reminder text for how this condition works."></textarea>
+              </label>
+              <button type="submit">Save custom condition</button>
             </form>
           {% else %}
-            <p class="meta">Statblock upload is only implemented for DND-5E right now.</p>
+            <p class="meta">This page is visible to you, but only the DM or an admin can manage its contents.</p>
           {% endif %}
-        {% else %}
-          <p class="meta">This page is visible to you, but only the DM or an admin can manage its contents.</p>
-        {% endif %}
 
-        {% if dm_statblocks %}
-          <div class="dm-content-list">
-            {% for statblock in dm_statblocks %}
-              <article class="dm-content-item" id="dm-statblock-{{ statblock.id }}">
-                <div class="dm-content-item__header">
-                  <div>
-                    <h3>{{ statblock.title }}</h3>
-                    <p class="meta">Source file: {{ statblock.source_filename }}</p>
+          {% if custom_condition_definitions %}
+            <div class="dm-content-list">
+              {% for condition in custom_condition_definitions %}
+                <article class="dm-content-item" id="dm-condition-{{ condition.id }}">
+                  <div class="dm-content-item__header">
+                    <div>
+                      <h3>{{ condition.name }}</h3>
+                    </div>
                   </div>
-                  <div class="badge-list">
-                    {% if statblock.armor_class is not none %}
-                      <span class="meta-badge">AC {{ statblock.armor_class }}</span>
-                    {% endif %}
-                    <span class="meta-badge">HP {{ statblock.max_hp }}</span>
-                    <span class="meta-badge">Speed {{ statblock.speed_text }}</span>
-                    <span class="meta-badge">Init {% if statblock.initiative_bonus > 0 %}+{% endif %}{{ statblock.initiative_bonus }}</span>
-                  </div>
-                </div>
-                <details class="feature-detail">
-                  <summary>View statblock text</summary>
-                  <pre class="dm-content-preview">{{ statblock.body_markdown }}</pre>
-                </details>
-                {% if can_manage_dm_content %}
-                  <form method="post" action="{{ url_for('campaign_dm_content_delete_statblock', campaign_slug=campaign.slug, statblock_id=statblock.id) }}">
-                    <button class="ghost-button" type="submit">Delete statblock</button>
-                  </form>
-                {% endif %}
-              </article>
-            {% endfor %}
-          </div>
-        {% else %}
-          <p class="meta">No DM statblocks have been uploaded yet.</p>
-        {% endif %}
-      </section>
-
-      <section class="card" id="dm-content-conditions">
-        <div class="section-heading">
-          <div>
-            <h2>Custom conditions</h2>
-            <p class="meta">These names appear in the combat condition picker alongside the standard DND-5E condition list.</p>
-          </div>
-        </div>
-
-        {% if can_manage_dm_content %}
-          <form method="post" action="{{ url_for('campaign_dm_content_add_condition_definition', campaign_slug=campaign.slug) }}" class="stack-form">
-            <label class="field">
-              <span>Condition name</span>
-              <input type="text" name="name" placeholder="Marked for Judgment">
-            </label>
-            <label class="field">
-              <span>Description</span>
-              <textarea name="description_markdown" rows="4" placeholder="Optional reminder text for how this condition works."></textarea>
-            </label>
-            <button type="submit">Save custom condition</button>
-          </form>
-        {% endif %}
-
-        {% if custom_condition_definitions %}
-          <div class="dm-content-list">
-            {% for condition in custom_condition_definitions %}
-              <article class="dm-content-item" id="dm-condition-{{ condition.id }}">
-                <div class="dm-content-item__header">
-                  <div>
-                    <h3>{{ condition.name }}</h3>
-                  </div>
-                </div>
-                {% if condition.description_markdown %}
-                  <pre class="dm-content-preview dm-content-preview--compact">{{ condition.description_markdown }}</pre>
-                {% else %}
-                  <p class="meta">No description saved.</p>
-                {% endif %}
-                {% if can_manage_dm_content %}
-                  <form method="post" action="{{ url_for('campaign_dm_content_delete_condition_definition', campaign_slug=campaign.slug, condition_definition_id=condition.id) }}">
-                    <button class="ghost-button" type="submit">Delete condition</button>
-                  </form>
-                {% endif %}
-              </article>
-            {% endfor %}
-          </div>
-        {% else %}
-          <p class="meta">No custom conditions have been saved yet.</p>
-        {% endif %}
-      </section>
+                  {% if condition.description_markdown %}
+                    <pre class="dm-content-preview dm-content-preview--compact">{{ condition.description_markdown }}</pre>
+                  {% else %}
+                    <p class="meta">No description saved.</p>
+                  {% endif %}
+                  {% if can_manage_dm_content %}
+                    <form method="post" action="{{ url_for('campaign_dm_content_delete_condition_definition', campaign_slug=campaign.slug, condition_definition_id=condition.id) }}">
+                      <button class="ghost-button" type="submit">Delete condition</button>
+                    </form>
+                  {% endif %}
+                </article>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="meta">No custom conditions have been saved yet.</p>
+          {% endif %}
+        </section>
+      {% endif %}
     </section>
 
     <aside class="sidebar">
-      <section class="card sidebar-card">
-        <h2>Combat integration</h2>
-        <p class="meta">Statblocks uploaded here populate the DM-side NPC picker on the Combat page.</p>
-        <p class="meta">NPC combatants copied from DM Content start with the statblock HP, speed, and initiative bonus already filled in.</p>
-      </section>
+      {% if dm_content_subpage == "statblocks" %}
+        <section class="card sidebar-card">
+          <h2>Combat integration</h2>
+          <p class="meta">Statblocks uploaded here populate the DM-side NPC picker on the Combat page.</p>
+          <p class="meta">NPC combatants copied from DM Content start with the statblock HP, speed, and initiative bonus already filled in.</p>
+        </section>
+      {% elif dm_content_subpage == "staged-articles" %}
+        <section class="card sidebar-card">
+          <h2>Session handoff</h2>
+          <p class="meta">Articles created here go straight into the Session DM staged queue.</p>
+          {% if active_session %}
+            <p class="meta">A session is active now. Reveal timing still happens on Session DM so players only see articles when you choose.</p>
+          {% else %}
+            <p class="meta">No session is active right now. You can still queue articles here before the next session begins.</p>
+          {% endif %}
+          <a class="ghost-button" href="{{ url_for('campaign_session_dm_view', campaign_slug=campaign.slug) }}">Open Session DM</a>
+        </section>
+      {% else %}
+        <section class="card sidebar-card">
+          <h2>Combat integration</h2>
+          <p class="meta">Custom condition names saved here merge into the combat condition picker for DM and player combat workflows.</p>
+          <p class="meta">Use short names for quick entry and optional description text for reminders during play.</p>
+        </section>
+      {% endif %}
 
       <section class="card sidebar-card">
         <h2>Visibility</h2>
         <p class="meta">DM Content defaults to DM visibility, but the campaign control panel can widen or tighten that scope later.</p>
         <p class="meta">Admins can always view and manage everything in the app.</p>
+        {% if dm_content_subpage == "staged-articles" %}
+          <p class="meta">This staged-article lane keeps DM-only management even when revealed articles later become player-visible on the live Session page.</p>
+        {% endif %}
       </section>
     </aside>
   </div>
+{% endblock %}
+
+{% block scripts %}
+  {% if dm_content_subpage == "staged-articles" and can_manage_session %}
+    {% include "_dm_content_staged_article_scripts.html" %}
+  {% endif %}
 {% endblock %}
