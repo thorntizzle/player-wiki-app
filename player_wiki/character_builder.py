@@ -888,6 +888,12 @@ def build_level_one_character_definition(
         raise CharacterBuildError("Character slug is required.")
 
     feat_selections = _resolve_builder_feat_selections(values, feat_catalog)
+    feature_choice_selections = _progression_feature_choice_selections(
+        class_progression=class_progression,
+        subclass_progression=subclass_progression,
+        target_level=1,
+        instance_prefix="level1_feature",
+    )
     ability_scores = _apply_feat_ability_score_bonuses(
         _parse_ability_scores(values),
         feat_selections=feat_selections,
@@ -939,6 +945,7 @@ def build_level_one_character_definition(
         proficiencies["skills"],
         proficiency_bonus,
         feat_selections=feat_selections,
+        feature_selections=feature_choice_selections,
         selected_choices=selected_choices,
         strict=True,
     )
@@ -2405,6 +2412,12 @@ def build_native_level_up_character_definition(
         subclass_progression=subclass_progression,
         target_level=row_target_level,
     )
+    feature_choice_selections = _progression_feature_choice_selections(
+        class_progression=class_progression,
+        subclass_progression=subclass_progression,
+        target_level=row_target_level,
+        instance_prefix="levelup_feature",
+    )
     new_feature_entries = _collect_progression_feature_entries_for_level(
         class_progression=class_progression,
         subclass_progression=subclass_progression,
@@ -2468,6 +2481,12 @@ def build_native_level_up_character_definition(
     existing_skill_proficiency_levels = _apply_feat_expertise_to_skill_proficiency_levels(
         existing_skill_proficiency_levels,
         feat_selections=feat_selections,
+        selected_choices=selected_choices,
+        strict=True,
+    )
+    existing_skill_proficiency_levels = _apply_feature_expertise_to_skill_proficiency_levels(
+        existing_skill_proficiency_levels,
+        feature_selections=feature_choice_selections,
         selected_choices=selected_choices,
         strict=True,
     )
@@ -6625,8 +6644,17 @@ def _build_choice_sections(
 
     class_fields = _build_class_skill_fields(selected_class, values)
     class_option_fields = _build_class_option_fields(class_progression, values)
-    if class_fields or class_option_fields:
-        sections.append({"title": "Class Choices", "fields": class_fields + class_option_fields})
+    class_feature_choice_fields = _build_feature_choice_fields(
+        feature_selections=_progression_feature_choice_selections(
+            class_progression=class_progression,
+            subclass_progression=subclass_progression,
+            target_level=1,
+            instance_prefix="level1_feature",
+        ),
+        values=values,
+    )
+    if class_fields or class_option_fields or class_feature_choice_fields:
+        sections.append({"title": "Class Choices", "fields": class_fields + class_option_fields + class_feature_choice_fields})
 
     species_fields = _build_species_choice_fields(selected_species, feat_options, values)
     if species_fields:
@@ -6756,6 +6784,17 @@ def _build_level_up_choice_sections(
             values=values,
             field_prefix="levelup_subclass_option",
             group_key_prefix="levelup_subclass_options",
+        )
+    )
+    class_fields.extend(
+        _build_feature_choice_fields(
+            feature_selections=_progression_feature_choice_selections(
+                class_progression=class_progression,
+                subclass_progression=subclass_progression,
+                target_level=target_level,
+                instance_prefix="levelup_feature",
+            ),
+            values=values,
         )
     )
     if class_fields:
@@ -7245,6 +7284,109 @@ def _build_background_choice_fields(
                     "kind": "language",
                 }
             )
+    return fields
+
+
+def _feature_choice_display_title(entry: SystemsEntryRecord) -> str:
+    feature_title = str(entry.title or "").strip() or "Feature"
+    class_name = str((entry.metadata or {}).get("class_name") or "").strip()
+    if class_name and normalize_lookup(class_name) not in normalize_lookup(feature_title):
+        return f"{class_name} {feature_title}".strip()
+    return feature_title
+
+
+def _supported_feature_expertise_blocks(entry: SystemsEntryRecord | None) -> list[dict[str, Any]]:
+    if not isinstance(entry, SystemsEntryRecord):
+        return []
+    metadata = dict(entry.metadata or {})
+    expertise_blocks = [dict(block) for block in list(metadata.get("expertise") or []) if isinstance(block, dict)]
+    if expertise_blocks:
+        return expertise_blocks
+    if normalize_lookup(entry.title) != normalize_lookup("Expertise"):
+        return []
+    class_name = normalize_lookup(metadata.get("class_name"))
+    class_source = normalize_lookup(metadata.get("class_source"))
+    if class_source == normalize_lookup(PHB_SOURCE_ID) and class_name in {
+        normalize_lookup("Bard"),
+        normalize_lookup("Rogue"),
+    }:
+        return [{"anyProficientSkill": 2}]
+    return []
+
+
+def _progression_feature_choice_selections(
+    *,
+    class_progression: list[dict[str, Any]],
+    subclass_progression: list[dict[str, Any]],
+    target_level: int,
+    instance_prefix: str,
+) -> list[dict[str, Any]]:
+    selections: list[dict[str, Any]] = []
+    seen_instance_keys: set[str] = set()
+    for scope, progression in (("class", class_progression), ("subclass", subclass_progression)):
+        for group in list(progression or []):
+            if int(group.get("level") or 0) != target_level:
+                continue
+            for feature_row in list(group.get("feature_rows") or []):
+                entry = feature_row.get("entry")
+                if not isinstance(entry, SystemsEntryRecord):
+                    continue
+                if not _supported_feature_expertise_blocks(entry):
+                    continue
+                instance_token = (
+                    str(entry.slug or "").strip()
+                    or str(entry.entry_key or "").strip()
+                    or slugify(str(entry.title or "").strip())
+                )
+                if not instance_token:
+                    continue
+                instance_key = f"{instance_prefix}_{scope}_{target_level}_{slugify(instance_token)}"
+                if instance_key in seen_instance_keys:
+                    continue
+                seen_instance_keys.add(instance_key)
+                selections.append({"instance_key": instance_key, "entry": entry})
+    return selections
+
+
+def _build_feature_choice_fields(
+    *,
+    feature_selections: list[dict[str, Any]],
+    values: dict[str, str],
+) -> list[dict[str, Any]]:
+    fields: list[dict[str, Any]] = []
+    skill_options = [_choice_option(label, token) for token, label in _all_skill_options()]
+    for selection in feature_selections:
+        feature_entry = selection.get("entry")
+        instance_key = str(selection.get("instance_key") or "").strip()
+        if not isinstance(feature_entry, SystemsEntryRecord) or not instance_key:
+            continue
+        expertise_blocks = _supported_feature_expertise_blocks(feature_entry)
+        if not expertise_blocks:
+            continue
+        expertise_choice_count = sum(int(block.get("anyProficientSkill") or 0) for block in expertise_blocks)
+        if expertise_choice_count <= 0:
+            continue
+        feature_title = _feature_choice_display_title(feature_entry)
+        expertise_choice_index = 0
+        for block in expertise_blocks:
+            count = int(block.get("anyProficientSkill") or 0)
+            if count <= 0:
+                continue
+            for _ in range(count):
+                expertise_choice_index += 1
+                label_suffix = f" {expertise_choice_index}" if expertise_choice_count > 1 else ""
+                field_name = _feature_field_name(instance_key, "expertise", expertise_choice_index)
+                fields.append(
+                    {
+                        "name": field_name,
+                        "label": f"{feature_title}{label_suffix}",
+                        "help_text": f"Choose a skill that already has proficiency so {feature_title} can grant expertise.",
+                        "options": skill_options,
+                        "selected": str(values.get(field_name) or "").strip(),
+                        "group_key": _feature_group_key(instance_key, "expertise"),
+                        "kind": "feature_skill",
+                    }
+                )
     return fields
 
 
@@ -8297,6 +8439,22 @@ def _feat_selected_values(
     category: str,
 ) -> list[str]:
     return list(selected_choices.get(_feat_group_key(instance_key, category)) or [])
+
+
+def _feature_field_name(instance_key: str, category: str, index: int) -> str:
+    return f"feature_{instance_key}_{category}_{index}"
+
+
+def _feature_group_key(instance_key: str, category: str) -> str:
+    return f"feature:{instance_key}:{category}"
+
+
+def _feature_selected_values(
+    selected_choices: dict[str, list[str]],
+    instance_key: str,
+    category: str,
+) -> list[str]:
+    return list(selected_choices.get(_feature_group_key(instance_key, category)) or [])
 
 
 def _feat_spell_choice_field_name(instance_key: str, category: str, spec_index: int, choice_index: int) -> str:
@@ -13002,6 +13160,12 @@ def _build_level_one_preview(
     values: dict[str, str],
 ) -> dict[str, Any]:
     feat_selections = _resolve_builder_feat_selections(values, feat_catalog)
+    feature_choice_selections = _progression_feature_choice_selections(
+        class_progression=class_progression,
+        subclass_progression=subclass_progression,
+        target_level=1,
+        instance_prefix="level1_feature",
+    )
     ability_scores = _coerce_ability_scores(values)
     proficiency_bonus = 2
     class_name = selected_class.title if selected_class is not None else ""
@@ -13044,6 +13208,7 @@ def _build_level_one_preview(
         proficiencies["skills"],
         proficiency_bonus,
         feat_selections=feat_selections,
+        feature_selections=feature_choice_selections,
         selected_choices=selected_choices,
         strict=False,
     )
@@ -13452,6 +13617,57 @@ def _apply_feat_expertise_to_skill_proficiency_levels(
                 updated_levels,
                 skill_name=selected_skill,
                 feat_title=feat_title,
+                strict=strict,
+            )
+    return updated_levels
+
+
+def _apply_feature_expertise_to_skill_proficiency_levels(
+    proficiency_levels: dict[str, str],
+    *,
+    feature_selections: list[dict[str, Any]],
+    selected_choices: dict[str, list[str]] | None = None,
+    strict: bool = False,
+) -> dict[str, str]:
+    updated_levels = {
+        normalized_skill: _normalize_skill_proficiency_level(level)
+        for raw_skill, level in dict(proficiency_levels or {}).items()
+        if (normalized_skill := normalize_lookup(raw_skill)) in SKILL_LABELS
+    }
+    choice_map = dict(selected_choices or {})
+    for selection in feature_selections:
+        feature_entry = selection.get("entry")
+        if not isinstance(feature_entry, SystemsEntryRecord):
+            continue
+        expertise_blocks = _supported_feature_expertise_blocks(feature_entry)
+        if not expertise_blocks:
+            continue
+        feature_title = _feature_choice_display_title(feature_entry)
+        instance_key = str(selection.get("instance_key") or "").strip()
+        for block in expertise_blocks:
+            for skill_name, value in dict(block).items():
+                if skill_name == "anyProficientSkill":
+                    continue
+                if value is True:
+                    _apply_skill_expertise_level(
+                        updated_levels,
+                        skill_name=skill_name,
+                        feat_title=feature_title,
+                        strict=strict,
+                    )
+        any_proficient_skill_count = sum(int(block.get("anyProficientSkill") or 0) for block in expertise_blocks)
+        if any_proficient_skill_count <= 0:
+            continue
+        if not instance_key:
+            if strict:
+                raise CharacterBuildError(f"{feature_title} is missing the expertise choice metadata needed to save.")
+            continue
+        selected_expertise_skills = _feature_selected_values(choice_map, instance_key, "expertise")
+        for selected_skill in selected_expertise_skills[:any_proficient_skill_count]:
+            _apply_skill_expertise_level(
+                updated_levels,
+                skill_name=selected_skill,
+                feat_title=feature_title,
                 strict=strict,
             )
     return updated_levels
@@ -13875,6 +14091,7 @@ def _build_skills_payload(
     proficiency_bonus: int,
     *,
     feat_selections: list[dict[str, Any]] | None = None,
+    feature_selections: list[dict[str, Any]] | None = None,
     selected_choices: dict[str, list[str]] | None = None,
     strict: bool = False,
 ) -> list[dict[str, Any]]:
@@ -13883,6 +14100,13 @@ def _build_skills_payload(
         proficiency_levels = _apply_feat_expertise_to_skill_proficiency_levels(
             proficiency_levels,
             feat_selections=feat_selections,
+            selected_choices=selected_choices,
+            strict=strict,
+        )
+    if feature_selections:
+        proficiency_levels = _apply_feature_expertise_to_skill_proficiency_levels(
+            proficiency_levels,
+            feature_selections=feature_selections,
             selected_choices=selected_choices,
             strict=strict,
         )
