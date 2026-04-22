@@ -461,6 +461,8 @@ COMMON_TOOL_PROFICIENCY_OPTIONS = [
     "Weaver's Tools",
     "Woodcarver's Tools",
 ]
+FEATURE_EXPERTISE_TOOL_VALUE_PREFIX = "tool:"
+THIEVES_TOOLS_PROFICIENCY = "Thieves' Tools"
 SIZE_LABELS = {
     "T": "Tiny",
     "S": "Small",
@@ -940,6 +942,13 @@ def build_level_one_character_definition(
         feat_selections=feat_selections,
         campaign_option_payloads=selected_campaign_option_payloads,
     )
+    tool_expertise = _apply_feature_expertise_to_tool_proficiencies(
+        [],
+        available_tool_proficiencies=proficiencies["tools"],
+        feature_selections=feature_choice_selections,
+        selected_choices=selected_choices,
+        strict=True,
+    )
     skills = _build_skills_payload(
         ability_scores,
         proficiencies["skills"],
@@ -1029,6 +1038,7 @@ def build_level_one_character_definition(
             "weapons": proficiencies["weapons"],
             "tools": proficiencies["tools"],
             "languages": proficiencies["languages"],
+            "tool_expertise": tool_expertise,
         },
         attacks=attacks,
         features=features,
@@ -2524,6 +2534,45 @@ def build_native_level_up_character_definition(
     )
     item_catalog = _build_item_catalog([])
     item_catalog = dict(level_up_context.get("item_catalog") or item_catalog)
+    resulting_armor_proficiencies = _dedupe_preserve_order(
+        list((current_definition.proficiencies or {}).get("armor") or [])
+        + (_extract_multiclass_gained_armor_proficiencies(selected_class) if advancement_mode == "add_class" else [])
+        + _extract_feat_armor_proficiencies(feat_selections, selected_choices)
+        + list(campaign_option_proficiencies.get("armor") or [])
+    )
+    resulting_weapon_proficiencies = _dedupe_preserve_order(
+        list((current_definition.proficiencies or {}).get("weapons") or [])
+        + (_extract_multiclass_gained_weapon_proficiencies(selected_class) if advancement_mode == "add_class" else [])
+        + _extract_feat_weapon_proficiencies(feat_selections, selected_choices)
+        + list(campaign_option_proficiencies.get("weapons") or [])
+    )
+    resulting_tool_proficiencies = _dedupe_preserve_order(
+        list((current_definition.proficiencies or {}).get("tools") or [])
+        + (
+            _extract_multiclass_gained_tool_proficiencies(selected_class, selected_choices)
+            if advancement_mode == "add_class"
+            else []
+        )
+        + _extract_feat_tool_proficiencies(feat_selections, selected_choices)
+        + list(campaign_option_proficiencies.get("tools") or [])
+    )
+    resulting_language_proficiencies = _dedupe_preserve_order(
+        list((current_definition.proficiencies or {}).get("languages") or [])
+        + (
+            _extract_multiclass_gained_language_proficiencies(selected_class, selected_choices)
+            if advancement_mode == "add_class"
+            else []
+        )
+        + _extract_feat_language_proficiencies(feat_selections, selected_choices)
+        + list(campaign_option_proficiencies.get("languages") or [])
+    )
+    resulting_tool_expertise = _apply_feature_expertise_to_tool_proficiencies(
+        list((current_definition.proficiencies or {}).get("tool_expertise") or []),
+        available_tool_proficiencies=resulting_tool_proficiencies,
+        feature_selections=feature_choice_selections,
+        selected_choices=selected_choices,
+        strict=True,
+    )
     attacks = _build_level_one_attacks(
         equipment_catalog=list(current_definition.equipment_catalog or []),
         item_catalog=item_catalog,
@@ -2566,38 +2615,11 @@ def build_native_level_up_character_definition(
         ),
         skills=skills,
         proficiencies={
-            "armor": _dedupe_preserve_order(
-                list((current_definition.proficiencies or {}).get("armor") or [])
-                + (_extract_multiclass_gained_armor_proficiencies(selected_class) if advancement_mode == "add_class" else [])
-                + _extract_feat_armor_proficiencies(feat_selections, selected_choices)
-                + list(campaign_option_proficiencies.get("armor") or [])
-            ),
-            "weapons": _dedupe_preserve_order(
-                list((current_definition.proficiencies or {}).get("weapons") or [])
-                + (_extract_multiclass_gained_weapon_proficiencies(selected_class) if advancement_mode == "add_class" else [])
-                + _extract_feat_weapon_proficiencies(feat_selections, selected_choices)
-                + list(campaign_option_proficiencies.get("weapons") or [])
-            ),
-            "tools": _dedupe_preserve_order(
-                list((current_definition.proficiencies or {}).get("tools") or [])
-                + (
-                    _extract_multiclass_gained_tool_proficiencies(selected_class, selected_choices)
-                    if advancement_mode == "add_class"
-                    else []
-                )
-                + _extract_feat_tool_proficiencies(feat_selections, selected_choices)
-                + list(campaign_option_proficiencies.get("tools") or [])
-            ),
-            "languages": _dedupe_preserve_order(
-                list((current_definition.proficiencies or {}).get("languages") or [])
-                + (
-                    _extract_multiclass_gained_language_proficiencies(selected_class, selected_choices)
-                    if advancement_mode == "add_class"
-                    else []
-                )
-                + _extract_feat_language_proficiencies(feat_selections, selected_choices)
-                + list(campaign_option_proficiencies.get("languages") or [])
-            ),
+            "armor": resulting_armor_proficiencies,
+            "weapons": resulting_weapon_proficiencies,
+            "tools": resulting_tool_proficiencies,
+            "languages": resulting_language_proficiencies,
+            "tool_expertise": resulting_tool_expertise,
         },
         attacks=attacks,
         features=merged_features,
@@ -7295,6 +7317,35 @@ def _feature_choice_display_title(entry: SystemsEntryRecord) -> str:
     return feature_title
 
 
+def _feature_expertise_tool_value(tool_name: Any) -> str:
+    cleaned = _clean_embedded_text(str(tool_name or "")).strip()
+    if not cleaned:
+        return ""
+    return f"{FEATURE_EXPERTISE_TOOL_VALUE_PREFIX}{cleaned}"
+
+
+def _feature_expertise_selected_tool_name(value: Any) -> str:
+    cleaned = str(value or "").strip()
+    prefix = FEATURE_EXPERTISE_TOOL_VALUE_PREFIX
+    if not cleaned or cleaned[: len(prefix)].lower() != prefix:
+        return ""
+    return _clean_embedded_text(cleaned[len(prefix):]).strip()
+
+
+def _feature_expertise_supports_thieves_tools(entry: SystemsEntryRecord | None) -> bool:
+    if not isinstance(entry, SystemsEntryRecord):
+        return False
+    for block in list(dict(entry.metadata or {}).get("expertise") or []):
+        if not isinstance(block, dict):
+            continue
+        for expertise_name, value in dict(block).items():
+            if expertise_name == "anyProficientSkill" or value is not True:
+                continue
+            if normalize_lookup(expertise_name) == normalize_lookup(THIEVES_TOOLS_PROFICIENCY):
+                return True
+    return normalize_lookup(THIEVES_TOOLS_PROFICIENCY) in _normalized_entry_body_text(entry)
+
+
 def _supported_feature_expertise_blocks(entry: SystemsEntryRecord | None) -> list[dict[str, Any]]:
     if not isinstance(entry, SystemsEntryRecord):
         return []
@@ -7367,6 +7418,18 @@ def _build_feature_choice_fields(
         if expertise_choice_count <= 0:
             continue
         feature_title = _feature_choice_display_title(feature_entry)
+        expertise_options = list(skill_options)
+        help_text = f"Choose a skill that already has proficiency so {feature_title} can grant expertise."
+        if _feature_expertise_supports_thieves_tools(feature_entry):
+            expertise_options.append(
+                _choice_option(
+                    THIEVES_TOOLS_PROFICIENCY,
+                    _feature_expertise_tool_value(THIEVES_TOOLS_PROFICIENCY),
+                )
+            )
+            help_text = (
+                f"Choose a skill or tool proficiency that already has proficiency so {feature_title} can grant expertise."
+            )
         expertise_choice_index = 0
         for block in expertise_blocks:
             count = int(block.get("anyProficientSkill") or 0)
@@ -7380,8 +7443,8 @@ def _build_feature_choice_fields(
                     {
                         "name": field_name,
                         "label": f"{feature_title}{label_suffix}",
-                        "help_text": f"Choose a skill that already has proficiency so {feature_title} can grant expertise.",
-                        "options": skill_options,
+                        "help_text": help_text,
+                        "options": expertise_options,
                         "selected": str(values.get(field_name) or "").strip(),
                         "group_key": _feature_group_key(instance_key, "expertise"),
                         "kind": "feature_skill",
@@ -13648,6 +13711,8 @@ def _apply_feature_expertise_to_skill_proficiency_levels(
             for skill_name, value in dict(block).items():
                 if skill_name == "anyProficientSkill":
                     continue
+                if normalize_lookup(skill_name) == normalize_lookup(THIEVES_TOOLS_PROFICIENCY):
+                    continue
                 if value is True:
                     _apply_skill_expertise_level(
                         updated_levels,
@@ -13664,6 +13729,8 @@ def _apply_feature_expertise_to_skill_proficiency_levels(
             continue
         selected_expertise_skills = _feature_selected_values(choice_map, instance_key, "expertise")
         for selected_skill in selected_expertise_skills[:any_proficient_skill_count]:
+            if _feature_expertise_selected_tool_name(selected_skill):
+                continue
             _apply_skill_expertise_level(
                 updated_levels,
                 skill_name=selected_skill,
@@ -13671,6 +13738,109 @@ def _apply_feature_expertise_to_skill_proficiency_levels(
                 strict=strict,
             )
     return updated_levels
+
+
+def _apply_tool_expertise_level(
+    tool_expertise: list[str],
+    *,
+    available_tool_proficiencies: list[str],
+    tool_name: Any,
+    feature_title: str,
+    strict: bool,
+) -> None:
+    resolved_tool_name = _feature_expertise_selected_tool_name(tool_name) or _clean_embedded_text(str(tool_name or "")).strip()
+    normalized_tool_name = normalize_lookup(resolved_tool_name)
+    if not normalized_tool_name:
+        if strict:
+            raise CharacterBuildError(f"Choose a valid expertise proficiency for {feature_title}.")
+        return
+    available_lookup = {
+        normalize_lookup(tool): str(tool).strip()
+        for tool in list(available_tool_proficiencies or [])
+        if str(tool).strip()
+    }
+    proficient_tool_name = available_lookup.get(normalized_tool_name)
+    if not proficient_tool_name:
+        if strict:
+            raise CharacterBuildError(f"{feature_title} requires choosing a tool that already has proficiency.")
+        return
+    existing_lookup = {
+        normalize_lookup(tool): str(tool).strip()
+        for tool in list(tool_expertise or [])
+        if str(tool).strip()
+    }
+    if normalized_tool_name in existing_lookup:
+        if strict:
+            raise CharacterBuildError(
+                f"{feature_title} requires choosing a tool that does not already have expertise."
+            )
+        return
+    tool_expertise.append(proficient_tool_name)
+
+
+def _apply_feature_expertise_to_tool_proficiencies(
+    tool_expertise: list[str],
+    *,
+    available_tool_proficiencies: list[str],
+    feature_selections: list[dict[str, Any]],
+    selected_choices: dict[str, list[str]] | None = None,
+    strict: bool = False,
+) -> list[str]:
+    available_tools = _dedupe_preserve_order(list(available_tool_proficiencies or []))
+    available_lookup = {
+        normalize_lookup(tool): str(tool).strip()
+        for tool in available_tools
+        if str(tool).strip()
+    }
+    updated_tools = _dedupe_preserve_order(
+        [
+            available_lookup.get(normalize_lookup(tool), str(tool).strip())
+            for tool in list(tool_expertise or [])
+            if str(tool).strip()
+        ]
+    )
+    choice_map = dict(selected_choices or {})
+    for selection in feature_selections:
+        feature_entry = selection.get("entry")
+        if not isinstance(feature_entry, SystemsEntryRecord):
+            continue
+        expertise_blocks = _supported_feature_expertise_blocks(feature_entry)
+        if not expertise_blocks:
+            continue
+        feature_title = _feature_choice_display_title(feature_entry)
+        instance_key = str(selection.get("instance_key") or "").strip()
+        for block in expertise_blocks:
+            for expertise_name, value in dict(block).items():
+                if expertise_name == "anyProficientSkill" or value is not True:
+                    continue
+                if normalize_lookup(expertise_name) in SKILL_LABELS:
+                    continue
+                _apply_tool_expertise_level(
+                    updated_tools,
+                    available_tool_proficiencies=available_tools,
+                    tool_name=expertise_name,
+                    feature_title=feature_title,
+                    strict=strict,
+                )
+        any_proficient_skill_count = sum(int(block.get("anyProficientSkill") or 0) for block in expertise_blocks)
+        if any_proficient_skill_count <= 0:
+            continue
+        if not instance_key:
+            if strict:
+                raise CharacterBuildError(f"{feature_title} is missing the expertise choice metadata needed to save.")
+            continue
+        selected_expertise_values = _feature_selected_values(choice_map, instance_key, "expertise")
+        for selected_value in selected_expertise_values[:any_proficient_skill_count]:
+            if not _feature_expertise_selected_tool_name(selected_value):
+                continue
+            _apply_tool_expertise_level(
+                updated_tools,
+                available_tool_proficiencies=available_tools,
+                tool_name=selected_value,
+                feature_title=feature_title,
+                strict=strict,
+            )
+    return _dedupe_preserve_order(updated_tools)
 
 
 def _extract_feat_expertise_skills(

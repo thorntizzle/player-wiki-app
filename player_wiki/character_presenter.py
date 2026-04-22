@@ -69,6 +69,29 @@ REDUNDANT_PASSIVE_FEATURE_NAMES = {
 ATTACK_NAME_SUFFIX_PATTERN = re.compile(r"\s*\([^)]*\)\s*$")
 
 
+def _present_tool_proficiency_values(proficiencies: dict[str, Any]) -> list[str]:
+    tools = [str(value).strip() for value in list(proficiencies.get("tools") or []) if str(value).strip()]
+    tool_expertise = [str(value).strip() for value in list(proficiencies.get("tool_expertise") or []) if str(value).strip()]
+    expertise_lookup = {
+        normalize_lookup(value): value
+        for value in tool_expertise
+        if normalize_lookup(value)
+    }
+    presented: list[str] = []
+    seen: set[str] = set()
+    for value in tools + tool_expertise:
+        cleaned = str(value).strip()
+        normalized = normalize_lookup(cleaned)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        label = cleaned
+        if normalized in expertise_lookup:
+            label = f"{label} (Expertise)"
+        presented.append(label)
+    return presented
+
+
 def _presented_spell_remove_label(*, mode: str, is_cantrip: bool, is_prepared: bool) -> str:
     if is_cantrip:
         return "Remove cantrip"
@@ -224,7 +247,10 @@ def present_character_detail(
     proficiency_groups = []
     proficiencies = dict(definition.proficiencies or {})
     for key, title in PROFICIENCY_TITLES:
-        values = [str(value).strip() for value in list(proficiencies.get(key) or []) if str(value).strip()]
+        if key == "tools":
+            values = _present_tool_proficiency_values(proficiencies)
+        else:
+            values = [str(value).strip() for value in list(proficiencies.get(key) or []) if str(value).strip()]
         if values:
             proficiency_groups.append({"title": title, "values_list": values})
 

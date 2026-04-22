@@ -5,6 +5,23 @@ from datetime import datetime
 from typing import Any
 
 
+def _normalize_proficiency_text(value: Any) -> str:
+    return " ".join(str(value or "").split()).strip()
+
+
+def _dedupe_proficiency_values(values: Any) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in list(values or []):
+        cleaned = _normalize_proficiency_text(value)
+        normalized = cleaned.casefold()
+        if not cleaned or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(cleaned)
+    return deduped
+
+
 @dataclass(slots=True)
 class CharacterDefinition:
     campaign_slug: str
@@ -49,6 +66,9 @@ class CharacterDefinition:
         if missing:
             joined = ", ".join(missing)
             raise ValueError(f"Character definition is missing required fields: {joined}")
+        raw_proficiencies = dict(payload.get("proficiencies") or {})
+        tool_expertise = _dedupe_proficiency_values(raw_proficiencies.get("tool_expertise") or [])
+        tools = _dedupe_proficiency_values(list(raw_proficiencies.get("tools") or []) + tool_expertise)
 
         return cls(
             campaign_slug=str(payload["campaign_slug"]),
@@ -59,10 +79,11 @@ class CharacterDefinition:
             stats=dict(payload.get("stats") or {}),
             skills=list(payload.get("skills") or []),
             proficiencies={
-                "armor": list((payload.get("proficiencies") or {}).get("armor") or []),
-                "weapons": list((payload.get("proficiencies") or {}).get("weapons") or []),
-                "tools": list((payload.get("proficiencies") or {}).get("tools") or []),
-                "languages": list((payload.get("proficiencies") or {}).get("languages") or []),
+                "armor": _dedupe_proficiency_values(raw_proficiencies.get("armor") or []),
+                "weapons": _dedupe_proficiency_values(raw_proficiencies.get("weapons") or []),
+                "tools": tools,
+                "languages": _dedupe_proficiency_values(raw_proficiencies.get("languages") or []),
+                "tool_expertise": tool_expertise,
             },
             attacks=list(payload.get("attacks") or []),
             features=list(payload.get("features") or []),

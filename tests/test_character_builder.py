@@ -11058,6 +11058,7 @@ def test_level_one_builder_surfaces_and_applies_rogue_expertise_class_feature():
             "hit_die": {"faces": 8},
             "proficiency": ["dex", "int"],
             "starting_proficiencies": {
+                "tools": ["Thieves' Tools"],
                 "skills": [
                     {
                         "choose": {
@@ -11161,6 +11162,121 @@ def test_level_one_builder_surfaces_and_applies_rogue_expertise_class_feature():
     assert skills_by_name["Perception"]["proficiency_level"] == "expertise"
     assert skills_by_name["Stealth"]["proficiency_level"] == "expertise"
     assert skills_by_name["Investigation"]["proficiency_level"] == "proficient"
+
+
+def test_level_one_builder_applies_rogue_expertise_to_thieves_tools():
+    rogue = _systems_entry(
+        "class",
+        "phb-class-rogue",
+        "Rogue",
+        metadata={
+            "hit_die": {"faces": 8},
+            "proficiency": ["dex", "int"],
+            "starting_proficiencies": {
+                "tools": ["Thieves' Tools"],
+                "skills": [
+                    {
+                        "choose": {
+                            "count": 4,
+                            "from": [
+                                "acrobatics",
+                                "athletics",
+                                "deception",
+                                "insight",
+                                "intimidation",
+                                "investigation",
+                                "perception",
+                                "performance",
+                                "persuasion",
+                                "sleight of hand",
+                                "stealth",
+                            ],
+                        }
+                    }
+                ]
+            },
+        },
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    expertise = _systems_entry(
+        "classfeature",
+        "phb-classfeature-expertise-rogue-phb-1",
+        "Expertise",
+        metadata={"class_name": "Rogue", "class_source": "PHB", "level": 1},
+        body={
+            "entries": [
+                "At 1st level, choose two of your skill proficiencies, or one of your skill proficiencies and your proficiency with thieves' tools.",
+            ]
+        },
+    )
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [rogue],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[],
+    )
+    _set_progressions(
+        systems_service,
+        class_by_slug={
+            rogue.slug: [
+                {
+                    "level": 1,
+                    "level_label": "Level 1",
+                    "feature_rows": [_progression_row("Expertise", entry=expertise)],
+                }
+            ]
+        },
+    )
+
+    form_values = {
+        "name": "Rook Vale",
+        "character_slug": "rook-vale",
+        "alignment": "Neutral",
+        "experience_model": "Milestone",
+        "class_slug": rogue.slug,
+        "species_slug": human.slug,
+        "background_slug": acolyte.slug,
+        "class_skill_1": "acrobatics",
+        "class_skill_2": "investigation",
+        "class_skill_3": "perception",
+        "class_skill_4": "stealth",
+        "str": "10",
+        "dex": "16",
+        "con": "12",
+        "int": "14",
+        "wis": "12",
+        "cha": "8",
+    }
+
+    context = build_level_one_builder_context(systems_service, "linden-pass", form_values)
+    first_expertise_field = _field_name_for_label(context, "Rogue Expertise 1")
+    second_expertise_field = _field_name_for_label(context, "Rogue Expertise 2")
+    form_values[first_expertise_field] = _field_value_for_label(context, first_expertise_field, "Perception")
+    form_values[second_expertise_field] = _field_value_for_label(context, second_expertise_field, "Thieves' Tools")
+
+    definition, _ = build_level_one_character_definition(
+        "linden-pass",
+        build_level_one_builder_context(systems_service, "linden-pass", form_values),
+        form_values,
+    )
+
+    skills_by_name = {skill["name"]: skill for skill in definition.skills}
+    assert skills_by_name["Perception"]["proficiency_level"] == "expertise"
+    assert any(tool.casefold() == "thieves' tools" for tool in definition.proficiencies["tools"])
+    assert any(tool.casefold() == "thieves' tools" for tool in definition.proficiencies.get("tool_expertise") or [])
 
 
 def test_level_one_builder_surfaces_and_applies_magic_initiate_feat_spells():
@@ -17118,6 +17234,97 @@ def test_native_level_up_surfaces_and_applies_rogue_expertise_class_feature():
     assert skills_by_name["Perception"]["proficiency_level"] == "expertise"
     assert skills_by_name["Stealth"]["proficiency_level"] == "expertise"
     assert skills_by_name["Investigation"]["proficiency_level"] == "proficient"
+
+
+def test_native_level_up_applies_rogue_expertise_to_thieves_tools():
+    rogue = _systems_entry(
+        "class",
+        "phb-class-rogue",
+        "Rogue",
+        metadata={"hit_die": {"faces": 8}, "proficiency": ["dex", "int"]},
+    )
+    human = _systems_entry(
+        "race",
+        "phb-race-human",
+        "Human",
+        metadata={"size": ["M"], "speed": 30, "languages": [{"common": True}]},
+    )
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    expertise = _systems_entry(
+        "classfeature",
+        "phb-classfeature-expertise-rogue-phb-6",
+        "Expertise",
+        metadata={"class_name": "Rogue", "class_source": "PHB", "level": 6},
+        body={
+            "entries": [
+                "At 6th level, you can choose two more of your proficiencies (in skills or with thieves' tools) to gain this benefit.",
+            ]
+        },
+    )
+
+    systems_service = _FakeSystemsService(
+        {
+            "class": [rogue],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "subclass": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[],
+    )
+    _set_progressions(
+        systems_service,
+        class_by_slug={
+            rogue.slug: [
+                {
+                    "level": 6,
+                    "level_label": "Level 6",
+                    "feature_rows": [_progression_row("Expertise", entry=expertise)],
+                }
+            ]
+        },
+    )
+
+    current_definition = _minimal_character_definition("rogue-veteran", "Rogue Veteran")
+    current_definition.profile["class_level_text"] = "Rogue 5"
+    current_definition.profile["classes"][0]["class_name"] = "Rogue"
+    current_definition.profile["classes"][0]["level"] = 5
+    current_definition.profile["classes"][0]["systems_ref"] = _systems_ref(rogue)
+    current_definition.profile["class_ref"] = _systems_ref(rogue)
+    current_definition.profile["species_ref"] = _systems_ref(human)
+    current_definition.profile["background_ref"] = _systems_ref(acolyte)
+    current_definition.stats["proficiency_bonus"] = 3
+    current_definition.skills = [
+        {"name": "Acrobatics", "bonus": 4, "proficiency_level": "proficient"},
+        {"name": "Investigation", "bonus": 3, "proficiency_level": "proficient"},
+        {"name": "Perception", "bonus": 4, "proficiency_level": "proficient"},
+        {"name": "Stealth", "bonus": 4, "proficiency_level": "proficient"},
+    ]
+    current_definition.proficiencies["tools"] = ["Thieves' Tools"]
+
+    form_values = {"hp_gain": "5"}
+    context = build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values)
+    first_expertise_field = _field_name_for_label(context, "Rogue Expertise 1")
+    second_expertise_field = _field_name_for_label(context, "Rogue Expertise 2")
+    form_values[first_expertise_field] = _field_value_for_label(context, first_expertise_field, "Stealth")
+    form_values[second_expertise_field] = _field_value_for_label(context, second_expertise_field, "Thieves' Tools")
+
+    leveled_definition, _, _ = build_native_level_up_character_definition(
+        "linden-pass",
+        current_definition,
+        build_native_level_up_context(systems_service, "linden-pass", current_definition, form_values),
+        form_values,
+    )
+
+    skills_by_name = {skill["name"]: skill for skill in leveled_definition.skills}
+    assert skills_by_name["Stealth"]["proficiency_level"] == "expertise"
+    assert any(tool.casefold() == "thieves' tools" for tool in leveled_definition.proficiencies["tools"])
+    assert any(
+        tool.casefold() == "thieves' tools"
+        for tool in leveled_definition.proficiencies.get("tool_expertise") or []
+    )
 
 
 def test_native_level_up_applies_structured_save_bonus_effect_keys():

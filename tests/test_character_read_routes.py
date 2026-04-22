@@ -347,6 +347,24 @@ def test_read_sheet_shows_carrying_capacity_stats(app, client, sign_in, users):
     assert "1920 lb." in sheet_html
 
 
+def test_read_sheet_shows_tool_expertise_under_tools(app, client, sign_in, users):
+    def _mutate(payload: dict) -> None:
+        proficiencies = dict(payload.get("proficiencies") or {})
+        proficiencies["tools"] = ["Navigator's Tools", "Thieves' Tools"]
+        proficiencies["tool_expertise"] = ["Thieves' Tools"]
+        payload["proficiencies"] = proficiencies
+
+    _write_character_definition(app, "selene-brook", _mutate)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    sheet = client.get("/campaigns/linden-pass/characters/selene-brook")
+
+    assert sheet.status_code == 200
+    sheet_html = sheet.get_data(as_text=True)
+    assert "Tools" in sheet_html
+    assert "Navigator&#39;s Tools, Thieves&#39; Tools (Expertise)" in sheet_html
+
+
 def test_roster_and_read_sheet_derive_multiclass_summary_from_class_rows(app, client, sign_in, users):
     def _mutate(payload: dict) -> None:
         profile = dict(payload.get("profile") or {})

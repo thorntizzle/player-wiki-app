@@ -2336,6 +2336,7 @@ def apply_native_character_edits(
         feat_selections=campaign_feat_selections,
         feat_selected_choices=feat_selected_choices,
     )
+    proficiencies["tool_expertise"] = list((current_definition.proficiencies or {}).get("tool_expertise") or [])
     stats = apply_manual_stat_adjustments(base_stats, stat_adjustments)
     campaign_stat_adjustments = collect_campaign_option_stat_adjustments(selected_campaign_option_payloads)
     if campaign_stat_adjustments:

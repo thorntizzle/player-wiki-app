@@ -3294,6 +3294,43 @@ def test_native_character_edits_can_manage_reference_text_and_feature_trackers(
     assert all(resource.get("id") != tracker_ref for resource in record.state_record.state["resources"])
 
 
+def test_native_character_edit_preserves_tool_expertise(
+    app, client, sign_in, users, get_character, set_campaign_visibility
+):
+    def _mutate(payload: dict) -> None:
+        proficiencies = dict(payload.get("proficiencies") or {})
+        proficiencies["tools"] = ["Thieves' Tools"]
+        proficiencies["tool_expertise"] = ["Thieves' Tools"]
+        payload["proficiencies"] = proficiencies
+
+    _write_character_definition(app, "arden-march", _mutate)
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    record = get_character("arden-march")
+    assert record is not None
+
+    response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/edit",
+        data={
+            "expected_revision": record.state_record.revision,
+            "languages_text": "Common\nElvish",
+            "armor_proficiencies_text": "",
+            "weapon_proficiencies_text": "",
+            "tool_proficiencies_text": "Thieves' Tools",
+            "biography_markdown": "Harbor scout.",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+
+    record = get_character("arden-march")
+    assert record is not None
+    assert any(tool.casefold() == "thieves' tools" for tool in record.definition.proficiencies["tools"])
+    assert any(tool.casefold() == "thieves' tools" for tool in record.definition.proficiencies.get("tool_expertise") or [])
+
+
 def test_native_character_edits_can_apply_campaign_stat_adjustments(
     client, sign_in, users, get_character, set_campaign_visibility
 ):
