@@ -32,6 +32,7 @@ class DMStatblockUpload:
     title: str
     body_markdown: str
     source_filename: str
+    subsection: str
     armor_class: int | None
     max_hp: int
     speed_text: str
@@ -89,14 +90,20 @@ class CampaignDMContentService:
         *,
         filename: str,
         data_blob: bytes,
+        subsection: str = "",
         created_by_user_id: int | None = None,
     ) -> CampaignDMStatblockRecord:
-        upload = self.parse_statblock_markdown_upload(filename=filename, data_blob=data_blob)
+        upload = self.parse_statblock_markdown_upload(
+            filename=filename,
+            data_blob=data_blob,
+            subsection_hint=subsection,
+        )
         return self.store.create_statblock(
             campaign_slug,
             title=upload.title,
             body_markdown=upload.body_markdown,
             source_filename=upload.source_filename,
+            subsection=upload.subsection,
             armor_class=upload.armor_class,
             max_hp=upload.max_hp,
             speed_text=upload.speed_text,
@@ -162,6 +169,7 @@ class CampaignDMContentService:
         *,
         filename: str,
         data_blob: bytes,
+        subsection_hint: str = "",
     ) -> DMStatblockUpload:
         normalized_filename = Path(filename or "").name.strip()
         if not normalized_filename:
@@ -204,6 +212,13 @@ class CampaignDMContentService:
         if not normalized_title:
             raise CampaignDMContentValidationError("The uploaded statblock needs a name or title.")
 
+        normalized_subsection = self._normalize_statblock_subsection(
+            subsection_hint
+            or metadata.get("subsection")
+            or metadata.get("group")
+            or metadata.get("section")
+        )
+
         armor_class = self._parse_optional_int(metadata.get("armor_class") or metadata.get("ac"))
         if armor_class is None:
             armor_class = self._search_int(STATBLOCK_ARMOR_CLASS_PATTERN, normalized_body)
@@ -234,6 +249,7 @@ class CampaignDMContentService:
             title=normalized_title,
             body_markdown=normalized_body,
             source_filename=normalized_filename,
+            subsection=normalized_subsection,
             armor_class=armor_class,
             max_hp=max_hp,
             speed_text=speed_text,
@@ -261,3 +277,11 @@ class CampaignDMContentService:
         if not distances:
             return 0
         return max(distances)
+
+    def _normalize_statblock_subsection(self, value: object) -> str:
+        normalized = str(value or "").strip()
+        if len(normalized) > 80:
+            raise CampaignDMContentValidationError(
+                "Statblock subsection labels must stay under 80 characters."
+            )
+        return normalized

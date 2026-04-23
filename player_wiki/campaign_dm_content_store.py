@@ -45,6 +45,7 @@ class CampaignDMContentStore:
         title: str,
         body_markdown: str,
         source_filename: str,
+        subsection: str,
         armor_class: int | None,
         max_hp: int,
         speed_text: str,
@@ -62,6 +63,7 @@ class CampaignDMContentStore:
                     title,
                     body_markdown,
                     source_filename,
+                    subsection,
                     armor_class,
                     max_hp,
                     speed_text,
@@ -72,13 +74,14 @@ class CampaignDMContentStore:
                     created_by_user_id,
                     updated_by_user_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     campaign_slug,
                     title,
                     body_markdown,
                     source_filename,
+                    subsection,
                     armor_class,
                     max_hp,
                     speed_text,
@@ -226,6 +229,7 @@ class CampaignDMContentStore:
             title=str(row["title"]),
             body_markdown=str(row["body_markdown"] or ""),
             source_filename=str(row["source_filename"] or ""),
+            subsection=str(row["subsection"] or ""),
             armor_class=int(row["armor_class"]) if row["armor_class"] is not None else None,
             max_hp=int(row["max_hp"] or 0),
             speed_text=str(row["speed_text"] or ""),

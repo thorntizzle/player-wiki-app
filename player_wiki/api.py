@@ -678,6 +678,7 @@ def register_api(app) -> None:
             "title": statblock.title,
             "body_markdown": statblock.body_markdown,
             "source_filename": statblock.source_filename,
+            "subsection": statblock.subsection,
             "armor_class": statblock.armor_class,
             "max_hp": statblock.max_hp,
             "speed_text": statblock.speed_text,
@@ -2202,6 +2203,7 @@ def register_api(app) -> None:
                 campaign_slug,
                 filename=str(payload.get("filename") or "").strip(),
                 data_blob=str(payload.get("markdown_text") or "").encode("utf-8"),
+                subsection=str(payload.get("subsection") or "").strip(),
                 created_by_user_id=user.id,
             )
         except CampaignDMContentValidationError as exc:

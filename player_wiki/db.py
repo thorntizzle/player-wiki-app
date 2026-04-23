@@ -218,6 +218,7 @@ CREATE TABLE IF NOT EXISTS campaign_dm_statblocks (
     title TEXT NOT NULL,
     body_markdown TEXT NOT NULL,
     source_filename TEXT NOT NULL,
+    subsection TEXT NOT NULL DEFAULT '',
     armor_class INTEGER,
     max_hp INTEGER NOT NULL DEFAULT 0,
     speed_text TEXT NOT NULL DEFAULT '',
@@ -599,6 +600,7 @@ def init_database() -> None:
     _migrate_campaign_session_articles_for_source_page_ref(connection)
     _migrate_campaign_combatants_for_revision(connection)
     _migrate_campaign_combatants_for_source_identity(connection)
+    _migrate_campaign_dm_statblocks_for_subsections(connection)
     connection.commit()
 
 
@@ -816,5 +818,36 @@ def _migrate_campaign_combatants_for_source_identity(connection: sqlite3.Connect
             WHEN COALESCE(player_detail_visible, 0) NOT IN (0, 1) THEN 0
             ELSE COALESCE(player_detail_visible, 0)
         END
+        """
+    )
+
+
+def _migrate_campaign_dm_statblocks_for_subsections(connection: sqlite3.Connection) -> None:
+    columns = {
+        str(row["name"] or "")
+        for row in connection.execute("PRAGMA table_info(campaign_dm_statblocks)").fetchall()
+    }
+    if not columns:
+        return
+
+    if "subsection" not in columns:
+        connection.execute(
+            """
+            ALTER TABLE campaign_dm_statblocks
+            ADD COLUMN subsection TEXT NOT NULL DEFAULT ''
+            """
+        )
+
+    connection.execute(
+        """
+        UPDATE campaign_dm_statblocks
+        SET subsection = 'Malverine Minions'
+        WHERE campaign_slug = 'linden-pass'
+          AND TRIM(COALESCE(subsection, '')) = ''
+          AND LOWER(TRIM(COALESCE(title, ''))) IN (
+              'eyestitched watcher',
+              'earless listener',
+              'mute scribe'
+          )
         """
     )

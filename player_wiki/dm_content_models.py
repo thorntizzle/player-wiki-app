@@ -11,6 +11,7 @@ class CampaignDMStatblockRecord:
     title: str
     body_markdown: str
     source_filename: str
+    subsection: str
     armor_class: int | None
     max_hp: int
     speed_text: str

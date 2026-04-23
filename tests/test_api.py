@@ -336,6 +336,7 @@ def test_api_dm_content_endpoints_require_dm_permissions(client, app, users):
         headers=api_headers(dm_token),
         json={
             "filename": "dock-runner.md",
+            "subsection": "Malverine Minions",
             "markdown_text": (
                 "# Dock Runner\n\n"
                 "Armor Class 13\n"
@@ -348,6 +349,7 @@ def test_api_dm_content_endpoints_require_dm_permissions(client, app, users):
 
     assert statblock_response.status_code == 200
     assert statblock_response.get_json()["statblock"]["title"] == "Dock Runner"
+    assert statblock_response.get_json()["statblock"]["subsection"] == "Malverine Minions"
 
     condition_response = client.post(
         "/api/v1/campaigns/linden-pass/dm-content/conditions",
@@ -367,6 +369,7 @@ def test_api_dm_content_endpoints_require_dm_permissions(client, app, users):
     dm_content_payload = dm_content_response.get_json()
     assert len(dm_content_payload["statblocks"]) == 1
     assert len(dm_content_payload["conditions"]) == 1
+    assert dm_content_payload["statblocks"][0]["subsection"] == "Malverine Minions"
 
     blocked_response = client.get("/api/v1/campaigns/linden-pass/dm-content", headers=api_headers(player_token))
 

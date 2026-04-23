@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from io import BytesIO
+import sqlite3
 
+from player_wiki.app import create_app
+from player_wiki.config import Config
+from player_wiki.db import init_database
+from tests.sample_data import build_test_campaigns_dir
 
 TEST_STATBLOCK_MARKDOWN = b"""AT-A-GLANCE (Quick Reference)
 --------------------------------------------------------------------------------
@@ -19,6 +24,24 @@ Hit Points 55 (10d8 + 10)
 Speed 30 ft., fly 40 ft.
 
 STR 10 (+0)  DEX 14 (+2)  CON 12 (+1)  INT 16 (+3)  WIS 14 (+2)  CHA 11 (+0)
+"""
+
+TEST_UNGROUPED_STATBLOCK_MARKDOWN = b"""AT-A-GLANCE (Quick Reference)
+--------------------------------------------------------------------------------
+Name: Dock Runner
+Creature Type: Humanoid
+Role/Archetype: Scout
+Challenge Rating: CR 1
+Proficiency Bonus: +2
+Speed: 30 ft.
+
+STATBLOCK (5e Format)
+--------------------------------------------------------------------------------
+Armor Class 13 (leather armor)
+Hit Points 22 (5d8)
+Speed 30 ft.
+
+STR 10 (+0)  DEX 14 (+2)  CON 10 (+0)  INT 11 (+0)  WIS 12 (+1)  CHA 10 (+0)
 """
 
 
@@ -130,6 +153,148 @@ def test_dm_can_upload_statblock_and_use_it_to_seed_an_npc_combatant(app, client
     assert combatant.movement_total == 40
     assert combatant.initiative_bonus == 2
     assert combatant.turn_value == 2
+
+
+def test_dm_statblocks_page_groups_subsectioned_entries_like_wiki_sections(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    grouped_upload = client.post(
+        "/campaigns/linden-pass/dm-content/statblocks",
+        data={
+            "subsection": "Malverine Minions",
+            "statblock_file": (BytesIO(TEST_STATBLOCK_MARKDOWN), "imperial-signal-operative-statblock.md"),
+        },
+        follow_redirects=True,
+    )
+
+    assert grouped_upload.status_code == 200
+    grouped_html = grouped_upload.get_data(as_text=True)
+    assert "Malverine Minions" in grouped_html
+    assert "1 statblock" in grouped_html
+    assert 'data-subsection-controls' in grouped_html
+
+    ungrouped_upload = client.post(
+        "/campaigns/linden-pass/dm-content/statblocks",
+        data={
+            "statblock_file": (BytesIO(TEST_UNGROUPED_STATBLOCK_MARKDOWN), "dock-runner-statblock.md"),
+        },
+        follow_redirects=True,
+    )
+
+    assert ungrouped_upload.status_code == 200
+
+    statblocks = _list_statblocks(app)
+    statblock_subsections = {statblock.title: statblock.subsection for statblock in statblocks}
+    assert statblock_subsections == {
+        "Dock Runner": "",
+        "Imperial Signal Operative": "Malverine Minions",
+    }
+
+    dm_page = client.get("/campaigns/linden-pass/dm-content")
+
+    assert dm_page.status_code == 200
+    dm_html = dm_page.get_data(as_text=True)
+    assert "Dock Runner" in dm_html
+    assert "Imperial Signal Operative" in dm_html
+    assert "Malverine Minions" in dm_html
+    assert "1 statblock" in dm_html
+
+
+def test_init_db_backfills_existing_linden_pass_statblocks_into_malverine_minions_group(
+    tmp_path, monkeypatch
+):
+    campaigns_dir = build_test_campaigns_dir(tmp_path)
+    monkeypatch.setattr(Config, "CAMPAIGNS_DIR", campaigns_dir)
+
+    db_path = tmp_path / "legacy-player-wiki.sqlite3"
+    connection = sqlite3.connect(db_path)
+    connection.executescript(
+        """
+        CREATE TABLE campaign_dm_statblocks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            campaign_slug TEXT NOT NULL,
+            title TEXT NOT NULL,
+            body_markdown TEXT NOT NULL,
+            source_filename TEXT NOT NULL,
+            armor_class INTEGER,
+            max_hp INTEGER NOT NULL DEFAULT 0,
+            speed_text TEXT NOT NULL DEFAULT '',
+            movement_total INTEGER NOT NULL DEFAULT 0,
+            initiative_bonus INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            created_by_user_id INTEGER,
+            updated_by_user_id INTEGER
+        );
+
+        INSERT INTO campaign_dm_statblocks (
+            campaign_slug,
+            title,
+            body_markdown,
+            source_filename,
+            armor_class,
+            max_hp,
+            speed_text,
+            movement_total,
+            initiative_bonus,
+            created_at,
+            updated_at
+        )
+        VALUES
+            (
+                'linden-pass',
+                'Eyestitched Watcher',
+                'Armor Class 14\nHit Points 27\nSpeed 30 ft.',
+                'Eyestitched Watcher - Powered-Up Statblock.md',
+                14,
+                27,
+                '30 ft.',
+                30,
+                2,
+                '2026-04-22T12:00:00Z',
+                '2026-04-22T12:00:00Z'
+            ),
+            (
+                'linden-pass',
+                'Dock Runner',
+                'Armor Class 13\nHit Points 22\nSpeed 30 ft.',
+                'dock-runner-statblock.md',
+                13,
+                22,
+                '30 ft.',
+                30,
+                2,
+                '2026-04-22T12:00:00Z',
+                '2026-04-22T12:00:00Z'
+            );
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    app = create_app()
+    app.config.update(TESTING=True, DB_PATH=db_path)
+
+    with app.app_context():
+        init_database()
+
+    connection = sqlite3.connect(db_path)
+    connection.row_factory = sqlite3.Row
+    rows = connection.execute(
+        """
+        SELECT title, subsection
+        FROM campaign_dm_statblocks
+        ORDER BY id ASC
+        """
+    ).fetchall()
+    connection.close()
+
+    assert [dict(row) for row in rows] == [
+        {"title": "Eyestitched Watcher", "subsection": "Malverine Minions"},
+        {"title": "Dock Runner", "subsection": ""},
+    ]
 
 
 def test_custom_conditions_flow_from_dm_content_into_combat_picker_and_can_be_deleted(

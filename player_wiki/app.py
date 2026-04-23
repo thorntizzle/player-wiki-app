@@ -499,6 +499,34 @@ def normalize_dm_content_subpage(value: str, *, allow_default: bool = False) -> 
     return aliases.get(normalized, "")
 
 
+def build_dm_statblock_subsection_groups(statblocks) -> tuple[list[object], list[dict[str, object]]]:
+    top_level_statblocks = []
+    subsection_map = defaultdict(list)
+    for statblock in statblocks:
+        normalized_subsection = str(getattr(statblock, "subsection", "") or "").strip()
+        if normalized_subsection:
+            subsection_map[normalized_subsection].append(statblock)
+            continue
+        top_level_statblocks.append(statblock)
+
+    top_level_statblocks.sort(key=lambda statblock: (statblock.title.lower(), statblock.id))
+    subsection_groups = []
+    for subsection_name in sorted(
+        subsection_map,
+        key=lambda subsection_name: subsection_sort_key("Statblocks", subsection_name),
+    ):
+        subsection_groups.append(
+            {
+                "name": subsection_name,
+                "statblocks": sorted(
+                    subsection_map[subsection_name],
+                    key=lambda statblock: (statblock.title.lower(), statblock.id),
+                ),
+            }
+        )
+    return top_level_statblocks, subsection_groups
+
+
 def get_character_read_subpage_labels(
     *,
     include_spellcasting: bool = False,
@@ -5554,6 +5582,7 @@ def create_app() -> Flask:
         can_manage_session = can_manage_campaign_session(campaign_slug)
         normalized_subpage = normalize_dm_content_subpage(dm_content_subpage, allow_default=True)
         statblocks = dm_content_service.list_statblocks(campaign_slug)
+        top_level_statblocks, statblock_subsection_groups = build_dm_statblock_subsection_groups(statblocks)
         custom_conditions = dm_content_service.list_condition_definitions(campaign_slug)
         session_service = get_campaign_session_service()
         staged_article_count = (
@@ -5603,6 +5632,9 @@ def create_app() -> Flask:
             "campaign": campaign,
             "dm_content_system_supported": campaign.system == SUPPORTED_COMBAT_SYSTEM,
             "dm_statblocks": statblocks,
+            "dm_statblock_top_level": top_level_statblocks,
+            "dm_statblock_subsection_groups": statblock_subsection_groups,
+            "dm_statblock_show_subsections": bool(statblock_subsection_groups),
             "custom_condition_definitions": custom_conditions,
             "can_manage_dm_content": can_manage_dm_content,
             "can_manage_session": can_manage_session,
@@ -7215,6 +7247,7 @@ def create_app() -> Flask:
                 campaign_slug,
                 filename=filename,
                 data_blob=data_blob,
+                subsection=request.form.get("subsection", ""),
                 created_by_user_id=user.id,
             )
         except CampaignDMContentValidationError as exc:

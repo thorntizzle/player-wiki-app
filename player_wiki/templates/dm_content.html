@@ -1,5 +1,33 @@
 {% extends "base.html" %}
 
+{% macro render_dm_statblock_card(campaign, statblock, can_manage_dm_content) -%}
+  <article class="dm-content-item" id="dm-statblock-{{ statblock.id }}">
+    <div class="dm-content-item__header">
+      <div>
+        <h3>{{ statblock.title }}</h3>
+        <p class="meta">Source file: {{ statblock.source_filename }}</p>
+      </div>
+      <div class="badge-list">
+        {% if statblock.armor_class is not none %}
+          <span class="meta-badge">AC {{ statblock.armor_class }}</span>
+        {% endif %}
+        <span class="meta-badge">HP {{ statblock.max_hp }}</span>
+        <span class="meta-badge">Speed {{ statblock.speed_text }}</span>
+        <span class="meta-badge">Init {% if statblock.initiative_bonus > 0 %}+{% endif %}{{ statblock.initiative_bonus }}</span>
+      </div>
+    </div>
+    <details class="feature-detail">
+      <summary>View statblock text</summary>
+      <pre class="dm-content-preview">{{ statblock.body_markdown }}</pre>
+    </details>
+    {% if can_manage_dm_content %}
+      <form method="post" action="{{ url_for('campaign_dm_content_delete_statblock', campaign_slug=campaign.slug, statblock_id=statblock.id) }}">
+        <button class="ghost-button" type="submit">Delete statblock</button>
+      </form>
+    {% endif %}
+  </article>
+{%- endmacro %}
+
 {% block title %}DM Content | {{ campaign.title }}{% endblock %}
 
 {% block content %}
@@ -43,6 +71,11 @@
                   <span>Statblock markdown file</span>
                   <input type="file" name="statblock_file" accept=".md,.markdown,text/markdown,text/plain">
                 </label>
+                <label class="field">
+                  <span>Wiki-style subsection</span>
+                  <input type="text" name="subsection" placeholder="Malverine Minions">
+                  <small class="field-help meta">Optional. Matching subsection labels group related statblocks together on this page.</small>
+                </label>
                 <button type="submit">Upload statblock</button>
               </form>
             {% else %}
@@ -53,35 +86,47 @@
           {% endif %}
 
           {% if dm_statblocks %}
-            <div class="dm-content-list">
-              {% for statblock in dm_statblocks %}
-                <article class="dm-content-item" id="dm-statblock-{{ statblock.id }}">
-                  <div class="dm-content-item__header">
-                    <div>
-                      <h3>{{ statblock.title }}</h3>
-                      <p class="meta">Source file: {{ statblock.source_filename }}</p>
+            {% if dm_statblock_show_subsections %}
+              <div class="section-list__controls" hidden data-subsection-controls>
+                <button class="ghost-button section-list__control" type="button" data-collapse-all>
+                  Collapse all
+                </button>
+                <button class="ghost-button section-list__control" type="button" data-expand-all>
+                  Expand all
+                </button>
+              </div>
+            {% endif %}
+            {% if dm_statblock_top_level %}
+              <div class="dm-content-list">
+                {% for statblock in dm_statblock_top_level %}
+                  {{ render_dm_statblock_card(campaign, statblock, can_manage_dm_content) }}
+                {% endfor %}
+              </div>
+            {% endif %}
+            {% if dm_statblock_subsection_groups %}
+              <section class="section-list">
+                {% for group in dm_statblock_subsection_groups %}
+                  <details class="section-block section-block--collapsible" data-collapsible-section open>
+                    <summary class="section-toggle-summary">
+                      <span class="section-toggle-summary__content">
+                        <span class="section-title">{{ group.name }}</span>
+                        <span class="meta">
+                          {{ group.statblocks|length }} statblock{% if group.statblocks|length != 1 %}s{% endif %}
+                        </span>
+                      </span>
+                      <span class="section-toggle-chevron" aria-hidden="true"></span>
+                    </summary>
+                    <div class="section-block__body">
+                      <div class="dm-content-list">
+                        {% for statblock in group.statblocks %}
+                          {{ render_dm_statblock_card(campaign, statblock, can_manage_dm_content) }}
+                        {% endfor %}
+                      </div>
                     </div>
-                    <div class="badge-list">
-                      {% if statblock.armor_class is not none %}
-                        <span class="meta-badge">AC {{ statblock.armor_class }}</span>
-                      {% endif %}
-                      <span class="meta-badge">HP {{ statblock.max_hp }}</span>
-                      <span class="meta-badge">Speed {{ statblock.speed_text }}</span>
-                      <span class="meta-badge">Init {% if statblock.initiative_bonus > 0 %}+{% endif %}{{ statblock.initiative_bonus }}</span>
-                    </div>
-                  </div>
-                  <details class="feature-detail">
-                    <summary>View statblock text</summary>
-                    <pre class="dm-content-preview">{{ statblock.body_markdown }}</pre>
                   </details>
-                  {% if can_manage_dm_content %}
-                    <form method="post" action="{{ url_for('campaign_dm_content_delete_statblock', campaign_slug=campaign.slug, statblock_id=statblock.id) }}">
-                      <button class="ghost-button" type="submit">Delete statblock</button>
-                    </form>
-                  {% endif %}
-                </article>
-              {% endfor %}
-            </div>
+                {% endfor %}
+              </section>
+            {% endif %}
           {% else %}
             <p class="meta">No DM statblocks have been uploaded yet.</p>
           {% endif %}
@@ -194,6 +239,34 @@
 {% endblock %}
 
 {% block scripts %}
+  {% if dm_content_subpage == "statblocks" and dm_statblock_show_subsections %}
+    <script>
+      (() => {
+        const controls = document.querySelector("[data-subsection-controls]");
+        const collapsibleSections = Array.from(document.querySelectorAll("[data-collapsible-section]"));
+        if (!controls || collapsibleSections.length === 0) {
+          return;
+        }
+
+        controls.hidden = false;
+
+        const collapseAllButton = controls.querySelector("[data-collapse-all]");
+        const expandAllButton = controls.querySelector("[data-expand-all]");
+
+        collapseAllButton?.addEventListener("click", () => {
+          collapsibleSections.forEach((section) => {
+            section.open = false;
+          });
+        });
+
+        expandAllButton?.addEventListener("click", () => {
+          collapsibleSections.forEach((section) => {
+            section.open = true;
+          });
+        });
+      })();
+    </script>
+  {% endif %}
   {% if dm_content_subpage == "staged-articles" and can_manage_session %}
     {% include "_dm_content_staged_article_scripts.html" %}
   {% endif %}
