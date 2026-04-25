@@ -13,6 +13,31 @@
 
   <div class="page-layout">
     <section class="section-list">
+      {% if shared_systems_entry_mechanics_warning %}
+        <section class="card mechanics-impact-warning" id="mechanics-impact-warning">
+          <div class="section-heading">
+            <div>
+              <h2>Mechanics Impact Review</h2>
+              <p class="meta">{{ shared_systems_entry_mechanics_warning.summary }}</p>
+            </div>
+          </div>
+          <div class="badge-list">
+            {% for surface in shared_systems_entry_mechanics_warning.surfaces %}
+              <span class="meta-badge">{{ surface }}</span>
+            {% endfor %}
+          </div>
+          <ul class="plain-list mechanics-impact-warning__signals">
+            {% for signal in shared_systems_entry_mechanics_warning.signals %}
+              <li>
+                <strong>{{ signal.label }}</strong>
+                <span class="meta">{{ signal.detail }}</span>
+              </li>
+            {% endfor %}
+          </ul>
+          <p class="meta">Saving this row does not automatically repair existing characters, combat trackers, or session references.</p>
+        </section>
+      {% endif %}
+
       <section class="card">
         <div class="section-heading">
           <div>

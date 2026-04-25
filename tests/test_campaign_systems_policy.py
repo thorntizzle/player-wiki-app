@@ -319,6 +319,107 @@ def test_shared_core_systems_edit_flow_stays_separate_from_overrides_and_custom_
         assert override.is_enabled_override is False
 
 
+def test_shared_core_systems_edit_warns_for_app_modeled_entries(app, client, sign_in, users):
+    source_id = f"WARN-{uuid4().hex[:8].upper()}"
+    source_key = source_id.lower()
+    spell_slug = f"modeled-spark-{uuid4().hex[:8]}"
+    book_slug = f"quiet-lore-{uuid4().hex[:8]}"
+    spell_entry_key = f"dnd-5e|spell|{source_key}|{spell_slug}"
+    book_entry_key = f"dnd-5e|book|{source_key}|{book_slug}"
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+        store.upsert_source(
+            library_slug,
+            source_id,
+            title="Warning Test Source",
+            license_class="open_license",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug=library_slug,
+            source_id=source_id,
+            is_enabled=True,
+            default_visibility="players",
+        )
+        store.replace_entries_for_source(
+            library_slug,
+            source_id,
+            entries=[
+                {
+                    "entry_key": spell_entry_key,
+                    "entry_type": "spell",
+                    "slug": spell_slug,
+                    "title": "Modeled Spark",
+                    "search_text": "modeled spark warning test source",
+                    "player_safe_default": True,
+                    "metadata": {"spell_support": {"mode": "known"}},
+                    "body": {"imported": True},
+                    "rendered_html": "<p>Original modeled spell body.</p>",
+                },
+                {
+                    "entry_key": book_entry_key,
+                    "entry_type": "book",
+                    "slug": book_slug,
+                    "title": "Quiet Lore",
+                    "search_text": "quiet lore warning test source",
+                    "player_safe_default": True,
+                    "metadata": {},
+                    "body": {"imported": True},
+                    "rendered_html": "<p>Reference prose only.</p>",
+                },
+            ],
+            entry_types=["spell", "book"],
+        )
+
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+
+    modeled_page = client.get(
+        f"/campaigns/linden-pass/systems/control-panel/shared-entries/{spell_slug}/edit"
+    )
+    assert modeled_page.status_code == 200
+    modeled_body = modeled_page.get_data(as_text=True)
+    assert "Mechanics Impact Review" in modeled_body
+    assert "Character tools" in modeled_body
+    assert "spell_support" in modeled_body
+    assert "does not automatically repair existing characters" in modeled_body
+    assert 'name="visibility_override"' not in modeled_body
+
+    prose_page = client.get(
+        f"/campaigns/linden-pass/systems/control-panel/shared-entries/{book_slug}/edit"
+    )
+    assert prose_page.status_code == 200
+    assert "Mechanics Impact Review" not in prose_page.get_data(as_text=True)
+
+    prose_save = client.post(
+        f"/campaigns/linden-pass/systems/control-panel/shared-entries/{book_slug}",
+        data={
+            "shared_entry_title": "Quiet Lore Revised",
+            "shared_entry_source_page": "",
+            "shared_entry_source_path": "",
+            "shared_entry_search_text": "quiet lore revised warning test source",
+            "shared_entry_player_safe_default": "1",
+            "shared_entry_metadata_json": "{}",
+            "shared_entry_body_json": '{"imported": true}',
+            "shared_entry_rendered_html": "<p>Reference prose revised.</p>",
+        },
+        follow_redirects=False,
+    )
+    assert prose_save.status_code == 302
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        entry = store.get_entry(service.get_campaign_library_slug("linden-pass"), book_entry_key)
+        assert entry is not None
+        assert entry.title == "Quiet Lore Revised"
+        assert store.get_campaign_entry_override("linden-pass", book_entry_key) is None
+
+
 def test_proprietary_source_cannot_be_made_public(client, sign_in, users, app):
     sign_in(users["dm"]["email"], users["dm"]["password"])
     form_data = build_source_form(app)

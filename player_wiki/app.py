@@ -8416,7 +8416,8 @@ def create_app() -> Flask:
         status_code: int = 200,
     ):
         campaign = load_campaign_context(campaign_slug)
-        source_state = get_systems_service().get_campaign_source_state(campaign_slug, entry.source_id)
+        systems_service = get_systems_service()
+        source_state = systems_service.get_campaign_source_state(campaign_slug, entry.source_id)
         if source_state is None:
             abort(404)
         return render_template(
@@ -8431,6 +8432,9 @@ def create_app() -> Flask:
             shared_systems_entry_form=build_shared_systems_entry_form(
                 entry=entry,
                 form_data=form_data,
+            ),
+            shared_systems_entry_mechanics_warning=(
+                systems_service.build_shared_core_entry_mechanics_impact_warning(entry)
             ),
             active_nav="systems",
         ), status_code

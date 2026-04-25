@@ -68,6 +68,63 @@ PASSIVE_CHECK_SKILL_KEYS = {"insight", "investigation", "perception"}
 RULES_REFERENCE_ENTRY_TYPES = ("book", "rule")
 RULES_REFERENCE_SEARCH_SCOPE_GLOBAL = "global"
 RULES_REFERENCE_SEARCH_SCOPE_SOURCE_ONLY = "source_only"
+MECHANICS_IMPACT_CHARACTER_ENTRY_TYPES = frozenset(
+    {
+        "background",
+        "class",
+        "classfeature",
+        "feat",
+        "item",
+        "optionalfeature",
+        "race",
+        "spell",
+        "subclass",
+        "subclassfeature",
+    }
+)
+MECHANICS_IMPACT_COMBAT_ENTRY_TYPES = frozenset({"monster"})
+MECHANICS_IMPACT_ENTRY_TYPE_LABELS = {
+    "background": "Background",
+    "class": "Class",
+    "classfeature": "Class Feature",
+    "feat": "Feat",
+    "item": "Item",
+    "monster": "Monster",
+    "optionalfeature": "Optional Feature",
+    "race": "Race",
+    "spell": "Spell",
+    "subclass": "Subclass",
+    "subclassfeature": "Subclass Feature",
+}
+MECHANICS_IMPACT_RULE_METADATA_KEYS = {
+    "formula": "formula",
+    "formulas": "formulas",
+    "rulefacets": "rule_facets",
+    "rulekey": "rule_key",
+}
+MECHANICS_IMPACT_CHARACTER_METADATA_KEYS = {
+    "baserulerefs": "base_rule_refs",
+    "characteroption": "character_option",
+    "characterprogression": "character_progression",
+    "derivedstat": "derived_stat",
+    "derivedstats": "derived_stats",
+    "managedresource": "managed_resource",
+    "managedresources": "managed_resources",
+    "modeledeffects": "modeled_effects",
+    "spellmanager": "spell_manager",
+    "spellsupport": "spell_support",
+}
+MECHANICS_IMPACT_COMBAT_METADATA_KEYS = {
+    "abilities": "abilities",
+    "actions": "actions",
+    "bonusactions": "bonus_actions",
+    "hp": "hp",
+    "initiative": "initiative",
+    "legendaryactions": "legendary_actions",
+    "reactions": "reactions",
+    "speed": "speed",
+    "traits": "traits",
+}
 PHB_BOOK_SECTION_RULE_KEY_MAP = {
     # Only link section anchors whose rule identity already exists as a stable RULES entry.
     "2-choose-a-class--hit-points-and-hit-dice": ("hit-points-and-hit-dice",),
@@ -664,6 +721,69 @@ class SystemsMonsterCombatSeed:
     initiative_bonus: int
 
 
+@dataclass(slots=True)
+class SystemsMechanicsImpactSignal:
+    label: str
+    detail: str
+    surface: str
+
+
+@dataclass(slots=True)
+class SystemsMechanicsImpactWarning:
+    summary: str
+    surfaces: tuple[str, ...]
+    signals: tuple[SystemsMechanicsImpactSignal, ...]
+
+
+def _find_structured_key_paths(
+    value: object,
+    target_keys: dict[str, str],
+    *,
+    prefix: str = "",
+    limit: int = 6,
+) -> list[str]:
+    if limit <= 0:
+        return []
+    matches: list[str] = []
+    if isinstance(value, dict):
+        for raw_key, child in value.items():
+            key_name = str(raw_key)
+            key_path = f"{prefix}.{key_name}" if prefix else key_name
+            display_key = target_keys.get(normalize_lookup(key_name))
+            if display_key:
+                matches.append(key_path if key_path == display_key else f"{key_path} ({display_key})")
+                if len(matches) >= limit:
+                    return matches
+            matches.extend(
+                _find_structured_key_paths(
+                    child,
+                    target_keys,
+                    prefix=key_path,
+                    limit=limit - len(matches),
+                )
+            )
+            if len(matches) >= limit:
+                return matches
+    elif isinstance(value, list):
+        child_prefix = f"{prefix}[]" if prefix else "[]"
+        for child in value:
+            matches.extend(
+                _find_structured_key_paths(
+                    child,
+                    target_keys,
+                    prefix=child_prefix,
+                    limit=limit - len(matches),
+                )
+            )
+            if len(matches) >= limit:
+                return matches
+    return matches
+
+
+def _format_structured_key_paths(paths: list[str]) -> str:
+    return ", ".join(paths[:6])
+
+
 class SystemsService:
     def __init__(self, store: SystemsStore, repository_store: RepositoryStore) -> None:
         self.store = store
@@ -909,6 +1029,115 @@ class SystemsService:
             can_set_private=True,
         )
         return entry
+
+    def build_shared_core_entry_mechanics_impact_warning(
+        self,
+        entry: SystemsEntryRecord,
+    ) -> SystemsMechanicsImpactWarning | None:
+        entry_type = str(entry.entry_type or "").strip().lower()
+        metadata = dict(entry.metadata or {})
+        body = dict(entry.body or {})
+        signals: list[SystemsMechanicsImpactSignal] = []
+        surfaces: set[str] = set()
+
+        def add_signal(label: str, detail: str, surface: str) -> None:
+            surfaces.add(surface)
+            signals.append(
+                SystemsMechanicsImpactSignal(
+                    label=label,
+                    detail=detail,
+                    surface=surface,
+                )
+            )
+
+        if entry_type in MECHANICS_IMPACT_CHARACTER_ENTRY_TYPES:
+            entry_type_label = MECHANICS_IMPACT_ENTRY_TYPE_LABELS.get(
+                entry_type,
+                entry.entry_type.replace("_", " ").title(),
+            )
+            add_signal(
+                "Character-facing entry type",
+                (
+                    f"{entry_type_label} entries can feed native "
+                    "character creation, level-up, sheet links, spell or equipment catalogs, "
+                    "or campaign option overlays when this source is enabled."
+                ),
+                "Character tools",
+            )
+
+        if entry_type in MECHANICS_IMPACT_COMBAT_ENTRY_TYPES:
+            add_signal(
+                "Combat-facing entry type",
+                (
+                    "Monster entries can seed combat NPCs; HP, speed, and Dexterity-derived "
+                    "initiative are copied into combatants when the encounter is created."
+                ),
+                "Combat seeding",
+            )
+
+        rules_key_paths = _find_structured_key_paths(metadata, MECHANICS_IMPACT_RULE_METADATA_KEYS)
+        rules_body_key_paths = _find_structured_key_paths(body, MECHANICS_IMPACT_RULE_METADATA_KEYS)
+        if entry.source_id == DND5E_RULES_REFERENCE_SOURCE_ID or rules_key_paths or rules_body_key_paths:
+            details = []
+            if entry.source_id == DND5E_RULES_REFERENCE_SOURCE_ID:
+                details.append("the shared RULES source")
+            if rules_key_paths:
+                details.append(f"metadata keys {_format_structured_key_paths(rules_key_paths)}")
+            if rules_body_key_paths:
+                details.append(f"body keys {_format_structured_key_paths(rules_body_key_paths)}")
+            add_signal(
+                "Rules reference identity",
+                (
+                    "This row carries stable rules-reference identity used by related-rule "
+                    f"links and character-math reference pages ({'; '.join(details)})."
+                ),
+                "Rules references",
+            )
+
+        character_key_paths = _find_structured_key_paths(metadata, MECHANICS_IMPACT_CHARACTER_METADATA_KEYS)
+        character_body_key_paths = _find_structured_key_paths(body, MECHANICS_IMPACT_CHARACTER_METADATA_KEYS)
+        if character_key_paths or character_body_key_paths:
+            details = []
+            if character_key_paths:
+                details.append(f"metadata keys {_format_structured_key_paths(character_key_paths)}")
+            if character_body_key_paths:
+                details.append(f"body keys {_format_structured_key_paths(character_body_key_paths)}")
+            add_signal(
+                "Structured character mechanics",
+                (
+                    "Structured hooks on this row can be read by character option, progression, "
+                    f"spell, resource, or derived-stat behavior ({'; '.join(details)})."
+                ),
+                "Character tools",
+            )
+
+        combat_key_paths = _find_structured_key_paths(metadata, MECHANICS_IMPACT_COMBAT_METADATA_KEYS)
+        combat_body_key_paths = _find_structured_key_paths(body, MECHANICS_IMPACT_COMBAT_METADATA_KEYS)
+        if combat_key_paths or combat_body_key_paths:
+            details = []
+            if combat_key_paths:
+                details.append(f"metadata keys {_format_structured_key_paths(combat_key_paths)}")
+            if combat_body_key_paths:
+                details.append(f"body keys {_format_structured_key_paths(combat_body_key_paths)}")
+            add_signal(
+                "Structured combat mechanics",
+                (
+                    "Structured tactical fields on this row can affect combat seeding or "
+                    f"encounter/session reference surfaces ({'; '.join(details)})."
+                ),
+                "Combat seeding",
+            )
+
+        if not signals:
+            return None
+        return SystemsMechanicsImpactWarning(
+            summary=(
+                "This shared/core Systems row participates in app-modeled behavior. "
+                "Review the impacted surfaces before saving shared-library edits."
+            ),
+            surfaces=tuple(sorted(surfaces)),
+            signals=tuple(signals),
+        )
 
     def update_shared_core_entry(
         self,
