@@ -103,11 +103,34 @@
         return diagnosticsTools.recordMetric(normalizedAction, metric);
       };
 
+      function setBusy(isBusy) {
+        if (!liveRoot.isConnected) {
+          return;
+        }
+        if (isBusy) {
+          liveRoot.setAttribute("aria-busy", "true");
+          liveRoot.dataset.loading = "1";
+        } else {
+          liveRoot.removeAttribute("aria-busy");
+          liveRoot.dataset.loading = "0";
+        }
+      }
+
+      function cancelActivePreview() {
+        activeRequestId += 1;
+        if (activeController) {
+          activeController.abort();
+          activeController = null;
+        }
+        setBusy(false);
+      }
+
       function scheduleRefresh(regionIds, delayMs) {
         if (!Array.isArray(regionIds) || regionIds.length === 0) {
           return;
         }
         pendingRegionIds = mergeRegionIds(pendingRegionIds, regionIds);
+        cancelActivePreview();
         window.clearTimeout(refreshTimer);
         refreshTimer = window.setTimeout(() => {
           const nextRegionIds = pendingRegionIds.slice();
@@ -135,9 +158,9 @@
         if (activeController) {
           activeController.abort();
         }
-        activeController = new AbortController();
-        liveRoot.setAttribute("aria-busy", "true");
-        liveRoot.dataset.loading = "1";
+        const controller = new AbortController();
+        activeController = controller;
+        setBusy(true);
         try {
           const previewUrl = typeof queryOverride === "string" && queryOverride
             ? queryOverride
@@ -146,7 +169,7 @@
           const response = await fetch(previewUrl, {
             credentials: "same-origin",
             headers: {"X-Requested-With": "XMLHttpRequest"},
-            signal: activeController.signal,
+            signal: controller.signal,
           });
           if (!response.ok || requestId !== activeRequestId) {
             return null;
@@ -210,9 +233,11 @@
           }
           return null;
         } finally {
-          if (liveRoot.isConnected) {
-            liveRoot.removeAttribute("aria-busy");
-            liveRoot.dataset.loading = "0";
+          if (activeController === controller) {
+            activeController = null;
+          }
+          if (requestId === activeRequestId) {
+            setBusy(false);
           }
         }
       }
@@ -236,7 +261,7 @@
         if (config.trigger !== "input" || config.regionIds.length === 0) {
           return;
         }
-        scheduleRefresh(config.regionIds, config.debounceMs || 350);
+        scheduleRefresh(config.regionIds, config.debounceMs || 650);
       });
 
       form.addEventListener(

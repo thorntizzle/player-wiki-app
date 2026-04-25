@@ -494,32 +494,32 @@ def _builder_context_fixture() -> dict[str, object]:
             "str": {
                 "live_preview_trigger": "input",
                 "live_preview_regions": "preview-summary,preview-spells,preview-attacks",
-                "live_preview_debounce_ms": 350,
+                "live_preview_debounce_ms": 650,
             },
             "dex": {
                 "live_preview_trigger": "input",
                 "live_preview_regions": "preview-summary,preview-spells,preview-attacks",
-                "live_preview_debounce_ms": 350,
+                "live_preview_debounce_ms": 650,
             },
             "con": {
                 "live_preview_trigger": "input",
                 "live_preview_regions": "preview-summary,preview-spells,preview-attacks",
-                "live_preview_debounce_ms": 350,
+                "live_preview_debounce_ms": 650,
             },
             "int": {
                 "live_preview_trigger": "input",
                 "live_preview_regions": "preview-summary,preview-spells,preview-attacks",
-                "live_preview_debounce_ms": 350,
+                "live_preview_debounce_ms": 650,
             },
             "wis": {
                 "live_preview_trigger": "input",
                 "live_preview_regions": "preview-summary,preview-spells,preview-attacks",
-                "live_preview_debounce_ms": 350,
+                "live_preview_debounce_ms": 650,
             },
             "cha": {
                 "live_preview_trigger": "input",
                 "live_preview_regions": "preview-summary,preview-spells,preview-attacks",
-                "live_preview_debounce_ms": 350,
+                "live_preview_debounce_ms": 650,
             },
         },
         "preview_region_ids": [
@@ -617,7 +617,7 @@ def _level_up_context_fixture() -> dict[str, object]:
             "hp_gain": {
                 "live_preview_trigger": "input",
                 "live_preview_regions": "preview-summary",
-                "live_preview_debounce_ms": 350,
+                "live_preview_debounce_ms": 650,
             },
         },
         "preview_region_ids": [
@@ -22133,7 +22133,7 @@ def test_build_level_one_builder_context_marks_choice_fields_with_live_preview_r
         builder_context["field_live_preview"]["str"],
         trigger="input",
         regions="preview-summary,preview-spells,preview-attacks",
-        debounce_ms=350,
+        debounce_ms=650,
     )
     _assert_live_preview_metadata(
         class_option_field,
@@ -22418,7 +22418,7 @@ def test_build_native_level_up_context_assigns_targeted_live_preview_regions_for
         context["field_live_preview"]["hp_gain"],
         trigger="input",
         regions="preview-summary",
-        debounce_ms=350,
+        debounce_ms=650,
     )
     _assert_live_preview_metadata(
         _find_builder_field(context, "levelup_asi_mode_1"),
@@ -22514,7 +22514,10 @@ def test_character_builder_page_renders_top_level_live_preview_metadata(app, cli
     assert 'name="str"' in html
     assert 'data-live-preview-trigger="input"' in html
     assert 'data-live-preview-regions="preview-summary,preview-spells,preview-attacks"' in html
-    assert 'data-live-preview-debounce-ms="350"' in html
+    assert 'data-live-preview-debounce-ms="650"' in html
+    assert "function cancelActivePreview()" in html
+    assert "cancelActivePreview();" in html
+    assert "if (requestId === activeRequestId)" in html
 
 
 def test_character_builder_loading_styles_do_not_dim_live_builder_surfaces():
@@ -22973,7 +22976,7 @@ def test_level_up_page_renders_hp_gain_as_summary_only_live_preview(app, client,
     assert 'name="hp_gain"' in html
     assert 'data-live-preview-trigger="input"' in html
     assert 'data-live-preview-regions="preview-summary"' in html
-    assert 'data-live-preview-debounce-ms="350"' in html
+    assert 'data-live-preview-debounce-ms="650"' in html
 
 
 def test_level_one_builder_applies_fighting_initiate_optionalfeature_choice_to_attacks():

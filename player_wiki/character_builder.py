@@ -156,6 +156,9 @@ LEVEL_UP_PREVIEW_REGION_IDS = (
     PREVIEW_SPELL_SLOTS_REGION_ID,
 )
 LEVEL_UP_LIVE_REGION_IDS = (ADVANCEMENT_REGION_ID, CHOICE_SECTIONS_REGION_ID, *LEVEL_UP_PREVIEW_REGION_IDS)
+BUILDER_CHOICE_PREVIEW_DEBOUNCE_MS = 120
+BUILDER_MODE_PREVIEW_DEBOUNCE_MS = 100
+BUILDER_TEXT_PREVIEW_DEBOUNCE_MS = 650
 CAMPAIGN_MIXED_SOURCE_SUBSECTIONS_BY_KIND = {
     "species": {"species"},
     "background": {"background", "backgrounds"},
@@ -6537,28 +6540,28 @@ def _level_one_field_live_preview_metadata() -> dict[str, dict[str, Any]]:
             preview_region_ids=LEVEL_ONE_PREVIEW_REGION_IDS,
             live_region_ids=LEVEL_ONE_LIVE_REGION_IDS,
             trigger="change",
-            debounce_ms=120,
+            debounce_ms=BUILDER_CHOICE_PREVIEW_DEBOUNCE_MS,
         ),
         "subclass_slug": _top_level_field_live_preview_metadata(
             field_name="subclass_slug",
             preview_region_ids=LEVEL_ONE_PREVIEW_REGION_IDS,
             live_region_ids=LEVEL_ONE_LIVE_REGION_IDS,
             trigger="change",
-            debounce_ms=120,
+            debounce_ms=BUILDER_CHOICE_PREVIEW_DEBOUNCE_MS,
         ),
         "species_slug": _top_level_field_live_preview_metadata(
             field_name="species_slug",
             preview_region_ids=LEVEL_ONE_PREVIEW_REGION_IDS,
             live_region_ids=LEVEL_ONE_LIVE_REGION_IDS,
             trigger="change",
-            debounce_ms=120,
+            debounce_ms=BUILDER_CHOICE_PREVIEW_DEBOUNCE_MS,
         ),
         "background_slug": _top_level_field_live_preview_metadata(
             field_name="background_slug",
             preview_region_ids=LEVEL_ONE_PREVIEW_REGION_IDS,
             live_region_ids=LEVEL_ONE_LIVE_REGION_IDS,
             trigger="change",
-            debounce_ms=120,
+            debounce_ms=BUILDER_CHOICE_PREVIEW_DEBOUNCE_MS,
         ),
     }
     for ability_key in ABILITY_KEYS:
@@ -6567,7 +6570,7 @@ def _level_one_field_live_preview_metadata() -> dict[str, dict[str, Any]]:
             preview_region_ids=LEVEL_ONE_PREVIEW_REGION_IDS,
             live_region_ids=LEVEL_ONE_LIVE_REGION_IDS,
             trigger="input",
-            debounce_ms=350,
+            debounce_ms=BUILDER_TEXT_PREVIEW_DEBOUNCE_MS,
         )
     return metadata
 
@@ -6579,35 +6582,35 @@ def _level_up_field_live_preview_metadata() -> dict[str, dict[str, Any]]:
             preview_region_ids=LEVEL_UP_PREVIEW_REGION_IDS,
             live_region_ids=LEVEL_UP_LIVE_REGION_IDS,
             trigger="change",
-            debounce_ms=100,
+            debounce_ms=BUILDER_MODE_PREVIEW_DEBOUNCE_MS,
         ),
         "new_class_slug": _top_level_field_live_preview_metadata(
             field_name="new_class_slug",
             preview_region_ids=LEVEL_UP_PREVIEW_REGION_IDS,
             live_region_ids=LEVEL_UP_LIVE_REGION_IDS,
             trigger="change",
-            debounce_ms=100,
+            debounce_ms=BUILDER_MODE_PREVIEW_DEBOUNCE_MS,
         ),
         "new_subclass_slug": _top_level_field_live_preview_metadata(
             field_name="new_subclass_slug",
             preview_region_ids=LEVEL_UP_PREVIEW_REGION_IDS,
             live_region_ids=LEVEL_UP_LIVE_REGION_IDS,
             trigger="change",
-            debounce_ms=100,
+            debounce_ms=BUILDER_MODE_PREVIEW_DEBOUNCE_MS,
         ),
         "target_class_row_id": _top_level_field_live_preview_metadata(
             field_name="target_class_row_id",
             preview_region_ids=LEVEL_UP_PREVIEW_REGION_IDS,
             live_region_ids=LEVEL_UP_LIVE_REGION_IDS,
             trigger="change",
-            debounce_ms=100,
+            debounce_ms=BUILDER_MODE_PREVIEW_DEBOUNCE_MS,
         ),
         "hp_gain": _top_level_field_live_preview_metadata(
             field_name="hp_gain",
             preview_region_ids=LEVEL_UP_PREVIEW_REGION_IDS,
             live_region_ids=LEVEL_UP_LIVE_REGION_IDS,
             trigger="input",
-            debounce_ms=350,
+            debounce_ms=BUILDER_TEXT_PREVIEW_DEBOUNCE_MS,
         ),
     }
 
@@ -6633,7 +6636,7 @@ def _annotate_builder_choice_sections(
                 _live_preview_field_metadata(
                     trigger="change",
                     region_ids=region_ids,
-                    debounce_ms=120,
+                    debounce_ms=BUILDER_CHOICE_PREVIEW_DEBOUNCE_MS,
                 )
             )
             section_copy["fields"].append(field)
