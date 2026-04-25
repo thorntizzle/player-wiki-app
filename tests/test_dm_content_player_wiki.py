@@ -4,6 +4,8 @@ from pathlib import Path
 
 import yaml
 
+from player_wiki.campaign_content_service import write_campaign_page_file
+
 
 def _page_form(**overrides):
     payload = {
@@ -34,6 +36,21 @@ def _campaign_page_path(app, page_ref: str) -> Path:
         / "content"
         / f"{page_ref}.md"
     )
+
+
+def _write_campaign_page(app, page_ref: str, *, metadata: dict[str, object], body_markdown: str):
+    with app.app_context():
+        campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
+        assert campaign is not None
+        record = write_campaign_page_file(
+            campaign,
+            page_ref,
+            metadata=metadata,
+            body_markdown=body_markdown,
+            page_store=app.extensions["campaign_page_store"],
+        )
+        app.extensions["repository_store"].refresh()
+        return record
 
 
 def test_dm_content_player_wiki_subpage_is_hidden_from_players(client, sign_in, users):
@@ -141,3 +158,87 @@ def test_dm_can_update_unpublish_and_delete_player_wiki_page(app, client, sign_i
         campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
         assert campaign is not None
         assert "notes/field-report" not in campaign.pages
+
+
+def test_dm_hard_delete_blocks_player_wiki_page_with_backlinks(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/dm-content/player-wiki/pages",
+        data=_page_form(),
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/dm-content/player-wiki/pages",
+        data=_page_form(
+            title="Followup Note",
+            slug_leaf="followup-note",
+            summary="A note that links back to the field report.",
+            body_markdown="## Description\n\nReview [[Field Report]] before closing the job.",
+        ),
+        follow_redirects=False,
+    )
+
+    landing = client.get("/campaigns/linden-pass/dm-content/player-wiki")
+    landing_body = landing.get_data(as_text=True)
+    assert "Hard delete blocked" in landing_body
+    assert "Backlinked from Followup Note." in landing_body
+
+    page_path = _campaign_page_path(app, "notes/field-report")
+    delete_response = client.post(
+        "/campaigns/linden-pass/dm-content/player-wiki/pages/notes/field-report/delete",
+        data={"confirm_delete": "1"},
+        follow_redirects=True,
+    )
+
+    assert delete_response.status_code == 200
+    delete_body = delete_response.get_data(as_text=True)
+    assert "Hard delete blocked. Unpublish/archive the page or remove:" in delete_body
+    assert "Backlinked from Followup Note." in delete_body
+    assert page_path.exists()
+
+
+def test_dm_hard_delete_blocks_player_wiki_page_with_character_hooks_and_session_provenance(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    _write_campaign_page(
+        app,
+        "mechanics/harbor-ritual-book",
+        metadata={
+            "title": "Harbor Ritual Book",
+            "slug": "mechanics/harbor-ritual-book",
+            "section": "Mechanics",
+            "type": "mechanic",
+            "summary": "A campaign mechanic that can feed character tools.",
+            "source_ref": "session-article:linden-pass:99",
+            "published": True,
+            "character_option": {
+                "kind": "feature",
+                "name": "Harbor Ritual Book",
+            },
+        },
+        body_markdown="## Description\n\nA reference page with character-facing hooks.",
+    )
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    landing = client.get("/campaigns/linden-pass/dm-content/player-wiki")
+    landing_body = landing.get_data(as_text=True)
+    assert "Harbor Ritual Book" in landing_body
+    assert "Character hooks: character option metadata." in landing_body
+    assert "Session provenance: converted session article." in landing_body
+
+    page_path = _campaign_page_path(app, "mechanics/harbor-ritual-book")
+    delete_response = client.post(
+        "/campaigns/linden-pass/dm-content/player-wiki/pages/mechanics/harbor-ritual-book/delete",
+        data={"confirm_delete": "1"},
+        follow_redirects=True,
+    )
+
+    assert delete_response.status_code == 200
+    delete_body = delete_response.get_data(as_text=True)
+    assert "Hard delete blocked. Unpublish/archive the page or remove:" in delete_body
+    assert "Character hooks: character option metadata." in delete_body
+    assert "Session provenance: converted session article." in delete_body
+    assert page_path.exists()

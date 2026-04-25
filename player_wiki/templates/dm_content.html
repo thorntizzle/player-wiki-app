@@ -214,11 +214,22 @@
                       {% if wiki_page.image_path %}
                         <span class="meta-badge">Image</span>
                       {% endif %}
+                      <span class="meta-badge">{{ wiki_page.removal_status_label }}</span>
                     </div>
                   </div>
                   {% if wiki_page.source_ref %}
                     <p class="meta">Source: {{ wiki_page.source_ref }}</p>
                   {% endif %}
+                  <div class="dm-content-removal-safety">
+                    <p class="meta"><strong>Removal safety:</strong> {{ wiki_page.removal_guidance }}</p>
+                    {% if wiki_page.hard_delete_blockers %}
+                      <ul class="plain-list">
+                        {% for blocker in wiki_page.hard_delete_blockers %}
+                          <li class="meta">{{ blocker }}</li>
+                        {% endfor %}
+                      </ul>
+                    {% endif %}
+                  </div>
                   <div class="dm-content-item__actions">
                     <a class="ghost-button" href="{{ url_for('campaign_dm_content_edit_player_wiki_page', campaign_slug=campaign.slug, page_ref=wiki_page.page_ref) }}#dm-content-player-wiki-editor">Edit</a>
                     {% if wiki_page.is_visible %}
@@ -226,16 +237,18 @@
                     {% endif %}
                     {% if wiki_page.published %}
                       <form method="post" action="{{ url_for('campaign_dm_content_unpublish_player_wiki_page', campaign_slug=campaign.slug, page_ref=wiki_page.page_ref) }}">
-                        <button class="ghost-button" type="submit">Unpublish</button>
+                        <button class="ghost-button" type="submit">Unpublish/archive</button>
                       </form>
                     {% endif %}
-                    <form method="post" action="{{ url_for('campaign_dm_content_delete_player_wiki_page', campaign_slug=campaign.slug, page_ref=wiki_page.page_ref) }}" class="dm-content-delete-form">
-                      <label class="checkbox-label">
-                        <input type="checkbox" name="confirm_delete" value="1">
-                        Confirm hard delete
-                      </label>
-                      <button class="ghost-button" type="submit">Delete file</button>
-                    </form>
+                    {% if wiki_page.can_hard_delete %}
+                      <form method="post" action="{{ url_for('campaign_dm_content_delete_player_wiki_page', campaign_slug=campaign.slug, page_ref=wiki_page.page_ref) }}" class="dm-content-delete-form">
+                        <label class="checkbox-label">
+                          <input type="checkbox" name="confirm_delete" value="1">
+                          Confirm hard delete
+                        </label>
+                        <button class="ghost-button" type="submit">Delete file</button>
+                      </form>
+                    {% endif %}
                   </div>
                 </article>
               {% endfor %}

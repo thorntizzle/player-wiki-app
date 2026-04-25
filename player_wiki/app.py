@@ -142,6 +142,7 @@ from .db import get_db_query_metrics, register_db, reset_db_query_metrics
 from .models import section_sort_key, subsection_sort_key
 from .session_article_publisher import (
     SESSION_ARTICLE_SECTION_TARGETS,
+    SESSION_ARTICLE_SOURCE_REF_PREFIX,
     SessionArticlePublishError,
     build_default_publish_options,
     find_published_page_for_session_article,
@@ -701,11 +702,211 @@ def normalize_dm_player_wiki_form(campaign, *, form_data, existing_record=None) 
     return page_ref, metadata, body_markdown
 
 
-def build_dm_player_wiki_page_summary(campaign, record) -> dict[str, object]:
+def normalize_dm_player_wiki_ref_value(value: object) -> str:
+    if isinstance(value, dict):
+        for key in ("page_ref", "slug", "page_slug"):
+            normalized = normalize_dm_player_wiki_ref_value(value.get(key))
+            if normalized:
+                return normalized
+        return ""
+
+    normalized = str(value or "").strip().replace("\\", "/").strip("/")
+    if normalized.lower().endswith(".md"):
+        normalized = normalized[:-3]
+    return normalized
+
+
+def collect_character_definition_page_refs(value: object) -> set[str]:
+    refs: set[str] = set()
+
+    def visit(node: object) -> None:
+        if isinstance(node, dict):
+            for key, item in node.items():
+                normalized_key = str(key or "")
+                if normalized_key == "page_ref" or normalized_key.endswith("_page_ref"):
+                    normalized_ref = normalize_dm_player_wiki_ref_value(item)
+                    if normalized_ref:
+                        refs.add(normalized_ref)
+                visit(item)
+        elif isinstance(node, list):
+            for item in node:
+                visit(item)
+
+    visit(value)
+    return refs
+
+
+def format_dm_player_wiki_usage_sample(values: list[str], *, limit: int = 3) -> str:
+    unique_values: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        cleaned = " ".join(str(value or "").split()).strip()
+        normalized = cleaned.casefold()
+        if not cleaned or normalized in seen:
+            continue
+        seen.add(normalized)
+        unique_values.append(cleaned)
+
+    if not unique_values:
+        return ""
+
+    shown = unique_values[:limit]
+    label = ", ".join(shown)
+    remaining = len(unique_values) - len(shown)
+    if remaining > 0:
+        label = f"{label}, and {remaining} more"
+    return label
+
+
+def build_dm_player_wiki_removal_safety_index(
+    campaign_slug: str,
+    campaign,
+    page_records: list[object],
+    *,
+    session_articles: list[object],
+    character_records: list[object],
+) -> dict[str, dict[str, object]]:
+    page_ref_lookup: defaultdict[str, set[str]] = defaultdict(set)
+    link_lookup: defaultdict[str, set[str]] = defaultdict(set)
+    page_titles: dict[str, str] = {}
+
+    for record in page_records:
+        page = getattr(record, "page", None)
+        page_ref = str(getattr(record, "page_ref", "") or "").strip()
+        if not page_ref or page is None:
+            continue
+
+        page_titles[page_ref] = str(getattr(page, "title", "") or page_ref).strip()
+        for raw_ref in (page_ref, getattr(page, "route_slug", "")):
+            normalized_ref = normalize_dm_player_wiki_ref_value(raw_ref).casefold()
+            if normalized_ref:
+                page_ref_lookup[normalized_ref].add(page_ref)
+
+        for raw_key in (
+            page_ref,
+            getattr(page, "route_slug", ""),
+            getattr(page, "title", ""),
+            *list(getattr(page, "aliases", []) or []),
+        ):
+            normalized_key = normalize_lookup(str(raw_key or ""))
+            if normalized_key:
+                link_lookup[normalized_key].add(page_ref)
+
+    backlinks_by_page_ref: defaultdict[str, list[str]] = defaultdict(list)
+    for record in page_records:
+        source_page = getattr(record, "page", None)
+        source_page_ref = str(getattr(record, "page_ref", "") or "").strip()
+        if not source_page_ref or source_page is None:
+            continue
+
+        source_title = str(getattr(source_page, "title", "") or source_page_ref).strip()
+        for raw_target in list(getattr(source_page, "raw_link_targets", []) or []):
+            normalized_target = normalize_lookup(str(raw_target or ""))
+            for target_page_ref in sorted(link_lookup.get(normalized_target, set())):
+                if target_page_ref == source_page_ref:
+                    continue
+                backlinks_by_page_ref[target_page_ref].append(source_title)
+
+    character_hooks_by_page_ref: defaultdict[str, list[str]] = defaultdict(list)
+    for record in page_records:
+        page_ref = str(getattr(record, "page_ref", "") or "").strip()
+        metadata = dict(getattr(record, "metadata", {}) or {})
+        if not page_ref:
+            continue
+        if metadata.get("character_option"):
+            character_hooks_by_page_ref[page_ref].append("character option metadata")
+        if metadata.get("character_progression"):
+            character_hooks_by_page_ref[page_ref].append("character progression metadata")
+
+    for character_record in character_records:
+        definition = getattr(character_record, "definition", None)
+        if definition is None:
+            continue
+        character_name = str(getattr(definition, "name", "") or "").strip()
+        if not character_name:
+            character_name = str(getattr(definition, "character_slug", "") or "character").strip()
+        for raw_ref in collect_character_definition_page_refs(definition.to_dict()):
+            normalized_ref = normalize_dm_player_wiki_ref_value(raw_ref).casefold()
+            for page_ref in sorted(page_ref_lookup.get(normalized_ref, set())):
+                character_hooks_by_page_ref[page_ref].append(f"{character_name} sheet link")
+
+    session_articles_by_id = {
+        int(getattr(article, "id", 0)): article
+        for article in session_articles
+        if int(getattr(article, "id", 0) or 0) > 0
+    }
+    session_provenance_by_page_ref: defaultdict[str, list[str]] = defaultdict(list)
+    for article in session_articles:
+        source_kind, source_ref = parse_session_article_source_ref(
+            str(getattr(article, "source_page_ref", "") or "")
+        )
+        if source_kind != SESSION_ARTICLE_SOURCE_KIND_PAGE:
+            continue
+        normalized_ref = normalize_dm_player_wiki_ref_value(source_ref).casefold()
+        article_title = str(getattr(article, "title", "") or f"Article {getattr(article, 'id', '')}").strip()
+        article_status = str(getattr(article, "status", "") or "").strip()
+        article_label = f"{article_title} ({article_status})" if article_status else article_title
+        for page_ref in sorted(page_ref_lookup.get(normalized_ref, set())):
+            session_provenance_by_page_ref[page_ref].append(article_label)
+
+    safety_index: dict[str, dict[str, object]] = {}
+    for record in page_records:
+        page = getattr(record, "page", None)
+        page_ref = str(getattr(record, "page_ref", "") or "").strip()
+        if not page_ref or page is None:
+            continue
+
+        blockers: list[str] = []
+        backlink_sample = format_dm_player_wiki_usage_sample(backlinks_by_page_ref[page_ref])
+        if backlink_sample:
+            blockers.append(f"Backlinked from {backlink_sample}.")
+
+        character_hook_sample = format_dm_player_wiki_usage_sample(character_hooks_by_page_ref[page_ref])
+        if character_hook_sample:
+            blockers.append(f"Character hooks: {character_hook_sample}.")
+
+        source_ref = str(getattr(page, "source_ref", "") or "").strip()
+        session_provenance = list(session_provenance_by_page_ref[page_ref])
+        if source_ref.startswith(SESSION_ARTICLE_SOURCE_REF_PREFIX):
+            source_tail = source_ref[len(SESSION_ARTICLE_SOURCE_REF_PREFIX) :].strip()
+            article_label = "converted session article"
+            if ":" in source_tail:
+                source_campaign_slug, article_id_text = source_tail.rsplit(":", 1)
+                if source_campaign_slug == campaign_slug and article_id_text.isdigit():
+                    article = session_articles_by_id.get(int(article_id_text))
+                    if article is not None:
+                        article_status = str(getattr(article, "status", "") or "").strip()
+                        article_label = str(getattr(article, "title", "") or article_label).strip()
+                        if article_status:
+                            article_label = f"{article_label} ({article_status})"
+            session_provenance.append(article_label)
+
+        session_sample = format_dm_player_wiki_usage_sample(session_provenance)
+        if session_sample:
+            blockers.append(f"Session provenance: {session_sample}.")
+
+        can_hard_delete = not blockers
+        safety_index[page_ref] = {
+            "can_hard_delete": can_hard_delete,
+            "hard_delete_blockers": blockers,
+            "removal_status_label": "Hard delete available" if can_hard_delete else "Hard delete blocked",
+            "removal_guidance": (
+                "Hard delete is available after confirmation."
+                if can_hard_delete
+                else "Unpublish/archive this page or clear the references before deleting its file."
+            ),
+            "page_title": page_titles.get(page_ref, page_ref),
+        }
+
+    return safety_index
+
+
+def build_dm_player_wiki_page_summary(campaign, record, *, removal_safety=None) -> dict[str, object]:
     page = record.page
     route_slug = page.route_slug
     route_page = campaign.pages.get(route_slug)
     is_visible = campaign.is_page_visible(route_page or page)
+    removal_safety = dict(removal_safety or {})
     search_text = " ".join(
         str(part or "")
         for part in (
@@ -740,6 +941,10 @@ def build_dm_player_wiki_page_summary(campaign, record) -> dict[str, object]:
         "status_label": status_label,
         "route_slug": route_slug,
         "search_text": search_text,
+        "can_hard_delete": bool(removal_safety.get("can_hard_delete", True)),
+        "hard_delete_blockers": list(removal_safety.get("hard_delete_blockers", []) or []),
+        "removal_status_label": str(removal_safety.get("removal_status_label") or "Hard delete available"),
+        "removal_guidance": str(removal_safety.get("removal_guidance") or "Hard delete is available after confirmation."),
     }
 
 
@@ -3233,13 +3438,14 @@ def create_app() -> Flask:
                     else f"DM Content currently requires {dm_content_visibility_label} access."
                 ),
                 capabilities=[
-                    "Create, edit, unpublish, or delete player wiki Markdown pages from the Player Wiki lane.",
+                    "Create, edit, unpublish/archive, or safely hard-delete player wiki Markdown pages from the Player Wiki lane.",
                     "Store uploaded statblocks for later encounter seeding.",
                     "Prepare staged session articles for later reveal.",
                     "Maintain custom combat conditions alongside the built-in DND-5E list.",
                 ],
                 limits=[
                     "Player wiki edits still need normal spoiler and reveal-safety judgment before publication.",
+                    "Hard delete is blocked when a page still has wiki backlinks, character hooks, or session provenance.",
                     "The statblock parser is currently implemented for DND-5E-style markdown.",
                     "Uploads should be UTF-8 markdown with recognizable Armor Class, Hit Points, and Speed lines.",
                     "Custom conditions augment the built-in list rather than replacing it.",
@@ -5898,8 +6104,19 @@ def create_app() -> Flask:
                 page_store=get_campaign_page_store(),
             )
             player_wiki_page_count = len(player_wiki_records)
+            player_wiki_removal_safety = build_dm_player_wiki_removal_safety_index(
+                campaign_slug,
+                campaign,
+                player_wiki_records,
+                session_articles=get_campaign_session_service().list_articles(campaign_slug),
+                character_records=get_character_repository().list_characters(campaign_slug),
+            )
             player_wiki_pages = [
-                build_dm_player_wiki_page_summary(campaign, record)
+                build_dm_player_wiki_page_summary(
+                    campaign,
+                    record,
+                    removal_safety=player_wiki_removal_safety.get(record.page_ref),
+                )
                 for record in player_wiki_records
             ]
             if player_wiki_query:
@@ -7698,6 +7915,18 @@ def create_app() -> Flask:
         if user is None:
             abort(403)
 
+        campaign = load_campaign_context(campaign_slug)
+        try:
+            existing_record = get_campaign_page_file(
+                campaign,
+                page_ref,
+                page_store=get_campaign_page_store(),
+            )
+        except (CampaignContentError, ValueError):
+            abort(404)
+        if existing_record is None:
+            abort(404)
+
         if request.form.get("confirm_delete") != "1":
             flash("Confirm hard delete before removing a wiki page file.", "error")
             return redirect(
@@ -7709,7 +7938,30 @@ def create_app() -> Flask:
                 )
             )
 
-        campaign = load_campaign_context(campaign_slug)
+        player_wiki_records = list_campaign_page_files(
+            campaign,
+            page_store=get_campaign_page_store(),
+        )
+        removal_safety = build_dm_player_wiki_removal_safety_index(
+            campaign_slug,
+            campaign,
+            player_wiki_records,
+            session_articles=get_campaign_session_service().list_articles(campaign_slug),
+            character_records=get_character_repository().list_characters(campaign_slug),
+        ).get(existing_record.page_ref, {})
+        hard_delete_blockers = list(removal_safety.get("hard_delete_blockers", []) or [])
+        if hard_delete_blockers:
+            flash(
+                "Hard delete blocked. Unpublish/archive the page or remove: "
+                + " ".join(hard_delete_blockers),
+                "error",
+            )
+            return redirect_to_campaign_dm_content(
+                campaign_slug,
+                subpage="player-wiki",
+                anchor=f"wiki-page-{build_dm_player_wiki_page_summary(campaign, existing_record)['dom_id']}",
+            )
+
         try:
             deleted = delete_campaign_page_file(
                 campaign,

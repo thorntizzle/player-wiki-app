@@ -1749,6 +1749,15 @@ button {
   align-items: center;
 }
 
+.dm-content-removal-safety {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.dm-content-removal-safety p {
+  margin: 0;
+}
+
 .dm-content-delete-form {
   display: flex;
   flex-wrap: wrap;
