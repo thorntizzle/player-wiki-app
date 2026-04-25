@@ -44,6 +44,7 @@ from .systems_models import (
 from .systems_store import SystemsStore
 from .system_policy import (
     DND_5E_SYSTEM_CODE,
+    XIANXIA_SYSTEM_CODE,
     default_systems_library_slug,
     is_dnd_5e_systems_library,
 )
@@ -718,6 +719,11 @@ BUILTIN_LIBRARY_CATALOG = {
         "title": "DND 5E",
         "system_code": DND_5E_SYSTEM_CODE,
         "sources": DND_5E_SOURCE_CATALOG,
+    },
+    XIANXIA_SYSTEM_CODE: {
+        "title": XIANXIA_SYSTEM_CODE,
+        "system_code": XIANXIA_SYSTEM_CODE,
+        "sources": (),
     }
 }
 

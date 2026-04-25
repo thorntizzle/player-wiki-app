@@ -11,6 +11,7 @@ from player_wiki.dnd5e_rules_reference import (
     build_dnd5e_rules_reference_entries,
 )
 from player_wiki.auth_store import AuthStore, utcnow
+from player_wiki.system_policy import XIANXIA_SYSTEM_CODE
 from player_wiki.systems_importer import Dnd5eSystemsImporter
 from player_wiki.systems_models import SystemsEntryRecord
 from tests.test_systems_importer import (
@@ -127,6 +128,21 @@ def test_dm_can_open_systems_control_panel_and_visibility_panel_shows_systems_sc
     assert "Shared-source imports are admin-only shared-library refreshes" in systems_html
     assert "shared/core content editor is app-admin-only" in systems_html
     assert 'class="checkbox-label"' in systems_html
+
+
+def test_xianxia_builtin_systems_library_identity_seeds_without_sources(app):
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+
+        library = service.ensure_builtin_library_seeded(XIANXIA_SYSTEM_CODE)
+
+        assert library is not None
+        assert library.library_slug == XIANXIA_SYSTEM_CODE
+        assert library.title == XIANXIA_SYSTEM_CODE
+        assert library.system_code == XIANXIA_SYSTEM_CODE
+        assert store.get_library(XIANXIA_SYSTEM_CODE) == library
+        assert store.list_sources(XIANXIA_SYSTEM_CODE) == []
 
 
 def test_shared_core_systems_edit_flow_stays_separate_from_overrides_and_custom_entries(
