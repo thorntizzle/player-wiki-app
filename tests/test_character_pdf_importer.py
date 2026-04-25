@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import player_wiki.app as app_module
+import pytest
 import yaml
 
 from player_wiki.app import create_app
@@ -14,6 +16,7 @@ from player_wiki.character_builder import (
     supports_native_level_up,
 )
 from player_wiki.character_importer import (
+    CharacterImportError,
     converge_imported_definition,
     extract_trackers_from_text,
     import_character,
@@ -22,6 +25,7 @@ from player_wiki.character_importer import (
 from player_wiki.character_models import CharacterDefinition
 from player_wiki.character_pdf_importer import (
     apply_systems_links_to_definition,
+    build_pdf_character_artifacts,
     build_pdf_character_markdown,
     resolve_definition_campaign_page_links,
     resolve_definition_systems_links,
@@ -213,6 +217,24 @@ def _sample_pdf_fields() -> dict[str, str]:
         "Eq Qty10": "1",
         "Eq Weight10": "1.5 lb.",
     }
+
+
+def test_pdf_character_import_is_gated_for_xianxia_campaigns(app, tmp_path, monkeypatch):
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = "xianxia"
+    payload["systems_library"] = "xianxia"
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+
+    monkeypatch.setattr(app_module, "create_app", lambda: app)
+    pdf_path = tmp_path / "xianxia-character.pdf"
+    pdf_path.write_bytes(b"not a real pdf")
+
+    with pytest.raises(CharacterImportError, match="PDF character import"):
+        build_pdf_character_artifacts("linden-pass", pdf_path)
 
 
 def _sample_system_entry(

@@ -445,6 +445,98 @@ def test_xianxia_roster_uses_system_policy_to_hide_dnd_native_affordances(
     assert "Native character creation and progression stay hidden here" in html
 
 
+def test_xianxia_native_character_routes_redirect_without_dnd_builder_affordances(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+
+    _write_campaign_config(app, _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.get("/campaigns/linden-pass/characters/new", follow_redirects=False)
+    assert create_response.status_code == 302
+    assert create_response.headers["Location"].endswith("/campaigns/linden-pass/characters")
+
+    for route_suffix in ("edit", "level-up", "progression-repair"):
+        response = client.get(
+            f"/campaigns/linden-pass/characters/arden-march/{route_suffix}",
+            follow_redirects=False,
+        )
+        assert response.status_code == 302
+        assert response.headers["Location"].endswith("/campaigns/linden-pass/characters/arden-march")
+
+    landing = client.get("/campaigns/linden-pass/characters/arden-march")
+    html = landing.get_data(as_text=True)
+    assert app_module.NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE in html
+    assert "Edit character" not in html
+    assert "Level up" not in html
+    assert "Prepare for level-up" not in html
+
+
+def test_xianxia_hides_dnd_spellcasting_read_and_session_affordances(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+
+    _write_campaign_config(app, _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    read_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=spellcasting")
+    session_response = client.get("/campaigns/linden-pass/session/character?character=arden-march&page=spells")
+
+    assert read_response.status_code == 200
+    read_html = read_response.get_data(as_text=True)
+    assert "At a glance" in read_html
+    assert "?page=spellcasting" not in read_html
+    assert "Spell slots" not in read_html
+    assert "Message" not in read_html
+
+    assert session_response.status_code == 200
+    session_html = session_response.get_data(as_text=True)
+    assert "Overview" in session_html
+    assert "Spell slots" not in session_html
+    assert "page=spells" not in session_html
+
+
+def test_xianxia_blocks_dnd_spellcasting_management_routes(app, client, sign_in, users):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+
+    _write_campaign_config(app, _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    search_response = client.get(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/spells/search?q=message"
+    )
+    assert search_response.status_code == 404
+    assert search_response.get_json()["message"] == app_module.DND5E_CHARACTER_SPELLCASTING_TOOLS_UNSUPPORTED_MESSAGE
+
+    spell_add_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/add",
+        follow_redirects=False,
+    )
+    assert spell_add_response.status_code == 302
+    assert spell_add_response.headers["Location"].endswith("/campaigns/linden-pass/characters/arden-march")
+
+    slot_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/session/spell-slots/1",
+        follow_redirects=False,
+    )
+    assert slot_response.status_code == 302
+    assert slot_response.headers["Location"].endswith("/campaigns/linden-pass/characters/arden-march")
+
+    landing = client.get(spell_add_response.headers["Location"])
+    assert app_module.DND5E_CHARACTER_SPELLCASTING_TOOLS_UNSUPPORTED_MESSAGE in landing.get_data(as_text=True)
+
+
 def test_non_5e_read_sheet_hides_native_authoring_affordances_and_skips_readiness(
     app, client, sign_in, users, monkeypatch
 ):

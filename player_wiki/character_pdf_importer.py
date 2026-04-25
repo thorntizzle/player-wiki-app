@@ -9,6 +9,7 @@ from typing import Any
 from pypdf import PdfReader
 
 from .character_importer import (
+    CharacterImportError,
     converge_imported_definition,
     initialize_or_reconcile_imported_state,
     load_existing_character_definition,
@@ -21,6 +22,10 @@ from .character_profile import ensure_profile_class_rows, sync_profile_class_sum
 from .character_repository import load_campaign_character_config
 from .character_store import CharacterStateStore
 from .repository import normalize_lookup
+from .system_policy import (
+    DND5E_CHARACTER_PDF_IMPORT_UNSUPPORTED_MESSAGE,
+    supports_dnd5e_character_pdf_import,
+)
 from .systems_models import SystemsEntryRecord
 from .systems_service import SystemsService
 
@@ -78,6 +83,14 @@ TRACKER_LINE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 NON_LINKABLE_FEATURE_TITLES = {"Hit Points", "Proficiencies", "Special"}
+
+
+def ensure_campaign_supports_pdf_character_import(app, campaign_slug: str) -> None:
+    campaign = app.extensions["repository_store"].get().get_campaign(campaign_slug)
+    if campaign is None:
+        raise CharacterImportError(f"Campaign not found: {campaign_slug}")
+    if not supports_dnd5e_character_pdf_import(getattr(campaign, "system", "")):
+        raise CharacterImportError(DND5E_CHARACTER_PDF_IMPORT_UNSUPPORTED_MESSAGE)
 
 
 @dataclass(slots=True)
@@ -1211,12 +1224,15 @@ def build_pdf_character_artifacts(
     if not pdf_path.exists():
         raise FileNotFoundError(f"PDF not found: {pdf_path}")
 
-    field_values = extract_pdf_annotation_fields(pdf_path)
-    synthetic_markdown = build_pdf_character_markdown(field_values)
-
     app = create_app()
     with app.app_context():
         init_database()
+        ensure_campaign_supports_pdf_character_import(app, campaign_slug)
+
+    field_values = extract_pdf_annotation_fields(pdf_path)
+    synthetic_markdown = build_pdf_character_markdown(field_values)
+
+    with app.app_context():
         definition, import_metadata = parse_character_sheet_text(
             campaign_slug,
             synthetic_markdown,

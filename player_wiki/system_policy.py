@@ -9,6 +9,12 @@ XIANXIA_SYSTEM_CODE = "Xianxia"
 NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE = (
     f"Native character tools are currently only supported for {DND_5E_SYSTEM_CODE} campaigns."
 )
+DND5E_CHARACTER_PDF_IMPORT_UNSUPPORTED_MESSAGE = (
+    f"PDF character import is currently only supported for {DND_5E_SYSTEM_CODE} campaigns."
+)
+DND5E_CHARACTER_SPELLCASTING_TOOLS_UNSUPPORTED_MESSAGE = (
+    f"Spellcasting management is currently only supported for {DND_5E_SYSTEM_CODE} campaigns."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +25,8 @@ class SystemCodePolicy:
     supports_combat_tracker: bool = False
     supports_dnd5e_statblock_upload: bool = False
     supports_native_character_tools: bool = False
+    supports_dnd5e_character_pdf_import: bool = False
+    supports_dnd5e_character_spellcasting_tools: bool = False
     supports_dnd5e_systems_import: bool = False
 
 
@@ -41,6 +49,8 @@ _SYSTEM_POLICIES = {
         supports_combat_tracker=True,
         supports_dnd5e_statblock_upload=True,
         supports_native_character_tools=True,
+        supports_dnd5e_character_pdf_import=True,
+        supports_dnd5e_character_spellcasting_tools=True,
         supports_dnd5e_systems_import=True,
     ),
     XIANXIA_SYSTEM_CODE: SystemCodePolicy(
@@ -106,6 +116,14 @@ def supports_dnd5e_statblock_upload(value: object) -> bool:
 
 def supports_native_character_tools(value: object) -> bool:
     return system_policy_for_code(value).supports_native_character_tools
+
+
+def supports_dnd5e_character_pdf_import(value: object) -> bool:
+    return system_policy_for_code(value).supports_dnd5e_character_pdf_import
+
+
+def supports_dnd5e_character_spellcasting_tools(value: object) -> bool:
+    return system_policy_for_code(value).supports_dnd5e_character_spellcasting_tools
 
 
 def supports_dnd5e_systems_import(library_slug: object) -> bool:

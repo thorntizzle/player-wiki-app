@@ -177,9 +177,11 @@ from .systems_ingest import SystemsIngestError, extracted_systems_archive
 from .systems_service import LICENSE_CLASS_LABELS, SystemsPolicyValidationError, SystemsService
 from .systems_store import SystemsStore
 from .system_policy import (
+    DND5E_CHARACTER_SPELLCASTING_TOOLS_UNSUPPORTED_MESSAGE,
     DND_5E_SYSTEM_CODE,
     NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE,
     supports_combat_tracker,
+    supports_dnd5e_character_spellcasting_tools,
     supports_dnd5e_statblock_upload,
     supports_dnd5e_systems_import,
     supports_native_character_tools,
@@ -3311,6 +3313,9 @@ def create_app() -> Flask:
     def campaign_supports_native_character_tools(campaign) -> bool:
         return supports_native_character_tools(getattr(campaign, "system", ""))
 
+    def campaign_supports_dnd5e_character_spellcasting_tools(campaign) -> bool:
+        return supports_dnd5e_character_spellcasting_tools(getattr(campaign, "system", ""))
+
     def redirect_unsupported_native_character_tools(
         campaign_slug: str,
         *,
@@ -3319,6 +3324,19 @@ def create_app() -> Flask:
         flash(NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE, "error")
         if character_slug is None:
             return redirect(url_for("character_roster_view", campaign_slug=campaign_slug))
+        return redirect(
+            url_for(
+                "character_read_view",
+                campaign_slug=campaign_slug,
+                character_slug=character_slug,
+            )
+        )
+
+    def redirect_unsupported_dnd5e_character_spellcasting_tools(
+        campaign_slug: str,
+        character_slug: str,
+    ):
+        flash(DND5E_CHARACTER_SPELLCASTING_TOOLS_UNSUPPORTED_MESSAGE, "error")
         return redirect(
             url_for(
                 "character_read_view",
@@ -3999,6 +4017,7 @@ def create_app() -> Flask:
     ):
         campaign, record = load_character_context(campaign_slug, character_slug)
         native_character_tools_supported = campaign_supports_native_character_tools(campaign)
+        dnd5e_spellcasting_tools_supported = campaign_supports_dnd5e_character_spellcasting_tools(campaign)
         can_use_session_mode = has_session_mode_access(campaign_slug, character_slug)
         can_manage_character = can_manage_campaign_session(campaign_slug)
         campaign_page_records = list_visible_character_page_records(campaign_slug, campaign)
@@ -4099,17 +4118,21 @@ def create_app() -> Flask:
         if background_draft is not None:
             character["personal_background_markdown"] = background_draft
         character["portrait"] = build_character_portrait_context(campaign, record.definition)
-        spell_catalog = get_read_spell_catalog()
-        spell_manager = build_character_spell_manager_context(
-            campaign_slug,
-            campaign,
-            record,
-            spell_catalog=spell_catalog,
-        )
-        if not character.get("spellcasting") and spell_manager is not None:
-            spellcasting_placeholder = build_character_spellcasting_placeholder(spell_manager)
-            if spellcasting_placeholder is not None:
-                character["spellcasting"] = spellcasting_placeholder
+        spell_manager = None
+        if dnd5e_spellcasting_tools_supported:
+            spell_catalog = get_read_spell_catalog()
+            spell_manager = build_character_spell_manager_context(
+                campaign_slug,
+                campaign,
+                record,
+                spell_catalog=spell_catalog,
+            )
+            if not character.get("spellcasting") and spell_manager is not None:
+                spellcasting_placeholder = build_character_spellcasting_placeholder(spell_manager)
+                if spellcasting_placeholder is not None:
+                    character["spellcasting"] = spellcasting_placeholder
+        else:
+            character.pop("spellcasting", None)
         include_spellcasting_subpage = bool(character.get("spellcasting"))
         available_character_subpages = get_character_read_subpage_labels(
             include_spellcasting=include_spellcasting_subpage,
@@ -4904,6 +4927,7 @@ def create_app() -> Flask:
         background_draft: str | None = None,
     ) -> dict[str, object]:
         campaign = load_campaign_context(campaign_slug)
+        dnd5e_spellcasting_tools_supported = campaign_supports_dnd5e_character_spellcasting_tools(campaign)
         session_service = get_campaign_session_service()
         can_manage_session = can_manage_campaign_session(campaign_slug)
         can_manage_combat = can_manage_campaign_combat(campaign_slug)
@@ -4977,12 +5001,16 @@ def create_app() -> Flask:
             record = accessible_records_by_slug[selected_character_slug]
             character_campaign_page_records = list_visible_character_page_records(campaign_slug, campaign)
             character_item_catalog = build_character_item_catalog(campaign_slug)
-            character_spell_catalog = _build_spell_catalog(
-                _list_campaign_enabled_entries(
-                    app.extensions["systems_service"],
-                    campaign_slug,
-                    "spell",
+            character_spell_catalog = (
+                _build_spell_catalog(
+                    _list_campaign_enabled_entries(
+                        app.extensions["systems_service"],
+                        campaign_slug,
+                        "spell",
+                    )
                 )
+                if dnd5e_spellcasting_tools_supported
+                else {}
             )
             character = present_character_detail(
                 campaign,
@@ -4998,16 +5026,20 @@ def create_app() -> Flask:
             if background_draft is not None:
                 character["personal_background_markdown"] = background_draft
             character["portrait"] = build_character_portrait_context(campaign, record.definition)
-            spell_manager = build_character_spell_manager_context(
-                campaign_slug,
-                campaign,
-                record,
-                spell_catalog=character_spell_catalog,
-            )
-            if not character.get("spellcasting") and spell_manager is not None:
-                spellcasting_placeholder = build_character_spellcasting_placeholder(spell_manager)
-                if spellcasting_placeholder is not None:
-                    character["spellcasting"] = spellcasting_placeholder
+            spell_manager = None
+            if dnd5e_spellcasting_tools_supported:
+                spell_manager = build_character_spell_manager_context(
+                    campaign_slug,
+                    campaign,
+                    record,
+                    spell_catalog=character_spell_catalog,
+                )
+                if not character.get("spellcasting") and spell_manager is not None:
+                    spellcasting_placeholder = build_character_spellcasting_placeholder(spell_manager)
+                    if spellcasting_placeholder is not None:
+                        character["spellcasting"] = spellcasting_placeholder
+            else:
+                character.pop("spellcasting", None)
             include_spellcasting_subpage = bool(character.get("spellcasting"))
             character_subpage = normalize_session_character_subpage(
                 requested_subpage if requested_subpage is not None else request.args.get("page", ""),
@@ -9817,6 +9849,11 @@ def create_app() -> Flask:
         combatant_id: int,
         level: int,
     ):
+        campaign = load_campaign_context(campaign_slug)
+        if not campaign_supports_dnd5e_character_spellcasting_tools(campaign):
+            flash(DND5E_CHARACTER_SPELLCASTING_TOOLS_UNSUPPORTED_MESSAGE, "error")
+            return redirect(url_for("campaign_view", campaign_slug=campaign_slug))
+
         return run_combat_character_mutation(
             campaign_slug,
             combatant_id,
@@ -11879,9 +11916,16 @@ def create_app() -> Flask:
     @app.get("/campaigns/<campaign_slug>/characters/<character_slug>/spellcasting/spells/search")
     @campaign_scope_access_required("characters")
     def character_spell_search(campaign_slug: str, character_slug: str):
-        _, record = load_character_context(campaign_slug, character_slug)
+        campaign, record = load_character_context(campaign_slug, character_slug)
         if not has_session_mode_access(campaign_slug, character_slug):
             abort(403)
+        if not campaign_supports_dnd5e_character_spellcasting_tools(campaign):
+            return jsonify(
+                {
+                    "results": [],
+                    "message": DND5E_CHARACTER_SPELLCASTING_TOOLS_UNSUPPORTED_MESSAGE,
+                }
+            ), 404
 
         spell_catalog, selected_class_rows = load_character_spell_management_support(
             campaign_slug,
@@ -11905,6 +11949,15 @@ def create_app() -> Flask:
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/spellcasting/add")
     @campaign_scope_access_required("characters")
     def character_spell_add(campaign_slug: str, character_slug: str):
+        campaign, _ = load_character_context(campaign_slug, character_slug)
+        if not has_session_mode_access(campaign_slug, character_slug):
+            abort(403)
+        if not campaign_supports_dnd5e_character_spellcasting_tools(campaign):
+            return redirect_unsupported_dnd5e_character_spellcasting_tools(
+                campaign_slug,
+                character_slug,
+            )
+
         def _action(record):
             spell_catalog, selected_class_rows = load_character_spell_management_support(
                 campaign_slug,
@@ -11934,6 +11987,15 @@ def create_app() -> Flask:
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/spellcasting/update")
     @campaign_scope_access_required("characters")
     def character_spell_update(campaign_slug: str, character_slug: str):
+        campaign, _ = load_character_context(campaign_slug, character_slug)
+        if not has_session_mode_access(campaign_slug, character_slug):
+            abort(403)
+        if not campaign_supports_dnd5e_character_spellcasting_tools(campaign):
+            return redirect_unsupported_dnd5e_character_spellcasting_tools(
+                campaign_slug,
+                character_slug,
+            )
+
         def _action(record):
             spell_catalog, selected_class_rows = load_character_spell_management_support(
                 campaign_slug,
@@ -11963,6 +12025,15 @@ def create_app() -> Flask:
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/spellcasting/remove")
     @campaign_scope_access_required("characters")
     def character_spell_remove(campaign_slug: str, character_slug: str):
+        campaign, _ = load_character_context(campaign_slug, character_slug)
+        if not has_session_mode_access(campaign_slug, character_slug):
+            abort(403)
+        if not campaign_supports_dnd5e_character_spellcasting_tools(campaign):
+            return redirect_unsupported_dnd5e_character_spellcasting_tools(
+                campaign_slug,
+                character_slug,
+            )
+
         def _action(record):
             spell_catalog, selected_class_rows = load_character_spell_management_support(
                 campaign_slug,
@@ -12433,6 +12504,15 @@ def create_app() -> Flask:
         character_slug: str,
         level: int,
     ):
+        campaign, _ = load_character_context(campaign_slug, character_slug)
+        if not has_session_mode_access(campaign_slug, character_slug):
+            abort(403)
+        if not campaign_supports_dnd5e_character_spellcasting_tools(campaign):
+            return redirect_unsupported_dnd5e_character_spellcasting_tools(
+                campaign_slug,
+                character_slug,
+            )
+
         return run_session_mutation(
             campaign_slug,
             character_slug,
