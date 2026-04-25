@@ -79,7 +79,7 @@ Common commands:
 ```powershell
 .\.venv\Scripts\python.exe .\run_ux_roadmap.py --dry-run
 .\.venv\Scripts\python.exe .\run_ux_roadmap.py --max-tasks 1
-.\.venv\Scripts\python.exe .\run_ux_roadmap.py --max-tasks 2 --model gpt-5.3-codex
+.\.venv\Scripts\python.exe .\run_ux_roadmap.py --max-tasks 2 --model gpt-5.5
 .\.venv\Scripts\python.exe .\run_ux_roadmap.py --max-tasks 1 --finish-mode local-only
 .\.venv\Scripts\python.exe .\run_ux_roadmap.py --max-tasks 1 --deploy-mode auto --live-sync-mode auto
 ```
@@ -89,6 +89,7 @@ Useful options:
 - `--dry-run`: preview the next prompt and command
 - `--max-tasks N`: stop after `N` targeted UX checkboxes
 - `--note "..."`: append extra worker instructions
+- `--model <model>`: override the model used by `run_codex_action.py`; the UX runner defaults to `gpt-5.5`
 - `--finish-mode local-only`: keep the whole pass local
 - `--add-dir <path>`: add more writable/readable roots for the nested worker if a pass needs something beyond the default app workspace, vault root, and Codex skill tree
 
