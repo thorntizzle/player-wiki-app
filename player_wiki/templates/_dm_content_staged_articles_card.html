@@ -37,6 +37,11 @@
           <div class="article-body article-body--compact">{{ article.body_html | safe }}</div>
           <div class="session-article-detail__actions">
             <a class="ghost-button" href="{{ url_for('campaign_session_dm_view', campaign_slug=campaign.slug, _anchor='session-staged-articles') }}">Open Session DM</a>
+            {% if not article.source_kind and not article.converted_page_title %}
+              <a class="ghost-button" href="{{ url_for('campaign_dm_content_new_player_wiki_page_from_session_article', campaign_slug=campaign.slug, article_id=article.id) }}">
+                Open in Player Wiki editor
+              </a>
+            {% endif %}
             <form
               method="post"
               action="{{ url_for('campaign_dm_content_delete_staged_article', campaign_slug=campaign.slug, article_id=article.id) }}"

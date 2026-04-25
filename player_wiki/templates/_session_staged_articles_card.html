@@ -58,6 +58,9 @@
                 {% endif %}
               </p>
             {% else %}
+              <a class="ghost-button" href="{{ url_for('campaign_dm_content_new_player_wiki_page_from_session_article', campaign_slug=campaign.slug, article_id=article.id) }}">
+                Open in Player Wiki editor
+              </a>
               <a class="ghost-button" href="{{ url_for('campaign_session_convert_article_view', campaign_slug=campaign.slug, article_id=article.id) }}">
                 Convert to wiki page
               </a>

@@ -157,6 +157,97 @@ def test_dm_can_upload_player_wiki_page_image_from_dm_content(app, client, sign_
     assert asset_response.data == TEST_PNG_BYTES
 
 
+def test_dm_can_promote_session_article_through_player_wiki_editor(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_article = client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "Courier Seal Editor",
+            "body_markdown": "This note should be reviewed in the wiki editor before publication.",
+            "image_alt": "A stamped courier seal.",
+            "image_caption": "Shown to the party after the reveal.",
+            "image_file": (BytesIO(TEST_PNG_BYTES), "courier-seal-editor.png"),
+        },
+        follow_redirects=False,
+    )
+
+    assert create_article.status_code == 302
+    with app.app_context():
+        article = app.extensions["campaign_session_service"].list_articles("linden-pass")[0]
+    editor_path = f"/campaigns/linden-pass/dm-content/player-wiki/session-articles/{article.id}/new"
+
+    staged_page = client.get("/campaigns/linden-pass/dm-content/staged-articles")
+    staged_html = staged_page.get_data(as_text=True)
+    assert staged_page.status_code == 200
+    assert editor_path in staged_html
+    assert "Open in Player Wiki editor" in staged_html
+
+    session_dm_page = client.get("/campaigns/linden-pass/session/dm")
+    session_dm_html = session_dm_page.get_data(as_text=True)
+    assert session_dm_page.status_code == 200
+    assert editor_path in session_dm_html
+
+    editor_page = client.get(editor_path)
+    editor_html = editor_page.get_data(as_text=True)
+    assert editor_page.status_code == 200
+    assert "Create wiki page from session article" in editor_html
+    assert 'name="source_session_article_id"' in editor_html
+    assert f'value="{article.id}"' in editor_html
+    assert 'value="session-article:linden-pass:' in editor_html
+    assert "Courier Seal Editor" in editor_html
+    assert "This note should be reviewed in the wiki editor before publication." in editor_html
+    assert "A stamped courier seal." in editor_html
+
+    create_page = client.post(
+        "/campaigns/linden-pass/dm-content/player-wiki/pages",
+        data=_page_form(
+            title="Courier Seal Editor",
+            slug_leaf="courier-seal-editor",
+            section="Notes",
+            page_type="note",
+            subsection="Session Handouts",
+            summary="A staged handout reviewed through the Player Wiki editor.",
+            aliases="Courier Seal",
+            reveal_after_session="2",
+            source_ref="session-article:linden-pass:edited-by-form",
+            image="",
+            image_alt="A stamped courier seal.",
+            image_caption="Shown to the party after the reveal.",
+            body_markdown="## Description\n\nReviewed copy for the durable player reference.",
+            source_session_article_id=str(article.id),
+        ),
+        follow_redirects=False,
+    )
+
+    assert create_page.status_code == 302
+    assert "/dm-content/player-wiki/pages/notes/courier-seal-editor/edit" in create_page.headers["Location"]
+
+    asset_ref = "wiki-pages/notes/courier-seal-editor.png"
+    asset_path = _campaign_asset_path(app, asset_ref)
+    assert asset_path.read_bytes() == TEST_PNG_BYTES
+
+    page_path = _campaign_page_path(app, "notes/courier-seal-editor")
+    raw_text = page_path.read_text(encoding="utf-8")
+    metadata = yaml.safe_load(raw_text.split("---", 2)[1])
+    assert metadata["title"] == "Courier Seal Editor"
+    assert metadata["source_ref"] == f"session-article:linden-pass:{article.id}"
+    assert metadata["image"] == asset_ref
+    assert metadata["image_alt"] == "A stamped courier seal."
+    assert metadata["image_caption"] == "Shown to the party after the reveal."
+    assert "Reviewed copy for the durable player reference." in raw_text
+
+    published_page = client.get("/campaigns/linden-pass/pages/notes/courier-seal-editor")
+    assert published_page.status_code == 200
+    published_html = published_page.get_data(as_text=True)
+    assert "/campaigns/linden-pass/assets/wiki-pages/notes/courier-seal-editor.png" in published_html
+    assert "Reviewed copy for the durable player reference." in published_html
+
+    already_converted = client.get(editor_path, follow_redirects=False)
+    assert already_converted.status_code == 302
+    assert "/dm-content/player-wiki/pages/notes/courier-seal-editor/edit" in already_converted.headers["Location"]
+
+
 def test_dm_player_wiki_image_upload_rejects_unsupported_files(app, client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 

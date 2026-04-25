@@ -30,6 +30,9 @@
 
 {% macro render_player_wiki_page_form(campaign, form, section_choices, action, mode, page_ref=None) -%}
   <form method="post" action="{{ action }}" enctype="multipart/form-data" class="stack-form dm-content-wiki-form">
+    {% if form.source_session_article_id %}
+      <input type="hidden" name="source_session_article_id" value="{{ form.source_session_article_id }}">
+    {% endif %}
     <label class="field">
       <span>Title</span>
       <input type="text" name="title" maxlength="200" value="{{ form.title }}" required>
@@ -144,6 +147,9 @@
               {% if player_wiki_edit_record %}
                 <h2>Edit player wiki page</h2>
                 <p class="meta">{{ player_wiki_edit_record.page.title }}</p>
+              {% elif player_wiki_form.source_session_article_id %}
+                <h2>Create wiki page from session article</h2>
+                <p class="meta">Review the staged article fields here before it becomes durable player wiki content.</p>
               {% else %}
                 <h2>Create player wiki page</h2>
                 <p class="meta">Direct authoring for durable player-facing reference pages.</p>

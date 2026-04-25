@@ -145,6 +145,7 @@ from .session_article_publisher import (
     SESSION_ARTICLE_SOURCE_REF_PREFIX,
     SessionArticlePublishError,
     build_default_publish_options,
+    build_session_article_source_ref,
     find_published_page_for_session_article,
     list_published_pages_for_session_articles,
     list_section_choices,
@@ -589,6 +590,7 @@ def build_dm_player_wiki_form(campaign, *, record=None, form_data=None) -> dict[
             "image_caption": str(data.get("image_caption") or ""),
             "body_markdown": str(data.get("body_markdown") or ""),
             "published": str(data.get("published") or "") == "1",
+            "source_session_article_id": str(data.get("source_session_article_id") or ""),
         }
 
     if record is not None:
@@ -610,6 +612,7 @@ def build_dm_player_wiki_form(campaign, *, record=None, form_data=None) -> dict[
             "image_caption": page.image_caption,
             "body_markdown": record.body_markdown,
             "published": bool(metadata.get("published", page.published)),
+            "source_session_article_id": "",
         }
 
     target = SESSION_ARTICLE_SECTION_TARGETS["Notes"]
@@ -629,6 +632,7 @@ def build_dm_player_wiki_form(campaign, *, record=None, form_data=None) -> dict[
         "image_caption": "",
         "body_markdown": "",
         "published": True,
+        "source_session_article_id": "",
     }
 
 
@@ -737,6 +741,52 @@ def apply_dm_player_wiki_image_upload(campaign, page_ref: str, metadata: dict[st
     extension, data_blob = normalized_upload
     asset_ref = build_dm_player_wiki_image_asset_ref(page_ref, extension)
     write_campaign_asset_file(campaign, asset_ref, data_blob=data_blob)
+    metadata["image"] = asset_ref
+    return asset_ref
+
+
+def normalize_dm_player_wiki_source_session_article_id(value: object) -> int | None:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return None
+    try:
+        article_id = int(normalized)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Session article provenance is invalid.") from exc
+    if article_id <= 0:
+        raise ValueError("Session article provenance is invalid.")
+    return article_id
+
+
+def build_dm_player_wiki_session_article_form_data(campaign, article, article_image=None) -> dict[str, object]:
+    default_options = build_default_publish_options(campaign, article)
+    return {
+        "title": default_options.title,
+        "slug_leaf": default_options.slug_leaf,
+        "section": default_options.section,
+        "page_type": default_options.page_type,
+        "subsection": default_options.subsection,
+        "summary": default_options.summary,
+        "aliases": "",
+        "display_order": "10000",
+        "reveal_after_session": str(default_options.reveal_after_session),
+        "source_ref": build_session_article_source_ref(campaign.slug, article.id),
+        "image": "",
+        "image_alt": article_image.alt_text if article_image is not None else "",
+        "image_caption": article_image.caption if article_image is not None else "",
+        "body_markdown": article.body_markdown,
+        "published": "1",
+        "source_session_article_id": str(article.id),
+    }
+
+
+def apply_dm_player_wiki_session_article_image(campaign, page_ref: str, metadata: dict[str, object], article_image) -> str:
+    if article_image is None or metadata.get("image"):
+        return ""
+
+    extension = Path(article_image.filename).suffix.lower() or ".bin"
+    asset_ref = build_dm_player_wiki_image_asset_ref(page_ref, extension)
+    write_campaign_asset_file(campaign, asset_ref, data_blob=article_image.data_blob)
     metadata["image"] = asset_ref
     return asset_ref
 
@@ -7770,6 +7820,42 @@ def create_app() -> Flask:
         )
         return render_template("dm_content.html", **context)
 
+    @app.get("/campaigns/<campaign_slug>/dm-content/player-wiki/session-articles/<int:article_id>/new")
+    @campaign_scope_access_required("dm_content")
+    def campaign_dm_content_new_player_wiki_page_from_session_article(campaign_slug: str, article_id: int):
+        if not can_manage_campaign_content(campaign_slug) or not can_manage_campaign_session(campaign_slug):
+            abort(403)
+
+        campaign = load_campaign_context(campaign_slug)
+        session_service = get_campaign_session_service()
+        article = session_service.get_article(campaign_slug, article_id)
+        if article is None:
+            abort(404)
+
+        existing_page = find_published_page_for_session_article(campaign, article_id)
+        if existing_page is not None:
+            flash("This session article already has a wiki page. Edit the published page here.", "info")
+            return redirect(
+                url_for(
+                    "campaign_dm_content_edit_player_wiki_page",
+                    campaign_slug=campaign_slug,
+                    page_ref=existing_page.route_slug,
+                    _anchor="dm-content-player-wiki-editor",
+                )
+            )
+
+        article_image = session_service.get_article_image(campaign_slug, article_id)
+        context = build_campaign_dm_content_page_context(
+            campaign_slug,
+            dm_content_subpage="player-wiki",
+            player_wiki_form_data=build_dm_player_wiki_session_article_form_data(
+                campaign,
+                article,
+                article_image=article_image,
+            ),
+        )
+        return render_template("dm_content.html", **context)
+
     @app.post("/campaigns/<campaign_slug>/dm-content/player-wiki/pages")
     @campaign_scope_access_required("dm_content")
     def campaign_dm_content_create_player_wiki_page(campaign_slug: str):
@@ -7786,6 +7872,23 @@ def create_app() -> Flask:
                 campaign,
                 form_data=request.form,
             )
+            source_session_article_id = normalize_dm_player_wiki_source_session_article_id(
+                request.form.get("source_session_article_id")
+            )
+            source_session_article_image = None
+            if source_session_article_id is not None:
+                session_service = get_campaign_session_service()
+                session_article = session_service.get_article(campaign_slug, source_session_article_id)
+                if session_article is None:
+                    raise ValueError("The source session article could not be found.")
+                existing_source_page = find_published_page_for_session_article(campaign, source_session_article_id)
+                if existing_source_page is not None:
+                    raise ValueError("This session article already has a wiki page. Edit that page instead.")
+                metadata["source_ref"] = build_session_article_source_ref(campaign.slug, source_session_article_id)
+                source_session_article_image = session_service.get_article_image(
+                    campaign_slug,
+                    source_session_article_id,
+                )
             existing_record = get_campaign_page_file(
                 campaign,
                 page_ref,
@@ -7794,6 +7897,14 @@ def create_app() -> Flask:
             if existing_record is not None:
                 raise ValueError("That page slug is already in use. Choose a different slug.")
             uploaded_image_asset_ref = apply_dm_player_wiki_image_upload(campaign, page_ref, metadata)
+            copied_session_article_image_asset_ref = ""
+            if not uploaded_image_asset_ref:
+                copied_session_article_image_asset_ref = apply_dm_player_wiki_session_article_image(
+                    campaign,
+                    page_ref,
+                    metadata,
+                    source_session_article_image,
+                )
             record = write_campaign_page_file(
                 campaign,
                 page_ref,
@@ -7820,6 +7931,8 @@ def create_app() -> Flask:
                 "route_slug": record.page.route_slug,
                 "source": "dm_content_player_wiki",
                 "uploaded_image_asset_ref": uploaded_image_asset_ref,
+                "copied_session_article_image_asset_ref": copied_session_article_image_asset_ref,
+                "source_session_article_id": source_session_article_id,
             },
         )
         flash(f"Created wiki page {record.page.title}.", "success")
