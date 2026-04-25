@@ -81,6 +81,100 @@ def test_dm_content_player_wiki_subpage_is_hidden_from_players(client, sign_in, 
     assert response.status_code == 404
 
 
+def test_dm_browser_write_routes_reject_players_when_scopes_are_visible(
+    app,
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+):
+    set_campaign_visibility(
+        "linden-pass",
+        dm_content="players",
+        systems="players",
+        session="players",
+    )
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    visible_dm_content = client.get("/campaigns/linden-pass/dm-content")
+    assert visible_dm_content.status_code == 200
+
+    wiki_create = client.post(
+        "/campaigns/linden-pass/dm-content/player-wiki/pages",
+        data=_page_form(slug_leaf="blocked-player-wiki-write"),
+        follow_redirects=False,
+    )
+    statblock_upload = client.post(
+        "/campaigns/linden-pass/dm-content/statblocks",
+        data={
+            "statblock_file": (
+                BytesIO(b"Armor Class 12\nHit Points 7\nSpeed 30 ft."),
+                "blocked.md",
+            )
+        },
+        follow_redirects=False,
+    )
+    staged_article_create = client.post(
+        "/campaigns/linden-pass/dm-content/staged-articles",
+        data={
+            "article_mode": "manual",
+            "title": "Blocked Article",
+            "body_markdown": "Players should not be able to stage DM prep.",
+        },
+        follow_redirects=False,
+    )
+    condition_create = client.post(
+        "/campaigns/linden-pass/dm-content/conditions",
+        data={
+            "name": "Blocked Condition",
+            "description_markdown": "Players should not be able to author DM conditions.",
+        },
+        follow_redirects=False,
+    )
+    systems_override = client.post(
+        "/campaigns/linden-pass/systems/control-panel/overrides",
+        data={
+            "return_to": "dm-content-systems",
+            "entry_key": "dnd-5e|spell|phb|blocked",
+            "visibility_override": "dm",
+            "is_enabled_override": "disabled",
+        },
+        follow_redirects=False,
+    )
+    custom_systems_entry = client.post(
+        "/campaigns/linden-pass/systems/control-panel/custom-entries",
+        data={
+            "return_to": "dm-content-systems",
+            "custom_entry_title": "Blocked Spark",
+            "custom_entry_slug": "blocked-spark",
+            "custom_entry_type": "spell",
+            "custom_entry_visibility": "players",
+            "custom_entry_body_markdown": "This should not save.",
+        },
+        follow_redirects=False,
+    )
+
+    assert wiki_create.status_code == 403
+    assert statblock_upload.status_code == 403
+    assert staged_article_create.status_code == 403
+    assert condition_create.status_code == 403
+    assert systems_override.status_code == 403
+    assert custom_systems_entry.status_code == 403
+
+    assert not _campaign_page_path(app, "notes/blocked-player-wiki-write").exists()
+    with app.app_context():
+        assert app.extensions["campaign_dm_content_service"].list_statblocks("linden-pass") == []
+        assert app.extensions["campaign_dm_content_service"].list_condition_definitions("linden-pass") == []
+        assert app.extensions["campaign_session_service"].list_articles("linden-pass") == []
+        assert (
+            app.extensions["systems_service"].get_custom_campaign_entry_by_slug(
+                "linden-pass",
+                "custom-linden-pass-blocked-spark",
+            )
+            is None
+        )
+
+
 def test_dm_can_create_player_wiki_page_from_dm_content(app, client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
@@ -289,6 +383,16 @@ def test_dm_can_update_unpublish_and_delete_player_wiki_page(app, client, sign_i
     assert "Updated Field Report" in raw_text
     assert "Updated browser-authored text." in raw_text
     assert page_path.name == "field-report.md"
+
+    refreshed_page = client.get("/campaigns/linden-pass/pages/notes/field-report")
+    refreshed_html = refreshed_page.get_data(as_text=True)
+    assert refreshed_page.status_code == 200
+    assert "Updated Field Report" in refreshed_html
+    assert "Updated browser-authored text." in refreshed_html
+    with app.app_context():
+        campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
+        assert campaign is not None
+        assert campaign.pages["notes/field-report"].title == "Updated Field Report"
 
     unpublish_response = client.post(
         "/campaigns/linden-pass/dm-content/player-wiki/pages/notes/field-report/unpublish",

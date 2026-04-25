@@ -12,6 +12,45 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+if os.name == "nt":
+    from _pytest.pathlib import make_numbered_dir, rm_rf
+    from _pytest.tmpdir import TempPathFactory
+
+    _ORIGINAL_GET_BASE_TEMP = TempPathFactory.getbasetemp
+
+    def _windows_getbasetemp(self):
+        if self._basetemp is not None:
+            return self._basetemp
+        if self._given_basetemp is None:
+            return _ORIGINAL_GET_BASE_TEMP(self)
+
+        basetemp = self._given_basetemp
+        if basetemp.exists():
+            rm_rf(basetemp)
+        # Python 3.14 on this Windows setup creates unreadable dirs with 0o700.
+        basetemp.mkdir(mode=0o777)
+        self._basetemp = basetemp.resolve()
+        self._trace("new basetemp", self._basetemp)
+        return self._basetemp
+
+    def _windows_mktemp(self, basename: str, numbered: bool = True) -> Path:
+        basename = self._ensure_relative_to_basetemp(basename)
+        if numbered:
+            path = make_numbered_dir(
+                root=self.getbasetemp(),
+                prefix=basename,
+                mode=0o777,
+            )
+            self._trace("mktemp", path)
+            return path
+
+        path = self.getbasetemp().joinpath(basename)
+        path.mkdir(mode=0o777)
+        return path
+
+    TempPathFactory.getbasetemp = _windows_getbasetemp
+    TempPathFactory.mktemp = _windows_mktemp
+
 from player_wiki.app import create_app
 from player_wiki.auth_store import AuthStore
 from player_wiki.config import Config
