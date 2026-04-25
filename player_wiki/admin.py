@@ -37,6 +37,7 @@ EVENT_TITLES = {
     "campaign_systems_policy_updated": "Systems policy updated",
     "campaign_systems_source_updated": "Systems source updated",
     "campaign_systems_entry_override_updated": "Systems entry override updated",
+    "campaign_systems_shared_entry_updated": "Shared Systems entry updated",
 }
 
 SOURCE_LABELS = {
@@ -47,6 +48,7 @@ SOURCE_LABELS = {
     "campaign_control_panel": "campaign control panel",
     "dm_content_player_wiki": "DM Content player wiki",
     "campaign_systems_control_panel": "systems control panel",
+    "campaign_systems_shared_entry_editor": "shared Systems entry editor",
     "character_controls": "character controls",
 }
 

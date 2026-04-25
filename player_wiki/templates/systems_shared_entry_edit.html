@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Shared Systems Entry | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Shared/core Systems editor</p>
+    <h1>{{ entry.title }}</h1>
+    <p class="lede">
+      Edit the shared library row used by every campaign that enables this source.
+    </p>
+  </section>
+
+  <div class="page-layout">
+    <section class="section-list">
+      <section class="card">
+        <div class="section-heading">
+          <div>
+            <h2>Shared Entry Fields</h2>
+            <p class="meta">{{ source_state.source.title }} ({{ source_state.source.source_id }}) | {{ entry_type_label }}</p>
+          </div>
+        </div>
+
+        <form
+          method="post"
+          action="{{ url_for('campaign_systems_control_panel_update_shared_entry', campaign_slug=campaign.slug, entry_slug=entry.slug) }}"
+          class="stack-form"
+        >
+          <div class="builder-field-grid">
+            <label class="field">
+              <span>Title</span>
+              <input type="text" name="shared_entry_title" maxlength="200" value="{{ shared_systems_entry_form.title }}" required>
+            </label>
+            <label class="field">
+              <span>Source page</span>
+              <input type="text" name="shared_entry_source_page" maxlength="80" value="{{ shared_systems_entry_form.source_page }}">
+            </label>
+          </div>
+
+          <label class="field">
+            <span>Source path</span>
+            <input type="text" name="shared_entry_source_path" maxlength="1000" value="{{ shared_systems_entry_form.source_path }}">
+          </label>
+
+          <div class="builder-field-grid">
+            <label class="checkbox-label">
+              <input type="checkbox" name="shared_entry_player_safe_default" value="1" {% if shared_systems_entry_form.player_safe_default %}checked{% endif %}>
+              Player-safe by default
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" name="shared_entry_dm_heavy" value="1" {% if shared_systems_entry_form.dm_heavy %}checked{% endif %}>
+              DM-heavy
+            </label>
+          </div>
+
+          <label class="field">
+            <span>Search text</span>
+            <textarea name="shared_entry_search_text" rows="4">{{ shared_systems_entry_form.search_text }}</textarea>
+          </label>
+
+          <label class="field">
+            <span>Metadata JSON</span>
+            <textarea name="shared_entry_metadata_json" rows="12" spellcheck="false">{{ shared_systems_entry_form.metadata_json }}</textarea>
+          </label>
+
+          <label class="field">
+            <span>Body JSON</span>
+            <textarea name="shared_entry_body_json" rows="12" spellcheck="false">{{ shared_systems_entry_form.body_json }}</textarea>
+          </label>
+
+          <label class="field">
+            <span>Rendered HTML</span>
+            <textarea name="shared_entry_rendered_html" rows="18" spellcheck="false">{{ shared_systems_entry_form.rendered_html }}</textarea>
+          </label>
+
+          <div class="badge-list">
+            <button type="submit">Save shared/core entry</button>
+            <a
+              class="ghost-button"
+              href="{{ url_for('campaign_systems_entry_detail', campaign_slug=campaign.slug, entry_slug=entry.slug, _anchor='systems-entry-management') }}"
+            >Back to entry</a>
+          </div>
+        </form>
+      </section>
+    </section>
+
+    <aside class="sidebar">
+      <section class="card sidebar-card">
+        <h2>Entry Identity</h2>
+        <p class="meta">Entry key: {{ entry.entry_key }}</p>
+        <p class="meta">Slug: {{ entry.slug }}</p>
+        <p class="meta">Source: {{ source_state.source.source_id }}</p>
+        <p class="meta">Type: {{ entry_type_label }}</p>
+      </section>
+
+      <section class="card sidebar-card">
+        <h2>Separate Lanes</h2>
+        <p class="meta">Campaign entry overrides still manage per-campaign visibility and enablement.</p>
+        <p class="meta">Custom entries still use the campaign-owned custom entry editor.</p>
+      </section>
+    </aside>
+  </div>
+{% endblock %}

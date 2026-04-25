@@ -910,6 +910,68 @@ class SystemsService:
         )
         return entry
 
+    def update_shared_core_entry(
+        self,
+        campaign_slug: str,
+        entry_slug: str,
+        *,
+        title: str,
+        source_page: str = "",
+        source_path: str = "",
+        search_text: str = "",
+        player_safe_default: bool = False,
+        dm_heavy: bool = False,
+        metadata: dict[str, object] | None = None,
+        body: dict[str, object] | None = None,
+        rendered_html: str = "",
+    ) -> SystemsEntryRecord:
+        existing = self.get_entry_by_slug_for_campaign(campaign_slug, entry_slug)
+        if existing is None:
+            raise SystemsPolicyValidationError("Choose a valid shared/core Systems entry before saving.")
+        source_state = self.get_campaign_source_state(campaign_slug, existing.source_id)
+        if source_state is None:
+            raise SystemsPolicyValidationError("The shared/core Systems source is no longer available.")
+        if self.is_campaign_custom_entry(campaign_slug, existing):
+            raise SystemsPolicyValidationError("Campaign custom entries must use the custom entry editor.")
+
+        normalized_title = str(title or "").strip()
+        if not normalized_title:
+            raise SystemsPolicyValidationError("Shared/core Systems entries need a title.")
+        if len(normalized_title) > 200:
+            raise SystemsPolicyValidationError("Shared/core Systems entry titles must stay under 200 characters.")
+
+        normalized_source_page = str(source_page or "").strip()
+        if len(normalized_source_page) > 80:
+            raise SystemsPolicyValidationError("Shared/core Systems source pages must stay under 80 characters.")
+        normalized_source_path = str(source_path or "").strip()
+        if len(normalized_source_path) > 1000:
+            raise SystemsPolicyValidationError("Shared/core Systems source paths must stay under 1000 characters.")
+        normalized_search_text = str(search_text or "").strip()
+        if len(normalized_search_text) > 40_000:
+            raise SystemsPolicyValidationError("Shared/core Systems search text must stay under 40,000 characters.")
+        normalized_rendered_html = str(rendered_html or "").strip()
+        if len(normalized_rendered_html) > 500_000:
+            raise SystemsPolicyValidationError("Shared/core Systems rendered HTML must stay under 500,000 characters.")
+
+        entry = self.store.upsert_entry(
+            existing.library_slug,
+            existing.source_id,
+            entry_key=existing.entry_key,
+            entry_type=existing.entry_type,
+            slug=existing.slug,
+            title=normalized_title,
+            source_page=normalized_source_page,
+            source_path=normalized_source_path,
+            search_text=normalized_search_text,
+            player_safe_default=bool(player_safe_default),
+            dm_heavy=bool(dm_heavy),
+            metadata=dict(metadata or {}),
+            body=dict(body or {}),
+            rendered_html=normalized_rendered_html,
+        )
+        _systems_service_cache_clear()
+        return entry
+
     def _save_custom_campaign_entry(
         self,
         campaign_slug: str,

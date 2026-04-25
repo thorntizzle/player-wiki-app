@@ -91,11 +91,13 @@ def test_dm_can_open_systems_control_panel_and_visibility_panel_shows_systems_sc
     assert "First model: both, kept as separate lanes." in systems_html
     assert "Custom campaign entries are the DM-authored lane" in systems_html
     assert "Shared-source imports are admin-only shared-library refreshes" in systems_html
-    assert "shared/core content edit routes are app-admin-only" in systems_html
+    assert "shared/core content editor is app-admin-only" in systems_html
     assert 'class="checkbox-label"' in systems_html
 
 
-def test_dm_systems_entry_detail_keeps_imported_entries_override_only(app, client, sign_in, users):
+def test_shared_core_systems_edit_flow_stays_separate_from_overrides_and_custom_entries(
+    app, client, sign_in, users
+):
     source_id = f"IMPT-{uuid4().hex[:8].upper()}"
     entry_slug = "shared-spark"
     entry_key = f"dnd-5e|spell|{source_id.lower()}|{entry_slug}"
@@ -146,8 +148,9 @@ def test_dm_systems_entry_detail_keeps_imported_entries_override_only(app, clien
     assert "Entry Management" in detail_body
     assert "Shared library entry" in detail_body
     assert "Manage campaign override" in detail_body
-    assert "shared/core content edit routes are app-admin-only" in detail_body
+    assert "shared/core content editing is app-admin-only" in detail_body
     assert "#systems-entry-overrides" in detail_body
+    assert "Edit shared/core entry" not in detail_body
     assert "Edit custom entry" not in detail_body
     assert f"/systems/control-panel/custom-entries/{entry_slug}" not in detail_body
 
@@ -186,17 +189,66 @@ def test_dm_systems_entry_detail_keeps_imported_entries_override_only(app, clien
     admin_shared_edit_page = client.get(
         f"/campaigns/linden-pass/systems/control-panel/shared-entries/{entry_slug}/edit"
     )
-    assert admin_shared_edit_page.status_code == 501
-    assert "Shared/core Systems entry editing is reserved for app admins" in admin_shared_edit_page.get_data(
-        as_text=True
+    assert admin_shared_edit_page.status_code == 200
+    admin_shared_edit_body = admin_shared_edit_page.get_data(as_text=True)
+    assert "Shared/core Systems editor" in admin_shared_edit_body
+    assert 'name="shared_entry_title"' in admin_shared_edit_body
+    assert 'name="shared_entry_metadata_json"' in admin_shared_edit_body
+    assert 'name="custom_entry_title"' not in admin_shared_edit_body
+    assert 'name="visibility_override"' not in admin_shared_edit_body
+
+    invalid_shared_edit = client.post(
+        f"/campaigns/linden-pass/systems/control-panel/shared-entries/{entry_slug}",
+        data={
+            "shared_entry_title": "Shared Spark Edited",
+            "shared_entry_metadata_json": "{bad json",
+            "shared_entry_body_json": "{}",
+            "shared_entry_rendered_html": "<p>This should not save.</p>",
+        },
+        follow_redirects=False,
     )
+    assert invalid_shared_edit.status_code == 400
+    assert "Metadata JSON must be valid JSON." in invalid_shared_edit.get_data(as_text=True)
 
     admin_shared_edit_post = client.post(
         f"/campaigns/linden-pass/systems/control-panel/shared-entries/{entry_slug}",
-        data={"title": "Shared Spark Edited"},
+        data={
+            "shared_entry_title": "Shared Spark Edited",
+            "shared_entry_source_page": "42",
+            "shared_entry_source_path": "sources/shared-spark.md",
+            "shared_entry_search_text": "shared spark edited admin browser flow",
+            "shared_entry_player_safe_default": "1",
+            "shared_entry_metadata_json": '{"edited": true, "original_source": "imported-test"}',
+            "shared_entry_body_json": '{"editor": "shared-core-browser"}',
+            "shared_entry_rendered_html": "<p>Edited shared library body.</p>",
+        },
         follow_redirects=False,
     )
-    assert admin_shared_edit_post.status_code == 501
+    assert admin_shared_edit_post.status_code == 302
+    assert f"/campaigns/linden-pass/systems/entries/{entry_slug}" in admin_shared_edit_post.headers[
+        "Location"
+    ]
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        entry = store.get_entry(service.get_campaign_library_slug("linden-pass"), entry_key)
+        assert entry is not None
+        assert entry.title == "Shared Spark Edited"
+        assert entry.source_page == "42"
+        assert entry.source_path == "sources/shared-spark.md"
+        assert entry.search_text == "shared spark edited admin browser flow"
+        assert entry.player_safe_default is True
+        assert entry.dm_heavy is False
+        assert entry.metadata == {"edited": True, "original_source": "imported-test"}
+        assert entry.body == {"editor": "shared-core-browser"}
+        assert entry.rendered_html == "<p>Edited shared library body.</p>"
+        assert store.get_campaign_entry_override("linden-pass", entry_key) is None
+        shared_events = AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_shared_entry_updated",
+            campaign_slug="linden-pass",
+        )
+        assert any(event.metadata.get("entry_key") == entry_key for event in shared_events)
 
     override_response = client.post(
         "/campaigns/linden-pass/systems/control-panel/overrides",
@@ -218,8 +270,8 @@ def test_dm_systems_entry_detail_keeps_imported_entries_override_only(app, clien
         store = app.extensions["systems_store"]
         entry = store.get_entry(service.get_campaign_library_slug("linden-pass"), entry_key)
         assert entry is not None
-        assert entry.title == "Shared Spark"
-        assert entry.rendered_html == "<p>Original shared library body.</p>"
+        assert entry.title == "Shared Spark Edited"
+        assert entry.rendered_html == "<p>Edited shared library body.</p>"
         override = store.get_campaign_entry_override("linden-pass", entry_key)
         assert override is not None
         assert override.visibility_override == "dm"

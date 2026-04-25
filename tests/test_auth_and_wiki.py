@@ -131,7 +131,7 @@ def test_dm_campaign_help_page_still_shows_dm_only_surfaces(client, sign_in, use
     assert "Characters" in body
     assert "Control" in body
     assert "Manage Systems source enablement, entry overrides" in body
-    assert "shared/core edit routes are reserved for app admins" in body
+    assert "shared/core editor is reserved for app admins" in body
     assert "Browser Player Wiki hard delete adds usage checks" in body
     assert 'href="/campaigns/linden-pass/dm-content/systems"' in body
     assert "Session-only articles stay separate from the published wiki until a DM converts them." in body

@@ -179,10 +179,6 @@ from .systems_store import SystemsStore
 from .version import build_app_metadata
 
 SESSION_ARTICLE_FORM_MODES = {"manual", "upload", "wiki"}
-SHARED_SYSTEMS_ENTRY_EDIT_UNAVAILABLE_MESSAGE = (
-    "Shared/core Systems entry editing is reserved for app admins and must use the separate shared-entry route. "
-    "The browser editor, audit/provenance capture, and mechanics-impact warning flow have not landed yet."
-)
 DM_CONTENT_SUBPAGE_LABELS = {
     "statblocks": "Statblocks",
     "player-wiki": "Player Wiki",
@@ -1141,6 +1137,64 @@ def build_dm_custom_systems_entry_form(
 
 def custom_systems_entry_dom_id(entry) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]+", "-", str(entry.slug or entry.id)).strip("-") or "custom-entry"
+
+
+def format_systems_entry_json_field(value) -> str:
+    if not value:
+        return "{}"
+    return json.dumps(value, indent=2, sort_keys=True)
+
+
+def build_shared_systems_entry_form(*, entry=None, form_data=None) -> dict[str, object]:
+    data = form_data if form_data is not None else {}
+    if data:
+        return {
+            "title": str(data.get("shared_entry_title") or ""),
+            "source_page": str(data.get("shared_entry_source_page") or ""),
+            "source_path": str(data.get("shared_entry_source_path") or ""),
+            "search_text": str(data.get("shared_entry_search_text") or ""),
+            "player_safe_default": data.get("shared_entry_player_safe_default") == "1",
+            "dm_heavy": data.get("shared_entry_dm_heavy") == "1",
+            "metadata_json": str(data.get("shared_entry_metadata_json") or "{}"),
+            "body_json": str(data.get("shared_entry_body_json") or "{}"),
+            "rendered_html": str(data.get("shared_entry_rendered_html") or ""),
+        }
+    if entry is not None:
+        return {
+            "title": entry.title,
+            "source_page": entry.source_page,
+            "source_path": entry.source_path,
+            "search_text": entry.search_text,
+            "player_safe_default": bool(entry.player_safe_default),
+            "dm_heavy": bool(entry.dm_heavy),
+            "metadata_json": format_systems_entry_json_field(entry.metadata),
+            "body_json": format_systems_entry_json_field(entry.body),
+            "rendered_html": entry.rendered_html,
+        }
+    return {
+        "title": "",
+        "source_page": "",
+        "source_path": "",
+        "search_text": "",
+        "player_safe_default": False,
+        "dm_heavy": False,
+        "metadata_json": "{}",
+        "body_json": "{}",
+        "rendered_html": "",
+    }
+
+
+def parse_shared_systems_entry_json_field(raw_value: str, *, field_label: str) -> dict[str, object]:
+    cleaned_value = str(raw_value or "").strip()
+    if not cleaned_value:
+        return {}
+    try:
+        parsed = json.loads(cleaned_value)
+    except json.JSONDecodeError as exc:
+        raise SystemsPolicyValidationError(f"{field_label} must be valid JSON.") from exc
+    if not isinstance(parsed, dict):
+        raise SystemsPolicyValidationError(f"{field_label} must be a JSON object.")
+    return parsed
 
 
 def get_character_read_subpage_labels(
@@ -3665,7 +3719,7 @@ def create_app() -> Flask:
                     "Player wiki edits still need normal spoiler and reveal-safety judgment before publication.",
                     "Inline wiki-page image uploads are copied into campaign assets and referenced from page frontmatter.",
                     "Hard delete is blocked when a page still has wiki backlinks, character hooks, or session provenance.",
-                    "Imported shared-library Systems entries are not edited through campaign management; shared/core edit routes are reserved for app admins and kept separate from source policy, entry overrides, and custom campaign entries.",
+                    "Imported shared-library Systems entries are not edited through campaign management; the shared/core editor is reserved for app admins and kept separate from source policy, entry overrides, and custom campaign entries.",
                     "The statblock parser is currently implemented for DND-5E-style markdown.",
                     "Statblock saves need recognizable Armor Class, Hit Points, and Speed lines when those values should feed Combat.",
                     "Custom conditions augment the built-in list rather than replacing it.",
@@ -8326,14 +8380,41 @@ def create_app() -> Flask:
             abort(404)
         return entry
 
+    def render_shared_systems_entry_editor(
+        campaign_slug: str,
+        entry,
+        *,
+        form_data=None,
+        status_code: int = 200,
+    ):
+        campaign = load_campaign_context(campaign_slug)
+        source_state = get_systems_service().get_campaign_source_state(campaign_slug, entry.source_id)
+        if source_state is None:
+            abort(404)
+        return render_template(
+            "systems_shared_entry_edit.html",
+            campaign=campaign,
+            entry=entry,
+            source_state=source_state,
+            entry_type_label=SYSTEMS_ENTRY_TYPE_LABELS.get(
+                entry.entry_type,
+                entry.entry_type.replace("_", " ").title(),
+            ),
+            shared_systems_entry_form=build_shared_systems_entry_form(
+                entry=entry,
+                form_data=form_data,
+            ),
+            active_nav="systems",
+        ), status_code
+
     @app.get("/campaigns/<campaign_slug>/systems/control-panel/shared-entries/<entry_slug>/edit")
     @login_required
     def campaign_systems_control_panel_edit_shared_entry(campaign_slug: str, entry_slug: str):
         load_campaign_context(campaign_slug)
         if not can_edit_shared_systems_entries(campaign_slug):
             abort(403)
-        get_shared_systems_entry_for_edit_route(campaign_slug, entry_slug)
-        abort(501, description=SHARED_SYSTEMS_ENTRY_EDIT_UNAVAILABLE_MESSAGE)
+        entry = get_shared_systems_entry_for_edit_route(campaign_slug, entry_slug)
+        return render_shared_systems_entry_editor(campaign_slug, entry)
 
     @app.post("/campaigns/<campaign_slug>/systems/control-panel/shared-entries/<entry_slug>")
     @login_required
@@ -8341,8 +8422,62 @@ def create_app() -> Flask:
         load_campaign_context(campaign_slug)
         if not can_edit_shared_systems_entries(campaign_slug):
             abort(403)
-        get_shared_systems_entry_for_edit_route(campaign_slug, entry_slug)
-        abort(501, description=SHARED_SYSTEMS_ENTRY_EDIT_UNAVAILABLE_MESSAGE)
+        user = get_current_user()
+        if user is None:
+            abort(403)
+        entry = get_shared_systems_entry_for_edit_route(campaign_slug, entry_slug)
+        try:
+            metadata = parse_shared_systems_entry_json_field(
+                request.form.get("shared_entry_metadata_json", ""),
+                field_label="Metadata JSON",
+            )
+            body = parse_shared_systems_entry_json_field(
+                request.form.get("shared_entry_body_json", ""),
+                field_label="Body JSON",
+            )
+            updated_entry = get_systems_service().update_shared_core_entry(
+                campaign_slug,
+                entry_slug,
+                title=request.form.get("shared_entry_title", ""),
+                source_page=request.form.get("shared_entry_source_page", ""),
+                source_path=request.form.get("shared_entry_source_path", ""),
+                search_text=request.form.get("shared_entry_search_text", ""),
+                player_safe_default=request.form.get("shared_entry_player_safe_default") == "1",
+                dm_heavy=request.form.get("shared_entry_dm_heavy") == "1",
+                metadata=metadata,
+                body=body,
+                rendered_html=request.form.get("shared_entry_rendered_html", ""),
+            )
+        except SystemsPolicyValidationError as exc:
+            flash(str(exc), "error")
+            return render_shared_systems_entry_editor(
+                campaign_slug,
+                entry,
+                form_data=request.form,
+                status_code=400,
+            )
+
+        get_auth_store().write_audit_event(
+            event_type="campaign_systems_shared_entry_updated",
+            actor_user_id=user.id,
+            campaign_slug=campaign_slug,
+            metadata={
+                "library_slug": updated_entry.library_slug,
+                "source_id": updated_entry.source_id,
+                "entry_key": updated_entry.entry_key,
+                "entry_slug": updated_entry.slug,
+                "source": "campaign_systems_shared_entry_editor",
+            },
+        )
+        flash(f"Saved shared/core Systems entry {updated_entry.title}.", "success")
+        return redirect(
+            url_for(
+                "campaign_systems_entry_detail",
+                campaign_slug=campaign_slug,
+                entry_slug=updated_entry.slug,
+                _anchor="systems-entry-management",
+            )
+        )
 
     @app.post("/campaigns/<campaign_slug>/systems/control-panel/custom-entries")
     @login_required
