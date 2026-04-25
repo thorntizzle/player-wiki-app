@@ -27,6 +27,7 @@ from .auth import (
     can_manage_campaign_systems,
     can_manage_campaign_visibility,
     can_manage_campaign_session,
+    can_edit_shared_systems_entries,
     can_post_campaign_session_messages,
     campaign_systems_entry_access_required,
     campaign_systems_source_access_required,
@@ -178,6 +179,10 @@ from .systems_store import SystemsStore
 from .version import build_app_metadata
 
 SESSION_ARTICLE_FORM_MODES = {"manual", "upload", "wiki"}
+SHARED_SYSTEMS_ENTRY_EDIT_UNAVAILABLE_MESSAGE = (
+    "Shared/core Systems entry editing is reserved for app admins and must use the separate shared-entry route. "
+    "The browser editor, audit/provenance capture, and mechanics-impact warning flow have not landed yet."
+)
 DM_CONTENT_SUBPAGE_LABELS = {
     "statblocks": "Statblocks",
     "player-wiki": "Player Wiki",
@@ -3660,7 +3665,7 @@ def create_app() -> Flask:
                     "Player wiki edits still need normal spoiler and reveal-safety judgment before publication.",
                     "Inline wiki-page image uploads are copied into campaign assets and referenced from page frontmatter.",
                     "Hard delete is blocked when a page still has wiki backlinks, character hooks, or session provenance.",
-                    "Imported shared-library Systems entries are not edited in place; use source policy, entry overrides, or custom campaign entries unless a shared-library edit model is approved.",
+                    "Imported shared-library Systems entries are not edited through campaign management; shared/core edit routes are reserved for app admins and kept separate from source policy, entry overrides, and custom campaign entries.",
                     "The statblock parser is currently implemented for DND-5E-style markdown.",
                     "Statblock saves need recognizable Armor Class, Hit Points, and Speed lines when those values should feed Combat.",
                     "Custom conditions augment the built-in list rather than replacing it.",
@@ -8310,6 +8315,34 @@ def create_app() -> Flask:
                 _anchor=anchor,
             )
         )
+
+    def get_shared_systems_entry_for_edit_route(campaign_slug: str, entry_slug: str):
+        systems_service = get_systems_service()
+        entry = systems_service.get_entry_by_slug_for_campaign(campaign_slug, entry_slug)
+        if entry is None:
+            abort(404)
+        source_state = systems_service.get_campaign_source_state(campaign_slug, entry.source_id)
+        if source_state is None or systems_service.is_campaign_custom_entry(campaign_slug, entry):
+            abort(404)
+        return entry
+
+    @app.get("/campaigns/<campaign_slug>/systems/control-panel/shared-entries/<entry_slug>/edit")
+    @login_required
+    def campaign_systems_control_panel_edit_shared_entry(campaign_slug: str, entry_slug: str):
+        load_campaign_context(campaign_slug)
+        if not can_edit_shared_systems_entries(campaign_slug):
+            abort(403)
+        get_shared_systems_entry_for_edit_route(campaign_slug, entry_slug)
+        abort(501, description=SHARED_SYSTEMS_ENTRY_EDIT_UNAVAILABLE_MESSAGE)
+
+    @app.post("/campaigns/<campaign_slug>/systems/control-panel/shared-entries/<entry_slug>")
+    @login_required
+    def campaign_systems_control_panel_update_shared_entry(campaign_slug: str, entry_slug: str):
+        load_campaign_context(campaign_slug)
+        if not can_edit_shared_systems_entries(campaign_slug):
+            abort(403)
+        get_shared_systems_entry_for_edit_route(campaign_slug, entry_slug)
+        abort(501, description=SHARED_SYSTEMS_ENTRY_EDIT_UNAVAILABLE_MESSAGE)
 
     @app.post("/campaigns/<campaign_slug>/systems/control-panel/custom-entries")
     @login_required

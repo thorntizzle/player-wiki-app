@@ -181,6 +181,7 @@ def register_auth(app: Flask) -> None:
             "can_manage_campaign_combat": can_manage_campaign_combat,
             "can_manage_campaign_dm_content": can_manage_campaign_dm_content,
             "can_manage_campaign_systems": can_manage_campaign_systems,
+            "can_edit_shared_systems_entries": can_edit_shared_systems_entries,
             "can_manage_campaign_content": can_manage_campaign_content,
             "can_post_campaign_session_messages": can_post_campaign_session_messages,
             "can_access_campaign_scope": can_access_campaign_scope,
@@ -689,6 +690,13 @@ def can_manage_campaign_systems(campaign_slug: str) -> bool:
     if user.is_admin:
         return True
     return get_campaign_role(campaign_slug) == "dm"
+
+
+def can_edit_shared_systems_entries(campaign_slug: str) -> bool:
+    user = get_current_user()
+    if user is None or not user.is_admin:
+        return False
+    return get_repository().get_campaign(campaign_slug) is not None
 
 
 def can_manage_campaign_content(campaign_slug: str) -> bool:

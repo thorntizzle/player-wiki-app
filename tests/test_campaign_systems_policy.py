@@ -91,7 +91,7 @@ def test_dm_can_open_systems_control_panel_and_visibility_panel_shows_systems_sc
     assert "First model: both, kept as separate lanes." in systems_html
     assert "Custom campaign entries are the DM-authored lane" in systems_html
     assert "Shared-source imports are admin-only shared-library refreshes" in systems_html
-    assert "Imported library entries stay read-only here" in systems_html
+    assert "shared/core content edit routes are app-admin-only" in systems_html
     assert 'class="checkbox-label"' in systems_html
 
 
@@ -146,9 +146,22 @@ def test_dm_systems_entry_detail_keeps_imported_entries_override_only(app, clien
     assert "Entry Management" in detail_body
     assert "Shared library entry" in detail_body
     assert "Manage campaign override" in detail_body
+    assert "shared/core content edit routes are app-admin-only" in detail_body
     assert "#systems-entry-overrides" in detail_body
     assert "Edit custom entry" not in detail_body
     assert f"/systems/control-panel/custom-entries/{entry_slug}" not in detail_body
+
+    shared_edit_page = client.get(
+        f"/campaigns/linden-pass/systems/control-panel/shared-entries/{entry_slug}/edit"
+    )
+    assert shared_edit_page.status_code == 403
+
+    shared_edit_post = client.post(
+        f"/campaigns/linden-pass/systems/control-panel/shared-entries/{entry_slug}",
+        data={"title": "Shared Spark Edited"},
+        follow_redirects=False,
+    )
+    assert shared_edit_post.status_code == 403
 
     override_page = client.get(
         "/campaigns/linden-pass/dm-content/systems",
@@ -168,6 +181,22 @@ def test_dm_systems_entry_detail_keeps_imported_entries_override_only(app, clien
         follow_redirects=False,
     )
     assert custom_edit_attempt.status_code == 404
+
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    admin_shared_edit_page = client.get(
+        f"/campaigns/linden-pass/systems/control-panel/shared-entries/{entry_slug}/edit"
+    )
+    assert admin_shared_edit_page.status_code == 501
+    assert "Shared/core Systems entry editing is reserved for app admins" in admin_shared_edit_page.get_data(
+        as_text=True
+    )
+
+    admin_shared_edit_post = client.post(
+        f"/campaigns/linden-pass/systems/control-panel/shared-entries/{entry_slug}",
+        data={"title": "Shared Spark Edited"},
+        follow_redirects=False,
+    )
+    assert admin_shared_edit_post.status_code == 501
 
     override_response = client.post(
         "/campaigns/linden-pass/systems/control-panel/overrides",

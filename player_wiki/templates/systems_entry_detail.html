@@ -524,7 +524,7 @@
               href="{{ url_for('campaign_systems_control_panel_edit_custom_entry', campaign_slug=campaign.slug, entry_slug=entry.slug, return_to='dm-content-systems', _anchor='systems-custom-entry-editor') }}"
             >Edit custom entry</a>
           {% else %}
-            <p class="meta">Shared library entry. Content edits are not available from campaign management.</p>
+            <p class="meta">Shared library entry. Campaign DMs use overrides; shared/core content edit routes are app-admin-only and separate from campaign management.</p>
             <a
               class="ghost-button"
               href="{{ url_for('campaign_dm_content_subpage_view', campaign_slug=campaign.slug, dm_content_subpage='systems', entry_key=entry.entry_key, _anchor='systems-entry-overrides') }}"
