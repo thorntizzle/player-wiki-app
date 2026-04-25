@@ -24,7 +24,7 @@ General notes:
 - `run_feedback_roadmap.py` is selective by design. Use `--item`, `--items`, or `--all-items`.
 - The roadmap runners now grant the nested Codex worker access to `C:\Users\thorn\.codex\skills` by default, so required skill-family doc updates can ship in the same pass instead of blocking on write scope.
 - The default close-out mode is `ship`, which means the nested Codex pass is expected to commit and push verified tracked app changes unless the task ends with no tracked diff.
-- When a shipped pass is only blocked by a transient Git write failure after the diff is already verified, the host wrapper can now finish the commit and push if the worker reports the intended commit subject on the `Commit:` line using the documented format.
+- When a shipped pass is only blocked by a transient Git write failure after the diff is already verified, the host wrapper can now finish the commit and push if the worker reports the intended commit subject on the `Commit:` line using the documented format. Host recovery stages tracked edits plus new untracked files under known app surfaces such as `player_wiki/`, `tests/`, and `docs/`; scratch output remains ignored and unknown untracked paths still stop the run for manual review.
 - `--deploy-mode auto` tells the worker to deploy when the completed pass changes shipped app functionality.
 - `--live-sync-mode auto` tells the worker to sync DB-backed or content changes that a code deploy would not carry.
 - `--finish-mode local-only` keeps the pass local and suppresses commit, push, deploy, and live sync.
