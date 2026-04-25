@@ -496,9 +496,21 @@ def test_xianxia_native_character_routes_redirect_without_dnd_builder_affordance
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
-    create_response = client.get("/campaigns/linden-pass/characters/new", follow_redirects=False)
-    assert create_response.status_code == 302
-    assert create_response.headers["Location"].endswith("/campaigns/linden-pass/characters")
+    roster = client.get("/campaigns/linden-pass/characters")
+    assert roster.status_code == 200
+    roster_html = roster.get_data(as_text=True)
+    assert "/campaigns/linden-pass/characters/new" not in roster_html
+    assert "Create character" not in roster_html
+    assert "PHB level 1 character" not in roster_html
+    assert "imported PDF" not in roster_html
+
+    for method_name in ("get", "post"):
+        create_response = getattr(client, method_name)(
+            "/campaigns/linden-pass/characters/new",
+            follow_redirects=False,
+        )
+        assert create_response.status_code == 302
+        assert create_response.headers["Location"].endswith("/campaigns/linden-pass/characters")
 
     create_landing = client.get(create_response.headers["Location"])
     assert XIANXIA_NATIVE_CHARACTER_CREATE_UNSUPPORTED_MESSAGE in create_landing.get_data(as_text=True)
@@ -510,17 +522,22 @@ def test_xianxia_native_character_routes_redirect_without_dnd_builder_affordance
         "retraining": XIANXIA_CHARACTER_ADVANCEMENT_UNSUPPORTED_MESSAGE,
     }
     for route_suffix, expected_message in expected_messages.items():
-        response = client.get(
-            f"/campaigns/linden-pass/characters/arden-march/{route_suffix}",
-            follow_redirects=False,
-        )
-        assert response.status_code == 302
-        assert response.headers["Location"].endswith("/campaigns/linden-pass/characters/arden-march")
-        route_landing = client.get(response.headers["Location"])
-        assert expected_message in route_landing.get_data(as_text=True)
+        for method_name in ("get", "post"):
+            response = getattr(client, method_name)(
+                f"/campaigns/linden-pass/characters/arden-march/{route_suffix}",
+                follow_redirects=False,
+            )
+            assert response.status_code == 302
+            assert response.headers["Location"].endswith("/campaigns/linden-pass/characters/arden-march")
+            route_landing = client.get(response.headers["Location"])
+            assert expected_message in route_landing.get_data(as_text=True)
 
     landing = client.get("/campaigns/linden-pass/characters/arden-march")
     html = landing.get_data(as_text=True)
+    assert "/campaigns/linden-pass/characters/arden-march/edit" not in html
+    assert "/campaigns/linden-pass/characters/arden-march/level-up" not in html
+    assert "/campaigns/linden-pass/characters/arden-march/progression-repair" not in html
+    assert "/campaigns/linden-pass/characters/arden-march/retraining" not in html
     assert "Edit character" not in html
     assert "Level up" not in html
     assert "Prepare for level-up" not in html
@@ -544,6 +561,7 @@ def test_xianxia_hides_dnd_spellcasting_read_and_session_affordances(
     read_html = read_response.get_data(as_text=True)
     assert "At a glance" in read_html
     assert "?page=spellcasting" not in read_html
+    assert "/spellcasting/" not in read_html
     assert "Spell slots" not in read_html
     assert "Message" not in read_html
 
@@ -552,6 +570,7 @@ def test_xianxia_hides_dnd_spellcasting_read_and_session_affordances(
     assert "Overview" in session_html
     assert "Spell slots" not in session_html
     assert "page=spells" not in session_html
+    assert "/spellcasting/" not in session_html
 
 
 def test_xianxia_read_sheet_keeps_shared_controls_without_dnd_authoring(
@@ -598,6 +617,20 @@ def test_xianxia_blocks_dnd_spellcasting_management_routes(app, client, sign_in,
     )
     assert spell_add_response.status_code == 302
     assert spell_add_response.headers["Location"].endswith("/campaigns/linden-pass/characters/arden-march")
+
+    spell_update_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/update",
+        follow_redirects=False,
+    )
+    assert spell_update_response.status_code == 302
+    assert spell_update_response.headers["Location"].endswith("/campaigns/linden-pass/characters/arden-march")
+
+    spell_remove_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/remove",
+        follow_redirects=False,
+    )
+    assert spell_remove_response.status_code == 302
+    assert spell_remove_response.headers["Location"].endswith("/campaigns/linden-pass/characters/arden-march")
 
     slot_response = client.post(
         "/campaigns/linden-pass/characters/arden-march/session/spell-slots/1",

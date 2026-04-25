@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import player_wiki.app as app_module
+import player_wiki.character_pdf_importer as pdf_importer_module
 import pytest
 import yaml
 
@@ -27,8 +28,10 @@ from player_wiki.character_pdf_importer import (
     apply_systems_links_to_definition,
     build_pdf_character_artifacts,
     build_pdf_character_markdown,
+    import_pdf_character,
     resolve_definition_campaign_page_links,
     resolve_definition_systems_links,
+    run_pdf_pilot,
 )
 from player_wiki.config import Config
 from player_wiki.db import init_database
@@ -235,6 +238,37 @@ def test_pdf_character_import_is_gated_for_xianxia_campaigns(app, tmp_path, monk
 
     with pytest.raises(CharacterImportError, match="PDF character import"):
         build_pdf_character_artifacts("linden-pass", pdf_path)
+
+
+def test_xianxia_blocks_pdf_pilot_and_import_entrypoints_before_parsing(app, tmp_path, monkeypatch):
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = "xianxia"
+    payload["systems_library"] = "xianxia"
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+
+    monkeypatch.setattr(app_module, "create_app", lambda: app)
+
+    def _fail_if_pdf_is_parsed(*args, **kwargs):
+        raise AssertionError("Xianxia PDF entrypoints should gate before PDF parsing")
+
+    monkeypatch.setattr(pdf_importer_module, "extract_pdf_annotation_fields", _fail_if_pdf_is_parsed)
+    pdf_path = tmp_path / "xianxia-character.pdf"
+    pdf_path.write_bytes(b"not a real pdf")
+
+    with pytest.raises(CharacterImportError, match="PDF character import"):
+        run_pdf_pilot(
+            tmp_path,
+            "linden-pass",
+            pdf_path,
+            output_dir=tmp_path / "pilot-output",
+        )
+
+    with pytest.raises(CharacterImportError, match="PDF character import"):
+        import_pdf_character(tmp_path, "linden-pass", pdf_path)
 
 
 def _sample_system_entry(
