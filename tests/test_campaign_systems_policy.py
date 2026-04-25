@@ -5,7 +5,11 @@ from uuid import uuid4
 
 import pytest
 
-from player_wiki.dnd5e_rules_reference import DND5E_RULES_REFERENCE_VERSION, build_dnd5e_rules_reference_entries
+from player_wiki.dnd5e_rules_reference import (
+    DND5E_RULES_REFERENCE_SOURCE_ID,
+    DND5E_RULES_REFERENCE_VERSION,
+    build_dnd5e_rules_reference_entries,
+)
 from player_wiki.auth_store import AuthStore
 from player_wiki.systems_importer import Dnd5eSystemsImporter
 from tests.test_systems_importer import (
@@ -418,6 +422,48 @@ def test_shared_core_systems_edit_warns_for_app_modeled_entries(app, client, sig
         assert entry is not None
         assert entry.title == "Quiet Lore Revised"
         assert store.get_campaign_entry_override("linden-pass", book_entry_key) is None
+
+
+def test_shared_core_systems_edit_warns_for_normalized_rules_entries(
+    app, client, sign_in, users
+):
+    rules_entry = next(
+        entry
+        for entry in build_dnd5e_rules_reference_entries()
+        if entry["metadata"]["rule_key"] == "ability-scores-and-ability-modifiers"
+    )
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+        service.ensure_builtin_library_seeded(library_slug)
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug=library_slug,
+            source_id=DND5E_RULES_REFERENCE_SOURCE_ID,
+            is_enabled=True,
+            default_visibility="players",
+        )
+        seeded_entry = store.get_entry(library_slug, rules_entry["entry_key"])
+        assert seeded_entry is not None
+        assert seeded_entry.metadata["source_provenance"]["kind"] == "normalized_reference"
+
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+
+    response = client.get(
+        f"/campaigns/linden-pass/systems/control-panel/shared-entries/{rules_entry['slug']}/edit"
+    )
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "Mechanics Impact Review" in body
+    assert "Rules references" in body
+    assert "Rules reference identity and provenance" in body
+    assert "the shared RULES source" in body
+    assert "metadata keys formula" in body
+    assert "source_provenance; body keys formula" in body
+    assert "character-math reference pages" in body
 
 
 def test_proprietary_source_cannot_be_made_public(client, sign_in, users, app):

@@ -101,6 +101,7 @@ MECHANICS_IMPACT_RULE_METADATA_KEYS = {
     "formulas": "formulas",
     "rulefacets": "rule_facets",
     "rulekey": "rule_key",
+    "sourceprovenance": "source_provenance",
 }
 MECHANICS_IMPACT_CHARACTER_METADATA_KEYS = {
     "baserulerefs": "base_rule_refs",
@@ -1086,9 +1087,9 @@ class SystemsService:
             if rules_body_key_paths:
                 details.append(f"body keys {_format_structured_key_paths(rules_body_key_paths)}")
             add_signal(
-                "Rules reference identity",
+                "Rules reference identity and provenance",
                 (
-                    "This row carries stable rules-reference identity used by related-rule "
+                    "This row carries stable rules-reference identity and source provenance used by related-rule "
                     f"links and character-math reference pages ({'; '.join(details)})."
                 ),
                 "Rules references",
