@@ -4788,7 +4788,7 @@ def _effective_item_catalog_for_definition(
     systems_service: Any | None = None,
     campaign_page_records: list[Any] | None = None,
 ) -> dict[str, Any]:
-    if item_catalog:
+    if item_catalog is not None:
         return dict(item_catalog)
     if systems_service is not None:
         static_bundle = _build_common_builder_static_bundle(
@@ -4809,7 +4809,7 @@ def _effective_spell_catalog_for_definition(
     systems_service: Any | None = None,
     campaign_page_records: list[Any] | None = None,
 ) -> dict[str, Any]:
-    if spell_catalog:
+    if spell_catalog is not None:
         return dict(spell_catalog)
     if systems_service is not None:
         static_bundle = _build_common_builder_static_bundle(

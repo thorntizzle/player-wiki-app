@@ -6,6 +6,7 @@ import yaml
 from datetime import datetime, timezone
 
 import player_wiki.app as app_module
+import player_wiki.character_builder as character_builder_module
 import pytest
 from player_wiki.auth_store import AuthStore
 from player_wiki.character_builder import normalize_definition_to_native_model
@@ -462,6 +463,26 @@ def test_non_5e_session_mode_still_works_for_owner_player(
     assert "Back to character sheet" in html
     assert "Back to read mode" not in html
     assert "Edit character" not in html
+
+
+def test_native_normalizer_respects_supplied_empty_catalogs(app):
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert record is not None
+
+        item_catalog = character_builder_module._effective_item_catalog_for_definition(
+            record.definition,
+            item_catalog={},
+            systems_service=app.extensions["systems_service"],
+        )
+        spell_catalog = character_builder_module._effective_spell_catalog_for_definition(
+            record.definition,
+            spell_catalog={},
+            systems_service=app.extensions["systems_service"],
+        )
+
+    assert item_catalog == {}
+    assert spell_catalog == {}
 
 
 def test_non_5e_builder_route_redirects_to_roster_with_error(app, client, sign_in, users):

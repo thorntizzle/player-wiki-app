@@ -1534,27 +1534,45 @@ def create_app() -> Flask:
                     )
         return results
 
-    def load_character_spell_management_support(campaign_slug: str, definition) -> tuple[dict[str, object], list[dict[str, object]]]:
-        spell_catalog = _build_spell_catalog(
-            _list_campaign_enabled_entries(
-                get_systems_service(),
-                campaign_slug,
-                "spell",
+    def load_character_spell_management_support(
+        campaign_slug: str,
+        definition,
+        *,
+        spell_catalog: dict[str, object] | None = None,
+    ) -> tuple[dict[str, object], list[dict[str, object]]]:
+        resolved_spell_catalog = (
+            spell_catalog
+            if spell_catalog is not None
+            else _build_spell_catalog(
+                _list_campaign_enabled_entries(
+                    get_systems_service(),
+                    campaign_slug,
+                    "spell",
+                )
             )
         )
         selected_class_rows = resolve_character_spellcasting_class_entries(campaign_slug, definition)
-        return spell_catalog, selected_class_rows
+        return resolved_spell_catalog, selected_class_rows
 
     def build_character_spell_manager_context(
         campaign_slug: str,
         campaign,
         record,
+        *,
+        spell_catalog: dict[str, object] | None = None,
+        selected_class_rows: list[dict[str, object]] | None = None,
     ) -> dict[str, object] | None:
-        spell_catalog, selected_class_rows = load_character_spell_management_support(campaign_slug, record.definition)
-        manager = build_character_spell_management_context(
+        resolved_spell_catalog, resolved_class_rows = load_character_spell_management_support(
+            campaign_slug,
             record.definition,
             spell_catalog=spell_catalog,
-            selected_class_rows=selected_class_rows,
+        )
+        if selected_class_rows is not None:
+            resolved_class_rows = selected_class_rows
+        manager = build_character_spell_management_context(
+            record.definition,
+            spell_catalog=resolved_spell_catalog,
+            selected_class_rows=resolved_class_rows,
         )
         if manager is None:
             return None
@@ -3209,6 +3227,27 @@ def create_app() -> Flask:
         can_manage_character = can_manage_campaign_session(campaign_slug)
         campaign_page_records = list_visible_character_page_records(campaign_slug, campaign)
         builder_campaign_page_records = list_builder_campaign_page_records(campaign_slug, campaign)
+        shared_item_catalog: dict[str, object] | None = None
+        shared_spell_catalog: dict[str, object] | None = None
+
+        def get_read_item_catalog() -> dict[str, object]:
+            nonlocal shared_item_catalog
+            if shared_item_catalog is None:
+                shared_item_catalog = build_character_item_catalog(campaign_slug)
+            return shared_item_catalog
+
+        def get_read_spell_catalog() -> dict[str, object]:
+            nonlocal shared_spell_catalog
+            if shared_spell_catalog is None:
+                shared_spell_catalog = _build_spell_catalog(
+                    _list_campaign_enabled_entries(
+                        app.extensions["systems_service"],
+                        campaign_slug,
+                        "spell",
+                    )
+                )
+            return shared_spell_catalog
+
         retraining_page_records = (
             [
                 page_record
@@ -3258,13 +3297,7 @@ def create_app() -> Flask:
                     )
                     if str(entry.slug or "").strip()
                 },
-                spell_catalog=_build_spell_catalog(
-                    _list_campaign_enabled_entries(
-                        app.extensions["systems_service"],
-                        campaign_slug,
-                        "spell",
-                    )
-                ),
+                spell_catalog=get_read_spell_catalog(),
             )
             can_retrain = bool(retraining_context.get("feature_rows"))
         include_controls_subpage = can_use_session_mode
@@ -3290,7 +3323,13 @@ def create_app() -> Flask:
         if background_draft is not None:
             character["personal_background_markdown"] = background_draft
         character["portrait"] = build_character_portrait_context(campaign, record.definition)
-        spell_manager = build_character_spell_manager_context(campaign_slug, campaign, record)
+        spell_catalog = get_read_spell_catalog()
+        spell_manager = build_character_spell_manager_context(
+            campaign_slug,
+            campaign,
+            record,
+            spell_catalog=spell_catalog,
+        )
         if not character.get("spellcasting") and spell_manager is not None:
             spellcasting_placeholder = build_character_spellcasting_placeholder(spell_manager)
             if spellcasting_placeholder is not None:
@@ -3311,7 +3350,7 @@ def create_app() -> Flask:
             if include_controls_subpage
             else None
         )
-        item_catalog = build_character_item_catalog(campaign_slug)
+        item_catalog = get_read_item_catalog()
         inventory_manager = (
             build_character_inventory_manager_context(
                 campaign_slug,
@@ -3530,9 +3569,15 @@ def create_app() -> Flask:
         character_slug: str,
         edit_context: dict[str, object],
         *,
+        campaign_page_records: list[object] | None = None,
         status_code: int = 200,
     ):
         campaign, record = load_character_context(campaign_slug, character_slug)
+        resolved_campaign_page_records = (
+            campaign_page_records
+            if campaign_page_records is not None
+            else list_visible_character_page_records(campaign_slug, campaign)
+        )
         return (
             render_template(
                 "character_edit.html",
@@ -3542,7 +3587,7 @@ def create_app() -> Flask:
                     record,
                     include_player_notes_section=True,
                     systems_service=get_systems_service(),
-                    campaign_page_records=list_visible_character_page_records(campaign_slug, campaign),
+                    campaign_page_records=resolved_campaign_page_records,
                 ),
                 edit_context=edit_context,
                 active_nav="characters",
@@ -3555,9 +3600,15 @@ def create_app() -> Flask:
         character_slug: str,
         retraining_context: dict[str, object],
         *,
+        campaign_page_records: list[object] | None = None,
         status_code: int = 200,
     ):
         campaign, record = load_character_context(campaign_slug, character_slug)
+        resolved_campaign_page_records = (
+            campaign_page_records
+            if campaign_page_records is not None
+            else list_visible_character_page_records(campaign_slug, campaign)
+        )
         return (
             render_template(
                 "character_retraining.html",
@@ -3567,7 +3618,7 @@ def create_app() -> Flask:
                     record,
                     include_player_notes_section=True,
                     systems_service=get_systems_service(),
-                    campaign_page_records=list_visible_character_page_records(campaign_slug, campaign),
+                    campaign_page_records=resolved_campaign_page_records,
                 ),
                 retraining_context=retraining_context,
                 active_nav="characters",
@@ -4108,12 +4159,21 @@ def create_app() -> Flask:
 
         if selected_character_slug:
             record = accessible_records_by_slug[selected_character_slug]
+            character_campaign_page_records = list_visible_character_page_records(campaign_slug, campaign)
+            character_item_catalog = build_character_item_catalog(campaign_slug)
+            character_spell_catalog = _build_spell_catalog(
+                _list_campaign_enabled_entries(
+                    app.extensions["systems_service"],
+                    campaign_slug,
+                    "spell",
+                )
+            )
             character = present_character_detail(
                 campaign,
                 record,
                 include_player_notes_section=True,
                 systems_service=get_systems_service(),
-                campaign_page_records=list_visible_character_page_records(campaign_slug, campaign),
+                campaign_page_records=character_campaign_page_records,
             )
             if notes_draft is not None:
                 character["player_notes_markdown"] = notes_draft
@@ -4122,7 +4182,12 @@ def create_app() -> Flask:
             if background_draft is not None:
                 character["personal_background_markdown"] = background_draft
             character["portrait"] = build_character_portrait_context(campaign, record.definition)
-            spell_manager = build_character_spell_manager_context(campaign_slug, campaign, record)
+            spell_manager = build_character_spell_manager_context(
+                campaign_slug,
+                campaign,
+                record,
+                spell_catalog=character_spell_catalog,
+            )
             if not character.get("spellcasting") and spell_manager is not None:
                 spellcasting_placeholder = build_character_spellcasting_placeholder(spell_manager)
                 if spellcasting_placeholder is not None:
@@ -4147,6 +4212,7 @@ def create_app() -> Flask:
                 campaign_slug,
                 campaign,
                 record,
+                item_catalog=character_item_catalog,
             )
             character_subpages = [
                 {
@@ -4928,17 +4994,20 @@ def create_app() -> Flask:
         return sections, default_section
 
     def build_combat_character_detail_context(campaign_slug: str, campaign, record) -> dict[str, object]:
+        campaign_page_records = list_visible_character_page_records(campaign_slug, campaign)
+        item_catalog = build_character_item_catalog(campaign_slug)
         character_detail = present_character_detail(
             campaign,
             record,
             include_player_notes_section=False,
             systems_service=get_systems_service(),
-            campaign_page_records=list_visible_character_page_records(campaign_slug, campaign),
+            campaign_page_records=campaign_page_records,
         )
         equipment_state_manager = build_character_equipment_state_context(
             campaign_slug,
             campaign,
             record,
+            item_catalog=item_catalog,
         )
         workspace_sections, workspace_default_section = build_combat_character_workspace_sections(
             character_detail,
@@ -9165,6 +9234,7 @@ def create_app() -> Flask:
             )
             if str(entry.slug or "").strip()
         }
+        item_catalog = build_character_item_catalog(campaign_slug)
         form_values = dict(request.form if request.method == "POST" else request.args)
         edit_context = build_native_character_edit_context(
             record.definition,
@@ -9172,12 +9242,18 @@ def create_app() -> Flask:
             form_values=form_values if request.method == "POST" else None,
             optionalfeature_catalog=optionalfeature_catalog,
             spell_catalog=spell_catalog,
+            item_catalog=item_catalog,
             linked_feature_authoring_support=linked_feature_authoring,
         )
         edit_context["state_revision"] = record.state_record.revision
 
         if request.method != "POST":
-            return render_character_edit_page(campaign_slug, character_slug, edit_context)
+            return render_character_edit_page(
+                campaign_slug,
+                character_slug,
+                edit_context,
+                campaign_page_records=campaign_page_records,
+            )
 
         user = get_current_user()
         if user is None:
@@ -9193,6 +9269,7 @@ def create_app() -> Flask:
                 form_values=form_values,
                 optionalfeature_catalog=optionalfeature_catalog,
                 spell_catalog=spell_catalog,
+                item_catalog=item_catalog,
                 systems_service=app.extensions["systems_service"],
                 linked_feature_authoring_support=linked_feature_authoring,
             )
@@ -9229,10 +9306,22 @@ def create_app() -> Flask:
             )
         except CharacterStateConflictError:
             flash("This sheet changed in another session. Refresh the page and try again.", "error")
-            return render_character_edit_page(campaign_slug, character_slug, edit_context, status_code=409)
+            return render_character_edit_page(
+                campaign_slug,
+                character_slug,
+                edit_context,
+                campaign_page_records=campaign_page_records,
+                status_code=409,
+            )
         except (CharacterEditValidationError, CharacterStateValidationError, ValueError) as exc:
             flash(str(exc), "error")
-            return render_character_edit_page(campaign_slug, character_slug, edit_context, status_code=400)
+            return render_character_edit_page(
+                campaign_slug,
+                character_slug,
+                edit_context,
+                campaign_page_records=campaign_page_records,
+                status_code=400,
+            )
 
         config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
         character_dir = config.characters_dir / character_slug
@@ -9304,6 +9393,7 @@ def create_app() -> Flask:
             )
             if str(entry.slug or "").strip()
         }
+        item_catalog = build_character_item_catalog(campaign_slug)
         form_values = dict(request.form if request.method == "POST" else request.args)
         retraining_context = build_native_character_retraining_context(
             record.definition,
@@ -9311,6 +9401,7 @@ def create_app() -> Flask:
             form_values=form_values if request.method == "POST" else None,
             optionalfeature_catalog=optionalfeature_catalog,
             spell_catalog=spell_catalog,
+            item_catalog=item_catalog,
         )
         retraining_context["state_revision"] = record.state_record.revision
         if not list(retraining_context.get("feature_rows") or []):
@@ -9331,6 +9422,7 @@ def create_app() -> Flask:
                 campaign_slug,
                 character_slug,
                 retraining_context,
+                campaign_page_records=campaign_page_records,
             )
 
         user = get_current_user()
@@ -9347,6 +9439,7 @@ def create_app() -> Flask:
                 form_values=form_values,
                 optionalfeature_catalog=optionalfeature_catalog,
                 spell_catalog=spell_catalog,
+                item_catalog=item_catalog,
                 systems_service=app.extensions["systems_service"],
             )
             definition = finalize_character_definition_for_write(
@@ -9386,6 +9479,7 @@ def create_app() -> Flask:
                 campaign_slug,
                 character_slug,
                 retraining_context,
+                campaign_page_records=campaign_page_records,
                 status_code=409,
             )
         except (CharacterEditValidationError, CharacterStateValidationError, ValueError) as exc:
@@ -9394,6 +9488,7 @@ def create_app() -> Flask:
                 campaign_slug,
                 character_slug,
                 retraining_context,
+                campaign_page_records=campaign_page_records,
                 status_code=400,
             )
 
