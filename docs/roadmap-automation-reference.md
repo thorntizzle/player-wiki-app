@@ -20,7 +20,7 @@ Preferred Python:
 
 General notes:
 
-- `scripts\roadmaps\run_systems_roadmap.py`, `scripts\roadmaps\run_ux_roadmap.py`, and `scripts\roadmaps\run_character_needed_coverage_roadmap.py` always start from the first unchecked checkbox in their roadmap.
+- `scripts\roadmaps\run_systems_roadmap.py`, `scripts\roadmaps\run_ux_roadmap.py`, `scripts\roadmaps\run_character_needed_coverage_roadmap.py`, and `scripts\roadmaps\run_xianxia_roadmap.py` always start from the first unchecked checkbox in their roadmap.
 - `scripts\roadmaps\run_feedback_roadmap.py` is selective by design. Use `--item`, `--items`, or `--all-items`.
 - The roadmap runners now grant the nested Codex worker access to `C:\Users\thorn\.codex\skills` by default, so required skill-family doc updates can ship in the same pass instead of blocking on write scope.
 - The default close-out mode is `ship`, which means the nested Codex pass is expected to commit and push verified tracked app changes unless the task ends with no tracked diff.
@@ -184,6 +184,40 @@ Useful options:
 - `--finish-mode local-only`: keep the whole pass local
 - `--add-dir <path>`: add more writable/readable roots for the nested worker if a pass needs something beyond the default app workspace, vault root, and Codex skill tree
 
+## Xianxia Roadmap
+
+Script:
+
+```text
+.\scripts\roadmaps\run_xianxia_roadmap.py
+```
+
+Roadmap:
+
+```text
+.\campaign_player_wiki\.local\xianxia-implementation-roadmap.md
+```
+
+This runner is sequential and only targets unchecked items under `Milestone 1 Checklist`. The deferred `Milestone 2 Deferred Backlog` checkboxes are ignored.
+
+Common commands:
+
+```powershell
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_xianxia_roadmap.py --dry-run
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_xianxia_roadmap.py --max-tasks 1
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_xianxia_roadmap.py --max-tasks 2 --model gpt-5.3-codex
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_xianxia_roadmap.py --max-tasks 1 --finish-mode local-only
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_xianxia_roadmap.py --max-tasks 1 --deploy-mode auto --live-sync-mode auto
+```
+
+Useful options:
+
+- `--dry-run`: preview the next Milestone 1 prompt and command
+- `--max-tasks N`: stop after `N` targeted Milestone 1 checklist passes
+- `--note "..."`: append extra worker instructions
+- `--finish-mode local-only`: keep the whole pass local
+- `--add-dir <path>`: add more writable/readable roots for the nested worker if a pass needs something beyond the default app workspace, vault root, and Codex skill tree
+
 ## Log Output
 
 Each runner creates a timestamped run folder under:
@@ -192,6 +226,7 @@ Each runner creates a timestamped run folder under:
 - UX: `campaign_player_wiki\.local\roadmap-runs\ux\`
 - Feedback: `campaign_player_wiki\.local\roadmap-runs\feedback\`
 - Character Needed Coverage: `campaign_player_wiki\.local\roadmap-runs\character-needed-coverage\`
+- Xianxia: `campaign_player_wiki\.local\roadmap-runs\xianxia\`
 
 Typical run artifacts:
 
