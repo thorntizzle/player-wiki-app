@@ -228,13 +228,36 @@ def test_shared_core_systems_edit_flow_stays_separate_from_overrides_and_custom_
     assert "Shared/core Systems editor" in admin_shared_edit_body
     assert 'name="shared_entry_title"' in admin_shared_edit_body
     assert 'name="shared_entry_metadata_json"' in admin_shared_edit_body
+    assert 'id="shared-entry-edit-form"' in admin_shared_edit_body
+    assert 'name="shared_entry_mechanics_impact_acknowledged"' in admin_shared_edit_body
+    assert "source reimport" in admin_shared_edit_body
     assert 'name="custom_entry_title"' not in admin_shared_edit_body
     assert 'name="visibility_override"' not in admin_shared_edit_body
+
+    missing_ack_shared_edit = client.post(
+        f"/campaigns/linden-pass/systems/control-panel/shared-entries/{entry_slug}",
+        data={
+            "shared_entry_title": "Shared Spark Edited",
+            "shared_entry_source_page": "42",
+            "shared_entry_source_path": "sources/shared-spark.md",
+            "shared_entry_search_text": "shared spark edited admin browser flow",
+            "shared_entry_player_safe_default": "1",
+            "shared_entry_metadata_json": '{"edited": true}',
+            "shared_entry_body_json": "{}",
+            "shared_entry_rendered_html": "<p>This should not save yet.</p>",
+        },
+        follow_redirects=False,
+    )
+    assert missing_ack_shared_edit.status_code == 400
+    assert "Review and acknowledge the mechanics impact warning" in missing_ack_shared_edit.get_data(
+        as_text=True
+    )
 
     invalid_shared_edit = client.post(
         f"/campaigns/linden-pass/systems/control-panel/shared-entries/{entry_slug}",
         data={
             "shared_entry_title": "Shared Spark Edited",
+            "shared_entry_mechanics_impact_acknowledged": "1",
             "shared_entry_metadata_json": "{bad json",
             "shared_entry_body_json": "{}",
             "shared_entry_rendered_html": "<p>This should not save.</p>",
@@ -252,6 +275,7 @@ def test_shared_core_systems_edit_flow_stays_separate_from_overrides_and_custom_
             "shared_entry_source_path": "sources/shared-spark.md",
             "shared_entry_search_text": "shared spark edited admin browser flow",
             "shared_entry_player_safe_default": "1",
+            "shared_entry_mechanics_impact_acknowledged": "1",
             "shared_entry_metadata_json": '{"edited": true, "original_source": "imported-test"}',
             "shared_entry_body_json": '{"editor": "shared-core-browser"}',
             "shared_entry_rendered_html": "<p>Edited shared library body.</p>",
@@ -420,7 +444,8 @@ def test_shared_core_systems_edit_warns_for_app_modeled_entries(app, client, sig
     assert "Mechanics Impact Review" in modeled_body
     assert "Character tools" in modeled_body
     assert "spell_support" in modeled_body
-    assert "does not automatically repair existing characters" in modeled_body
+    assert "does not start a character repair" in modeled_body
+    assert 'name="shared_entry_mechanics_impact_acknowledged"' in modeled_body
     assert 'name="visibility_override"' not in modeled_body
 
     prose_page = client.get(

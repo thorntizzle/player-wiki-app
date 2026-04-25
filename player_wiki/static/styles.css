@@ -896,6 +896,14 @@ button {
   border-top: 1px solid var(--border-soft);
 }
 
+.mechanics-impact-warning__ack {
+  margin-top: 0.9rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border-accent);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
 .broken-link {
   color: var(--danger);
   border-bottom: 1px dashed currentColor;

@@ -34,7 +34,18 @@
               </li>
             {% endfor %}
           </ul>
-          <p class="meta">Saving this row does not automatically repair existing characters, combat trackers, or session references.</p>
+          <p class="meta">Saving this row only updates the shared Systems entry. It does not start a character repair, combat repair, session repair, or source reimport.</p>
+          <label class="checkbox-label mechanics-impact-warning__ack">
+            <input
+              type="checkbox"
+              name="shared_entry_mechanics_impact_acknowledged"
+              value="1"
+              form="shared-entry-edit-form"
+              required
+              {% if shared_systems_entry_form.mechanics_impact_acknowledged %}checked{% endif %}
+            >
+            I reviewed this impact inventory and understand this save will not repair existing characters, combat trackers, session references, or source data.
+          </label>
         </section>
       {% endif %}
 
@@ -47,6 +58,7 @@
         </div>
 
         <form
+          id="shared-entry-edit-form"
           method="post"
           action="{{ url_for('campaign_systems_control_panel_update_shared_entry', campaign_slug=campaign.slug, entry_slug=entry.slug) }}"
           class="stack-form"

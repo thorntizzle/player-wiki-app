@@ -1158,6 +1158,9 @@ def build_shared_systems_entry_form(*, entry=None, form_data=None) -> dict[str, 
             "metadata_json": str(data.get("shared_entry_metadata_json") or "{}"),
             "body_json": str(data.get("shared_entry_body_json") or "{}"),
             "rendered_html": str(data.get("shared_entry_rendered_html") or ""),
+            "mechanics_impact_acknowledged": (
+                data.get("shared_entry_mechanics_impact_acknowledged") == "1"
+            ),
         }
     if entry is not None:
         return {
@@ -1170,6 +1173,7 @@ def build_shared_systems_entry_form(*, entry=None, form_data=None) -> dict[str, 
             "metadata_json": format_systems_entry_json_field(entry.metadata),
             "body_json": format_systems_entry_json_field(entry.body),
             "rendered_html": entry.rendered_html,
+            "mechanics_impact_acknowledged": False,
         }
     return {
         "title": "",
@@ -1181,6 +1185,7 @@ def build_shared_systems_entry_form(*, entry=None, form_data=None) -> dict[str, 
         "metadata_json": "{}",
         "body_json": "{}",
         "rendered_html": "",
+        "mechanics_impact_acknowledged": False,
     }
 
 
@@ -8459,6 +8464,21 @@ def create_app() -> Flask:
             abort(403)
         entry = get_shared_systems_entry_for_edit_route(campaign_slug, entry_slug)
         systems_service = get_systems_service()
+        mechanics_warning = systems_service.build_shared_core_entry_mechanics_impact_warning(entry)
+        if (
+            mechanics_warning is not None
+            and request.form.get("shared_entry_mechanics_impact_acknowledged") != "1"
+        ):
+            flash(
+                "Review and acknowledge the mechanics impact warning before saving this shared/core Systems entry.",
+                "error",
+            )
+            return render_shared_systems_entry_editor(
+                campaign_slug,
+                entry,
+                form_data=request.form,
+                status_code=400,
+            )
         original_source_identity = build_shared_systems_entry_original_source_identity(entry)
         try:
             metadata = parse_shared_systems_entry_json_field(
