@@ -10,6 +10,7 @@ import markdown
 import yaml
 
 from .models import Campaign, Page, page_sort_key
+from .system_policy import default_systems_library_slug, normalize_system_code
 
 FRONTMATTER_PATTERN = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 OBSIDIAN_LINK_PATTERN = re.compile(r"\[\[([^\]]+)\]\]")
@@ -138,12 +139,12 @@ def load_campaign(config_path: Path, page_store: Any) -> Campaign:
         title=config["title"],
         slug=config.get("slug", slugify(config["title"])),
         summary=config.get("summary", ""),
-        system=config.get("system", "").strip(),
+        system=normalize_system_code(config.get("system", "")),
         current_session=int(config.get("current_session", 0)),
         source_wiki_root=config.get("source_wiki_root", ""),
         player_content_dir=str(content_root),
         assets_dir=str(assets_root),
-        systems_library_slug=str(config.get("systems_library", "") or "").strip(),
+        systems_library_slug=default_systems_library_slug(config.get("systems_library", "")),
         systems_source_defaults=list(config.get("systems_sources") or []),
     )
 

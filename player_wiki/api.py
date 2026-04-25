@@ -72,9 +72,9 @@ from .session_models import (
 from .systems_importer import Dnd5eSystemsImporter, SUPPORTED_ENTRY_TYPES
 from .systems_ingest import SystemsIngestError, extracted_systems_archive
 from .systems_service import LICENSE_CLASS_LABELS, SystemsPolicyValidationError
+from .system_policy import supports_combat_tracker
 from .version import build_app_metadata
 
-SUPPORTED_COMBAT_SYSTEM = "DND-5E"
 SYSTEMS_ENTRY_TYPE_LABELS = {
     "action": "Actions",
     "background": "Backgrounds",
@@ -930,7 +930,7 @@ def register_api(app) -> None:
         campaign = get_repository().get_campaign(campaign_slug)
         if campaign is None:
             abort(404)
-        if campaign.system != SUPPORTED_COMBAT_SYSTEM:
+        if not supports_combat_tracker(campaign.system):
             raise CampaignCombatValidationError(
                 f"Combat tracker support for {campaign.system or 'this system'} is not available yet."
             )
@@ -944,7 +944,7 @@ def register_api(app) -> None:
         can_manage_combat = can_manage_campaign_combat(campaign_slug)
         can_access_dm_content = can_access_campaign_scope(campaign_slug, "dm_content")
         can_access_systems = can_access_campaign_scope(campaign_slug, "systems")
-        combat_system_supported = campaign.system == SUPPORTED_COMBAT_SYSTEM
+        combat_system_supported = supports_combat_tracker(campaign.system)
 
         tracker_view: dict[str, Any] = {
             "round_number": 1,
@@ -2396,7 +2396,7 @@ def register_api(app) -> None:
         campaign = get_repository().get_campaign(campaign_slug)
         if campaign is None:
             abort(404)
-        if campaign.system != SUPPORTED_COMBAT_SYSTEM:
+        if not supports_combat_tracker(campaign.system):
             return jsonify(
                 {
                     "ok": True,

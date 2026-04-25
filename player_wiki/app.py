@@ -176,6 +176,14 @@ from .systems_importer import Dnd5eSystemsImporter, SUPPORTED_ENTRY_TYPES
 from .systems_ingest import SystemsIngestError, extracted_systems_archive
 from .systems_service import LICENSE_CLASS_LABELS, SystemsPolicyValidationError, SystemsService
 from .systems_store import SystemsStore
+from .system_policy import (
+    DND_5E_SYSTEM_CODE,
+    NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE,
+    supports_combat_tracker,
+    supports_dnd5e_statblock_upload,
+    supports_dnd5e_systems_import,
+    supports_native_character_tools,
+)
 from .version import build_app_metadata
 
 SESSION_ARTICLE_FORM_MODES = {"manual", "upload", "wiki"}
@@ -429,11 +437,6 @@ BUILDER_RELEVANT_CAMPAIGN_SECTIONS = frozenset(
         CAMPAIGN_MECHANICS_SECTION,
         CAMPAIGN_ITEMS_SECTION,
     }
-)
-SUPPORTED_COMBAT_SYSTEM = "DND-5E"
-SUPPORTED_NATIVE_CHARACTER_SYSTEM = "DND-5E"
-NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE = (
-    "Native character tools are currently only supported for DND-5E campaigns."
 )
 CHARACTER_PORTRAIT_ALT_MAX_LENGTH = 200
 CHARACTER_PORTRAIT_CAPTION_MAX_LENGTH = 300
@@ -3019,7 +3022,7 @@ def create_app() -> Flask:
         if not character_slug:
             return None
         campaign = campaign if campaign is not None else load_campaign_context(campaign_slug)
-        if campaign.system != SUPPORTED_COMBAT_SYSTEM:
+        if not supports_combat_tracker(campaign.system):
             return None
         for combatant in get_campaign_combat_service().list_combatants(
             campaign_slug,
@@ -3297,7 +3300,7 @@ def create_app() -> Flask:
 
     def require_supported_combat_system(campaign_slug: str):
         campaign = load_campaign_context(campaign_slug)
-        if campaign.system != SUPPORTED_COMBAT_SYSTEM:
+        if not supports_combat_tracker(campaign.system):
             flash(
                 f"Combat tracker support for {campaign.system or 'this system'} is not available yet.",
                 "error",
@@ -3306,10 +3309,7 @@ def create_app() -> Flask:
         return campaign
 
     def campaign_supports_native_character_tools(campaign) -> bool:
-        return (
-            str(getattr(campaign, "system", "") or "").strip().upper()
-            == SUPPORTED_NATIVE_CHARACTER_SYSTEM
-        )
+        return supports_native_character_tools(getattr(campaign, "system", ""))
 
     def redirect_unsupported_native_character_tools(
         campaign_slug: str,
@@ -3443,7 +3443,7 @@ def create_app() -> Flask:
         can_manage_visibility = can_manage_campaign_visibility(campaign_slug)
 
         native_character_tools_supported = campaign_supports_native_character_tools(campaign)
-        combat_system_supported = campaign.system == SUPPORTED_COMBAT_SYSTEM
+        combat_system_supported = supports_combat_tracker(campaign.system)
         system_label = str(getattr(campaign, "system", "") or "").strip() or "Unspecified"
         combat_source_seed_capability = (
             "NPC combatants can be seeded from Systems monsters and DM Content statblocks when those source libraries are available."
@@ -3666,7 +3666,7 @@ def create_app() -> Flask:
                         + (
                             ""
                             if combat_system_supported
-                            else f" This campaign uses {system_label}, so combat stays limited until non-{SUPPORTED_COMBAT_SYSTEM} support exists."
+                            else f" This campaign uses {system_label}, so combat stays limited until non-{DND_5E_SYSTEM_CODE} support exists."
                         )
                     )
                     if can_view_combat
@@ -3682,7 +3682,7 @@ def create_app() -> Flask:
                     combat_source_seed_capability,
                 ],
                 limits=[
-                    f"Combat is currently implemented for {SUPPORTED_COMBAT_SYSTEM} campaigns.",
+                    f"Combat is currently implemented for {DND_5E_SYSTEM_CODE} campaigns.",
                     "Player edits stay limited to their own allowed combat-facing character state.",
                     "NPC detail visibility remains DM-controlled.",
                 ],
@@ -3735,7 +3735,7 @@ def create_app() -> Flask:
                         + (
                             ""
                             if combat_system_supported
-                            else f" Statblock upload is currently built only for {SUPPORTED_COMBAT_SYSTEM} campaigns."
+                            else f" Statblock upload is currently built only for {DND_5E_SYSTEM_CODE} campaigns."
                         )
                     )
                     if can_view_dm_content
@@ -3830,7 +3830,7 @@ def create_app() -> Flask:
                         + (
                             " Native create/edit/level-up tools are available for this campaign system."
                             if native_character_tools_supported
-                            else f" Native authoring stays limited because this campaign is not using {SUPPORTED_NATIVE_CHARACTER_SYSTEM}."
+                            else f" Native authoring stays limited because this campaign is not using {DND_5E_SYSTEM_CODE}."
                         )
                     )
                     if can_view_characters
@@ -3846,7 +3846,7 @@ def create_app() -> Flask:
                     "Use the full character page for portraits, equipment state, spell-list maintenance, and broader sheet upkeep.",
                 ],
                 limits=[
-                    f"Native authoring tools are currently only supported for {SUPPORTED_NATIVE_CHARACTER_SYSTEM} campaigns.",
+                    f"Native authoring tools are currently only supported for {DND_5E_SYSTEM_CODE} campaigns.",
                     "Imported characters may need progression repair before native level-up is available.",
                     "Session and Combat intentionally keep only a smaller quick-edit slice instead of replacing the full character page.",
                 ],
@@ -5891,7 +5891,7 @@ def create_app() -> Flask:
         )
         campaign = load_campaign_context(campaign_slug)
         can_manage_combat = can_manage_campaign_combat(campaign_slug)
-        combat_system_supported = campaign.system == SUPPORTED_COMBAT_SYSTEM
+        combat_system_supported = supports_combat_tracker(campaign.system)
         can_access_dm_content = can_access_campaign_scope(campaign_slug, "dm_content")
         can_access_systems = can_access_campaign_scope(campaign_slug, "systems")
 
@@ -6593,7 +6593,7 @@ def create_app() -> Flask:
 
         return {
             "campaign": campaign,
-            "dm_content_system_supported": campaign.system == SUPPORTED_COMBAT_SYSTEM,
+            "dm_content_system_supported": supports_dnd5e_statblock_upload(campaign.system),
             "dm_statblocks": statblocks,
             "dm_statblock_top_level": top_level_statblocks,
             "dm_statblock_subsection_groups": statblock_subsection_groups,
@@ -8794,7 +8794,7 @@ def create_app() -> Flask:
 
         systems_service = get_systems_service()
         library_slug = systems_service.get_campaign_library_slug(campaign_slug)
-        if library_slug != "DND-5E":
+        if not supports_dnd5e_systems_import(library_slug):
             return render_import_error("Browser source import is currently only available for DND-5E Systems libraries.")
 
         source_ids: list[str] = []
@@ -9366,9 +9366,9 @@ def create_app() -> Flask:
             abort(403)
 
         campaign = load_campaign_context(campaign_slug)
-        if campaign.system != SUPPORTED_COMBAT_SYSTEM:
+        if not supports_dnd5e_statblock_upload(campaign.system):
             flash(
-                f"Statblock upload is only implemented for {SUPPORTED_COMBAT_SYSTEM} right now.",
+                f"Statblock upload is only implemented for {DND_5E_SYSTEM_CODE} right now.",
                 "error",
             )
             return redirect_to_campaign_dm_content(

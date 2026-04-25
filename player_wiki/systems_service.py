@@ -42,6 +42,11 @@ from .systems_models import (
     SystemsSourceRecord,
 )
 from .systems_store import SystemsStore
+from .system_policy import (
+    DND_5E_SYSTEM_CODE,
+    default_systems_library_slug,
+    is_dnd_5e_systems_library,
+)
 
 LICENSE_CLASS_LABELS = {
     "app_reference": "App-authored reference",
@@ -709,9 +714,9 @@ DND_5E_SOURCE_CATALOG = (
 )
 
 BUILTIN_LIBRARY_CATALOG = {
-    "DND-5E": {
+    DND_5E_SYSTEM_CODE: {
         "title": "DND 5E",
-        "system_code": "DND-5E",
+        "system_code": DND_5E_SYSTEM_CODE,
         "sources": DND_5E_SOURCE_CATALOG,
     }
 }
@@ -856,8 +861,8 @@ class SystemsService:
         if campaign is None:
             return ""
         if campaign.systems_library_slug:
-            return campaign.systems_library_slug
-        return campaign.system.strip()
+            return default_systems_library_slug(campaign.systems_library_slug)
+        return default_systems_library_slug(campaign.system)
 
     def get_campaign_library(self, campaign_slug: str) -> SystemsLibraryRecord | None:
         library_slug = self.get_campaign_library_slug(campaign_slug)
@@ -3103,7 +3108,7 @@ class SystemsService:
             source_id = source.source_id
         else:
             source_id = str(source or "").strip()
-        resolved_library_slug = str(library_slug or "DND-5E").strip()
+        resolved_library_slug = str(library_slug or DND_5E_SYSTEM_CODE).strip()
         if not resolved_library_slug or not str(source_id or "").strip():
             return None
         catalog = BUILTIN_LIBRARY_CATALOG.get(resolved_library_slug, {})
@@ -3584,7 +3589,7 @@ class SystemsService:
         return False
 
     def _ensure_builtin_reference_entries_seeded(self, library_slug: str) -> None:
-        if library_slug != "DND-5E":
+        if not is_dnd_5e_systems_library(library_slug):
             return
         expected_entries = build_dnd5e_rules_reference_entries()
         sentinel_entry = self.store.get_entry(library_slug, DND5E_RULES_REFERENCE_SENTINEL_ENTRY_KEY)

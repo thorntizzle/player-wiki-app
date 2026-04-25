@@ -12,6 +12,7 @@ from typing import Any
 from .repository import normalize_lookup, slugify
 from .systems_service import SystemsService
 from .systems_store import SystemsStore
+from .system_policy import DND_5E_SYSTEM_CODE
 
 INLINE_TAG_PATTERN = re.compile(r"\{@([^{}]+)\}")
 MAGIC_VARIANT_PLACEHOLDER_PATTERN = re.compile(r"\{=([^{}]+)\}")
@@ -449,7 +450,7 @@ class Dnd5eSystemsImporter:
         store: SystemsStore,
         systems_service: SystemsService,
         data_root: Path,
-        library_slug: str = "DND-5E",
+        library_slug: str = DND_5E_SYSTEM_CODE,
     ) -> None:
         self.store = store
         self.systems_service = systems_service

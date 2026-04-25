@@ -425,6 +425,26 @@ def test_non_5e_roster_hides_native_character_builder_affordances(app, client, s
     assert "Native character creation and progression stay hidden here" in html
 
 
+def test_xianxia_roster_uses_system_policy_to_hide_dnd_native_affordances(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+
+    _write_campaign_config(app, _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get("/campaigns/linden-pass/characters")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Create character" not in html
+    assert "/campaigns/linden-pass/characters/new" not in html
+    assert "PHB level 1 character" not in html
+    assert "Native character creation and progression stay hidden here" in html
+
+
 def test_non_5e_read_sheet_hides_native_authoring_affordances_and_skips_readiness(
     app, client, sign_in, users, monkeypatch
 ):
