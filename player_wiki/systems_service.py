@@ -82,17 +82,20 @@ MECHANICS_IMPACT_CHARACTER_ENTRY_TYPES = frozenset(
         "subclassfeature",
     }
 )
-MECHANICS_IMPACT_COMBAT_ENTRY_TYPES = frozenset({"monster"})
+MECHANICS_IMPACT_COMBAT_ENTRY_TYPES = frozenset({"action", "condition", "monster", "status"})
 MECHANICS_IMPACT_ENTRY_TYPE_LABELS = {
+    "action": "Action",
     "background": "Background",
     "class": "Class",
     "classfeature": "Class Feature",
+    "condition": "Condition",
     "feat": "Feat",
     "item": "Item",
     "monster": "Monster",
     "optionalfeature": "Optional Feature",
     "race": "Race",
     "spell": "Spell",
+    "status": "Status",
     "subclass": "Subclass",
     "subclassfeature": "Subclass Feature",
 }
@@ -117,13 +120,28 @@ MECHANICS_IMPACT_CHARACTER_METADATA_KEYS = {
 }
 MECHANICS_IMPACT_COMBAT_METADATA_KEYS = {
     "abilities": "abilities",
+    "ac": "ac",
+    "action": "action",
     "actions": "actions",
+    "bonus": "bonus_action",
+    "bonusaction": "bonus_action",
     "bonusactions": "bonus_actions",
+    "conditionimmune": "condition_immune",
     "hp": "hp",
     "initiative": "initiative",
+    "initiativebonus": "initiative_bonus",
+    "lairaction": "lair_action",
+    "lairactions": "lair_actions",
+    "legendary": "legendary_actions",
+    "legendaryaction": "legendary_action",
     "legendaryactions": "legendary_actions",
+    "mythic": "mythic_actions",
+    "mythicaction": "mythic_action",
+    "mythicactions": "mythic_actions",
+    "reaction": "reaction",
     "reactions": "reactions",
     "speed": "speed",
+    "trait": "trait",
     "traits": "traits",
 }
 PHB_BOOK_SECTION_RULE_KEY_MAP = {
@@ -1072,13 +1090,27 @@ class SystemsService:
             )
 
         if entry_type in MECHANICS_IMPACT_COMBAT_ENTRY_TYPES:
+            entry_type_label = MECHANICS_IMPACT_ENTRY_TYPE_LABELS.get(
+                entry_type,
+                raw_entry_type.replace("_", " ").replace("-", " ").title(),
+            )
+            if entry_type == "monster":
+                detail = (
+                    "Monster entries can seed combat NPCs; HP, speed, Dexterity-derived "
+                    "initiative, traits, and action sections can appear in combat and session "
+                    "reference surfaces when this source is enabled."
+                )
+                surface = "Combat seeding"
+            else:
+                detail = (
+                    f"{entry_type_label} entries can appear in combat or session tactical "
+                    "reference surfaces when this source is enabled."
+                )
+                surface = "Combat/session reference"
             add_signal(
-                "Combat-facing entry type",
-                (
-                    "Monster entries can seed combat NPCs; HP, speed, and Dexterity-derived "
-                    "initiative are copied into combatants when the encounter is created."
-                ),
-                "Combat seeding",
+                "Combat/session-facing entry type",
+                detail,
+                surface,
             )
 
         rules_key_paths = _find_structured_key_paths(metadata, MECHANICS_IMPACT_RULE_METADATA_KEYS)
@@ -1132,6 +1164,16 @@ class SystemsService:
                     f"encounter/session reference surfaces ({'; '.join(details)})."
                 ),
                 "Combat seeding",
+            )
+
+        if entry_type in MECHANICS_IMPACT_COMBAT_ENTRY_TYPES and str(entry.rendered_html or "").strip():
+            add_signal(
+                "Rendered tactical reference",
+                (
+                    "Rendered entry text can be shown in combat or session reference panels for "
+                    "source-backed monsters, conditions, statuses, or actions."
+                ),
+                "Combat/session reference",
             )
 
         if not signals:

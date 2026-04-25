@@ -484,6 +484,30 @@ def test_shared_core_systems_warning_inventory_covers_character_entry_types(app)
             )
 
 
+def test_shared_core_systems_warning_inventory_covers_combat_session_entry_types(app):
+    cases = [
+        ("monster", "Monster"),
+        ("condition", "Condition"),
+        ("status", "Status"),
+        ("action", "Action"),
+    ]
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        for entry_type, label in cases:
+            warning = service.build_shared_core_entry_mechanics_impact_warning(
+                build_warning_inventory_entry(entry_type=entry_type)
+            )
+
+            assert warning is not None
+            assert "Combat/session reference" in warning.surfaces
+            assert any(
+                signal.label == "Combat/session-facing entry type" and label in signal.detail
+                for signal in warning.signals
+            )
+            assert any(signal.label == "Rendered tactical reference" for signal in warning.signals)
+
+
 def test_shared_core_systems_warning_inventory_covers_character_metadata_hooks(app):
     metadata = {
         "character_option": {"kind": "feat"},
@@ -523,6 +547,40 @@ def test_shared_core_systems_warning_inventory_covers_character_metadata_hooks(a
     assert "nested.modeled-effects (modeled_effects)" in structured_signal.detail
     assert "nested.managed-resource (managed_resource)" in structured_signal.detail
     assert "body keys sections[].derived-stat (derived_stat)" in structured_signal.detail
+
+
+def test_shared_core_systems_warning_inventory_covers_combat_metadata_hooks(app):
+    metadata = {
+        "hp": {"average": 7},
+        "speed": {"walk": 30},
+        "initiativeBonus": 2,
+        "nested": {
+            "conditionImmune": ["frightened"],
+        },
+    }
+    body = {
+        "traits": [{"name": "Pack Tactics"}],
+        "actions": [{"name": "Bite"}],
+        "bonusAction": [{"name": "Skitter"}],
+        "legendary": [{"name": "Tail Swipe"}],
+    }
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        warning = service.build_shared_core_entry_mechanics_impact_warning(
+            build_warning_inventory_entry(entry_type="book", metadata=metadata, body=body)
+        )
+
+    assert warning is not None
+    assert "Combat seeding" in warning.surfaces
+    structured_signal = next(signal for signal in warning.signals if signal.label == "Structured combat mechanics")
+    assert "hp" in structured_signal.detail
+    assert "speed" in structured_signal.detail
+    assert "initiativeBonus (initiative_bonus)" in structured_signal.detail
+    assert "nested.conditionImmune (condition_immune)" in structured_signal.detail
+    assert "body keys traits" in structured_signal.detail
+    assert "actions" in structured_signal.detail
+    assert "bonusAction (bonus_action)" in structured_signal.detail
 
 
 def test_shared_core_systems_edit_warns_for_normalized_rules_entries(
