@@ -259,6 +259,51 @@ class CampaignDMContentStore:
             raise RuntimeError("Failed to persist DM condition definition.")
         return condition_definition
 
+    def update_condition_definition(
+        self,
+        campaign_slug: str,
+        condition_definition_id: int,
+        *,
+        name: str,
+        description_markdown: str,
+        updated_by_user_id: int | None = None,
+    ) -> CampaignDMConditionDefinitionRecord:
+        connection = get_db()
+        now = isoformat(utcnow())
+        try:
+            cursor = connection.execute(
+                """
+                UPDATE campaign_dm_condition_definitions
+                SET name = ?,
+                    description_markdown = ?,
+                    updated_at = ?,
+                    updated_by_user_id = ?
+                WHERE campaign_slug = ? AND id = ?
+                """,
+                (
+                    name,
+                    description_markdown,
+                    now,
+                    updated_by_user_id,
+                    campaign_slug,
+                    condition_definition_id,
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise CampaignDMContentConflictError(
+                f"Unable to update custom condition for {campaign_slug}/{name}."
+            ) from exc
+        connection.commit()
+
+        if cursor.rowcount == 0:
+            raise CampaignDMContentConflictError(
+                f"Unable to update custom condition {condition_definition_id} for {campaign_slug}."
+            )
+        condition_definition = self.get_condition_definition(campaign_slug, condition_definition_id)
+        if condition_definition is None:
+            raise RuntimeError("Failed to reload updated DM condition definition.")
+        return condition_definition
+
     def delete_condition_definition(
         self,
         campaign_slug: str,

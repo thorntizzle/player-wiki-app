@@ -2307,6 +2307,46 @@ def register_api(app) -> None:
 
         return jsonify({"ok": True, "condition": serialize_condition_definition(definition)})
 
+    @api.put("/campaigns/<campaign_slug>/dm-content/conditions/<int:condition_definition_id>")
+    @api_campaign_scope_access_required("dm_content")
+    @api_login_required
+    def dm_content_condition_update(campaign_slug: str, condition_definition_id: int):
+        if not can_manage_campaign_dm_content(campaign_slug):
+            return json_error("You do not have permission to manage DM Content.", 403, code="forbidden")
+
+        user = get_current_user()
+        if user is None:
+            return json_error("Authentication required.", 401, code="auth_required")
+
+        try:
+            payload = load_json_object()
+        except ValueError as exc:
+            return json_error(str(exc), 400, code="invalid_json")
+
+        has_name = "name" in payload
+        has_description = "description_markdown" in payload
+        if not has_name and not has_description:
+            return json_error(
+                "Provide name or description_markdown to update a custom condition.",
+                400,
+                code="validation_error",
+            )
+
+        try:
+            definition = current_app.extensions["campaign_dm_content_service"].update_condition_definition(
+                campaign_slug,
+                condition_definition_id,
+                name=str(payload.get("name") or "") if has_name else None,
+                description_markdown=(
+                    str(payload.get("description_markdown") or "") if has_description else None
+                ),
+                updated_by_user_id=user.id,
+            )
+        except CampaignDMContentValidationError as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        return jsonify({"ok": True, "condition": serialize_condition_definition(definition)})
+
     @api.delete("/campaigns/<campaign_slug>/dm-content/conditions/<int:condition_definition_id>")
     @api_campaign_scope_access_required("dm_content")
     @api_login_required

@@ -6236,6 +6236,7 @@ def create_app() -> Flask:
         *,
         dm_content_subpage: str = "statblocks",
         dm_statblock_form_overrides=None,
+        dm_condition_form_overrides=None,
         player_wiki_edit_record=None,
         player_wiki_form_data=None,
     ) -> dict[str, object]:
@@ -6337,6 +6338,7 @@ def create_app() -> Flask:
             "dm_statblock_show_subsections": bool(statblock_subsection_groups),
             "dm_statblock_form_overrides": dm_statblock_form_overrides or {},
             "custom_condition_definitions": custom_conditions,
+            "dm_condition_form_overrides": dm_condition_form_overrides or {},
             "can_manage_dm_content": can_manage_dm_content,
             "can_manage_content": can_manage_content,
             "can_manage_session": can_manage_session,
@@ -8457,6 +8459,55 @@ def create_app() -> Flask:
             campaign_slug,
             subpage="conditions",
             anchor="dm-content-conditions",
+        )
+
+    @app.post("/campaigns/<campaign_slug>/dm-content/conditions/<int:condition_definition_id>")
+    @campaign_scope_access_required("dm_content")
+    def campaign_dm_content_update_condition_definition(campaign_slug: str, condition_definition_id: int):
+        if not can_manage_campaign_dm_content(campaign_slug):
+            abort(403)
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        try:
+            condition_definition = get_campaign_dm_content_service().update_condition_definition(
+                campaign_slug,
+                condition_definition_id,
+                name=request.form.get("name", ""),
+                description_markdown=request.form.get("description_markdown", ""),
+                updated_by_user_id=user.id,
+            )
+        except CampaignDMContentValidationError as exc:
+            flash(str(exc), "error")
+            context = build_campaign_dm_content_page_context(
+                campaign_slug,
+                dm_content_subpage="conditions",
+                dm_condition_form_overrides={
+                    condition_definition_id: {
+                        "name": request.form.get("name", ""),
+                        "description_markdown": request.form.get("description_markdown", ""),
+                    }
+                },
+            )
+            return render_template("dm_content.html", **context), 400
+
+        get_auth_store().write_audit_event(
+            event_type="campaign_dm_condition_updated",
+            actor_user_id=user.id,
+            campaign_slug=campaign_slug,
+            metadata={
+                "condition_definition_id": condition_definition.id,
+                "name": condition_definition.name,
+                "source": "dm_content_conditions",
+            },
+        )
+        flash(f"Custom condition {condition_definition.name} updated.", "success")
+        return redirect_to_campaign_dm_content(
+            campaign_slug,
+            subpage="conditions",
+            anchor=f"dm-condition-{condition_definition.id}",
         )
 
     @app.post("/campaigns/<campaign_slug>/dm-content/conditions/<int:condition_definition_id>/delete")

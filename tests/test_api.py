@@ -399,7 +399,33 @@ def test_api_dm_content_endpoints_require_dm_permissions(client, app, users):
     )
 
     assert condition_response.status_code == 200
-    assert condition_response.get_json()["condition"]["name"] == "Off Balance"
+    condition_payload = condition_response.get_json()["condition"]
+    assert condition_payload["name"] == "Off Balance"
+
+    condition_update_response = client.put(
+        f"/api/v1/campaigns/linden-pass/dm-content/conditions/{condition_payload['id']}",
+        headers=api_headers(dm_token),
+        json={
+            "name": "Off Balance Revised",
+            "description_markdown": "The target has disadvantage on its next Dexterity check.",
+        },
+    )
+
+    assert condition_update_response.status_code == 200
+    updated_condition_payload = condition_update_response.get_json()["condition"]
+    assert updated_condition_payload["name"] == "Off Balance Revised"
+    assert (
+        updated_condition_payload["description_markdown"]
+        == "The target has disadvantage on its next Dexterity check."
+    )
+
+    blocked_condition_update_response = client.put(
+        f"/api/v1/campaigns/linden-pass/dm-content/conditions/{condition_payload['id']}",
+        headers=api_headers(player_token),
+        json={"name": "Blocked"},
+    )
+
+    assert blocked_condition_update_response.status_code == 403
 
     dm_content_response = client.get("/api/v1/campaigns/linden-pass/dm-content", headers=api_headers(dm_token))
 
@@ -408,6 +434,7 @@ def test_api_dm_content_endpoints_require_dm_permissions(client, app, users):
     assert len(dm_content_payload["statblocks"]) == 1
     assert len(dm_content_payload["conditions"]) == 1
     assert dm_content_payload["statblocks"][0]["subsection"] == "Dock Crew"
+    assert dm_content_payload["conditions"][0]["name"] == "Off Balance Revised"
 
     blocked_response = client.get("/api/v1/campaigns/linden-pass/dm-content", headers=api_headers(player_token))
 

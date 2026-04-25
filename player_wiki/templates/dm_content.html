@@ -387,11 +387,11 @@
             <form method="post" action="{{ url_for('campaign_dm_content_add_condition_definition', campaign_slug=campaign.slug) }}" class="stack-form">
               <label class="field">
                 <span>Condition name</span>
-                <input type="text" name="name" placeholder="Marked for Judgment">
+                <input type="text" name="name" maxlength="80" placeholder="Marked for Judgment" required>
               </label>
               <label class="field">
                 <span>Description</span>
-                <textarea name="description_markdown" rows="4" placeholder="Optional reminder text for how this condition works."></textarea>
+                <textarea name="description_markdown" rows="4" maxlength="4000" placeholder="Optional reminder text for how this condition works."></textarea>
               </label>
               <button type="submit">Save custom condition</button>
             </form>
@@ -402,6 +402,7 @@
           {% if custom_condition_definitions %}
             <div class="dm-content-list">
               {% for condition in custom_condition_definitions %}
+                {% set condition_form_override = dm_condition_form_overrides.get(condition.id) %}
                 <article class="dm-content-item" id="dm-condition-{{ condition.id }}">
                   <div class="dm-content-item__header">
                     <div>
@@ -414,9 +415,25 @@
                     <p class="meta">No description saved.</p>
                   {% endif %}
                   {% if can_manage_dm_content %}
-                    <form method="post" action="{{ url_for('campaign_dm_content_delete_condition_definition', campaign_slug=campaign.slug, condition_definition_id=condition.id) }}">
-                      <button class="ghost-button" type="submit">Delete condition</button>
-                    </form>
+                    <details class="feature-detail" {% if condition_form_override %}open{% endif %}>
+                      <summary>Edit condition</summary>
+                      <form method="post" action="{{ url_for('campaign_dm_content_update_condition_definition', campaign_slug=campaign.slug, condition_definition_id=condition.id) }}" class="stack-form">
+                        <label class="field">
+                          <span>Condition name</span>
+                          <input type="text" name="name" maxlength="80" value="{{ condition_form_override.name if condition_form_override else condition.name }}" required>
+                        </label>
+                        <label class="field">
+                          <span>Description</span>
+                          <textarea name="description_markdown" rows="4" maxlength="4000">{{ condition_form_override.description_markdown if condition_form_override else condition.description_markdown }}</textarea>
+                        </label>
+                        <button type="submit">Save condition</button>
+                      </form>
+                    </details>
+                    <div class="dm-content-item__actions">
+                      <form method="post" action="{{ url_for('campaign_dm_content_delete_condition_definition', campaign_slug=campaign.slug, condition_definition_id=condition.id) }}">
+                        <button class="ghost-button" type="submit">Delete condition</button>
+                      </form>
+                    </div>
                   {% endif %}
                 </article>
               {% endfor %}

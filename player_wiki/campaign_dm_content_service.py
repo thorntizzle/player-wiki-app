@@ -199,13 +199,13 @@ class CampaignDMContentService:
         description_markdown: str = "",
         created_by_user_id: int | None = None,
     ) -> CampaignDMConditionDefinitionRecord:
-        normalized_name = (name or "").strip()
+        normalized_name = str(name or "").strip()
         if not normalized_name:
             raise CampaignDMContentValidationError("Condition name is required.")
         if len(normalized_name) > 80:
             raise CampaignDMContentValidationError("Condition names must stay under 80 characters.")
 
-        normalized_description = (description_markdown or "").strip()
+        normalized_description = str(description_markdown or "").strip()
         if len(normalized_description) > 4_000:
             raise CampaignDMContentValidationError("Condition descriptions must stay under 4,000 characters.")
 
@@ -222,6 +222,50 @@ class CampaignDMContentService:
             name=normalized_name,
             description_markdown=normalized_description,
             created_by_user_id=created_by_user_id,
+        )
+
+    def update_condition_definition(
+        self,
+        campaign_slug: str,
+        condition_definition_id: int,
+        *,
+        name: str | None = None,
+        description_markdown: str | None = None,
+        updated_by_user_id: int | None = None,
+    ) -> CampaignDMConditionDefinitionRecord:
+        existing = self.store.get_condition_definition(campaign_slug, condition_definition_id)
+        if existing is None:
+            raise CampaignDMContentValidationError("That custom condition could not be found.")
+
+        normalized_name = existing.name if name is None else str(name or "").strip()
+        if not normalized_name:
+            raise CampaignDMContentValidationError("Condition name is required.")
+        if len(normalized_name) > 80:
+            raise CampaignDMContentValidationError("Condition names must stay under 80 characters.")
+
+        normalized_description = (
+            existing.description_markdown
+            if description_markdown is None
+            else str(description_markdown or "").strip()
+        )
+        if len(normalized_description) > 4_000:
+            raise CampaignDMContentValidationError("Condition descriptions must stay under 4,000 characters.")
+
+        normalized_name_lookup = normalize_lookup(normalized_name)
+        existing_names = {
+            normalize_lookup(condition.name)
+            for condition in self.store.list_condition_definitions(campaign_slug)
+            if condition.id != condition_definition_id
+        }
+        if normalized_name_lookup in existing_names:
+            raise CampaignDMContentValidationError("A custom condition with that name already exists.")
+
+        return self.store.update_condition_definition(
+            campaign_slug,
+            condition_definition_id,
+            name=normalized_name,
+            description_markdown=normalized_description,
+            updated_by_user_id=updated_by_user_id,
         )
 
     def delete_condition_definition(

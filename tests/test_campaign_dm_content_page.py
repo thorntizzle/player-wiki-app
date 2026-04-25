@@ -413,9 +413,31 @@ def test_custom_conditions_flow_from_dm_content_into_combat_picker_and_can_be_de
     assert len(definitions) == 1
     assert definitions[0].name == "Marked for Judgment"
 
+    update_condition = client.post(
+        f"/campaigns/linden-pass/dm-content/conditions/{definitions[0].id}",
+        data={
+            "name": "Judged by the Tide",
+            "description_markdown": "The target leaves glowing footprints until the next dawn.",
+        },
+        follow_redirects=True,
+    )
+
+    assert update_condition.status_code == 200
+    update_html = update_condition.get_data(as_text=True)
+    assert "Custom condition Judged by the Tide updated." in update_html
+    assert "Judged by the Tide" in update_html
+    assert "leaves glowing footprints" in update_html
+    assert 'action="/campaigns/linden-pass/dm-content/conditions/' in update_html
+
+    definitions = _list_condition_definitions(app)
+    assert len(definitions) == 1
+    assert definitions[0].name == "Judged by the Tide"
+    assert definitions[0].description_markdown == "The target leaves glowing footprints until the next dawn."
+
     combat_page = client.get("/campaigns/linden-pass/combat")
     combat_html = combat_page.get_data(as_text=True)
-    assert '<option value="Marked for Judgment"></option>' in combat_html
+    assert '<option value="Judged by the Tide"></option>' in combat_html
+    assert '<option value="Marked for Judgment"></option>' not in combat_html
 
     delete_condition = client.post(
         f"/campaigns/linden-pass/dm-content/conditions/{definitions[0].id}/delete",
@@ -423,11 +445,11 @@ def test_custom_conditions_flow_from_dm_content_into_combat_picker_and_can_be_de
     )
 
     assert delete_condition.status_code == 200
-    assert "Deleted custom condition Marked for Judgment." in delete_condition.get_data(as_text=True)
+    assert "Deleted custom condition Judged by the Tide." in delete_condition.get_data(as_text=True)
     assert _list_condition_definitions(app) == []
 
     refreshed_combat = client.get("/campaigns/linden-pass/combat")
-    assert '<option value="Marked for Judgment"></option>' not in refreshed_combat.get_data(as_text=True)
+    assert '<option value="Judged by the Tide"></option>' not in refreshed_combat.get_data(as_text=True)
 
 
 def test_dm_can_stage_session_article_from_dm_content_and_manage_it_from_session_dm(
