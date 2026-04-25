@@ -1276,8 +1276,13 @@ def create_app() -> Flask:
         record,
         *,
         campaign_page_records: list[object],
+        item_catalog: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        item_catalog = build_character_item_catalog(campaign_slug)
+        item_catalog = (
+            item_catalog
+            if item_catalog is not None
+            else build_character_item_catalog(campaign_slug)
+        )
         normalized_definition_equipment = _normalize_equipment_payloads(
             list(record.definition.equipment_catalog or []),
             item_catalog=item_catalog,
@@ -1354,8 +1359,14 @@ def create_app() -> Flask:
         campaign_slug: str,
         campaign,
         record,
+        *,
+        item_catalog: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        item_catalog = build_character_item_catalog(campaign_slug)
+        item_catalog = (
+            item_catalog
+            if item_catalog is not None
+            else build_character_item_catalog(campaign_slug)
+        )
         definition_item_lookup, support_lookup = build_record_equipment_support_lookup(
             record,
             item_catalog=item_catalog,
@@ -3300,12 +3311,14 @@ def create_app() -> Flask:
             if include_controls_subpage
             else None
         )
+        item_catalog = build_character_item_catalog(campaign_slug)
         inventory_manager = (
             build_character_inventory_manager_context(
                 campaign_slug,
                 campaign,
                 record,
                 campaign_page_records=campaign_page_records,
+                item_catalog=item_catalog,
             )
             if can_use_session_mode
             else None
@@ -3314,6 +3327,7 @@ def create_app() -> Flask:
             campaign_slug,
             campaign,
             record,
+            item_catalog=item_catalog,
         )
         character_subpages = [
             {

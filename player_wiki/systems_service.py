@@ -34,6 +34,7 @@ from .dnd5e_rules_reference import (
 from .repository import normalize_lookup, slugify
 from .repository_store import RepositoryStore
 from .systems_models import (
+    CampaignEntryOverrideRecord,
     CampaignSystemsPolicyRecord,
     SystemsEntryRecord,
     SystemsLibraryRecord,
@@ -509,6 +510,15 @@ def _systems_service_cache_get(cache_key: tuple[object, ...], build_value):
         cache[cache_key] = build_value()
     return cache[cache_key]
 
+
+def _systems_service_cache_clear() -> None:
+    if not has_request_context():
+        return
+    cache = getattr(g, "_systems_service_request_cache", None)
+    if isinstance(cache, dict):
+        cache.clear()
+
+
 ABILITY_NAME_LABELS = {
     "str": "Strength",
     "dex": "Dexterity",
@@ -725,43 +735,68 @@ class SystemsService:
         )
 
     def list_campaign_source_states(self, campaign_slug: str) -> list[CampaignSourceState]:
-        library = self.get_campaign_library(campaign_slug)
-        if library is None:
-            return []
-        configured_by_id = {
-            item.source_id: item
-            for item in self.store.list_campaign_enabled_sources(campaign_slug)
-            if item.library_slug == library.library_slug
-        }
-        seed_by_id = self._campaign_source_seed_map(campaign_slug)
-        rows: list[CampaignSourceState] = []
-        for source in self.store.list_sources(library.library_slug):
-            configured = configured_by_id.get(source.source_id)
-            seed = seed_by_id.get(source.source_id, {})
-            if configured is not None:
-                is_enabled = configured.is_enabled
-                default_visibility = configured.default_visibility
-                is_configured = True
-            else:
-                is_enabled = (
-                    bool(seed.get("enabled"))
-                    if "enabled" in seed
-                    else self._default_enabled_for_source(source)
+        def _load_source_states() -> list[CampaignSourceState]:
+            library = self.get_campaign_library(campaign_slug)
+            if library is None:
+                return []
+            configured_by_id = {
+                item.source_id: item
+                for item in self.store.list_campaign_enabled_sources(campaign_slug)
+                if item.library_slug == library.library_slug
+            }
+            seed_by_id = self._campaign_source_seed_map(campaign_slug)
+            rows: list[CampaignSourceState] = []
+            for source in self.store.list_sources(library.library_slug):
+                configured = configured_by_id.get(source.source_id)
+                seed = seed_by_id.get(source.source_id, {})
+                if configured is not None:
+                    is_enabled = configured.is_enabled
+                    default_visibility = configured.default_visibility
+                    is_configured = True
+                else:
+                    is_enabled = (
+                        bool(seed.get("enabled"))
+                        if "enabled" in seed
+                        else self._default_enabled_for_source(source)
+                    )
+                    default_visibility = self._normalize_or_default_visibility(
+                        seed.get("default_visibility"),
+                        fallback=self._default_visibility_for_source(source),
+                    )
+                    is_configured = False
+                rows.append(
+                    CampaignSourceState(
+                        source=source,
+                        is_enabled=is_enabled,
+                        default_visibility=self.clamp_visibility_for_source(source, default_visibility),
+                        is_configured=is_configured,
+                    )
                 )
-                default_visibility = self._normalize_or_default_visibility(
-                    seed.get("default_visibility"),
-                    fallback=self._default_visibility_for_source(source),
-                )
-                is_configured = False
-            rows.append(
-                CampaignSourceState(
-                    source=source,
-                    is_enabled=is_enabled,
-                    default_visibility=self.clamp_visibility_for_source(source, default_visibility),
-                    is_configured=is_configured,
-                )
+            return rows
+
+        return list(
+            _systems_service_cache_get(
+                ("campaign-source-states", campaign_slug),
+                _load_source_states,
             )
-        return rows
+            or []
+        )
+
+    def _campaign_source_state_map(self, campaign_slug: str) -> dict[str, CampaignSourceState]:
+        def _load_state_map() -> dict[str, CampaignSourceState]:
+            return {
+                row.source.source_id: row
+                for row in self.list_campaign_source_states(campaign_slug)
+                if row.source.source_id
+            }
+
+        return dict(
+            _systems_service_cache_get(
+                ("campaign-source-state-map", campaign_slug),
+                _load_state_map,
+            )
+            or {}
+        )
 
     def get_builder_static_revision(
         self,
@@ -822,10 +857,9 @@ class SystemsService:
 
     def get_campaign_source_state(self, campaign_slug: str, source_id: str) -> CampaignSourceState | None:
         normalized_source_id = source_id.strip()
-        for row in self.list_campaign_source_states(campaign_slug):
-            if row.source.source_id == normalized_source_id:
-                return row
-        return None
+        if not normalized_source_id:
+            return None
+        return self._campaign_source_state_map(campaign_slug).get(normalized_source_id)
 
     def list_entry_type_counts_for_campaign_source(
         self,
@@ -2649,11 +2683,39 @@ class SystemsService:
             limit=limit,
         )
 
+    def _campaign_entry_override_map(
+        self,
+        campaign_slug: str,
+        library_slug: str,
+    ) -> dict[str, CampaignEntryOverrideRecord]:
+        def _load_override_map() -> dict[str, CampaignEntryOverrideRecord]:
+            return {
+                override.entry_key: override
+                for override in self.store.list_campaign_entry_overrides(
+                    campaign_slug,
+                    library_slug,
+                )
+                if override.entry_key
+            }
+
+        return dict(
+            _systems_service_cache_get(
+                ("campaign-entry-override-map", campaign_slug, library_slug),
+                _load_override_map,
+            )
+            or {}
+        )
+
     def is_entry_enabled_for_campaign(self, campaign_slug: str, entry: SystemsEntryRecord) -> bool:
-        source_state = self.get_campaign_source_state(campaign_slug, entry.source_id)
+        source_state = self._campaign_source_state_map(campaign_slug).get(
+            str(entry.source_id or "").strip()
+        )
         if source_state is None or not source_state.is_enabled:
             return False
-        override = self.store.get_campaign_entry_override(campaign_slug, entry.entry_key)
+        override = self._campaign_entry_override_map(
+            campaign_slug,
+            source_state.source.library_slug,
+        ).get(str(entry.entry_key or "").strip())
         if override is not None and override.is_enabled_override is False:
             return False
         return True
@@ -2742,6 +2804,8 @@ class SystemsService:
             source = source_records.get(source_id)
             if source is not None:
                 changed_sources.append(source)
+        if changed_sources:
+            _systems_service_cache_clear()
         return changed_sources
 
     def update_campaign_entry_override(
@@ -2780,7 +2844,7 @@ class SystemsService:
             library_slug=library.library_slug,
             updated_by_user_id=actor_user_id,
         )
-        return self.store.upsert_campaign_entry_override(
+        override = self.store.upsert_campaign_entry_override(
             campaign_slug,
             library_slug=library.library_slug,
             entry_key=entry.entry_key,
@@ -2788,6 +2852,8 @@ class SystemsService:
             is_enabled_override=is_enabled_override,
             updated_by_user_id=actor_user_id,
         )
+        _systems_service_cache_clear()
+        return override
 
     def clamp_visibility_for_source(self, source: SystemsSourceRecord, visibility: str) -> str:
         normalized = self._normalize_or_default_visibility(

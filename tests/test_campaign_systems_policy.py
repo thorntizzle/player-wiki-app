@@ -210,6 +210,135 @@ def test_builder_static_revision_tracks_entry_and_override_changes(app):
     assert override_revision != entry_revision
 
 
+def test_campaign_entry_enablement_uses_bulk_override_map(app, monkeypatch):
+    source_id = f"TST-{uuid4().hex[:8].upper()}"
+    enabled_key = f"dnd-5e|spell|{source_id.lower()}|bulk-enable-alpha"
+    disabled_key = f"dnd-5e|spell|{source_id.lower()}|bulk-enable-beta"
+
+    with app.test_request_context("/"):
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+
+        store.upsert_source(
+            library_slug,
+            source_id,
+            title="Bulk Enablement Test Source",
+            license_class="custom_campaign",
+        )
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug=library_slug,
+            source_id=source_id,
+            is_enabled=True,
+            default_visibility="players",
+        )
+        store.replace_entries_for_source(
+            library_slug,
+            source_id,
+            entries=[
+                {
+                    "entry_key": enabled_key,
+                    "entry_type": "spell",
+                    "slug": "bulk-enable-alpha",
+                    "title": "Bulk Enablement Alpha",
+                    "search_text": "bulk enablement alpha",
+                    "player_safe_default": True,
+                    "metadata": {},
+                    "body": {},
+                },
+                {
+                    "entry_key": disabled_key,
+                    "entry_type": "spell",
+                    "slug": "bulk-enable-beta",
+                    "title": "Bulk Enablement Beta",
+                    "search_text": "bulk enablement beta",
+                    "player_safe_default": True,
+                    "metadata": {},
+                    "body": {},
+                },
+            ],
+            entry_types=["spell"],
+        )
+        store.upsert_campaign_entry_override(
+            "linden-pass",
+            library_slug=library_slug,
+            entry_key=disabled_key,
+            visibility_override=None,
+            is_enabled_override=False,
+        )
+
+        def fail_per_entry_override_lookup(*_args, **_kwargs):
+            raise AssertionError("per-entry campaign override lookup should not run")
+
+        monkeypatch.setattr(store, "get_campaign_entry_override", fail_per_entry_override_lookup)
+
+        results = service.search_entries_for_campaign(
+            "linden-pass",
+            query="bulk enablement",
+            entry_type="spell",
+            limit=10,
+        )
+
+    assert [entry.title for entry in results] == ["Bulk Enablement Alpha"]
+
+
+def test_campaign_entry_override_update_invalidates_request_enablement_cache(app):
+    source_id = f"TST-{uuid4().hex[:8].upper()}"
+    entry_key = f"dnd-5e|spell|{source_id.lower()}|cache-invalidated"
+
+    with app.test_request_context("/"):
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+
+        store.upsert_source(
+            library_slug,
+            source_id,
+            title="Override Cache Invalidation Source",
+            license_class="custom_campaign",
+        )
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug=library_slug,
+            source_id=source_id,
+            is_enabled=True,
+            default_visibility="players",
+        )
+        store.replace_entries_for_source(
+            library_slug,
+            source_id,
+            entries=[
+                {
+                    "entry_key": entry_key,
+                    "entry_type": "spell",
+                    "slug": "cache-invalidated",
+                    "title": "Cache Invalidated",
+                    "search_text": "cache invalidated",
+                    "player_safe_default": True,
+                    "metadata": {},
+                    "body": {},
+                }
+            ],
+            entry_types=["spell"],
+        )
+        entry = store.get_entry(library_slug, entry_key)
+
+        assert entry is not None
+        assert service.is_entry_enabled_for_campaign("linden-pass", entry) is True
+
+        service.update_campaign_entry_override(
+            "linden-pass",
+            entry_key=entry_key,
+            visibility_override=None,
+            is_enabled_override=False,
+            actor_user_id=1,
+            can_set_private=True,
+        )
+
+        assert service.is_entry_enabled_for_campaign("linden-pass", entry) is False
+
+
 def test_builtin_rules_source_is_seeded_and_browsable_without_import(client, sign_in, users, app):
     with app.app_context():
         service = app.extensions["systems_service"]

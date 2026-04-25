@@ -330,6 +330,28 @@ class SystemsStore:
         ).fetchone()
         return self._map_campaign_entry_override(row)
 
+    def list_campaign_entry_overrides(
+        self,
+        campaign_slug: str,
+        library_slug: str,
+    ) -> list[CampaignEntryOverrideRecord]:
+        rows = get_db().execute(
+            """
+            SELECT *
+            FROM campaign_entry_overrides
+            WHERE campaign_slug = ?
+              AND library_slug = ?
+            ORDER BY entry_key ASC
+            """,
+            (campaign_slug, library_slug),
+        ).fetchall()
+        records: list[CampaignEntryOverrideRecord] = []
+        for row in rows:
+            record = self._map_campaign_entry_override(row)
+            if record is not None:
+                records.append(record)
+        return records
+
     def upsert_campaign_entry_override(
         self,
         campaign_slug: str,
