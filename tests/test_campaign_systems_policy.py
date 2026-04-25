@@ -87,6 +87,11 @@ def test_dm_can_open_systems_control_panel_and_visibility_panel_shows_systems_sc
     assert "Dungeon Master&#39;s Guide (2014)" in systems_html
     assert "Wayfarer&#39;s Guide to Eberron" not in systems_html
     assert "Proprietary-source acknowledgement" in systems_html
+    assert "Authoring Model" in systems_html
+    assert "First model: both, kept as separate lanes." in systems_html
+    assert "Custom campaign entries are the DM-authored lane" in systems_html
+    assert "Shared-source imports are admin-only shared-library refreshes" in systems_html
+    assert "Imported library entries stay read-only here" in systems_html
     assert 'class="checkbox-label"' in systems_html
 
 

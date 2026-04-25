@@ -64,6 +64,18 @@
 
     <aside class="sidebar">
       <section class="card sidebar-card">
+        <h2>Authoring Model</h2>
+        <p class="meta">First model: both, kept as separate lanes.</p>
+        <p class="meta">
+          Custom campaign entries are the DM-authored lane for campaign-owned Systems content.
+          Shared-source imports are admin-only shared-library refreshes with import-run review.
+        </p>
+        <p class="meta">
+          Imported library entries stay read-only here; use source policy or entry overrides for campaign-specific changes.
+        </p>
+      </section>
+
+      <section class="card sidebar-card">
         <h2>Entry Overrides</h2>
         <p class="meta">Use this when a specific imported entry should differ from its source default.</p>
         <form method="post" action="{{ url_for('campaign_systems_control_panel_update_override', campaign_slug=campaign.slug) }}" class="stack-form">
