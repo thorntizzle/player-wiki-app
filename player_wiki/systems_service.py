@@ -962,6 +962,57 @@ class SystemsService:
             entry_type=entry_type,
         )
 
+    def _class_feature_entries_by_class_identity(
+        self,
+        campaign_slug: str,
+    ) -> dict[tuple[str, str], list[SystemsEntryRecord]]:
+        def _load_lookup() -> dict[tuple[str, str], list[SystemsEntryRecord]]:
+            lookup: dict[tuple[str, str], list[SystemsEntryRecord]] = defaultdict(list)
+            for candidate in self.list_enabled_entries_for_campaign(
+                campaign_slug,
+                entry_type="classfeature",
+                limit=None,
+            ):
+                class_name = str(candidate.metadata.get("class_name", "") or "").strip()
+                class_source = str(candidate.metadata.get("class_source", "") or "").strip().upper()
+                if class_name and class_source:
+                    lookup[(class_name, class_source)].append(candidate)
+            return dict(lookup)
+
+        return dict(
+            _systems_service_cache_get(
+                ("class-feature-entries-by-class", campaign_slug),
+                _load_lookup,
+            )
+            or {}
+        )
+
+    def _subclass_feature_entries_by_class_and_source(
+        self,
+        campaign_slug: str,
+    ) -> dict[tuple[str, str, str], list[SystemsEntryRecord]]:
+        def _load_lookup() -> dict[tuple[str, str, str], list[SystemsEntryRecord]]:
+            lookup: dict[tuple[str, str, str], list[SystemsEntryRecord]] = defaultdict(list)
+            for candidate in self.list_enabled_entries_for_campaign(
+                campaign_slug,
+                entry_type="subclassfeature",
+                limit=None,
+            ):
+                class_name = str(candidate.metadata.get("class_name", "") or "").strip()
+                class_source = str(candidate.metadata.get("class_source", "") or "").strip().upper()
+                subclass_source = str(candidate.metadata.get("subclass_source", "") or "").strip().upper()
+                if class_name and class_source and subclass_source:
+                    lookup[(class_name, class_source, subclass_source)].append(candidate)
+            return dict(lookup)
+
+        return dict(
+            _systems_service_cache_get(
+                ("subclass-feature-entries-by-class-source", campaign_slug),
+                _load_lookup,
+            )
+            or {}
+        )
+
     def build_class_feature_progression_for_class_entry(
         self,
         campaign_slug: str,
@@ -969,16 +1020,15 @@ class SystemsService:
     ) -> list[dict[str, object]]:
         if entry.entry_type != "class":
             return []
-        matching_entries = [
-            candidate
-            for candidate in self.list_enabled_entries_for_campaign(
-                campaign_slug,
-                entry_type="classfeature",
-                limit=None,
+        matching_entries = list(
+            self._class_feature_entries_by_class_identity(campaign_slug).get(
+                (
+                    str(entry.title or "").strip(),
+                    str(entry.source_id or "").strip().upper(),
+                ),
+                [],
             )
-            if str(candidate.metadata.get("class_name", "") or "").strip() == entry.title
-            and str(candidate.metadata.get("class_source", "") or "").strip().upper() == entry.source_id
-        ]
+        )
 
         progression_rows = entry.body.get("feature_progression")
         matching_entries.extend(
@@ -1001,15 +1051,15 @@ class SystemsService:
         class_source = str(entry.metadata.get("class_source", "") or "").strip().upper()
         matching_entries = [
             candidate
-            for candidate in self.list_enabled_entries_for_campaign(
-                campaign_slug,
-                entry_type="subclassfeature",
-                limit=None,
+            for candidate in self._subclass_feature_entries_by_class_and_source(campaign_slug).get(
+                (
+                    class_name,
+                    class_source,
+                    str(entry.source_id or "").strip().upper(),
+                ),
+                [],
             )
-            if str(candidate.metadata.get("class_name", "") or "").strip() == class_name
-            and str(candidate.metadata.get("class_source", "") or "").strip().upper() == class_source
             and self._subclass_entry_matches_feature(entry, candidate)
-            and str(candidate.metadata.get("subclass_source", "") or "").strip().upper() == entry.source_id
         ]
 
         progression_rows = entry.body.get("feature_progression")
@@ -3183,17 +3233,26 @@ class SystemsService:
         ]
 
     def _list_campaign_progression_entries(self, campaign_slug: str) -> list[SystemsEntryRecord]:
-        entries: list[SystemsEntryRecord] = []
-        seen_keys: set[str] = set()
-        for record in self._list_visible_campaign_mechanics_page_records(campaign_slug):
-            for entry in build_campaign_page_progression_entries(record):
-                entry_key = str(entry.entry_key or "").strip()
-                if entry_key and entry_key in seen_keys:
-                    continue
-                if entry_key:
-                    seen_keys.add(entry_key)
-                entries.append(entry)
-        return entries
+        def _load_entries() -> list[SystemsEntryRecord]:
+            entries: list[SystemsEntryRecord] = []
+            seen_keys: set[str] = set()
+            for record in self._list_visible_campaign_mechanics_page_records(campaign_slug):
+                for entry in build_campaign_page_progression_entries(record):
+                    entry_key = str(entry.entry_key or "").strip()
+                    if entry_key and entry_key in seen_keys:
+                        continue
+                    if entry_key:
+                        seen_keys.add(entry_key)
+                    entries.append(entry)
+            return entries
+
+        return list(
+            _systems_service_cache_get(
+                ("campaign-progression-entries", campaign_slug),
+                _load_entries,
+            )
+            or []
+        )
 
     def _list_visible_campaign_mechanics_page_records(self, campaign_slug: str) -> list[object]:
         campaign = self._get_campaign(campaign_slug)

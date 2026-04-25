@@ -48,6 +48,7 @@ from .systems_models import SystemsEntryRecord
 
 CHARACTER_BUILDER_VERSION = "2026-04-20.01"
 BUILDER_STATIC_CACHE_MAX_ENTRIES = 12
+BUILDER_PROGRESS_CACHE_MAX_ENTRIES = 64
 BUILDER_STATIC_ENTRY_TYPES = (
     "background",
     "class",
@@ -57,6 +58,13 @@ BUILDER_STATIC_ENTRY_TYPES = (
     "race",
     "spell",
     "subclass",
+)
+BUILDER_PROGRESS_ENTRY_TYPES = (
+    "class",
+    "classfeature",
+    "optionalfeature",
+    "subclass",
+    "subclassfeature",
 )
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
@@ -93,6 +101,7 @@ WEAPON_WIELD_MODE_MAIN_HAND = "main-hand"
 WEAPON_WIELD_MODE_OFF_HAND = "off-hand"
 
 _BUILDER_STATIC_BUNDLE_CACHE: OrderedDict[tuple[Any, ...], dict[str, Any]] = OrderedDict()
+_BUILDER_PROGRESS_CACHE: OrderedDict[tuple[Any, ...], list[dict[str, Any]]] = OrderedDict()
 _BUILDER_STATIC_BUNDLE_CACHE_LOCK = RLock()
 WEAPON_WIELD_MODE_TWO_HANDED = "two-handed"
 WEAPON_WIELD_MODE_LABELS = {
@@ -783,8 +792,18 @@ def build_level_one_builder_context(
     )
     selected_subclass = _resolve_selected_entry(subclass_options, preview_values.get("subclass_slug", ""))
 
-    class_progression = _class_progression_for_builder(systems_service, campaign_slug, selected_class)
-    subclass_progression = _subclass_progression_for_builder(systems_service, campaign_slug, selected_subclass)
+    class_progression = _class_progression_for_builder(
+        systems_service,
+        campaign_slug,
+        selected_class,
+        campaign_page_records=campaign_page_records,
+    )
+    subclass_progression = _subclass_progression_for_builder(
+        systems_service,
+        campaign_slug,
+        selected_subclass,
+        campaign_page_records=campaign_page_records,
+    )
     requires_subclass = _class_requires_subclass_at_level_one(selected_class, class_progression)
 
     equipment_groups = _build_equipment_groups(
@@ -1295,7 +1314,12 @@ def native_level_up_readiness(
                     f"Choose the {_profile_link_subject(subject, systems_ref=class_row_ref, entry=selected_row_class)} link so native level-up can extend the imported class baseline cleanly."
                 )
 
-        class_progression = _class_progression_for_builder(systems_service, campaign_slug, selected_row_class)
+        class_progression = _class_progression_for_builder(
+            systems_service,
+            campaign_slug,
+            selected_row_class,
+            campaign_page_records=campaign_page_records,
+        )
         subclass_options = _list_subclass_options(systems_service, campaign_slug, selected_row_class)
         profile_subclass_ref = profile_primary_subclass_ref(definition.profile) if index == 1 else {}
         class_row_subclass_ref = dict(class_payload.get("subclass_ref") or {})
@@ -1323,6 +1347,7 @@ def native_level_up_readiness(
             selected_class=selected_row_class,
             selected_subclass=selected_row_subclass,
             row_level=row_level,
+            campaign_page_records=campaign_page_records,
         )
         row_multiclass_supported = bool(multiclass_support.get("supported"))
         multiclass_support_reason = str(multiclass_support.get("reason") or "").strip()
@@ -1345,6 +1370,7 @@ def native_level_up_readiness(
                     systems_service,
                     campaign_slug,
                     selected_row_subclass,
+                    campaign_page_records=campaign_page_records,
                 ),
                 "requires_subclass": requires_subclass,
                 "shared_slot_multiclass_supported": row_multiclass_supported,
@@ -2152,7 +2178,11 @@ def build_native_level_up_context(
     row_target_level = next_level
     new_class_options = [
         entry
-        for entry in _list_shared_slot_multiclass_class_entries(systems_service, campaign_slug)
+        for entry in _list_shared_slot_multiclass_class_entries(
+            systems_service,
+            campaign_slug,
+            campaign_page_records=campaign_page_records,
+        )
         if (
             str(entry.slug or "").strip(),
             str(entry.source_id or "").strip().upper(),
@@ -2179,12 +2209,23 @@ def build_native_level_up_context(
                 campaign_slug,
                 selected_class,
                 subclass_entries=list(static_bundle.get("subclass_entries") or []),
+                campaign_page_records=campaign_page_records,
             )
-            class_progression = _class_progression_for_builder(systems_service, campaign_slug, selected_class)
+            class_progression = _class_progression_for_builder(
+                systems_service,
+                campaign_slug,
+                selected_class,
+                campaign_page_records=campaign_page_records,
+            )
             values["new_subclass_slug"] = _sanitize_entry_selection_value(values.get("new_subclass_slug"), subclass_options)
             selected_subclass = _resolve_selected_entry(subclass_options, values.get("new_subclass_slug", ""))
             requires_subclass = _class_requires_subclass_at_level(selected_class, class_progression, 1) and selected_subclass is None
-            subclass_progression = _subclass_progression_for_builder(systems_service, campaign_slug, selected_subclass)
+            subclass_progression = _subclass_progression_for_builder(
+                systems_service,
+                campaign_slug,
+                selected_subclass,
+                campaign_page_records=campaign_page_records,
+            )
             values, choice_sections = _stabilize_choice_section_values(
                 values,
                 static_keys=LEVEL_UP_BUILDER_STATIC_KEYS,
@@ -2239,7 +2280,12 @@ def build_native_level_up_context(
         selected_subclass = _resolve_selected_entry(subclass_options, values.get("subclass_slug", ""))
         class_progression = list(target_row_context.get("class_progression") or [])
         requires_subclass = _class_requires_subclass_at_level(selected_class, class_progression, row_target_level) and selected_subclass is None
-        subclass_progression = _subclass_progression_for_builder(systems_service, campaign_slug, selected_subclass)
+        subclass_progression = _subclass_progression_for_builder(
+            systems_service,
+            campaign_slug,
+            selected_subclass,
+            campaign_page_records=campaign_page_records,
+        )
         values, choice_sections = _stabilize_choice_section_values(
             values,
             static_keys=LEVEL_UP_BUILDER_STATIC_KEYS,
@@ -3239,6 +3285,7 @@ def _builder_cache_get(cache_key: tuple[Any, ...], build_value):
 def _clear_builder_static_bundle_cache() -> None:
     with _BUILDER_STATIC_BUNDLE_CACHE_LOCK:
         _BUILDER_STATIC_BUNDLE_CACHE.clear()
+        _BUILDER_PROGRESS_CACHE.clear()
 
 
 def _builder_static_cache_get(
@@ -3259,6 +3306,27 @@ def _builder_static_cache_get(
         _BUILDER_STATIC_BUNDLE_CACHE[cache_key] = value
         while len(_BUILDER_STATIC_BUNDLE_CACHE) > BUILDER_STATIC_CACHE_MAX_ENTRIES:
             _BUILDER_STATIC_BUNDLE_CACHE.popitem(last=False)
+        return value
+
+
+def _builder_progress_cache_get(
+    cache_key: tuple[Any, ...],
+    build_value: Callable[[], list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    with _BUILDER_STATIC_BUNDLE_CACHE_LOCK:
+        if cache_key in _BUILDER_PROGRESS_CACHE:
+            _BUILDER_PROGRESS_CACHE.move_to_end(cache_key)
+            return _BUILDER_PROGRESS_CACHE[cache_key]
+
+    value = list(build_value() or [])
+
+    with _BUILDER_STATIC_BUNDLE_CACHE_LOCK:
+        if cache_key in _BUILDER_PROGRESS_CACHE:
+            _BUILDER_PROGRESS_CACHE.move_to_end(cache_key)
+            return _BUILDER_PROGRESS_CACHE[cache_key]
+        _BUILDER_PROGRESS_CACHE[cache_key] = value
+        while len(_BUILDER_PROGRESS_CACHE) > BUILDER_PROGRESS_CACHE_MAX_ENTRIES:
+            _BUILDER_PROGRESS_CACHE.popitem(last=False)
         return value
 
 
@@ -3319,18 +3387,33 @@ def _builder_service_cache_identity(systems_service: Any) -> tuple[Any, ...]:
 def _builder_static_revision_key(
     systems_service: Any,
     campaign_slug: str,
+    *,
+    entry_types: tuple[str, ...] = BUILDER_STATIC_ENTRY_TYPES,
 ) -> tuple[Any, ...] | None:
-    revision_loader = getattr(systems_service, "get_builder_static_revision", None)
-    if not callable(revision_loader):
-        return None
-    revision = revision_loader(campaign_slug, entry_types=BUILDER_STATIC_ENTRY_TYPES)
-    if revision is None:
-        return None
-    if isinstance(revision, tuple):
-        return revision
-    if isinstance(revision, list):
-        return tuple(revision)
-    return (revision,)
+    normalized_entry_types = tuple(sorted(str(entry_type or "").strip() for entry_type in entry_types))
+
+    def _load_revision_key() -> tuple[Any, ...] | None:
+        revision_loader = getattr(systems_service, "get_builder_static_revision", None)
+        if not callable(revision_loader):
+            return None
+        revision = revision_loader(campaign_slug, entry_types=normalized_entry_types)
+        if revision is None:
+            return None
+        if isinstance(revision, tuple):
+            return revision
+        if isinstance(revision, list):
+            return tuple(revision)
+        return (revision,)
+
+    return _builder_cache_get(
+        (
+            "builder-static-revision",
+            _builder_service_cache_identity(systems_service),
+            campaign_slug,
+            normalized_entry_types,
+        ),
+        _load_revision_key,
+    )
 
 
 def _sort_entries_for_builder(entries: list[SystemsEntryRecord]) -> list[SystemsEntryRecord]:
@@ -3440,13 +3523,55 @@ def _class_progression_for_builder(
     systems_service: Any,
     campaign_slug: str,
     selected_class: SystemsEntryRecord | None,
+    *,
+    campaign_page_records: list[Any] | None = None,
 ) -> list[dict[str, Any]]:
     if selected_class is None:
         return []
+    service_key = _builder_service_cache_identity(systems_service)
+    revision_key = _builder_static_revision_key(
+        systems_service,
+        campaign_slug,
+        entry_types=BUILDER_PROGRESS_ENTRY_TYPES,
+    )
+    page_key = _builder_request_page_key(campaign_page_records)
+    entry_key = str(selected_class.entry_key or "").strip()
+
+    def _load_progression() -> list[dict[str, Any]]:
+        return list(
+            systems_service.build_class_feature_progression_for_class_entry(
+                campaign_slug,
+                selected_class,
+            )
+            or []
+        )
+
+    def _load_or_cache_progression() -> list[dict[str, Any]]:
+        if revision_key is None or campaign_page_records is None:
+            return _load_progression()
+        return _builder_progress_cache_get(
+            (
+                "class-progression",
+                service_key,
+                campaign_slug,
+                revision_key,
+                page_key,
+                entry_key,
+            ),
+            _load_progression,
+        )
+
     return list(
         _builder_cache_get(
-            ("class-progression", campaign_slug, str(selected_class.entry_key or "").strip()),
-            lambda: systems_service.build_class_feature_progression_for_class_entry(campaign_slug, selected_class),
+            (
+                "class-progression",
+                service_key,
+                campaign_slug,
+                revision_key,
+                page_key,
+                entry_key,
+            ),
+            _load_or_cache_progression,
         )
         or []
     )
@@ -3456,13 +3581,55 @@ def _subclass_progression_for_builder(
     systems_service: Any,
     campaign_slug: str,
     selected_subclass: SystemsEntryRecord | None,
+    *,
+    campaign_page_records: list[Any] | None = None,
 ) -> list[dict[str, Any]]:
     if selected_subclass is None:
         return []
+    service_key = _builder_service_cache_identity(systems_service)
+    revision_key = _builder_static_revision_key(
+        systems_service,
+        campaign_slug,
+        entry_types=BUILDER_PROGRESS_ENTRY_TYPES,
+    )
+    page_key = _builder_request_page_key(campaign_page_records)
+    entry_key = str(selected_subclass.entry_key or "").strip()
+
+    def _load_progression() -> list[dict[str, Any]]:
+        return list(
+            systems_service.build_subclass_feature_progression_for_subclass_entry(
+                campaign_slug,
+                selected_subclass,
+            )
+            or []
+        )
+
+    def _load_or_cache_progression() -> list[dict[str, Any]]:
+        if revision_key is None or campaign_page_records is None:
+            return _load_progression()
+        return _builder_progress_cache_get(
+            (
+                "subclass-progression",
+                service_key,
+                campaign_slug,
+                revision_key,
+                page_key,
+                entry_key,
+            ),
+            _load_progression,
+        )
+
     return list(
         _builder_cache_get(
-            ("subclass-progression", campaign_slug, str(selected_subclass.entry_key or "").strip()),
-            lambda: systems_service.build_subclass_feature_progression_for_subclass_entry(campaign_slug, selected_subclass),
+            (
+                "subclass-progression",
+                service_key,
+                campaign_slug,
+                revision_key,
+                page_key,
+                entry_key,
+            ),
+            _load_or_cache_progression,
         )
         or []
     )
@@ -3652,6 +3819,8 @@ def _class_supports_shared_slot_multiclass(
     systems_service: Any,
     campaign_slug: str,
     selected_class: SystemsEntryRecord | None,
+    *,
+    campaign_page_records: list[Any] | None = None,
 ) -> bool:
     if not _supports_native_class_entry(selected_class):
         return False
@@ -3660,7 +3829,12 @@ def _class_supports_shared_slot_multiclass(
     caster_progression = _class_caster_progression(selected_class.title, selected_class=selected_class)
     if caster_progression in SUPPORTED_MULTICLASS_CASTER_PROGRESSIONS or caster_progression == "pact":
         return True
-    class_progression = _class_progression_for_builder(systems_service, campaign_slug, selected_class)
+    class_progression = _class_progression_for_builder(
+        systems_service,
+        campaign_slug,
+        selected_class,
+        campaign_page_records=campaign_page_records,
+    )
     return not _progression_has_spellbearing_features(class_progression)
 
 
@@ -3670,6 +3844,7 @@ def _subclass_supports_shared_slot_multiclass(
     selected_subclass: SystemsEntryRecord | None,
     *,
     selected_class: SystemsEntryRecord | None = None,
+    campaign_page_records: list[Any] | None = None,
 ) -> bool:
     if selected_subclass is None:
         return True
@@ -3685,7 +3860,12 @@ def _subclass_supports_shared_slot_multiclass(
             subclass_caster_progression in SUPPORTED_MULTICLASS_CASTER_PROGRESSIONS
             or subclass_caster_progression == "pact"
         )
-    subclass_progression = _subclass_progression_for_builder(systems_service, campaign_slug, selected_subclass)
+    subclass_progression = _subclass_progression_for_builder(
+        systems_service,
+        campaign_slug,
+        selected_subclass,
+        campaign_page_records=campaign_page_records,
+    )
     return not _progression_has_spellbearing_features(subclass_progression)
 
 
@@ -3696,6 +3876,7 @@ def _evaluate_shared_slot_multiclass_support(
     selected_class: SystemsEntryRecord | None,
     selected_subclass: SystemsEntryRecord | None = None,
     row_level: int = 0,
+    campaign_page_records: list[Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(selected_class, SystemsEntryRecord):
         return {
@@ -3719,8 +3900,18 @@ def _evaluate_shared_slot_multiclass_support(
         }
 
     class_name = str(selected_class.title or "").strip()
-    class_progression = _class_progression_for_builder(systems_service, campaign_slug, selected_class)
-    subclass_progression = _subclass_progression_for_builder(systems_service, campaign_slug, selected_subclass)
+    class_progression = _class_progression_for_builder(
+        systems_service,
+        campaign_slug,
+        selected_class,
+        campaign_page_records=campaign_page_records,
+    )
+    subclass_progression = _subclass_progression_for_builder(
+        systems_service,
+        campaign_slug,
+        selected_subclass,
+        campaign_page_records=campaign_page_records,
+    )
     subclass_spell_profile = _subclass_spell_progression(selected_subclass)
     subclass_spell_mode = _spellcasting_mode_from_progression(subclass_spell_profile)
     subclass_caster_progression = _normalize_caster_progression(subclass_spell_profile.get("caster_progression"))
@@ -3812,11 +4003,18 @@ def _evaluate_shared_slot_multiclass_support(
 def _list_shared_slot_multiclass_class_entries(
     systems_service: Any,
     campaign_slug: str,
+    *,
+    campaign_page_records: list[Any] | None = None,
 ) -> list[SystemsEntryRecord]:
     return [
         entry
         for entry in _list_supported_class_entries(systems_service, campaign_slug)
-        if _class_supports_shared_slot_multiclass(systems_service, campaign_slug, entry)
+        if _class_supports_shared_slot_multiclass(
+            systems_service,
+            campaign_slug,
+            entry,
+            campaign_page_records=campaign_page_records,
+        )
     ]
 
 
@@ -3826,6 +4024,7 @@ def _list_shared_slot_multiclass_subclass_options(
     selected_class: SystemsEntryRecord | None,
     *,
     subclass_entries: list[SystemsEntryRecord] | None = None,
+    campaign_page_records: list[Any] | None = None,
 ) -> list[SystemsEntryRecord]:
     return [
         entry
@@ -3840,6 +4039,7 @@ def _list_shared_slot_multiclass_subclass_options(
             campaign_slug,
             entry,
             selected_class=selected_class,
+            campaign_page_records=campaign_page_records,
         )
     ]
 
@@ -6777,7 +6977,26 @@ def _stabilize_choice_section_values(
             section_cache[cache_key] = list(build_sections(current_snapshot) or [])
         return section_cache[cache_key]
 
+    def _relevant_section_value_key(
+        current_snapshot: dict[str, str],
+        choice_sections: list[dict[str, Any]],
+    ) -> tuple[tuple[str, str], ...]:
+        relevant_keys = {str(key) for key in static_keys}
+        for section in list(choice_sections or []):
+            for field in list(section.get("fields") or []):
+                field_name = str(field.get("name") or "").strip()
+                if field_name:
+                    relevant_keys.add(field_name)
+        return tuple(
+            sorted(
+                (key, str(current_snapshot.get(key) or ""))
+                for key in relevant_keys
+                if key in current_snapshot
+            )
+        )
+
     choice_sections = _build_sections(current_values)
+    relevant_value_key = _relevant_section_value_key(current_values, choice_sections)
     for _ in range(4):
         sanitized_values = _sanitize_choice_section_values(
             current_values,
@@ -6787,7 +7006,11 @@ def _stabilize_choice_section_values(
         if sanitized_values == current_values:
             break
         current_values = sanitized_values
+        sanitized_relevant_value_key = _relevant_section_value_key(current_values, choice_sections)
+        if sanitized_relevant_value_key == relevant_value_key:
+            break
         choice_sections = _build_sections(current_values)
+        relevant_value_key = _relevant_section_value_key(current_values, choice_sections)
     return current_values, choice_sections
 
 

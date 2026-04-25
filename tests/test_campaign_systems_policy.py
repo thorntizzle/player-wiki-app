@@ -339,6 +339,124 @@ def test_campaign_entry_override_update_invalidates_request_enablement_cache(app
         assert service.is_entry_enabled_for_campaign("linden-pass", entry) is False
 
 
+def test_class_progression_builds_reuse_classfeature_index(app, monkeypatch):
+    source_id = f"TST-{uuid4().hex[:8].upper()}"
+    alpha_class_key = f"dnd-5e|class|{source_id.lower()}|alpha-adept"
+    beta_class_key = f"dnd-5e|class|{source_id.lower()}|beta-adept"
+    alpha_feature_key = f"dnd-5e|classfeature|{source_id.lower()}|alpha-feature"
+    beta_feature_key = f"dnd-5e|classfeature|{source_id.lower()}|beta-feature"
+
+    with app.test_request_context("/"):
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+
+        store.upsert_source(
+            library_slug,
+            source_id,
+            title="Progression Index Test Source",
+            license_class="custom_campaign",
+        )
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug=library_slug,
+            source_id=source_id,
+            is_enabled=True,
+            default_visibility="players",
+        )
+        store.replace_entries_for_source(
+            library_slug,
+            source_id,
+            entries=[
+                {
+                    "entry_key": alpha_class_key,
+                    "entry_type": "class",
+                    "slug": "alpha-adept",
+                    "title": "Alpha Adept",
+                    "search_text": "alpha adept",
+                    "player_safe_default": True,
+                    "metadata": {"hit_die": {"faces": 8}},
+                    "body": {
+                        "feature_progression": [
+                            {"name": "1st Level", "entries": ["Alpha Feature"]}
+                        ]
+                    },
+                },
+                {
+                    "entry_key": beta_class_key,
+                    "entry_type": "class",
+                    "slug": "beta-adept",
+                    "title": "Beta Adept",
+                    "search_text": "beta adept",
+                    "player_safe_default": True,
+                    "metadata": {"hit_die": {"faces": 8}},
+                    "body": {
+                        "feature_progression": [
+                            {"name": "1st Level", "entries": ["Beta Feature"]}
+                        ]
+                    },
+                },
+                {
+                    "entry_key": alpha_feature_key,
+                    "entry_type": "classfeature",
+                    "slug": "alpha-feature",
+                    "title": "Alpha Feature",
+                    "search_text": "alpha feature",
+                    "player_safe_default": True,
+                    "metadata": {
+                        "class_name": "Alpha Adept",
+                        "class_source": source_id,
+                        "level": 1,
+                    },
+                    "body": {},
+                },
+                {
+                    "entry_key": beta_feature_key,
+                    "entry_type": "classfeature",
+                    "slug": "beta-feature",
+                    "title": "Beta Feature",
+                    "search_text": "beta feature",
+                    "player_safe_default": True,
+                    "metadata": {
+                        "class_name": "Beta Adept",
+                        "class_source": source_id,
+                        "level": 1,
+                    },
+                    "body": {},
+                },
+            ],
+            entry_types=["class", "classfeature"],
+        )
+        alpha_class = store.get_entry(library_slug, alpha_class_key)
+        beta_class = store.get_entry(library_slug, beta_class_key)
+        assert alpha_class is not None
+        assert beta_class is not None
+
+        original_list_enabled = service.list_enabled_entries_for_campaign
+        classfeature_calls = 0
+
+        def count_list_enabled_entries(campaign_slug: str, **kwargs):
+            nonlocal classfeature_calls
+            if kwargs.get("entry_type") == "classfeature":
+                classfeature_calls += 1
+            return original_list_enabled(campaign_slug, **kwargs)
+
+        monkeypatch.setattr(service, "list_enabled_entries_for_campaign", count_list_enabled_entries)
+
+        alpha_progression = service.build_class_feature_progression_for_class_entry(
+            "linden-pass",
+            alpha_class,
+        )
+        beta_progression = service.build_class_feature_progression_for_class_entry(
+            "linden-pass",
+            beta_class,
+        )
+
+    assert classfeature_calls == 1
+    assert alpha_progression[0]["feature_rows"][0]["label"] == "Alpha Feature"
+    assert beta_progression[0]["feature_rows"][0]["label"] == "Beta Feature"
+
+
 def test_builtin_rules_source_is_seeded_and_browsable_without_import(client, sign_in, users, app):
     with app.app_context():
         service = app.extensions["systems_service"]

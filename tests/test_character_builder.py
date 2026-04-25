@@ -20,6 +20,7 @@ from player_wiki.character_builder import (
     _prepared_spell_count_for_level,
     _recalculate_definition_attacks,
     _resolve_builder_choices,
+    _stabilize_choice_section_values,
     apply_imported_progression_repairs,
     build_native_level_up_character_definition,
     build_native_level_up_context,
@@ -146,6 +147,8 @@ class _FakeSystemsService:
         self.list_enabled_entries_calls: list[tuple[str, str | None, str, int | None]] = []
         self.list_entries_for_campaign_source_calls = 0
         self.is_entry_enabled_calls = 0
+        self.class_progression_calls = 0
+        self.subclass_progression_calls = 0
 
     def get_campaign_library(self, campaign_slug: str):
         del campaign_slug
@@ -232,6 +235,7 @@ class _FakeSystemsService:
         entry: SystemsEntryRecord | None,
     ) -> list[dict]:
         del campaign_slug, entry
+        self.class_progression_calls += 1
         return list(self._class_progression)
 
     def build_subclass_feature_progression_for_subclass_entry(
@@ -240,6 +244,7 @@ class _FakeSystemsService:
         entry: SystemsEntryRecord | None,
     ) -> list[dict]:
         del campaign_slug, entry
+        self.subclass_progression_calls += 1
         return list(self._subclass_progression)
 
 
@@ -22169,6 +22174,113 @@ def test_builder_static_bundle_cache_uses_source_and_page_revisions():
     )
 
     assert [call[1] for call in systems_service.list_enabled_entries_calls] == expected_static_entry_types * 3
+
+
+def test_builder_progression_cache_uses_source_and_page_revisions():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}},
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "subclass": [],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "optionalfeature": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[
+            {
+                "level": 1,
+                "level_label": "1st Level",
+                "feature_rows": [_progression_row("Second Wind")],
+            }
+        ],
+    )
+    page_record = _campaign_page_record("mechanics/fighter-training", "Fighter Training", section="Mechanics")
+    page_record.updated_at = "2026-04-24T12:00:00+00:00"
+    form_values = {
+        "class_slug": fighter.slug,
+        "species_slug": human.slug,
+        "background_slug": acolyte.slug,
+    }
+
+    build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=[page_record],
+    )
+    build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=[page_record],
+    )
+
+    assert systems_service.class_progression_calls == 1
+
+    page_record.updated_at = "2026-04-24T12:05:00+00:00"
+    build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=[page_record],
+    )
+
+    assert systems_service.class_progression_calls == 2
+
+    systems_service.static_revision_token = "v2"
+    build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=[page_record],
+    )
+
+    assert systems_service.class_progression_calls == 3
+
+
+def test_choice_section_stabilizer_skips_rebuild_when_only_stale_values_drop():
+    build_calls = 0
+
+    def build_sections(values: dict[str, str]) -> list[dict[str, object]]:
+        nonlocal build_calls
+        build_calls += 1
+        return [
+            {
+                "title": "Choices",
+                "fields": [
+                    {
+                        "name": "known_choice",
+                        "label": "Known Choice",
+                        "options": [{"value": "alpha", "label": "Alpha"}],
+                        "selected": str(values.get("known_choice") or "").strip(),
+                    }
+                ],
+            }
+        ]
+
+    values, sections = _stabilize_choice_section_values(
+        {
+            "name": "Preview Hero",
+            "known_choice": "alpha",
+            "stale_choice": "removed",
+        },
+        static_keys=frozenset({"name"}),
+        build_sections=build_sections,
+    )
+
+    assert values == {"name": "Preview Hero", "known_choice": "alpha"}
+    assert sections[0]["fields"][0]["selected"] == "alpha"
+    assert build_calls == 1
 
 
 def test_build_level_one_builder_context_marks_choice_fields_with_live_preview_regions():
