@@ -10,8 +10,9 @@ from player_wiki.dnd5e_rules_reference import (
     DND5E_RULES_REFERENCE_VERSION,
     build_dnd5e_rules_reference_entries,
 )
-from player_wiki.auth_store import AuthStore
+from player_wiki.auth_store import AuthStore, utcnow
 from player_wiki.systems_importer import Dnd5eSystemsImporter
+from player_wiki.systems_models import SystemsEntryRecord
 from tests.test_systems_importer import (
     build_dmg_book_data_root,
     build_egw_character_option_wrapper_data_root,
@@ -43,6 +44,35 @@ def build_repo_local_test_root(name: str) -> Path:
     path = root / f"{name}-{uuid4().hex}"
     path.mkdir()
     return path
+
+
+def build_warning_inventory_entry(
+    *,
+    entry_type: str,
+    metadata: dict | None = None,
+    body: dict | None = None,
+) -> SystemsEntryRecord:
+    now = utcnow()
+    slug = f"warning-inventory-{entry_type.replace('_', '-').replace(' ', '-')}"
+    return SystemsEntryRecord(
+        id=0,
+        library_slug="DND-5E",
+        source_id="WARN",
+        entry_key=f"dnd-5e|{entry_type}|warn|{slug}",
+        entry_type=entry_type,
+        slug=slug,
+        title="Warning Inventory Entry",
+        source_page="",
+        source_path="",
+        search_text="warning inventory entry",
+        player_safe_default=True,
+        dm_heavy=False,
+        metadata=dict(metadata or {}),
+        body=dict(body or {}),
+        rendered_html="<p>Warning inventory entry.</p>",
+        created_at=now,
+        updated_at=now,
+    )
 
 
 @pytest.fixture()
@@ -422,6 +452,77 @@ def test_shared_core_systems_edit_warns_for_app_modeled_entries(app, client, sig
         assert entry is not None
         assert entry.title == "Quiet Lore Revised"
         assert store.get_campaign_entry_override("linden-pass", book_entry_key) is None
+
+
+def test_shared_core_systems_warning_inventory_covers_character_entry_types(app):
+    cases = [
+        ("background", "Background"),
+        ("class", "Class"),
+        ("classfeature", "Class Feature"),
+        ("class_feature", "Class Feature"),
+        ("feat", "Feat"),
+        ("item", "Item"),
+        ("optionalfeature", "Optional Feature"),
+        ("race", "Race"),
+        ("spell", "Spell"),
+        ("subclass", "Subclass"),
+        ("subclass-feature", "Subclass Feature"),
+    ]
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        for entry_type, label in cases:
+            warning = service.build_shared_core_entry_mechanics_impact_warning(
+                build_warning_inventory_entry(entry_type=entry_type)
+            )
+
+            assert warning is not None
+            assert "Character tools" in warning.surfaces
+            assert any(
+                signal.label == "Character-facing entry type" and label in signal.detail
+                for signal in warning.signals
+            )
+
+
+def test_shared_core_systems_warning_inventory_covers_character_metadata_hooks(app):
+    metadata = {
+        "character_option": {"kind": "feat"},
+        "character-progression": [{"kind": "class"}],
+        "spellSupport": [{"mode": "known"}],
+        "nested": {
+            "spell_manager": {"sources": []},
+            "modeled-effects": [{"kind": "speed_bonus"}],
+            "managed-resource": {"key": "ki"},
+            "derivedStats": ["armor_class"],
+        },
+    }
+    body = {
+        "sections": [
+            {
+                "name": "Structured Body Hook",
+                "derived-stat": {"field": "initiative"},
+            }
+        ]
+    }
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        warning = service.build_shared_core_entry_mechanics_impact_warning(
+            build_warning_inventory_entry(entry_type="book", metadata=metadata, body=body)
+        )
+
+    assert warning is not None
+    assert "Character tools" in warning.surfaces
+    structured_signal = next(
+        signal for signal in warning.signals if signal.label == "Structured character mechanics"
+    )
+    assert "character_option" in structured_signal.detail
+    assert "character-progression (character_progression)" in structured_signal.detail
+    assert "spellSupport (spell_support)" in structured_signal.detail
+    assert "nested.spell_manager" in structured_signal.detail
+    assert "nested.modeled-effects (modeled_effects)" in structured_signal.detail
+    assert "nested.managed-resource (managed_resource)" in structured_signal.detail
+    assert "body keys sections[].derived-stat (derived_stat)" in structured_signal.detail
 
 
 def test_shared_core_systems_edit_warns_for_normalized_rules_entries(

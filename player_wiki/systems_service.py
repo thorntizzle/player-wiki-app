@@ -785,6 +785,10 @@ def _format_structured_key_paths(paths: list[str]) -> str:
     return ", ".join(paths[:6])
 
 
+def _normalize_mechanics_impact_entry_type(value: object) -> str:
+    return normalize_lookup(str(value or "").strip())
+
+
 class SystemsService:
     def __init__(self, store: SystemsStore, repository_store: RepositoryStore) -> None:
         self.store = store
@@ -1035,7 +1039,8 @@ class SystemsService:
         self,
         entry: SystemsEntryRecord,
     ) -> SystemsMechanicsImpactWarning | None:
-        entry_type = str(entry.entry_type or "").strip().lower()
+        raw_entry_type = str(entry.entry_type or "").strip()
+        entry_type = _normalize_mechanics_impact_entry_type(raw_entry_type)
         metadata = dict(entry.metadata or {})
         body = dict(entry.body or {})
         signals: list[SystemsMechanicsImpactSignal] = []
@@ -1054,7 +1059,7 @@ class SystemsService:
         if entry_type in MECHANICS_IMPACT_CHARACTER_ENTRY_TYPES:
             entry_type_label = MECHANICS_IMPACT_ENTRY_TYPE_LABELS.get(
                 entry_type,
-                entry.entry_type.replace("_", " ").title(),
+                raw_entry_type.replace("_", " ").replace("-", " ").title(),
             )
             add_signal(
                 "Character-facing entry type",
