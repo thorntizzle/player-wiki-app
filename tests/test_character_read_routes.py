@@ -471,6 +471,7 @@ def test_xianxia_native_character_routes_redirect_without_dnd_builder_affordance
         "edit": app_module.NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE,
         "level-up": XIANXIA_CHARACTER_ADVANCEMENT_UNSUPPORTED_MESSAGE,
         "progression-repair": XIANXIA_CHARACTER_ADVANCEMENT_UNSUPPORTED_MESSAGE,
+        "retraining": XIANXIA_CHARACTER_ADVANCEMENT_UNSUPPORTED_MESSAGE,
     }
     for route_suffix, expected_message in expected_messages.items():
         response = client.get(
@@ -648,7 +649,7 @@ def test_non_5e_builder_route_redirects_to_roster_with_error(app, client, sign_i
     assert "Create character" not in html
 
 
-@pytest.mark.parametrize("route_suffix", ["edit", "level-up", "progression-repair"])
+@pytest.mark.parametrize("route_suffix", ["edit", "level-up", "progression-repair", "retraining"])
 def test_non_5e_native_character_routes_redirect_to_sheet_with_error(
     app, client, sign_in, users, route_suffix: str
 ):

@@ -5,6 +5,8 @@ import logging
 import sqlite3
 from pathlib import Path
 
+import yaml
+
 import player_wiki.campaign_combat_service as campaign_combat_service_module
 from player_wiki.app import create_app
 from player_wiki.config import Config
@@ -70,6 +72,13 @@ def _assert_expected_combatant_revision_field(html: str, revision: int, *, at_le
 def _write_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _write_campaign_config(app, mutator) -> None:
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    mutator(payload)
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
 def _import_systems_goblin(app, tmp_path) -> str:
@@ -172,6 +181,33 @@ def test_campaign_member_can_open_combat_page_and_campaign_links_to_it(client, s
     assert "Add custom NPC combatant" not in combat_html
     assert 'data-live-active-interval-ms="500"' in combat_html
     assert 'data-live-idle-interval-ms="3000"' in combat_html
+
+
+def test_xianxia_combat_routes_show_friendly_unsupported_system_fallback(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+
+    _write_campaign_config(app, _mutate)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    combat_page = client.get("/campaigns/linden-pass/combat")
+    controls_page = client.get("/campaigns/linden-pass/combat/dm")
+    status_page = client.get("/campaigns/linden-pass/combat/status")
+
+    for response in (combat_page, controls_page, status_page):
+        assert response.status_code == 200
+        html = response.get_data(as_text=True)
+        assert "Combat tracker not configured for Xianxia yet" in html
+        assert "current combat tracker is" in html
+        assert "DND-5E-only" in html
+        assert "/campaigns/linden-pass/characters" in html
+        assert "/campaigns/linden-pass/session" in html
+        assert "Add player character" not in html
+        assert "Add NPC from Systems" not in html
+        assert "data-combat-live-url=" not in html
 
 
 def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, sign_in, users):

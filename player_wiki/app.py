@@ -11630,6 +11630,7 @@ def create_app() -> Flask:
             return redirect_unsupported_native_character_tools(
                 campaign_slug,
                 character_slug=character_slug,
+                message=character_advancement_unsupported_message(campaign.system),
             )
         level_up_readiness = native_level_up_readiness(
             get_systems_service(),

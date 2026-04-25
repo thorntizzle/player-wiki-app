@@ -7,19 +7,25 @@ DND_5E_SYSTEM_CODE = "DND-5E"
 XIANXIA_SYSTEM_CODE = "Xianxia"
 
 NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE = (
-    f"Native character tools are currently only supported for {DND_5E_SYSTEM_CODE} campaigns."
+    "This campaign can still use the character roster, read-mode sheets, session-mode sheets, "
+    "and Controls. Native DND-5E builder, edit, level-up, repair, retraining, PDF-import, "
+    "and spellcasting tools are not implemented for this campaign system."
 )
 XIANXIA_NATIVE_CHARACTER_CREATE_UNSUPPORTED_MESSAGE = (
-    "Xianxia native character creation is recognized, but its builder is not implemented yet."
+    "Xianxia is recognized as its own character lane, but its native character builder is not "
+    "implemented yet. Use the roster and existing read/session sheets for now."
 )
 XIANXIA_CHARACTER_ADVANCEMENT_UNSUPPORTED_MESSAGE = (
-    "Xianxia character advancement and cultivation routes are recognized, but not implemented yet."
+    "Xianxia advancement and cultivation are recognized as their own character lane, but those "
+    "routes are not implemented yet. Use the existing read/session sheet and Controls surfaces "
+    "for now."
 )
 DND5E_CHARACTER_PDF_IMPORT_UNSUPPORTED_MESSAGE = (
     f"PDF character import is currently only supported for {DND_5E_SYSTEM_CODE} campaigns."
 )
 DND5E_CHARACTER_SPELLCASTING_TOOLS_UNSUPPORTED_MESSAGE = (
-    f"Spellcasting management is currently only supported for {DND_5E_SYSTEM_CODE} campaigns."
+    "This character sheet remains available, but DND-5E spellcasting management is not "
+    "implemented for this campaign system."
 )
 
 CHARACTER_ROUTE_LANE_SHARED = "shared"

@@ -1,0 +1,16 @@
+<section class="card auth-card">
+  <h2>Combat tracker not configured for {{ campaign.system or "this system" }} yet</h2>
+  <p>
+    This route is a placeholder for the campaign system lane. The current combat tracker is
+    DND-5E-only, so no encounter automation is available here for {{ campaign.system or "this system" }} yet.
+  </p>
+  <div class="hero-actions">
+    <a class="button-link" href="{{ url_for('campaign_view', campaign_slug=campaign.slug) }}">Open Campaign Home</a>
+    {% if can_access_campaign_scope(campaign.slug, 'characters') %}
+      <a class="ghost-button" href="{{ url_for('character_roster_view', campaign_slug=campaign.slug) }}">Open Characters</a>
+    {% endif %}
+    {% if can_access_campaign_scope(campaign.slug, 'session') %}
+      <a class="ghost-button" href="{{ url_for('campaign_session_view', campaign_slug=campaign.slug) }}">Open Session</a>
+    {% endif %}
+  </div>
+</section>

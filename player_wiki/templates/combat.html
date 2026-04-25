@@ -19,10 +19,7 @@
   </section>
 
   {% if not combat_system_supported %}
-    <section class="card auth-card">
-      <h2>Combat tracker not configured for this system yet</h2>
-      <p>This campaign uses {{ campaign.system or "an unknown system" }}, and the current combat tracker is only implemented for DND-5E right now.</p>
-    </section>
+    {% include "_unsupported_combat_system_card.html" %}
   {% else %}
     <datalist id="combat-condition-options">
       {% for option in combat_condition_options %}
