@@ -448,11 +448,48 @@ def test_shared_core_systems_edit_warns_for_app_modeled_entries(app, client, sig
     assert 'name="shared_entry_mechanics_impact_acknowledged"' in modeled_body
     assert 'name="visibility_override"' not in modeled_body
 
+    modeled_save_without_ack = client.post(
+        f"/campaigns/linden-pass/systems/control-panel/shared-entries/{spell_slug}",
+        data={
+            "shared_entry_title": "Modeled Spark Revised",
+            "shared_entry_source_page": "",
+            "shared_entry_source_path": "",
+            "shared_entry_search_text": "modeled spark revised warning test source",
+            "shared_entry_player_safe_default": "1",
+            "shared_entry_metadata_json": '{"spell_support": {"mode": "prepared"}}',
+            "shared_entry_body_json": '{"imported": true}',
+            "shared_entry_rendered_html": "<p>Modeled spell revised.</p>",
+        },
+        follow_redirects=False,
+    )
+    assert modeled_save_without_ack.status_code == 400
+    modeled_save_without_ack_body = modeled_save_without_ack.get_data(as_text=True)
+    assert "Review and acknowledge the mechanics impact warning" in modeled_save_without_ack_body
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        entry = store.get_entry(service.get_campaign_library_slug("linden-pass"), spell_entry_key)
+        assert entry is not None
+        assert entry.title == "Modeled Spark"
+        assert entry.metadata == {"spell_support": {"mode": "known"}}
+        assert store.get_campaign_entry_override("linden-pass", spell_entry_key) is None
+        assert not store.list_shared_entry_edit_events(
+            library_slug=service.get_campaign_library_slug("linden-pass"),
+            entry_key=spell_entry_key,
+            limit=5,
+        )
+
     prose_page = client.get(
         f"/campaigns/linden-pass/systems/control-panel/shared-entries/{book_slug}/edit"
     )
     assert prose_page.status_code == 200
-    assert "Mechanics Impact Review" not in prose_page.get_data(as_text=True)
+    prose_page_body = prose_page.get_data(as_text=True)
+    assert "Mechanics Impact Review" not in prose_page_body
+    assert 'name="shared_entry_mechanics_impact_acknowledged"' not in prose_page_body
+    assert "character repair" not in prose_page_body
+    assert "combat repair" not in prose_page_body
+    assert "session repair" not in prose_page_body
 
     prose_save = client.post(
         f"/campaigns/linden-pass/systems/control-panel/shared-entries/{book_slug}",
@@ -477,6 +514,34 @@ def test_shared_core_systems_edit_warns_for_app_modeled_entries(app, client, sig
         assert entry is not None
         assert entry.title == "Quiet Lore Revised"
         assert store.get_campaign_entry_override("linden-pass", book_entry_key) is None
+        edit_events = store.list_shared_entry_edit_events(
+            library_slug=service.get_campaign_library_slug("linden-pass"),
+            entry_key=book_entry_key,
+            limit=5,
+        )
+        assert len(edit_events) == 1
+        assert edit_events[0].edited_fields == ["title", "search_text", "rendered_html"]
+
+        campaign_events = AuthStore().list_recent_audit_events(
+            campaign_slug="linden-pass",
+            limit=20,
+        )
+        prose_event = next(
+            event
+            for event in campaign_events
+            if event.event_type == "campaign_systems_shared_entry_updated"
+            and event.metadata.get("entry_key") == book_entry_key
+        )
+        assert prose_event.metadata["source"] == "campaign_systems_shared_entry_editor"
+        assert not [
+            event
+            for event in campaign_events
+            if event.metadata.get("entry_key") == book_entry_key
+            and (
+                "repair" in event.event_type
+                or event.event_type == "campaign_systems_entry_override_updated"
+            )
+        ]
 
 
 def test_shared_core_systems_warning_inventory_covers_character_entry_types(app):
