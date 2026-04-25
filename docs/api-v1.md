@@ -117,6 +117,17 @@ Invoke-RestMethod -Uri "http://127.0.0.1:5000/api/v1/me" -Headers $headers
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/notes`
 - `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>`
 
+## Browser Content Management Coverage
+
+The browser `DM Content` hub now covers the main DM-managed content lanes while still reusing the same app services and JSON API where those are the right write contract:
+
+- `DM Content -> Player Wiki` creates and edits published wiki pages through the content service, uploads page images into campaign assets under `wiki-pages/`, can prefill a new page from a staged or revealed session article, can unpublish/archive pages by updating page metadata, and only hard-deletes through the browser after usage checks pass.
+- `DM Content -> Systems` manages campaign source enablement and entry overrides through the same Systems policy service as `PUT /api/v1/campaigns/<campaign_slug>/systems/sources` and `PUT /api/v1/campaigns/<campaign_slug>/systems/overrides/<entry_key>`. It also owns the browser surface for custom campaign Systems entries, shared-source import review, and admin-only DND-5E ZIP uploads.
+- `DM Content -> Staged Articles` writes into the existing session article store for manual, upload, and wiki-backed prep articles. The JSON API can create, reveal, and delete session articles; the browser is currently the update surface for revising unrevealed staged article title, body, image alt/caption, or replacement image before reveal or wiki conversion.
+- `DM Content -> Statblocks` and `DM Content -> Conditions` have both browser and JSON API create/update/delete coverage through the `/dm-content/statblocks` and `/dm-content/conditions` endpoints.
+
+Use the browser Player Wiki lane when you want the built-in removal guidance, archive/unpublish affordance, session-article promotion flow, and usage blockers for backlinks, character hooks or sheet references, and session provenance. The low-level content API remains automation-oriented: `DELETE /api/v1/campaigns/<campaign_slug>/content/pages/<page_ref>` deletes the page file after DM/admin authorization and does not display the browser safety review, so API clients should either unpublish through a metadata update or reproduce the relevant dependency checks before hard deletion.
+
 ## Request Notes
 
 - `GET /api/v1/app` exposes the current app version, build id, runtime, and active DB/campaign paths.
@@ -124,13 +135,15 @@ Invoke-RestMethod -Uri "http://127.0.0.1:5000/api/v1/me" -Headers $headers
 - `POST /api/v1/systems/imports/dnd5e` accepts `source_ids`, optional `entry_types`, and an embedded `archive` object with `filename` and `data_base64`. The archive must be a `.zip` containing a compatible DND 5E source `data/` directory.
 - `POST /api/v1/systems/imports/dnd5e` also accepts optional `import_version` and `source_path_label` overrides if you want import-run history to show a custom source label instead of the uploaded archive name.
 - `GET /api/v1/systems/import-runs` and `GET /api/v1/systems/import-runs/<import_run_id>` expose the recorded shared-library ingest history, including import summaries and source file lists.
+- Browser custom campaign Systems entry create/edit/archive/restore is currently service-backed rather than exposed as a JSON API endpoint. Imported shared-library Systems entries remain read-only at the content level; use campaign source policy or entry overrides for campaign-specific changes unless a shared-library edit model is deliberately added later.
 - `GET /api/v1/me` now includes the same app metadata block alongside the authenticated user payload.
 - `PATCH /api/v1/campaigns/<campaign_slug>/content/config` currently supports the live editable campaign fields `title`, `summary`, `system`, `current_session`, `source_wiki_root`, and `systems_library`.
 - Asset detail reads return `data_base64`, and asset writes use an embedded `asset_file` object with `filename` and `data_base64`.
 - The `/content/...` management endpoints are DM/admin only. They expose unpublished pages and raw character file content, so they intentionally do not follow normal player-facing visibility rules.
-- Page management endpoints read and write raw frontmatter plus `body_markdown`, then refresh the running repository so the current app process sees the changes immediately.
+- Page management endpoints read and write raw frontmatter plus `body_markdown`, then refresh the running repository so the current app process sees the changes immediately. Set page metadata such as `published: false` for an API-driven archive/unpublish workflow instead of hard-deleting a referenced page.
 - Campaign config writes also refresh the running repository so title, summary, current session, and systems-library changes take effect immediately.
 - Character management endpoints read and write `definition.yaml` and `import.yaml`. They initialize live character state if it does not already exist, but they do not overwrite existing mutable session state.
+- Character content management endpoints are low-level file operations. Native in-browser character create, edit, level-up, progression repair, portrait, assignment, and deletion workflows continue to use the character-specific routes and support matrix rather than the raw content API.
 - Deleting a managed character removes the file-backed definition/import metadata, the live `character_state` row, and any character assignment for that slug.
 - Session article creation accepts JSON `mode: "manual"`, `mode: "upload"`, or `mode: "wiki"`.
 - Upload mode accepts `filename`, `markdown_text`, and optional `referenced_image`.

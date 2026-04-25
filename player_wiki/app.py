@@ -3626,7 +3626,10 @@ def create_app() -> Flask:
             build_help_surface(
                 anchor="dm-content",
                 label="DM Content",
-                summary="DM-facing content management for player wiki pages, statblocks, staged articles, and custom conditions.",
+                summary=(
+                    "DM-facing content management for player wiki pages, Systems policy and custom entries, "
+                    "statblocks, staged articles, and custom conditions."
+                ),
                 status_label=(
                     "Open"
                     if can_view_dm_content and combat_system_supported
@@ -3648,14 +3651,16 @@ def create_app() -> Flask:
                 ),
                 capabilities=[
                     "Create, edit, attach images to, unpublish/archive, or safely hard-delete player wiki Markdown pages from the Player Wiki lane.",
+                    "Manage Systems source enablement, entry overrides, custom campaign entries, shared-source import review, and admin-only DND-5E ZIP imports from the Systems lane.",
                     "Upload and edit DM statblock markdown for later encounter seeding.",
-                    "Prepare staged session articles for later reveal.",
+                    "Prepare and revise unrevealed staged session articles before reveal or wiki publication.",
                     "Maintain custom combat conditions alongside the built-in DND-5E list.",
                 ],
                 limits=[
                     "Player wiki edits still need normal spoiler and reveal-safety judgment before publication.",
                     "Inline wiki-page image uploads are copied into campaign assets and referenced from page frontmatter.",
                     "Hard delete is blocked when a page still has wiki backlinks, character hooks, or session provenance.",
+                    "Imported shared-library Systems entries are not edited in place; use source policy, entry overrides, or custom campaign entries unless a shared-library edit model is approved.",
                     "The statblock parser is currently implemented for DND-5E-style markdown.",
                     "Statblock saves need recognizable Armor Class, Hit Points, and Speed lines when those values should feed Combat.",
                     "Custom conditions augment the built-in list rather than replacing it.",
@@ -3665,11 +3670,56 @@ def create_app() -> Flask:
                         {
                             "label": "Open DM Content",
                             "href": url_for("campaign_dm_content_view", campaign_slug=campaign.slug),
+                        },
+                        {
+                            "label": "Open Player Wiki",
+                            "href": url_for(
+                                "campaign_dm_content_subpage_view",
+                                campaign_slug=campaign.slug,
+                                dm_content_subpage="player-wiki",
+                            ),
+                        },
+                        {
+                            "label": "Open Systems",
+                            "href": url_for(
+                                "campaign_dm_content_subpage_view",
+                                campaign_slug=campaign.slug,
+                                dm_content_subpage="systems",
+                            ),
+                        },
+                        {
+                            "label": "Open Staged Articles",
+                            "href": url_for(
+                                "campaign_dm_content_subpage_view",
+                                campaign_slug=campaign.slug,
+                                dm_content_subpage="staged-articles",
+                            ),
                         }
                     ]
                     if can_view_dm_content
                     else []
                 ),
+                guidance_cards=[
+                    {
+                        "title": "Browser and API boundary",
+                        "body": "",
+                        "items": [
+                            "Browser Player Wiki saves use the content service so mirrored Markdown and the read model stay synchronized.",
+                            "Browser Player Wiki hard delete adds usage checks before the low-level content delete runs.",
+                            "The raw content API remains available for automation, but API clients need their own publish-safety and dependency checks.",
+                        ],
+                        "meta": "",
+                    },
+                    {
+                        "title": "Character-linked content",
+                        "body": "",
+                        "items": [
+                            "Player Wiki deletion checks include character hooks and sheet page references.",
+                            "Character file API management is separate from native character create, edit, level-up, repair, and controls workflows.",
+                        ],
+                        "meta": "",
+                    },
+                ],
             ),
             build_help_surface(
                 anchor="characters",
