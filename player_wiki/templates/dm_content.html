@@ -134,6 +134,8 @@
     <p class="lede">
       {% if dm_content_subpage == "player-wiki" %}
         Maintain published player wiki pages from inside the app.
+      {% elif dm_content_subpage == "systems" %}
+        Manage Systems source policy, entry overrides, custom campaign entries, and import history from one lane.
       {% elif dm_content_subpage == "statblocks" %}
         Upload DM-side statblocks that seed Combat NPCs without exposing them in the player wiki.
       {% elif dm_content_subpage == "staged-articles" %}
@@ -283,6 +285,8 @@
             <p class="meta">No player wiki pages have been published yet.</p>
           {% endif %}
         </section>
+      {% elif dm_content_subpage == "systems" %}
+        {% include "_systems_management_panel.html" %}
       {% elif dm_content_subpage == "statblocks" %}
         <section class="card" id="dm-content-statblocks">
           <div class="section-heading">
@@ -452,6 +456,16 @@
           <p class="meta">Pages marked published appear to players when their reveal session is at or below the campaign's current session.</p>
           <p class="meta">Unpublish hides a page without deleting the Markdown file.</p>
         </section>
+      {% elif dm_content_subpage == "systems" %}
+        <section class="card sidebar-card">
+          <h2>Systems lanes</h2>
+          <ul class="plain-list">
+            <li><a href="#systems-source-enablement">Source Enablement</a></li>
+            <li><a href="#systems-entry-overrides">Entry Overrides</a></li>
+            <li><a href="#systems-custom-entries">Custom Entries</a></li>
+            <li><a href="#systems-import-history">Import-Run History</a></li>
+          </ul>
+        </section>
       {% elif dm_content_subpage == "statblocks" %}
         <section class="card sidebar-card">
           <h2>Combat integration</h2>
@@ -486,6 +500,9 @@
         {% endif %}
         {% if dm_content_subpage == "staged-articles" %}
           <p class="meta">This staged-article lane keeps DM-only management even when revealed articles later become player-visible on the live Session page.</p>
+        {% endif %}
+        {% if dm_content_subpage == "systems" %}
+          <p class="meta">Systems entries still follow the Systems scope, source policy, and entry override rules outside this DM surface.</p>
         {% endif %}
       </section>
     </aside>

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from io import BytesIO
 import sqlite3
+from uuid import uuid4
 
 from player_wiki.app import create_app
 from player_wiki.config import Config
@@ -74,6 +75,18 @@ def _list_combatants(app):
         return app.extensions["campaign_combat_service"].list_combatants("linden-pass")
 
 
+def _build_systems_source_form(app) -> dict[str, str]:
+    with app.app_context():
+        rows = app.extensions["systems_service"].list_campaign_source_states("linden-pass")
+
+    data: dict[str, str] = {}
+    for row in rows:
+        if row.is_enabled:
+            data[f"source_{row.source.source_id}_enabled"] = "1"
+        data[f"source_{row.source.source_id}_visibility"] = row.default_visibility
+    return data
+
+
 def _find_combatant(app, *, name: str):
     for combatant in _list_combatants(app):
         if combatant.display_name == name:
@@ -86,6 +99,7 @@ def test_dm_can_open_dm_content_page_and_players_cannot_by_default(client, sign_
 
     campaign = client.get("/campaigns/linden-pass")
     dm_page = client.get("/campaigns/linden-pass/dm-content")
+    systems_page = client.get("/campaigns/linden-pass/dm-content/systems")
     staged_articles_page = client.get("/campaigns/linden-pass/dm-content/staged-articles")
     conditions_page = client.get("/campaigns/linden-pass/dm-content/conditions")
 
@@ -97,11 +111,20 @@ def test_dm_can_open_dm_content_page_and_players_cannot_by_default(client, sign_
     assert dm_page.status_code == 200
     dm_html = dm_page.get_data(as_text=True)
     assert "Statblock library" in dm_html
+    assert "Systems" in dm_html
     assert "Staged Articles" in dm_html
     assert "Conditions" in dm_html
     assert 'name="statblock_file"' in dm_html
+    assert '/campaigns/linden-pass/dm-content/systems' in dm_html
     assert '/campaigns/linden-pass/dm-content/staged-articles' in dm_html
     assert '/campaigns/linden-pass/dm-content/conditions' in dm_html
+
+    assert systems_page.status_code == 200
+    systems_html = systems_page.get_data(as_text=True)
+    assert "Source Enablement" in systems_html
+    assert "Entry Overrides" in systems_html
+    assert "Custom Entries" in systems_html
+    assert "Import-Run History" in systems_html
 
     assert staged_articles_page.status_code == 200
     staged_html = staged_articles_page.get_data(as_text=True)
@@ -120,6 +143,104 @@ def test_dm_can_open_dm_content_page_and_players_cannot_by_default(client, sign_
 
     assert 'href="/campaigns/linden-pass/dm-content"' not in player_campaign.get_data(as_text=True)
     assert player_page.status_code == 404
+
+
+def test_dm_content_systems_page_separates_systems_lanes_and_returns_after_source_update(
+    app, client, sign_in, users
+):
+    source_id = f"CSTM-{uuid4().hex[:8].upper()}"
+    entry_key = f"dnd-5e|spell|{source_id.lower()}|harbor-spark"
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+        store.upsert_source(
+            library_slug,
+            source_id,
+            title="Harbor Custom Systems",
+            license_class="custom_campaign",
+        )
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug=library_slug,
+            source_id=source_id,
+            is_enabled=True,
+            default_visibility="dm",
+        )
+        store.replace_entries_for_source(
+            library_slug,
+            source_id,
+            entries=[
+                {
+                    "entry_key": entry_key,
+                    "entry_type": "spell",
+                    "slug": "harbor-spark",
+                    "title": "Harbor Spark",
+                    "search_text": "harbor spark",
+                    "player_safe_default": True,
+                    "metadata": {},
+                    "body": {},
+                }
+            ],
+            entry_types=["spell"],
+        )
+        store.upsert_campaign_entry_override(
+            "linden-pass",
+            library_slug=library_slug,
+            entry_key=entry_key,
+            visibility_override="dm",
+            is_enabled_override=False,
+        )
+        import_run = store.create_import_run(
+            library_slug=library_slug,
+            source_id="MM",
+            import_version="browser-review",
+            source_path=r"C:\private\source\mm.zip",
+            summary={},
+        )
+        store.complete_import_run(
+            import_run.id,
+            summary={
+                "imported_count": 42,
+                "imported_by_type": {"monster": 42},
+                "source_files": ["data/bestiary/bestiary-mm.json"],
+            },
+        )
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    page = client.get("/campaigns/linden-pass/dm-content/systems")
+
+    assert page.status_code == 200
+    body = page.get_data(as_text=True)
+    assert "Source Enablement" in body
+    assert "Entry Overrides" in body
+    assert "Custom Entries" in body
+    assert "Import-Run History" in body
+    assert "Harbor Custom Systems" in body
+    assert "Harbor Spark" in body
+    assert "MM import #" in body
+    assert "42 entries" in body
+    assert r"C:\private\source\mm.zip" not in body
+    assert 'name="return_to" value="dm-content-systems"' in body
+
+    form_data = _build_systems_source_form(app)
+    form_data["return_to"] = "dm-content-systems"
+    form_data[f"source_{source_id}_visibility"] = "players"
+    response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/sources",
+        data=form_data,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert "/campaigns/linden-pass/dm-content/systems" in response.headers["Location"]
+    assert "#systems-source-enablement" in response.headers["Location"]
+
+    with app.app_context():
+        state = app.extensions["systems_service"].get_campaign_source_state("linden-pass", source_id)
+        assert state is not None
+        assert state.default_visibility == "players"
 
 
 def test_dm_can_upload_statblock_and_use_it_to_seed_an_npc_combatant(app, client, sign_in, users):

@@ -179,6 +179,7 @@ SESSION_ARTICLE_FORM_MODES = {"manual", "upload", "wiki"}
 DM_CONTENT_SUBPAGE_LABELS = {
     "statblocks": "Statblocks",
     "player-wiki": "Player Wiki",
+    "systems": "Systems",
     "staged-articles": "Staged Articles",
     "conditions": "Conditions",
 }
@@ -507,6 +508,11 @@ def normalize_dm_content_subpage(value: str, *, allow_default: bool = False) -> 
         "wiki-pages": "player-wiki",
         "player-wiki-pages": "player-wiki",
         "pages": "player-wiki",
+        "system": "systems",
+        "systems": "systems",
+        "systems-management": "systems",
+        "systems-settings": "systems",
+        "source-management": "systems",
         "statblock": "statblocks",
         "statblocks": "statblocks",
         "staged-article": "staged-articles",
@@ -6245,10 +6251,23 @@ def create_app() -> Flask:
         can_manage_dm_content = can_manage_campaign_dm_content(campaign_slug)
         can_manage_content = can_manage_campaign_content(campaign_slug)
         can_manage_session = can_manage_campaign_session(campaign_slug)
+        can_manage_systems = can_manage_campaign_systems(campaign_slug)
         normalized_subpage = normalize_dm_content_subpage(dm_content_subpage, allow_default=True)
         statblocks = dm_content_service.list_statblocks(campaign_slug)
         top_level_statblocks, statblock_subsection_groups = build_dm_statblock_subsection_groups(statblocks)
         custom_conditions = dm_content_service.list_condition_definitions(campaign_slug)
+        systems_management_context: dict[str, object] = {}
+        systems_management_count = 0
+        if can_manage_systems:
+            if normalized_subpage == "systems":
+                systems_management_context = build_campaign_systems_control_context(
+                    campaign_slug,
+                    return_to="dm-content-systems",
+                    active_nav="dm_content",
+                )
+                systems_management_count = int(systems_management_context.get("systems_management_count") or 0)
+            else:
+                systems_management_count = len(get_systems_service().list_campaign_source_states(campaign_slug))
         player_wiki_records = []
         player_wiki_pages = []
         player_wiki_page_count = len(campaign.pages) if can_manage_content else 0
@@ -6304,11 +6323,15 @@ def create_app() -> Flask:
         for subpage_key, label in DM_CONTENT_SUBPAGE_LABELS.items():
             if subpage_key == "player-wiki" and not can_manage_content:
                 continue
+            if subpage_key == "systems" and not can_manage_systems:
+                continue
             if subpage_key == "staged-articles" and not can_manage_session:
                 continue
             count = 0
             if subpage_key == "player-wiki":
                 count = player_wiki_page_count
+            elif subpage_key == "systems":
+                count = systems_management_count
             elif subpage_key == "statblocks":
                 count = len(statblocks)
             elif subpage_key == "staged-articles":
@@ -6342,6 +6365,7 @@ def create_app() -> Flask:
             "can_manage_dm_content": can_manage_dm_content,
             "can_manage_content": can_manage_content,
             "can_manage_session": can_manage_session,
+            "can_manage_systems": can_manage_systems,
             "dm_content_subpage": normalized_subpage,
             "dm_content_subpage_label": DM_CONTENT_SUBPAGE_LABELS[normalized_subpage],
             "dm_content_subpages": dm_content_subpages,
@@ -6361,6 +6385,7 @@ def create_app() -> Flask:
             "active_session": active_session,
             "chat_is_open": chat_is_open,
             "active_nav": "dm_content",
+            **systems_management_context,
         }
 
     def build_campaign_visibility_control_context(campaign_slug: str) -> dict[str, object]:
@@ -6396,14 +6421,20 @@ def create_app() -> Flask:
             "active_nav": "control",
         }
 
-    def build_campaign_systems_control_context(campaign_slug: str) -> dict[str, object]:
+    def build_campaign_systems_control_context(
+        campaign_slug: str,
+        *,
+        return_to: str = "",
+        active_nav: str = "systems",
+    ) -> dict[str, object]:
         campaign = load_campaign_context(campaign_slug)
         user = get_current_user()
         include_private = bool(user and user.is_admin)
         systems_service = get_systems_service()
         policy = systems_service.get_campaign_policy(campaign_slug)
+        source_states = systems_service.list_campaign_source_states(campaign_slug)
         source_rows = []
-        for state in systems_service.list_campaign_source_states(campaign_slug):
+        for state in source_states:
             entry_count = systems_service.count_entries_for_source(campaign_slug, state.source.source_id)
             choices = []
             for choice in list_visibility_choices(include_private=include_private):
@@ -6432,15 +6463,143 @@ def create_app() -> Flask:
                 }
             )
 
+        library_slug = policy.library_slug if policy is not None else systems_service.get_campaign_library_slug(campaign_slug)
+        entry_override_rows = []
+        if library_slug:
+            for override in systems_service.store.list_campaign_entry_overrides(campaign_slug, library_slug):
+                entry = systems_service.store.get_entry(library_slug, override.entry_key)
+                source_state = (
+                    systems_service.get_campaign_source_state(campaign_slug, entry.source_id)
+                    if entry is not None
+                    else None
+                )
+                visibility_label = (
+                    VISIBILITY_LABELS.get(override.visibility_override, override.visibility_override)
+                    if override.visibility_override
+                    else "Inherit source default"
+                )
+                if override.is_enabled_override is None:
+                    enablement_label = "Inherit source enablement"
+                elif override.is_enabled_override:
+                    enablement_label = "Enabled"
+                else:
+                    enablement_label = "Disabled"
+                entry_override_rows.append(
+                    {
+                        "entry_key": override.entry_key,
+                        "entry_title": entry.title if entry is not None else "Unknown entry",
+                        "entry_type_label": (
+                            SYSTEMS_ENTRY_TYPE_LABELS.get(entry.entry_type, entry.entry_type.replace("_", " ").title())
+                            if entry is not None
+                            else ""
+                        ),
+                        "entry_href": (
+                            url_for(
+                                "campaign_systems_entry_detail",
+                                campaign_slug=campaign.slug,
+                                entry_slug=entry.slug,
+                            )
+                            if entry is not None and can_access_campaign_systems_entry(campaign_slug, entry.slug)
+                            else ""
+                        ),
+                        "source_label": (
+                            f"{source_state.source.title} ({source_state.source.source_id})"
+                            if source_state is not None
+                            else (entry.source_id if entry is not None else "")
+                        ),
+                        "visibility_label": visibility_label,
+                        "enablement_label": enablement_label,
+                    }
+                )
+
+        custom_entry_source_rows = []
+        custom_entry_count = 0
+        for state in source_states:
+            if state.source.license_class != "custom_campaign":
+                continue
+            entry_count = systems_service.count_entries_for_source(campaign_slug, state.source.source_id)
+            custom_entry_count += entry_count
+            entries = systems_service.store.list_entries_for_source(
+                state.source.library_slug,
+                state.source.source_id,
+                limit=10,
+            )
+            custom_entry_source_rows.append(
+                {
+                    "source_id": state.source.source_id,
+                    "title": state.source.title,
+                    "is_enabled": state.is_enabled,
+                    "default_visibility_label": VISIBILITY_LABELS.get(
+                        state.default_visibility,
+                        state.default_visibility,
+                    ),
+                    "entry_count": entry_count,
+                    "entries": [
+                        {
+                            "title": entry.title,
+                            "entry_type_label": SYSTEMS_ENTRY_TYPE_LABELS.get(
+                                entry.entry_type,
+                                entry.entry_type.replace("_", " ").title(),
+                            ),
+                            "source_id": entry.source_id,
+                            "href": (
+                                url_for(
+                                    "campaign_systems_entry_detail",
+                                    campaign_slug=campaign.slug,
+                                    entry_slug=entry.slug,
+                                )
+                                if can_access_campaign_systems_entry(campaign_slug, entry.slug)
+                                else ""
+                            ),
+                        }
+                        for entry in entries
+                    ],
+                }
+            )
+
+        import_run_rows = []
+        if library_slug:
+            for import_run in systems_service.store.list_import_runs(library_slug=library_slug, limit=10):
+                summary = dict(import_run.summary or {})
+                imported_by_type = summary.get("imported_by_type")
+                type_summary = []
+                if isinstance(imported_by_type, dict):
+                    for entry_type, count in sorted(imported_by_type.items()):
+                        type_summary.append(
+                            f"{SYSTEMS_ENTRY_TYPE_LABELS.get(str(entry_type), str(entry_type).replace('_', ' ').title())}: {count}"
+                        )
+                source_files = summary.get("source_files")
+                import_run_rows.append(
+                    {
+                        "id": import_run.id,
+                        "source_id": import_run.source_id,
+                        "status": import_run.status,
+                        "import_version": import_run.import_version,
+                        "imported_count": summary.get("imported_count"),
+                        "type_summary": type_summary[:6],
+                        "source_file_count": len(source_files) if isinstance(source_files, list) else None,
+                        "started_at": import_run.started_at,
+                        "completed_at": import_run.completed_at,
+                    }
+                )
+
         return {
             "campaign": campaign,
-            "systems_library": policy.library_slug if policy is not None else "",
+            "systems_library": library_slug if policy is not None else "",
             "systems_scope_visibility_label": VISIBILITY_LABELS[get_effective_campaign_visibility(campaign_slug, "systems")],
             "source_rows": source_rows,
             "has_proprietary_sources": any(row["license_class"] == "proprietary_private" for row in source_rows),
             "proprietary_acknowledged": bool(policy and policy.proprietary_acknowledged_at is not None),
             "can_set_private_visibility": include_private,
-            "active_nav": "systems",
+            "systems_management_return_to": return_to,
+            "entry_override_rows": entry_override_rows,
+            "entry_override_count": len(entry_override_rows),
+            "custom_entry_source_rows": custom_entry_source_rows,
+            "custom_entry_count": custom_entry_count,
+            "import_run_rows": import_run_rows,
+            "import_run_count": len(import_run_rows),
+            "systems_management_count": len(source_rows),
+            "active_nav": active_nav,
         }
 
     def build_rules_reference_search_result(entry) -> dict[str, object]:
@@ -7739,6 +7898,7 @@ def create_app() -> Flask:
         if user is None:
             abort(403)
 
+        return_to_dm_content_systems = request.form.get("return_to") == "dm-content-systems"
         systems_service = get_systems_service()
         source_states = systems_service.list_campaign_source_states(campaign_slug)
         updates = []
@@ -7765,6 +7925,11 @@ def create_app() -> Flask:
             )
         except SystemsPolicyValidationError as exc:
             flash(str(exc), "error")
+            if return_to_dm_content_systems:
+                return render_template(
+                    "dm_content.html",
+                    **build_campaign_dm_content_page_context(campaign_slug, dm_content_subpage="systems"),
+                ), 400
             return render_template(
                 "campaign_systems_control_panel.html",
                 **build_campaign_systems_control_context(campaign_slug),
@@ -7795,6 +7960,12 @@ def create_app() -> Flask:
         else:
             flash("Systems source settings already matched those values.", "success")
 
+        if return_to_dm_content_systems:
+            return redirect_to_campaign_dm_content(
+                campaign_slug,
+                subpage="systems",
+                anchor="systems-source-enablement",
+            )
         return redirect(url_for("campaign_systems_control_panel_view", campaign_slug=campaign_slug))
 
     @app.post("/campaigns/<campaign_slug>/systems/control-panel/overrides")
@@ -7808,6 +7979,7 @@ def create_app() -> Flask:
         if user is None:
             abort(403)
 
+        return_to_dm_content_systems = request.form.get("return_to") == "dm-content-systems"
         raw_enabled_override = normalize_lookup(request.form.get("is_enabled_override", ""))
         enabled_override = None
         if raw_enabled_override == "enabled":
@@ -7826,6 +7998,11 @@ def create_app() -> Flask:
             )
         except SystemsPolicyValidationError as exc:
             flash(str(exc), "error")
+            if return_to_dm_content_systems:
+                return render_template(
+                    "dm_content.html",
+                    **build_campaign_dm_content_page_context(campaign_slug, dm_content_subpage="systems"),
+                ), 400
             return render_template(
                 "campaign_systems_control_panel.html",
                 **build_campaign_systems_control_context(campaign_slug),
@@ -7842,6 +8019,12 @@ def create_app() -> Flask:
             },
         )
         flash("Saved systems entry override.", "success")
+        if return_to_dm_content_systems:
+            return redirect_to_campaign_dm_content(
+                campaign_slug,
+                subpage="systems",
+                anchor="systems-entry-overrides",
+            )
         return redirect(url_for("campaign_systems_control_panel_view", campaign_slug=campaign_slug))
 
     @app.get("/campaigns/<campaign_slug>/dm-content")
@@ -7856,6 +8039,8 @@ def create_app() -> Flask:
         normalized_subpage = normalize_dm_content_subpage(dm_content_subpage)
         if not normalized_subpage:
             abort(404)
+        if normalized_subpage == "systems" and not can_manage_campaign_systems(campaign_slug):
+            abort(403)
         context = build_campaign_dm_content_page_context(
             campaign_slug,
             dm_content_subpage=normalized_subpage,

@@ -7,59 +7,13 @@
     <p class="eyebrow">Systems control panel</p>
     <h1>{{ campaign.title }} Systems Settings</h1>
     <p class="lede">
-      Configure which systems sources this campaign uses and what visibility they default to.
+      Configure source enablement, campaign entry overrides, custom campaign entries, and shared-library import history.
     </p>
   </section>
 
   <div class="page-layout">
-    <section class="article card">
-      <h2>Systems Policy</h2>
-      <p class="meta">Library: {{ systems_library or "Not configured" }}</p>
-      <p class="meta">Systems scope visibility: {{ systems_scope_visibility_label }}</p>
-      {% if has_proprietary_sources %}
-        <p class="meta">
-          Proprietary-source acknowledgement:
-          {% if proprietary_acknowledged %}recorded{% else %}not yet recorded in the systems policy{% endif %}
-        </p>
-      {% endif %}
-
-      <form method="post" action="{{ url_for('campaign_systems_control_panel_update_sources', campaign_slug=campaign.slug) }}" class="stack-form">
-        {% for row in source_rows %}
-          <div class="field">
-            <label class="checkbox-label">
-              <input type="checkbox" name="source_{{ row.source_id }}_enabled" value="1" {% if row.is_enabled %}checked{% endif %}>
-              {{ row.title }} ({{ row.source_id }})
-            </label>
-            <p class="meta">{{ row.license_class_label }}</p>
-            <p class="meta">{{ row.entry_count }} imported entries</p>
-            <label class="field">
-              <span>Default visibility</span>
-              <select name="source_{{ row.source_id }}_visibility">
-                {% for choice in row.choices %}
-                  <option value="{{ choice.value }}" {% if row.selected_visibility == choice.value %}selected{% endif %} {% if choice.disabled %}disabled{% endif %}>
-                    {{ choice.label }}{% if choice.disabled %} (not allowed for this source){% endif %}
-                  </option>
-                {% endfor %}
-              </select>
-            </label>
-            {% if not row.public_visibility_allowed %}
-              <p class="meta">This source is restricted from public visibility by policy.</p>
-            {% endif %}
-          </div>
-        {% endfor %}
-
-        {% if has_proprietary_sources and not proprietary_acknowledged %}
-          <label class="field">
-            <span>Proprietary-source acknowledgement</span>
-            <label class="checkbox-label">
-              <input type="checkbox" name="acknowledge_proprietary" value="yes">
-              I understand proprietary systems sources are for private campaign use only and must not be made public or redistributed.
-            </label>
-          </label>
-        {% endif %}
-
-        <button type="submit">Save systems sources</button>
-      </form>
+    <section class="section-list">
+      {% include "_systems_management_panel.html" %}
     </section>
 
     <aside class="sidebar">
@@ -76,35 +30,13 @@
       </section>
 
       <section class="card sidebar-card">
-        <h2>Entry Overrides</h2>
-        <p class="meta">Use this when a specific imported entry should differ from its source default.</p>
-        <form method="post" action="{{ url_for('campaign_systems_control_panel_update_override', campaign_slug=campaign.slug) }}" class="stack-form">
-          <label class="field">
-            <span>Entry key</span>
-            <input type="text" name="entry_key" placeholder="spell::fireball::phb">
-          </label>
-          <label class="field">
-            <span>Visibility override</span>
-            <select name="visibility_override">
-              <option value="">Inherit source default</option>
-              <option value="public">Public</option>
-              <option value="players">Players</option>
-              <option value="dm">DM</option>
-              {% if can_set_private_visibility %}
-                <option value="private">Private</option>
-              {% endif %}
-            </select>
-          </label>
-          <label class="field">
-            <span>Enablement override</span>
-            <select name="is_enabled_override">
-              <option value="">Inherit source enablement</option>
-              <option value="enabled">Enabled</option>
-              <option value="disabled">Disabled</option>
-            </select>
-          </label>
-          <button type="submit">Save entry override</button>
-        </form>
+        <h2>Management Lanes</h2>
+        <ul class="plain-list">
+          <li><a href="#systems-source-enablement">Source Enablement</a></li>
+          <li><a href="#systems-entry-overrides">Entry Overrides</a></li>
+          <li><a href="#systems-custom-entries">Custom Entries</a></li>
+          <li><a href="#systems-import-history">Import-Run History</a></li>
+        </ul>
       </section>
     </aside>
   </div>

@@ -1,0 +1,213 @@
+<section class="card" id="systems-source-enablement">
+  <div class="section-heading">
+    <div>
+      <h2>Source Enablement</h2>
+      <p class="meta">Systems Policy</p>
+      <p class="meta">Library: {{ systems_library or "Not configured" }}</p>
+      <p class="meta">Systems scope visibility: {{ systems_scope_visibility_label }}</p>
+    </div>
+  </div>
+  {% if has_proprietary_sources %}
+    <p class="meta">
+      Proprietary-source acknowledgement:
+      {% if proprietary_acknowledged %}recorded{% else %}not yet recorded in the systems policy{% endif %}
+    </p>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('campaign_systems_control_panel_update_sources', campaign_slug=campaign.slug) }}" class="stack-form">
+    {% if systems_management_return_to %}
+      <input type="hidden" name="return_to" value="{{ systems_management_return_to }}">
+    {% endif %}
+    {% for row in source_rows %}
+      <div class="field">
+        <label class="checkbox-label">
+          <input type="checkbox" name="source_{{ row.source_id }}_enabled" value="1" {% if row.is_enabled %}checked{% endif %}>
+          {{ row.title }} ({{ row.source_id }})
+        </label>
+        <p class="meta">{{ row.license_class_label }}</p>
+        <p class="meta">{{ row.entry_count }} imported entries</p>
+        <label class="field">
+          <span>Default visibility</span>
+          <select name="source_{{ row.source_id }}_visibility">
+            {% for choice in row.choices %}
+              <option value="{{ choice.value }}" {% if row.selected_visibility == choice.value %}selected{% endif %} {% if choice.disabled %}disabled{% endif %}>
+                {{ choice.label }}{% if choice.disabled %} (not allowed for this source){% endif %}
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+        {% if not row.public_visibility_allowed %}
+          <p class="meta">This source is restricted from public visibility by policy.</p>
+        {% endif %}
+      </div>
+    {% endfor %}
+
+    {% if has_proprietary_sources and not proprietary_acknowledged %}
+      <label class="field">
+        <span>Proprietary-source acknowledgement</span>
+        <label class="checkbox-label">
+          <input type="checkbox" name="acknowledge_proprietary" value="yes">
+          I understand proprietary systems sources are for private campaign use only and must not be made public or redistributed.
+        </label>
+      </label>
+    {% endif %}
+
+    <button type="submit">Save systems sources</button>
+  </form>
+</section>
+
+<section class="card" id="systems-entry-overrides">
+  <div class="section-heading">
+    <div>
+      <h2>Entry Overrides</h2>
+      <p class="meta">{{ entry_override_count }} saved override{% if entry_override_count != 1 %}s{% endif %}</p>
+    </div>
+  </div>
+  <form method="post" action="{{ url_for('campaign_systems_control_panel_update_override', campaign_slug=campaign.slug) }}" class="stack-form">
+    {% if systems_management_return_to %}
+      <input type="hidden" name="return_to" value="{{ systems_management_return_to }}">
+    {% endif %}
+    <label class="field">
+      <span>Entry key</span>
+      <input type="text" name="entry_key" placeholder="spell::fireball::phb">
+    </label>
+    <label class="field">
+      <span>Visibility override</span>
+      <select name="visibility_override">
+        <option value="">Inherit source default</option>
+        <option value="public">Public</option>
+        <option value="players">Players</option>
+        <option value="dm">DM</option>
+        {% if can_set_private_visibility %}
+          <option value="private">Private</option>
+        {% endif %}
+      </select>
+    </label>
+    <label class="field">
+      <span>Enablement override</span>
+      <select name="is_enabled_override">
+        <option value="">Inherit source enablement</option>
+        <option value="enabled">Enabled</option>
+        <option value="disabled">Disabled</option>
+      </select>
+    </label>
+    <button type="submit">Save entry override</button>
+  </form>
+
+  {% if entry_override_rows %}
+    <div class="dm-content-list">
+      {% for override in entry_override_rows %}
+        <article class="dm-content-item">
+          <div class="dm-content-item__header">
+            <div>
+              <h3>
+                {% if override.entry_href %}
+                  <a href="{{ override.entry_href }}">{{ override.entry_title }}</a>
+                {% else %}
+                  {{ override.entry_title }}
+                {% endif %}
+              </h3>
+              <p class="meta">{{ override.entry_key }}</p>
+              {% if override.source_label %}
+                <p class="meta">{{ override.source_label }}{% if override.entry_type_label %} | {{ override.entry_type_label }}{% endif %}</p>
+              {% endif %}
+            </div>
+            <div class="badge-list">
+              <span class="meta-badge">{{ override.visibility_label }}</span>
+              <span class="meta-badge">{{ override.enablement_label }}</span>
+            </div>
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="meta">No campaign-specific Systems entry overrides have been saved yet.</p>
+  {% endif %}
+</section>
+
+<section class="card" id="systems-custom-entries">
+  <div class="section-heading">
+    <div>
+      <h2>Custom Entries</h2>
+      <p class="meta">{{ custom_entry_count }} custom campaign entr{% if custom_entry_count == 1 %}y{% else %}ies{% endif %}</p>
+    </div>
+  </div>
+  <p class="meta">Campaign-owned custom Systems entries are tracked separately from imported shared-library entries.</p>
+  {% if custom_entry_source_rows %}
+    <div class="dm-content-list">
+      {% for source in custom_entry_source_rows %}
+        <article class="dm-content-item">
+          <div class="dm-content-item__header">
+            <div>
+              <h3>{{ source.title }}</h3>
+              <p class="meta">{{ source.source_id }} | {{ source.default_visibility_label }} visibility</p>
+            </div>
+            <div class="badge-list">
+              <span class="meta-badge">{% if source.is_enabled %}Enabled{% else %}Disabled{% endif %}</span>
+              <span class="meta-badge">{{ source.entry_count }} entries</span>
+            </div>
+          </div>
+          {% if source.entries %}
+            <ul class="plain-list">
+              {% for entry in source.entries %}
+                <li>
+                  {% if entry.href %}
+                    <a href="{{ entry.href }}">{{ entry.title }}</a>
+                  {% else %}
+                    {{ entry.title }}
+                  {% endif %}
+                  <span class="meta">{{ entry.entry_type_label }}</span>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="meta">No entries have been authored under this custom source yet.</p>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="meta">No custom campaign Systems source exists yet.</p>
+  {% endif %}
+</section>
+
+<section class="card" id="systems-import-history">
+  <div class="section-heading">
+    <div>
+      <h2>Import-Run History</h2>
+      <p class="meta">{{ import_run_count }} recent shared-library run{% if import_run_count != 1 %}s{% endif %}</p>
+    </div>
+  </div>
+  <p class="meta">Shared-source imports refresh the library; campaign-specific choices stay in source enablement and entry overrides.</p>
+  {% if import_run_rows %}
+    <div class="dm-content-list">
+      {% for run in import_run_rows %}
+        <article class="dm-content-item">
+          <div class="dm-content-item__header">
+            <div>
+              <h3>{{ run.source_id }} import #{{ run.id }}</h3>
+              <p class="meta">Started {{ run.started_at }}{% if run.completed_at %} | Completed {{ run.completed_at }}{% endif %}</p>
+              {% if run.import_version %}
+                <p class="meta">Import version: {{ run.import_version }}</p>
+              {% endif %}
+            </div>
+            <div class="badge-list">
+              <span class="meta-badge">{{ run.status }}</span>
+              {% if run.imported_count is not none %}
+                <span class="meta-badge">{{ run.imported_count }} entries</span>
+              {% endif %}
+              {% if run.source_file_count is not none %}
+                <span class="meta-badge">{{ run.source_file_count }} files</span>
+              {% endif %}
+            </div>
+          </div>
+          {% if run.type_summary %}
+            <p class="meta">{{ run.type_summary | join(", ") }}</p>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="meta">No Systems import runs have been recorded yet.</p>
+  {% endif %}
+</section>
