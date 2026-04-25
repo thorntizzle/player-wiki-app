@@ -67,6 +67,22 @@ class SystemsEntryRecord:
 
 
 @dataclass(slots=True)
+class SystemsSharedEntryEditEventRecord:
+    id: int
+    campaign_slug: str
+    library_slug: str
+    source_id: str
+    entry_key: str
+    entry_slug: str
+    original_source_identity: dict[str, Any]
+    edited_fields: list[str]
+    actor_user_id: int | None
+    audit_event_type: str
+    audit_metadata: dict[str, Any]
+    created_at: datetime
+
+
+@dataclass(slots=True)
 class CampaignSystemsPolicyRecord:
     campaign_slug: str
     library_slug: str

@@ -13,6 +13,7 @@ from .systems_models import (
     SystemsEntryRecord,
     SystemsImportRunRecord,
     SystemsLibraryRecord,
+    SystemsSharedEntryEditEventRecord,
     SystemsSourceRecord,
 )
 
@@ -506,6 +507,90 @@ class SystemsStore:
         if entry is None:
             raise RuntimeError("Failed to persist systems entry.")
         return entry
+
+    def record_shared_entry_edit_event(
+        self,
+        *,
+        campaign_slug: str,
+        library_slug: str,
+        source_id: str,
+        entry_key: str,
+        entry_slug: str,
+        original_source_identity: dict[str, Any],
+        edited_fields: list[str],
+        actor_user_id: int | None,
+        audit_event_type: str,
+        audit_metadata: dict[str, Any],
+    ) -> SystemsSharedEntryEditEventRecord:
+        now = isoformat(utcnow())
+        connection = get_db()
+        cursor = connection.execute(
+            """
+            INSERT INTO systems_shared_entry_edit_events (
+                campaign_slug,
+                library_slug,
+                source_id,
+                entry_key,
+                entry_slug,
+                original_source_identity_json,
+                edited_fields_json,
+                actor_user_id,
+                audit_event_type,
+                audit_metadata_json,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(campaign_slug),
+                str(library_slug),
+                str(source_id),
+                str(entry_key),
+                str(entry_slug),
+                json.dumps(original_source_identity or {}, sort_keys=True),
+                json.dumps([str(field) for field in edited_fields], sort_keys=True),
+                actor_user_id,
+                str(audit_event_type),
+                json.dumps(audit_metadata or {}, sort_keys=True),
+                now,
+            ),
+        )
+        connection.commit()
+        event = self.get_shared_entry_edit_event(int(cursor.lastrowid))
+        if event is None:
+            raise RuntimeError("Failed to persist shared Systems entry edit event.")
+        return event
+
+    def get_shared_entry_edit_event(self, event_id: int) -> SystemsSharedEntryEditEventRecord | None:
+        row = get_db().execute(
+            """
+            SELECT *
+            FROM systems_shared_entry_edit_events
+            WHERE id = ?
+            """,
+            (event_id,),
+        ).fetchone()
+        return self._map_shared_entry_edit_event(row)
+
+    def list_shared_entry_edit_events(
+        self,
+        *,
+        library_slug: str,
+        entry_key: str,
+        limit: int | None = None,
+    ) -> list[SystemsSharedEntryEditEventRecord]:
+        parameters: list[object] = [str(library_slug), str(entry_key)]
+        query = """
+            SELECT *
+            FROM systems_shared_entry_edit_events
+            WHERE library_slug = ? AND entry_key = ?
+            ORDER BY created_at DESC, id DESC
+        """
+        if limit is not None:
+            query += " LIMIT ?"
+            parameters.append(max(1, int(limit)))
+        rows = get_db().execute(query, tuple(parameters)).fetchall()
+        return [event for row in rows if (event := self._map_shared_entry_edit_event(row)) is not None]
 
     def list_entries_for_source(
         self,
@@ -1151,6 +1236,27 @@ class SystemsStore:
             updated_at=parse_timestamp(row["updated_at"]) or utcnow(),
         )
 
+    def _map_shared_entry_edit_event(
+        self,
+        row: sqlite3.Row | None,
+    ) -> SystemsSharedEntryEditEventRecord | None:
+        if row is None:
+            return None
+        return SystemsSharedEntryEditEventRecord(
+            id=int(row["id"]),
+            campaign_slug=str(row["campaign_slug"]),
+            library_slug=str(row["library_slug"]),
+            source_id=str(row["source_id"]),
+            entry_key=str(row["entry_key"]),
+            entry_slug=str(row["entry_slug"]),
+            original_source_identity=self._load_json_object(row["original_source_identity_json"]),
+            edited_fields=self._load_json_string_list(row["edited_fields_json"]),
+            actor_user_id=int(row["actor_user_id"]) if row["actor_user_id"] is not None else None,
+            audit_event_type=str(row["audit_event_type"]),
+            audit_metadata=self._load_json_object(row["audit_metadata_json"]),
+            created_at=parse_timestamp(row["created_at"]) or utcnow(),
+        )
+
     def _map_campaign_policy(self, row: sqlite3.Row | None) -> CampaignSystemsPolicyRecord | None:
         if row is None:
             return None
@@ -1210,6 +1316,17 @@ class SystemsStore:
         except json.JSONDecodeError:
             return {}
         return parsed if isinstance(parsed, dict) else {}
+
+    def _load_json_string_list(self, raw_value: str | None) -> list[str]:
+        if not raw_value:
+            return []
+        try:
+            parsed = json.loads(raw_value)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(parsed, list):
+            return []
+        return [str(value) for value in parsed if str(value)]
 
     def _build_entry_search_clause(
         self,

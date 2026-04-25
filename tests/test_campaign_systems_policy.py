@@ -244,11 +244,52 @@ def test_shared_core_systems_edit_flow_stays_separate_from_overrides_and_custom_
         assert entry.body == {"editor": "shared-core-browser"}
         assert entry.rendered_html == "<p>Edited shared library body.</p>"
         assert store.get_campaign_entry_override("linden-pass", entry_key) is None
+        expected_edited_fields = [
+            "title",
+            "source_page",
+            "source_path",
+            "search_text",
+            "metadata",
+            "body",
+            "rendered_html",
+        ]
+        edit_events = store.list_shared_entry_edit_events(
+            library_slug=service.get_campaign_library_slug("linden-pass"),
+            entry_key=entry_key,
+            limit=5,
+        )
+        assert len(edit_events) == 1
+        edit_event = edit_events[0]
+        assert edit_event.campaign_slug == "linden-pass"
+        assert edit_event.source_id == source_id
+        assert edit_event.entry_slug == entry_slug
+        assert edit_event.actor_user_id == users["admin"]["id"]
+        assert edit_event.audit_event_type == "campaign_systems_shared_entry_updated"
+        assert edit_event.edited_fields == expected_edited_fields
+        assert edit_event.original_source_identity == {
+            "library_slug": service.get_campaign_library_slug("linden-pass"),
+            "source_id": source_id,
+            "entry_key": entry_key,
+            "entry_slug": entry_slug,
+            "entry_type": "spell",
+            "title": "Shared Spark",
+            "source_page": "",
+            "source_path": "",
+        }
+        assert edit_event.audit_metadata["edited_fields"] == expected_edited_fields
+        assert edit_event.audit_metadata["campaign_slug"] == "linden-pass"
+        assert edit_event.audit_metadata["source"] == "campaign_systems_shared_entry_editor"
         shared_events = AuthStore().list_recent_audit_events(
             event_type="campaign_systems_shared_entry_updated",
             campaign_slug="linden-pass",
         )
         assert any(event.metadata.get("entry_key") == entry_key for event in shared_events)
+        matching_shared_event = next(
+            event for event in shared_events if event.metadata.get("entry_key") == entry_key
+        )
+        assert matching_shared_event.actor_user_id == users["admin"]["id"]
+        assert matching_shared_event.metadata["edited_fields"] == expected_edited_fields
+        assert matching_shared_event.metadata["original_source_identity"] == edit_event.original_source_identity
 
     override_response = client.post(
         "/campaigns/linden-pass/systems/control-panel/overrides",

@@ -1184,6 +1184,34 @@ def build_shared_systems_entry_form(*, entry=None, form_data=None) -> dict[str, 
     }
 
 
+def build_shared_systems_entry_original_source_identity(entry) -> dict[str, object]:
+    return {
+        "library_slug": entry.library_slug,
+        "source_id": entry.source_id,
+        "entry_key": entry.entry_key,
+        "entry_slug": entry.slug,
+        "entry_type": entry.entry_type,
+        "title": entry.title,
+        "source_page": entry.source_page,
+        "source_path": entry.source_path,
+    }
+
+
+def list_shared_systems_entry_changed_fields(before_entry, after_entry) -> list[str]:
+    comparable_fields = {
+        "title": (before_entry.title, after_entry.title),
+        "source_page": (before_entry.source_page, after_entry.source_page),
+        "source_path": (before_entry.source_path, after_entry.source_path),
+        "search_text": (before_entry.search_text, after_entry.search_text),
+        "player_safe_default": (bool(before_entry.player_safe_default), bool(after_entry.player_safe_default)),
+        "dm_heavy": (bool(before_entry.dm_heavy), bool(after_entry.dm_heavy)),
+        "metadata": (dict(before_entry.metadata or {}), dict(after_entry.metadata or {})),
+        "body": (dict(before_entry.body or {}), dict(after_entry.body or {})),
+        "rendered_html": (before_entry.rendered_html, after_entry.rendered_html),
+    }
+    return [field for field, (before_value, after_value) in comparable_fields.items() if before_value != after_value]
+
+
 def parse_shared_systems_entry_json_field(raw_value: str, *, field_label: str) -> dict[str, object]:
     cleaned_value = str(raw_value or "").strip()
     if not cleaned_value:
@@ -8426,6 +8454,8 @@ def create_app() -> Flask:
         if user is None:
             abort(403)
         entry = get_shared_systems_entry_for_edit_route(campaign_slug, entry_slug)
+        systems_service = get_systems_service()
+        original_source_identity = build_shared_systems_entry_original_source_identity(entry)
         try:
             metadata = parse_shared_systems_entry_json_field(
                 request.form.get("shared_entry_metadata_json", ""),
@@ -8435,7 +8465,7 @@ def create_app() -> Flask:
                 request.form.get("shared_entry_body_json", ""),
                 field_label="Body JSON",
             )
-            updated_entry = get_systems_service().update_shared_core_entry(
+            updated_entry = systems_service.update_shared_core_entry(
                 campaign_slug,
                 entry_slug,
                 title=request.form.get("shared_entry_title", ""),
@@ -8457,17 +8487,34 @@ def create_app() -> Flask:
                 status_code=400,
             )
 
+        edited_fields = list_shared_systems_entry_changed_fields(entry, updated_entry)
+        audit_metadata = {
+            "campaign_slug": campaign_slug,
+            "library_slug": updated_entry.library_slug,
+            "source_id": updated_entry.source_id,
+            "entry_key": updated_entry.entry_key,
+            "entry_slug": updated_entry.slug,
+            "source": "campaign_systems_shared_entry_editor",
+            "original_source_identity": original_source_identity,
+            "edited_fields": edited_fields,
+        }
+        systems_service.store.record_shared_entry_edit_event(
+            campaign_slug=campaign_slug,
+            library_slug=updated_entry.library_slug,
+            source_id=updated_entry.source_id,
+            entry_key=updated_entry.entry_key,
+            entry_slug=updated_entry.slug,
+            original_source_identity=original_source_identity,
+            edited_fields=edited_fields,
+            actor_user_id=user.id,
+            audit_event_type="campaign_systems_shared_entry_updated",
+            audit_metadata=audit_metadata,
+        )
         get_auth_store().write_audit_event(
             event_type="campaign_systems_shared_entry_updated",
             actor_user_id=user.id,
             campaign_slug=campaign_slug,
-            metadata={
-                "library_slug": updated_entry.library_slug,
-                "source_id": updated_entry.source_id,
-                "entry_key": updated_entry.entry_key,
-                "entry_slug": updated_entry.slug,
-                "source": "campaign_systems_shared_entry_editor",
-            },
+            metadata=audit_metadata,
         )
         flash(f"Saved shared/core Systems entry {updated_entry.title}.", "success")
         return redirect(

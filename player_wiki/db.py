@@ -383,6 +383,25 @@ ON systems_entries(library_slug, source_id, title, id);
 CREATE INDEX IF NOT EXISTS idx_systems_entries_search
 ON systems_entries(library_slug, source_id, entry_type, title, id);
 
+CREATE TABLE IF NOT EXISTS systems_shared_entry_edit_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_slug TEXT NOT NULL,
+    library_slug TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    entry_key TEXT NOT NULL,
+    entry_slug TEXT NOT NULL,
+    original_source_identity_json TEXT NOT NULL DEFAULT '{}',
+    edited_fields_json TEXT NOT NULL DEFAULT '[]',
+    actor_user_id INTEGER,
+    audit_event_type TEXT NOT NULL,
+    audit_metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (actor_user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_systems_shared_entry_edit_events_entry
+ON systems_shared_entry_edit_events(library_slug, entry_key, created_at DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS systems_entry_links (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     library_slug TEXT NOT NULL,
