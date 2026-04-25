@@ -449,6 +449,42 @@ def test_xianxia_roster_uses_system_policy_to_hide_dnd_native_affordances(
     assert "Native character creation and progression stay hidden here" in html
 
 
+def test_dnd5e_character_routes_keep_native_affordances_with_xianxia_policy_present(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "DND-5E"
+        payload["systems_library"] = "DND-5E"
+
+    _write_campaign_config(app, _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    roster = client.get("/campaigns/linden-pass/characters")
+    builder = client.get("/campaigns/linden-pass/characters/new")
+    sheet = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=quick")
+
+    assert roster.status_code == 200
+    roster_html = roster.get_data(as_text=True)
+    assert "Create character" in roster_html
+    assert "/campaigns/linden-pass/characters/new" in roster_html
+    assert "PHB level 1 character" in roster_html
+    assert "Native character creation and progression stay hidden here" not in roster_html
+
+    assert builder.status_code == 200
+    builder_html = builder.get_data(as_text=True)
+    assert "Native Level 1 Builder" in builder_html
+    assert XIANXIA_NATIVE_CHARACTER_CREATE_UNSUPPORTED_MESSAGE not in builder_html
+
+    assert sheet.status_code == 200
+    sheet_html = sheet.get_data(as_text=True)
+    assert "Edit character" in sheet_html
+    assert "/campaigns/linden-pass/characters/arden-march/edit" in sheet_html
+    assert "Open sheet edit view" in sheet_html
+    assert "?page=spellcasting" in sheet_html
+    assert app_module.NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE not in sheet_html
+
+
 def test_xianxia_native_character_routes_redirect_without_dnd_builder_affordances(
     app, client, sign_in, users
 ):
@@ -572,6 +608,40 @@ def test_xianxia_blocks_dnd_spellcasting_management_routes(app, client, sign_in,
 
     landing = client.get(spell_add_response.headers["Location"])
     assert app_module.DND5E_CHARACTER_SPELLCASTING_TOOLS_UNSUPPORTED_MESSAGE in landing.get_data(as_text=True)
+
+
+def test_dnd5e_spellcasting_and_session_slots_remain_enabled_with_xianxia_policy_present(
+    app, client, sign_in, users, get_character
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "DND-5E"
+        payload["systems_library"] = "DND-5E"
+
+    _write_campaign_config(app, _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    search_response = client.get(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/spells/search?q=message"
+    )
+
+    assert search_response.status_code == 200
+    assert (
+        search_response.get_json()["message"]
+        != app_module.DND5E_CHARACTER_SPELLCASTING_TOOLS_UNSUPPORTED_MESSAGE
+    )
+
+    record = get_character("arden-march")
+    response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/session/spell-slots/2",
+        data={"expected_revision": record.state_record.revision, "used": 1},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    record = get_character("arden-march")
+    spell_slots = {item["level"]: item for item in record.state_record.state["spell_slots"]}
+    assert spell_slots[2]["used"] == 1
 
 
 def test_non_5e_read_sheet_hides_native_authoring_affordances_and_skips_readiness(
