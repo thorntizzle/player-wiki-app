@@ -2,7 +2,7 @@
 
 Use this reference when you want to launch one of the Codex-driven roadmap runners from PowerShell.
 
-These scripts live in the `my_scripts` root and drive focused Codex passes against the app roadmaps. Each run writes logs under `campaign_player_wiki\.local\roadmap-runs\...`.
+These scripts live under `my_scripts\scripts\roadmaps` and drive focused Codex passes against the app roadmaps. Each run writes logs under `campaign_player_wiki\.local\roadmap-runs\...`.
 
 ## Base Setup
 
@@ -20,8 +20,8 @@ Preferred Python:
 
 General notes:
 
-- `run_systems_roadmap.py`, `run_ux_roadmap.py`, and `run_character_needed_coverage_roadmap.py` always start from the first unchecked checkbox in their roadmap.
-- `run_feedback_roadmap.py` is selective by design. Use `--item`, `--items`, or `--all-items`.
+- `scripts\roadmaps\run_systems_roadmap.py`, `scripts\roadmaps\run_ux_roadmap.py`, and `scripts\roadmaps\run_character_needed_coverage_roadmap.py` always start from the first unchecked checkbox in their roadmap.
+- `scripts\roadmaps\run_feedback_roadmap.py` is selective by design. Use `--item`, `--items`, or `--all-items`.
 - The roadmap runners now grant the nested Codex worker access to `C:\Users\thorn\.codex\skills` by default, so required skill-family doc updates can ship in the same pass instead of blocking on write scope.
 - The default close-out mode is `ship`, which means the nested Codex pass is expected to commit and push verified tracked app changes unless the task ends with no tracked diff.
 - When a shipped pass is only blocked by a transient Git write failure after the diff is already verified, the host wrapper can now finish the commit and push if the worker reports the intended commit subject on the `Commit:` line using the documented format. Host recovery stages tracked edits plus new untracked files under known app surfaces such as `player_wiki/`, `tests/`, and `docs/`; scratch output remains ignored and unknown untracked paths still stop the run for manual review.
@@ -34,7 +34,7 @@ General notes:
 Script:
 
 ```text
-.\run_systems_roadmap.py
+.\scripts\roadmaps\run_systems_roadmap.py
 ```
 
 Roadmap:
@@ -46,11 +46,11 @@ Roadmap:
 Common commands:
 
 ```powershell
-.\.venv\Scripts\python.exe .\run_systems_roadmap.py --dry-run
-.\.venv\Scripts\python.exe .\run_systems_roadmap.py --max-tasks 1
-.\.venv\Scripts\python.exe .\run_systems_roadmap.py --max-tasks 2 --model gpt-5.3-codex
-.\.venv\Scripts\python.exe .\run_systems_roadmap.py --max-tasks 1 --finish-mode local-only
-.\.venv\Scripts\python.exe .\run_systems_roadmap.py --max-tasks 1 --deploy-mode auto --live-sync-mode auto
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_systems_roadmap.py --dry-run
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_systems_roadmap.py --max-tasks 1
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_systems_roadmap.py --max-tasks 2 --model gpt-5.3-codex
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_systems_roadmap.py --max-tasks 1 --finish-mode local-only
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_systems_roadmap.py --max-tasks 1 --deploy-mode auto --live-sync-mode auto
 ```
 
 Useful options:
@@ -65,7 +65,7 @@ Useful options:
 Script:
 
 ```text
-.\run_ux_roadmap.py
+.\scripts\roadmaps\run_ux_roadmap.py
 ```
 
 Roadmap:
@@ -77,11 +77,11 @@ Roadmap:
 Common commands:
 
 ```powershell
-.\.venv\Scripts\python.exe .\run_ux_roadmap.py --dry-run
-.\.venv\Scripts\python.exe .\run_ux_roadmap.py --max-tasks 1
-.\.venv\Scripts\python.exe .\run_ux_roadmap.py --max-tasks 2 --model gpt-5.5
-.\.venv\Scripts\python.exe .\run_ux_roadmap.py --max-tasks 1 --finish-mode local-only
-.\.venv\Scripts\python.exe .\run_ux_roadmap.py --max-tasks 1 --deploy-mode auto --live-sync-mode auto
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_ux_roadmap.py --dry-run
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_ux_roadmap.py --max-tasks 1
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_ux_roadmap.py --max-tasks 2 --model gpt-5.5
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_ux_roadmap.py --max-tasks 1 --finish-mode local-only
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_ux_roadmap.py --max-tasks 1 --deploy-mode auto --live-sync-mode auto
 ```
 
 Useful options:
@@ -98,7 +98,7 @@ Useful options:
 Script:
 
 ```text
-.\run_feedback_roadmap.py
+.\scripts\roadmaps\run_feedback_roadmap.py
 ```
 
 Roadmap:
@@ -112,32 +112,32 @@ This runner is selective. It ignores non-numbered sections like `Ongoing Intake`
 List the available numbered items first:
 
 ```powershell
-.\.venv\Scripts\python.exe .\run_feedback_roadmap.py --list-items
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_feedback_roadmap.py --list-items
 ```
 
 Target one item:
 
 ```powershell
-.\.venv\Scripts\python.exe .\run_feedback_roadmap.py --item 35
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_feedback_roadmap.py --item 35
 ```
 
 Target multiple items or ranges:
 
 ```powershell
-.\.venv\Scripts\python.exe .\run_feedback_roadmap.py --items 25,35-37
-.\.venv\Scripts\python.exe .\run_feedback_roadmap.py --item 20 --item 35 --max-tasks 2
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_feedback_roadmap.py --items 25,35-37
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_feedback_roadmap.py --item 20 --item 35 --max-tasks 2
 ```
 
 Preview the next selected pass without running it:
 
 ```powershell
-.\.venv\Scripts\python.exe .\run_feedback_roadmap.py --item 35 --dry-run
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_feedback_roadmap.py --item 35 --dry-run
 ```
 
 Run against every numbered feedback item explicitly:
 
 ```powershell
-.\.venv\Scripts\python.exe .\run_feedback_roadmap.py --all-items --max-tasks 3
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_feedback_roadmap.py --all-items --max-tasks 3
 ```
 
 Useful options:
@@ -155,7 +155,7 @@ Useful options:
 Script:
 
 ```text
-.\run_character_needed_coverage_roadmap.py
+.\scripts\roadmaps\run_character_needed_coverage_roadmap.py
 ```
 
 Roadmap:
@@ -169,11 +169,11 @@ This runner is sequential like the Systems and UX runners. Each pass targets the
 Common commands:
 
 ```powershell
-.\.venv\Scripts\python.exe .\run_character_needed_coverage_roadmap.py --dry-run
-.\.venv\Scripts\python.exe .\run_character_needed_coverage_roadmap.py --max-tasks 1
-.\.venv\Scripts\python.exe .\run_character_needed_coverage_roadmap.py --max-tasks 2 --model gpt-5.3-codex
-.\.venv\Scripts\python.exe .\run_character_needed_coverage_roadmap.py --max-tasks 1 --finish-mode local-only
-.\.venv\Scripts\python.exe .\run_character_needed_coverage_roadmap.py --max-tasks 1 --deploy-mode auto --live-sync-mode auto
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_character_needed_coverage_roadmap.py --dry-run
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_character_needed_coverage_roadmap.py --max-tasks 1
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_character_needed_coverage_roadmap.py --max-tasks 2 --model gpt-5.3-codex
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_character_needed_coverage_roadmap.py --max-tasks 1 --finish-mode local-only
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_character_needed_coverage_roadmap.py --max-tasks 1 --deploy-mode auto --live-sync-mode auto
 ```
 
 Useful options:
@@ -211,17 +211,17 @@ Commit: intended subject `Describe the shipped change`; local commit/push blocke
 When you want to inspect a run before letting it modify anything:
 
 ```powershell
-.\.venv\Scripts\python.exe .\run_feedback_roadmap.py --item 35 --dry-run
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_feedback_roadmap.py --item 35 --dry-run
 ```
 
 When you want one bounded live pass:
 
 ```powershell
-.\.venv\Scripts\python.exe .\run_feedback_roadmap.py --item 35 --max-tasks 1
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_feedback_roadmap.py --item 35 --max-tasks 1
 ```
 
 When you want a local-only experiment:
 
 ```powershell
-.\.venv\Scripts\python.exe .\run_feedback_roadmap.py --item 35 --max-tasks 1 --finish-mode local-only
+.\.venv\Scripts\python.exe .\scripts\roadmaps\run_feedback_roadmap.py --item 35 --max-tasks 1 --finish-mode local-only
 ```
