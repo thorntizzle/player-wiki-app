@@ -15,6 +15,7 @@ from player_wiki.character_builder import (
     _attach_campaign_item_page_support,
     _build_item_catalog,
     _build_spell_catalog,
+    _clear_builder_static_bundle_cache,
     _list_campaign_enabled_entries,
     _prepared_spell_count_for_level,
     _recalculate_definition_attacks,
@@ -80,6 +81,13 @@ def _systems_ref(entry: SystemsEntryRecord) -> dict[str, str]:
     }
 
 
+@pytest.fixture(autouse=True)
+def _clear_static_builder_cache_between_tests():
+    _clear_builder_static_bundle_cache()
+    yield
+    _clear_builder_static_bundle_cache()
+
+
 class _FakeSystemsStore:
     def __init__(self, entries_by_type: dict[str, list[SystemsEntryRecord]]):
         self._entries_by_type = entries_by_type
@@ -110,10 +118,12 @@ class _FakeSystemsService:
         subclass_progression: list[dict] | None = None,
         enabled_source_ids: list[str] | None = None,
         disabled_entry_keys: list[str] | None = None,
+        static_revision_token: str = "v1",
     ):
         self.store = _FakeSystemsStore(entries_by_type)
         self._class_progression = list(class_progression)
         self._subclass_progression = list(subclass_progression or [])
+        self.static_revision_token = static_revision_token
         self._enabled_source_ids = {
             str(source_id or "").strip().upper()
             for source_id in (
@@ -158,6 +168,21 @@ class _FakeSystemsService:
             )
             for source_id in sorted(self._enabled_source_ids)
         ]
+
+    def get_builder_static_revision(
+        self,
+        campaign_slug: str,
+        *,
+        entry_types: tuple[str, ...],
+    ) -> tuple[object, ...]:
+        return (
+            "fake",
+            campaign_slug,
+            self.static_revision_token,
+            tuple(sorted(str(entry_type or "").strip() for entry_type in entry_types)),
+            tuple(sorted(self._enabled_source_ids)),
+            tuple(sorted(self._disabled_entry_keys)),
+        )
 
     def list_entries_for_campaign_source(
         self,
@@ -22063,6 +22088,87 @@ def test_builder_enabled_entries_use_bulk_helper_and_request_cache(app):
     assert systems_service.list_enabled_entries_calls == [("linden-pass", "feat", "", None)]
     assert systems_service.list_entries_for_campaign_source_calls == 0
     assert systems_service.is_entry_enabled_calls == 0
+
+
+def test_builder_static_bundle_cache_uses_source_and_page_revisions():
+    fighter = _systems_entry(
+        "class",
+        "phb-class-fighter",
+        "Fighter",
+        metadata={"hit_die": {"faces": 10}},
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    acolyte = _systems_entry("background", "phb-background-acolyte", "Acolyte")
+    systems_service = _FakeSystemsService(
+        {
+            "class": [fighter],
+            "subclass": [],
+            "race": [human],
+            "background": [acolyte],
+            "feat": [],
+            "optionalfeature": [],
+            "item": [],
+            "spell": [],
+        },
+        class_progression=[],
+    )
+    page_record = _campaign_page_record(
+        "mechanics/page-feat",
+        "Page Feat",
+        section="Mechanics",
+        metadata={"character_option": {"kind": "feat", "name": "Page Feat"}},
+    )
+    page_record.updated_at = "2026-04-24T12:00:00+00:00"
+    form_values = {
+        "class_slug": fighter.slug,
+        "species_slug": human.slug,
+        "background_slug": acolyte.slug,
+    }
+    expected_static_entry_types = [
+        "class",
+        "subclass",
+        "race",
+        "background",
+        "feat",
+        "optionalfeature",
+        "item",
+        "spell",
+    ]
+
+    build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=[page_record],
+    )
+    build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=[page_record],
+    )
+
+    assert [call[1] for call in systems_service.list_enabled_entries_calls] == expected_static_entry_types
+
+    page_record.updated_at = "2026-04-24T12:05:00+00:00"
+    build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=[page_record],
+    )
+
+    assert [call[1] for call in systems_service.list_enabled_entries_calls] == expected_static_entry_types * 2
+
+    systems_service.static_revision_token = "v2"
+    build_level_one_builder_context(
+        systems_service,
+        "linden-pass",
+        form_values,
+        campaign_page_records=[page_record],
+    )
+
+    assert [call[1] for call in systems_service.list_enabled_entries_calls] == expected_static_entry_types * 3
 
 
 def test_build_level_one_builder_context_marks_choice_fields_with_live_preview_regions():

@@ -763,6 +763,63 @@ class SystemsService:
             )
         return rows
 
+    def get_builder_static_revision(
+        self,
+        campaign_slug: str,
+        *,
+        entry_types: tuple[str, ...],
+    ) -> tuple[object, ...] | None:
+        library = self.get_campaign_library(campaign_slug)
+        if library is None:
+            return None
+        normalized_entry_types = tuple(
+            sorted(
+                {
+                    str(entry_type or "").strip()
+                    for entry_type in tuple(entry_types or ())
+                    if str(entry_type or "").strip()
+                }
+            )
+        )
+        if not normalized_entry_types:
+            return None
+
+        source_states = self.list_campaign_source_states(campaign_slug)
+        source_key = tuple(
+            (
+                str(row.source.source_id or "").strip(),
+                int(bool(row.is_enabled)),
+                str(row.default_visibility or "").strip(),
+                int(bool(row.is_configured)),
+                str(row.source.status or "").strip(),
+                isoformat(row.source.updated_at),
+            )
+            for row in source_states
+        )
+        enabled_source_ids = [
+            str(row.source.source_id or "").strip()
+            for row in source_states
+            if row.is_enabled and str(row.source.source_id or "").strip()
+        ]
+        entries_revision = self.store.get_campaign_entries_revision(
+            campaign_slug,
+            library.library_slug,
+            enabled_source_ids,
+            list(normalized_entry_types),
+        )
+        overrides_revision = self.store.get_campaign_entry_overrides_revision(
+            campaign_slug,
+            library.library_slug,
+        )
+        return (
+            library.library_slug,
+            isoformat(library.updated_at),
+            normalized_entry_types,
+            source_key,
+            entries_revision,
+            overrides_revision,
+        )
+
     def get_campaign_source_state(self, campaign_slug: str, source_id: str) -> CampaignSourceState | None:
         normalized_source_id = source_id.strip()
         for row in self.list_campaign_source_states(campaign_slug):

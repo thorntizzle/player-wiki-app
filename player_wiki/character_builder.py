@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from copy import deepcopy
 import json
 import re
 from functools import lru_cache
 from pathlib import Path
+from threading import RLock
 from typing import Any, Callable
 
 from flask import g, has_request_context
@@ -45,6 +47,17 @@ from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
 CHARACTER_BUILDER_VERSION = "2026-04-20.01"
+BUILDER_STATIC_CACHE_MAX_ENTRIES = 12
+BUILDER_STATIC_ENTRY_TYPES = (
+    "background",
+    "class",
+    "feat",
+    "item",
+    "optionalfeature",
+    "race",
+    "spell",
+    "subclass",
+)
 DEFAULT_EXPERIENCE_MODEL = "Milestone"
 DEFAULT_ABILITY_SCORE = 10
 NATIVE_LEVEL_UP_READY = "ready"
@@ -78,6 +91,9 @@ ATTACK_MODE_WEAPON_TWO_HANDED = "weapon:two-handed"
 ATTACK_MODE_WEAPON_OFF_HAND = "weapon:off-hand"
 WEAPON_WIELD_MODE_MAIN_HAND = "main-hand"
 WEAPON_WIELD_MODE_OFF_HAND = "off-hand"
+
+_BUILDER_STATIC_BUNDLE_CACHE: OrderedDict[tuple[Any, ...], dict[str, Any]] = OrderedDict()
+_BUILDER_STATIC_BUNDLE_CACHE_LOCK = RLock()
 WEAPON_WIELD_MODE_TWO_HANDED = "two-handed"
 WEAPON_WIELD_MODE_LABELS = {
     WEAPON_WIELD_MODE_MAIN_HAND: "Main Hand",
@@ -3220,19 +3236,101 @@ def _builder_cache_get(cache_key: tuple[Any, ...], build_value):
     return cache[cache_key]
 
 
-def _builder_request_page_key(campaign_page_records: list[Any] | None) -> tuple[str, ...]:
+def _clear_builder_static_bundle_cache() -> None:
+    with _BUILDER_STATIC_BUNDLE_CACHE_LOCK:
+        _BUILDER_STATIC_BUNDLE_CACHE.clear()
+
+
+def _builder_static_cache_get(
+    cache_key: tuple[Any, ...],
+    build_value: Callable[[], dict[str, Any]],
+) -> dict[str, Any]:
+    with _BUILDER_STATIC_BUNDLE_CACHE_LOCK:
+        if cache_key in _BUILDER_STATIC_BUNDLE_CACHE:
+            _BUILDER_STATIC_BUNDLE_CACHE.move_to_end(cache_key)
+            return _BUILDER_STATIC_BUNDLE_CACHE[cache_key]
+
+    value = build_value()
+
+    with _BUILDER_STATIC_BUNDLE_CACHE_LOCK:
+        if cache_key in _BUILDER_STATIC_BUNDLE_CACHE:
+            _BUILDER_STATIC_BUNDLE_CACHE.move_to_end(cache_key)
+            return _BUILDER_STATIC_BUNDLE_CACHE[cache_key]
+        _BUILDER_STATIC_BUNDLE_CACHE[cache_key] = value
+        while len(_BUILDER_STATIC_BUNDLE_CACHE) > BUILDER_STATIC_CACHE_MAX_ENTRIES:
+            _BUILDER_STATIC_BUNDLE_CACHE.popitem(last=False)
+        return value
+
+
+def _builder_revision_part(value: Any) -> str:
+    if value is None:
+        return ""
+    try:
+        if hasattr(value, "astimezone"):
+            return isoformat(value)
+    except (TypeError, ValueError, AttributeError):
+        pass
+    return str(value or "").strip()
+
+
+def _extract_campaign_page_updated_at(payload: Any) -> str:
+    if isinstance(payload, dict):
+        return _builder_revision_part(
+            payload.get("updated_at")
+            or payload.get("page_updated_at")
+            or payload.get("last_modified")
+        )
+    page = getattr(payload, "page", None)
+    return _builder_revision_part(
+        getattr(payload, "updated_at", "")
+        or getattr(page, "updated_at", "")
+    )
+
+
+def _builder_request_page_key(campaign_page_records: list[Any] | None) -> tuple[tuple[str, str], ...]:
     return tuple(
         sorted(
             {
-                page_ref
-                for page_ref in (
-                    _extract_campaign_page_ref(record)
-                    for record in list(campaign_page_records or [])
+                (
+                    page_ref,
+                    _extract_campaign_page_updated_at(record),
                 )
+                for record in list(campaign_page_records or [])
+                for page_ref in [_extract_campaign_page_ref(record)]
                 if page_ref
             }
         )
     )
+
+
+def _builder_service_cache_identity(systems_service: Any) -> tuple[Any, ...]:
+    try:
+        hash(systems_service)
+    except TypeError:
+        return (
+            "service-id",
+            type(systems_service).__module__,
+            type(systems_service).__qualname__,
+            id(systems_service),
+        )
+    return ("service-object", systems_service)
+
+
+def _builder_static_revision_key(
+    systems_service: Any,
+    campaign_slug: str,
+) -> tuple[Any, ...] | None:
+    revision_loader = getattr(systems_service, "get_builder_static_revision", None)
+    if not callable(revision_loader):
+        return None
+    revision = revision_loader(campaign_slug, entry_types=BUILDER_STATIC_ENTRY_TYPES)
+    if revision is None:
+        return None
+    if isinstance(revision, tuple):
+        return revision
+    if isinstance(revision, list):
+        return tuple(revision)
+    return (revision,)
 
 
 def _sort_entries_for_builder(entries: list[SystemsEntryRecord]) -> list[SystemsEntryRecord]:
@@ -3262,6 +3360,8 @@ def _build_common_builder_static_bundle(
     campaign_page_records: list[Any] | None = None,
 ) -> dict[str, Any]:
     page_key = _builder_request_page_key(campaign_page_records)
+    service_key = _builder_service_cache_identity(systems_service)
+    revision_key = _builder_static_revision_key(systems_service, campaign_slug)
 
     def _build_bundle() -> dict[str, Any]:
         page_records = list(campaign_page_records or [])
@@ -3314,10 +3414,24 @@ def _build_common_builder_static_bundle(
             ),
         }
 
+    def _build_or_load_static_bundle() -> dict[str, Any]:
+        if revision_key is None:
+            return _build_bundle()
+        return _builder_static_cache_get(
+            (
+                "builder-static-bundle",
+                service_key,
+                campaign_slug,
+                revision_key,
+                page_key,
+            ),
+            _build_bundle,
+        )
+
     return dict(
         _builder_cache_get(
-            ("builder-static-bundle", campaign_slug, page_key),
-            _build_bundle,
+            ("builder-static-bundle", service_key, campaign_slug, revision_key, page_key),
+            _build_or_load_static_bundle,
         )
     )
 
@@ -3794,7 +3908,11 @@ def _list_subclass_options(
 ) -> list[SystemsEntryRecord]:
     if selected_class is None:
         return []
-    options = list(subclass_entries or _list_campaign_enabled_entries(systems_service, campaign_slug, "subclass"))
+    options = list(
+        subclass_entries
+        if subclass_entries is not None
+        else _list_campaign_enabled_entries(systems_service, campaign_slug, "subclass")
+    )
     return [
         entry
         for entry in options

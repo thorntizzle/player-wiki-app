@@ -692,6 +692,82 @@ class SystemsStore:
             for row in rows
         ]
 
+    def get_campaign_entries_revision(
+        self,
+        campaign_slug: str,
+        library_slug: str,
+        source_ids: list[str],
+        entry_types: list[str],
+    ) -> tuple[tuple[str, int, str], ...]:
+        normalized_source_ids = [
+            str(source_id or "").strip()
+            for source_id in list(source_ids or [])
+            if str(source_id or "").strip()
+        ]
+        normalized_entry_types = [
+            str(entry_type or "").strip()
+            for entry_type in list(entry_types or [])
+            if str(entry_type or "").strip()
+        ]
+        if not normalized_source_ids or not normalized_entry_types:
+            return ()
+
+        source_placeholders = ", ".join("?" for _ in normalized_source_ids)
+        entry_type_placeholders = ", ".join("?" for _ in normalized_entry_types)
+        rows = get_db().execute(
+            f"""
+            SELECT
+                systems_entries.entry_type AS entry_type,
+                COUNT(*) AS count,
+                COALESCE(MAX(systems_entries.updated_at), '') AS updated_at
+            FROM systems_entries
+            LEFT JOIN campaign_entry_overrides
+              ON campaign_entry_overrides.campaign_slug = ?
+             AND campaign_entry_overrides.library_slug = systems_entries.library_slug
+             AND campaign_entry_overrides.entry_key = systems_entries.entry_key
+            WHERE systems_entries.library_slug = ?
+              AND systems_entries.source_id IN ({source_placeholders})
+              AND systems_entries.entry_type IN ({entry_type_placeholders})
+              AND COALESCE(campaign_entry_overrides.is_enabled_override, 1) != 0
+            GROUP BY systems_entries.entry_type
+            ORDER BY systems_entries.entry_type ASC
+            """,
+            (
+                campaign_slug,
+                library_slug,
+                *normalized_source_ids,
+                *normalized_entry_types,
+            ),
+        ).fetchall()
+        return tuple(
+            (
+                str(row["entry_type"]),
+                int(row["count"]),
+                str(row["updated_at"] or ""),
+            )
+            for row in rows
+        )
+
+    def get_campaign_entry_overrides_revision(
+        self,
+        campaign_slug: str,
+        library_slug: str,
+    ) -> tuple[int, str]:
+        row = get_db().execute(
+            """
+            SELECT
+                COUNT(*) AS count,
+                COALESCE(MAX(updated_at), '') AS updated_at
+            FROM campaign_entry_overrides
+            WHERE campaign_slug = ?
+              AND library_slug = ?
+            """,
+            (campaign_slug, library_slug),
+        ).fetchone()
+        if row is None:
+            return (0, "")
+        return (int(row["count"]), str(row["updated_at"] or ""))
+
     def replace_entries_for_source(
         self,
         library_slug: str,

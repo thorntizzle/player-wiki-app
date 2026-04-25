@@ -144,6 +144,72 @@ def test_dm_can_update_source_visibility_and_audit_event_is_written(client, sign
         assert any(event.metadata.get("source_id") == "XGE" for event in events)
 
 
+def test_builder_static_revision_tracks_entry_and_override_changes(app):
+    source_id = f"TST-{uuid4().hex[:8].upper()}"
+    entry_key = f"dnd-5e|class|{source_id.lower()}|cache-fighter"
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+
+        store.upsert_source(
+            library_slug,
+            source_id,
+            title="Builder Cache Test Source",
+            license_class="custom_campaign",
+        )
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug=library_slug,
+            source_id=source_id,
+            is_enabled=True,
+            default_visibility="players",
+        )
+
+        initial_revision = service.get_builder_static_revision(
+            "linden-pass",
+            entry_types=("class",),
+        )
+
+        store.replace_entries_for_source(
+            library_slug,
+            source_id,
+            entries=[
+                {
+                    "entry_key": entry_key,
+                    "entry_type": "class",
+                    "slug": "cache-fighter",
+                    "title": "Cache Fighter",
+                    "search_text": "cache fighter",
+                    "player_safe_default": True,
+                    "metadata": {"hit_die": {"faces": 10}},
+                    "body": {},
+                }
+            ],
+            entry_types=["class"],
+        )
+        entry_revision = service.get_builder_static_revision(
+            "linden-pass",
+            entry_types=("class",),
+        )
+
+        store.upsert_campaign_entry_override(
+            "linden-pass",
+            library_slug=library_slug,
+            entry_key=entry_key,
+            visibility_override=None,
+            is_enabled_override=False,
+        )
+        override_revision = service.get_builder_static_revision(
+            "linden-pass",
+            entry_types=("class",),
+        )
+
+    assert entry_revision != initial_revision
+    assert override_revision != entry_revision
+
+
 def test_builtin_rules_source_is_seeded_and_browsable_without_import(client, sign_in, users, app):
     with app.app_context():
         service = app.extensions["systems_service"]
