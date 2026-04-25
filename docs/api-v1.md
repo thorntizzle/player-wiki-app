@@ -76,6 +76,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:5000/api/v1/me" -Headers $headers
 - `GET /api/v1/campaigns/<campaign_slug>/session/articles/<article_id>/image`
 - `GET /api/v1/campaigns/<campaign_slug>/dm-content`
 - `POST /api/v1/campaigns/<campaign_slug>/dm-content/statblocks`
+- `PUT /api/v1/campaigns/<campaign_slug>/dm-content/statblocks/<statblock_id>`
 - `DELETE /api/v1/campaigns/<campaign_slug>/dm-content/statblocks/<statblock_id>`
 - `POST /api/v1/campaigns/<campaign_slug>/dm-content/conditions`
 - `DELETE /api/v1/campaigns/<campaign_slug>/dm-content/conditions/<condition_definition_id>`

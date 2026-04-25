@@ -348,8 +348,46 @@ def test_api_dm_content_endpoints_require_dm_permissions(client, app, users):
     )
 
     assert statblock_response.status_code == 200
-    assert statblock_response.get_json()["statblock"]["title"] == "Dock Runner"
-    assert statblock_response.get_json()["statblock"]["subsection"] == "Malverine Minions"
+    statblock_payload = statblock_response.get_json()["statblock"]
+    assert statblock_payload["title"] == "Dock Runner"
+    assert statblock_payload["subsection"] == "Malverine Minions"
+    assert statblock_payload["parser_feedback"]["summary"] == (
+        "Parsed combat fields: AC 13, HP 22, Speed 30 ft. (30 ft. movement), Init +2."
+    )
+
+    update_statblock_response = client.put(
+        f"/api/v1/campaigns/linden-pass/dm-content/statblocks/{statblock_payload['id']}",
+        headers=api_headers(dm_token),
+        json={
+            "subsection": "Dock Crew",
+            "markdown_text": (
+                "# Dock Runner Captain\n\n"
+                "Armor Class 15\n"
+                "Hit Points 36\n"
+                "Speed 35 ft.\n\n"
+                "DEX 16 (+3)\n"
+            ),
+        },
+    )
+
+    assert update_statblock_response.status_code == 200
+    updated_statblock_payload = update_statblock_response.get_json()["statblock"]
+    assert updated_statblock_payload["title"] == "Dock Runner Captain"
+    assert updated_statblock_payload["subsection"] == "Dock Crew"
+    assert updated_statblock_payload["max_hp"] == 36
+    assert updated_statblock_payload["movement_total"] == 35
+    assert updated_statblock_payload["initiative_bonus"] == 3
+    assert updated_statblock_payload["parser_feedback"]["summary"] == (
+        "Parsed combat fields: AC 15, HP 36, Speed 35 ft. (35 ft. movement), Init +3."
+    )
+
+    blocked_update_response = client.put(
+        f"/api/v1/campaigns/linden-pass/dm-content/statblocks/{statblock_payload['id']}",
+        headers=api_headers(player_token),
+        json={"subsection": "Blocked"},
+    )
+
+    assert blocked_update_response.status_code == 403
 
     condition_response = client.post(
         "/api/v1/campaigns/linden-pass/dm-content/conditions",
@@ -369,7 +407,7 @@ def test_api_dm_content_endpoints_require_dm_permissions(client, app, users):
     dm_content_payload = dm_content_response.get_json()
     assert len(dm_content_payload["statblocks"]) == 1
     assert len(dm_content_payload["conditions"]) == 1
-    assert dm_content_payload["statblocks"][0]["subsection"] == "Malverine Minions"
+    assert dm_content_payload["statblocks"][0]["subsection"] == "Dock Crew"
 
     blocked_response = client.get("/api/v1/campaigns/linden-pass/dm-content", headers=api_headers(player_token))
 

@@ -40,6 +40,37 @@ class DMStatblockUpload:
     initiative_bonus: int
 
 
+def format_statblock_initiative_bonus(value: int) -> str:
+    return f"+{value}" if value > 0 else str(value)
+
+
+def build_statblock_parser_feedback(statblock: CampaignDMStatblockRecord) -> dict[str, object]:
+    armor_class_label = (
+        f"AC {statblock.armor_class}"
+        if statblock.armor_class is not None
+        else "AC not parsed"
+    )
+    movement_label = (
+        f"{statblock.movement_total} ft. movement"
+        if statblock.movement_total > 0
+        else "movement not parsed"
+    )
+    initiative_label = format_statblock_initiative_bonus(statblock.initiative_bonus)
+    return {
+        "armor_class": statblock.armor_class,
+        "max_hp": statblock.max_hp,
+        "speed_text": statblock.speed_text,
+        "movement_total": statblock.movement_total,
+        "initiative_bonus": statblock.initiative_bonus,
+        "summary": (
+            "Parsed combat fields: "
+            f"{armor_class_label}, HP {statblock.max_hp}, "
+            f"Speed {statblock.speed_text} ({movement_label}), "
+            f"Init {initiative_label}."
+        ),
+    }
+
+
 def extract_statblock_title_heading(markdown_text: str) -> tuple[str, str]:
     lines = markdown_text.replace("\r\n", "\n").split("\n")
     line_index = 0
@@ -112,6 +143,45 @@ class CampaignDMContentService:
             created_by_user_id=created_by_user_id,
         )
 
+    def update_statblock(
+        self,
+        campaign_slug: str,
+        statblock_id: int,
+        *,
+        body_markdown: str | None = None,
+        subsection: str | None = None,
+        updated_by_user_id: int | None = None,
+    ) -> CampaignDMStatblockRecord:
+        existing = self.store.get_statblock(campaign_slug, statblock_id)
+        if existing is None:
+            raise CampaignDMContentValidationError("That statblock could not be found.")
+
+        source_filename = existing.source_filename
+        if Path(source_filename or "").suffix.lower() not in ALLOWED_DM_CONTENT_MARKDOWN_EXTENSIONS:
+            source_filename = f"{existing.title or 'statblock'}.md"
+
+        source_body = existing.body_markdown if body_markdown is None else body_markdown
+        subsection_hint = existing.subsection if subsection is None else subsection
+        upload = self.parse_statblock_markdown_upload(
+            filename=source_filename,
+            data_blob=str(source_body or "").encode("utf-8"),
+            subsection_hint=subsection_hint,
+            fallback_title_hint=existing.title,
+        )
+        return self.store.update_statblock(
+            campaign_slug,
+            statblock_id,
+            title=upload.title,
+            body_markdown=upload.body_markdown,
+            subsection=upload.subsection,
+            armor_class=upload.armor_class,
+            max_hp=upload.max_hp,
+            speed_text=upload.speed_text,
+            movement_total=upload.movement_total,
+            initiative_bonus=upload.initiative_bonus,
+            updated_by_user_id=updated_by_user_id,
+        )
+
     def delete_statblock(self, campaign_slug: str, statblock_id: int) -> CampaignDMStatblockRecord:
         statblock = self.store.delete_statblock(campaign_slug, statblock_id)
         if statblock is None:
@@ -170,6 +240,7 @@ class CampaignDMContentService:
         filename: str,
         data_blob: bytes,
         subsection_hint: str = "",
+        fallback_title_hint: str = "",
     ) -> DMStatblockUpload:
         normalized_filename = Path(filename or "").name.strip()
         if not normalized_filename:
@@ -207,7 +278,7 @@ class CampaignDMContentService:
 
         name_line_match = STATBLOCK_NAME_LINE_PATTERN.search(normalized_body)
         name_line_title = str(name_line_match.group("value")).strip() if name_line_match is not None else ""
-        fallback_title = fallback_title_from_filename(normalized_filename)
+        fallback_title = str(fallback_title_hint or "").strip() or fallback_title_from_filename(normalized_filename)
         normalized_title = metadata_title or heading_title or name_line_title or fallback_title
         if not normalized_title:
             raise CampaignDMContentValidationError("The uploaded statblock needs a name or title.")

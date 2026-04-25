@@ -44,6 +44,15 @@ Speed 30 ft.
 STR 10 (+0)  DEX 14 (+2)  CON 10 (+0)  INT 11 (+0)  WIS 12 (+1)  CHA 10 (+0)
 """
 
+UPDATED_STATBLOCK_MARKDOWN = """# Imperial Signal Lieutenant
+
+Armor Class 16 (studded leather, shield)
+Hit Points 64 (12d8 + 12)
+Speed 30 ft., fly 45 ft.
+
+STR 10 (+0)  DEX 16 (+3)  CON 12 (+1)  INT 16 (+3)  WIS 14 (+2)  CHA 11 (+0)
+"""
+
 
 def _list_statblocks(app):
     with app.app_context():
@@ -200,6 +209,90 @@ def test_dm_statblocks_page_groups_subsectioned_entries_like_wiki_sections(
     assert "Imperial Signal Operative" in dm_html
     assert "Malverine Minions" in dm_html
     assert "1 statblock" in dm_html
+
+
+def test_dm_can_update_statblock_source_and_combat_parser_fields(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    upload = client.post(
+        "/campaigns/linden-pass/dm-content/statblocks",
+        data={"statblock_file": (BytesIO(TEST_STATBLOCK_MARKDOWN), "imperial-signal-operative-statblock.md")},
+        follow_redirects=True,
+    )
+    assert upload.status_code == 200
+
+    statblock = _list_statblocks(app)[0]
+    update = client.post(
+        f"/campaigns/linden-pass/dm-content/statblocks/{statblock.id}",
+        data={
+            "subsection": "Signal Officers",
+            "body_markdown": UPDATED_STATBLOCK_MARKDOWN,
+        },
+        follow_redirects=True,
+    )
+
+    assert update.status_code == 200
+    update_html = update.get_data(as_text=True)
+    assert "Statblock Imperial Signal Lieutenant updated." in update_html
+    assert "Parsed combat fields: AC 16, HP 64, Speed 30 ft., fly 45 ft. (45 ft. movement), Init +3." in update_html
+    assert "Signal Officers" in update_html
+    assert 'name="body_markdown"' in update_html
+    assert "Hit Points 64" in update_html
+
+    statblocks = _list_statblocks(app)
+    assert len(statblocks) == 1
+    updated_statblock = statblocks[0]
+    assert updated_statblock.title == "Imperial Signal Lieutenant"
+    assert updated_statblock.subsection == "Signal Officers"
+    assert updated_statblock.max_hp == 64
+    assert updated_statblock.movement_total == 45
+    assert updated_statblock.initiative_bonus == 3
+
+    add_to_combat = client.post(
+        "/campaigns/linden-pass/combat/statblock-combatants",
+        data={"statblock_id": str(updated_statblock.id)},
+        follow_redirects=False,
+    )
+    assert add_to_combat.status_code == 302
+
+    combatant = _find_combatant(app, name="Imperial Signal Lieutenant")
+    assert combatant is not None
+    assert combatant.max_hp == 64
+    assert combatant.current_hp == 64
+    assert combatant.movement_total == 45
+    assert combatant.initiative_bonus == 3
+    assert combatant.turn_value == 3
+
+
+def test_dm_statblock_update_keeps_submitted_body_visible_after_parser_error(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    upload = client.post(
+        "/campaigns/linden-pass/dm-content/statblocks",
+        data={"statblock_file": (BytesIO(TEST_STATBLOCK_MARKDOWN), "imperial-signal-operative-statblock.md")},
+        follow_redirects=True,
+    )
+    assert upload.status_code == 200
+
+    statblock = _list_statblocks(app)[0]
+    update = client.post(
+        f"/campaigns/linden-pass/dm-content/statblocks/{statblock.id}",
+        data={
+            "subsection": "Broken Drafts",
+            "body_markdown": "# Broken Draft\n\nArmor Class 12\nSpeed 30 ft.\n",
+        },
+        follow_redirects=False,
+    )
+
+    assert update.status_code == 400
+    update_html = update.get_data(as_text=True)
+    assert "The uploaded statblock needs a Hit Points value." in update_html
+    assert "Broken Drafts" in update_html
+    assert "Broken Draft" in update_html
+
+    unchanged = _list_statblocks(app)[0]
+    assert unchanged.title == "Imperial Signal Operative"
+    assert unchanged.max_hp == 55
 
 
 def test_init_db_backfills_existing_linden_pass_statblocks_into_malverine_minions_group(

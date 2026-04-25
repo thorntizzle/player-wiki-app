@@ -51,7 +51,10 @@ from .campaign_content_service import (
     write_campaign_character_file,
     write_campaign_page_file,
 )
-from .campaign_dm_content_service import CampaignDMContentValidationError
+from .campaign_dm_content_service import (
+    CampaignDMContentValidationError,
+    build_statblock_parser_feedback,
+)
 from .campaign_session_service import CampaignSessionValidationError
 from .campaign_visibility import CAMPAIGN_VISIBILITY_SCOPES
 from .character_models import CharacterRecord, CharacterStateRecord
@@ -684,6 +687,7 @@ def register_api(app) -> None:
             "speed_text": statblock.speed_text,
             "movement_total": statblock.movement_total,
             "initiative_bonus": statblock.initiative_bonus,
+            "parser_feedback": build_statblock_parser_feedback(statblock),
             "created_at": serialize_datetime(statblock.created_at),
             "updated_at": serialize_datetime(statblock.updated_at),
             "created_by_user_id": statblock.created_by_user_id,
@@ -2205,6 +2209,53 @@ def register_api(app) -> None:
                 data_blob=str(payload.get("markdown_text") or "").encode("utf-8"),
                 subsection=str(payload.get("subsection") or "").strip(),
                 created_by_user_id=user.id,
+            )
+        except CampaignDMContentValidationError as exc:
+            return json_error(str(exc), 400, code="validation_error")
+
+        return jsonify({"ok": True, "statblock": serialize_dm_statblock(statblock)})
+
+    @api.put("/campaigns/<campaign_slug>/dm-content/statblocks/<int:statblock_id>")
+    @api_campaign_scope_access_required("dm_content")
+    @api_login_required
+    def dm_content_statblock_update(campaign_slug: str, statblock_id: int):
+        if not can_manage_campaign_dm_content(campaign_slug):
+            return json_error("You do not have permission to manage DM Content.", 403, code="forbidden")
+
+        user = get_current_user()
+        if user is None:
+            return json_error("Authentication required.", 401, code="auth_required")
+
+        try:
+            payload = load_json_object()
+        except ValueError as exc:
+            return json_error(str(exc), 400, code="invalid_json")
+
+        has_markdown_text = "markdown_text" in payload
+        has_body_markdown = "body_markdown" in payload
+        has_subsection = "subsection" in payload
+        if not has_markdown_text and not has_body_markdown and not has_subsection:
+            return json_error(
+                "Provide markdown_text, body_markdown, or subsection to update a statblock.",
+                400,
+                code="validation_error",
+            )
+
+        body_value = None
+        if has_markdown_text:
+            body_value = payload.get("markdown_text")
+        elif has_body_markdown:
+            body_value = payload.get("body_markdown")
+        body_markdown = str(body_value or "") if has_markdown_text or has_body_markdown else None
+        subsection = str(payload.get("subsection") or "").strip() if has_subsection else None
+
+        try:
+            statblock = current_app.extensions["campaign_dm_content_service"].update_statblock(
+                campaign_slug,
+                statblock_id,
+                body_markdown=body_markdown,
+                subsection=subsection,
+                updated_by_user_id=user.id,
             )
         except CampaignDMContentValidationError as exc:
             return json_error(str(exc), 400, code="validation_error")

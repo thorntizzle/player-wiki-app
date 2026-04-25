@@ -104,6 +104,69 @@ class CampaignDMContentStore:
             raise RuntimeError("Failed to persist DM statblock.")
         return statblock
 
+    def update_statblock(
+        self,
+        campaign_slug: str,
+        statblock_id: int,
+        *,
+        title: str,
+        body_markdown: str,
+        subsection: str,
+        armor_class: int | None,
+        max_hp: int,
+        speed_text: str,
+        movement_total: int,
+        initiative_bonus: int,
+        updated_by_user_id: int | None = None,
+    ) -> CampaignDMStatblockRecord:
+        connection = get_db()
+        now = isoformat(utcnow())
+        try:
+            cursor = connection.execute(
+                """
+                UPDATE campaign_dm_statblocks
+                SET title = ?,
+                    body_markdown = ?,
+                    subsection = ?,
+                    armor_class = ?,
+                    max_hp = ?,
+                    speed_text = ?,
+                    movement_total = ?,
+                    initiative_bonus = ?,
+                    updated_at = ?,
+                    updated_by_user_id = ?
+                WHERE campaign_slug = ? AND id = ?
+                """,
+                (
+                    title,
+                    body_markdown,
+                    subsection,
+                    armor_class,
+                    max_hp,
+                    speed_text,
+                    movement_total,
+                    initiative_bonus,
+                    now,
+                    updated_by_user_id,
+                    campaign_slug,
+                    statblock_id,
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise CampaignDMContentConflictError(
+                f"Unable to update statblock for {campaign_slug}/{title}."
+            ) from exc
+        connection.commit()
+
+        if cursor.rowcount == 0:
+            raise CampaignDMContentConflictError(
+                f"Unable to update statblock {statblock_id} for {campaign_slug}."
+            )
+        statblock = self.get_statblock(campaign_slug, statblock_id)
+        if statblock is None:
+            raise RuntimeError("Failed to reload updated DM statblock.")
+        return statblock
+
     def delete_statblock(
         self,
         campaign_slug: str,

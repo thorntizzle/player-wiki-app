@@ -109,7 +109,11 @@ from .campaign_content_service import (
     write_campaign_asset_file,
     write_campaign_page_file,
 )
-from .campaign_dm_content_service import CampaignDMContentService, CampaignDMContentValidationError
+from .campaign_dm_content_service import (
+    CampaignDMContentService,
+    CampaignDMContentValidationError,
+    build_statblock_parser_feedback,
+)
 from .campaign_dm_content_store import CampaignDMContentStore
 from .campaign_page_store import CampaignPageStore
 from .campaign_session_service import (
@@ -3547,7 +3551,7 @@ def create_app() -> Flask:
                 ),
                 capabilities=[
                     "Create, edit, attach images to, unpublish/archive, or safely hard-delete player wiki Markdown pages from the Player Wiki lane.",
-                    "Store uploaded statblocks for later encounter seeding.",
+                    "Upload and edit DM statblock markdown for later encounter seeding.",
                     "Prepare staged session articles for later reveal.",
                     "Maintain custom combat conditions alongside the built-in DND-5E list.",
                 ],
@@ -3556,7 +3560,7 @@ def create_app() -> Flask:
                     "Inline wiki-page image uploads are copied into campaign assets and referenced from page frontmatter.",
                     "Hard delete is blocked when a page still has wiki backlinks, character hooks, or session provenance.",
                     "The statblock parser is currently implemented for DND-5E-style markdown.",
-                    "Uploads should be UTF-8 markdown with recognizable Armor Class, Hit Points, and Speed lines.",
+                    "Statblock saves need recognizable Armor Class, Hit Points, and Speed lines when those values should feed Combat.",
                     "Custom conditions augment the built-in list rather than replacing it.",
                 ],
                 links=(
@@ -6231,6 +6235,7 @@ def create_app() -> Flask:
         campaign_slug: str,
         *,
         dm_content_subpage: str = "statblocks",
+        dm_statblock_form_overrides=None,
         player_wiki_edit_record=None,
         player_wiki_form_data=None,
     ) -> dict[str, object]:
@@ -6330,6 +6335,7 @@ def create_app() -> Flask:
             "dm_statblock_top_level": top_level_statblocks,
             "dm_statblock_subsection_groups": statblock_subsection_groups,
             "dm_statblock_show_subsections": bool(statblock_subsection_groups),
+            "dm_statblock_form_overrides": dm_statblock_form_overrides or {},
             "custom_condition_definitions": custom_conditions,
             "can_manage_dm_content": can_manage_dm_content,
             "can_manage_content": can_manage_content,
@@ -8330,7 +8336,7 @@ def create_app() -> Flask:
         filename = (markdown_file.filename or "").strip() if markdown_file is not None else ""
         data_blob = markdown_file.read() if markdown_file is not None else b""
         try:
-            get_campaign_dm_content_service().create_statblock(
+            statblock = get_campaign_dm_content_service().create_statblock(
                 campaign_slug,
                 filename=filename,
                 data_blob=data_blob,
@@ -8340,12 +8346,70 @@ def create_app() -> Flask:
         except CampaignDMContentValidationError as exc:
             flash(str(exc), "error")
         else:
-            flash("Statblock saved to DM Content.", "success")
+            parser_feedback = build_statblock_parser_feedback(statblock)
+            flash(f"Statblock saved to DM Content. {parser_feedback['summary']}", "success")
 
         return redirect_to_campaign_dm_content(
             campaign_slug,
             subpage="statblocks",
             anchor="dm-content-statblocks",
+        )
+
+    @app.post("/campaigns/<campaign_slug>/dm-content/statblocks/<int:statblock_id>")
+    @campaign_scope_access_required("dm_content")
+    def campaign_dm_content_update_statblock(campaign_slug: str, statblock_id: int):
+        if not can_manage_campaign_dm_content(campaign_slug):
+            abort(403)
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        try:
+            statblock = get_campaign_dm_content_service().update_statblock(
+                campaign_slug,
+                statblock_id,
+                body_markdown=request.form.get("body_markdown", ""),
+                subsection=request.form.get("subsection", ""),
+                updated_by_user_id=user.id,
+            )
+        except CampaignDMContentValidationError as exc:
+            flash(str(exc), "error")
+            context = build_campaign_dm_content_page_context(
+                campaign_slug,
+                dm_content_subpage="statblocks",
+                dm_statblock_form_overrides={
+                    statblock_id: {
+                        "subsection": request.form.get("subsection", ""),
+                        "body_markdown": request.form.get("body_markdown", ""),
+                    }
+                },
+            )
+            return render_template("dm_content.html", **context), 400
+
+        parser_feedback = build_statblock_parser_feedback(statblock)
+        get_auth_store().write_audit_event(
+            event_type="campaign_dm_statblock_updated",
+            actor_user_id=user.id,
+            campaign_slug=campaign_slug,
+            metadata={
+                "statblock_id": statblock.id,
+                "title": statblock.title,
+                "subsection": statblock.subsection,
+                "source": "dm_content_statblocks",
+                "parsed": {
+                    "armor_class": statblock.armor_class,
+                    "max_hp": statblock.max_hp,
+                    "movement_total": statblock.movement_total,
+                    "initiative_bonus": statblock.initiative_bonus,
+                },
+            },
+        )
+        flash(f"Statblock {statblock.title} updated. {parser_feedback['summary']}", "success")
+        return redirect_to_campaign_dm_content(
+            campaign_slug,
+            subpage="statblocks",
+            anchor=f"dm-statblock-{statblock.id}",
         )
 
     @app.post("/campaigns/<campaign_slug>/dm-content/statblocks/<int:statblock_id>/delete")

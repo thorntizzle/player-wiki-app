@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% macro render_dm_statblock_card(campaign, statblock, can_manage_dm_content) -%}
+{% macro render_dm_statblock_card(campaign, statblock, can_manage_dm_content, form_override=None) -%}
   <article class="dm-content-item" id="dm-statblock-{{ statblock.id }}">
     <div class="dm-content-item__header">
       <div>
@@ -21,6 +21,20 @@
       <pre class="dm-content-preview">{{ statblock.body_markdown }}</pre>
     </details>
     {% if can_manage_dm_content %}
+      <details class="feature-detail" {% if form_override %}open{% endif %}>
+        <summary>Edit statblock source</summary>
+        <form method="post" action="{{ url_for('campaign_dm_content_update_statblock', campaign_slug=campaign.slug, statblock_id=statblock.id) }}" class="stack-form">
+          <label class="field">
+            <span>Subsection</span>
+            <input type="text" name="subsection" maxlength="80" value="{{ form_override.subsection if form_override else statblock.subsection }}">
+          </label>
+          <label class="field">
+            <span>Source markdown body</span>
+            <textarea name="body_markdown" rows="14">{{ form_override.body_markdown if form_override else statblock.body_markdown }}</textarea>
+          </label>
+          <button type="submit">Save statblock</button>
+        </form>
+      </details>
       <form method="post" action="{{ url_for('campaign_dm_content_delete_statblock', campaign_slug=campaign.slug, statblock_id=statblock.id) }}">
         <button class="ghost-button" type="submit">Delete statblock</button>
       </form>
@@ -313,7 +327,7 @@
             {% if dm_statblock_top_level %}
               <div class="dm-content-list">
                 {% for statblock in dm_statblock_top_level %}
-                  {{ render_dm_statblock_card(campaign, statblock, can_manage_dm_content) }}
+                  {{ render_dm_statblock_card(campaign, statblock, can_manage_dm_content, dm_statblock_form_overrides.get(statblock.id)) }}
                 {% endfor %}
               </div>
             {% endif %}
@@ -333,7 +347,7 @@
                     <div class="section-block__body">
                       <div class="dm-content-list">
                         {% for statblock in group.statblocks %}
-                          {{ render_dm_statblock_card(campaign, statblock, can_manage_dm_content) }}
+                          {{ render_dm_statblock_card(campaign, statblock, can_manage_dm_content, dm_statblock_form_overrides.get(statblock.id)) }}
                         {% endfor %}
                       </div>
                     </div>
