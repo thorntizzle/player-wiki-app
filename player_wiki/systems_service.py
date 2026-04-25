@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from flask import g, has_request_context
+import markdown
 
 from .auth_store import isoformat, utcnow
 from .character_campaign_options import (
@@ -668,6 +669,12 @@ class SystemsService:
         self.store = store
         self.repository_store = repository_store
 
+    def get_campaign_custom_source_id(self, campaign_slug: str) -> str:
+        normalized_campaign_slug = slugify(str(campaign_slug or "")).replace("/", "-").upper()
+        if not normalized_campaign_slug:
+            normalized_campaign_slug = "CAMPAIGN"
+        return f"CUSTOM-{normalized_campaign_slug}"
+
     def ensure_builtin_library_seeded(self, library_slug: str) -> SystemsLibraryRecord | None:
         catalog = BUILTIN_LIBRARY_CATALOG.get(library_slug)
         existing_library = self.store.get_library(library_slug)
@@ -714,6 +721,298 @@ class SystemsService:
         if not library_slug:
             return None
         return self.ensure_builtin_library_seeded(library_slug)
+
+    def ensure_campaign_custom_source(
+        self,
+        campaign_slug: str,
+        *,
+        actor_user_id: int | None = None,
+    ) -> SystemsSourceRecord:
+        library = self.get_campaign_library(campaign_slug)
+        if library is None:
+            raise SystemsPolicyValidationError("That campaign does not have a systems library configured.")
+        campaign = self._get_campaign(campaign_slug)
+        source_id = self.get_campaign_custom_source_id(campaign_slug)
+        source_title = (
+            f"{campaign.title} Custom Systems"
+            if campaign is not None and str(campaign.title or "").strip()
+            else f"{campaign_slug} Custom Systems"
+        )
+        source = self.store.upsert_source(
+            library.library_slug,
+            source_id,
+            title=source_title,
+            license_class="custom_campaign",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        self.store.upsert_campaign_policy(
+            campaign_slug,
+            library_slug=library.library_slug,
+            updated_by_user_id=actor_user_id,
+        )
+        if self.store.get_campaign_enabled_source(campaign_slug, source.source_id) is None:
+            self.store.upsert_campaign_enabled_source(
+                campaign_slug,
+                library_slug=library.library_slug,
+                source_id=source.source_id,
+                is_enabled=True,
+                default_visibility=VISIBILITY_PLAYERS,
+                updated_by_user_id=actor_user_id,
+            )
+        _systems_service_cache_clear()
+        return source
+
+    def is_campaign_custom_entry(self, campaign_slug: str, entry: SystemsEntryRecord) -> bool:
+        source_state = self.get_campaign_source_state(campaign_slug, entry.source_id)
+        if source_state is None:
+            return False
+        metadata = dict(entry.metadata or {})
+        custom_campaign_slug = str(metadata.get("custom_campaign_slug") or "").strip()
+        return source_state.source.license_class == "custom_campaign" and (
+            not custom_campaign_slug or custom_campaign_slug == campaign_slug
+        )
+
+    def get_custom_campaign_entry_by_slug(
+        self,
+        campaign_slug: str,
+        entry_slug: str,
+    ) -> SystemsEntryRecord | None:
+        library = self.get_campaign_library(campaign_slug)
+        if library is None:
+            return None
+        entry = self.store.get_entry_by_slug(library.library_slug, str(entry_slug or "").strip())
+        if entry is None or not self.is_campaign_custom_entry(campaign_slug, entry):
+            return None
+        return entry
+
+    def create_custom_campaign_entry(
+        self,
+        campaign_slug: str,
+        *,
+        title: str,
+        entry_type: str,
+        slug_leaf: str = "",
+        provenance: str = "",
+        visibility: str = VISIBILITY_PLAYERS,
+        search_metadata: str = "",
+        body_markdown: str = "",
+        actor_user_id: int,
+        can_set_private: bool,
+    ) -> SystemsEntryRecord:
+        source = self.ensure_campaign_custom_source(
+            campaign_slug,
+            actor_user_id=actor_user_id,
+        )
+        normalized_slug_leaf = slugify(slug_leaf or title).replace("/", "-").strip("-")
+        if not normalized_slug_leaf:
+            raise SystemsPolicyValidationError("Choose a URL slug or title before saving a custom Systems entry.")
+        slug = f"{source.source_id.lower()}-{normalized_slug_leaf}"
+        library = self.get_campaign_library(campaign_slug)
+        if library is None:
+            raise SystemsPolicyValidationError("That campaign does not have a systems library configured.")
+        existing = self.store.get_entry_by_slug(library.library_slug, slug)
+        if existing is not None:
+            raise SystemsPolicyValidationError("That custom Systems entry slug is already in use.")
+        entry_key = f"{library.library_slug.lower()}|custom|{campaign_slug}|{normalized_slug_leaf}"
+        return self._save_custom_campaign_entry(
+            campaign_slug,
+            source=source,
+            entry_key=entry_key,
+            slug=slug,
+            title=title,
+            entry_type=entry_type,
+            provenance=provenance,
+            visibility=visibility,
+            search_metadata=search_metadata,
+            body_markdown=body_markdown,
+            actor_user_id=actor_user_id,
+            can_set_private=can_set_private,
+            is_enabled_override=None,
+        )
+
+    def update_custom_campaign_entry(
+        self,
+        campaign_slug: str,
+        entry_slug: str,
+        *,
+        title: str,
+        entry_type: str,
+        provenance: str = "",
+        visibility: str = VISIBILITY_PLAYERS,
+        search_metadata: str = "",
+        body_markdown: str = "",
+        actor_user_id: int,
+        can_set_private: bool,
+    ) -> SystemsEntryRecord:
+        existing = self.get_custom_campaign_entry_by_slug(campaign_slug, entry_slug)
+        if existing is None:
+            raise SystemsPolicyValidationError("Choose a valid custom Systems entry before saving.")
+        source_state = self.get_campaign_source_state(campaign_slug, existing.source_id)
+        if source_state is None:
+            raise SystemsPolicyValidationError("The custom Systems source is no longer available.")
+        override = self.store.get_campaign_entry_override(campaign_slug, existing.entry_key)
+        return self._save_custom_campaign_entry(
+            campaign_slug,
+            source=source_state.source,
+            entry_key=existing.entry_key,
+            slug=existing.slug,
+            title=title,
+            entry_type=entry_type,
+            provenance=provenance,
+            visibility=visibility,
+            search_metadata=search_metadata,
+            body_markdown=body_markdown,
+            actor_user_id=actor_user_id,
+            can_set_private=can_set_private,
+            is_enabled_override=override.is_enabled_override if override is not None else None,
+        )
+
+    def archive_custom_campaign_entry(
+        self,
+        campaign_slug: str,
+        entry_slug: str,
+        *,
+        actor_user_id: int,
+    ) -> SystemsEntryRecord:
+        entry = self.get_custom_campaign_entry_by_slug(campaign_slug, entry_slug)
+        if entry is None:
+            raise SystemsPolicyValidationError("Choose a valid custom Systems entry before archiving.")
+        override = self.store.get_campaign_entry_override(campaign_slug, entry.entry_key)
+        self.update_campaign_entry_override(
+            campaign_slug,
+            entry_key=entry.entry_key,
+            visibility_override=override.visibility_override if override is not None else None,
+            is_enabled_override=False,
+            actor_user_id=actor_user_id,
+            can_set_private=True,
+        )
+        return entry
+
+    def restore_custom_campaign_entry(
+        self,
+        campaign_slug: str,
+        entry_slug: str,
+        *,
+        actor_user_id: int,
+    ) -> SystemsEntryRecord:
+        entry = self.get_custom_campaign_entry_by_slug(campaign_slug, entry_slug)
+        if entry is None:
+            raise SystemsPolicyValidationError("Choose a valid custom Systems entry before restoring.")
+        override = self.store.get_campaign_entry_override(campaign_slug, entry.entry_key)
+        self.update_campaign_entry_override(
+            campaign_slug,
+            entry_key=entry.entry_key,
+            visibility_override=override.visibility_override if override is not None else None,
+            is_enabled_override=None,
+            actor_user_id=actor_user_id,
+            can_set_private=True,
+        )
+        return entry
+
+    def _save_custom_campaign_entry(
+        self,
+        campaign_slug: str,
+        *,
+        source: SystemsSourceRecord,
+        entry_key: str,
+        slug: str,
+        title: str,
+        entry_type: str,
+        provenance: str,
+        visibility: str,
+        search_metadata: str,
+        body_markdown: str,
+        actor_user_id: int,
+        can_set_private: bool,
+        is_enabled_override: bool | None,
+    ) -> SystemsEntryRecord:
+        library = self.get_campaign_library(campaign_slug)
+        if library is None:
+            raise SystemsPolicyValidationError("That campaign does not have a systems library configured.")
+        normalized_title = str(title or "").strip()
+        if not normalized_title:
+            raise SystemsPolicyValidationError("Custom Systems entries need a title.")
+        if len(normalized_title) > 200:
+            raise SystemsPolicyValidationError("Custom Systems entry titles must stay under 200 characters.")
+        normalized_entry_type = re.sub(r"[^a-z0-9_]+", "", str(entry_type or "").strip().lower())
+        if not normalized_entry_type:
+            raise SystemsPolicyValidationError("Choose an entry type before saving this custom Systems entry.")
+        normalized_visibility = self._normalize_or_default_visibility(
+            visibility,
+            fallback=VISIBILITY_PLAYERS,
+        )
+        if normalized_visibility == VISIBILITY_PRIVATE and not can_set_private:
+            raise SystemsPolicyValidationError("Private visibility is reserved for app admins.")
+        if normalized_visibility == VISIBILITY_PUBLIC and not source.public_visibility_allowed:
+            raise SystemsPolicyValidationError(
+                f"{source.title} cannot be made public because that source is marked as non-public."
+            )
+        normalized_provenance = str(provenance or "").strip()
+        if len(normalized_provenance) > 500:
+            raise SystemsPolicyValidationError("Custom Systems provenance must stay under 500 characters.")
+        normalized_search_metadata = str(search_metadata or "").strip()
+        if len(normalized_search_metadata) > 4000:
+            raise SystemsPolicyValidationError("Custom Systems searchable metadata must stay under 4000 characters.")
+        normalized_body_markdown = str(body_markdown or "").strip()
+        if not normalized_body_markdown:
+            raise SystemsPolicyValidationError("Custom Systems entries need a rendered body.")
+        if len(normalized_body_markdown) > 100_000:
+            raise SystemsPolicyValidationError("Custom Systems entry bodies must stay under 100,000 characters.")
+        rendered_html = markdown.Markdown(extensions=["fenced_code", "tables", "sane_lists"]).convert(normalized_body_markdown)
+        search_text = " ".join(
+            part
+            for part in (
+                normalized_title,
+                normalized_entry_type,
+                source.source_id,
+                normalized_provenance,
+                normalized_search_metadata,
+            )
+            if part
+        ).lower()
+        metadata = {
+            "custom_campaign_slug": campaign_slug,
+            "provenance": normalized_provenance,
+            "search_metadata": normalized_search_metadata,
+            "body_format": "markdown",
+            "body_markdown": normalized_body_markdown,
+            "updated_by_user_id": actor_user_id,
+        }
+        body = {
+            "markdown": normalized_body_markdown,
+        }
+        existing_slug_entry = self.store.get_entry_by_slug(library.library_slug, slug)
+        if existing_slug_entry is not None and existing_slug_entry.entry_key != entry_key:
+            raise SystemsPolicyValidationError("That custom Systems entry slug is already in use.")
+        entry = self.store.upsert_entry(
+            library.library_slug,
+            source.source_id,
+            entry_key=entry_key,
+            entry_type=normalized_entry_type,
+            slug=slug,
+            title=normalized_title,
+            source_path=normalized_provenance,
+            search_text=search_text,
+            player_safe_default=normalized_visibility in {VISIBILITY_PUBLIC, VISIBILITY_PLAYERS},
+            dm_heavy=normalized_visibility in {VISIBILITY_DM, VISIBILITY_PRIVATE},
+            metadata=metadata,
+            body=body,
+            rendered_html=rendered_html,
+        )
+        self.update_campaign_entry_override(
+            campaign_slug,
+            entry_key=entry.entry_key,
+            visibility_override=normalized_visibility,
+            is_enabled_override=is_enabled_override,
+            actor_user_id=actor_user_id,
+            can_set_private=can_set_private,
+        )
+        _systems_service_cache_clear()
+        refreshed_entry = self.store.get_entry(library.library_slug, entry.entry_key)
+        if refreshed_entry is None:
+            raise RuntimeError("Failed to reload custom Systems entry.")
+        return refreshed_entry
 
     def get_campaign_policy(self, campaign_slug: str) -> CampaignSystemsPolicyRecord | None:
         library = self.get_campaign_library(campaign_slug)

@@ -133,6 +133,76 @@
     </div>
   </div>
   <p class="meta">Campaign-owned custom Systems entries are tracked separately from imported shared-library entries.</p>
+
+  <form
+    method="post"
+    action="{% if custom_systems_edit_entry %}{{ url_for('campaign_systems_control_panel_update_custom_entry', campaign_slug=campaign.slug, entry_slug=custom_systems_edit_entry.slug) }}{% else %}{{ url_for('campaign_systems_control_panel_create_custom_entry', campaign_slug=campaign.slug) }}{% endif %}"
+    class="stack-form"
+    id="systems-custom-entry-editor"
+  >
+    {% if systems_management_return_to %}
+      <input type="hidden" name="return_to" value="{{ systems_management_return_to }}">
+    {% endif %}
+    <div class="builder-field-grid">
+      <label class="field">
+        <span>Title</span>
+        <input type="text" name="custom_entry_title" value="{{ custom_systems_entry_form.title }}" required>
+      </label>
+      {% if custom_systems_edit_entry %}
+        <label class="field">
+          <span>URL slug</span>
+          <input type="text" value="{{ custom_systems_edit_entry.slug }}" disabled>
+        </label>
+      {% else %}
+        <label class="field">
+          <span>URL slug</span>
+          <input type="text" name="custom_entry_slug" value="{{ custom_systems_entry_form.slug_leaf }}">
+        </label>
+      {% endif %}
+      <label class="field">
+        <span>Entry type</span>
+        <select name="custom_entry_type">
+          {% for choice in custom_systems_entry_type_choices %}
+            <option value="{{ choice.value }}" {% if custom_systems_entry_form.entry_type == choice.value %}selected{% endif %}>
+              {{ choice.label }}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field">
+        <span>Visibility</span>
+        <select name="custom_entry_visibility">
+          {% for choice in custom_systems_entry_visibility_choices %}
+            <option value="{{ choice.value }}" {% if custom_systems_entry_form.visibility == choice.value %}selected{% endif %}>
+              {{ choice.label }}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <label class="field">
+      <span>Source/provenance</span>
+      <input type="text" name="custom_entry_provenance" value="{{ custom_systems_entry_form.provenance }}">
+    </label>
+    <label class="field">
+      <span>Searchable metadata</span>
+      <textarea name="custom_entry_search_metadata" rows="3">{{ custom_systems_entry_form.search_metadata }}</textarea>
+    </label>
+    <label class="field">
+      <span>Rendered body</span>
+      <textarea name="custom_entry_body_markdown" rows="10" required>{{ custom_systems_entry_form.body_markdown }}</textarea>
+    </label>
+    <div class="badge-list">
+      <button type="submit">{% if custom_systems_edit_entry %}Update custom entry{% else %}Create custom entry{% endif %}</button>
+      {% if custom_systems_edit_entry %}
+        <a
+          class="ghost-button"
+          href="{% if systems_management_return_to == 'dm-content-systems' %}{{ url_for('campaign_dm_content_subpage_view', campaign_slug=campaign.slug, dm_content_subpage='systems', _anchor='systems-custom-entries') }}{% else %}{{ url_for('campaign_systems_control_panel_view', campaign_slug=campaign.slug, _anchor='systems-custom-entries') }}{% endif %}"
+        >New entry</a>
+      {% endif %}
+    </div>
+  </form>
+
   {% if custom_entry_source_rows %}
     <div class="dm-content-list">
       {% for source in custom_entry_source_rows %}
@@ -150,13 +220,41 @@
           {% if source.entries %}
             <ul class="plain-list">
               {% for entry in source.entries %}
-                <li>
-                  {% if entry.href %}
-                    <a href="{{ entry.href }}">{{ entry.title }}</a>
-                  {% else %}
-                    {{ entry.title }}
-                  {% endif %}
-                  <span class="meta">{{ entry.entry_type_label }}</span>
+                <li id="systems-custom-entry-{{ entry.dom_id }}">
+                  <div class="dm-content-item__header">
+                    <div>
+                      {% if entry.href %}
+                        <a href="{{ entry.href }}">{{ entry.title }}</a>
+                      {% else %}
+                        {{ entry.title }}
+                      {% endif %}
+                      <p class="meta">{{ entry.entry_type_label }} | {{ entry.visibility_label }} | {{ entry.status_label }}</p>
+                      {% if entry.provenance %}
+                        <p class="meta">Source/provenance: {{ entry.provenance }}</p>
+                      {% endif %}
+                      {% if entry.search_metadata %}
+                        <p class="meta">Search metadata: {{ entry.search_metadata }}</p>
+                      {% endif %}
+                    </div>
+                    <div class="badge-list">
+                      <a class="ghost-button" href="{{ entry.edit_href }}">Edit</a>
+                      {% if entry.is_archived %}
+                        <form method="post" action="{{ entry.restore_href }}">
+                          {% if systems_management_return_to %}
+                            <input type="hidden" name="return_to" value="{{ systems_management_return_to }}">
+                          {% endif %}
+                          <button class="ghost-button" type="submit">Restore</button>
+                        </form>
+                      {% else %}
+                        <form method="post" action="{{ entry.archive_href }}">
+                          {% if systems_management_return_to %}
+                            <input type="hidden" name="return_to" value="{{ systems_management_return_to }}">
+                          {% endif %}
+                          <button class="ghost-button" type="submit">Archive</button>
+                        </form>
+                      {% endif %}
+                    </div>
+                  </div>
                 </li>
               {% endfor %}
             </ul>

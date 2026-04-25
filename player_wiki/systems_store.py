@@ -421,6 +421,92 @@ class SystemsStore:
         ).fetchone()
         return self._map_entry(row)
 
+    def upsert_entry(
+        self,
+        library_slug: str,
+        source_id: str,
+        *,
+        entry_key: str,
+        entry_type: str,
+        slug: str,
+        title: str,
+        source_page: str = "",
+        source_path: str = "",
+        search_text: str = "",
+        player_safe_default: bool = False,
+        dm_heavy: bool = False,
+        metadata: dict[str, Any] | None = None,
+        body: dict[str, Any] | None = None,
+        rendered_html: str = "",
+    ) -> SystemsEntryRecord:
+        normalized_entry_key = str(entry_key or "").strip()
+        if not normalized_entry_key:
+            raise ValueError("Systems entries need an entry key.")
+        existing = self.get_entry(library_slug, normalized_entry_key)
+        now = isoformat(utcnow())
+        created_at = isoformat(existing.created_at) if existing is not None else now
+        connection = get_db()
+        connection.execute(
+            """
+            INSERT INTO systems_entries (
+                library_slug,
+                source_id,
+                entry_key,
+                entry_type,
+                slug,
+                title,
+                source_page,
+                source_path,
+                search_text,
+                player_safe_default,
+                dm_heavy,
+                metadata_json,
+                body_json,
+                rendered_html,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(library_slug, entry_key) DO UPDATE SET
+                source_id = excluded.source_id,
+                entry_type = excluded.entry_type,
+                slug = excluded.slug,
+                title = excluded.title,
+                source_page = excluded.source_page,
+                source_path = excluded.source_path,
+                search_text = excluded.search_text,
+                player_safe_default = excluded.player_safe_default,
+                dm_heavy = excluded.dm_heavy,
+                metadata_json = excluded.metadata_json,
+                body_json = excluded.body_json,
+                rendered_html = excluded.rendered_html,
+                updated_at = excluded.updated_at
+            """,
+            (
+                library_slug,
+                source_id,
+                normalized_entry_key,
+                str(entry_type),
+                str(slug),
+                str(title),
+                str(source_page or ""),
+                str(source_path or ""),
+                str(search_text or ""),
+                int(bool(player_safe_default)),
+                int(bool(dm_heavy)),
+                json.dumps(metadata or {}, sort_keys=True),
+                json.dumps(body or {}, sort_keys=True),
+                str(rendered_html or ""),
+                created_at,
+                now,
+            ),
+        )
+        connection.commit()
+        entry = self.get_entry(library_slug, normalized_entry_key)
+        if entry is None:
+            raise RuntimeError("Failed to persist systems entry.")
+        return entry
+
     def list_entries_for_source(
         self,
         library_slug: str,

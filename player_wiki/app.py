@@ -1047,6 +1047,60 @@ def build_dm_player_wiki_page_summary(campaign, record, *, removal_safety=None) 
     }
 
 
+def build_dm_custom_systems_entry_type_choices() -> list[dict[str, str]]:
+    return [
+        {
+            "value": entry_type,
+            "label": SYSTEMS_ENTRY_TYPE_LABELS.get(entry_type, entry_type.replace("_", " ").title()),
+        }
+        for entry_type in sorted(SYSTEMS_ENTRY_TYPE_LABELS, key=systems_entry_type_sort_key)
+    ]
+
+
+def build_dm_custom_systems_entry_form(
+    *,
+    entry=None,
+    form_data=None,
+    visibility: str = "players",
+) -> dict[str, str]:
+    data = form_data if form_data is not None else {}
+    if data:
+        return {
+            "title": str(data.get("custom_entry_title") or ""),
+            "slug_leaf": str(data.get("custom_entry_slug") or ""),
+            "entry_type": str(data.get("custom_entry_type") or "rule"),
+            "visibility": str(data.get("custom_entry_visibility") or "players"),
+            "provenance": str(data.get("custom_entry_provenance") or ""),
+            "search_metadata": str(data.get("custom_entry_search_metadata") or ""),
+            "body_markdown": str(data.get("custom_entry_body_markdown") or ""),
+        }
+    if entry is not None:
+        metadata = dict(entry.metadata or {})
+        body = dict(entry.body or {})
+        return {
+            "title": entry.title,
+            "slug_leaf": entry.slug,
+            "entry_type": entry.entry_type,
+            "visibility": visibility,
+            "provenance": str(metadata.get("provenance") or entry.source_path or ""),
+            "search_metadata": str(metadata.get("search_metadata") or ""),
+            "body_markdown": str(body.get("markdown") or metadata.get("body_markdown") or ""),
+        }
+    return {
+        "title": "",
+        "slug_leaf": "",
+        "entry_type": "rule",
+        "visibility": "players",
+        "provenance": "",
+        "search_metadata": "",
+        "body_markdown": "",
+    }
+
+
+def custom_systems_entry_dom_id(entry) -> str:
+    return re.sub(r"[^a-zA-Z0-9_-]+", "-", str(entry.slug or entry.id)).strip("-") or "custom-entry"
+
+
 def get_character_read_subpage_labels(
     *,
     include_spellcasting: bool = False,
@@ -6245,6 +6299,8 @@ def create_app() -> Flask:
         dm_condition_form_overrides=None,
         player_wiki_edit_record=None,
         player_wiki_form_data=None,
+        custom_systems_edit_entry=None,
+        custom_systems_entry_form_data=None,
     ) -> dict[str, object]:
         campaign = load_campaign_context(campaign_slug)
         dm_content_service = get_campaign_dm_content_service()
@@ -6264,6 +6320,8 @@ def create_app() -> Flask:
                     campaign_slug,
                     return_to="dm-content-systems",
                     active_nav="dm_content",
+                    custom_systems_edit_entry=custom_systems_edit_entry,
+                    custom_systems_entry_form_data=custom_systems_entry_form_data,
                 )
                 systems_management_count = int(systems_management_context.get("systems_management_count") or 0)
             else:
@@ -6426,6 +6484,8 @@ def create_app() -> Flask:
         *,
         return_to: str = "",
         active_nav: str = "systems",
+        custom_systems_edit_entry=None,
+        custom_systems_entry_form_data=None,
     ) -> dict[str, object]:
         campaign = load_campaign_context(campaign_slug)
         user = get_current_user()
@@ -6517,13 +6577,70 @@ def create_app() -> Flask:
         for state in source_states:
             if state.source.license_class != "custom_campaign":
                 continue
-            entry_count = systems_service.count_entries_for_source(campaign_slug, state.source.source_id)
-            custom_entry_count += entry_count
             entries = systems_service.store.list_entries_for_source(
                 state.source.library_slug,
                 state.source.source_id,
-                limit=10,
+                limit=None,
             )
+            entry_count = len(entries)
+            custom_entry_count += entry_count
+            active_entry_count = 0
+            entry_rows = []
+            for entry in entries:
+                override = systems_service.store.get_campaign_entry_override(campaign_slug, entry.entry_key)
+                is_archived = bool(override is not None and override.is_enabled_override is False)
+                if not is_archived:
+                    active_entry_count += 1
+                entry_visibility = (
+                    override.visibility_override
+                    if override is not None and override.visibility_override
+                    else systems_service.get_default_entry_visibility_for_campaign(campaign_slug, entry)
+                )
+                entry_rows.append(
+                    {
+                        "dom_id": custom_systems_entry_dom_id(entry),
+                        "title": entry.title,
+                        "entry_key": entry.entry_key,
+                        "entry_slug": entry.slug,
+                        "entry_type_label": SYSTEMS_ENTRY_TYPE_LABELS.get(
+                            entry.entry_type,
+                            entry.entry_type.replace("_", " ").title(),
+                        ),
+                        "source_id": entry.source_id,
+                        "visibility_label": VISIBILITY_LABELS.get(entry_visibility, entry_visibility),
+                        "status_label": "Archived" if is_archived else "Active",
+                        "is_archived": is_archived,
+                        "provenance": str((entry.metadata or {}).get("provenance") or entry.source_path or ""),
+                        "search_metadata": str((entry.metadata or {}).get("search_metadata") or ""),
+                        "rendered_html": entry.rendered_html,
+                        "href": (
+                            url_for(
+                                "campaign_systems_entry_detail",
+                                campaign_slug=campaign.slug,
+                                entry_slug=entry.slug,
+                            )
+                            if can_access_campaign_systems_entry(campaign_slug, entry.slug)
+                            else ""
+                        ),
+                        "edit_href": url_for(
+                            "campaign_systems_control_panel_edit_custom_entry",
+                            campaign_slug=campaign.slug,
+                            entry_slug=entry.slug,
+                            return_to=return_to or None,
+                            _anchor="systems-custom-entry-editor",
+                        ),
+                        "archive_href": url_for(
+                            "campaign_systems_control_panel_archive_custom_entry",
+                            campaign_slug=campaign.slug,
+                            entry_slug=entry.slug,
+                        ),
+                        "restore_href": url_for(
+                            "campaign_systems_control_panel_restore_custom_entry",
+                            campaign_slug=campaign.slug,
+                            entry_slug=entry.slug,
+                        ),
+                    }
+                )
             custom_entry_source_rows.append(
                 {
                     "source_id": state.source.source_id,
@@ -6534,27 +6651,25 @@ def create_app() -> Flask:
                         state.default_visibility,
                     ),
                     "entry_count": entry_count,
-                    "entries": [
-                        {
-                            "title": entry.title,
-                            "entry_type_label": SYSTEMS_ENTRY_TYPE_LABELS.get(
-                                entry.entry_type,
-                                entry.entry_type.replace("_", " ").title(),
-                            ),
-                            "source_id": entry.source_id,
-                            "href": (
-                                url_for(
-                                    "campaign_systems_entry_detail",
-                                    campaign_slug=campaign.slug,
-                                    entry_slug=entry.slug,
-                                )
-                                if can_access_campaign_systems_entry(campaign_slug, entry.slug)
-                                else ""
-                            ),
-                        }
-                        for entry in entries
-                    ],
+                    "active_entry_count": active_entry_count,
+                    "archived_entry_count": entry_count - active_entry_count,
+                    "entries": entry_rows,
                 }
+            )
+
+        custom_entry_form_visibility = "players"
+        if custom_systems_edit_entry is not None:
+            edit_override = systems_service.store.get_campaign_entry_override(
+                campaign_slug,
+                custom_systems_edit_entry.entry_key,
+            )
+            custom_entry_form_visibility = (
+                edit_override.visibility_override
+                if edit_override is not None and edit_override.visibility_override
+                else systems_service.get_default_entry_visibility_for_campaign(
+                    campaign_slug,
+                    custom_systems_edit_entry,
+                )
             )
 
         import_run_rows = []
@@ -6596,6 +6711,14 @@ def create_app() -> Flask:
             "entry_override_count": len(entry_override_rows),
             "custom_entry_source_rows": custom_entry_source_rows,
             "custom_entry_count": custom_entry_count,
+            "custom_systems_edit_entry": custom_systems_edit_entry,
+            "custom_systems_entry_form": build_dm_custom_systems_entry_form(
+                entry=custom_systems_edit_entry,
+                form_data=custom_systems_entry_form_data,
+                visibility=custom_entry_form_visibility,
+            ),
+            "custom_systems_entry_type_choices": build_dm_custom_systems_entry_type_choices(),
+            "custom_systems_entry_visibility_choices": list_visibility_choices(include_private=include_private),
             "import_run_rows": import_run_rows,
             "import_run_count": len(import_run_rows),
             "systems_management_count": len(source_rows),
@@ -8026,6 +8149,263 @@ def create_app() -> Flask:
                 anchor="systems-entry-overrides",
             )
         return redirect(url_for("campaign_systems_control_panel_view", campaign_slug=campaign_slug))
+
+    def render_custom_systems_entry_management(
+        campaign_slug: str,
+        *,
+        return_to_dm_content_systems: bool,
+        edit_entry=None,
+        form_data=None,
+        status_code: int = 200,
+    ):
+        if return_to_dm_content_systems:
+            return render_template(
+                "dm_content.html",
+                **build_campaign_dm_content_page_context(
+                    campaign_slug,
+                    dm_content_subpage="systems",
+                    custom_systems_edit_entry=edit_entry,
+                    custom_systems_entry_form_data=form_data,
+                ),
+            ), status_code
+        return render_template(
+            "campaign_systems_control_panel.html",
+            **build_campaign_systems_control_context(
+                campaign_slug,
+                custom_systems_edit_entry=edit_entry,
+                custom_systems_entry_form_data=form_data,
+            ),
+        ), status_code
+
+    def redirect_after_custom_systems_entry(
+        campaign_slug: str,
+        *,
+        return_to_dm_content_systems: bool,
+        anchor: str = "systems-custom-entries",
+    ):
+        if return_to_dm_content_systems:
+            return redirect_to_campaign_dm_content(
+                campaign_slug,
+                subpage="systems",
+                anchor=anchor,
+            )
+        return redirect(
+            url_for(
+                "campaign_systems_control_panel_view",
+                campaign_slug=campaign_slug,
+                _anchor=anchor,
+            )
+        )
+
+    @app.post("/campaigns/<campaign_slug>/systems/control-panel/custom-entries")
+    @login_required
+    def campaign_systems_control_panel_create_custom_entry(campaign_slug: str):
+        load_campaign_context(campaign_slug)
+        if not can_manage_campaign_systems(campaign_slug):
+            abort(403)
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        return_to_dm_content_systems = request.form.get("return_to") == "dm-content-systems"
+        try:
+            entry = get_systems_service().create_custom_campaign_entry(
+                campaign_slug,
+                title=request.form.get("custom_entry_title", ""),
+                entry_type=request.form.get("custom_entry_type", ""),
+                slug_leaf=request.form.get("custom_entry_slug", ""),
+                provenance=request.form.get("custom_entry_provenance", ""),
+                visibility=request.form.get("custom_entry_visibility", ""),
+                search_metadata=request.form.get("custom_entry_search_metadata", ""),
+                body_markdown=request.form.get("custom_entry_body_markdown", ""),
+                actor_user_id=user.id,
+                can_set_private=bool(user.is_admin),
+            )
+        except SystemsPolicyValidationError as exc:
+            flash(str(exc), "error")
+            return render_custom_systems_entry_management(
+                campaign_slug,
+                return_to_dm_content_systems=return_to_dm_content_systems,
+                form_data=request.form,
+                status_code=400,
+            )
+
+        get_auth_store().write_audit_event(
+            event_type="campaign_systems_custom_entry_created",
+            actor_user_id=user.id,
+            campaign_slug=campaign_slug,
+            metadata={
+                "entry_key": entry.entry_key,
+                "entry_slug": entry.slug,
+                "entry_type": entry.entry_type,
+                "source": "campaign_systems_control_panel",
+            },
+        )
+        flash(f"Custom Systems entry {entry.title} saved.", "success")
+        return redirect_after_custom_systems_entry(
+            campaign_slug,
+            return_to_dm_content_systems=return_to_dm_content_systems,
+            anchor=f"systems-custom-entry-{custom_systems_entry_dom_id(entry)}",
+        )
+
+    @app.get("/campaigns/<campaign_slug>/systems/control-panel/custom-entries/<entry_slug>/edit")
+    @login_required
+    def campaign_systems_control_panel_edit_custom_entry(campaign_slug: str, entry_slug: str):
+        load_campaign_context(campaign_slug)
+        if not can_manage_campaign_systems(campaign_slug):
+            abort(403)
+
+        entry = get_systems_service().get_custom_campaign_entry_by_slug(campaign_slug, entry_slug)
+        if entry is None:
+            abort(404)
+        return render_custom_systems_entry_management(
+            campaign_slug,
+            return_to_dm_content_systems=request.args.get("return_to") == "dm-content-systems",
+            edit_entry=entry,
+        )
+
+    @app.post("/campaigns/<campaign_slug>/systems/control-panel/custom-entries/<entry_slug>")
+    @login_required
+    def campaign_systems_control_panel_update_custom_entry(campaign_slug: str, entry_slug: str):
+        load_campaign_context(campaign_slug)
+        if not can_manage_campaign_systems(campaign_slug):
+            abort(403)
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        systems_service = get_systems_service()
+        edit_entry = systems_service.get_custom_campaign_entry_by_slug(campaign_slug, entry_slug)
+        if edit_entry is None:
+            abort(404)
+
+        return_to_dm_content_systems = request.form.get("return_to") == "dm-content-systems"
+        try:
+            entry = systems_service.update_custom_campaign_entry(
+                campaign_slug,
+                entry_slug,
+                title=request.form.get("custom_entry_title", ""),
+                entry_type=request.form.get("custom_entry_type", ""),
+                provenance=request.form.get("custom_entry_provenance", ""),
+                visibility=request.form.get("custom_entry_visibility", ""),
+                search_metadata=request.form.get("custom_entry_search_metadata", ""),
+                body_markdown=request.form.get("custom_entry_body_markdown", ""),
+                actor_user_id=user.id,
+                can_set_private=bool(user.is_admin),
+            )
+        except SystemsPolicyValidationError as exc:
+            flash(str(exc), "error")
+            return render_custom_systems_entry_management(
+                campaign_slug,
+                return_to_dm_content_systems=return_to_dm_content_systems,
+                edit_entry=edit_entry,
+                form_data=request.form,
+                status_code=400,
+            )
+
+        get_auth_store().write_audit_event(
+            event_type="campaign_systems_custom_entry_updated",
+            actor_user_id=user.id,
+            campaign_slug=campaign_slug,
+            metadata={
+                "entry_key": entry.entry_key,
+                "entry_slug": entry.slug,
+                "entry_type": entry.entry_type,
+                "source": "campaign_systems_control_panel",
+            },
+        )
+        flash(f"Custom Systems entry {entry.title} updated.", "success")
+        return redirect_after_custom_systems_entry(
+            campaign_slug,
+            return_to_dm_content_systems=return_to_dm_content_systems,
+            anchor=f"systems-custom-entry-{custom_systems_entry_dom_id(entry)}",
+        )
+
+    @app.post("/campaigns/<campaign_slug>/systems/control-panel/custom-entries/<entry_slug>/archive")
+    @login_required
+    def campaign_systems_control_panel_archive_custom_entry(campaign_slug: str, entry_slug: str):
+        load_campaign_context(campaign_slug)
+        if not can_manage_campaign_systems(campaign_slug):
+            abort(403)
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        return_to_dm_content_systems = request.form.get("return_to") == "dm-content-systems"
+        try:
+            entry = get_systems_service().archive_custom_campaign_entry(
+                campaign_slug,
+                entry_slug,
+                actor_user_id=user.id,
+            )
+        except SystemsPolicyValidationError as exc:
+            flash(str(exc), "error")
+            return redirect_after_custom_systems_entry(
+                campaign_slug,
+                return_to_dm_content_systems=return_to_dm_content_systems,
+            )
+
+        get_auth_store().write_audit_event(
+            event_type="campaign_systems_custom_entry_archived",
+            actor_user_id=user.id,
+            campaign_slug=campaign_slug,
+            metadata={
+                "entry_key": entry.entry_key,
+                "entry_slug": entry.slug,
+                "source": "campaign_systems_control_panel",
+            },
+        )
+        flash(f"Archived custom Systems entry {entry.title}.", "success")
+        return redirect_after_custom_systems_entry(
+            campaign_slug,
+            return_to_dm_content_systems=return_to_dm_content_systems,
+            anchor=f"systems-custom-entry-{custom_systems_entry_dom_id(entry)}",
+        )
+
+    @app.post("/campaigns/<campaign_slug>/systems/control-panel/custom-entries/<entry_slug>/restore")
+    @login_required
+    def campaign_systems_control_panel_restore_custom_entry(campaign_slug: str, entry_slug: str):
+        load_campaign_context(campaign_slug)
+        if not can_manage_campaign_systems(campaign_slug):
+            abort(403)
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        return_to_dm_content_systems = request.form.get("return_to") == "dm-content-systems"
+        try:
+            entry = get_systems_service().restore_custom_campaign_entry(
+                campaign_slug,
+                entry_slug,
+                actor_user_id=user.id,
+            )
+        except SystemsPolicyValidationError as exc:
+            flash(str(exc), "error")
+            return redirect_after_custom_systems_entry(
+                campaign_slug,
+                return_to_dm_content_systems=return_to_dm_content_systems,
+            )
+
+        get_auth_store().write_audit_event(
+            event_type="campaign_systems_custom_entry_restored",
+            actor_user_id=user.id,
+            campaign_slug=campaign_slug,
+            metadata={
+                "entry_key": entry.entry_key,
+                "entry_slug": entry.slug,
+                "source": "campaign_systems_control_panel",
+            },
+        )
+        flash(f"Restored custom Systems entry {entry.title}.", "success")
+        return redirect_after_custom_systems_entry(
+            campaign_slug,
+            return_to_dm_content_systems=return_to_dm_content_systems,
+            anchor=f"systems-custom-entry-{custom_systems_entry_dom_id(entry)}",
+        )
 
     @app.get("/campaigns/<campaign_slug>/dm-content")
     @campaign_scope_access_required("dm_content")

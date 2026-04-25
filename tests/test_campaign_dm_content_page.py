@@ -243,6 +243,126 @@ def test_dm_content_systems_page_separates_systems_lanes_and_returns_after_sourc
         assert state.default_visibility == "players"
 
 
+def test_dm_content_systems_page_can_create_edit_archive_and_restore_custom_entries(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/custom-entries",
+        data={
+            "return_to": "dm-content-systems",
+            "custom_entry_title": "Harbor Spark",
+            "custom_entry_slug": "harbor-spark",
+            "custom_entry_type": "spell",
+            "custom_entry_visibility": "players",
+            "custom_entry_provenance": "Linden Pass table notes",
+            "custom_entry_search_metadata": "storm dock signal",
+            "custom_entry_body_markdown": "## Effect\nLightning gathers around the harbor bells.",
+        },
+        follow_redirects=False,
+    )
+
+    assert create_response.status_code == 302
+    assert "/campaigns/linden-pass/dm-content/systems" in create_response.headers["Location"]
+    assert "#systems-custom-entry-custom-linden-pass-harbor-spark" in create_response.headers["Location"]
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        entry = service.get_custom_campaign_entry_by_slug("linden-pass", "custom-linden-pass-harbor-spark")
+        assert entry is not None
+        assert entry.title == "Harbor Spark"
+        assert entry.entry_type == "spell"
+        assert entry.source_id == "CUSTOM-LINDEN-PASS"
+        assert entry.source_path == "Linden Pass table notes"
+        assert "storm dock signal" in entry.search_text
+        assert "<h2>Effect</h2>" in entry.rendered_html
+        override = store.get_campaign_entry_override("linden-pass", entry.entry_key)
+        assert override is not None
+        assert override.visibility_override == "players"
+        assert override.is_enabled_override is None
+        assert service.is_entry_enabled_for_campaign("linden-pass", entry) is True
+
+    detail_response = client.get("/campaigns/linden-pass/systems/entries/custom-linden-pass-harbor-spark")
+    detail_body = detail_response.get_data(as_text=True)
+    assert detail_response.status_code == 200
+    assert "Harbor Spark" in detail_body
+    assert "Lightning gathers around the harbor bells." in detail_body
+
+    edit_response = client.get(
+        "/campaigns/linden-pass/systems/control-panel/custom-entries/custom-linden-pass-harbor-spark/edit"
+        "?return_to=dm-content-systems"
+    )
+    edit_body = edit_response.get_data(as_text=True)
+    assert edit_response.status_code == 200
+    assert 'value="Harbor Spark"' in edit_body
+    assert 'name="return_to" value="dm-content-systems"' in edit_body
+
+    update_response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/custom-entries/custom-linden-pass-harbor-spark",
+        data={
+            "return_to": "dm-content-systems",
+            "custom_entry_title": "Harbor Spark Revised",
+            "custom_entry_type": "rule",
+            "custom_entry_visibility": "dm",
+            "custom_entry_provenance": "Revised table notes",
+            "custom_entry_search_metadata": "updated signal",
+            "custom_entry_body_markdown": "Updated custom body.",
+        },
+        follow_redirects=False,
+    )
+
+    assert update_response.status_code == 302
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        entry = service.get_custom_campaign_entry_by_slug("linden-pass", "custom-linden-pass-harbor-spark")
+        assert entry is not None
+        assert entry.title == "Harbor Spark Revised"
+        assert entry.entry_type == "rule"
+        assert entry.source_path == "Revised table notes"
+        assert "updated signal" in entry.search_text
+        assert "Updated custom body." in entry.rendered_html
+        override = store.get_campaign_entry_override("linden-pass", entry.entry_key)
+        assert override is not None
+        assert override.visibility_override == "dm"
+
+    archive_response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/custom-entries/custom-linden-pass-harbor-spark/archive",
+        data={"return_to": "dm-content-systems"},
+        follow_redirects=False,
+    )
+
+    assert archive_response.status_code == 302
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        entry = service.get_custom_campaign_entry_by_slug("linden-pass", "custom-linden-pass-harbor-spark")
+        assert entry is not None
+        override = store.get_campaign_entry_override("linden-pass", entry.entry_key)
+        assert override is not None
+        assert override.is_enabled_override is False
+        assert service.is_entry_enabled_for_campaign("linden-pass", entry) is False
+
+    restore_response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/custom-entries/custom-linden-pass-harbor-spark/restore",
+        data={"return_to": "dm-content-systems"},
+        follow_redirects=False,
+    )
+
+    assert restore_response.status_code == 302
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        entry = service.get_custom_campaign_entry_by_slug("linden-pass", "custom-linden-pass-harbor-spark")
+        assert entry is not None
+        override = store.get_campaign_entry_override("linden-pass", entry.entry_key)
+        assert override is not None
+        assert override.is_enabled_override is None
+        assert service.is_entry_enabled_for_campaign("linden-pass", entry) is True
+
+
 def test_dm_can_upload_statblock_and_use_it_to_seed_an_npc_combatant(app, client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
