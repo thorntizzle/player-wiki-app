@@ -171,6 +171,8 @@ from .session_presenter import (
     present_session_messages,
     present_session_record,
 )
+from .systems_importer import Dnd5eSystemsImporter, SUPPORTED_ENTRY_TYPES
+from .systems_ingest import SystemsIngestError, extracted_systems_archive
 from .systems_service import LICENSE_CLASS_LABELS, SystemsPolicyValidationError, SystemsService
 from .systems_store import SystemsStore
 from .version import build_app_metadata
@@ -1055,6 +1057,41 @@ def build_dm_custom_systems_entry_type_choices() -> list[dict[str, str]]:
         }
         for entry_type in sorted(SYSTEMS_ENTRY_TYPE_LABELS, key=systems_entry_type_sort_key)
     ]
+
+
+def build_systems_import_entry_type_choices() -> list[dict[str, str]]:
+    return [
+        {
+            "value": entry_type,
+            "label": SYSTEMS_ENTRY_TYPE_LABELS.get(entry_type, entry_type.replace("_", " ").title()),
+        }
+        for entry_type in sorted(SUPPORTED_ENTRY_TYPES, key=systems_entry_type_sort_key)
+    ]
+
+
+def build_systems_import_form(form_data=None) -> dict[str, object]:
+    selected_source_ids: list[str] = []
+    selected_entry_types: list[str] = []
+    import_version = ""
+    if form_data is not None:
+        if hasattr(form_data, "getlist"):
+            selected_source_ids = [
+                str(value or "").strip().upper()
+                for value in form_data.getlist("source_ids")
+                if str(value or "").strip()
+            ]
+            selected_entry_types = [
+                str(value or "").strip().lower()
+                for value in form_data.getlist("entry_types")
+                if str(value or "").strip()
+            ]
+        import_version = str(form_data.get("import_version") or "").strip()
+
+    return {
+        "source_ids": selected_source_ids,
+        "entry_types": selected_entry_types,
+        "import_version": import_version,
+    }
 
 
 def build_dm_custom_systems_entry_form(
@@ -6301,6 +6338,7 @@ def create_app() -> Flask:
         player_wiki_form_data=None,
         custom_systems_edit_entry=None,
         custom_systems_entry_form_data=None,
+        systems_import_form_data=None,
     ) -> dict[str, object]:
         campaign = load_campaign_context(campaign_slug)
         dm_content_service = get_campaign_dm_content_service()
@@ -6322,6 +6360,7 @@ def create_app() -> Flask:
                     active_nav="dm_content",
                     custom_systems_edit_entry=custom_systems_edit_entry,
                     custom_systems_entry_form_data=custom_systems_entry_form_data,
+                    systems_import_form_data=systems_import_form_data,
                 )
                 systems_management_count = int(systems_management_context.get("systems_management_count") or 0)
             else:
@@ -6486,6 +6525,7 @@ def create_app() -> Flask:
         active_nav: str = "systems",
         custom_systems_edit_entry=None,
         custom_systems_entry_form_data=None,
+        systems_import_form_data=None,
     ) -> dict[str, object]:
         campaign = load_campaign_context(campaign_slug)
         user = get_current_user()
@@ -6691,12 +6731,28 @@ def create_app() -> Flask:
                         "status": import_run.status,
                         "import_version": import_run.import_version,
                         "imported_count": summary.get("imported_count"),
-                        "type_summary": type_summary[:6],
+                        "type_summary": type_summary,
+                        "source_files": source_files if isinstance(source_files, list) else [],
                         "source_file_count": len(source_files) if isinstance(source_files, list) else None,
+                        "error": str(summary.get("error") or ""),
                         "started_at": import_run.started_at,
                         "completed_at": import_run.completed_at,
                     }
                 )
+
+        import_source_choices = [
+            {
+                "source_id": state.source.source_id,
+                "title": state.source.title,
+                "license_class_label": LICENSE_CLASS_LABELS.get(
+                    state.source.license_class,
+                    state.source.license_class.replace("_", " ").title(),
+                ),
+                "entry_count": systems_service.count_entries_for_source(campaign_slug, state.source.source_id),
+            }
+            for state in source_states
+            if state.source.source_id != "RULES" and state.source.license_class != "custom_campaign"
+        ]
 
         return {
             "campaign": campaign,
@@ -6719,6 +6775,10 @@ def create_app() -> Flask:
             ),
             "custom_systems_entry_type_choices": build_dm_custom_systems_entry_type_choices(),
             "custom_systems_entry_visibility_choices": list_visibility_choices(include_private=include_private),
+            "systems_import_form": build_systems_import_form(systems_import_form_data),
+            "systems_import_source_choices": import_source_choices,
+            "systems_import_entry_type_choices": build_systems_import_entry_type_choices(),
+            "can_import_shared_systems": bool(user and user.is_admin),
             "import_run_rows": import_run_rows,
             "import_run_count": len(import_run_rows),
             "systems_management_count": len(source_rows),
@@ -8405,6 +8465,135 @@ def create_app() -> Flask:
             campaign_slug,
             return_to_dm_content_systems=return_to_dm_content_systems,
             anchor=f"systems-custom-entry-{custom_systems_entry_dom_id(entry)}",
+        )
+
+    @app.post("/campaigns/<campaign_slug>/systems/control-panel/imports/dnd5e")
+    @login_required
+    def campaign_systems_control_panel_import_dnd5e(campaign_slug: str):
+        load_campaign_context(campaign_slug)
+        if not can_manage_campaign_systems(campaign_slug):
+            abort(403)
+
+        user = get_current_user()
+        if user is None or not user.is_admin:
+            abort(403)
+
+        return_to_dm_content_systems = request.form.get("return_to") == "dm-content-systems"
+
+        def render_import_error(message: str, *, status_code: int = 400):
+            flash(message, "error")
+            if return_to_dm_content_systems:
+                return render_template(
+                    "dm_content.html",
+                    **build_campaign_dm_content_page_context(
+                        campaign_slug,
+                        dm_content_subpage="systems",
+                        systems_import_form_data=request.form,
+                    ),
+                ), status_code
+            return render_template(
+                "campaign_systems_control_panel.html",
+                **build_campaign_systems_control_context(
+                    campaign_slug,
+                    systems_import_form_data=request.form,
+                ),
+            ), status_code
+
+        systems_service = get_systems_service()
+        library_slug = systems_service.get_campaign_library_slug(campaign_slug)
+        if library_slug != "DND-5E":
+            return render_import_error("Browser source import is currently only available for DND-5E Systems libraries.")
+
+        source_ids: list[str] = []
+        seen_source_ids: set[str] = set()
+        for raw_source_id in request.form.getlist("source_ids"):
+            source_id = str(raw_source_id or "").strip().upper()
+            if not source_id or source_id in seen_source_ids:
+                continue
+            source_ids.append(source_id)
+            seen_source_ids.add(source_id)
+        if not source_ids:
+            return render_import_error("Choose at least one DND-5E source to import.")
+
+        supported_browser_sources = {
+            state.source.source_id
+            for state in systems_service.list_campaign_source_states(campaign_slug)
+            if state.source.source_id != "RULES" and state.source.license_class != "custom_campaign"
+        }
+        unsupported_source_ids = sorted(set(source_ids) - supported_browser_sources)
+        if unsupported_source_ids:
+            return render_import_error("Unsupported source IDs: " + ", ".join(unsupported_source_ids) + ".")
+
+        selected_entry_types: list[str] = []
+        seen_entry_types: set[str] = set()
+        supported_entry_types = set(SUPPORTED_ENTRY_TYPES)
+        for raw_entry_type in request.form.getlist("entry_types"):
+            entry_type = str(raw_entry_type or "").strip().lower()
+            if not entry_type or entry_type in seen_entry_types:
+                continue
+            selected_entry_types.append(entry_type)
+            seen_entry_types.add(entry_type)
+        invalid_entry_types = sorted(set(selected_entry_types) - supported_entry_types)
+        if invalid_entry_types:
+            return render_import_error("Unsupported entry types: " + ", ".join(invalid_entry_types) + ".")
+
+        upload = request.files.get("systems_import_archive")
+        archive_filename = str(getattr(upload, "filename", "") or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+        if upload is None or not archive_filename:
+            return render_import_error("Choose a ZIP archive to import.")
+        if not archive_filename.lower().endswith(".zip"):
+            return render_import_error("Systems source imports must be uploaded as a .zip archive.")
+
+        archive_bytes = upload.read()
+        if not archive_bytes:
+            return render_import_error("Choose a non-empty ZIP archive to import.")
+
+        import_version = request.form.get("import_version", "").strip() or Path(archive_filename).stem
+        source_path_label = f"browser-upload:{archive_filename}"
+        try:
+            with extracted_systems_archive(archive_bytes) as data_root:
+                importer = Dnd5eSystemsImporter(
+                    store=systems_service.store,
+                    systems_service=systems_service,
+                    data_root=data_root,
+                )
+                results = importer.import_sources(
+                    source_ids,
+                    entry_types=selected_entry_types or None,
+                    started_by_user_id=user.id,
+                    import_version=import_version,
+                    source_path_label=source_path_label,
+                )
+        except (FileNotFoundError, SystemsIngestError, ValueError) as exc:
+            return render_import_error(str(exc))
+
+        get_auth_store().write_audit_event(
+            event_type="systems_dnd5e_source_imported",
+            actor_user_id=user.id,
+            campaign_slug=campaign_slug,
+            metadata={
+                "library_slug": library_slug,
+                "source_ids": source_ids,
+                "entry_types": selected_entry_types or ["all"],
+                "import_run_ids": [result.import_run_id for result in results],
+                "archive_filename": archive_filename,
+                "source": "campaign_systems_control_panel",
+            },
+        )
+        result_summary = ", ".join(f"{result.source_id} ({result.imported_count} entries)" for result in results)
+        flash(f"Imported DND-5E Systems sources: {result_summary}.", "success")
+        if return_to_dm_content_systems:
+            return redirect_to_campaign_dm_content(
+                campaign_slug,
+                subpage="systems",
+                anchor="systems-import-history",
+            )
+        return redirect(
+            url_for(
+                "campaign_systems_control_panel_view",
+                campaign_slug=campaign_slug,
+                _anchor="systems-import-history",
+            )
         )
 
     @app.get("/campaigns/<campaign_slug>/dm-content")

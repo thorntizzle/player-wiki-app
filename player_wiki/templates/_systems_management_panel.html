@@ -269,6 +269,61 @@
   {% endif %}
 </section>
 
+<section class="card" id="systems-shared-imports">
+  <div class="section-heading">
+    <div>
+      <h2>Shared Source Imports</h2>
+      <p class="meta">Admin-only DND-5E library refreshes from uploaded source ZIPs.</p>
+    </div>
+  </div>
+  {% if can_import_shared_systems %}
+    <form
+      method="post"
+      action="{{ url_for('campaign_systems_control_panel_import_dnd5e', campaign_slug=campaign.slug) }}"
+      enctype="multipart/form-data"
+      class="stack-form"
+    >
+      {% if systems_management_return_to %}
+        <input type="hidden" name="return_to" value="{{ systems_management_return_to }}">
+      {% endif %}
+      <label class="field">
+        <span>5etools-style source ZIP</span>
+        <input type="file" name="systems_import_archive" accept=".zip,application/zip,application/x-zip-compressed" required>
+      </label>
+      <label class="field">
+        <span>Import label</span>
+        <input type="text" name="import_version" value="{{ systems_import_form.import_version }}" placeholder="5etools-v2.25.3">
+      </label>
+      <div class="field">
+        <span>DND-5E sources</span>
+        <div class="builder-field-grid">
+          {% for source in systems_import_source_choices %}
+            <label class="checkbox-label">
+              <input type="checkbox" name="source_ids" value="{{ source.source_id }}" {% if source.source_id in systems_import_form.source_ids %}checked{% endif %}>
+              {{ source.source_id }} | {{ source.title }}
+            </label>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="field">
+        <span>Entry families</span>
+        <div class="builder-field-grid">
+          {% for choice in systems_import_entry_type_choices %}
+            <label class="checkbox-label">
+              <input type="checkbox" name="entry_types" value="{{ choice.value }}" {% if choice.value in systems_import_form.entry_types %}checked{% endif %}>
+              {{ choice.label }}
+            </label>
+          {% endfor %}
+        </div>
+        <p class="meta">Leave entry families unchecked to import every supported family for the selected source.</p>
+      </div>
+      <button type="submit">Import selected sources</button>
+    </form>
+  {% else %}
+    <p class="meta">Shared-source ZIP imports are limited to app admins. Campaign DMs can still review import runs and manage campaign policy here.</p>
+  {% endif %}
+</section>
+
 <section class="card" id="systems-import-history">
   <div class="section-heading">
     <div>
@@ -301,6 +356,22 @@
           </div>
           {% if run.type_summary %}
             <p class="meta">{{ run.type_summary | join(", ") }}</p>
+          {% endif %}
+          {% if run.error %}
+            <p class="meta">Error: {{ run.error }}</p>
+          {% endif %}
+          {% if run.source_files %}
+            <details class="feature-detail">
+              <summary>Review imported files and entry counts</summary>
+              {% if run.type_summary %}
+                <p class="meta">{{ run.type_summary | join(", ") }}</p>
+              {% endif %}
+              <ul class="plain-list">
+                {% for source_file in run.source_files %}
+                  <li class="meta">{{ source_file }}</li>
+                {% endfor %}
+              </ul>
+            </details>
           {% endif %}
         </article>
       {% endfor %}

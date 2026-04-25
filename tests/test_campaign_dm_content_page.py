@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from io import BytesIO
+import json
 import sqlite3
 from uuid import uuid4
+import zipfile
 
 from player_wiki.app import create_app
 from player_wiki.config import Config
 from player_wiki.db import init_database
+from player_wiki.auth_store import AuthStore
 from tests.sample_data import build_test_campaigns_dir
 
 TEST_STATBLOCK_MARKDOWN = b"""AT-A-GLANCE (Quick Reference)
@@ -53,6 +56,47 @@ Speed 30 ft., fly 45 ft.
 
 STR 10 (+0)  DEX 16 (+3)  CON 12 (+1)  INT 16 (+3)  WIS 14 (+2)  CHA 11 (+0)
 """
+
+
+def _build_systems_import_archive() -> bytes:
+    archive_buffer = BytesIO()
+    with zipfile.ZipFile(archive_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "data/bestiary/bestiary-mm.json",
+            json.dumps(
+                {
+                    "monster": [
+                        {
+                            "name": "Goblin",
+                            "source": "MM",
+                            "page": 166,
+                            "size": ["S"],
+                            "type": {"type": "humanoid", "tags": ["goblinoid"]},
+                            "alignment": ["N", "E"],
+                            "ac": [{"ac": 15, "from": ["leather armor", "shield"]}],
+                            "hp": {"average": 7, "formula": "2d6"},
+                            "speed": {"walk": 30},
+                            "str": 8,
+                            "dex": 14,
+                            "con": 10,
+                            "int": 10,
+                            "wis": 8,
+                            "cha": 8,
+                            "action": [
+                                {
+                                    "name": "Scimitar",
+                                    "entries": [
+                                        "{@atk mw} {@hit 4} to hit, reach 5 ft., one target. {@h}5 ({@damage 1d6 + 2}) slashing damage."
+                                    ],
+                                }
+                            ],
+                        }
+                    ]
+                },
+                indent=2,
+            ),
+        )
+    return archive_buffer.getvalue()
 
 
 def _list_statblocks(app):
@@ -241,6 +285,76 @@ def test_dm_content_systems_page_separates_systems_lanes_and_returns_after_sourc
         state = app.extensions["systems_service"].get_campaign_source_state("linden-pass", source_id)
         assert state is not None
         assert state.default_visibility == "players"
+
+
+def test_admin_can_import_dnd5e_systems_source_from_dm_content_systems(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    dm_page = client.get("/campaigns/linden-pass/dm-content/systems")
+    dm_body = dm_page.get_data(as_text=True)
+    assert dm_page.status_code == 200
+    assert "Shared Source Imports" in dm_body
+    assert "Shared-source ZIP imports are limited to app admins" in dm_body
+    assert 'name="systems_import_archive"' not in dm_body
+
+    blocked_response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/imports/dnd5e",
+        data={"source_ids": ["MM"]},
+        follow_redirects=False,
+    )
+    assert blocked_response.status_code == 403
+
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    admin_page = client.get("/campaigns/linden-pass/dm-content/systems")
+    admin_body = admin_page.get_data(as_text=True)
+    assert admin_page.status_code == 200
+    assert 'name="systems_import_archive"' in admin_body
+    assert 'action="/campaigns/linden-pass/systems/control-panel/imports/dnd5e"' in admin_body
+    assert "Import selected sources" in admin_body
+
+    archive_bytes = _build_systems_import_archive()
+    import_response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/imports/dnd5e",
+        data={
+            "return_to": "dm-content-systems",
+            "source_ids": ["MM"],
+            "entry_types": ["monster"],
+            "import_version": "browser-mm-import",
+            "systems_import_archive": (BytesIO(archive_bytes), "browser-mm-import.zip"),
+        },
+        follow_redirects=False,
+    )
+
+    assert import_response.status_code == 302
+    assert "/campaigns/linden-pass/dm-content/systems" in import_response.headers["Location"]
+    assert "#systems-import-history" in import_response.headers["Location"]
+
+    with app.app_context():
+        store = app.extensions["systems_store"]
+        entries = store.list_entries_for_source("DND-5E", "MM", entry_type="monster", limit=None)
+        assert any(entry.title == "Goblin" for entry in entries)
+        import_run = store.list_import_runs(library_slug="DND-5E", source_id="MM", limit=1)[0]
+        assert import_run.status == "completed"
+        assert import_run.import_version == "browser-mm-import"
+        assert import_run.source_path == "browser-upload:browser-mm-import.zip"
+        assert import_run.started_by_user_id == users["admin"]["id"]
+        assert import_run.summary["imported_count"] == 1
+        assert import_run.summary["imported_by_type"] == {"monster": 1}
+        assert import_run.summary["source_files"] == ["data/bestiary/bestiary-mm.json"]
+        events = AuthStore().list_recent_audit_events(
+            event_type="systems_dnd5e_source_imported",
+            campaign_slug="linden-pass",
+        )
+        assert any(event.metadata.get("import_run_ids") == [import_run.id] for event in events)
+
+    review_page = client.get("/campaigns/linden-pass/dm-content/systems")
+    review_body = review_page.get_data(as_text=True)
+    assert review_page.status_code == 200
+    assert "MM import #" in review_body
+    assert "browser-mm-import" in review_body
+    assert "1 entries" in review_body
+    assert "Monsters: 1" in review_body
+    assert "data/bestiary/bestiary-mm.json" in review_body
+    assert "browser-upload:browser-mm-import.zip" not in review_body
 
 
 def test_dm_content_systems_page_can_create_edit_archive_and_restore_custom_entries(

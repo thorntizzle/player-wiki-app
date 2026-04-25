@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 import os
-import tempfile
 from pathlib import Path
+import secrets
+import shutil
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -16,5 +19,20 @@ def local_temp_root() -> Path:
     return root.resolve()
 
 
-def temporary_directory(*, prefix: str = "player-wiki-") -> tempfile.TemporaryDirectory[str]:
-    return tempfile.TemporaryDirectory(prefix=prefix, dir=str(local_temp_root()))
+@contextmanager
+def temporary_directory(*, prefix: str = "player-wiki-") -> Iterator[str]:
+    root = local_temp_root()
+    for _ in range(100):
+        path = root / f"{prefix}{secrets.token_hex(8)}"
+        try:
+            path.mkdir()
+        except FileExistsError:
+            continue
+        break
+    else:
+        raise FileExistsError(f"Could not create a unique temporary directory under {root}.")
+
+    try:
+        yield str(path)
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
