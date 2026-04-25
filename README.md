@@ -134,7 +134,7 @@ The app now treats deployed functionality and live content as separate concerns:
 - live SQLite-backed content is updated through the JSON API
 - live campaign files on Fly live on the mounted `/data/campaigns` volume instead of inside the image
 - campaign config, published assets, published wiki pages, and character definition/import files can also be managed through the JSON API
-- DMs/admins can create, edit, unpublish/archive, and hard-delete published wiki page files from the browser under DM Content -> Player Wiki; hard delete is blocked when backlinks, character hooks, or session provenance make removal risky
+- DMs/admins can create, edit, attach images to, unpublish/archive, and hard-delete published wiki page files from the browser under DM Content -> Player Wiki; hard delete is blocked when backlinks, character hooks, or session provenance make removal risky
 - shared DND 5E source ingest can now be driven through an admin-only JSON API upload plus import-run history endpoints
 - systems source policy and combat tracker state now have API coverage in addition to the browser UI
 - the Systems UI now exposes an initial DM-default DMG book-backed browse slice (`Treasure`, `Running the Game`, and `Dungeon Master's Workshop`) through the normal source/category/detail path while keeping it hidden from players under source policy
@@ -301,7 +301,7 @@ Player-facing visibility is controlled by:
 
 Editorial-only fields such as `source_ref` stay in frontmatter and internal tooling. They are not shown in the normal wiki page UI.
 
-Published page files still matter operationally because they are the portable mirror format and the draft/publish pipeline still writes them, but the running app now reads published wiki pages from SQLite. Browser writes from DM Content -> Player Wiki, API writes, and publish flows update both the DB read model and the mirrored Markdown file so local/Fly sync and backups still behave the same way. In the browser lane, unpublish/archive keeps a risky page file recoverable, while hard delete is reserved for pages without backlink, character-hook, or session-provenance blockers.
+Published page files still matter operationally because they are the portable mirror format and the draft/publish pipeline still writes them, but the running app now reads published wiki pages from SQLite. Browser writes from DM Content -> Player Wiki, API writes, and publish flows update both the DB read model and the mirrored Markdown file so local/Fly sync and backups still behave the same way. In the browser lane, inline image uploads copy PNG, JPG, GIF, or WEBP files into campaign assets and update page image frontmatter in the same save. Unpublish/archive keeps a risky page file recoverable, while hard delete is reserved for pages without backlink, character-hook, or session-provenance blockers.
 
 ## Campaign Config
 

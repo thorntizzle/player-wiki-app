@@ -1,10 +1,21 @@
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
 
 import yaml
 
 from player_wiki.campaign_content_service import write_campaign_page_file
+
+
+TEST_PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n"
+    b"\x00\x00\x00\rIHDR"
+    b"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00"
+    b"\x90wS\xde"
+    b"\x00\x00\x00\x0cIDAT\x08\xd7c\xf8\xff\xff?\x00\x05\xfe\x02\xfeA\xd9\x8f\x9b"
+    b"\x00\x00\x00\x00IEND\xaeB`\x82"
+)
 
 
 def _page_form(**overrides):
@@ -35,6 +46,15 @@ def _campaign_page_path(app, page_ref: str) -> Path:
         / "linden-pass"
         / "content"
         / f"{page_ref}.md"
+    )
+
+
+def _campaign_asset_path(app, asset_ref: str) -> Path:
+    return (
+        Path(app.config["TEST_CAMPAIGNS_DIR"])
+        / "linden-pass"
+        / "assets"
+        / Path(*asset_ref.split("/"))
     )
 
 
@@ -96,6 +116,61 @@ def test_dm_can_create_player_wiki_page_from_dm_content(app, client, sign_in, us
         campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
         assert campaign is not None
         assert campaign.pages["notes/field-report"].title == "Field Report"
+
+
+def test_dm_can_upload_player_wiki_page_image_from_dm_content(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/dm-content/player-wiki/pages",
+        data={
+            **_page_form(
+                image_alt="Uploaded field report image.",
+                image_caption="A browser-uploaded image attached to the field report.",
+            ),
+            "image_file": (BytesIO(TEST_PNG_BYTES), "field-report.png"),
+        },
+        follow_redirects=False,
+    )
+
+    assert create_response.status_code == 302
+    asset_ref = "wiki-pages/notes/field-report.png"
+    asset_path = _campaign_asset_path(app, asset_ref)
+    assert asset_path.read_bytes() == TEST_PNG_BYTES
+
+    page_path = _campaign_page_path(app, "notes/field-report")
+    raw_text = page_path.read_text(encoding="utf-8")
+    metadata = yaml.safe_load(raw_text.split("---", 2)[1])
+    assert metadata["image"] == asset_ref
+    assert metadata["image_alt"] == "Uploaded field report image."
+    assert metadata["image_caption"] == "A browser-uploaded image attached to the field report."
+
+    published_page = client.get("/campaigns/linden-pass/pages/notes/field-report")
+    published_html = published_page.get_data(as_text=True)
+    assert published_page.status_code == 200
+    assert "/campaigns/linden-pass/assets/wiki-pages/notes/field-report.png" in published_html
+    assert "Uploaded field report image." in published_html
+    assert "A browser-uploaded image attached to the field report." in published_html
+
+    asset_response = client.get("/campaigns/linden-pass/assets/wiki-pages/notes/field-report.png")
+    assert asset_response.status_code == 200
+    assert asset_response.data == TEST_PNG_BYTES
+
+
+def test_dm_player_wiki_image_upload_rejects_unsupported_files(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.post(
+        "/campaigns/linden-pass/dm-content/player-wiki/pages",
+        data={
+            **_page_form(slug_leaf="bad-image"),
+            "image_file": (BytesIO(b"not an image"), "bad-image.txt"),
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Wiki page images must be PNG, JPG, GIF, or WEBP files." in response.get_data(as_text=True)
+    assert not _campaign_page_path(app, "notes/bad-image").exists()
 
 
 def test_dm_can_update_unpublish_and_delete_player_wiki_page(app, client, sign_in, users):

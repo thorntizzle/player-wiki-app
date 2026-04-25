@@ -702,6 +702,45 @@ def normalize_dm_player_wiki_form(campaign, *, form_data, existing_record=None) 
     return page_ref, metadata, body_markdown
 
 
+def normalize_dm_player_wiki_image_upload(upload) -> tuple[str, bytes] | None:
+    filename = Path(str(getattr(upload, "filename", "") or "").strip()).name
+    if not upload or not filename:
+        return None
+
+    extension = Path(filename).suffix.lower()
+    if extension not in ALLOWED_SESSION_ARTICLE_IMAGE_EXTENSIONS:
+        raise ValueError("Wiki page images must be PNG, JPG, GIF, or WEBP files.")
+
+    data_blob = upload.read()
+    if not data_blob:
+        raise ValueError("Uploaded wiki page images cannot be empty.")
+    if len(data_blob) > 8 * 1024 * 1024:
+        raise ValueError("Wiki page images must stay under 8 MB.")
+
+    return extension, data_blob
+
+
+def build_dm_player_wiki_image_asset_ref(page_ref: str, extension: str) -> str:
+    normalized_page_ref = slugify(page_ref).strip("/")
+    if not normalized_page_ref:
+        normalized_page_ref = "wiki-page"
+    normalized_extension = extension if extension.startswith(".") else f".{extension}"
+    return f"wiki-pages/{normalized_page_ref}{normalized_extension.lower()}"
+
+
+def apply_dm_player_wiki_image_upload(campaign, page_ref: str, metadata: dict[str, object]) -> str:
+    upload = request.files.get("image_file")
+    normalized_upload = normalize_dm_player_wiki_image_upload(upload)
+    if normalized_upload is None:
+        return ""
+
+    extension, data_blob = normalized_upload
+    asset_ref = build_dm_player_wiki_image_asset_ref(page_ref, extension)
+    write_campaign_asset_file(campaign, asset_ref, data_blob=data_blob)
+    metadata["image"] = asset_ref
+    return asset_ref
+
+
 def normalize_dm_player_wiki_ref_value(value: object) -> str:
     if isinstance(value, dict):
         for key in ("page_ref", "slug", "page_slug"):
@@ -3438,13 +3477,14 @@ def create_app() -> Flask:
                     else f"DM Content currently requires {dm_content_visibility_label} access."
                 ),
                 capabilities=[
-                    "Create, edit, unpublish/archive, or safely hard-delete player wiki Markdown pages from the Player Wiki lane.",
+                    "Create, edit, attach images to, unpublish/archive, or safely hard-delete player wiki Markdown pages from the Player Wiki lane.",
                     "Store uploaded statblocks for later encounter seeding.",
                     "Prepare staged session articles for later reveal.",
                     "Maintain custom combat conditions alongside the built-in DND-5E list.",
                 ],
                 limits=[
                     "Player wiki edits still need normal spoiler and reveal-safety judgment before publication.",
+                    "Inline wiki-page image uploads are copied into campaign assets and referenced from page frontmatter.",
                     "Hard delete is blocked when a page still has wiki backlinks, character hooks, or session provenance.",
                     "The statblock parser is currently implemented for DND-5E-style markdown.",
                     "Uploads should be UTF-8 markdown with recognizable Armor Class, Hit Points, and Speed lines.",
@@ -7753,6 +7793,7 @@ def create_app() -> Flask:
             )
             if existing_record is not None:
                 raise ValueError("That page slug is already in use. Choose a different slug.")
+            uploaded_image_asset_ref = apply_dm_player_wiki_image_upload(campaign, page_ref, metadata)
             record = write_campaign_page_file(
                 campaign,
                 page_ref,
@@ -7778,6 +7819,7 @@ def create_app() -> Flask:
                 "page_ref": record.page_ref,
                 "route_slug": record.page.route_slug,
                 "source": "dm_content_player_wiki",
+                "uploaded_image_asset_ref": uploaded_image_asset_ref,
             },
         )
         flash(f"Created wiki page {record.page.title}.", "success")
@@ -7818,6 +7860,11 @@ def create_app() -> Flask:
                 form_data=request.form,
                 existing_record=existing_record,
             )
+            uploaded_image_asset_ref = apply_dm_player_wiki_image_upload(
+                campaign,
+                normalized_page_ref,
+                metadata,
+            )
             record = write_campaign_page_file(
                 campaign,
                 normalized_page_ref,
@@ -7844,6 +7891,7 @@ def create_app() -> Flask:
                 "page_ref": record.page_ref,
                 "route_slug": record.page.route_slug,
                 "source": "dm_content_player_wiki",
+                "uploaded_image_asset_ref": uploaded_image_asset_ref,
             },
         )
         flash(f"Updated wiki page {record.page.title}.", "success")
