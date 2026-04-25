@@ -1742,6 +1742,24 @@ button {
   margin: 0;
 }
 
+.dm-content-item__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.dm-content-delete-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.dm-content-search-form {
+  margin-bottom: 1rem;
+}
+
 .dm-content-preview {
   margin: 0;
   padding: 0.95rem 1rem;

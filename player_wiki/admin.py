@@ -30,6 +30,10 @@ EVENT_TITLES = {
     "api_token_revoked": "API token revoked",
     "user_disabled": "User disabled",
     "campaign_visibility_updated": "Campaign visibility updated",
+    "campaign_wiki_page_created": "Wiki page created",
+    "campaign_wiki_page_updated": "Wiki page updated",
+    "campaign_wiki_page_unpublished": "Wiki page unpublished",
+    "campaign_wiki_page_deleted": "Wiki page deleted",
     "campaign_systems_policy_updated": "Systems policy updated",
     "campaign_systems_source_updated": "Systems source updated",
     "campaign_systems_entry_override_updated": "Systems entry override updated",
@@ -41,6 +45,7 @@ SOURCE_LABELS = {
     "invite": "invite setup",
     "reset_token": "reset link",
     "campaign_control_panel": "campaign control panel",
+    "dm_content_player_wiki": "DM Content player wiki",
     "campaign_systems_control_panel": "systems control panel",
     "character_controls": "character controls",
 }

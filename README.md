@@ -120,7 +120,7 @@ The app is private by default now:
 - authenticated users only see campaigns they can access
 - app-wide `admin` users can see every campaign
 - campaign access for `dm`, `player`, and `observer` is managed separately from the Markdown content
-- the wiki experience itself is read-only in MVP
+- the player-facing wiki stays read-only for players, while DMs/admins can manage published pages through the DM Content `Player Wiki` lane or the content API
 
 For local authoring, content reload is enabled by default. That makes Windows iteration easy: edit content in the vault, run the app locally, and use the CLI to manage access without needing a real server or domain first.
 
@@ -134,6 +134,7 @@ The app now treats deployed functionality and live content as separate concerns:
 - live SQLite-backed content is updated through the JSON API
 - live campaign files on Fly live on the mounted `/data/campaigns` volume instead of inside the image
 - campaign config, published assets, published wiki pages, and character definition/import files can also be managed through the JSON API
+- DMs/admins can create, edit, unpublish, and hard-delete published wiki page files from the browser under DM Content -> Player Wiki
 - shared DND 5E source ingest can now be driven through an admin-only JSON API upload plus import-run history endpoints
 - systems source policy and combat tracker state now have API coverage in addition to the browser UI
 - the Systems UI now exposes an initial DM-default DMG book-backed browse slice (`Treasure`, `Running the Game`, and `Dungeon Master's Workshop`) through the normal source/category/detail path while keeping it hidden from players under source policy
@@ -300,7 +301,7 @@ Player-facing visibility is controlled by:
 
 Editorial-only fields such as `source_ref` stay in frontmatter and internal tooling. They are not shown in the normal wiki page UI.
 
-Published page files still matter operationally because they are the portable mirror format and the draft/publish pipeline still writes them, but the running app now reads published wiki pages from SQLite. API writes and publish flows update both the DB read model and the mirrored Markdown file so local/Fly sync and backups still behave the same way.
+Published page files still matter operationally because they are the portable mirror format and the draft/publish pipeline still writes them, but the running app now reads published wiki pages from SQLite. Browser writes from DM Content -> Player Wiki, API writes, and publish flows update both the DB read model and the mirrored Markdown file so local/Fly sync and backups still behave the same way.
 
 ## Campaign Config
 

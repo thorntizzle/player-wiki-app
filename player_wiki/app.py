@@ -100,9 +100,14 @@ from .campaign_combat_service import (
 )
 from .campaign_combat_store import CampaignCombatStore
 from .campaign_content_service import (
+    CampaignContentError,
     delete_campaign_asset_file,
     delete_campaign_character_file,
+    delete_campaign_page_file,
+    get_campaign_page_file,
+    list_campaign_page_files,
     write_campaign_asset_file,
+    write_campaign_page_file,
 )
 from .campaign_dm_content_service import CampaignDMContentService, CampaignDMContentValidationError
 from .campaign_dm_content_store import CampaignDMContentStore
@@ -136,6 +141,7 @@ from .combat_models import (
 from .db import get_db_query_metrics, register_db, reset_db_query_metrics
 from .models import section_sort_key, subsection_sort_key
 from .session_article_publisher import (
+    SESSION_ARTICLE_SECTION_TARGETS,
     SessionArticlePublishError,
     build_default_publish_options,
     find_published_page_for_session_article,
@@ -166,6 +172,7 @@ from .version import build_app_metadata
 SESSION_ARTICLE_FORM_MODES = {"manual", "upload", "wiki"}
 DM_CONTENT_SUBPAGE_LABELS = {
     "statblocks": "Statblocks",
+    "player-wiki": "Player Wiki",
     "staged-articles": "Staged Articles",
     "conditions": "Conditions",
 }
@@ -488,6 +495,12 @@ def normalize_dm_content_subpage(value: str, *, allow_default: bool = False) -> 
         return "statblocks" if allow_default else ""
 
     aliases = {
+        "player-wiki": "player-wiki",
+        "playerwiki": "player-wiki",
+        "wiki": "player-wiki",
+        "wiki-pages": "player-wiki",
+        "player-wiki-pages": "player-wiki",
+        "pages": "player-wiki",
         "statblock": "statblocks",
         "statblocks": "statblocks",
         "staged-article": "staged-articles",
@@ -525,6 +538,209 @@ def build_dm_statblock_subsection_groups(statblocks) -> tuple[list[object], list
             }
         )
     return top_level_statblocks, subsection_groups
+
+
+def parse_dm_player_wiki_aliases(value: str) -> list[str]:
+    aliases = []
+    for line in str(value or "").replace(",", "\n").splitlines():
+        alias = line.strip()
+        if alias and alias not in aliases:
+            aliases.append(alias)
+    return aliases
+
+
+def normalize_dm_player_wiki_int(value: str, *, field_label: str, default: int = 0) -> int:
+    raw_value = str(value or "").strip()
+    if not raw_value:
+        return default
+    try:
+        normalized_value = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{field_label} must be a whole number.") from exc
+    if normalized_value < 0:
+        raise ValueError(f"{field_label} must be zero or greater.")
+    return normalized_value
+
+
+def normalize_dm_player_wiki_page_type(value: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().lower()).strip("-")
+    if not normalized:
+        raise ValueError("Page type is required.")
+    return normalized
+
+
+def build_dm_player_wiki_form(campaign, *, record=None, form_data=None) -> dict[str, object]:
+    data = form_data if form_data is not None else {}
+    if data:
+        return {
+            "title": str(data.get("title") or ""),
+            "slug_leaf": str(data.get("slug_leaf") or ""),
+            "section": str(data.get("section") or "Notes"),
+            "page_type": str(data.get("page_type") or "note"),
+            "subsection": str(data.get("subsection") or ""),
+            "summary": str(data.get("summary") or ""),
+            "aliases": str(data.get("aliases") or ""),
+            "display_order": str(data.get("display_order") or "10000"),
+            "reveal_after_session": str(data.get("reveal_after_session") or campaign.current_session),
+            "source_ref": str(data.get("source_ref") or ""),
+            "image": str(data.get("image") or ""),
+            "image_alt": str(data.get("image_alt") or ""),
+            "image_caption": str(data.get("image_caption") or ""),
+            "body_markdown": str(data.get("body_markdown") or ""),
+            "published": str(data.get("published") or "") == "1",
+        }
+
+    if record is not None:
+        page = record.page
+        metadata = dict(record.metadata or {})
+        return {
+            "title": page.title,
+            "slug_leaf": record.page_ref.rsplit("/", 1)[-1],
+            "section": page.section,
+            "page_type": page.page_type,
+            "subsection": page.subsection,
+            "summary": page.summary,
+            "aliases": "\n".join(page.aliases),
+            "display_order": str(page.display_order),
+            "reveal_after_session": str(page.reveal_after_session),
+            "source_ref": page.source_ref,
+            "image": page.image_path,
+            "image_alt": page.image_alt,
+            "image_caption": page.image_caption,
+            "body_markdown": record.body_markdown,
+            "published": bool(metadata.get("published", page.published)),
+        }
+
+    target = SESSION_ARTICLE_SECTION_TARGETS["Notes"]
+    return {
+        "title": "",
+        "slug_leaf": "",
+        "section": "Notes",
+        "page_type": str(target["page_type"]),
+        "subsection": "",
+        "summary": "",
+        "aliases": "",
+        "display_order": "10000",
+        "reveal_after_session": str(campaign.current_session),
+        "source_ref": "",
+        "image": "",
+        "image_alt": "",
+        "image_caption": "",
+        "body_markdown": "",
+        "published": True,
+    }
+
+
+def normalize_dm_player_wiki_form(campaign, *, form_data, existing_record=None) -> tuple[str, dict[str, object], str]:
+    title = str(form_data.get("title") or "").strip()
+    if not title:
+        raise ValueError("Wiki pages need a title.")
+    if len(title) > 200:
+        raise ValueError("Wiki page titles must stay under 200 characters.")
+
+    section = str(form_data.get("section") or "").strip()
+    if section not in SESSION_ARTICLE_SECTION_TARGETS:
+        raise ValueError("Choose a supported wiki section.")
+
+    page_type = normalize_dm_player_wiki_page_type(str(form_data.get("page_type") or ""))
+    summary = str(form_data.get("summary") or "").strip()
+    if len(summary) > 400:
+        raise ValueError("Wiki page summaries must stay under 400 characters.")
+
+    display_order = normalize_dm_player_wiki_int(
+        str(form_data.get("display_order") or ""),
+        field_label="Display order",
+        default=10_000,
+    )
+    reveal_after_session = normalize_dm_player_wiki_int(
+        str(form_data.get("reveal_after_session") or ""),
+        field_label="Reveal after session",
+        default=campaign.current_session,
+    )
+    body_markdown = str(form_data.get("body_markdown") or "").strip()
+    published = str(form_data.get("published") or "") == "1"
+
+    if existing_record is None:
+        slug_leaf = slugify(str(form_data.get("slug_leaf") or ""))
+        if not slug_leaf:
+            raise ValueError("Choose a page slug before saving this wiki page.")
+        target = SESSION_ARTICLE_SECTION_TARGETS[section]
+        page_ref = f"{target['target_subdir']}/{slug_leaf}"
+        metadata: dict[str, object] = {"slug": page_ref}
+    else:
+        page_ref = existing_record.page_ref
+        metadata = dict(existing_record.metadata or {})
+        metadata.setdefault("slug", existing_record.page.route_slug or existing_record.page_ref)
+
+    metadata.update(
+        {
+            "title": title,
+            "section": section,
+            "type": page_type,
+            "summary": summary,
+            "aliases": parse_dm_player_wiki_aliases(str(form_data.get("aliases") or "")),
+            "display_order": display_order,
+            "reveal_after_session": reveal_after_session,
+            "published": published,
+        }
+    )
+
+    optional_text_fields = {
+        "subsection": str(form_data.get("subsection") or "").strip(),
+        "source_ref": str(form_data.get("source_ref") or "").strip(),
+        "image": str(form_data.get("image") or "").strip(),
+        "image_alt": str(form_data.get("image_alt") or "").strip(),
+        "image_caption": str(form_data.get("image_caption") or "").strip(),
+    }
+    for key, value in optional_text_fields.items():
+        if value:
+            metadata[key] = value
+        else:
+            metadata.pop(key, None)
+
+    return page_ref, metadata, body_markdown
+
+
+def build_dm_player_wiki_page_summary(campaign, record) -> dict[str, object]:
+    page = record.page
+    route_slug = page.route_slug
+    route_page = campaign.pages.get(route_slug)
+    is_visible = campaign.is_page_visible(route_page or page)
+    search_text = " ".join(
+        str(part or "")
+        for part in (
+            record.page_ref,
+            page.title,
+            page.section,
+            page.subsection,
+            page.page_type,
+            page.summary,
+            page.source_ref,
+        )
+    ).lower()
+    status_label = (
+        "Visible"
+        if is_visible
+        else "Unpublished"
+        if not page.published
+        else f"Reveals after session {page.reveal_after_session}"
+    )
+    return {
+        "page_ref": record.page_ref,
+        "dom_id": re.sub(r"[^a-zA-Z0-9_-]+", "-", record.page_ref).strip("-") or "page",
+        "title": page.title,
+        "section": page.section,
+        "subsection": page.subsection,
+        "page_type": page.page_type,
+        "summary": page.summary,
+        "source_ref": page.source_ref,
+        "image_path": page.image_path,
+        "published": page.published,
+        "is_visible": is_visible,
+        "status_label": status_label,
+        "route_slug": route_slug,
+        "search_text": search_text,
+    }
 
 
 def get_character_read_subpage_labels(
@@ -2996,7 +3212,7 @@ def create_app() -> Flask:
             build_help_surface(
                 anchor="dm-content",
                 label="DM Content",
-                summary="DM-only prep library for uploaded statblocks and custom conditions.",
+                summary="DM-facing content management for player wiki pages, statblocks, staged articles, and custom conditions.",
                 status_label=(
                     "Open"
                     if can_view_dm_content and combat_system_supported
@@ -3017,11 +3233,13 @@ def create_app() -> Flask:
                     else f"DM Content currently requires {dm_content_visibility_label} access."
                 ),
                 capabilities=[
+                    "Create, edit, unpublish, or delete player wiki Markdown pages from the Player Wiki lane.",
                     "Store uploaded statblocks for later encounter seeding.",
+                    "Prepare staged session articles for later reveal.",
                     "Maintain custom combat conditions alongside the built-in DND-5E list.",
-                    "Keep reusable encounter prep separate from published player-facing wiki content.",
                 ],
                 limits=[
+                    "Player wiki edits still need normal spoiler and reveal-safety judgment before publication.",
                     "The statblock parser is currently implemented for DND-5E-style markdown.",
                     "Uploads should be UTF-8 markdown with recognizable Armor Class, Hit Points, and Speed lines.",
                     "Custom conditions augment the built-in list rather than replacing it.",
@@ -5658,15 +5876,39 @@ def create_app() -> Flask:
         campaign_slug: str,
         *,
         dm_content_subpage: str = "statblocks",
+        player_wiki_edit_record=None,
+        player_wiki_form_data=None,
     ) -> dict[str, object]:
         campaign = load_campaign_context(campaign_slug)
         dm_content_service = get_campaign_dm_content_service()
         can_manage_dm_content = can_manage_campaign_dm_content(campaign_slug)
+        can_manage_content = can_manage_campaign_content(campaign_slug)
         can_manage_session = can_manage_campaign_session(campaign_slug)
         normalized_subpage = normalize_dm_content_subpage(dm_content_subpage, allow_default=True)
         statblocks = dm_content_service.list_statblocks(campaign_slug)
         top_level_statblocks, statblock_subsection_groups = build_dm_statblock_subsection_groups(statblocks)
         custom_conditions = dm_content_service.list_condition_definitions(campaign_slug)
+        player_wiki_records = []
+        player_wiki_pages = []
+        player_wiki_page_count = len(campaign.pages) if can_manage_content else 0
+        player_wiki_query = request.args.get("q", "").strip()
+        if can_manage_content and normalized_subpage == "player-wiki":
+            player_wiki_records = list_campaign_page_files(
+                campaign,
+                page_store=get_campaign_page_store(),
+            )
+            player_wiki_page_count = len(player_wiki_records)
+            player_wiki_pages = [
+                build_dm_player_wiki_page_summary(campaign, record)
+                for record in player_wiki_records
+            ]
+            if player_wiki_query:
+                lowered_query = player_wiki_query.lower()
+                player_wiki_pages = [
+                    page
+                    for page in player_wiki_pages
+                    if lowered_query in str(page["search_text"])
+                ]
         session_service = get_campaign_session_service()
         staged_article_count = (
             len(session_service.list_articles(campaign_slug, statuses=("staged",)))
@@ -5688,10 +5930,14 @@ def create_app() -> Flask:
 
         dm_content_subpages = []
         for subpage_key, label in DM_CONTENT_SUBPAGE_LABELS.items():
+            if subpage_key == "player-wiki" and not can_manage_content:
+                continue
             if subpage_key == "staged-articles" and not can_manage_session:
                 continue
             count = 0
-            if subpage_key == "statblocks":
+            if subpage_key == "player-wiki":
+                count = player_wiki_page_count
+            elif subpage_key == "statblocks":
                 count = len(statblocks)
             elif subpage_key == "staged-articles":
                 count = staged_article_count
@@ -5720,10 +5966,21 @@ def create_app() -> Flask:
             "dm_statblock_show_subsections": bool(statblock_subsection_groups),
             "custom_condition_definitions": custom_conditions,
             "can_manage_dm_content": can_manage_dm_content,
+            "can_manage_content": can_manage_content,
             "can_manage_session": can_manage_session,
             "dm_content_subpage": normalized_subpage,
             "dm_content_subpage_label": DM_CONTENT_SUBPAGE_LABELS[normalized_subpage],
             "dm_content_subpages": dm_content_subpages,
+            "player_wiki_pages": player_wiki_pages,
+            "player_wiki_page_count": player_wiki_page_count,
+            "player_wiki_query": player_wiki_query,
+            "player_wiki_section_choices": list_section_choices(),
+            "player_wiki_form": build_dm_player_wiki_form(
+                campaign,
+                record=player_wiki_edit_record,
+                form_data=player_wiki_form_data,
+            ),
+            "player_wiki_edit_record": player_wiki_edit_record,
             "staged_articles": staged_articles,
             "staged_article_count": staged_article_count,
             "session_article_form_mode": session_article_form_mode,
@@ -7230,6 +7487,254 @@ def create_app() -> Flask:
             dm_content_subpage=normalized_subpage,
         )
         return render_template("dm_content.html", **context)
+
+    @app.get("/campaigns/<campaign_slug>/dm-content/player-wiki/pages/<path:page_ref>/edit")
+    @campaign_scope_access_required("dm_content")
+    def campaign_dm_content_edit_player_wiki_page(campaign_slug: str, page_ref: str):
+        if not can_manage_campaign_content(campaign_slug):
+            abort(403)
+
+        campaign = load_campaign_context(campaign_slug)
+        try:
+            record = get_campaign_page_file(
+                campaign,
+                page_ref,
+                page_store=get_campaign_page_store(),
+            )
+        except (CampaignContentError, ValueError):
+            abort(404)
+        if record is None:
+            abort(404)
+
+        context = build_campaign_dm_content_page_context(
+            campaign_slug,
+            dm_content_subpage="player-wiki",
+            player_wiki_edit_record=record,
+        )
+        return render_template("dm_content.html", **context)
+
+    @app.post("/campaigns/<campaign_slug>/dm-content/player-wiki/pages")
+    @campaign_scope_access_required("dm_content")
+    def campaign_dm_content_create_player_wiki_page(campaign_slug: str):
+        if not can_manage_campaign_content(campaign_slug):
+            abort(403)
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        campaign = load_campaign_context(campaign_slug)
+        try:
+            page_ref, metadata, body_markdown = normalize_dm_player_wiki_form(
+                campaign,
+                form_data=request.form,
+            )
+            existing_record = get_campaign_page_file(
+                campaign,
+                page_ref,
+                page_store=get_campaign_page_store(),
+            )
+            if existing_record is not None:
+                raise ValueError("That page slug is already in use. Choose a different slug.")
+            record = write_campaign_page_file(
+                campaign,
+                page_ref,
+                metadata=metadata,
+                body_markdown=body_markdown,
+                page_store=get_campaign_page_store(),
+            )
+        except (CampaignContentError, ValueError) as exc:
+            flash(str(exc), "error")
+            context = build_campaign_dm_content_page_context(
+                campaign_slug,
+                dm_content_subpage="player-wiki",
+                player_wiki_form_data=request.form,
+            )
+            return render_template("dm_content.html", **context), 400
+
+        repository_store.refresh()
+        get_auth_store().write_audit_event(
+            event_type="campaign_wiki_page_created",
+            actor_user_id=user.id,
+            campaign_slug=campaign_slug,
+            metadata={
+                "page_ref": record.page_ref,
+                "route_slug": record.page.route_slug,
+                "source": "dm_content_player_wiki",
+            },
+        )
+        flash(f"Created wiki page {record.page.title}.", "success")
+        return redirect(
+            url_for(
+                "campaign_dm_content_edit_player_wiki_page",
+                campaign_slug=campaign_slug,
+                page_ref=record.page_ref,
+                _anchor="dm-content-player-wiki-editor",
+            )
+        )
+
+    @app.post("/campaigns/<campaign_slug>/dm-content/player-wiki/pages/<path:page_ref>")
+    @campaign_scope_access_required("dm_content")
+    def campaign_dm_content_update_player_wiki_page(campaign_slug: str, page_ref: str):
+        if not can_manage_campaign_content(campaign_slug):
+            abort(403)
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        campaign = load_campaign_context(campaign_slug)
+        try:
+            existing_record = get_campaign_page_file(
+                campaign,
+                page_ref,
+                page_store=get_campaign_page_store(),
+            )
+        except (CampaignContentError, ValueError):
+            abort(404)
+        if existing_record is None:
+            abort(404)
+
+        try:
+            normalized_page_ref, metadata, body_markdown = normalize_dm_player_wiki_form(
+                campaign,
+                form_data=request.form,
+                existing_record=existing_record,
+            )
+            record = write_campaign_page_file(
+                campaign,
+                normalized_page_ref,
+                metadata=metadata,
+                body_markdown=body_markdown,
+                page_store=get_campaign_page_store(),
+            )
+        except (CampaignContentError, ValueError) as exc:
+            flash(str(exc), "error")
+            context = build_campaign_dm_content_page_context(
+                campaign_slug,
+                dm_content_subpage="player-wiki",
+                player_wiki_edit_record=existing_record,
+                player_wiki_form_data=request.form,
+            )
+            return render_template("dm_content.html", **context), 400
+
+        repository_store.refresh()
+        get_auth_store().write_audit_event(
+            event_type="campaign_wiki_page_updated",
+            actor_user_id=user.id,
+            campaign_slug=campaign_slug,
+            metadata={
+                "page_ref": record.page_ref,
+                "route_slug": record.page.route_slug,
+                "source": "dm_content_player_wiki",
+            },
+        )
+        flash(f"Updated wiki page {record.page.title}.", "success")
+        return redirect(
+            url_for(
+                "campaign_dm_content_edit_player_wiki_page",
+                campaign_slug=campaign_slug,
+                page_ref=record.page_ref,
+                _anchor="dm-content-player-wiki-editor",
+            )
+        )
+
+    @app.post("/campaigns/<campaign_slug>/dm-content/player-wiki/pages/<path:page_ref>/unpublish")
+    @campaign_scope_access_required("dm_content")
+    def campaign_dm_content_unpublish_player_wiki_page(campaign_slug: str, page_ref: str):
+        if not can_manage_campaign_content(campaign_slug):
+            abort(403)
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        campaign = load_campaign_context(campaign_slug)
+        try:
+            existing_record = get_campaign_page_file(
+                campaign,
+                page_ref,
+                page_store=get_campaign_page_store(),
+            )
+        except (CampaignContentError, ValueError):
+            abort(404)
+        if existing_record is None:
+            abort(404)
+
+        metadata = dict(existing_record.metadata or {})
+        metadata["published"] = False
+        record = write_campaign_page_file(
+            campaign,
+            existing_record.page_ref,
+            metadata=metadata,
+            body_markdown=existing_record.body_markdown,
+            page_store=get_campaign_page_store(),
+        )
+        repository_store.refresh()
+        get_auth_store().write_audit_event(
+            event_type="campaign_wiki_page_unpublished",
+            actor_user_id=user.id,
+            campaign_slug=campaign_slug,
+            metadata={
+                "page_ref": record.page_ref,
+                "route_slug": record.page.route_slug,
+                "source": "dm_content_player_wiki",
+            },
+        )
+        flash(f"Unpublished wiki page {record.page.title}.", "success")
+        return redirect_to_campaign_dm_content(
+            campaign_slug,
+            subpage="player-wiki",
+            anchor=f"wiki-page-{build_dm_player_wiki_page_summary(campaign, record)['dom_id']}",
+        )
+
+    @app.post("/campaigns/<campaign_slug>/dm-content/player-wiki/pages/<path:page_ref>/delete")
+    @campaign_scope_access_required("dm_content")
+    def campaign_dm_content_delete_player_wiki_page(campaign_slug: str, page_ref: str):
+        if not can_manage_campaign_content(campaign_slug):
+            abort(403)
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        if request.form.get("confirm_delete") != "1":
+            flash("Confirm hard delete before removing a wiki page file.", "error")
+            return redirect(
+                url_for(
+                    "campaign_dm_content_edit_player_wiki_page",
+                    campaign_slug=campaign_slug,
+                    page_ref=page_ref,
+                    _anchor="dm-content-player-wiki-editor",
+                )
+            )
+
+        campaign = load_campaign_context(campaign_slug)
+        try:
+            deleted = delete_campaign_page_file(
+                campaign,
+                page_ref,
+                page_store=get_campaign_page_store(),
+            )
+        except CampaignContentError as exc:
+            flash(str(exc), "error")
+            return redirect_to_campaign_dm_content(campaign_slug, subpage="player-wiki")
+        if deleted is None:
+            abort(404)
+
+        repository_store.refresh()
+        get_auth_store().write_audit_event(
+            event_type="campaign_wiki_page_deleted",
+            actor_user_id=user.id,
+            campaign_slug=campaign_slug,
+            metadata={
+                "page_ref": deleted.page_ref,
+                "route_slug": deleted.page.route_slug,
+                "source": "dm_content_player_wiki",
+            },
+        )
+        flash(f"Deleted wiki page {deleted.page.title}.", "success")
+        return redirect_to_campaign_dm_content(campaign_slug, subpage="player-wiki")
 
     @app.post("/campaigns/<campaign_slug>/dm-content/staged-articles")
     @campaign_scope_access_required("dm_content")
