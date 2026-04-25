@@ -1,9 +1,6 @@
 <script>
   (() => {
-    const root = document.querySelector("[data-dm-content-staged-articles-root]");
-    if (!(root instanceof HTMLElement)) {
-      return;
-    }
+    const root = document;
 
     const updateFileFieldName = (field) => {
       const input = field.querySelector("[data-session-file-input]");

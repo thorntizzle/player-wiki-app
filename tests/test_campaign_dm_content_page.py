@@ -363,10 +363,32 @@ def test_dm_can_stage_session_article_from_dm_content_and_manage_it_from_session
     assert articles[0].title == "Harbormaster Letter"
     assert not articles[0].is_revealed
 
+    update_article = client.post(
+        f"/campaigns/linden-pass/dm-content/staged-articles/{articles[0].id}",
+        data={
+            "title": "Harbormaster Letter Revised",
+            "body_markdown": "The seal is fresh, and the revised copy names the east pier.",
+        },
+        follow_redirects=True,
+    )
+
+    assert update_article.status_code == 200
+    update_html = update_article.get_data(as_text=True)
+    assert "Staged article updated." in update_html
+    assert "Harbormaster Letter Revised" in update_html
+    assert "revised copy names the east pier" in update_html
+    assert "The seal is fresh and the paper smells faintly of brine." not in update_html
+
+    articles = _list_session_articles(app)
+    assert len(articles) == 1
+    assert articles[0].title == "Harbormaster Letter Revised"
+    assert articles[0].body_markdown == "The seal is fresh, and the revised copy names the east pier."
+
     session_dm_page = client.get("/campaigns/linden-pass/session/dm")
     session_dm_html = session_dm_page.get_data(as_text=True)
     assert session_dm_page.status_code == 200
-    assert "Harbormaster Letter" in session_dm_html
+    assert "Harbormaster Letter Revised" in session_dm_html
+    assert "revised copy names the east pier" in session_dm_html
     assert "Begin a session before revealing this article." in session_dm_html
 
     delete_article = client.post(

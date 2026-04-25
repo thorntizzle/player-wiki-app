@@ -1074,6 +1074,78 @@ def test_session_articles_stay_out_of_wiki_until_revealed_and_appear_in_chat(cli
     assert "Deliver the crate to the eastern gate before moonrise." in player_html
 
 
+def test_dm_can_update_staged_session_article_before_reveal_and_conversion(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+    create_article = client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "Draft Orders",
+            "body_markdown": "Deliver the crate to the wrong gate.",
+            "image_alt": "Original draft image.",
+            "image_caption": "Original caption.",
+            "image_file": (BytesIO(TEST_PNG_BYTES), "draft-orders.png"),
+        },
+        follow_redirects=False,
+    )
+    assert create_article.status_code == 302
+
+    update_article = client.post(
+        "/campaigns/linden-pass/session/articles/1",
+        data={
+            "title": "Sealed Orders",
+            "body_markdown": "Deliver the crate to the eastern gate before moonrise.",
+            "image_alt": "Updated sealed orders image.",
+            "image_caption": "Updated before reveal.",
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert update_article.status_code == 200
+    payload = update_article.get_json()
+    assert payload["ok"] is True
+    assert "Session article updated." in payload["flash_html"]
+    assert "Sealed Orders" in payload["staged_articles_html"]
+    assert "Deliver the crate to the eastern gate before moonrise." in payload["staged_articles_html"]
+    assert "Draft Orders" not in payload["staged_articles_html"]
+    assert 'action="/campaigns/linden-pass/session/articles/1"' in payload["staged_articles_html"]
+    assert "Updated sealed orders image." in payload["staged_articles_html"]
+
+    with app.app_context():
+        session_service = app.extensions["campaign_session_service"]
+        article = session_service.get_article("linden-pass", 1)
+        image = session_service.get_article_image("linden-pass", 1)
+
+    assert article is not None
+    assert article.title == "Sealed Orders"
+    assert article.body_markdown == "Deliver the crate to the eastern gate before moonrise."
+    assert image is not None
+    assert image.alt_text == "Updated sealed orders image."
+    assert image.caption == "Updated before reveal."
+
+    convert_page = client.get("/campaigns/linden-pass/session/articles/1/convert")
+    convert_html = convert_page.get_data(as_text=True)
+    assert convert_page.status_code == 200
+    assert "Sealed Orders" in convert_html
+    assert "Deliver the crate to the eastern gate before moonrise." in convert_html
+    assert "Draft Orders" not in convert_html
+
+    reveal = client.post("/campaigns/linden-pass/session/articles/1/reveal", follow_redirects=True)
+    assert reveal.status_code == 200
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["party"]["email"], users["party"]["password"])
+    player_view = client.get("/campaigns/linden-pass/session")
+    player_html = player_view.get_data(as_text=True)
+    assert player_view.status_code == 200
+    assert "Sealed Orders" in player_html
+    assert "Deliver the crate to the eastern gate before moonrise." in player_html
+    assert "Draft Orders" not in player_html
+    assert "wrong gate" not in player_html
+
+
 def test_dm_session_article_store_supports_manual_upload_and_lookup_modes(client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 

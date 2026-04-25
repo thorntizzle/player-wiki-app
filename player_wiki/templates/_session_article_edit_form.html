@@ -1,0 +1,50 @@
+<details class="session-article-edit-detail">
+  <summary>Edit prep draft</summary>
+  <form
+    method="post"
+    action="{{ session_article_update_action }}"
+    class="stack-form session-article-edit-form"
+    enctype="multipart/form-data"
+    {% if session_article_update_async %}data-session-async{% endif %}
+  >
+    <label class="field">
+      <span>Title</span>
+      <input type="text" name="title" value="{{ article.title }}" maxlength="200">
+    </label>
+    <label class="field">
+      <span>{% if article.source_kind == "systems" %}Body HTML{% else %}Body{% endif %}</span>
+      <textarea name="body_markdown" rows="8">{{ article.body_markdown }}</textarea>
+    </label>
+    <div class="field session-file-field">
+      <span>{% if article.image_url %}Replace image{% else %}Image{% endif %}</span>
+      <input
+        class="session-file-input"
+        type="file"
+        id="{{ session_article_edit_file_id }}"
+        name="image_file"
+        accept="image/png,image/jpeg,image/gif,image/webp"
+        data-session-file-input
+      >
+      <label
+        class="session-file-dropzone"
+        for="{{ session_article_edit_file_id }}"
+        tabindex="0"
+        data-session-file-dropzone
+      >
+        <strong>Drag and drop a file here</strong>
+        <span class="meta">or use Browse to choose one</span>
+        <span class="session-file-dropzone__browse">Browse</span>
+        <span class="meta session-file-dropzone__name" data-session-file-name>No file selected.</span>
+      </label>
+    </div>
+    <label class="field">
+      <span>Image alt text</span>
+      <input type="text" name="image_alt" value="{{ article.image_alt }}" maxlength="200">
+    </label>
+    <label class="field">
+      <span>Image caption</span>
+      <input type="text" name="image_caption" value="{{ article.image_caption }}" maxlength="300">
+    </label>
+    <button type="submit">Update prep draft</button>
+  </form>
+</details>

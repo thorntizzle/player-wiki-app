@@ -341,6 +341,40 @@ class CampaignSessionStore:
             raise RuntimeError("Failed to persist session article.")
         return article
 
+    def update_article(
+        self,
+        campaign_slug: str,
+        article_id: int,
+        *,
+        title: str,
+        body_markdown: str,
+    ) -> SessionArticleRecord:
+        connection = get_db()
+        cursor = connection.execute(
+            """
+            UPDATE campaign_session_articles
+            SET title = ?,
+                body_markdown = ?
+            WHERE id = ? AND campaign_slug = ? AND status = 'staged'
+            """,
+            (
+                title,
+                body_markdown,
+                article_id,
+                campaign_slug,
+            ),
+        )
+        connection.commit()
+        if cursor.rowcount != 1:
+            raise CampaignSessionConflictError(
+                f"Unable to update session article {campaign_slug}/{article_id}"
+            )
+
+        article = self.get_article(article_id)
+        if article is None:
+            raise RuntimeError("Session article disappeared after update.")
+        return article
+
     def delete_article(self, campaign_slug: str, article_id: int) -> SessionArticleRecord:
         connection = get_db()
         article = self.get_article(article_id)
@@ -448,6 +482,40 @@ class CampaignSessionStore:
         image = self.get_article_image(article_id)
         if image is None:
             raise RuntimeError("Failed to persist session article image.")
+        return image
+
+    def update_article_image_metadata(
+        self,
+        article_id: int,
+        *,
+        alt_text: str = "",
+        caption: str = "",
+    ) -> SessionArticleImageRecord:
+        connection = get_db()
+        cursor = connection.execute(
+            """
+            UPDATE campaign_session_article_images
+            SET alt_text = ?,
+                caption = ?,
+                updated_at = ?
+            WHERE article_id = ?
+            """,
+            (
+                alt_text,
+                caption,
+                isoformat(utcnow()),
+                article_id,
+            ),
+        )
+        connection.commit()
+        if cursor.rowcount != 1:
+            raise CampaignSessionConflictError(
+                f"Unable to update session article image {article_id}"
+            )
+
+        image = self.get_article_image(article_id)
+        if image is None:
+            raise RuntimeError("Session article image disappeared after update.")
         return image
 
     def list_messages(self, session_id: int) -> list[SessionMessageRecord]:

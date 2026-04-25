@@ -80,6 +80,7 @@ def present_session_articles(
                 "source_url": str(source_item.get("url") or ""),
                 "source_action_label": str(source_item.get("action_label") or ""),
                 "source_missing_message": str(source_item.get("missing_message") or ""),
+                "body_markdown": article.body_markdown,
                 "body_html": render_presented_session_article_body(campaign, article),
                 "image_url": image_url_builder(article.id) if image is not None else "",
                 "image_alt": (image.alt_text or article.title) if image is not None else "",

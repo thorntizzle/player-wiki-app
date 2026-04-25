@@ -638,6 +638,8 @@
         logsRoot.innerHTML = payload.logs_html;
       }
 
+      initializeFileFields(stagedRoot || document);
+      initializeFileFields(revealedRoot || document);
       restoreOpenSessionArticleIds(stagedRoot, openSessionArticleIds);
       restoreOpenSessionArticleIds(revealedRoot, openSessionArticleIds);
 

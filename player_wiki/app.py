@@ -2647,8 +2647,27 @@ def create_app() -> Flask:
         revealed_articles: list[dict[str, object]],
         session_logs: list[dict[str, object]],
     ) -> str:
-        staged_ids = ",".join(str(article["id"]) for article in staged_articles)
-        revealed_ids = ",".join(str(article["id"]) for article in revealed_articles)
+        def article_token(article: dict[str, object]) -> str:
+            payload = [
+                str(article.get("id") or ""),
+                str(article.get("status") or ""),
+                str(article.get("title") or ""),
+                str(article.get("source_page_ref") or ""),
+                str(article.get("source_title") or ""),
+                str(article.get("source_url") or ""),
+                str(article.get("body_markdown") or ""),
+                str(article.get("image_url") or ""),
+                str(article.get("image_alt") or ""),
+                str(article.get("image_caption") or ""),
+                str(article.get("converted_page_title") or ""),
+                str(article.get("converted_page_url") or ""),
+                str(article.get("converted_page_reveal_after_session") or ""),
+            ]
+            digest = hashlib.sha1(json.dumps(payload, separators=(",", ":")).encode("utf-8")).hexdigest()[:12]
+            return f"{article.get('id') or ''}:{digest}"
+
+        staged_ids = ",".join(article_token(article) for article in staged_articles)
+        revealed_ids = ",".join(article_token(article) for article in revealed_articles)
         log_ids = ",".join(str(log["id"]) for log in session_logs)
         return f"{active_session_id or 0}|{staged_ids}|{revealed_ids}|{log_ids}"
 
@@ -4590,6 +4609,46 @@ def create_app() -> Flask:
             raise
 
         return article, article_mode, source_kind
+
+    def update_session_article_from_request(
+        campaign_slug: str,
+        article_id: int,
+        *,
+        updated_by_user_id: int,
+    ):
+        session_service = get_campaign_session_service()
+        image_file = request.files.get("image_file")
+        image_filename = (image_file.filename or "").strip() if image_file is not None else ""
+        image_alt = request.form.get("image_alt", "")
+        image_caption = request.form.get("image_caption", "")
+
+        updated_article = session_service.update_article(
+            campaign_slug,
+            article_id,
+            title=request.form.get("title", ""),
+            body_markdown=request.form.get("body_markdown", ""),
+            updated_by_user_id=updated_by_user_id,
+        )
+        if image_file is not None and image_filename:
+            session_service.attach_article_image(
+                campaign_slug,
+                article_id,
+                filename=image_filename,
+                media_type=image_file.mimetype,
+                data_blob=image_file.read(),
+                alt_text=image_alt,
+                caption=image_caption,
+                updated_by_user_id=updated_by_user_id,
+            )
+        elif session_service.get_article_image(campaign_slug, article_id) is not None:
+            session_service.update_article_image_metadata(
+                campaign_slug,
+                article_id,
+                alt_text=image_alt,
+                caption=image_caption,
+                updated_by_user_id=updated_by_user_id,
+            )
+        return updated_article
 
     def build_campaign_session_character_page_context(
         campaign_slug: str,
@@ -8184,6 +8243,33 @@ def create_app() -> Flask:
             anchor="dm-content-staged-article-store",
         )
 
+    @app.post("/campaigns/<campaign_slug>/dm-content/staged-articles/<int:article_id>")
+    @campaign_scope_access_required("dm_content")
+    def campaign_dm_content_update_staged_article(campaign_slug: str, article_id: int):
+        if not can_manage_campaign_session(campaign_slug):
+            abort(403)
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        try:
+            update_session_article_from_request(
+                campaign_slug,
+                article_id,
+                updated_by_user_id=user.id,
+            )
+        except CampaignSessionValidationError as exc:
+            flash(str(exc), "error")
+        else:
+            flash("Staged article updated.", "success")
+
+        return redirect_to_campaign_dm_content(
+            campaign_slug,
+            subpage="staged-articles",
+            anchor="dm-content-staged-articles-queue",
+        )
+
     @app.post("/campaigns/<campaign_slug>/dm-content/staged-articles/<int:article_id>/delete")
     @campaign_scope_access_required("dm_content")
     def campaign_dm_content_delete_staged_article(campaign_slug: str, article_id: int):
@@ -9530,6 +9616,36 @@ def create_app() -> Flask:
             mutation_succeeded=mutation_succeeded,
             anchor="session-article-store",
             article_mode=article_mode,
+            redirect_to_dm=True,
+        )
+
+    @app.post("/campaigns/<campaign_slug>/session/articles/<int:article_id>")
+    @campaign_scope_access_required("session")
+    def campaign_session_update_article(campaign_slug: str, article_id: int):
+        if not can_manage_campaign_session(campaign_slug):
+            abort(403)
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        mutation_succeeded = False
+        try:
+            update_session_article_from_request(
+                campaign_slug,
+                article_id,
+                updated_by_user_id=user.id,
+            )
+        except CampaignSessionValidationError as exc:
+            flash(str(exc), "error")
+        else:
+            flash("Session article updated.", "success")
+            mutation_succeeded = True
+
+        return respond_to_campaign_session_mutation(
+            campaign_slug,
+            mutation_succeeded=mutation_succeeded,
+            anchor="session-staged-articles",
             redirect_to_dm=True,
         )
 

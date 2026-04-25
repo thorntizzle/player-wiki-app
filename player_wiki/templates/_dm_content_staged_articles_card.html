@@ -35,6 +35,10 @@
             <p class="meta">{{ article.source_missing_message }}</p>
           {% endif %}
           <div class="article-body article-body--compact">{{ article.body_html | safe }}</div>
+          {% set session_article_update_action = url_for('campaign_dm_content_update_staged_article', campaign_slug=campaign.slug, article_id=article.id) %}
+          {% set session_article_update_async = false %}
+          {% set session_article_edit_file_id = 'dm-content-article-edit-image-' ~ article.id %}
+          {% include "_session_article_edit_form.html" %}
           <div class="session-article-detail__actions">
             <a class="ghost-button" href="{{ url_for('campaign_session_dm_view', campaign_slug=campaign.slug, _anchor='session-staged-articles') }}">Open Session DM</a>
             {% if not article.source_kind and not article.converted_page_title %}
