@@ -514,6 +514,24 @@
         <p class="meta">Source: {{ source_state.source.source_id }}</p>
         <p class="meta">Entry key: {{ entry.entry_key }}</p>
       </section>
+      {% if can_manage_systems %}
+        <section class="card sidebar-card">
+          <h2>Entry Management</h2>
+          {% if is_campaign_custom_entry %}
+            <p class="meta">Campaign-owned custom entry.</p>
+            <a
+              class="ghost-button"
+              href="{{ url_for('campaign_systems_control_panel_edit_custom_entry', campaign_slug=campaign.slug, entry_slug=entry.slug, return_to='dm-content-systems', _anchor='systems-custom-entry-editor') }}"
+            >Edit custom entry</a>
+          {% else %}
+            <p class="meta">Shared library entry. Content edits are not available from campaign management.</p>
+            <a
+              class="ghost-button"
+              href="{{ url_for('campaign_dm_content_subpage_view', campaign_slug=campaign.slug, dm_content_subpage='systems', entry_key=entry.entry_key, _anchor='systems-entry-overrides') }}"
+            >Manage campaign override</a>
+          {% endif %}
+        </section>
+      {% endif %}
     </aside>
   </div>
 {% endblock %}

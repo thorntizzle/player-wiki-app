@@ -6563,6 +6563,7 @@ def create_app() -> Flask:
                 }
             )
 
+        entry_override_form_entry_key = request.args.get("entry_key", "").strip()
         library_slug = policy.library_slug if policy is not None else systems_service.get_campaign_library_slug(campaign_slug)
         entry_override_rows = []
         if library_slug:
@@ -6763,6 +6764,7 @@ def create_app() -> Flask:
             "proprietary_acknowledged": bool(policy and policy.proprietary_acknowledged_at is not None),
             "can_set_private_visibility": include_private,
             "systems_management_return_to": return_to,
+            "entry_override_form_entry_key": entry_override_form_entry_key,
             "entry_override_rows": entry_override_rows,
             "entry_override_count": len(entry_override_rows),
             "custom_entry_source_rows": custom_entry_source_rows,
@@ -7156,6 +7158,7 @@ def create_app() -> Flask:
         source_state = systems_service.get_campaign_source_state(campaign_slug, entry.source_id)
         if source_state is None or not source_state.is_enabled:
             abort(404)
+        is_campaign_custom_entry = systems_service.is_campaign_custom_entry(campaign_slug, entry)
 
         def filter_base_rule_refs(value: object) -> list[dict[str, object]]:
             filtered_refs: list[dict[str, object]] = []
@@ -7383,6 +7386,7 @@ def create_app() -> Flask:
             "book_visibility_policy_note": book_visibility_policy_note,
             "source_state": source_state,
             "can_manage_systems": can_manage_campaign_systems(campaign_slug),
+            "is_campaign_custom_entry": is_campaign_custom_entry,
             "license_class_label": LICENSE_CLASS_LABELS.get(
                 source_state.source.license_class,
                 source_state.source.license_class.replace("_", " ").title(),

@@ -95,6 +95,108 @@ def test_dm_can_open_systems_control_panel_and_visibility_panel_shows_systems_sc
     assert 'class="checkbox-label"' in systems_html
 
 
+def test_dm_systems_entry_detail_keeps_imported_entries_override_only(app, client, sign_in, users):
+    source_id = f"IMPT-{uuid4().hex[:8].upper()}"
+    entry_slug = "shared-spark"
+    entry_key = f"dnd-5e|spell|{source_id.lower()}|{entry_slug}"
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+        store.upsert_source(
+            library_slug,
+            source_id,
+            title="Imported Test Source",
+            license_class="open_license",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug=library_slug,
+            source_id=source_id,
+            is_enabled=True,
+            default_visibility="players",
+        )
+        store.replace_entries_for_source(
+            library_slug,
+            source_id,
+            entries=[
+                {
+                    "entry_key": entry_key,
+                    "entry_type": "spell",
+                    "slug": entry_slug,
+                    "title": "Shared Spark",
+                    "search_text": "shared spark imported test source",
+                    "player_safe_default": True,
+                    "metadata": {},
+                    "body": {"imported": True},
+                    "rendered_html": "<p>Original shared library body.</p>",
+                }
+            ],
+            entry_types=["spell"],
+        )
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    detail = client.get(f"/campaigns/linden-pass/systems/entries/{entry_slug}")
+
+    assert detail.status_code == 200
+    detail_body = detail.get_data(as_text=True)
+    assert "Entry Management" in detail_body
+    assert "Shared library entry" in detail_body
+    assert "Manage campaign override" in detail_body
+    assert "#systems-entry-overrides" in detail_body
+    assert "Edit custom entry" not in detail_body
+    assert f"/systems/control-panel/custom-entries/{entry_slug}" not in detail_body
+
+    override_page = client.get(
+        "/campaigns/linden-pass/dm-content/systems",
+        query_string={"entry_key": entry_key},
+    )
+    assert override_page.status_code == 200
+    assert f'value="{entry_key}"' in override_page.get_data(as_text=True)
+
+    custom_edit_attempt = client.post(
+        f"/campaigns/linden-pass/systems/control-panel/custom-entries/{entry_slug}",
+        data={
+            "custom_entry_title": "Shared Spark Edited",
+            "custom_entry_type": "spell",
+            "custom_entry_visibility": "dm",
+            "custom_entry_body_markdown": "This should not save.",
+        },
+        follow_redirects=False,
+    )
+    assert custom_edit_attempt.status_code == 404
+
+    override_response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/overrides",
+        data={
+            "return_to": "dm-content-systems",
+            "entry_key": entry_key,
+            "visibility_override": "dm",
+            "is_enabled_override": "disabled",
+        },
+        follow_redirects=False,
+    )
+
+    assert override_response.status_code == 302
+    assert "/campaigns/linden-pass/dm-content/systems" in override_response.headers["Location"]
+    assert "#systems-entry-overrides" in override_response.headers["Location"]
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        entry = store.get_entry(service.get_campaign_library_slug("linden-pass"), entry_key)
+        assert entry is not None
+        assert entry.title == "Shared Spark"
+        assert entry.rendered_html == "<p>Original shared library body.</p>"
+        override = store.get_campaign_entry_override("linden-pass", entry_key)
+        assert override is not None
+        assert override.visibility_override == "dm"
+        assert override.is_enabled_override is False
+
+
 def test_proprietary_source_cannot_be_made_public(client, sign_in, users, app):
     sign_in(users["dm"]["email"], users["dm"]["password"])
     form_data = build_source_form(app)
