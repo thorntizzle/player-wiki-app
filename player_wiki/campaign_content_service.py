@@ -18,6 +18,7 @@ from .character_store import CharacterStateStore
 from .db import get_db
 from .models import Campaign, Page, page_sort_key
 from .repository import slugify
+from .system_policy import default_systems_library_slug, normalize_system_code
 
 
 class CampaignContentError(ValueError):
@@ -162,6 +163,10 @@ def _normalize_campaign_config_updates(updates: dict[str, Any]) -> dict[str, Any
         normalized_value = str(value or "").strip()
         if key == "title" and not normalized_value:
             raise CampaignContentError("Campaign title is required.")
+        if key == "system":
+            normalized_value = normalize_system_code(normalized_value)
+        elif key == "systems_library":
+            normalized_value = default_systems_library_slug(normalized_value)
         normalized[key] = normalized_value
 
     return normalized

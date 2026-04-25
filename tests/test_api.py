@@ -961,6 +961,39 @@ def test_api_content_config_and_assets_refresh_repository_and_manage_files(clien
     assert not asset_path.exists()
 
 
+def test_api_content_config_can_select_xianxia_system_and_library(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-xianxia-config-api")
+
+    update_response = client.patch(
+        "/api/v1/campaigns/linden-pass/content/config",
+        headers=api_headers(dm_token),
+        json={
+            "config": {
+                "system": "xianxia",
+                "systems_library": "xianxia",
+            }
+        },
+    )
+
+    assert update_response.status_code == 200
+    updated_config = update_response.get_json()["config_file"]["config"]
+    assert updated_config["system"] == "Xianxia"
+    assert updated_config["systems_library"] == "Xianxia"
+
+    campaign_detail = client.get("/api/v1/campaigns/linden-pass", headers=api_headers(dm_token))
+    assert campaign_detail.status_code == 200
+    campaign_payload = campaign_detail.get_json()["campaign"]
+    assert campaign_payload["system"] == "Xianxia"
+    assert campaign_payload["systems_library_slug"] == "Xianxia"
+
+    with app.app_context():
+        campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
+        assert campaign is not None
+        assert campaign.system == "Xianxia"
+        assert campaign.systems_library_slug == "Xianxia"
+        assert app.extensions["systems_service"].get_campaign_library_slug("linden-pass") == "Xianxia"
+
+
 def test_api_systems_endpoints_follow_source_visibility_and_allow_dm_policy_updates(client, app, users, tmp_path):
     goblin_entry_key, goblin_slug = _import_systems_goblin(app, tmp_path)
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-systems-api")
