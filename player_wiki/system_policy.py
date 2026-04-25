@@ -9,12 +9,24 @@ XIANXIA_SYSTEM_CODE = "Xianxia"
 NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE = (
     f"Native character tools are currently only supported for {DND_5E_SYSTEM_CODE} campaigns."
 )
+XIANXIA_NATIVE_CHARACTER_CREATE_UNSUPPORTED_MESSAGE = (
+    "Xianxia native character creation is recognized, but its builder is not implemented yet."
+)
+XIANXIA_CHARACTER_ADVANCEMENT_UNSUPPORTED_MESSAGE = (
+    "Xianxia character advancement and cultivation routes are recognized, but not implemented yet."
+)
 DND5E_CHARACTER_PDF_IMPORT_UNSUPPORTED_MESSAGE = (
     f"PDF character import is currently only supported for {DND_5E_SYSTEM_CODE} campaigns."
 )
 DND5E_CHARACTER_SPELLCASTING_TOOLS_UNSUPPORTED_MESSAGE = (
     f"Spellcasting management is currently only supported for {DND_5E_SYSTEM_CODE} campaigns."
 )
+
+CHARACTER_ROUTE_LANE_SHARED = "shared"
+CHARACTER_ROUTE_LANE_DND5E = "dnd5e"
+CHARACTER_ROUTE_LANE_XIANXIA = "xianxia"
+CHARACTER_ADVANCEMENT_LANE_DND5E_LEVEL_UP = "dnd5e-level-up"
+CHARACTER_ADVANCEMENT_LANE_XIANXIA_CULTIVATION = "xianxia-cultivation"
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +37,15 @@ class SystemCodePolicy:
     supports_combat_tracker: bool = False
     supports_dnd5e_statblock_upload: bool = False
     supports_native_character_tools: bool = False
+    supports_native_character_create: bool = False
+    supports_native_character_advancement: bool = False
+    native_character_create_lane: str = ""
+    character_read_lane: str = CHARACTER_ROUTE_LANE_SHARED
+    character_session_lane: str = CHARACTER_ROUTE_LANE_SHARED
+    character_controls_lane: str = CHARACTER_ROUTE_LANE_SHARED
+    character_advancement_lane: str = ""
+    native_character_create_unsupported_message: str = NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE
+    character_advancement_unsupported_message: str = NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE
     supports_dnd5e_character_pdf_import: bool = False
     supports_dnd5e_character_spellcasting_tools: bool = False
     supports_dnd5e_systems_import: bool = False
@@ -49,6 +70,13 @@ _SYSTEM_POLICIES = {
         supports_combat_tracker=True,
         supports_dnd5e_statblock_upload=True,
         supports_native_character_tools=True,
+        supports_native_character_create=True,
+        supports_native_character_advancement=True,
+        native_character_create_lane=CHARACTER_ROUTE_LANE_DND5E,
+        character_read_lane=CHARACTER_ROUTE_LANE_DND5E,
+        character_session_lane=CHARACTER_ROUTE_LANE_DND5E,
+        character_controls_lane=CHARACTER_ROUTE_LANE_SHARED,
+        character_advancement_lane=CHARACTER_ADVANCEMENT_LANE_DND5E_LEVEL_UP,
         supports_dnd5e_character_pdf_import=True,
         supports_dnd5e_character_spellcasting_tools=True,
         supports_dnd5e_systems_import=True,
@@ -57,6 +85,13 @@ _SYSTEM_POLICIES = {
         code=XIANXIA_SYSTEM_CODE,
         label=XIANXIA_SYSTEM_CODE,
         default_systems_library_slug=XIANXIA_SYSTEM_CODE,
+        native_character_create_lane=CHARACTER_ROUTE_LANE_XIANXIA,
+        character_read_lane=CHARACTER_ROUTE_LANE_XIANXIA,
+        character_session_lane=CHARACTER_ROUTE_LANE_XIANXIA,
+        character_controls_lane=CHARACTER_ROUTE_LANE_SHARED,
+        character_advancement_lane=CHARACTER_ADVANCEMENT_LANE_XIANXIA_CULTIVATION,
+        native_character_create_unsupported_message=XIANXIA_NATIVE_CHARACTER_CREATE_UNSUPPORTED_MESSAGE,
+        character_advancement_unsupported_message=XIANXIA_CHARACTER_ADVANCEMENT_UNSUPPORTED_MESSAGE,
     ),
 }
 
@@ -116,6 +151,54 @@ def supports_dnd5e_statblock_upload(value: object) -> bool:
 
 def supports_native_character_tools(value: object) -> bool:
     return system_policy_for_code(value).supports_native_character_tools
+
+
+def supports_native_character_create(value: object) -> bool:
+    return system_policy_for_code(value).supports_native_character_create
+
+
+def supports_native_character_advancement(value: object) -> bool:
+    return system_policy_for_code(value).supports_native_character_advancement
+
+
+def native_character_create_lane(value: object) -> str:
+    return system_policy_for_code(value).native_character_create_lane
+
+
+def character_read_lane(value: object) -> str:
+    return system_policy_for_code(value).character_read_lane
+
+
+def character_session_lane(value: object) -> str:
+    return system_policy_for_code(value).character_session_lane
+
+
+def character_controls_lane(value: object) -> str:
+    return system_policy_for_code(value).character_controls_lane
+
+
+def character_advancement_lane(value: object) -> str:
+    return system_policy_for_code(value).character_advancement_lane
+
+
+def supports_character_read_routes(value: object) -> bool:
+    return bool(character_read_lane(value))
+
+
+def supports_character_session_routes(value: object) -> bool:
+    return bool(character_session_lane(value))
+
+
+def supports_character_controls_routes(value: object) -> bool:
+    return bool(character_controls_lane(value))
+
+
+def native_character_create_unsupported_message(value: object) -> str:
+    return system_policy_for_code(value).native_character_create_unsupported_message
+
+
+def character_advancement_unsupported_message(value: object) -> str:
+    return system_policy_for_code(value).character_advancement_unsupported_message
 
 
 def supports_dnd5e_character_pdf_import(value: object) -> bool:

@@ -11,6 +11,10 @@ import pytest
 from player_wiki.auth_store import AuthStore
 from player_wiki.character_builder import normalize_definition_to_native_model
 from player_wiki.character_models import CharacterDefinition
+from player_wiki.system_policy import (
+    XIANXIA_CHARACTER_ADVANCEMENT_UNSUPPORTED_MESSAGE,
+    XIANXIA_NATIVE_CHARACTER_CREATE_UNSUPPORTED_MESSAGE,
+)
 from player_wiki.systems_models import SystemsEntryRecord
 
 
@@ -460,17 +464,26 @@ def test_xianxia_native_character_routes_redirect_without_dnd_builder_affordance
     assert create_response.status_code == 302
     assert create_response.headers["Location"].endswith("/campaigns/linden-pass/characters")
 
-    for route_suffix in ("edit", "level-up", "progression-repair"):
+    create_landing = client.get(create_response.headers["Location"])
+    assert XIANXIA_NATIVE_CHARACTER_CREATE_UNSUPPORTED_MESSAGE in create_landing.get_data(as_text=True)
+
+    expected_messages = {
+        "edit": app_module.NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE,
+        "level-up": XIANXIA_CHARACTER_ADVANCEMENT_UNSUPPORTED_MESSAGE,
+        "progression-repair": XIANXIA_CHARACTER_ADVANCEMENT_UNSUPPORTED_MESSAGE,
+    }
+    for route_suffix, expected_message in expected_messages.items():
         response = client.get(
             f"/campaigns/linden-pass/characters/arden-march/{route_suffix}",
             follow_redirects=False,
         )
         assert response.status_code == 302
         assert response.headers["Location"].endswith("/campaigns/linden-pass/characters/arden-march")
+        route_landing = client.get(response.headers["Location"])
+        assert expected_message in route_landing.get_data(as_text=True)
 
     landing = client.get("/campaigns/linden-pass/characters/arden-march")
     html = landing.get_data(as_text=True)
-    assert app_module.NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE in html
     assert "Edit character" not in html
     assert "Level up" not in html
     assert "Prepare for level-up" not in html
@@ -502,6 +515,29 @@ def test_xianxia_hides_dnd_spellcasting_read_and_session_affordances(
     assert "Overview" in session_html
     assert "Spell slots" not in session_html
     assert "page=spells" not in session_html
+
+
+def test_xianxia_read_sheet_keeps_shared_controls_without_dnd_authoring(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+
+    _write_campaign_config(app, _mutate)
+
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    response = client.get("/campaigns/linden-pass/characters/arden-march?page=controls")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Controls" in html
+    assert "Assignment controls" in html
+    assert "Delete character" in html
+    assert "Edit character" not in html
+    assert "Level up" not in html
+    assert "Prepare for level-up" not in html
+    assert "?page=spellcasting" not in html
 
 
 def test_xianxia_blocks_dnd_spellcasting_management_routes(app, client, sign_in, users):

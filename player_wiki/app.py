@@ -180,10 +180,17 @@ from .system_policy import (
     DND5E_CHARACTER_SPELLCASTING_TOOLS_UNSUPPORTED_MESSAGE,
     DND_5E_SYSTEM_CODE,
     NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE,
+    character_advancement_unsupported_message,
+    native_character_create_unsupported_message,
+    supports_character_controls_routes,
+    supports_character_read_routes,
+    supports_character_session_routes,
     supports_combat_tracker,
     supports_dnd5e_character_spellcasting_tools,
     supports_dnd5e_statblock_upload,
     supports_dnd5e_systems_import,
+    supports_native_character_advancement,
+    supports_native_character_create,
     supports_native_character_tools,
 )
 from .version import build_app_metadata
@@ -2449,16 +2456,22 @@ def create_app() -> Flask:
                 character_slug,
                 anchor=anchor,
             )
-        _, record = load_character_context(campaign_slug, character_slug)
+        campaign, record = load_character_context(campaign_slug, character_slug)
         spellcasting_payload = dict(record.definition.spellcasting or {})
         read_subpage = normalize_character_read_subpage(
             request.values.get("page", ""),
             include_spellcasting=bool(
-                spellcasting_payload.get("spells")
-                or spellcasting_payload.get("slot_progression")
-                or spellcasting_payload.get("slot_lanes")
+                campaign_supports_dnd5e_character_spellcasting_tools(campaign)
+                and (
+                    spellcasting_payload.get("spells")
+                    or spellcasting_payload.get("slot_progression")
+                    or spellcasting_payload.get("slot_lanes")
+                )
             ),
-            include_controls=has_session_mode_access(campaign_slug, character_slug),
+            include_controls=(
+                has_session_mode_access(campaign_slug, character_slug)
+                and campaign_supports_character_controls_routes(campaign)
+            ),
         )
         mode = request.values.get("mode", "").strip().lower()
         route_values = {
@@ -2527,14 +2540,19 @@ def create_app() -> Flask:
         anchor: str | None = None,
         confirm_rest: str | None = None,
     ):
-        _, record = load_character_context(campaign_slug, character_slug)
+        campaign, record = load_character_context(campaign_slug, character_slug)
+        if not campaign_supports_character_session_routes(campaign):
+            abort(404)
         spellcasting_payload = dict(record.definition.spellcasting or {})
         session_subpage = normalize_session_character_subpage(
             request.values.get("page", ""),
             include_spellcasting=bool(
-                spellcasting_payload.get("spells")
-                or spellcasting_payload.get("slot_progression")
-                or spellcasting_payload.get("slot_lanes")
+                campaign_supports_dnd5e_character_spellcasting_tools(campaign)
+                and (
+                    spellcasting_payload.get("spells")
+                    or spellcasting_payload.get("slot_progression")
+                    or spellcasting_payload.get("slot_lanes")
+                )
             ),
         )
         route_values: dict[str, object] = {
@@ -3313,15 +3331,31 @@ def create_app() -> Flask:
     def campaign_supports_native_character_tools(campaign) -> bool:
         return supports_native_character_tools(getattr(campaign, "system", ""))
 
+    def campaign_supports_native_character_create(campaign) -> bool:
+        return supports_native_character_create(getattr(campaign, "system", ""))
+
+    def campaign_supports_native_character_advancement(campaign) -> bool:
+        return supports_native_character_advancement(getattr(campaign, "system", ""))
+
     def campaign_supports_dnd5e_character_spellcasting_tools(campaign) -> bool:
         return supports_dnd5e_character_spellcasting_tools(getattr(campaign, "system", ""))
+
+    def campaign_supports_character_read_routes(campaign) -> bool:
+        return supports_character_read_routes(getattr(campaign, "system", ""))
+
+    def campaign_supports_character_session_routes(campaign) -> bool:
+        return supports_character_session_routes(getattr(campaign, "system", ""))
+
+    def campaign_supports_character_controls_routes(campaign) -> bool:
+        return supports_character_controls_routes(getattr(campaign, "system", ""))
 
     def redirect_unsupported_native_character_tools(
         campaign_slug: str,
         *,
         character_slug: str | None = None,
+        message: str | None = None,
     ):
-        flash(NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE, "error")
+        flash(message or NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE, "error")
         if character_slug is None:
             return redirect(url_for("character_roster_view", campaign_slug=campaign_slug))
         return redirect(
@@ -4016,9 +4050,14 @@ def create_app() -> Flask:
         status_code: int = 200,
     ):
         campaign, record = load_character_context(campaign_slug, character_slug)
+        if not campaign_supports_character_read_routes(campaign):
+            abort(404)
         native_character_tools_supported = campaign_supports_native_character_tools(campaign)
         dnd5e_spellcasting_tools_supported = campaign_supports_dnd5e_character_spellcasting_tools(campaign)
-        can_use_session_mode = has_session_mode_access(campaign_slug, character_slug)
+        can_use_session_mode = (
+            has_session_mode_access(campaign_slug, character_slug)
+            and campaign_supports_character_session_routes(campaign)
+        )
         can_manage_character = can_manage_campaign_session(campaign_slug)
         campaign_page_records = list_visible_character_page_records(campaign_slug, campaign)
         builder_campaign_page_records = list_builder_campaign_page_records(campaign_slug, campaign)
@@ -4095,7 +4134,9 @@ def create_app() -> Flask:
                 spell_catalog=get_read_spell_catalog(),
             )
             can_retrain = bool(retraining_context.get("feature_rows"))
-        include_controls_subpage = can_use_session_mode
+        include_controls_subpage = (
+            can_use_session_mode and campaign_supports_character_controls_routes(campaign)
+        )
         requested_mode = request.args.get("mode", "").strip().lower()
         is_session_mode = force_session_mode or (requested_mode == "session" and can_use_session_mode)
 
@@ -4261,7 +4302,9 @@ def create_app() -> Flask:
         success_message: str,
         action,
     ):
-        _, record = load_character_context(campaign_slug, character_slug)
+        campaign, record = load_character_context(campaign_slug, character_slug)
+        if not campaign_supports_character_session_routes(campaign):
+            abort(404)
         if not has_session_mode_access(campaign_slug, character_slug):
             abort(403)
 
@@ -4927,6 +4970,8 @@ def create_app() -> Flask:
         background_draft: str | None = None,
     ) -> dict[str, object]:
         campaign = load_campaign_context(campaign_slug)
+        if not campaign_supports_character_session_routes(campaign):
+            abort(404)
         dnd5e_spellcasting_tools_supported = campaign_supports_dnd5e_character_spellcasting_tools(campaign)
         session_service = get_campaign_session_service()
         can_manage_session = can_manage_campaign_session(campaign_slug)
@@ -11091,7 +11136,7 @@ def create_app() -> Flask:
         campaign = repository.get_campaign(campaign_slug)
         if not campaign:
             abort(404)
-        native_character_tools_supported = campaign_supports_native_character_tools(campaign)
+        native_character_tools_supported = campaign_supports_native_character_create(campaign)
 
         query = request.args.get("q", "").strip()
         character_cards = present_character_roster(
@@ -11123,8 +11168,11 @@ def create_app() -> Flask:
             abort(403)
 
         campaign = load_campaign_context(campaign_slug)
-        if not campaign_supports_native_character_tools(campaign):
-            return redirect_unsupported_native_character_tools(campaign_slug)
+        if not campaign_supports_native_character_create(campaign):
+            return redirect_unsupported_native_character_tools(
+                campaign_slug,
+                message=native_character_create_unsupported_message(campaign.system),
+            )
         campaign_page_records = list_builder_campaign_page_records(campaign_slug, campaign)
         form_values = dict(request.form if request.method == "POST" else request.args)
         builder_context = build_level_one_builder_context(
@@ -11193,10 +11241,11 @@ def create_app() -> Flask:
             abort(403)
 
         campaign, record = load_character_context(campaign_slug, character_slug)
-        if not campaign_supports_native_character_tools(campaign):
+        if not campaign_supports_native_character_advancement(campaign):
             return redirect_unsupported_native_character_tools(
                 campaign_slug,
                 character_slug=character_slug,
+                message=character_advancement_unsupported_message(campaign.system),
             )
         campaign_page_records = list_builder_campaign_page_records(campaign_slug, campaign)
         readiness = native_level_up_readiness(
@@ -11303,10 +11352,11 @@ def create_app() -> Flask:
             abort(403)
 
         campaign, record = load_character_context(campaign_slug, character_slug)
-        if not campaign_supports_native_character_tools(campaign):
+        if not campaign_supports_native_character_advancement(campaign):
             return redirect_unsupported_native_character_tools(
                 campaign_slug,
                 character_slug=character_slug,
+                message=character_advancement_unsupported_message(campaign.system),
             )
         campaign_page_records = list_builder_campaign_page_records(campaign_slug, campaign)
         readiness = native_level_up_readiness(
@@ -11747,7 +11797,9 @@ def create_app() -> Flask:
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment")
     @campaign_scope_access_required("characters")
     def character_controls_assignment(campaign_slug: str, character_slug: str):
-        load_character_context(campaign_slug, character_slug)
+        campaign, _ = load_character_context(campaign_slug, character_slug)
+        if not campaign_supports_character_controls_routes(campaign):
+            abort(404)
         actor = get_current_user()
         if actor is None or not actor.is_admin:
             abort(403)
@@ -11790,7 +11842,9 @@ def create_app() -> Flask:
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment/remove")
     @campaign_scope_access_required("characters")
     def character_controls_assignment_remove(campaign_slug: str, character_slug: str):
-        load_character_context(campaign_slug, character_slug)
+        campaign, _ = load_character_context(campaign_slug, character_slug)
+        if not campaign_supports_character_controls_routes(campaign):
+            abort(404)
         actor = get_current_user()
         if actor is None or not actor.is_admin:
             abort(403)
@@ -11824,6 +11878,8 @@ def create_app() -> Flask:
     @campaign_scope_access_required("characters")
     def character_controls_delete(campaign_slug: str, character_slug: str):
         campaign, record = load_character_context(campaign_slug, character_slug)
+        if not campaign_supports_character_controls_routes(campaign):
+            abort(404)
         if not can_manage_campaign_content(campaign_slug):
             abort(403)
 
@@ -12571,7 +12627,9 @@ def create_app() -> Flask:
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/notes")
     @campaign_scope_access_required("characters")
     def character_session_notes(campaign_slug: str, character_slug: str):
-        _, record = load_character_context(campaign_slug, character_slug)
+        campaign, record = load_character_context(campaign_slug, character_slug)
+        if not campaign_supports_character_session_routes(campaign):
+            abort(404)
         if not has_session_mode_access(campaign_slug, character_slug):
             abort(403)
 
@@ -12635,7 +12693,9 @@ def create_app() -> Flask:
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/personal")
     @campaign_scope_access_required("characters")
     def character_session_personal(campaign_slug: str, character_slug: str):
-        _, record = load_character_context(campaign_slug, character_slug)
+        campaign, record = load_character_context(campaign_slug, character_slug)
+        if not campaign_supports_character_session_routes(campaign):
+            abort(404)
         if not has_session_mode_access(campaign_slug, character_slug):
             abort(403)
 
@@ -12712,6 +12772,9 @@ def create_app() -> Flask:
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>")
     @campaign_scope_access_required("characters")
     def character_session_rest(campaign_slug: str, character_slug: str, rest_type: str):
+        campaign, _ = load_character_context(campaign_slug, character_slug)
+        if not campaign_supports_character_session_routes(campaign):
+            abort(404)
         if request.form.get("confirm_rest", "") != "1":
             return redirect_to_character_mode(campaign_slug, character_slug, anchor="session-rest")
 
