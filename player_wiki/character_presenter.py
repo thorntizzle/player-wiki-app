@@ -119,6 +119,36 @@ XIANXIA_ENERGY_LABELS = {
     "qi": "Qi",
     "shen": "Shen",
 }
+XIANXIA_APPROVAL_STATUS_GROUPS = (
+    (
+        "karmic_constraints",
+        "Karmic Constraints",
+        "No Karmic Constraint approval records yet.",
+    ),
+    (
+        "ascendant_arts",
+        "Ascendant Arts",
+        "No Ascendant Art approval records yet.",
+    ),
+    (
+        "dao_immolating_use_records",
+        "Dao Immolating Technique Use Records",
+        "No Dao Immolating Technique use records yet.",
+    ),
+)
+XIANXIA_APPROVAL_KIND_LABELS = {
+    "karmic_constraints": "Karmic Constraint",
+    "ascendant_arts": "Ascendant Art",
+    "dao_immolating_use_records": "Dao Immolating Technique Use",
+}
+XIANXIA_APPROVAL_STATUS_LABELS = {
+    "approved": "Approved",
+    "pending": "Pending",
+    "rejected": "Rejected",
+    "denied": "Rejected",
+    "not_approved": "Not approved",
+    "unapproved": "Not approved",
+}
 XIANXIA_MARTIAL_ART_RANK_LABELS = {
     "initiate": "Initiate",
     "novice": "Novice",
@@ -1793,6 +1823,11 @@ def present_xianxia_read_context(
                 dao_immolating.get("use_history")
             ),
             "approval_requests": _present_xianxia_named_records(xianxia.get("approval_requests")),
+            "status_groups": _present_xianxia_approval_status_groups(
+                variants=xianxia.get("variants"),
+                approval_requests=xianxia.get("approval_requests"),
+                dao_immolating_use_history=dao_immolating.get("use_history"),
+            ),
         },
         "active_state": {
             "stance": _present_xianxia_active_state(active_stance, label="Stance"),
@@ -1844,6 +1879,139 @@ def _present_xianxia_named_records(values: Any) -> list[dict[str, Any]]:
             }
         )
     return records
+
+
+def _present_xianxia_approval_status_groups(
+    *,
+    variants: Any,
+    approval_requests: Any,
+    dao_immolating_use_history: Any,
+) -> list[dict[str, Any]]:
+    grouped_records: dict[str, list[dict[str, Any]]] = {
+        key: [] for key, _, _ in XIANXIA_APPROVAL_STATUS_GROUPS
+    }
+
+    for value in list(variants or []):
+        payload = dict(value or {}) if isinstance(value, dict) else {"name": value}
+        group_key = _xianxia_approval_group_key_from_payload(payload)
+        if group_key not in grouped_records:
+            continue
+        grouped_records[group_key].append(
+            _present_xianxia_approval_status_record(
+                payload,
+                source_label="Variant",
+                group_key=group_key,
+            )
+        )
+
+    for value in list(approval_requests or []):
+        payload = dict(value or {}) if isinstance(value, dict) else {"name": value}
+        group_key = _xianxia_approval_group_key_from_payload(payload)
+        if group_key not in grouped_records:
+            continue
+        grouped_records[group_key].append(
+            _present_xianxia_approval_status_record(
+                payload,
+                source_label="Approval request",
+                group_key=group_key,
+            )
+        )
+
+    for value in list(dao_immolating_use_history or []):
+        payload = dict(value or {}) if isinstance(value, dict) else {"name": value}
+        grouped_records["dao_immolating_use_records"].append(
+            _present_xianxia_approval_status_record(
+                payload,
+                source_label="Use record",
+                group_key="dao_immolating_use_records",
+            )
+        )
+
+    return [
+        {
+            "key": key,
+            "title": title,
+            "empty_message": empty_message,
+            "records": grouped_records[key],
+        }
+        for key, title, empty_message in XIANXIA_APPROVAL_STATUS_GROUPS
+    ]
+
+
+def _present_xianxia_approval_status_record(
+    payload: dict[str, Any],
+    *,
+    source_label: str,
+    group_key: str,
+) -> dict[str, str]:
+    status = str(
+        payload.get("approval_status")
+        or payload.get("status")
+        or payload.get("request_status")
+        or ""
+    ).strip()
+    record_type = str(
+        payload.get("type")
+        or payload.get("variant_type")
+        or payload.get("request_type")
+        or ""
+    ).strip()
+    return {
+        "name": str(payload.get("name") or payload.get("title") or "").strip()
+        or "Unnamed record",
+        "status": status,
+        "status_label": _format_xianxia_approval_status_label(status),
+        "type": record_type,
+        "type_label": _format_xianxia_approval_type_label(record_type, group_key=group_key),
+        "source_label": source_label,
+        "notes": str(payload.get("notes") or payload.get("approval_notes") or "").strip(),
+    }
+
+
+def _xianxia_approval_group_key_from_payload(payload: dict[str, Any]) -> str:
+    for field_name in ("variant_type", "request_type", "type", "category", "kind"):
+        group_key = _normalize_xianxia_approval_group_key(payload.get(field_name))
+        if group_key:
+            return group_key
+    return ""
+
+
+def _normalize_xianxia_approval_group_key(value: Any) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
+    if normalized in {"karmic_constraint", "karmic_constraints"}:
+        return "karmic_constraints"
+    if normalized in {"ascendant_art", "ascendant_arts"}:
+        return "ascendant_arts"
+    if normalized in {
+        "dao_immolating",
+        "dao_immolating_technique",
+        "dao_immolating_techniques",
+        "dao_immolating_use",
+        "dao_immolating_use_record",
+        "dao_immolating_use_records",
+    }:
+        return "dao_immolating_use_records"
+    return ""
+
+
+def _format_xianxia_approval_status_label(value: Any) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
+    if not normalized:
+        return "Status not recorded"
+    if normalized in XIANXIA_APPROVAL_STATUS_LABELS:
+        return XIANXIA_APPROVAL_STATUS_LABELS[normalized]
+    return " ".join(part.capitalize() for part in normalized.split("_") if part)
+
+
+def _format_xianxia_approval_type_label(value: Any, *, group_key: str) -> str:
+    group_label = XIANXIA_APPROVAL_KIND_LABELS.get(group_key, "")
+    normalized_group = _normalize_xianxia_approval_group_key(value)
+    if normalized_group == group_key and group_label:
+        return group_label
+    cleaned = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
+    if cleaned:
+        return " ".join(part.capitalize() for part in cleaned.split("_") if part)
+    return group_label
 
 
 def _present_xianxia_inventory_records(values: Any) -> list[dict[str, Any]]:

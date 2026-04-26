@@ -189,13 +189,7 @@
         {% endif %}
       </article>
 
-      {% set approval_groups = [
-        {"title": "Variants", "records": xianxia_sheet.approval.variants},
-        {"title": "Prepared Dao Immolating Techniques", "records": xianxia_sheet.approval.dao_immolating_prepared},
-        {"title": "Dao Immolating Use History", "records": xianxia_sheet.approval.dao_immolating_use_history},
-        {"title": "Approval Requests", "records": xianxia_sheet.approval.approval_requests},
-      ] %}
-      {% for group in approval_groups %}
+      {% for group in xianxia_sheet.approval.status_groups %}
         <article class="detail-card">
           <h3>{{ group.title }}</h3>
           {% if group.records %}
@@ -203,11 +197,12 @@
               {% for record in group.records %}
                 <li>
                   <span>{{ record.name }}</span>
-                  {% if record.status %}
-                    <strong>{{ record.status }}</strong>
-                  {% elif record.type %}
-                    <strong>{{ record.type }}</strong>
-                  {% endif %}
+                  <strong>{{ record.status_label }}</strong>
+                </li>
+                <li class="meta">
+                  {% if record.type_label %}{{ record.type_label }}{% endif %}
+                  {% if record.type_label and record.source_label %} | {% endif %}
+                  {% if record.source_label %}{{ record.source_label }}{% endif %}
                 </li>
                 {% if record.notes %}
                   <li class="meta">{{ record.notes }}</li>
@@ -215,10 +210,33 @@
               {% endfor %}
             </ul>
           {% else %}
-            <p class="meta">No records yet.</p>
+            <p class="meta">{{ group.empty_message }}</p>
           {% endif %}
         </article>
       {% endfor %}
+
+      <article class="detail-card">
+        <h3>Prepared Dao Immolating Techniques</h3>
+        {% if xianxia_sheet.approval.dao_immolating_prepared %}
+          <ul class="plain-list slot-list">
+            {% for record in xianxia_sheet.approval.dao_immolating_prepared %}
+              <li>
+                <span>{{ record.name }}</span>
+                {% if record.status %}
+                  <strong>{{ record.status }}</strong>
+                {% elif record.type %}
+                  <strong>{{ record.type }}</strong>
+                {% endif %}
+              </li>
+              {% if record.notes %}
+                <li class="meta">{{ record.notes }}</li>
+              {% endif %}
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="meta">No prepared Dao Immolating Technique notes yet.</p>
+        {% endif %}
+      </article>
     </div>
   </section>
 {% endif %}

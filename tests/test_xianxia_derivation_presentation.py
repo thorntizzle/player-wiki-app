@@ -249,6 +249,95 @@ def test_xianxia_read_presenter_context_collects_first_pass_sheet_facts(
     assert character["spellcasting"] is None
 
 
+def test_xianxia_techniques_page_shows_approval_status_records(
+    app,
+    client,
+    sign_in,
+    users,
+    get_character,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Approval Crane"),
+        follow_redirects=False,
+    )
+
+    assert create_response.status_code == 302
+    record = get_character("approval-crane")
+    assert record is not None
+    payload = record.definition.to_dict()
+    payload["xianxia"]["variants"] = [
+        {
+            "variant_type": "karmic_constraint",
+            "name": "Falling Palm Oath",
+            "approval_status": "approved",
+            "approval_notes": "Approved for the Heavenly Palm initiate technique.",
+        },
+        {
+            "variant_type": "ascendant_art",
+            "name": "Skyfire Crown",
+            "status": "pending",
+            "notes": "Awaiting sect elder review.",
+        },
+    ]
+    payload["xianxia"]["approval_requests"] = [
+        {
+            "request_type": "ascendant_art",
+            "name": "Cloud-Splitting Revision",
+            "status": "rejected",
+            "approval_notes": "Too broad for this rank.",
+        }
+    ]
+    payload["xianxia"]["dao_immolating_techniques"]["use_history"] = [
+        {
+            "name": "River-Cleaving Spark",
+            "approval_status": "approved",
+            "approval_notes": "Spent after the duel began.",
+        }
+    ]
+    _write_raw_xianxia_character_definition(app, "approval-crane", payload)
+    record = get_character("approval-crane")
+    assert record is not None
+
+    with app.app_context():
+        campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
+        character = present_character_detail(
+            campaign,
+            record,
+            systems_service=app.extensions["systems_service"],
+        )
+
+    approval_groups = character["xianxia_read"]["approval"]["status_groups"]
+    assert [(group["title"], [record["status_label"] for record in group["records"]]) for group in approval_groups] == [
+        ("Karmic Constraints", ["Approved"]),
+        ("Ascendant Arts", ["Pending", "Rejected"]),
+        ("Dao Immolating Technique Use Records", ["Approved"]),
+    ]
+
+    response = client.get("/campaigns/linden-pass/characters/approval-crane?page=techniques")
+
+    assert response.status_code == 200
+    html = unescape(response.get_data(as_text=True))
+    assert "Karmic Constraints" in html
+    assert "Falling Palm Oath" in html
+    assert "Approved" in html
+    assert "Karmic Constraint" in html
+    assert "Variant" in html
+    assert "Ascendant Arts" in html
+    assert "Skyfire Crown" in html
+    assert "Pending" in html
+    assert "Cloud-Splitting Revision" in html
+    assert "Rejected" in html
+    assert "Dao Immolating Technique Use Records" in html
+    assert "River-Cleaving Spark" in html
+    assert "Dao Immolating Technique Use" in html
+    assert "Use record" in html
+    assert "Prepared Dao Immolating Techniques" in html
+
+
 def test_xianxia_read_sheet_uses_system_specific_subpages(
     client,
     sign_in,
