@@ -52,6 +52,9 @@ class CharacterStateService:
         temp_hp: Any | None = None,
         current_stance: Any | None = None,
         temp_stance: Any | None = None,
+        current_jing: Any | None = None,
+        current_qi: Any | None = None,
+        current_shen: Any | None = None,
         hp_delta: Any | None = None,
         temp_hp_delta: Any | None = None,
         clear_temp_hp: bool = False,
@@ -71,6 +74,12 @@ class CharacterStateService:
                 state,
                 current_stance=current_stance,
                 temp_stance=temp_stance,
+            )
+            self._apply_xianxia_energy_update(
+                state,
+                current_jing=current_jing,
+                current_qi=current_qi,
+                current_shen=current_shen,
             )
         return self._replace_state(
             record,
@@ -380,6 +389,33 @@ class CharacterStateService:
         if temp_stance is not None and str(temp_stance).strip() != "":
             vitals["temp_stance"] = int(temp_stance)
         xianxia_state["vitals"] = vitals
+        state["xianxia"] = xianxia_state
+
+    def _apply_xianxia_energy_update(
+        self,
+        state: dict[str, Any],
+        *,
+        current_jing: Any | None = None,
+        current_qi: Any | None = None,
+        current_shen: Any | None = None,
+    ) -> None:
+        submitted = {
+            "jing": current_jing,
+            "qi": current_qi,
+            "shen": current_shen,
+        }
+        if all(value is None or str(value).strip() == "" for value in submitted.values()):
+            return
+
+        xianxia_state = dict(state.get("xianxia") or {})
+        energies = dict(xianxia_state.get("energies") or {})
+        for key, value in submitted.items():
+            if value is None or str(value).strip() == "":
+                continue
+            energy = dict(energies.get(key) or {})
+            energy["current"] = int(value)
+            energies[key] = energy
+        xianxia_state["energies"] = energies
         state["xianxia"] = xianxia_state
 
     def _apply_resource_update(

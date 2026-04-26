@@ -251,7 +251,7 @@
         {% set xianxia_stance_resource = xianxia_sheet.resources.durability[1] %}
         <div class="section-heading">
           <div>
-            <h3>HP and Stance</h3>
+            <h3>HP, Stance, and Energy</h3>
             <p class="meta">
               HP {{ character.current_hp }} / {{ character.max_hp }}{% if character.temp_hp %} | Temp HP {{ character.temp_hp }}{% endif %}
               | Stance {{ xianxia_stance_resource.current }} / {{ xianxia_stance_resource.max }}{% if xianxia_stance_resource.temp %} | Temp Stance {{ xianxia_stance_resource.temp }}{% endif %}
@@ -286,7 +286,13 @@
             <span>Temp Stance</span>
             <input type="number" name="temp_stance" value="{{ xianxia_stance_resource.temp }}" min="0">
           </label>
-          <button class="button-link" type="submit">Save HP and Stance</button>
+          {% for resource in xianxia_sheet.resources.energies %}
+            <label class="session-field">
+              <span>Current {{ resource.label }}</span>
+              <input type="number" name="current_{{ resource.key }}" value="{{ resource.current }}" min="0" max="{{ resource.max }}">
+            </label>
+          {% endfor %}
+          <button class="button-link" type="submit">Save HP, Stance, and Energy</button>
         </form>
       </article>
     {% endif %}
