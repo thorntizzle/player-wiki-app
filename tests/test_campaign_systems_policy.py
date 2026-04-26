@@ -211,6 +211,86 @@ def test_xianxia_campaign_systems_scope_defaults_dm_only_while_wiki_stays_visibl
     assert dm_systems.status_code == 200
 
 
+def test_xianxia_source_policy_defaults_entries_dm_only_while_player_wiki_stays_visible(
+    app, client, sign_in, users
+):
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = "xianxia"
+    payload["systems_library"] = "xianxia"
+    payload["systems_sources"] = [
+        {
+            "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+            "enabled": True,
+        }
+    ]
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    entry_slug = "dao-breathing"
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        service.ensure_builtin_library_seeded(XIANXIA_SYSTEM_CODE)
+        store.replace_entries_for_source(
+            XIANXIA_SYSTEM_CODE,
+            XIANXIA_HOMEBREW_SOURCE_ID,
+            entries=[
+                {
+                    "entry_key": f"xianxia|rule|{XIANXIA_HOMEBREW_SOURCE_ID.lower()}|{entry_slug}",
+                    "entry_type": "rule",
+                    "slug": entry_slug,
+                    "title": "Dao Breathing",
+                    "search_text": "dao breathing xianxia homebrew",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"rule_key": "dao_breathing"},
+                    "body": {},
+                    "rendered_html": "<p>Dao Breathing is a Xianxia test rule.</p>",
+                }
+            ],
+        )
+
+        state = service.get_campaign_source_state("linden-pass", XIANXIA_HOMEBREW_SOURCE_ID)
+        entry = service.get_entry_by_slug_for_campaign("linden-pass", entry_slug)
+
+        assert state is not None
+        assert state.is_enabled is True
+        assert state.default_visibility == VISIBILITY_DM
+        assert state.is_configured is False
+        assert entry is not None
+        assert service.is_entry_enabled_for_campaign("linden-pass", entry)
+        assert get_campaign_scope_visibility("linden-pass", "systems") == VISIBILITY_DM
+        assert get_effective_campaign_visibility("linden-pass", "systems") == VISIBILITY_DM
+        assert get_campaign_scope_visibility("linden-pass", "wiki") == VISIBILITY_PUBLIC
+        assert get_effective_campaign_visibility("linden-pass", "wiki") == VISIBILITY_PUBLIC
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    campaign = client.get("/campaigns/linden-pass")
+    wiki_page = client.get("/campaigns/linden-pass/pages/index")
+    systems = client.get("/campaigns/linden-pass/systems")
+    source = client.get(f"/campaigns/linden-pass/systems/sources/{XIANXIA_HOMEBREW_SOURCE_ID}")
+    entry_response = client.get(f"/campaigns/linden-pass/systems/entries/{entry_slug}")
+
+    assert campaign.status_code == 200
+    assert wiki_page.status_code == 200
+    assert 'href="/campaigns/linden-pass/systems"' not in campaign.get_data(as_text=True)
+    assert systems.status_code == 404
+    assert source.status_code == 404
+    assert entry_response.status_code == 404
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    dm_systems = client.get("/campaigns/linden-pass/systems")
+    dm_search = client.get("/campaigns/linden-pass/systems/search?q=Dao")
+    dm_entry = client.get(f"/campaigns/linden-pass/systems/entries/{entry_slug}")
+
+    assert dm_systems.status_code == 200
+    assert dm_search.status_code == 200
+    assert "Dao Breathing" in dm_search.get_data(as_text=True)
+    assert dm_entry.status_code == 200
+    assert "Dao Breathing" in dm_entry.get_data(as_text=True)
+
+
 def test_dm_can_later_enable_xianxia_systems_for_players_through_existing_controls(
     app, client, sign_in, users
 ):
