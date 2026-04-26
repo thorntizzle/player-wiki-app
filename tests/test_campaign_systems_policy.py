@@ -24,6 +24,9 @@ from player_wiki.xianxia_systems_seed import (
     XIANXIA_MARTIAL_ART_RANK_KEYS,
     XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_COMPLETE,
     XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_INTENTIONAL_DRAFT,
+    XIANXIA_MARTIAL_ART_RANK_RECORDS_STATUS_ADVANCEMENT_METADATA_SEEDED,
+    XIANXIA_MARTIAL_ART_RANK_STATUS_MISSING_INTENTIONAL_DRAFT,
+    XIANXIA_MARTIAL_ART_RANK_STATUS_PRESENT,
     XIANXIA_SYSTEMS_SEED_DATA_RELATIVE_PATH,
     XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY,
     XIANXIA_SYSTEMS_SEED_VERSION,
@@ -285,10 +288,28 @@ def test_xianxia_martial_art_rank_definitions_cover_milestone_one_rank_names():
         "Master",
         "Legendary",
     ]
-    assert get_xianxia_martial_art_rank_definition("Legendary") == {
-        "key": "legendary",
-        "rank_name": "Legendary",
-    }
+    assert [definition["rank_order"] for definition in definitions] == [1, 2, 3, 4, 5]
+    assert [definition["prerequisite_rank_key"] for definition in definitions] == [
+        None,
+        "initiate",
+        "novice",
+        "apprentice",
+        "master",
+    ]
+    assert all(definition["insight_cost"] == 1 for definition in definitions)
+    assert definitions[2]["teacher_breakthrough_requirement"] == "master"
+    assert definitions[2]["teacher_breakthrough_note"].startswith("Requires learning under a Master")
+    assert definitions[3]["teacher_breakthrough_requirement"] == "legendary_master"
+    legendary = get_xianxia_martial_art_rank_definition("Legendary")
+    assert legendary is not None
+    assert legendary["key"] == "legendary"
+    assert legendary["rank_name"] == "Legendary"
+    assert legendary["rank_order"] == 5
+    assert legendary["prerequisite_rank_key"] == "master"
+    assert legendary["insight_cost"] == 1
+    assert legendary["teacher_breakthrough_requirement"] == "ascension_breakthrough"
+    assert legendary["teacher_breakthrough_note"] == "Requires an Ascension Breakthrough."
+    assert "quest or mythic-level master" in legendary["legendary_prerequisite_note"]
 
 
 def test_xianxia_core_rule_seed_entries_cover_milestone_one_references():
@@ -407,7 +428,8 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
     assert all(entry["metadata"]["catalog_role"] == "parent" for entry in martial_art_entries)
     assert all(entry["metadata"]["rank_records_seeded"] is True for entry in martial_art_entries)
     assert all(
-        entry["metadata"]["rank_records_status"] == "present_rank_names_seeded"
+        entry["metadata"]["rank_records_status"]
+        == XIANXIA_MARTIAL_ART_RANK_RECORDS_STATUS_ADVANCEMENT_METADATA_SEEDED
         for entry in martial_art_entries
     )
     assert all(
@@ -458,6 +480,18 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
     for slug in complete_slugs:
         records = entry_map[slug]["metadata"]["martial_art_rank_records"]
         assert [record["rank_key"] for record in records] == complete_rank_keys
+        assert [record["rank_order"] for record in records] == [1, 2, 3, 4, 5]
+        assert all(record["insight_cost"] == 1 for record in records)
+        assert all(record["rank_available_in_seed"] is True for record in records)
+        assert all(record["is_incomplete_rank"] is False for record in records)
+        assert all(
+            record["rank_completion_status"] == XIANXIA_MARTIAL_ART_RANK_STATUS_PRESENT
+            for record in records
+        )
+        assert (
+            entry_map[slug]["metadata"]["rank_records_status"]
+            == XIANXIA_MARTIAL_ART_RANK_RECORDS_STATUS_ADVANCEMENT_METADATA_SEEDED
+        )
         assert (
             entry_map[slug]["metadata"]["rank_completion_status"]
             == XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_COMPLETE
@@ -468,15 +502,23 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
         )
         assert "missing_rank_keys" not in entry_map[slug]["metadata"]
         assert "source_draft_status" not in entry_map[slug]["metadata"]
+        assert entry_map[slug]["metadata"]["has_incomplete_ranks"] is False
+        assert entry_map[slug]["metadata"]["incomplete_rank_flags"] == {
+            rank_key: False for rank_key in complete_rank_keys
+        }
+        assert entry_map[slug]["metadata"]["martial_art_missing_rank_records"] == []
         assert "Intentional Draft Content" not in entry_map[slug]["rendered_html"]
 
     for slug, expected_rank_keys in incomplete_rank_keys.items():
         records = entry_map[slug]["metadata"]["martial_art_rank_records"]
         assert [record["rank_key"] for record in records] == expected_rank_keys
+        assert all(record["rank_available_in_seed"] is True for record in records)
+        assert all(record["is_incomplete_rank"] is False for record in records)
         missing_rank_keys = complete_rank_keys[len(expected_rank_keys) :]
         missing_rank_names = [rank_name_by_key[rank_key] for rank_key in missing_rank_keys]
         metadata = entry_map[slug]["metadata"]
         martial_art_body = entry_map[slug]["body"]["xianxia_martial_art"]
+        missing_records = metadata["martial_art_missing_rank_records"]
         assert metadata["rank_completion_status"] == (
             XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_INTENTIONAL_DRAFT
         )
@@ -493,9 +535,32 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
             metadata["source_draft_status"]
             == XIANXIA_MARTIAL_ART_MISSING_RANK_REASON_INTENTIONAL_DRAFT
         )
+        assert metadata["has_incomplete_ranks"] is True
+        assert metadata["incomplete_rank_flags"] == {
+            rank_key: rank_key in missing_rank_keys for rank_key in complete_rank_keys
+        }
+        assert [record["rank_key"] for record in missing_records] == missing_rank_keys
+        assert [record["rank_order"] for record in missing_records] == list(
+            range(len(expected_rank_keys) + 1, 6)
+        )
+        assert all(record["rank_available_in_seed"] is False for record in missing_records)
+        assert all(record["is_incomplete_rank"] is True for record in missing_records)
+        assert all(
+            record["rank_completion_status"]
+            == XIANXIA_MARTIAL_ART_RANK_STATUS_MISSING_INTENTIONAL_DRAFT
+            for record in missing_records
+        )
+        assert all(
+            record["incomplete_rank_reason"]
+            == XIANXIA_MARTIAL_ART_MISSING_RANK_REASON_INTENTIONAL_DRAFT
+            for record in missing_records
+        )
         assert martial_art_body["rank_completion_status"] == (
             XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_INTENTIONAL_DRAFT
         )
+        assert martial_art_body["has_incomplete_ranks"] is True
+        assert martial_art_body["incomplete_rank_flags"] == metadata["incomplete_rank_flags"]
+        assert martial_art_body["missing_rank_records"] == missing_records
         assert martial_art_body["missing_rank_keys"] == missing_rank_keys
         assert martial_art_body["missing_rank_names"] == missing_rank_names
         assert "intentional draft content" in entry_map[slug]["search_text"]
@@ -506,16 +571,23 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
             assert missing_rank_name in entry_map[slug]["rendered_html"]
 
     demons_fist_ranks = entry_map["demons-fist"]["body"]["xianxia_martial_art"]["rank_records"]
-    assert demons_fist_ranks[0] == {
-        "martial_art_key": "demons_fist",
-        "martial_art_slug": "demons-fist",
-        "rank_key": "initiate",
-        "rank_name": "Initiate",
-        "rank_ref": "xianxia:demons-fist:initiate",
-    }
+    assert demons_fist_ranks[0]["martial_art_key"] == "demons_fist"
+    assert demons_fist_ranks[0]["martial_art_slug"] == "demons-fist"
+    assert demons_fist_ranks[0]["rank_key"] == "initiate"
+    assert demons_fist_ranks[0]["rank_name"] == "Initiate"
+    assert demons_fist_ranks[0]["rank_order"] == 1
+    assert demons_fist_ranks[0]["rank_ref"] == "xianxia:demons-fist:initiate"
+    assert demons_fist_ranks[0]["prerequisite_rank_key"] is None
+    assert demons_fist_ranks[0]["prerequisite_rank_name"] is None
+    assert demons_fist_ranks[0]["insight_cost"] == 1
+    assert demons_fist_ranks[0]["teacher_breakthrough_requirement"] == "none"
+    assert demons_fist_ranks[0]["teacher_breakthrough_note"] == ""
+    assert demons_fist_ranks[0]["rank_available_in_seed"] is True
+    assert demons_fist_ranks[0]["is_incomplete_rank"] is False
     assert demons_fist_ranks[-1]["rank_ref"] == "xianxia:demons-fist:legendary"
-    assert "rank_order" not in demons_fist_ranks[0]
-    assert "insight_cost" not in demons_fist_ranks[0]
+    assert demons_fist_ranks[-1]["prerequisite_rank_key"] == "master"
+    assert demons_fist_ranks[-1]["teacher_breakthrough_requirement"] == "ascension_breakthrough"
+    assert "quest or mythic-level master" in demons_fist_ranks[-1]["legendary_prerequisite_note"]
     assert "ability_grants" not in demons_fist_ranks[0]
 
 

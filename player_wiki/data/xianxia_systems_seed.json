@@ -1,5 +1,5 @@
 {
-  "version": "2026-04-26.6",
+  "version": "2026-04-26.7",
   "source_id": "XIANXIA-HOMEBREW",
   "source_title": "Xianxia Homebrew",
   "storage_strategy": "curated_seed_data",
@@ -248,23 +248,58 @@
   "martial_art_ranks": [
     {
       "key": "initiate",
-      "rank_name": "Initiate"
+      "rank_name": "Initiate",
+      "rank_order": 1,
+      "prerequisite_rank_key": null,
+      "insight_cost": 1,
+      "teacher_breakthrough_requirement": "none",
+      "teacher_breakthrough_note": "",
+      "advancement_note": "Progressing in a Martial Art requires 1 Insight and the requisites for the target rank; starting character packages can grant ranks separately.",
+      "legendary_prerequisite_note": ""
     },
     {
       "key": "novice",
-      "rank_name": "Novice"
+      "rank_name": "Novice",
+      "rank_order": 2,
+      "prerequisite_rank_key": "initiate",
+      "insight_cost": 1,
+      "teacher_breakthrough_requirement": "none",
+      "teacher_breakthrough_note": "",
+      "advancement_note": "Progressing in a Martial Art requires 1 Insight and the requisites for the target rank; starting character packages can grant ranks separately.",
+      "legendary_prerequisite_note": ""
     },
     {
       "key": "apprentice",
-      "rank_name": "Apprentice"
+      "rank_name": "Apprentice",
+      "rank_order": 3,
+      "prerequisite_rank_key": "novice",
+      "insight_cost": 1,
+      "teacher_breakthrough_requirement": "master",
+      "teacher_breakthrough_note": "Requires learning under a Master. Teacher requirements are stored as notes for now rather than enforced advancement blockers.",
+      "advancement_note": "Progressing in a Martial Art requires 1 Insight and the requisites for the target rank; starting character packages can grant ranks separately.",
+      "legendary_prerequisite_note": ""
     },
     {
       "key": "master",
-      "rank_name": "Master"
+      "rank_name": "Master",
+      "rank_order": 4,
+      "prerequisite_rank_key": "apprentice",
+      "insight_cost": 1,
+      "teacher_breakthrough_requirement": "legendary_master",
+      "teacher_breakthrough_note": "Requires learning under a Legendary Master. Teacher requirements are stored as notes for now rather than enforced advancement blockers.",
+      "advancement_note": "Progressing in a Martial Art requires 1 Insight and the requisites for the target rank; starting character packages can grant ranks separately.",
+      "legendary_prerequisite_note": ""
     },
     {
       "key": "legendary",
-      "rank_name": "Legendary"
+      "rank_name": "Legendary",
+      "rank_order": 5,
+      "prerequisite_rank_key": "master",
+      "insight_cost": 1,
+      "teacher_breakthrough_requirement": "ascension_breakthrough",
+      "teacher_breakthrough_note": "Requires an Ascension Breakthrough.",
+      "advancement_note": "Progressing in a Martial Art requires 1 Insight and the requisites for the target rank; starting character packages can grant ranks separately.",
+      "legendary_prerequisite_note": "Requires all previous ranks in the Martial Art plus a quest or mythic-level master; primarily narrative completion rather than a purely mechanical purchase."
     }
   ],
   "martial_art_rank_sets": {

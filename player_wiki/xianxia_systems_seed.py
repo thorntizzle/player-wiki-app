@@ -60,9 +60,14 @@ XIANXIA_MARTIAL_ART_RANK_KEYS = (
     "master",
     "legendary",
 )
+XIANXIA_MARTIAL_ART_RANK_RECORDS_STATUS_ADVANCEMENT_METADATA_SEEDED = (
+    "rank_advancement_metadata_seeded"
+)
 XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_COMPLETE = "complete"
 XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_INTENTIONAL_DRAFT = "intentional_incomplete_draft"
 XIANXIA_MARTIAL_ART_MISSING_RANK_REASON_INTENTIONAL_DRAFT = "intentional_draft_content"
+XIANXIA_MARTIAL_ART_RANK_STATUS_PRESENT = "present"
+XIANXIA_MARTIAL_ART_RANK_STATUS_MISSING_INTENTIONAL_DRAFT = "missing_intentional_draft"
 
 
 @lru_cache(maxsize=1)
@@ -258,6 +263,18 @@ def _normalize_string_list(raw_values: object) -> list[str]:
     return [str(value).strip() for value in raw_values if str(value).strip()]
 
 
+def _normalize_non_negative_int(value: object, *, context: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{context} must be a non-negative integer.")
+    try:
+        normalized = int(str(value).strip())
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{context} must be a non-negative integer.") from exc
+    if normalized < 0:
+        raise ValueError(f"{context} must be a non-negative integer.")
+    return normalized
+
+
 def _normalize_identifier(value: object) -> str:
     normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
     normalized = re.sub(r"[^a-z0-9_]+", "_", normalized)
@@ -407,7 +424,45 @@ def _normalize_martial_art_rank_definitions(raw_ranks: object) -> list[dict[str,
         rank_name = str(raw_rank.get("rank_name") or raw_rank.get("label") or "").strip()
         if not rank_name:
             raise ValueError(f"Xianxia Martial Art rank definition {key!r} is missing rank_name.")
-        definitions.append({"key": key, "rank_name": rank_name})
+        rank_order = _normalize_non_negative_int(
+            raw_rank.get("rank_order"),
+            context=f"Xianxia Martial Art rank definition {key!r} rank_order",
+        )
+        if rank_order != index:
+            raise ValueError(
+                f"Xianxia Martial Art rank definition {key!r} must use rank_order {index}."
+            )
+        prerequisite_rank_key = _normalize_identifier(raw_rank.get("prerequisite_rank_key"))
+        expected_prerequisite_key = definitions[-1]["key"] if definitions else ""
+        if prerequisite_rank_key != expected_prerequisite_key:
+            expected_label = expected_prerequisite_key or "no prerequisite"
+            raise ValueError(
+                f"Xianxia Martial Art rank definition {key!r} must use prerequisite "
+                f"{expected_label!r}."
+            )
+        insight_cost = _normalize_non_negative_int(
+            raw_rank.get("insight_cost"),
+            context=f"Xianxia Martial Art rank definition {key!r} insight_cost",
+        )
+        teacher_breakthrough_requirement = (
+            _normalize_identifier(raw_rank.get("teacher_breakthrough_requirement")) or "none"
+        )
+        teacher_breakthrough_note = str(raw_rank.get("teacher_breakthrough_note") or "").strip()
+        advancement_note = str(raw_rank.get("advancement_note") or "").strip()
+        legendary_prerequisite_note = str(raw_rank.get("legendary_prerequisite_note") or "").strip()
+        definitions.append(
+            {
+                "key": key,
+                "rank_name": rank_name,
+                "rank_order": rank_order,
+                "prerequisite_rank_key": prerequisite_rank_key or None,
+                "insight_cost": insight_cost,
+                "teacher_breakthrough_requirement": teacher_breakthrough_requirement,
+                "teacher_breakthrough_note": teacher_breakthrough_note,
+                "advancement_note": advancement_note,
+                "legendary_prerequisite_note": legendary_prerequisite_note,
+            }
+        )
 
     actual_keys = tuple(definition["key"] for definition in definitions)
     if actual_keys != XIANXIA_MARTIAL_ART_RANK_KEYS:
@@ -517,14 +572,25 @@ def _stamp_martial_art_rank_records(metadata: dict[str, Any], body: dict[str, An
         martial_art_key=martial_art_key,
         martial_art_slug=slug,
         rank_keys=rank_keys,
+        rank_available=True,
     )
     missing_rank_keys = [
         rank_key for rank_key in XIANXIA_MARTIAL_ART_RANK_KEYS if rank_key not in rank_keys
     ]
+    missing_rank_records = _build_martial_art_rank_records(
+        martial_art_key=martial_art_key,
+        martial_art_slug=slug,
+        rank_keys=missing_rank_keys,
+        rank_available=False,
+    )
     missing_rank_names = [
         str(_XIANXIA_MARTIAL_ART_RANK_LOOKUP[rank_key]["rank_name"])
         for rank_key in missing_rank_keys
     ]
+    incomplete_rank_flags = {
+        rank_key: rank_key in set(missing_rank_keys)
+        for rank_key in XIANXIA_MARTIAL_ART_RANK_KEYS
+    }
     rank_completion_status = (
         XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_INTENTIONAL_DRAFT
         if missing_rank_keys
@@ -532,12 +598,22 @@ def _stamp_martial_art_rank_records(metadata: dict[str, Any], body: dict[str, An
     )
     metadata_rank_records = [dict(record) for record in rank_records]
     body_rank_records = [dict(record) for record in rank_records]
+    metadata_missing_rank_records = [dict(record) for record in missing_rank_records]
+    body_missing_rank_records = [dict(record) for record in missing_rank_records]
     metadata["rank_records_seeded"] = True
-    metadata["rank_records_status"] = "present_rank_names_seeded"
+    metadata["rank_records_status"] = (
+        XIANXIA_MARTIAL_ART_RANK_RECORDS_STATUS_ADVANCEMENT_METADATA_SEEDED
+    )
     metadata["rank_completion_status"] = rank_completion_status
     metadata["xianxia_rank_completion_status"] = rank_completion_status
+    metadata["has_incomplete_ranks"] = bool(missing_rank_keys)
+    metadata["incomplete_rank_flags"] = incomplete_rank_flags
     metadata["martial_art_rank_records"] = metadata_rank_records
     metadata["xianxia_martial_art_rank_records"] = [dict(record) for record in rank_records]
+    metadata["martial_art_missing_rank_records"] = metadata_missing_rank_records
+    metadata["xianxia_martial_art_missing_rank_records"] = [
+        dict(record) for record in missing_rank_records
+    ]
     if missing_rank_keys:
         rank_completion_note = _build_martial_art_draft_note(missing_rank_names)
         metadata["missing_rank_keys"] = missing_rank_keys
@@ -553,10 +629,18 @@ def _stamp_martial_art_rank_records(metadata: dict[str, Any], body: dict[str, An
         martial_art_body = {}
         body["xianxia_martial_art"] = martial_art_body
     martial_art_body["rank_records_seeded"] = True
-    martial_art_body["rank_records_status"] = "present_rank_names_seeded"
+    martial_art_body["rank_records_status"] = (
+        XIANXIA_MARTIAL_ART_RANK_RECORDS_STATUS_ADVANCEMENT_METADATA_SEEDED
+    )
     martial_art_body["rank_completion_status"] = rank_completion_status
+    martial_art_body["has_incomplete_ranks"] = bool(missing_rank_keys)
+    martial_art_body["incomplete_rank_flags"] = dict(incomplete_rank_flags)
     martial_art_body["rank_records"] = body_rank_records
     martial_art_body["xianxia_martial_art_rank_records"] = [dict(record) for record in rank_records]
+    martial_art_body["missing_rank_records"] = body_missing_rank_records
+    martial_art_body["xianxia_martial_art_missing_rank_records"] = [
+        dict(record) for record in missing_rank_records
+    ]
     if missing_rank_keys:
         martial_art_body["missing_rank_keys"] = missing_rank_keys
         martial_art_body["missing_rank_names"] = missing_rank_names
@@ -620,17 +704,46 @@ def _build_martial_art_rank_records(
     martial_art_key: str,
     martial_art_slug: str,
     rank_keys: list[str],
+    rank_available: bool,
 ) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for rank_key in rank_keys:
         rank_definition = _XIANXIA_MARTIAL_ART_RANK_LOOKUP[rank_key]
+        prerequisite_rank_key = rank_definition.get("prerequisite_rank_key")
+        prerequisite_rank_name = (
+            str(_XIANXIA_MARTIAL_ART_RANK_LOOKUP[str(prerequisite_rank_key)]["rank_name"])
+            if prerequisite_rank_key
+            else None
+        )
         records.append(
             {
                 "martial_art_key": martial_art_key,
                 "martial_art_slug": martial_art_slug,
                 "rank_key": rank_key,
                 "rank_name": str(rank_definition["rank_name"]),
+                "rank_order": int(rank_definition["rank_order"]),
                 "rank_ref": f"xianxia:{martial_art_slug}:{rank_key}",
+                "prerequisite_rank_key": prerequisite_rank_key,
+                "prerequisite_rank_name": prerequisite_rank_name,
+                "insight_cost": int(rank_definition["insight_cost"]),
+                "teacher_breakthrough_requirement": str(
+                    rank_definition["teacher_breakthrough_requirement"]
+                ),
+                "teacher_breakthrough_note": str(rank_definition["teacher_breakthrough_note"]),
+                "advancement_note": str(rank_definition["advancement_note"]),
+                "legendary_prerequisite_note": str(rank_definition["legendary_prerequisite_note"]),
+                "rank_available_in_seed": rank_available,
+                "is_incomplete_rank": not rank_available,
+                "rank_completion_status": (
+                    XIANXIA_MARTIAL_ART_RANK_STATUS_PRESENT
+                    if rank_available
+                    else XIANXIA_MARTIAL_ART_RANK_STATUS_MISSING_INTENTIONAL_DRAFT
+                ),
+                "incomplete_rank_reason": (
+                    None
+                    if rank_available
+                    else XIANXIA_MARTIAL_ART_MISSING_RANK_REASON_INTENTIONAL_DRAFT
+                ),
             }
         )
     return records
