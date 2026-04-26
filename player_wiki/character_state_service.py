@@ -100,6 +100,33 @@ class CharacterStateService:
             updated_by_user_id=updated_by_user_id,
         )
 
+    def update_xianxia_active_state(
+        self,
+        record: CharacterRecord,
+        *,
+        expected_revision: int,
+        active_stance_name: Any | None = None,
+        active_aura_name: Any | None = None,
+        updated_by_user_id: int | None = None,
+    ) -> CharacterStateRecord:
+        if not is_xianxia_system(record.definition.system):
+            raise ValueError(
+                "Active Stance and Aura state is only supported for Xianxia characters."
+            )
+
+        state = deepcopy(record.state_record.state)
+        self._apply_xianxia_active_state_update(
+            state,
+            active_stance_name=active_stance_name,
+            active_aura_name=active_aura_name,
+        )
+        return self._replace_state(
+            record,
+            state,
+            expected_revision=expected_revision,
+            updated_by_user_id=updated_by_user_id,
+        )
+
     def update_resource(
         self,
         record: CharacterRecord,
@@ -466,6 +493,31 @@ class CharacterStateService:
         dao["current"] = int(current_dao)
         xianxia_state["dao"] = dao
         state["xianxia"] = xianxia_state
+
+    def _apply_xianxia_active_state_update(
+        self,
+        state: dict[str, Any],
+        *,
+        active_stance_name: Any | None = None,
+        active_aura_name: Any | None = None,
+    ) -> None:
+        if active_stance_name is None and active_aura_name is None:
+            return
+
+        xianxia_state = dict(state.get("xianxia") or {})
+        if active_stance_name is not None:
+            xianxia_state["active_stance"] = self._manual_active_state_record(
+                active_stance_name
+            )
+        if active_aura_name is not None:
+            xianxia_state["active_aura"] = self._manual_active_state_record(
+                active_aura_name
+            )
+        state["xianxia"] = xianxia_state
+
+    def _manual_active_state_record(self, value: Any) -> dict[str, str] | None:
+        name = " ".join(str(value or "").split()).strip()
+        return {"name": name} if name else None
 
     def _apply_resource_update(
         self,

@@ -306,6 +306,39 @@
           <button class="button-link" type="submit">Save HP, Stance, Energy, Yin/Yang, and Dao</button>
         </form>
       </article>
+      <article class="detail-card" id="session-active-state">
+        <div class="section-heading">
+          <div>
+            <h3>Active Stance and Aura</h3>
+            <p class="meta">
+              {{ xianxia_sheet.active_state.stance.status_label }}
+              | {{ xianxia_sheet.active_state.aura.status_label }}
+            </p>
+          </div>
+        </div>
+        <form
+          class="session-vitals-form"
+          data-character-sheet-edit-form="xianxia-active-state"
+          method="post"
+          action="{{ url_for('character_session_xianxia_active_state', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+        >
+          <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+          <input type="hidden" name="mode" value="session">
+          <input type="hidden" name="page" value="{{ character_subpage }}">
+          {% if session_return_view | default("") %}
+            <input type="hidden" name="return_view" value="{{ session_return_view }}">
+          {% endif %}
+          <label class="session-field">
+            <span>Active Stance</span>
+            <input type="text" name="active_stance_name" value="{{ xianxia_sheet.active_state.stance.name }}">
+          </label>
+          <label class="session-field">
+            <span>Active Aura</span>
+            <input type="text" name="active_aura_name" value="{{ xianxia_sheet.active_state.aura.name }}">
+          </label>
+          <button class="button-link" type="submit">Save Active Stance and Aura</button>
+        </form>
+      </article>
     {% endif %}
     <div class="resource-grid">
       {% for resource in xianxia_sheet.resources.durability %}

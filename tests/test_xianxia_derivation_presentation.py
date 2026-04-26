@@ -926,6 +926,95 @@ def test_xianxia_session_resources_allow_stance_and_temp_stance_updates(
     }
 
 
+def test_xianxia_session_resources_allow_manual_active_stance_and_aura_updates(
+    client,
+    sign_in,
+    users,
+    app,
+    get_character,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Session Active Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    resources_response = client.get(
+        "/campaigns/linden-pass/session/character?character=session-active-crane&page=resources"
+    )
+
+    assert resources_response.status_code == 200
+    resources_html = unescape(resources_response.get_data(as_text=True))
+    assert 'id="session-active-state"' in resources_html
+    assert "No active Stance recorded" in resources_html
+    assert "No active Aura recorded" in resources_html
+    assert 'name="active_stance_name" value=""' in resources_html
+    assert 'name="active_aura_name" value=""' in resources_html
+    assert "Save Active Stance and Aura" in resources_html
+
+    record = get_character("session-active-crane")
+    assert record is not None
+    response = client.post(
+        "/campaigns/linden-pass/characters/session-active-crane/session/xianxia-active-state",
+        data={
+            "expected_revision": record.state_record.revision,
+            "active_stance_name": "  Stone   Root  ",
+            "active_aura_name": "Azure Bell",
+            "mode": "session",
+            "page": "resources",
+            "return_view": "session-character",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert (
+        "/campaigns/linden-pass/session/character?character=session-active-crane"
+        "&page=resources#session-active-state"
+    ) in response.headers["Location"]
+    updated = get_character("session-active-crane")
+    assert updated is not None
+    xianxia_state = updated.state_record.state["xianxia"]
+    assert xianxia_state["active_stance"] == {"name": "Stone Root"}
+    assert xianxia_state["active_aura"] == {"name": "Azure Bell"}
+    assert "targets" not in xianxia_state
+    assert "target_effects" not in xianxia_state
+    assert "dying" not in xianxia_state
+
+    quick_response = client.get(
+        "/campaigns/linden-pass/characters/session-active-crane?mode=session&page=quick"
+    )
+    assert quick_response.status_code == 200
+    quick_html = unescape(quick_response.get_data(as_text=True))
+    assert "Active Stance: Stone Root" in quick_html
+    assert "Active Aura: Azure Bell" in quick_html
+
+    response = client.post(
+        "/campaigns/linden-pass/characters/session-active-crane/session/xianxia-active-state",
+        data={
+            "expected_revision": updated.state_record.revision,
+            "active_stance_name": "Flowing Reed",
+            "active_aura_name": "",
+            "mode": "session",
+            "page": "resources",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    updated = get_character("session-active-crane")
+    assert updated is not None
+    assert updated.state_record.state["xianxia"]["active_stance"] == {
+        "name": "Flowing Reed"
+    }
+    assert updated.state_record.state["xianxia"]["active_aura"] is None
+
+
 def test_xianxia_session_resources_allow_jing_qi_and_shen_updates(
     client,
     sign_in,

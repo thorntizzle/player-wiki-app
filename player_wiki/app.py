@@ -12746,6 +12746,26 @@ def create_app() -> Flask:
             ),
         )
 
+    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-active-state")
+    @campaign_scope_access_required("characters")
+    def character_session_xianxia_active_state(campaign_slug: str, character_slug: str):
+        def update_active_state(record, expected_revision, user_id):
+            return get_character_state_service().update_xianxia_active_state(
+                record,
+                expected_revision=expected_revision,
+                active_stance_name=request.form.get("active_stance_name"),
+                active_aura_name=request.form.get("active_aura_name"),
+                updated_by_user_id=user_id,
+            )
+
+        return run_session_mutation(
+            campaign_slug,
+            character_slug,
+            anchor="session-active-state",
+            success_message="Active Stance and Aura updated.",
+            action=update_active_state,
+        )
+
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/resources/<resource_id>")
     @campaign_scope_access_required("characters")
     def character_session_resource(
