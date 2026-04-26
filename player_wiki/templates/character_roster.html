@@ -7,8 +7,10 @@
     <p class="eyebrow">Character roster</p>
     <h1>{{ campaign.title }} Characters</h1>
     <p class="lede">
-      {% if native_character_tools_supported %}
+      {% if character_create_lane == "dnd5e" %}
         Open a player sheet in read mode for play, or start a new in-app PHB level 1 character when you need native sheet data instead of an imported PDF.
+      {% elif character_create_lane == "xianxia" %}
+        Open a player sheet in read mode for play, or start a new native Xianxia character record for this campaign.
       {% else %}
         Open a player sheet in read mode for play, or open the sheet edit view when you have edit access.
       {% endif %}
@@ -20,11 +22,15 @@
       <div class="section-heading">
         <div>
           <h2>Roster tools</h2>
-          <p class="meta">Use the current PHB level 1 builder to create new characters directly in the app.</p>
+          {% if character_create_lane == "xianxia" %}
+            <p class="meta">Use the Xianxia character creator to start new native character records directly in the app.</p>
+          {% else %}
+            <p class="meta">Use the current PHB level 1 builder to create new characters directly in the app.</p>
+          {% endif %}
         </div>
         <a class="button-link" href="{{ url_for('character_create_view', campaign_slug=campaign.slug) }}">Create character</a>
       </div>
-    {% elif not native_character_tools_supported %}
+    {% elif not native_character_create_supported %}
       <div class="section-heading">
         <div>
           <h2>Roster</h2>

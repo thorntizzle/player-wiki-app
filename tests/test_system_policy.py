@@ -77,7 +77,7 @@ def test_system_policy_recognizes_xianxia_without_enabling_dnd_only_tools() -> N
     assert not supports_combat_tracker("xianxia")
     assert not supports_dnd5e_statblock_upload("xianxia")
     assert not supports_native_character_tools("xianxia")
-    assert not supports_native_character_create("xianxia")
+    assert supports_native_character_create("xianxia")
     assert not supports_native_character_advancement("xianxia")
     assert native_character_create_lane("xianxia") == CHARACTER_ROUTE_LANE_XIANXIA
     assert character_read_lane("xianxia") == CHARACTER_ROUTE_LANE_XIANXIA

@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+
+{% block title %}Create Xianxia Character | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Character creator</p>
+    <h1>Create {{ campaign.title }} Xianxia Character</h1>
+    <p class="lede">
+      Create a native Xianxia character record with the campaign's Xianxia system discriminator, definition block, and initial session-state pools.
+    </p>
+  </section>
+
+  <div class="page-layout character-builder-layout">
+    <section class="section-list">
+      <section class="card">
+        <div class="section-heading">
+          <div>
+            <h2>Xianxia Character</h2>
+            <p class="meta">Start the sheet in the Xianxia lane so later creation-budget, Martial Art, read-sheet, session, and cultivation workflows can build on the same saved record.</p>
+          </div>
+          <a class="ghost-button" href="{{ url_for('character_roster_view', campaign_slug=campaign.slug) }}">Back to roster</a>
+        </div>
+
+        <form
+          method="post"
+          action="{{ url_for('character_create_view', campaign_slug=campaign.slug) }}"
+          class="stack-form character-builder-form"
+        >
+          <section class="builder-section">
+            <h3>Identity</h3>
+            <div class="builder-field-grid">
+              <label class="field">
+                <span>Character Name</span>
+                <input
+                  type="text"
+                  name="name"
+                  value="{{ builder.values.name }}"
+                  placeholder="Lotus Wake"
+                  required
+                >
+              </label>
+              <label class="field">
+                <span>Character Slug</span>
+                <input
+                  type="text"
+                  name="character_slug"
+                  value="{{ builder.values.character_slug }}"
+                  placeholder="Auto-generated from the name if left blank"
+                >
+              </label>
+            </div>
+          </section>
+
+          <div class="builder-actions">
+            <button type="submit">Create character</button>
+          </div>
+        </form>
+      </section>
+    </section>
+
+    <aside class="sidebar">
+      <section class="card sidebar-card">
+        <h2>Starting Defaults</h2>
+        <div class="builder-preview-list">
+          <div>
+            <span class="meta">Realm</span>
+            <strong>{{ builder.defaults.realm }}</strong>
+          </div>
+          <div>
+            <span class="meta">Actions</span>
+            <strong>{{ builder.defaults.actions_per_turn }}</strong>
+          </div>
+          <div>
+            <span class="meta">Honor</span>
+            <strong>{{ builder.defaults.honor }}</strong>
+          </div>
+          <div>
+            <span class="meta">Reputation</span>
+            <strong>{{ builder.defaults.reputation }}</strong>
+          </div>
+          <div>
+            <span class="meta">HP</span>
+            <strong>{{ builder.defaults.hp_max }}</strong>
+          </div>
+          <div>
+            <span class="meta">Stance</span>
+            <strong>{{ builder.defaults.stance_max }}</strong>
+          </div>
+          <div>
+            <span class="meta">Defense</span>
+            <strong>{{ builder.defaults.defense }}</strong>
+          </div>
+          <div>
+            <span class="meta">Yin / Yang</span>
+            <strong>{{ builder.defaults.yin_max }} / {{ builder.defaults.yang_max }}</strong>
+          </div>
+          <div>
+            <span class="meta">Dao</span>
+            <strong>0 / {{ builder.defaults.dao_max }}</strong>
+          </div>
+          <div>
+            <span class="meta">Insight</span>
+            <strong>{{ builder.defaults.insight_available }}</strong>
+          </div>
+        </div>
+      </section>
+    </aside>
+  </div>
+{% endblock %}

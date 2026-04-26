@@ -86,6 +86,10 @@ from .character_editor import (
 from .character_importer import write_yaml
 from .character_profile import ensure_profile_class_rows, profile_class_level_text, profile_class_rows, profile_primary_class_ref
 from .character_service import CharacterStateValidationError, build_initial_state, merge_state_with_definition
+from .xianxia_character_builder import (
+    build_xianxia_character_create_context,
+    build_xianxia_character_definition,
+)
 from .combat_presenter import DND_5E_CONDITION_OPTIONS, present_combat_tracker
 from .character_presenter import (
     build_character_entry_href,
@@ -185,10 +189,13 @@ from .systems_labels import (
 from .systems_service import LICENSE_CLASS_LABELS, SystemsPolicyValidationError, SystemsService
 from .systems_store import SystemsStore
 from .system_policy import (
+    CHARACTER_ROUTE_LANE_DND5E,
+    CHARACTER_ROUTE_LANE_XIANXIA,
     DND5E_CHARACTER_SPELLCASTING_TOOLS_UNSUPPORTED_MESSAGE,
     DND_5E_SYSTEM_CODE,
     NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE,
     character_advancement_unsupported_message,
+    native_character_create_lane,
     native_character_create_unsupported_message,
     supports_character_controls_routes,
     supports_character_read_routes,
@@ -4360,6 +4367,23 @@ def create_app() -> Flask:
                 render_ms=render_ms,
             )
         return response
+
+    def render_xianxia_character_create_page(
+        campaign_slug: str,
+        create_context: dict[str, object],
+        *,
+        status_code: int = 200,
+    ):
+        campaign = load_campaign_context(campaign_slug)
+        return (
+            render_template(
+                "character_create_xianxia.html",
+                campaign=campaign,
+                builder=create_context,
+                active_nav="characters",
+            ),
+            status_code,
+        )
 
     def render_character_edit_page(
         campaign_slug: str,
@@ -11093,7 +11117,9 @@ def create_app() -> Flask:
         campaign = repository.get_campaign(campaign_slug)
         if not campaign:
             abort(404)
-        native_character_tools_supported = campaign_supports_native_character_create(campaign)
+        native_character_tools_supported = campaign_supports_native_character_tools(campaign)
+        native_character_create_supported = campaign_supports_native_character_create(campaign)
+        character_create_lane = native_character_create_lane(getattr(campaign, "system", ""))
 
         query = request.args.get("q", "").strip()
         character_cards = present_character_roster(
@@ -11112,9 +11138,11 @@ def create_app() -> Flask:
             query=query,
             result_count=len(character_cards),
             can_create_characters=(
-                can_manage_campaign_session(campaign_slug) and native_character_tools_supported
+                can_manage_campaign_session(campaign_slug) and native_character_create_supported
             ),
             native_character_tools_supported=native_character_tools_supported,
+            native_character_create_supported=native_character_create_supported,
+            character_create_lane=character_create_lane,
             active_nav="characters",
         )
 
@@ -11125,7 +11153,51 @@ def create_app() -> Flask:
             abort(403)
 
         campaign = load_campaign_context(campaign_slug)
-        if not campaign_supports_native_character_create(campaign):
+        create_lane = native_character_create_lane(getattr(campaign, "system", ""))
+        if not campaign_supports_native_character_create(campaign) or not create_lane:
+            return redirect_unsupported_native_character_tools(
+                campaign_slug,
+                message=native_character_create_unsupported_message(campaign.system),
+            )
+        if create_lane == CHARACTER_ROUTE_LANE_XIANXIA:
+            form_values = dict(request.form if request.method == "POST" else request.args)
+            create_context = build_xianxia_character_create_context(form_values)
+            if request.method != "POST":
+                return render_xianxia_character_create_page(campaign_slug, create_context)
+
+            try:
+                definition, import_metadata = build_xianxia_character_definition(
+                    campaign_slug,
+                    create_context,
+                    form_values,
+                )
+            except CharacterBuildError as exc:
+                flash(str(exc), "error")
+                return render_xianxia_character_create_page(campaign_slug, create_context, status_code=400)
+
+            config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
+            character_dir = config.characters_dir / definition.character_slug
+            definition_path = character_dir / "definition.yaml"
+            import_path = character_dir / "import.yaml"
+            if definition_path.exists() or import_path.exists():
+                flash(
+                    f"A character with slug '{definition.character_slug}' already exists in this campaign.",
+                    "error",
+                )
+                return render_xianxia_character_create_page(campaign_slug, create_context, status_code=409)
+
+            write_yaml(definition_path, definition.to_dict())
+            write_yaml(import_path, import_metadata.to_dict())
+            character_state_store.initialize_state_if_missing(definition, build_initial_state(definition))
+            flash(f"{definition.name} created.", "success")
+            return redirect(
+                url_for(
+                    "character_read_view",
+                    campaign_slug=campaign_slug,
+                    character_slug=definition.character_slug,
+                )
+            )
+        if create_lane != CHARACTER_ROUTE_LANE_DND5E:
             return redirect_unsupported_native_character_tools(
                 campaign_slug,
                 message=native_character_create_unsupported_message(campaign.system),

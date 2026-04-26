@@ -93,6 +93,7 @@ _SYSTEM_POLICIES = {
         label=XIANXIA_SYSTEM_CODE,
         default_systems_library_slug=XIANXIA_SYSTEM_CODE,
         default_campaign_visibility_by_scope=(("systems", "dm"),),
+        supports_native_character_create=True,
         native_character_create_lane=CHARACTER_ROUTE_LANE_XIANXIA,
         character_read_lane=CHARACTER_ROUTE_LANE_XIANXIA,
         character_session_lane=CHARACTER_ROUTE_LANE_XIANXIA,

@@ -432,7 +432,7 @@ def test_non_5e_roster_hides_native_character_builder_affordances(app, client, s
     assert "Native character creation and progression stay hidden here" in html
 
 
-def test_xianxia_roster_uses_system_policy_to_hide_dnd_native_affordances(
+def test_xianxia_roster_uses_system_policy_to_show_xianxia_create_without_dnd_affordances(
     app, client, sign_in, users
 ):
     def _mutate(payload: dict) -> None:
@@ -446,10 +446,11 @@ def test_xianxia_roster_uses_system_policy_to_hide_dnd_native_affordances(
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Create character" not in html
-    assert "/campaigns/linden-pass/characters/new" not in html
+    assert "Create character" in html
+    assert "/campaigns/linden-pass/characters/new" in html
+    assert "Xianxia character creator" in html
     assert "PHB level 1 character" not in html
-    assert "Native character creation and progression stay hidden here" in html
+    assert "Native character creation and progression stay hidden here" not in html
 
 
 def test_dnd5e_character_routes_keep_native_affordances_with_xianxia_policy_present(
@@ -488,8 +489,8 @@ def test_dnd5e_character_routes_keep_native_affordances_with_xianxia_policy_pres
     assert app_module.NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE not in sheet_html
 
 
-def test_xianxia_native_character_routes_redirect_without_dnd_builder_affordances(
-    app, client, sign_in, users
+def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_path(
+    app, client, sign_in, users, get_character
 ):
     def _mutate(payload: dict) -> None:
         payload["system"] = "xianxia"
@@ -502,21 +503,86 @@ def test_xianxia_native_character_routes_redirect_without_dnd_builder_affordance
     roster = client.get("/campaigns/linden-pass/characters")
     assert roster.status_code == 200
     roster_html = roster.get_data(as_text=True)
-    assert "/campaigns/linden-pass/characters/new" not in roster_html
-    assert "Create character" not in roster_html
+    assert "/campaigns/linden-pass/characters/new" in roster_html
+    assert "Create character" in roster_html
     assert "PHB level 1 character" not in roster_html
     assert "imported PDF" not in roster_html
 
-    for method_name in ("get", "post"):
-        create_response = getattr(client, method_name)(
-            "/campaigns/linden-pass/characters/new",
-            follow_redirects=False,
-        )
-        assert create_response.status_code == 302
-        assert create_response.headers["Location"].endswith("/campaigns/linden-pass/characters")
+    create_response = client.get("/campaigns/linden-pass/characters/new")
+    assert create_response.status_code == 200
+    create_html = create_response.get_data(as_text=True)
+    assert "Xianxia Character" in create_html
+    assert "Starting Defaults" in create_html
+    assert "Native Level 1 Builder" not in create_html
+    assert "Spell Preview" not in create_html
+    assert XIANXIA_NATIVE_CHARACTER_CREATE_UNSUPPORTED_MESSAGE not in create_html
 
-    create_landing = client.get(create_response.headers["Location"])
-    assert XIANXIA_NATIVE_CHARACTER_CREATE_UNSUPPORTED_MESSAGE in create_landing.get_data(as_text=True)
+    missing_name = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={"name": "", "character_slug": ""},
+        follow_redirects=False,
+    )
+    assert missing_name.status_code == 400
+    assert "Character name is required." in missing_name.get_data(as_text=True)
+
+    submit_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={"name": "Lotus Wake", "character_slug": ""},
+        follow_redirects=False,
+    )
+    assert submit_response.status_code == 302
+    assert submit_response.headers["Location"].endswith("/campaigns/linden-pass/characters/lotus-wake")
+
+    definition_payload = _read_character_definition(app, "lotus-wake")
+    assert definition_payload["system"] == XIANXIA_SYSTEM_CODE
+    assert definition_payload["source"]["source_type"] == "xianxia_character_builder"
+    assert definition_payload["spellcasting"] == {}
+    assert definition_payload["xianxia"]["realm"] == "Mortal"
+    assert definition_payload["xianxia"]["honor"] == "Honorable"
+    assert definition_payload["xianxia"]["reputation"] == "Unknown"
+    assert definition_payload["xianxia"]["durability"] == {
+        "hp_max": 10,
+        "stance_max": 10,
+        "manual_armor_bonus": 0,
+        "defense": 10,
+    }
+    assert definition_payload["xianxia"]["yin_yang"] == {"yin_max": 1, "yang_max": 1}
+    assert definition_payload["xianxia"]["dao"] == {"max": 3}
+    assert definition_payload["xianxia"]["insight"] == {"available": 0, "spent": 0}
+    assert definition_payload["xianxia"]["martial_arts"] == []
+    assert definition_payload["xianxia"]["generic_techniques"] == []
+
+    import_payload = yaml.safe_load(
+        (
+            app.config["TEST_CAMPAIGNS_DIR"]
+            / "linden-pass"
+            / "characters"
+            / "lotus-wake"
+            / "import.yaml"
+        ).read_text(encoding="utf-8")
+    )
+    assert import_payload["source_path"] == "builder://xianxia-create"
+
+    record = get_character("lotus-wake")
+    assert record is not None
+    assert record.definition.system == XIANXIA_SYSTEM_CODE
+    state = record.state_record.state
+    assert state["vitals"] == {"current_hp": 10, "temp_hp": 0}
+    assert state["spell_slots"] == []
+    assert state["resources"] == []
+    assert state["xianxia"]["vitals"] == {
+        "current_hp": 10,
+        "temp_hp": 0,
+        "current_stance": 10,
+        "temp_stance": 0,
+    }
+    assert state["xianxia"]["energies"] == {
+        "jing": {"current": 0},
+        "qi": {"current": 0},
+        "shen": {"current": 0},
+    }
+    assert state["xianxia"]["yin_yang"] == {"yin_current": 1, "yang_current": 1}
+    assert state["xianxia"]["dao"] == {"current": 0}
 
     expected_messages = {
         "edit": app_module.NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE,
