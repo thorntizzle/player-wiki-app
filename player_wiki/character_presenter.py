@@ -1769,10 +1769,9 @@ def present_xianxia_read_context(
             include_rank_refs=True,
             systems_service=systems_service,
         ),
-        "generic_techniques": _present_xianxia_linked_records(
+        "generic_techniques": _present_xianxia_generic_technique_records(
             campaign.slug,
             xianxia.get("generic_techniques"),
-            default_name="Generic Technique",
             systems_service=systems_service,
         ),
         "basic_actions": _present_xianxia_basic_action_links(
@@ -1930,6 +1929,193 @@ def _present_xianxia_linked_records(
             )
         records.append(record)
     return records
+
+
+def _present_xianxia_generic_technique_records(
+    campaign_slug: str,
+    values: Any,
+    *,
+    systems_service: Any | None = None,
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for value in list(values or []):
+        payload = dict(value or {}) if isinstance(value, dict) else {"name": value}
+        systems_ref = dict(payload.get("systems_ref") or {})
+        entry = _xianxia_entry_for_linked_record(
+            campaign_slug,
+            systems_ref=systems_ref,
+            systems_service=systems_service,
+        )
+        if entry is not None and not systems_ref:
+            systems_ref = _systems_ref_for_entry(entry)
+        metadata = dict(getattr(entry, "metadata", {}) or {})
+        body = dict(getattr(entry, "body", {}) or {})
+        technique_body = dict(body.get("xianxia_generic_technique") or {})
+        support_state = _first_present_xianxia_value(
+            payload.get("support_state"),
+            payload.get("xianxia_support_state"),
+            metadata.get("support_state"),
+            metadata.get("xianxia_support_state"),
+            technique_body.get("support_state"),
+            technique_body.get("xianxia_support_state"),
+        )
+        insight_cost = _first_present_xianxia_value(
+            payload.get("insight_cost"),
+            metadata.get("insight_cost"),
+            technique_body.get("insight_cost"),
+        )
+        reset_cadence = _first_present_xianxia_value(
+            payload.get("reset_cadence"),
+            metadata.get("reset_cadence"),
+            technique_body.get("reset_cadence"),
+        )
+        records.append(
+            {
+                "name": str(
+                    payload.get("name")
+                    or systems_ref.get("title")
+                    or getattr(entry, "title", "")
+                    or "Generic Technique"
+                ).strip()
+                or "Generic Technique",
+                "href": build_character_entry_href(
+                    campaign_slug,
+                    systems_ref=systems_ref,
+                    page_ref=payload.get("page_ref"),
+                ),
+                "systems_ref": systems_ref,
+                "support_label": _xianxia_support_label(support_state),
+                "insight_cost": str(insight_cost).strip() if insight_cost is not None else "",
+                "prerequisites": _format_xianxia_prerequisites_for_sheet(
+                    _first_present_xianxia_value(
+                        payload.get("prerequisites"),
+                        metadata.get("prerequisites"),
+                        technique_body.get("prerequisites"),
+                    )
+                ),
+                "resource_costs": _format_xianxia_resource_costs_for_sheet(
+                    _first_present_xianxia_value(
+                        payload.get("resource_costs"),
+                        payload.get("costs"),
+                        metadata.get("resource_costs"),
+                        technique_body.get("resource_costs"),
+                    )
+                ),
+                "range_tags": _format_xianxia_string_tags(
+                    _first_present_xianxia_value(
+                        payload.get("range_tags"),
+                        payload.get("ranges"),
+                        metadata.get("range_tags"),
+                        technique_body.get("range_tags"),
+                    )
+                ),
+                "effort_tags": _format_xianxia_string_tags(
+                    _first_present_xianxia_value(
+                        payload.get("effort_tags"),
+                        payload.get("efforts"),
+                        metadata.get("effort_tags"),
+                        technique_body.get("effort_tags"),
+                    )
+                ),
+                "reset_cadence": humanize_value(reset_cadence),
+                "learnable_without_master": bool(
+                    _first_present_xianxia_value(
+                        payload.get("learnable_without_master"),
+                        metadata.get("learnable_without_master"),
+                        technique_body.get("learnable_without_master"),
+                    )
+                ),
+                "requires_master": bool(
+                    _first_present_xianxia_value(
+                        payload.get("requires_master"),
+                        metadata.get("requires_master"),
+                        technique_body.get("requires_master"),
+                    )
+                ),
+            }
+        )
+    return records
+
+
+def _first_present_xianxia_value(*values: Any) -> Any:
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return value
+    return None
+
+
+def _format_xianxia_prerequisites_for_sheet(values: Any) -> str:
+    parts: list[str] = []
+    for value in _xianxia_value_list(values):
+        if isinstance(value, dict):
+            label = str(value.get("label") or "").strip()
+            if not label:
+                label = humanize_value(value.get("value")) or humanize_value(value.get("kind"))
+            if label:
+                parts.append(label)
+        else:
+            label = humanize_value(value)
+            if label:
+                parts.append(label)
+    return "; ".join(parts)
+
+
+def _format_xianxia_resource_costs_for_sheet(values: Any) -> str:
+    parts: list[str] = []
+    for value in _xianxia_value_list(values):
+        if isinstance(value, dict):
+            resource = humanize_value(
+                value.get("resource") or value.get("resource_key") or value.get("type")
+            )
+            amount = str(value.get("amount") or "").strip()
+            if resource and amount:
+                label = f"{amount} {resource}"
+            else:
+                label = resource or amount
+            timing = humanize_value(value.get("timing"))
+            note = str(value.get("note") or "").strip()
+            details = [detail for detail in (timing, note) if detail]
+            if label and details:
+                label = f"{label} ({'; '.join(details)})"
+            if label:
+                parts.append(label)
+            continue
+        label = _format_xianxia_resource_cost_string(value)
+        if label:
+            parts.append(label)
+    return "; ".join(parts)
+
+
+def _format_xianxia_resource_cost_string(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if ":" in text:
+        resource, amount = text.split(":", 1)
+        resource_label = humanize_value(resource)
+        amount_label = amount.strip()
+        if resource_label and amount_label:
+            return f"{amount_label} {resource_label}"
+    return humanize_value(text)
+
+
+def _format_xianxia_string_tags(values: Any) -> str:
+    return ", ".join(
+        humanize_value(value) for value in _xianxia_value_list(values) if str(value).strip()
+    )
+
+
+def _xianxia_value_list(values: Any) -> list[Any]:
+    if values is None:
+        return []
+    if isinstance(values, str):
+        return [values]
+    if isinstance(values, dict):
+        return [values]
+    return list(values or [])
 
 
 def _present_xianxia_rank_refs(

@@ -113,7 +113,7 @@
     </div>
     <div class="detail-grid">
       <article class="detail-card">
-        <h3>Generic Techniques</h3>
+        <h3>Known Generic Techniques</h3>
         {% if xianxia_sheet.generic_techniques %}
           <ul class="plain-list slot-list">
             {% for technique in xianxia_sheet.generic_techniques %}
@@ -123,10 +123,37 @@
                 {% else %}
                   <span>{{ technique.name }}</span>
                 {% endif %}
-                {% if technique.current_rank %}
-                  <strong>{{ technique.current_rank }}</strong>
+                {% if technique.support_label %}
+                  <strong>{{ technique.support_label }}</strong>
+                {% endif %}
+                {% if technique.insight_cost %}
+                  <span class="meta">Insight {{ technique.insight_cost }}</span>
                 {% endif %}
               </li>
+              {% if technique.prerequisites %}
+                <li class="meta">Prerequisites: {{ technique.prerequisites }}</li>
+              {% endif %}
+              {% if technique.resource_costs %}
+                <li class="meta">Resource Costs: {{ technique.resource_costs }}</li>
+              {% endif %}
+              {% if technique.range_tags or technique.effort_tags or technique.reset_cadence %}
+                <li class="meta">
+                  {% if technique.range_tags %}Range: {{ technique.range_tags }}{% endif %}
+                  {% if technique.range_tags and (technique.effort_tags or technique.reset_cadence) %} | {% endif %}
+                  {% if technique.effort_tags %}Effort: {{ technique.effort_tags }}{% endif %}
+                  {% if technique.effort_tags and technique.reset_cadence %} | {% endif %}
+                  {% if technique.reset_cadence %}Reset: {{ technique.reset_cadence }}{% endif %}
+                </li>
+              {% endif %}
+              {% if technique.learnable_without_master or technique.requires_master %}
+                <li class="meta">
+                  {% if technique.learnable_without_master %}
+                    Learnable without a Master
+                  {% elif technique.requires_master %}
+                    Master required
+                  {% endif %}
+                </li>
+              {% endif %}
             {% endfor %}
           </ul>
         {% else %}

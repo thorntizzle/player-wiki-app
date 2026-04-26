@@ -352,6 +352,8 @@ def test_xianxia_read_sheet_uses_system_specific_subpages(
         "/campaigns/linden-pass/systems/entries/demons-fist"
         "#xianxia-demons-fist-initiate-qi-fist-technique"
     ) in martial_arts_html
+    assert "Qi Blast" not in martial_arts_html
+    assert "Known Generic Techniques" not in martial_arts_html
     assert "Features and traits" not in martial_arts_html
 
     techniques_response = client.get(
@@ -359,9 +361,16 @@ def test_xianxia_read_sheet_uses_system_specific_subpages(
     )
     assert techniques_response.status_code == 200
     techniques_html = unescape(techniques_response.get_data(as_text=True))
-    assert "Generic Techniques" in techniques_html
+    assert "Known Generic Techniques" in techniques_html
     assert "Qi Blast" in techniques_html
     assert "/campaigns/linden-pass/systems/entries/qi-blast" in techniques_html
+    assert "Insight 1" in techniques_html
+    assert "Resource Costs: 1 Qi" in techniques_html
+    assert "2 Qi" in techniques_html
+    assert "Range: Near, Far" in techniques_html
+    assert "Effort: Magic Effort Damage" in techniques_html
+    assert "Learnable without a Master" in techniques_html
+    assert "Current rank:" not in techniques_html
     assert "Basic Actions" in techniques_html
     assert "/campaigns/linden-pass/systems/entries/recoup" in techniques_html
     assert "/campaigns/linden-pass/systems/entries/throat-jab" in techniques_html
