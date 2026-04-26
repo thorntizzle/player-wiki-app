@@ -871,6 +871,49 @@ def test_api_content_character_management_can_upsert_and_delete_files(client, ap
     assert not (campaigns_dir / "linden-pass" / "characters" / "api-scout" / "definition.yaml").exists()
 
 
+def test_api_content_dnd5e_definition_load_round_trips_unchanged(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-dnd5e-round-trip-api")
+    campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])
+    character_dir = campaigns_dir / "linden-pass" / "characters" / "arden-march"
+    definition_path = character_dir / "definition.yaml"
+    original_definition = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
+    expected_definition = deepcopy(original_definition)
+    expected_definition["system"] = "DND-5E"
+    expected_definition["proficiencies"] = {
+        "armor": list(original_definition["proficiencies"].get("armor") or []),
+        "weapons": list(original_definition["proficiencies"].get("weapons") or []),
+        "tools": list(original_definition["proficiencies"].get("tools") or []),
+        "languages": list(original_definition["proficiencies"].get("languages") or []),
+        "tool_expertise": list(original_definition["proficiencies"].get("tool_expertise") or []),
+    }
+
+    detail_response = client.get(
+        "/api/v1/campaigns/linden-pass/content/characters/arden-march",
+        headers=api_headers(dm_token),
+    )
+
+    assert detail_response.status_code == 200
+    loaded_definition = detail_response.get_json()["character_file"]["definition"]
+    assert loaded_definition == expected_definition
+    assert "xianxia" not in loaded_definition
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert record is not None
+        assert record.definition.to_dict() == expected_definition
+
+    save_loaded_response = client.put(
+        "/api/v1/campaigns/linden-pass/content/characters/arden-march",
+        headers=api_headers(dm_token),
+        json={"definition": loaded_definition},
+    )
+
+    assert save_loaded_response.status_code == 200
+    round_tripped_definition = save_loaded_response.get_json()["character_file"]["definition"]
+    assert round_tripped_definition == expected_definition
+    assert yaml.safe_load(definition_path.read_text(encoding="utf-8")) == expected_definition
+
+
 def test_api_content_xianxia_definition_round_trips_through_save_and_load(client, app, users):
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-xianxia-round-trip-api")
     campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])

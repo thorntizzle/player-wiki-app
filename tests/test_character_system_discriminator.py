@@ -302,6 +302,103 @@ def test_dnd5e_definition_does_not_emit_xianxia_definition_payload():
     assert xianxia_definition_validation_errors(definition.to_dict()) == []
 
 
+def test_dnd5e_definition_load_preserves_existing_definition_fields():
+    payload = _minimal_definition_payload(
+        system="dnd5e",
+        profile={
+            "class_level_text": "Sorcerer 5",
+            "classes": [{"class_name": "Sorcerer", "subclass_name": "Wild Surge", "level": 5}],
+            "species": "Human",
+            "background": "Courier",
+        },
+        stats={
+            "max_hp": 38,
+            "armor_class": 14,
+            "proficiency_bonus": 3,
+            "ability_scores": {
+                "str": {"score": 10, "modifier": 0, "save_bonus": 0},
+                "dex": {"score": 14, "modifier": 2, "save_bonus": 2},
+                "con": {"score": 14, "modifier": 2, "save_bonus": 5},
+                "int": {"score": 12, "modifier": 1, "save_bonus": 1},
+                "wis": {"score": 12, "modifier": 1, "save_bonus": 1},
+                "cha": {"score": 18, "modifier": 4, "save_bonus": 7},
+            },
+        },
+        skills=[{"name": "Arcana", "bonus": 7, "proficiency_level": "proficient"}],
+        proficiencies={
+            "armor": [],
+            "weapons": ["Daggers", "Light Crossbows", "Quarterstaffs"],
+            "tools": ["Navigator's Tools"],
+            "languages": ["Common", "Elvish"],
+        },
+        attacks=[
+            {
+                "name": "Crossbow, Light",
+                "category": "ranged weapon",
+                "attack_bonus": 5,
+                "damage": "1d8+2 piercing",
+                "notes": "Ammunition, loading, range 80/320.",
+            }
+        ],
+        features=[
+            {
+                "name": "Wild Surge",
+                "category": "class_feature",
+                "tracker_ref": "wild-die",
+                "description_markdown": "A volatile spark that can tilt a spell once each rest.",
+            }
+        ],
+        spellcasting={
+            "spellcasting_class": "Sorcerer",
+            "spellcasting_ability": "Charisma",
+            "spell_save_dc": 15,
+            "spell_attack_bonus": 7,
+            "slot_progression": [{"level": 1, "max_slots": 4}],
+            "spells": [{"name": "Message", "source": "Sample Rules"}],
+        },
+        equipment_catalog=[{"id": "light-crossbow-1", "name": "Light Crossbow", "is_equipped": True}],
+        reference_notes={"additional_notes_markdown": "Route notes."},
+        resource_templates=[
+            {
+                "id": "sorcery-points",
+                "label": "Sorcery Points",
+                "max": 5,
+                "reset_on": "long_rest",
+            }
+        ],
+        source={"sheet_name": "System Marker", "imported_from": "System Marker.md"},
+        xianxia={
+            "realm": "Immortal",
+            "martial_arts": [{"name": "Heavenly Palm"}],
+        },
+    )
+
+    loaded = CharacterDefinition.from_dict(payload).to_dict()
+
+    assert loaded["system"] == DND_5E_SYSTEM_CODE
+    assert "xianxia" not in loaded
+    for field in (
+        "profile",
+        "stats",
+        "skills",
+        "attacks",
+        "features",
+        "spellcasting",
+        "equipment_catalog",
+        "reference_notes",
+        "resource_templates",
+        "source",
+    ):
+        assert loaded[field] == payload[field]
+    assert loaded["proficiencies"] == {
+        "armor": [],
+        "weapons": ["Daggers", "Light Crossbows", "Quarterstaffs"],
+        "tools": ["Navigator's Tools"],
+        "languages": ["Common", "Elvish"],
+        "tool_expertise": [],
+    }
+
+
 def test_xianxia_initial_state_defines_mutable_session_state_shape():
     definition = CharacterDefinition.from_dict(
         _minimal_definition_payload(
