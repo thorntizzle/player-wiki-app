@@ -539,6 +539,61 @@ def test_xianxia_read_sheet_uses_system_specific_subpages(
     assert "Current owner" in controls_html
 
 
+def test_xianxia_session_character_uses_read_sheet_subpage_chrome(
+    client,
+    sign_in,
+    users,
+    app,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Session Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+
+    response = client.get(
+        "/campaigns/linden-pass/session/character?character=session-crane&page=martial_arts"
+    )
+
+    assert response.status_code == 200
+    html = unescape(response.get_data(as_text=True))
+    assert "Character subpages" in html
+    assert "character-subpage-nav" in html
+    assert "combat-workspace-nav" not in html
+    for page in (
+        "quick",
+        "martial_arts",
+        "techniques",
+        "resources",
+        "skills",
+        "equipment",
+        "inventory",
+        "personal",
+        "notes",
+    ):
+        assert f"/campaigns/linden-pass/session/character?character=session-crane&page={page}" in html
+    assert "?page=controls" not in html
+    assert ">Spells<" not in html
+    assert ">Features<" not in html
+    assert ">Abilities and Skills<" not in html
+    assert "Demon's Fist" in html
+    assert "Current rank: Initiate" in html
+    assert "/campaigns/linden-pass/characters/session-crane?page=martial_arts" in html
+
+    legacy_response = client.get(
+        "/campaigns/linden-pass/session/character?character=session-crane&page=spellcasting"
+    )
+    assert legacy_response.status_code == 200
+    legacy_html = unescape(legacy_response.get_data(as_text=True))
+    assert "At a glance" in legacy_html
+    assert "?page=spellcasting" not in legacy_html
+    assert ">Spellcasting<" not in legacy_html
+
+
 def test_xianxia_martial_arts_page_marks_incomplete_rank_progress(
     client,
     sign_in,

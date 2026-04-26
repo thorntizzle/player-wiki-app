@@ -17,6 +17,7 @@
   <div class="page-layout session-layout">
     <section class="session-column">
       {% if character %}
+        {% set is_xianxia_sheet = character.xianxia_read %}
         <article class="article card character-sheet">
           <header class="character-header">
             <p class="eyebrow">Session character</p>
@@ -63,16 +64,20 @@
           <section class="card combat-workspace-card">
             <div class="section-heading">
               <div>
-                <h2>Character sections</h2>
+                <h2>{% if is_xianxia_sheet %}Character subpages{% else %}Character sections{% endif %}</h2>
                 <p class="meta">
-                  Keep Session trimmed to an overview plus the non-combat sections players are most likely to open in play, without turning this route into a second full character hub.
+                  {% if is_xianxia_sheet %}
+                    Use the same Xianxia sheet subpages here as the full character page, with in-play controls kept to the currently supported lanes.
+                  {% else %}
+                    Keep Session trimmed to an overview plus the non-combat sections players are most likely to open in play, without turning this route into a second full character hub.
+                  {% endif %}
                 </p>
               </div>
             </div>
-            <nav class="combat-workspace-nav" aria-label="Session character sections">
+            <nav class="{% if is_xianxia_sheet %}character-subpage-nav{% else %}combat-workspace-nav{% endif %}" aria-label="{% if is_xianxia_sheet %}Character subpages{% else %}Session character sections{% endif %}">
               {% for subpage in character_subpages %}
                 <a
-                  class="ghost-button combat-workspace-button{% if subpage.is_active %} combat-workspace-button--active{% endif %}"
+                  class="{% if is_xianxia_sheet %}{% if subpage.is_active %}button-link{% else %}ghost-button{% endif %}{% else %}ghost-button combat-workspace-button{% if subpage.is_active %} combat-workspace-button--active{% endif %}{% endif %}"
                   href="{{ subpage.href }}"
                   {% if subpage.is_active %}aria-current="page"{% endif %}
                 >
@@ -83,9 +88,9 @@
                 </a>
               {% endfor %}
             </nav>
-            {% if session_character_active_edit_summary or session_combat_relationship_available %}
+            {% if (session_character_active_edit_summary and not is_xianxia_sheet) or session_combat_relationship_available %}
               <div class="session-character-lane-note">
-                {% if session_character_active_edit_summary %}
+                {% if session_character_active_edit_summary and not is_xianxia_sheet %}
                   <p class="meta">
                     <strong>Session edits:</strong> {{ session_character_active_edit_summary }}.
                   </p>
@@ -111,13 +116,13 @@
           </section>
 
           {% set show_overview_sections = character_subpage == 'overview' %}
-          {% set show_quick_sections = show_overview_sections %}
-          {% set show_spellcasting_sections = character_subpage == 'spells' %}
+          {% set show_quick_sections = character_subpage == 'quick' if is_xianxia_sheet else show_overview_sections %}
+          {% set show_spellcasting_sections = character_subpage == 'spells' and not is_xianxia_sheet %}
           {% set show_resource_sections = character_subpage == 'resources' %}
-          {% set show_feature_sections = character_subpage == 'features' %}
+          {% set show_feature_sections = character_subpage == 'features' and not is_xianxia_sheet %}
           {% set show_equipment_sections = character_subpage == 'equipment' %}
           {% set show_inventory_sections = character_subpage == 'inventory' %}
-          {% set show_ability_skill_sections = character_subpage == 'abilities_skills' %}
+          {% set show_ability_skill_sections = character_subpage == 'abilities_skills' and not is_xianxia_sheet %}
           {% set show_note_sections = character_subpage == 'notes' %}
           {% set show_personal_sections = character_subpage == 'personal' %}
 
@@ -127,6 +132,20 @@
 
           {% if show_overview_sections %}
             <section class="read-section" id="session-character-overview">
+              <h2>At a glance</h2>
+              <div class="glance-grid">
+                {% for stat in character.overview_stats %}
+                  <div class="glance-card">
+                    <span class="meta">{{ stat.label }}</span>
+                    <strong>{{ stat.value }}</strong>
+                  </div>
+                {% endfor %}
+              </div>
+            </section>
+          {% endif %}
+
+          {% if show_quick_sections and is_xianxia_sheet %}
+            <section class="read-section" id="character-quick-overview">
               <h2>At a glance</h2>
               <div class="glance-grid">
                 {% for stat in character.overview_stats %}
@@ -166,11 +185,15 @@
             </section>
           {% endif %}
 
-          {% if session_character_editing_enabled %}
+          {% if session_character_editing_enabled and not is_xianxia_sheet %}
             {% include "_character_session_panels.html" %}
           {% endif %}
 
-          {% if show_resource_sections %}
+          {% if is_xianxia_sheet %}
+            {% include "_character_xianxia_read_sections.html" %}
+          {% endif %}
+
+          {% if show_resource_sections and not is_xianxia_sheet %}
             <section class="read-section">
               <div class="section-heading">
                 <h2>Resources</h2>
@@ -299,7 +322,7 @@
             {% include "_character_spellcasting_section.html" %}
           {% endif %}
 
-          {% if show_equipment_sections %}
+          {% if show_equipment_sections and not is_xianxia_sheet %}
             <section class="read-section">
               <div class="section-heading">
                 <h2>Equipment</h2>
@@ -362,7 +385,7 @@
             </section>
           {% endif %}
 
-          {% if show_inventory_sections %}
+          {% if show_inventory_sections and not is_xianxia_sheet %}
             <section class="read-section">
               <div class="section-heading">
                 <h2>Inventory and currency</h2>

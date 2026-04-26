@@ -263,6 +263,25 @@ SESSION_CHARACTER_SECTION_ALIASES = {
     normalize_lookup("notes"): "notes",
     normalize_lookup("personal"): "personal",
 }
+XIANXIA_SESSION_CHARACTER_SECTION_ALIASES = {
+    normalize_lookup("overview"): "quick",
+    normalize_lookup("quick"): "quick",
+    normalize_lookup("quick reference"): "quick",
+    normalize_lookup("martial arts"): "martial_arts",
+    normalize_lookup("martial_arts"): "martial_arts",
+    normalize_lookup("techniques"): "techniques",
+    normalize_lookup("technique"): "techniques",
+    normalize_lookup("resources"): "resources",
+    normalize_lookup("resource"): "resources",
+    normalize_lookup("skills"): "skills",
+    normalize_lookup("abilities and skills"): "skills",
+    normalize_lookup("abilities & skills"): "skills",
+    normalize_lookup("abilities_skills"): "skills",
+    normalize_lookup("equipment"): "equipment",
+    normalize_lookup("inventory"): "inventory",
+    normalize_lookup("notes"): "notes",
+    normalize_lookup("personal"): "personal",
+}
 SESSION_CHARACTER_FULL_SHEET_PAGE_MAP = {
     "overview": ("quick", "#character-quick-overview"),
     "spells": ("spellcasting", ""),
@@ -1265,7 +1284,15 @@ def normalize_character_read_subpage(
 def get_session_character_subpage_labels(
     *,
     include_spellcasting: bool = False,
+    xianxia_read: dict[str, object] | None = None,
 ) -> dict[str, str]:
+    if xianxia_read:
+        return get_character_read_subpage_labels(
+            include_spellcasting=False,
+            include_controls=False,
+            xianxia_read=xianxia_read,
+        )
+
     labels = {
         "overview": SESSION_CHARACTER_SECTION_LABELS["overview"],
     }
@@ -1289,11 +1316,22 @@ def normalize_session_character_subpage(
     value: str,
     *,
     include_spellcasting: bool = False,
+    xianxia_read: dict[str, object] | None = None,
 ) -> str:
     allowed_labels = get_session_character_subpage_labels(
-        include_spellcasting=include_spellcasting
+        include_spellcasting=include_spellcasting,
+        xianxia_read=xianxia_read,
     )
     normalized = normalize_lookup(value)
+    if xianxia_read:
+        direct_candidate = (value or "").strip().lower()
+        if direct_candidate in allowed_labels:
+            return direct_candidate
+        candidate = XIANXIA_SESSION_CHARACTER_SECTION_ALIASES.get(normalized, "")
+        if candidate in allowed_labels:
+            return candidate
+        return "quick"
+
     candidate = SESSION_CHARACTER_SECTION_ALIASES.get(normalized, "")
     if candidate in allowed_labels:
         return candidate
@@ -3001,11 +3039,20 @@ def create_app() -> Flask:
         campaign_slug: str,
         character_slug: str,
         session_subpage: str,
+        *,
+        xianxia_read: dict[str, object] | None = None,
     ) -> str:
-        read_page, anchor = SESSION_CHARACTER_FULL_SHEET_PAGE_MAP.get(
-            session_subpage,
-            ("quick", ""),
-        )
+        if xianxia_read:
+            read_page = normalize_session_character_subpage(
+                session_subpage,
+                xianxia_read=xianxia_read,
+            )
+            anchor = ""
+        else:
+            read_page, anchor = SESSION_CHARACTER_FULL_SHEET_PAGE_MAP.get(
+                session_subpage,
+                ("quick", ""),
+            )
         href = url_for(
             "character_read_view",
             campaign_slug=campaign_slug,
@@ -4217,14 +4264,22 @@ def create_app() -> Flask:
             and get_campaign_session_service().get_active_session(campaign_slug) is not None
             and can_access_session_character_surface(campaign_slug, character_slug)
         ):
+            session_character_page = (
+                normalize_session_character_subpage(
+                    character_subpage,
+                    xianxia_read=xianxia_read_context,
+                )
+                if xianxia_read_context
+                else CHARACTER_READ_TO_SESSION_CHARACTER_PAGE_MAP.get(
+                    character_subpage,
+                    "overview",
+                )
+            )
             character_session_surface_href = url_for(
                 "campaign_session_character_view",
                 campaign_slug=campaign.slug,
                 character=character_slug,
-                page=CHARACTER_READ_TO_SESSION_CHARACTER_PAGE_MAP.get(
-                    character_subpage,
-                    "overview",
-                ),
+                page=session_character_page,
             )
         character_combat_surface_href = ""
         character_combat_surface_action_label = ""
@@ -5091,9 +5146,15 @@ def create_app() -> Flask:
             else:
                 character.pop("spellcasting", None)
             include_spellcasting_subpage = bool(character.get("spellcasting"))
+            xianxia_read_context = (
+                dict(character.get("xianxia_read") or {})
+                if isinstance(character.get("xianxia_read"), dict)
+                else None
+            )
             character_subpage = normalize_session_character_subpage(
                 requested_subpage if requested_subpage is not None else request.args.get("page", ""),
                 include_spellcasting=include_spellcasting_subpage,
+                xianxia_read=xianxia_read_context,
             )
             session_character_editing_enabled = bool(
                 active_session_record is not None
@@ -5139,6 +5200,7 @@ def create_app() -> Flask:
                     campaign.slug,
                     selected_character_slug,
                     character_subpage,
+                    xianxia_read=xianxia_read_context,
                 )
                 if can_view_full_character_sheet
                 else ""
@@ -5168,6 +5230,7 @@ def create_app() -> Flask:
                     campaign.slug,
                     selected_character_slug,
                     "personal",
+                    xianxia_read=xianxia_read_context,
                 )
                 if can_view_full_character_sheet
                 else ""
@@ -5640,6 +5703,11 @@ def create_app() -> Flask:
         equipment_state_manager: dict[str, object] | None = None,
         include_spellcasting: bool = False,
     ) -> list[dict[str, object]]:
+        xianxia_read = (
+            dict(character_detail.get("xianxia_read") or {})
+            if isinstance(character_detail.get("xianxia_read"), dict)
+            else None
+        )
         spellcasting = dict(character_detail.get("spellcasting") or {})
         resources = [dict(item or {}) for item in list(character_detail.get("resources") or [])]
         feature_groups = [dict(group or {}) for group in list(character_detail.get("feature_groups") or [])]
@@ -5659,6 +5727,69 @@ def create_app() -> Flask:
             for section in list(spellcasting.get("row_sections") or [])
             if isinstance(section, dict)
         )
+        if xianxia_read:
+            xianxia_resources = dict(xianxia_read.get("resources") or {})
+            xianxia_approval = dict(xianxia_read.get("approval") or {})
+            xianxia_equipment = dict(xianxia_read.get("equipment") or {})
+            xianxia_inventory = dict(xianxia_read.get("inventory") or {})
+            xianxia_quick_reference = dict(xianxia_read.get("quick_reference") or {})
+            xianxia_status_groups = [
+                dict(group or {})
+                for group in list(xianxia_approval.get("status_groups") or [])
+                if isinstance(group, dict)
+            ]
+            xianxia_counts = {
+                "quick": (
+                    len(overview_stats)
+                    + int(bool(xianxia_quick_reference.get("check_formula")))
+                    + int(bool(xianxia_quick_reference.get("difficulty_states")))
+                    + int(bool(xianxia_quick_reference.get("honor_interactions")))
+                    + int(bool(xianxia_quick_reference.get("skill_use_guardrails")))
+                    + len(list(xianxia_quick_reference.get("rule_text_references") or []))
+                    + int(bool(xianxia_quick_reference.get("actions")))
+                    + int(bool(xianxia_quick_reference.get("defense")))
+                    + int(bool(xianxia_quick_reference.get("effort_damage")))
+                    + len(list(xianxia_quick_reference.get("active_state_reminders") or []))
+                    + int(bool(xianxia_quick_reference.get("stance_break")))
+                ),
+                "martial_arts": len(list(xianxia_read.get("martial_arts") or [])),
+                "techniques": (
+                    len(list(xianxia_read.get("generic_techniques") or []))
+                    + len(list(xianxia_read.get("basic_actions") or []))
+                    + sum(len(list(group.get("records") or [])) for group in xianxia_status_groups)
+                    + len(list(xianxia_approval.get("dao_immolating_prepared") or []))
+                ),
+                "resources": (
+                    len(list(xianxia_resources.get("durability") or []))
+                    + len(list(xianxia_resources.get("energies") or []))
+                    + len(list(xianxia_resources.get("yin_yang") or []))
+                    + int(bool(xianxia_resources.get("dao")))
+                    + int(bool(xianxia_resources.get("insight")))
+                ),
+                "skills": len(list(dict(xianxia_read.get("skills") or {}).get("trained") or [])),
+                "equipment": (
+                    1
+                    + len(list(xianxia_equipment.get("necessary_weapons") or []))
+                    + len(list(xianxia_equipment.get("necessary_tools") or []))
+                ),
+                "inventory": len(list(xianxia_inventory.get("quantities") or [])),
+                "personal": (
+                    int(bool(character_detail.get("portrait")))
+                    + int(bool(character_detail.get("physical_description_html")))
+                    + int(bool(character_detail.get("personal_background_html")))
+                ),
+                "notes": int(bool(character_detail.get("player_notes_html"))) + len(reference_sections),
+            }
+            return [
+                {
+                    "slug": slug,
+                    "label": label,
+                    "count": int(xianxia_counts.get(slug) or 0),
+                }
+                for slug, label in get_session_character_subpage_labels(
+                    xianxia_read=xianxia_read
+                ).items()
+            ]
 
         sections = [
             {
