@@ -20,6 +20,10 @@ from player_wiki.xianxia_systems_seed import (
     XIANXIA_ENERGY_KEYS,
     XIANXIA_EFFORT_KEYS,
     XIANXIA_ENTRY_FACET_KEYS,
+    XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_NOTE_INSIGHT_STARTS_AT_0,
+    XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_REASON_INSIGHT_STARTS_AT_0,
+    XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_STATUS_SEEDED,
+    XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_UNAVAILABLE_BY_DEFAULT,
     XIANXIA_GENERIC_TECHNIQUE_DEFAULT_SUPPORT_STATE,
     XIANXIA_GENERIC_TECHNIQUE_DETAILS_STATUS_COST_PREREQ_RESOURCE_RANGE_EFFORT_RESET_SUPPORT_SEEDED,
     XIANXIA_MAGIC_EFFORT_CANONICAL_LABEL,
@@ -931,8 +935,42 @@ def test_xianxia_generic_technique_seed_entries_cover_requirements_catalog():
         for entry in generic_entries
     )
     assert all(
+        detail["available_at_character_creation"] is False
+        for detail in generic_technique_details.values()
+    )
+    assert all(
+        detail["character_creation_availability"]
+        == XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_UNAVAILABLE_BY_DEFAULT
+        for detail in generic_technique_details.values()
+    )
+    assert all(entry["metadata"]["available_at_character_creation"] is False for entry in generic_entries)
+    assert all(
+        entry["metadata"]["character_creation_availability"]
+        == XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_UNAVAILABLE_BY_DEFAULT
+        for entry in generic_entries
+    )
+    assert all(
+        entry["metadata"]["character_creation_availability_reason"]
+        == XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_REASON_INSIGHT_STARTS_AT_0
+        for entry in generic_entries
+    )
+    assert all(
+        entry["metadata"]["character_creation_availability_note"]
+        == XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_NOTE_INSIGHT_STARTS_AT_0
+        for entry in generic_entries
+    )
+    assert all(
+        entry["metadata"]["character_creation_availability_status"]
+        == XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_STATUS_SEEDED
+        for entry in generic_entries
+    )
+    assert all(
         entry["body"]["xianxia_generic_technique"]["details_status"]
         == XIANXIA_GENERIC_TECHNIQUE_DETAILS_STATUS_COST_PREREQ_RESOURCE_RANGE_EFFORT_RESET_SUPPORT_SEEDED
+        for entry in generic_entries
+    )
+    assert all(
+        entry["body"]["xianxia_generic_technique"]["available_at_character_creation"] is False
         for entry in generic_entries
     )
 
@@ -958,9 +996,13 @@ def test_xianxia_generic_technique_seed_entries_cover_requirements_catalog():
     assert qi_blast["body"]["xianxia_generic_technique"]["insight_cost"] == 1
     assert "Spend a point of Qi" in qi_blast["rendered_html"]
     assert "Insight Cost" in qi_blast["rendered_html"]
+    assert "Character Creation" in qi_blast["rendered_html"]
+    assert "Insight starts at 0" in qi_blast["rendered_html"]
     assert "magic effort damage" in qi_blast["rendered_html"]
     assert "qi blast" in qi_blast["search_text"]
     assert "magic_effort_damage" in qi_blast["search_text"]
+    assert "unavailable_by_default" in qi_blast["search_text"]
+    assert "insight_starts_at_0" in qi_blast["search_text"]
 
     scolding_backhand = entry_map["scolding-backhand"]
     assert scolding_backhand["metadata"]["reset_cadence"] == "once_per_combat"

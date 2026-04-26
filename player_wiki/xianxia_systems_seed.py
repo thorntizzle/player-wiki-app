@@ -93,6 +93,18 @@ XIANXIA_GENERIC_TECHNIQUE_DETAILS_STATUS_COST_PREREQ_RESOURCE_RANGE_EFFORT_RESET
 )
 XIANXIA_GENERIC_TECHNIQUE_SUPPORT_STATES = frozenset({"reference_only", "modeled"})
 XIANXIA_GENERIC_TECHNIQUE_DEFAULT_SUPPORT_STATE = "reference_only"
+XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_UNAVAILABLE_BY_DEFAULT = (
+    "unavailable_by_default"
+)
+XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_REASON_INSIGHT_STARTS_AT_0 = (
+    "insight_starts_at_0"
+)
+XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_NOTE_INSIGHT_STARTS_AT_0 = (
+    "Generic Techniques require spending Insight, and Insight starts at 0."
+)
+XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_STATUS_SEEDED = (
+    "unavailable_by_default_insight_starts_at_0"
+)
 
 
 @lru_cache(maxsize=1)
@@ -958,6 +970,15 @@ def _normalize_generic_technique_details(raw_details: object) -> dict[str, dict[
         reset_cadence = _normalize_identifier(
             raw_detail.get("reset_cadence") or raw_detail.get("reset")
         )
+        available_at_character_creation = bool(
+            raw_detail.get("available_at_character_creation")
+            or raw_detail.get("character_creation_available")
+        )
+        if available_at_character_creation:
+            raise ValueError(
+                f"Xianxia Generic Technique {generic_technique_key!r} must be unavailable "
+                "at character creation because Insight starts at 0."
+            )
         normalized[generic_technique_key] = {
             "insight_cost": insight_cost,
             "prerequisites": _normalize_generic_technique_prerequisites(
@@ -979,6 +1000,19 @@ def _normalize_generic_technique_details(raw_details: object) -> dict[str, dict[
             "reset_cadence": reset_cadence or None,
             "support_state": support_state,
             "xianxia_support_state": support_state,
+            "available_at_character_creation": False,
+            "character_creation_availability": (
+                XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_UNAVAILABLE_BY_DEFAULT
+            ),
+            "character_creation_availability_reason": (
+                XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_REASON_INSIGHT_STARTS_AT_0
+            ),
+            "character_creation_availability_note": (
+                XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_NOTE_INSIGHT_STARTS_AT_0
+            ),
+            "character_creation_availability_status": (
+                XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_STATUS_SEEDED
+            ),
         }
     return normalized
 
@@ -1465,6 +1499,21 @@ def _stamp_generic_technique_details(metadata: dict[str, Any], body: dict[str, A
     metadata["reset_cadence"] = details["reset_cadence"]
     metadata["support_state"] = str(details["support_state"])
     metadata["xianxia_support_state"] = str(details["xianxia_support_state"])
+    metadata["available_at_character_creation"] = bool(
+        details["available_at_character_creation"]
+    )
+    metadata["character_creation_availability"] = str(
+        details["character_creation_availability"]
+    )
+    metadata["character_creation_availability_reason"] = str(
+        details["character_creation_availability_reason"]
+    )
+    metadata["character_creation_availability_note"] = str(
+        details["character_creation_availability_note"]
+    )
+    metadata["character_creation_availability_status"] = str(
+        details["character_creation_availability_status"]
+    )
 
     generic_technique_body = body.get("xianxia_generic_technique")
     if not isinstance(generic_technique_body, dict):
@@ -1484,6 +1533,21 @@ def _stamp_generic_technique_details(metadata: dict[str, Any], body: dict[str, A
     generic_technique_body["reset_cadence"] = details["reset_cadence"]
     generic_technique_body["support_state"] = str(details["support_state"])
     generic_technique_body["xianxia_support_state"] = str(details["xianxia_support_state"])
+    generic_technique_body["available_at_character_creation"] = bool(
+        details["available_at_character_creation"]
+    )
+    generic_technique_body["character_creation_availability"] = str(
+        details["character_creation_availability"]
+    )
+    generic_technique_body["character_creation_availability_reason"] = str(
+        details["character_creation_availability_reason"]
+    )
+    generic_technique_body["character_creation_availability_note"] = str(
+        details["character_creation_availability_note"]
+    )
+    generic_technique_body["character_creation_availability_status"] = str(
+        details["character_creation_availability_status"]
+    )
     body["support_state"] = str(details["support_state"])
     body["xianxia_support_state"] = str(details["xianxia_support_state"])
 
@@ -1557,6 +1621,10 @@ def _generic_technique_details_search_parts(body: dict[str, Any]) -> list[str]:
         str(generic_technique_body.get("insight_cost") or ""),
         str(generic_technique_body.get("reset_cadence") or ""),
         str(generic_technique_body.get("support_state") or ""),
+        str(generic_technique_body.get("character_creation_availability") or ""),
+        str(generic_technique_body.get("character_creation_availability_reason") or ""),
+        str(generic_technique_body.get("character_creation_availability_note") or ""),
+        str(generic_technique_body.get("character_creation_availability_status") or ""),
     ]
     parts.extend(str(value) for value in generic_technique_body.get("range_tags") or [])
     parts.extend(str(value) for value in generic_technique_body.get("effort_tags") or [])
@@ -1627,6 +1695,21 @@ def _render_generic_technique_details_html(body: dict[str, Any]) -> str:
     )
     if prerequisites:
         parts.append(f"<p><strong>Prerequisites:</strong> {prerequisites}</p>")
+
+    character_creation_availability = str(
+        generic_technique_body.get("character_creation_availability") or ""
+    ).strip()
+    if character_creation_availability:
+        character_creation_note = str(
+            generic_technique_body.get("character_creation_availability_note") or ""
+        ).strip()
+        character_creation_label = character_creation_availability.replace("_", " ")
+        character_creation_text = escape(character_creation_label)
+        if character_creation_note:
+            character_creation_text += f" ({escape(character_creation_note)})"
+        parts.append(
+            f"<p><strong>Character Creation:</strong> {character_creation_text}</p>"
+        )
 
     resource_costs = _format_resource_costs(generic_technique_body.get("resource_costs"))
     if resource_costs:
@@ -1987,6 +2070,25 @@ def _copy_generic_technique_detail(detail: dict[str, Any]) -> dict[str, Any]:
             detail.get("xianxia_support_state")
             or detail.get("support_state")
             or XIANXIA_GENERIC_TECHNIQUE_DEFAULT_SUPPORT_STATE
+        ),
+        "available_at_character_creation": bool(
+            detail.get("available_at_character_creation", False)
+        ),
+        "character_creation_availability": str(
+            detail.get("character_creation_availability")
+            or XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_UNAVAILABLE_BY_DEFAULT
+        ),
+        "character_creation_availability_reason": str(
+            detail.get("character_creation_availability_reason")
+            or XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_REASON_INSIGHT_STARTS_AT_0
+        ),
+        "character_creation_availability_note": str(
+            detail.get("character_creation_availability_note")
+            or XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_NOTE_INSIGHT_STARTS_AT_0
+        ),
+        "character_creation_availability_status": str(
+            detail.get("character_creation_availability_status")
+            or XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_STATUS_SEEDED
         ),
     }
 
