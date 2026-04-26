@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from .system_policy import DND_5E_SYSTEM_CODE, normalize_system_code
+from .system_policy import DND_5E_SYSTEM_CODE, is_xianxia_system, normalize_system_code
+from .xianxia_character_model import normalize_xianxia_definition_payload
 
 
 def _normalize_proficiency_text(value: Any) -> str:
@@ -42,14 +43,16 @@ class CharacterDefinition:
     resource_templates: list[dict[str, Any]]
     source: dict[str, Any]
     system: str = DND_5E_SYSTEM_CODE
+    xianxia: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        normalized_system = normalize_system_code(self.system) or DND_5E_SYSTEM_CODE
+        payload = {
             "campaign_slug": self.campaign_slug,
             "character_slug": self.character_slug,
             "name": self.name,
             "status": self.status,
-            "system": normalize_system_code(self.system) or DND_5E_SYSTEM_CODE,
+            "system": normalized_system,
             "profile": self.profile,
             "stats": self.stats,
             "skills": self.skills,
@@ -62,26 +65,40 @@ class CharacterDefinition:
             "resource_templates": self.resource_templates,
             "source": self.source,
         }
+        if is_xianxia_system(normalized_system):
+            payload["xianxia"] = normalize_xianxia_definition_payload(
+                {**payload, "xianxia": self.xianxia}
+            )["xianxia"]
+        return payload
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "CharacterDefinition":
+        normalized_system = (
+            normalize_system_code(payload.get("system") or payload.get("system_code") or DND_5E_SYSTEM_CODE)
+            or DND_5E_SYSTEM_CODE
+        )
+        normalized_payload = dict(payload)
+        normalized_payload["system"] = normalized_system
+        if is_xianxia_system(normalized_system):
+            normalized_payload = normalize_xianxia_definition_payload(normalized_payload)
+
         required_fields = ("campaign_slug", "character_slug", "name", "status")
-        missing = [field for field in required_fields if not payload.get(field)]
+        missing = [field for field in required_fields if not normalized_payload.get(field)]
         if missing:
             joined = ", ".join(missing)
             raise ValueError(f"Character definition is missing required fields: {joined}")
-        raw_proficiencies = dict(payload.get("proficiencies") or {})
+        raw_proficiencies = dict(normalized_payload.get("proficiencies") or {})
         tool_expertise = _dedupe_proficiency_values(raw_proficiencies.get("tool_expertise") or [])
         tools = _dedupe_proficiency_values(list(raw_proficiencies.get("tools") or []) + tool_expertise)
 
         return cls(
-            campaign_slug=str(payload["campaign_slug"]),
-            character_slug=str(payload["character_slug"]),
-            name=str(payload["name"]),
-            status=str(payload["status"]),
-            profile=dict(payload.get("profile") or {}),
-            stats=dict(payload.get("stats") or {}),
-            skills=list(payload.get("skills") or []),
+            campaign_slug=str(normalized_payload["campaign_slug"]),
+            character_slug=str(normalized_payload["character_slug"]),
+            name=str(normalized_payload["name"]),
+            status=str(normalized_payload["status"]),
+            profile=dict(normalized_payload.get("profile") or {}),
+            stats=dict(normalized_payload.get("stats") or {}),
+            skills=list(normalized_payload.get("skills") or []),
             proficiencies={
                 "armor": _dedupe_proficiency_values(raw_proficiencies.get("armor") or []),
                 "weapons": _dedupe_proficiency_values(raw_proficiencies.get("weapons") or []),
@@ -89,17 +106,15 @@ class CharacterDefinition:
                 "languages": _dedupe_proficiency_values(raw_proficiencies.get("languages") or []),
                 "tool_expertise": tool_expertise,
             },
-            attacks=list(payload.get("attacks") or []),
-            features=list(payload.get("features") or []),
-            spellcasting=dict(payload.get("spellcasting") or {}),
-            equipment_catalog=list(payload.get("equipment_catalog") or []),
-            reference_notes=dict(payload.get("reference_notes") or {}),
-            resource_templates=list(payload.get("resource_templates") or []),
-            source=dict(payload.get("source") or {}),
-            system=normalize_system_code(
-                payload.get("system") or payload.get("system_code") or DND_5E_SYSTEM_CODE
-            )
-            or DND_5E_SYSTEM_CODE,
+            attacks=list(normalized_payload.get("attacks") or []),
+            features=list(normalized_payload.get("features") or []),
+            spellcasting=dict(normalized_payload.get("spellcasting") or {}),
+            equipment_catalog=list(normalized_payload.get("equipment_catalog") or []),
+            reference_notes=dict(normalized_payload.get("reference_notes") or {}),
+            resource_templates=list(normalized_payload.get("resource_templates") or []),
+            source=dict(normalized_payload.get("source") or {}),
+            system=normalized_system,
+            xianxia=dict(normalized_payload.get("xianxia") or {}) if is_xianxia_system(normalized_system) else {},
         )
 
 

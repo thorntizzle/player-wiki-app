@@ -3,6 +3,10 @@ from __future__ import annotations
 from player_wiki.character_builder import normalize_definition_to_native_model
 from player_wiki.character_models import CharacterDefinition
 from player_wiki.system_policy import DND_5E_SYSTEM_CODE, XIANXIA_SYSTEM_CODE
+from player_wiki.xianxia_character_model import (
+    XIANXIA_CHARACTER_DEFINITION_SCHEMA_VERSION,
+    XIANXIA_DEFINITION_FIELD_KEYS,
+)
 
 
 def _minimal_definition_payload(**overrides):
@@ -50,3 +54,155 @@ def test_native_dnd5e_normalizer_leaves_xianxia_definitions_untouched():
     normalized = normalize_definition_to_native_model(definition)
 
     assert normalized.to_dict() == definition.to_dict()
+
+
+def test_xianxia_definition_normalizes_stable_definition_fields():
+    definition = CharacterDefinition.from_dict(
+        _minimal_definition_payload(
+            system="xianxia",
+            xianxia={
+                "realm": "immortal",
+                "action_count": "3",
+                "honor": "majestic",
+                "reputation": "Known in the Eastern Ward",
+                "attributes": {"str": 1, "dex": 2, "con": 3, "int": 0, "wis": 0, "cha": 0},
+                "efforts": {
+                    "basic": 1,
+                    "weapon": 2,
+                    "guns_explosive": 0,
+                    "magic": 1,
+                    "ultimate": 1,
+                },
+                "energy_maxima": {"jing": 2, "qi": 3, "shen": 1},
+                "yin_yang": {"yin_max": "2", "yang_max": "1"},
+                "dao_max": 3,
+                "insight": {"available": 4, "spent": 2},
+                "durability": {
+                    "hp_max": 18,
+                    "stance_max": 14,
+                    "manual_armor_bonus": 2,
+                    "defense": 15,
+                },
+                "skills": {"trained": ["Tea Ceremony", "Strategy", "Tea Ceremony"]},
+                "equipment": {
+                    "necessary_weapons": [{"name": "Jian", "reason": "Required by Heavenly Palm"}],
+                    "necessary_tools": ["Calligraphy brush"],
+                },
+                "martial_arts": [
+                    {
+                        "systems_ref": {"slug": "heavenly-palm", "entry_type": "martial_art"},
+                        "current_rank": "Novice",
+                        "learned_rank_refs": ["xianxia:heavenly-palm:initiate"],
+                    }
+                ],
+                "generic_techniques": [
+                    {"systems_ref": {"slug": "qi-blast", "entry_type": "generic_technique"}}
+                ],
+                "variants": [{"variant_type": "karmic_constraint", "name": "Falling Palm Oath"}],
+                "dao_immolating_records": {
+                    "prepared": [{"name": "Ashen Bell"}],
+                    "history": [{"name": "River-Cleaving Spark", "approval_status": "approved"}],
+                },
+                "approval_requests": [{"request_type": "ascendant_art", "status": "pending"}],
+                "companions": [{"name": "Ink phantom", "source_ref": "xianxia:ink-stained-historian"}],
+                "advancement_history": [{"action": "gather_insight", "amount": 1}],
+            },
+        )
+    )
+
+    xianxia = definition.to_dict()["xianxia"]
+
+    assert tuple(xianxia) == XIANXIA_DEFINITION_FIELD_KEYS
+    assert xianxia["schema_version"] == XIANXIA_CHARACTER_DEFINITION_SCHEMA_VERSION
+    assert xianxia["realm"] == "Immortal"
+    assert xianxia["actions_per_turn"] == 3
+    assert xianxia["honor"] == "Majestic"
+    assert xianxia["reputation"] == "Known in the Eastern Ward"
+    assert xianxia["attributes"] == {"str": 1, "dex": 2, "con": 3, "int": 0, "wis": 0, "cha": 0}
+    assert xianxia["efforts"]["guns_explosive"] == 0
+    assert xianxia["efforts"]["magic"] == 1
+    assert xianxia["energies"] == {"jing": {"max": 2}, "qi": {"max": 3}, "shen": {"max": 1}}
+    assert xianxia["yin_yang"] == {"yin_max": 2, "yang_max": 1}
+    assert xianxia["dao"] == {"max": 3}
+    assert xianxia["insight"] == {"available": 4, "spent": 2}
+    assert xianxia["durability"] == {
+        "hp_max": 18,
+        "stance_max": 14,
+        "manual_armor_bonus": 2,
+        "defense": 15,
+    }
+    assert xianxia["skills"]["trained"] == ["Tea Ceremony", "Strategy"]
+    assert xianxia["equipment"]["necessary_weapons"] == [
+        {"name": "Jian", "reason": "Required by Heavenly Palm"}
+    ]
+    assert xianxia["equipment"]["necessary_tools"] == [{"name": "Calligraphy brush"}]
+    assert xianxia["martial_arts"][0]["current_rank"] == "Novice"
+    assert xianxia["generic_techniques"][0]["systems_ref"]["slug"] == "qi-blast"
+    assert xianxia["variants"][0]["variant_type"] == "karmic_constraint"
+    assert xianxia["dao_immolating_techniques"]["prepared"][0]["name"] == "Ashen Bell"
+    assert xianxia["dao_immolating_techniques"]["use_history"][0]["approval_status"] == "approved"
+    assert xianxia["approval_requests"][0]["status"] == "pending"
+    assert xianxia["companions"][0]["name"] == "Ink phantom"
+    assert xianxia["advancement_history"][0]["action"] == "gather_insight"
+    assert "dying" not in xianxia
+
+
+def test_xianxia_definition_accepts_requirements_sketch_top_level_aliases():
+    definition = CharacterDefinition.from_dict(
+        _minimal_definition_payload(
+            system="xianxia",
+            realm="Divine",
+            actions_per_turn=4,
+            attributes={"str": 4, "dex": 3, "con": 2, "int": 1, "wis": 0, "cha": 0},
+            efforts={"basic": 1, "weapon": 1, "guns_explosive": 1, "magic": 2, "ultimate": 3},
+            energies={"jing": {"max": 5}, "qi": {"max": 4}, "shen": {"max": 3}},
+            yin_max=2,
+            yang_max=2,
+            hp_max=24,
+            stance_max=20,
+            manual_armor_bonus=1,
+            defense=13,
+            trained_skills=["Fishing", "Court Etiquette", "Fishing"],
+            necessary_weapons=["Spear"],
+            necessary_tools=[{"name": "Fishing net", "reason": "Required for Fishing"}],
+            martial_arts=["Heavenly Palm"],
+            generic_techniques=["Qi Blast"],
+            dao_max=3,
+            insight_available=1,
+            insight_spent=0,
+        )
+    )
+
+    xianxia = definition.to_dict()["xianxia"]
+
+    assert xianxia["realm"] == "Divine"
+    assert xianxia["actions_per_turn"] == 4
+    assert xianxia["attributes"]["str"] == 4
+    assert xianxia["efforts"]["magic"] == 2
+    assert xianxia["energies"]["jing"] == {"max": 5}
+    assert xianxia["yin_yang"] == {"yin_max": 2, "yang_max": 2}
+    assert xianxia["durability"]["hp_max"] == 24
+    assert xianxia["durability"]["stance_max"] == 20
+    assert xianxia["durability"]["manual_armor_bonus"] == 1
+    assert xianxia["durability"]["defense"] == 13
+    assert xianxia["skills"]["trained"] == ["Fishing", "Court Etiquette"]
+    assert xianxia["equipment"]["necessary_weapons"] == [{"name": "Spear"}]
+    assert xianxia["equipment"]["necessary_tools"] == [
+        {"name": "Fishing net", "reason": "Required for Fishing"}
+    ]
+    assert xianxia["martial_arts"] == [{"name": "Heavenly Palm"}]
+    assert xianxia["generic_techniques"] == [{"name": "Qi Blast"}]
+    assert xianxia["dao"] == {"max": 3}
+    assert xianxia["insight"] == {"available": 1, "spent": 0}
+
+
+def test_dnd5e_definition_does_not_emit_xianxia_definition_payload():
+    definition = CharacterDefinition.from_dict(
+        _minimal_definition_payload(
+            system="dnd5e",
+            xianxia={"realm": "Mortal", "martial_arts": ["Heavenly Palm"]},
+        )
+    )
+
+    assert definition.system == DND_5E_SYSTEM_CODE
+    assert "xianxia" not in definition.to_dict()
