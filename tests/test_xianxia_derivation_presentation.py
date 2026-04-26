@@ -275,6 +275,24 @@ def test_xianxia_read_sheet_uses_system_specific_subpages(
         }
     ]
     _write_raw_xianxia_character_definition(app, "subpage-crane", payload)
+    record = get_character("subpage-crane")
+    assert record is not None
+    depleted_state = deepcopy(record.state_record.state)
+    depleted_state["vitals"] = {"current_hp": 6, "temp_hp": 2}
+    depleted_state["xianxia"]["vitals"] = {
+        "current_hp": 6,
+        "temp_hp": 2,
+        "current_stance": 4,
+        "temp_stance": 5,
+    }
+    depleted_state["xianxia"]["energies"] = {
+        "jing": {"current": 0},
+        "qi": {"current": 1},
+        "shen": {"current": 0},
+    }
+    depleted_state["xianxia"]["yin_yang"] = {"yin_current": 0, "yang_current": 1}
+    depleted_state["xianxia"]["dao"] = {"current": 2}
+    _replace_character_state(app, record, depleted_state)
 
     quick_response = client.get("/campaigns/linden-pass/characters/subpage-crane?page=quick")
 
@@ -345,10 +363,20 @@ def test_xianxia_read_sheet_uses_system_specific_subpages(
     resources_html = unescape(resources_response.get_data(as_text=True))
     assert "Resources" in resources_html
     assert "HP" in resources_html
+    assert "Current 6 / Max 10" in resources_html
+    assert "Temporary HP: 2" in resources_html
     assert "Stance" in resources_html
+    assert "Current 4 / Max 10" in resources_html
+    assert "Temporary Stance: 5" in resources_html
     assert "Jing" in resources_html
+    assert "Current 0 / Max 1" in resources_html
+    assert "Qi" in resources_html
+    assert "Current 1 / Max 1" in resources_html
+    assert "Shen" in resources_html
     assert "Yin" in resources_html
+    assert "Yang" in resources_html
     assert "Dao" in resources_html
+    assert "Current 2 / Max 3" in resources_html
     assert "Insight" in resources_html
     assert "No active Stance recorded" in resources_html
 

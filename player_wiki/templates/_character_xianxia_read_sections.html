@@ -180,7 +180,7 @@
       {% for resource in xianxia_sheet.resources.durability %}
         <article class="resource-card">
           <h3>{{ resource.label }}</h3>
-          <p class="resource-card__value">{{ resource.current }} / {{ resource.max }}</p>
+          <p class="resource-card__value">Current {{ resource.current }} / Max {{ resource.max }}</p>
           {% if resource.temp %}
             <p class="meta">Temporary {{ resource.label }}: {{ resource.temp }}</p>
           {% endif %}
@@ -189,18 +189,18 @@
       {% for resource in xianxia_sheet.resources.energies %}
         <article class="resource-card">
           <h3>{{ resource.label }}</h3>
-          <p class="resource-card__value">{{ resource.current }} / {{ resource.max }}</p>
+          <p class="resource-card__value">Current {{ resource.current }} / Max {{ resource.max }}</p>
         </article>
       {% endfor %}
       {% for resource in xianxia_sheet.resources.yin_yang %}
         <article class="resource-card">
           <h3>{{ resource.label }}</h3>
-          <p class="resource-card__value">{{ resource.current }} / {{ resource.max }}</p>
+          <p class="resource-card__value">Current {{ resource.current }} / Max {{ resource.max }}</p>
         </article>
       {% endfor %}
       <article class="resource-card">
         <h3>Dao</h3>
-        <p class="resource-card__value">{{ xianxia_sheet.resources.dao.current }} / {{ xianxia_sheet.resources.dao.max }}</p>
+        <p class="resource-card__value">Current {{ xianxia_sheet.resources.dao.current }} / Max {{ xianxia_sheet.resources.dao.max }}</p>
       </article>
       <article class="resource-card">
         <h3>Insight</h3>
