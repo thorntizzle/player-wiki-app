@@ -116,6 +116,17 @@ _DEFERRED_DEFINITION_KEYS = {
     "dying": "Dying Rounds belong to a future combat-state shape.",
     "dying_rounds": "Dying Rounds belong to a future combat-state shape.",
     "dying_rounds_remaining": "Dying Rounds belong to a future combat-state shape.",
+    "statuses": "Status functionality belongs to a future combat-state shape.",
+    "status_effects": "Status functionality belongs to a future combat-state shape.",
+    "conditions": "Status and condition functionality belong to a future combat-state shape.",
+    "targets": "Target state belongs to a future combat-state shape.",
+    "target_effects": "Target effects belong to a future combat-state shape.",
+    "action_resolution": "Action resolution belongs to a future combat automation shape.",
+}
+
+_DEFERRED_XIANXIA_DEFINITION_KEYS = {
+    **_DEFERRED_DEFINITION_KEYS,
+    "attacks": "Attacks and attack resolution belong to a future combat automation shape.",
 }
 
 
@@ -606,12 +617,20 @@ def _normalized_definition_validation_payload(payload: dict[str, Any]) -> dict[s
 
 def _collect_deferred_definition_key_errors(payload: dict[str, Any], errors: list[str]) -> None:
     raw_xianxia = payload.get("xianxia") if isinstance(payload.get("xianxia"), dict) else {}
-    for path, mapping in (("", payload), ("xianxia.", raw_xianxia)):
+    for path, mapping, deferred_keys in (
+        ("", payload, _DEFERRED_DEFINITION_KEYS),
+        ("xianxia.", raw_xianxia, _DEFERRED_XIANXIA_DEFINITION_KEYS),
+    ):
         if not isinstance(mapping, dict):
             continue
-        for key, reason in _DEFERRED_DEFINITION_KEYS.items():
+        for key, reason in deferred_keys.items():
             if key in mapping:
                 errors.append(f"{path}{key} is not valid Xianxia definition data. {reason}")
+
+    raw_attacks = payload.get("attacks")
+    if raw_attacks:
+        reason = _DEFERRED_XIANXIA_DEFINITION_KEYS["attacks"]
+        errors.append(f"attacks is not valid Xianxia definition data. {reason}")
 
 
 def _value_at_path(mapping: dict[str, Any], path: str) -> Any:

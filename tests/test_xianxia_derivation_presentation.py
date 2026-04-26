@@ -968,6 +968,11 @@ def test_xianxia_session_resources_allow_manual_active_stance_and_aura_updates(
             "mode": "session",
             "page": "resources",
             "return_view": "session-character",
+            "dying_rounds_remaining": "4",
+            "statuses": "Burn",
+            "attacks": "Duel Strike",
+            "target_effects": "Sealed Bandit",
+            "action_resolution": "Hit",
         },
         follow_redirects=False,
     )
@@ -982,9 +987,16 @@ def test_xianxia_session_resources_allow_manual_active_stance_and_aura_updates(
     xianxia_state = updated.state_record.state["xianxia"]
     assert xianxia_state["active_stance"] == {"name": "Stone Root"}
     assert xianxia_state["active_aura"] == {"name": "Azure Bell"}
-    assert "targets" not in xianxia_state
-    assert "target_effects" not in xianxia_state
-    assert "dying" not in xianxia_state
+    for deferred_key in (
+        "dying",
+        "dying_rounds_remaining",
+        "statuses",
+        "attacks",
+        "targets",
+        "target_effects",
+        "action_resolution",
+    ):
+        assert deferred_key not in xianxia_state
 
     quick_response = client.get(
         "/campaigns/linden-pass/characters/session-active-crane?mode=session&page=quick"

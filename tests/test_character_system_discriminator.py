@@ -303,6 +303,7 @@ def test_xianxia_definition_validation_helpers_accept_stable_payloads():
 def test_xianxia_definition_validation_helpers_report_invalid_payloads():
     payload = _minimal_definition_payload(
         system="xianxia",
+        attacks=[{"name": "Duel Strike"}],
         xianxia={
             "realm": "Mortal",
             "actions_per_turn": 3,
@@ -315,6 +316,10 @@ def test_xianxia_definition_validation_helpers_report_invalid_payloads():
             "durability": {"hp_max": -1, "manual_armor_bonus": -1},
             "martial_arts": [{}],
             "dying": {"rounds_remaining": 4},
+            "statuses": [{"name": "Burn"}],
+            "attacks": [{"name": "Duel Strike"}],
+            "target_effects": [{"target": "Bandit", "effect": "sealed"}],
+            "action_resolution": {"last_roll": 20},
         },
     )
 
@@ -333,6 +338,26 @@ def test_xianxia_definition_validation_helpers_report_invalid_payloads():
     assert (
         "xianxia.dying is not valid Xianxia definition data. "
         "Dying Rounds belong to a future combat-state shape."
+    ) in errors
+    assert (
+        "xianxia.statuses is not valid Xianxia definition data. "
+        "Status functionality belongs to a future combat-state shape."
+    ) in errors
+    assert (
+        "xianxia.attacks is not valid Xianxia definition data. "
+        "Attacks and attack resolution belong to a future combat automation shape."
+    ) in errors
+    assert (
+        "xianxia.target_effects is not valid Xianxia definition data. "
+        "Target effects belong to a future combat-state shape."
+    ) in errors
+    assert (
+        "xianxia.action_resolution is not valid Xianxia definition data. "
+        "Action resolution belongs to a future combat automation shape."
+    ) in errors
+    assert (
+        "attacks is not valid Xianxia definition data. "
+        "Attacks and attack resolution belong to a future combat automation shape."
     ) in errors
 
     try:
@@ -493,7 +518,7 @@ def test_xianxia_initial_state_defines_mutable_session_state_shape():
     assert "dying" not in xianxia_state
 
 
-def test_xianxia_state_normalizes_requirement_sketch_aliases_without_dying_rounds():
+def test_xianxia_state_normalizes_requirement_sketch_aliases_without_deferred_combat_state():
     definition = CharacterDefinition.from_dict(
         _minimal_definition_payload(
             system="xianxia",
@@ -524,6 +549,13 @@ def test_xianxia_state_normalizes_requirement_sketch_aliases_without_dying_round
                 "active_stance": "Stone Root",
                 "active_aura": {"name": "Azure Bell", "systems_ref": {"slug": "azure-bell"}},
                 "dying": {"rounds_remaining": 4},
+                "dying_rounds_remaining": 4,
+                "statuses": [{"name": "Burn"}],
+                "status_effects": [{"name": "Poison"}],
+                "attacks": [{"name": "Duel Strike"}],
+                "targets": [{"name": "Bandit"}],
+                "target_effects": [{"target": "Bandit", "effect": "sealed"}],
+                "action_resolution": {"last_roll": 20},
             },
         },
     )
@@ -553,7 +585,17 @@ def test_xianxia_state_normalizes_requirement_sketch_aliases_without_dying_round
         "quantities": [{"id": "spirit-rice", "name": "Spirit rice", "quantity": 2}],
     }
     assert xianxia_state["notes"] == {"player_notes_markdown": "Watch for the Azure Bell timer."}
-    assert "dying" not in xianxia_state
+    for deferred_key in (
+        "dying",
+        "dying_rounds_remaining",
+        "statuses",
+        "status_effects",
+        "attacks",
+        "targets",
+        "target_effects",
+        "action_resolution",
+    ):
+        assert deferred_key not in xianxia_state
 
 
 def test_xianxia_state_normalization_clamps_mutable_pools_to_current_maxima():
