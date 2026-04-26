@@ -805,6 +805,125 @@ def test_xianxia_systems_entries_appear_on_expected_source_category_pages(
         assert all(other_title not in category_html for other_title in other_titles)
 
 
+def test_xianxia_systems_search_uses_title_and_metadata_without_prose_parsing(
+    app, client, sign_in, users
+):
+    source_id = "XIANXIA-SEARCH-TEST"
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = "xianxia"
+    payload["systems_library"] = "xianxia"
+    payload["systems_sources"] = [
+        {
+            "source_id": source_id,
+            "enabled": True,
+        }
+    ]
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        service.ensure_builtin_library_seeded(XIANXIA_SYSTEM_CODE)
+        store.upsert_source(
+            XIANXIA_SYSTEM_CODE,
+            source_id,
+            title="Xianxia Search Test",
+            license_class="open_license",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        store.upsert_entry(
+            XIANXIA_SYSTEM_CODE,
+            source_id,
+            entry_key="xianxia|rule|search-test|metadata-lantern",
+            entry_type="rule",
+            slug="metadata-lantern",
+            title="Metadata Lantern",
+            search_text="metadata lantern curated title boundary",
+            player_safe_default=True,
+            metadata={
+                "rule_key": "metadata_lantern",
+                "rule_facets": ["structured_harmonizer"],
+                "aliases": ["Structured Harmonizer"],
+                "reference_terms": ["curated-metadata-test"],
+                "xianxia_entry_facets": ["rule"],
+                "xianxia_rule_key": "metadata_lantern",
+            },
+            body={"summary": "The prose-only term verdantphoenix should not be searchable."},
+            rendered_html="<p>The prose-only term verdantphoenix appears only in full prose.</p>",
+        )
+
+        title_results = service.search_entries_for_campaign(
+            "linden-pass",
+            query="Metadata Lantern",
+            include_source_ids=[source_id],
+            limit=None,
+        )
+        prose_global_results = service.search_entries_for_campaign(
+            "linden-pass",
+            query="verdantphoenix",
+            include_source_ids=[source_id],
+            limit=None,
+        )
+        metadata_reference_results = service.search_rules_reference_entries_for_campaign(
+            "linden-pass",
+            query="structured harmonizer",
+            include_source_ids=[source_id],
+            limit=None,
+        )
+        prose_reference_results = service.search_rules_reference_entries_for_campaign(
+            "linden-pass",
+            query="verdantphoenix",
+            include_source_ids=[source_id],
+            limit=None,
+        )
+        prose_category_results = service.list_entries_for_campaign_source(
+            "linden-pass",
+            source_id,
+            entry_type="rule",
+            query="verdantphoenix",
+            limit=None,
+        )
+
+        assert "Metadata Lantern" in {entry.title for entry in title_results}
+        assert "Metadata Lantern" in {entry.title for entry in metadata_reference_results}
+        assert "Metadata Lantern" not in {entry.title for entry in prose_global_results}
+        assert "Metadata Lantern" not in {entry.title for entry in prose_reference_results}
+        assert "Metadata Lantern" not in {entry.title for entry in prose_category_results}
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    title_search = client.get("/campaigns/linden-pass/systems/search?q=Metadata+Lantern")
+    metadata_search = client.get(
+        "/campaigns/linden-pass/systems/search?reference_q=structured+harmonizer"
+    )
+    prose_search = client.get(
+        "/campaigns/linden-pass/systems/search?q=verdantphoenix&reference_q=verdantphoenix"
+    )
+    prose_category = client.get(
+        f"/campaigns/linden-pass/systems/sources/{source_id}/types/rule"
+        "?q=verdantphoenix"
+    )
+
+    assert title_search.status_code == 200
+    assert "Metadata Lantern" in title_search.get_data(as_text=True)
+
+    assert metadata_search.status_code == 200
+    assert "Metadata Lantern" in metadata_search.get_data(as_text=True)
+
+    assert prose_search.status_code == 200
+    prose_html = prose_search.get_data(as_text=True)
+    assert "Metadata Lantern" not in prose_html
+    assert "No imported systems entries matched that search yet." in prose_html
+    assert "No rules references matched that metadata search yet." in prose_html
+
+    assert prose_category.status_code == 200
+    prose_category_html = prose_category.get_data(as_text=True)
+    assert "Metadata Lantern" not in prose_category_html
+    assert "No rules matched that title/type search." in prose_category_html
+
+
 def test_dm_can_later_enable_xianxia_systems_for_players_through_existing_controls(
     app, client, sign_in, users
 ):
