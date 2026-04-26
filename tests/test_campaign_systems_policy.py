@@ -21,8 +21,10 @@ from player_wiki.xianxia_systems_seed import (
     XIANXIA_EFFORT_KEYS,
     XIANXIA_ENTRY_FACET_KEYS,
     XIANXIA_MAGIC_EFFORT_CANONICAL_LABEL,
+    XIANXIA_MARTIAL_ART_ABILITY_KIND_KEYS,
     XIANXIA_MARTIAL_ART_MISSING_RANK_REASON_INTENTIONAL_DRAFT,
     XIANXIA_MARTIAL_ART_RANK_KEYS,
+    XIANXIA_MARTIAL_ART_RANK_ABILITY_GRANTS_STATUS_KIND_TAGS_SEEDED,
     XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_COMPLETE,
     XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_INTENTIONAL_DRAFT,
     XIANXIA_MARTIAL_ART_RANK_RECORDS_STATUS_ADVANCEMENT_METADATA_SEEDED,
@@ -35,6 +37,7 @@ from player_wiki.xianxia_systems_seed import (
     _build_seed_entry,
     build_xianxia_entry_facet_definitions,
     build_xianxia_effort_definitions,
+    build_xianxia_martial_art_rank_ability_grants,
     build_xianxia_martial_art_rank_definitions,
     build_xianxia_martial_art_rank_resource_grants,
     build_xianxia_systems_seed_entries,
@@ -391,6 +394,7 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
     entries = build_xianxia_systems_seed_entries()
     martial_art_entries = [entry for entry in entries if entry["entry_type"] == "martial_art"]
     rank_resource_grants = build_xianxia_martial_art_rank_resource_grants()
+    rank_ability_grants = build_xianxia_martial_art_rank_ability_grants()
     expected_titles = [
         "Demon's Fist",
         "Heavenly Palm",
@@ -446,9 +450,24 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
         for entry in martial_art_entries
     )
     assert all(
+        entry["metadata"]["rank_ability_grants_seeded"] is True
+        for entry in martial_art_entries
+    )
+    assert all(
+        entry["metadata"]["rank_ability_grants_status"]
+        == XIANXIA_MARTIAL_ART_RANK_ABILITY_GRANTS_STATUS_KIND_TAGS_SEEDED
+        for entry in martial_art_entries
+    )
+    assert all(
         set(grants) == set(XIANXIA_ENERGY_KEYS)
         for rank_grants in rank_resource_grants.values()
         for grants in rank_grants.values()
+    )
+    assert all(
+        grant["kind_key"] in XIANXIA_MARTIAL_ART_ABILITY_KIND_KEYS
+        for rank_grants in rank_ability_grants.values()
+        for grants in rank_grants.values()
+        for grant in grants
     )
     assert all(
         entry["metadata"]["rank_completion_status"]
@@ -465,7 +484,11 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
         for entry in martial_art_entries
     )
     assert all(
-        "Rank-granted ability details are deferred" in entry["rendered_html"]
+        "rank-granted ability names and kind tags" in entry["rendered_html"]
+        for entry in martial_art_entries
+    )
+    assert all(
+        "Detailed ability rules remain deferred" in entry["rendered_html"]
         for entry in martial_art_entries
     )
 
@@ -478,6 +501,10 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
     assert "Ji, and Shen" not in entry_map["bing-ti"]["rendered_html"]
     assert "Qi Fist Technique" not in entry_map["demons-fist"]["rendered_html"]
     assert set(rank_resource_grants) == {
+        entry["metadata"]["martial_art_key"]
+        for entry in martial_art_entries
+    }
+    assert set(rank_ability_grants) == {
         entry["metadata"]["martial_art_key"]
         for entry in martial_art_entries
     }
@@ -504,6 +531,18 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
         "qi": 0,
         "shen": 0,
     }
+    assert rank_ability_grants["demons_fist"]["initiate"][0]["name"] == "Qi Fist Technique"
+    assert rank_ability_grants["demons_fist"]["initiate"][0]["kind_key"] == "technique"
+    assert rank_ability_grants["bloody_saber"]["novice"][0]["kind_key"] == "aura"
+    assert rank_ability_grants["cherry_blossom_swallow"]["novice"][0]["kind_key"] == "stance"
+    assert [grant["name"] for grant in rank_ability_grants["strategists_acumen"]["initiate"]] == [
+        "Eagle-Eyed Insight Maneuver",
+        "Flow of Battle Maneuver",
+    ]
+    assert {grant["kind_key"] for grant in rank_ability_grants["strategists_acumen"]["initiate"]} == {
+        "maneuver"
+    }
+    assert rank_ability_grants["formless_fist"]["legendary"][0]["kind_key"] == "other"
 
     complete_rank_keys = list(XIANXIA_MARTIAL_ART_RANK_KEYS)
     rank_name_by_key = {
@@ -548,6 +587,12 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
             == XIANXIA_MARTIAL_ART_RANK_RESOURCE_GRANTS_STATUS_ENERGY_MAXIMUMS_SEEDED
             for record in records
         )
+        assert all(
+            record["rank_ability_grants_status"]
+            == XIANXIA_MARTIAL_ART_RANK_ABILITY_GRANTS_STATUS_KIND_TAGS_SEEDED
+            for record in records
+        )
+        assert all(record["xianxia_ability_grants"] == record["ability_grants"] for record in records)
         assert metadata["martial_art_rank_resource_grants"] == {
             record["rank_key"]: record["energy_maximum_increases"]
             for record in records
@@ -558,6 +603,17 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
         assert martial_art_body["rank_resource_grants"] == metadata["martial_art_rank_resource_grants"]
         assert martial_art_body["xianxia_martial_art_rank_resource_grants"] == (
             metadata["martial_art_rank_resource_grants"]
+        )
+        assert metadata["martial_art_rank_ability_grants"] == {
+            record["rank_key"]: record["ability_grants"]
+            for record in records
+        }
+        assert metadata["xianxia_martial_art_rank_ability_grants"] == (
+            metadata["martial_art_rank_ability_grants"]
+        )
+        assert martial_art_body["rank_ability_grants"] == metadata["martial_art_rank_ability_grants"]
+        assert martial_art_body["xianxia_martial_art_rank_ability_grants"] == (
+            metadata["martial_art_rank_ability_grants"]
         )
         assert all(record["rank_available_in_seed"] is True for record in records)
         assert all(record["is_incomplete_rank"] is False for record in records)
@@ -596,6 +652,8 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
             == rank_resource_grants[record["martial_art_key"]][record["rank_key"]]
             for record in records
         )
+        assert all(record["rank_ability_grants_status"] is not None for record in records)
+        assert all(record["ability_grants"] for record in records)
         missing_rank_keys = complete_rank_keys[len(expected_rank_keys) :]
         missing_rank_names = [rank_name_by_key[rank_key] for rank_key in missing_rank_keys]
         metadata = entry_map[slug]["metadata"]
@@ -627,11 +685,19 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
         )
         assert all(record["energy_maximum_increases"] is None for record in missing_records)
         assert all(record["rank_resource_grants_status"] is None for record in missing_records)
+        assert all(record["ability_grants"] == [] for record in missing_records)
+        assert all(record["xianxia_ability_grants"] == [] for record in missing_records)
+        assert all(record["rank_ability_grants_status"] is None for record in missing_records)
         assert metadata["martial_art_rank_resource_grants"] == {
             record["rank_key"]: record["energy_maximum_increases"]
             for record in records
         }
         assert martial_art_body["rank_resource_grants"] == metadata["martial_art_rank_resource_grants"]
+        assert metadata["martial_art_rank_ability_grants"] == {
+            record["rank_key"]: record["ability_grants"]
+            for record in records
+        }
+        assert martial_art_body["rank_ability_grants"] == metadata["martial_art_rank_ability_grants"]
         assert all(record["rank_available_in_seed"] is False for record in missing_records)
         assert all(record["is_incomplete_rank"] is True for record in missing_records)
         assert all(
@@ -677,7 +743,11 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
     assert demons_fist_ranks[-1]["prerequisite_rank_key"] == "master"
     assert demons_fist_ranks[-1]["teacher_breakthrough_requirement"] == "ascension_breakthrough"
     assert "quest or mythic-level master" in demons_fist_ranks[-1]["legendary_prerequisite_note"]
-    assert "ability_grants" not in demons_fist_ranks[0]
+    qi_fist = demons_fist_ranks[0]["ability_grants"][0]
+    assert qi_fist["ability_key"] == "qi_fist_technique"
+    assert qi_fist["kind_key"] == "technique"
+    assert qi_fist["ability_ref"] == "xianxia:demons-fist:initiate:qi-fist-technique"
+    assert "qi fist technique" in entry_map["demons-fist"]["search_text"]
 
 
 def test_xianxia_condition_and_status_seed_entries_are_forced_reference_only():
@@ -987,7 +1057,8 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
     assert "Catalog Parent" in demons_fist_html
     assert "Structured rank records are seeded for the ranks present" in demons_fist_html
     assert "include Jing, Qi, and Shen maximum increases" in demons_fist_html
-    assert "Rank-granted ability details are deferred" in demons_fist_html
+    assert "rank-granted ability names and kind tags" in demons_fist_html
+    assert "Detailed ability rules remain deferred" in demons_fist_html
     assert "Qi Fist Technique" not in demons_fist_html
 
     assert dnd_entry.status_code == 404

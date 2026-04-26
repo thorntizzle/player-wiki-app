@@ -67,11 +67,22 @@ XIANXIA_MARTIAL_ART_RANK_RECORDS_STATUS_ADVANCEMENT_METADATA_SEEDED = (
 XIANXIA_MARTIAL_ART_RANK_RESOURCE_GRANTS_STATUS_ENERGY_MAXIMUMS_SEEDED = (
     "energy_maximum_increases_seeded"
 )
+XIANXIA_MARTIAL_ART_RANK_ABILITY_GRANTS_STATUS_KIND_TAGS_SEEDED = (
+    "ability_kind_tags_seeded"
+)
 XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_COMPLETE = "complete"
 XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_INTENTIONAL_DRAFT = "intentional_incomplete_draft"
 XIANXIA_MARTIAL_ART_MISSING_RANK_REASON_INTENTIONAL_DRAFT = "intentional_draft_content"
 XIANXIA_MARTIAL_ART_RANK_STATUS_PRESENT = "present"
 XIANXIA_MARTIAL_ART_RANK_STATUS_MISSING_INTENTIONAL_DRAFT = "missing_intentional_draft"
+XIANXIA_MARTIAL_ART_ABILITY_KIND_KEYS = ("technique", "maneuver", "stance", "aura", "other")
+XIANXIA_MARTIAL_ART_ABILITY_KIND_LABELS = {
+    "technique": "Technique",
+    "maneuver": "Maneuver",
+    "stance": "Stance",
+    "aura": "Aura",
+    "other": "Other",
+}
 
 
 @lru_cache(maxsize=1)
@@ -89,6 +100,7 @@ def _load_xianxia_systems_seed_payload() -> dict[str, Any]:
     raw_martial_art_ranks = payload.get("martial_art_ranks")
     raw_martial_art_rank_sets = payload.get("martial_art_rank_sets")
     raw_martial_art_rank_resource_grants = payload.get("martial_art_rank_resource_grants")
+    raw_martial_art_rank_ability_grants = payload.get("martial_art_rank_ability_grants")
     raw_entries = payload.get("entries")
 
     if source_id != XIANXIA_HOMEBREW_SOURCE_ID:
@@ -110,10 +122,18 @@ def _load_xianxia_systems_seed_payload() -> dict[str, Any]:
     payload["martial_art_rank_resource_grants"] = _normalize_martial_art_rank_resource_grants(
         raw_martial_art_rank_resource_grants
     )
+    payload["martial_art_rank_ability_grants"] = _normalize_martial_art_rank_ability_grants(
+        raw_martial_art_rank_ability_grants
+    )
     if not isinstance(raw_entries, list):
         raise ValueError("Xianxia Systems seed payload must include an entries list.")
     _validate_martial_art_rank_resource_grants_cover_entries(
         payload["martial_art_rank_resource_grants"],
+        raw_entries,
+        payload["martial_art_rank_sets"],
+    )
+    _validate_martial_art_rank_ability_grants_cover_entries(
+        payload["martial_art_rank_ability_grants"],
         raw_entries,
         payload["martial_art_rank_sets"],
     )
@@ -158,6 +178,16 @@ def build_xianxia_martial_art_rank_resource_grants() -> dict[str, dict[str, dict
             for rank_key, grants in rank_grants.items()
         }
         for martial_art_key, rank_grants in _XIANXIA_MARTIAL_ART_RANK_RESOURCE_GRANTS.items()
+    }
+
+
+def build_xianxia_martial_art_rank_ability_grants() -> dict[str, dict[str, list[dict[str, Any]]]]:
+    return {
+        martial_art_key: {
+            rank_key: [dict(grant) for grant in grants]
+            for rank_key, grants in rank_grants.items()
+        }
+        for martial_art_key, rank_grants in _XIANXIA_MARTIAL_ART_RANK_ABILITY_GRANTS.items()
     }
 
 
@@ -257,6 +287,7 @@ def _build_seed_entry(raw_spec: dict[str, Any], *, index: int, source_path: str)
     ]
     if entry_type == "martial_art":
         search_parts.extend(_martial_art_draft_search_parts(body))
+        search_parts.extend(_martial_art_ability_search_parts(body))
     rendered_html = str(raw_spec.get("rendered_html") or "").strip() or _render_seed_entry_html(
         summary=summary,
         aliases=aliases,
@@ -580,6 +611,124 @@ def _normalize_martial_art_rank_resource_grants(
     return normalized
 
 
+def _normalize_martial_art_rank_ability_grants(
+    raw_ability_grants: object,
+) -> dict[str, dict[str, list[dict[str, Any]]]]:
+    if not isinstance(raw_ability_grants, dict):
+        raise ValueError(
+            "Xianxia Systems seed payload must include a martial_art_rank_ability_grants object."
+        )
+
+    normalized: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for raw_martial_art_key, raw_rank_grants in raw_ability_grants.items():
+        martial_art_key = _normalize_identifier(raw_martial_art_key)
+        if not martial_art_key:
+            raise ValueError(
+                "Xianxia Martial Art rank ability grants are missing a Martial Art key."
+            )
+        if martial_art_key in normalized:
+            raise ValueError(
+                f"Xianxia Martial Art rank ability grants for {martial_art_key!r} are duplicated."
+            )
+        if not isinstance(raw_rank_grants, dict):
+            raise ValueError(
+                f"Xianxia Martial Art rank ability grants for {martial_art_key!r} must be an object."
+            )
+
+        normalized_rank_grants: dict[str, list[dict[str, Any]]] = {}
+        for raw_rank_key, raw_grants in raw_rank_grants.items():
+            rank_key = _normalize_identifier(raw_rank_key)
+            if rank_key not in XIANXIA_MARTIAL_ART_RANK_KEYS:
+                raise ValueError(
+                    f"Xianxia Martial Art rank ability grants for {martial_art_key!r} "
+                    f"use unknown rank {rank_key!r}."
+                )
+            if rank_key in normalized_rank_grants:
+                raise ValueError(
+                    f"Xianxia Martial Art rank ability grants for {martial_art_key!r} "
+                    f"duplicate rank {rank_key!r}."
+                )
+            if not isinstance(raw_grants, list) or not raw_grants:
+                raise ValueError(
+                    f"Xianxia Martial Art rank ability grants for {martial_art_key!r} "
+                    f"rank {rank_key!r} must be a non-empty list."
+                )
+
+            normalized_rank_grants[rank_key] = _normalize_rank_ability_grants(
+                raw_grants,
+                context=(
+                    f"Xianxia Martial Art rank ability grants for {martial_art_key!r} "
+                    f"rank {rank_key!r}"
+                ),
+            )
+
+        normalized[martial_art_key] = normalized_rank_grants
+
+    return normalized
+
+
+def _normalize_rank_ability_grants(
+    raw_grants: list[object],
+    *,
+    context: str,
+) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+    for index, raw_grant in enumerate(raw_grants, start=1):
+        if isinstance(raw_grant, str):
+            name = raw_grant.strip()
+            raw_kind: object = None
+            raw_key: object = None
+        elif isinstance(raw_grant, dict):
+            name = str(raw_grant.get("name") or raw_grant.get("title") or "").strip()
+            raw_kind = raw_grant.get("kind")
+            raw_key = raw_grant.get("ability_key") or raw_grant.get("key")
+        else:
+            raise ValueError(f"{context} ability grant {index} must be a string or object.")
+
+        if not name:
+            raise ValueError(f"{context} ability grant {index} is missing a name.")
+        ability_key = _normalize_identifier(raw_key) or _normalize_identifier(name)
+        if not ability_key:
+            raise ValueError(f"{context} ability grant {index} is missing an ability key.")
+        if ability_key in seen_keys:
+            raise ValueError(f"{context} ability grant {ability_key!r} is duplicated.")
+        seen_keys.add(ability_key)
+
+        kind_key = _normalize_ability_kind(raw_kind, name=name)
+        normalized.append(
+            {
+                "ability_key": ability_key,
+                "name": name,
+                "kind": XIANXIA_MARTIAL_ART_ABILITY_KIND_LABELS[kind_key],
+                "kind_key": kind_key,
+                "ability_kind": XIANXIA_MARTIAL_ART_ABILITY_KIND_LABELS[kind_key],
+                "ability_kind_key": kind_key,
+            }
+        )
+
+    return normalized
+
+
+def _normalize_ability_kind(raw_kind: object, *, name: str) -> str:
+    kind_key = _normalize_identifier(raw_kind)
+    if not kind_key:
+        lowered_name = name.strip().lower()
+        if lowered_name.endswith(" technique"):
+            kind_key = "technique"
+        elif lowered_name.endswith(" maneuver"):
+            kind_key = "maneuver"
+        elif lowered_name.endswith(" stance"):
+            kind_key = "stance"
+        elif lowered_name.endswith(" aura"):
+            kind_key = "aura"
+        else:
+            kind_key = "other"
+    if kind_key not in XIANXIA_MARTIAL_ART_ABILITY_KIND_KEYS:
+        raise ValueError(f"Xianxia Martial Art ability kind {kind_key!r} is not supported.")
+    return kind_key
+
+
 def _normalize_energy_maximum_increases(
     raw_grants: object,
     *,
@@ -647,6 +796,48 @@ def _validate_martial_art_rank_resource_grants_cover_entries(
         )
 
 
+def _validate_martial_art_rank_ability_grants_cover_entries(
+    ability_grants: dict[str, dict[str, list[dict[str, Any]]]],
+    raw_entries: list[Any],
+    rank_sets: dict[str, Any],
+) -> None:
+    expected_martial_art_keys: set[str] = set()
+    for raw_entry in raw_entries:
+        if not isinstance(raw_entry, dict):
+            continue
+        if _normalize_identifier(raw_entry.get("entry_type")) != "martial_art":
+            continue
+        raw_metadata = raw_entry.get("metadata")
+        metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+        martial_art_key = _normalize_identifier(
+            metadata.get("martial_art_key")
+            or metadata.get("xianxia_martial_art_key")
+            or raw_entry.get("slug")
+            or raw_entry.get("title")
+        )
+        if not martial_art_key:
+            raise ValueError("Xianxia Martial Art seed entry is missing a Martial Art key.")
+        expected_martial_art_keys.add(martial_art_key)
+        expected_rank_keys = tuple(
+            rank_sets["by_martial_art_key"].get(martial_art_key)
+            or rank_sets["default"]
+        )
+        actual_rank_keys = tuple(ability_grants.get(martial_art_key, {}))
+        if actual_rank_keys != expected_rank_keys:
+            raise ValueError(
+                f"Xianxia Martial Art rank ability grants for {martial_art_key!r} "
+                "must match the ranks present in the seed."
+            )
+
+    extra_martial_art_keys = sorted(set(ability_grants) - expected_martial_art_keys)
+    if extra_martial_art_keys:
+        raise ValueError(
+            "Xianxia Martial Art rank ability grants include unknown Martial Arts: "
+            + ", ".join(extra_martial_art_keys)
+            + "."
+        )
+
+
 def _normalize_rank_key_sequence(raw_rank_keys: object, *, context: str) -> list[str]:
     rank_keys = [_normalize_identifier(value) for value in _normalize_string_list(raw_rank_keys)]
     rank_keys = [rank_key for rank_key in rank_keys if rank_key]
@@ -709,12 +900,14 @@ def _stamp_martial_art_rank_records(metadata: dict[str, Any], body: dict[str, An
     )
     rank_keys = _martial_art_rank_keys_for(martial_art_key)
     rank_resource_grants = _martial_art_rank_resource_grants_for(martial_art_key, rank_keys)
+    rank_ability_grants = _martial_art_rank_ability_grants_for(martial_art_key, rank_keys)
     rank_records = _build_martial_art_rank_records(
         martial_art_key=martial_art_key,
         martial_art_slug=slug,
         rank_keys=rank_keys,
         rank_available=True,
         rank_resource_grants=rank_resource_grants,
+        rank_ability_grants=rank_ability_grants,
     )
     missing_rank_keys = [
         rank_key for rank_key in XIANXIA_MARTIAL_ART_RANK_KEYS if rank_key not in rank_keys
@@ -725,6 +918,7 @@ def _stamp_martial_art_rank_records(metadata: dict[str, Any], body: dict[str, An
         rank_keys=missing_rank_keys,
         rank_available=False,
         rank_resource_grants={},
+        rank_ability_grants={},
     )
     missing_rank_names = [
         str(_XIANXIA_MARTIAL_ART_RANK_LOOKUP[rank_key]["rank_name"])
@@ -765,6 +959,18 @@ def _stamp_martial_art_rank_records(metadata: dict[str, Any], body: dict[str, An
         rank_key: dict(rank_resource_grants[rank_key])
         for rank_key in rank_keys
     }
+    metadata["rank_ability_grants_seeded"] = True
+    metadata["rank_ability_grants_status"] = (
+        XIANXIA_MARTIAL_ART_RANK_ABILITY_GRANTS_STATUS_KIND_TAGS_SEEDED
+    )
+    metadata["martial_art_rank_ability_grants"] = {
+        rank_key: [dict(grant) for grant in _rank_record_ability_grants(rank_records, rank_key)]
+        for rank_key in rank_keys
+    }
+    metadata["xianxia_martial_art_rank_ability_grants"] = {
+        rank_key: [dict(grant) for grant in grants]
+        for rank_key, grants in metadata["martial_art_rank_ability_grants"].items()
+    }
     metadata["martial_art_missing_rank_records"] = metadata_missing_rank_records
     metadata["xianxia_martial_art_missing_rank_records"] = [
         dict(record) for record in missing_rank_records
@@ -804,6 +1010,18 @@ def _stamp_martial_art_rank_records(metadata: dict[str, Any], body: dict[str, An
         rank_key: dict(rank_resource_grants[rank_key])
         for rank_key in rank_keys
     }
+    martial_art_body["rank_ability_grants_seeded"] = True
+    martial_art_body["rank_ability_grants_status"] = (
+        XIANXIA_MARTIAL_ART_RANK_ABILITY_GRANTS_STATUS_KIND_TAGS_SEEDED
+    )
+    martial_art_body["rank_ability_grants"] = {
+        rank_key: [dict(grant) for grant in _rank_record_ability_grants(rank_records, rank_key)]
+        for rank_key in rank_keys
+    }
+    martial_art_body["xianxia_martial_art_rank_ability_grants"] = {
+        rank_key: [dict(grant) for grant in grants]
+        for rank_key, grants in martial_art_body["rank_ability_grants"].items()
+    }
     martial_art_body["missing_rank_records"] = body_missing_rank_records
     martial_art_body["xianxia_martial_art_missing_rank_records"] = [
         dict(record) for record in missing_rank_records
@@ -841,6 +1059,32 @@ def _martial_art_draft_search_parts(body: dict[str, Any]) -> list[str]:
     ]
 
 
+def _martial_art_ability_search_parts(body: dict[str, Any]) -> list[str]:
+    martial_art_body = body.get("xianxia_martial_art")
+    if not isinstance(martial_art_body, dict):
+        return []
+    rank_ability_grants = martial_art_body.get("rank_ability_grants")
+    if not isinstance(rank_ability_grants, dict):
+        return []
+
+    parts: list[str] = []
+    for grants in rank_ability_grants.values():
+        if not isinstance(grants, list):
+            continue
+        for grant in grants:
+            if not isinstance(grant, dict):
+                continue
+            parts.extend(
+                [
+                    str(grant.get("name") or ""),
+                    str(grant.get("kind") or ""),
+                    str(grant.get("kind_key") or ""),
+                    str(grant.get("ability_ref") or ""),
+                ]
+            )
+    return parts
+
+
 def _render_martial_art_draft_marker_html(body: dict[str, Any]) -> str:
     martial_art_body = body.get("xianxia_martial_art")
     if not isinstance(martial_art_body, dict):
@@ -873,6 +1117,7 @@ def _build_martial_art_rank_records(
     rank_keys: list[str],
     rank_available: bool,
     rank_resource_grants: dict[str, dict[str, int]],
+    rank_ability_grants: dict[str, list[dict[str, Any]]],
 ) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for rank_key in rank_keys:
@@ -881,6 +1126,16 @@ def _build_martial_art_rank_records(
             dict(rank_resource_grants[rank_key])
             if rank_available
             else None
+        )
+        ability_grants = (
+            _build_rank_ability_grants(
+                martial_art_key=martial_art_key,
+                martial_art_slug=martial_art_slug,
+                rank_key=rank_key,
+                grants=rank_ability_grants[rank_key],
+            )
+            if rank_available
+            else []
         )
         prerequisite_rank_key = rank_definition.get("prerequisite_rank_key")
         prerequisite_rank_name = (
@@ -916,6 +1171,13 @@ def _build_martial_art_rank_records(
                     if rank_available
                     else None
                 ),
+                "ability_grants": ability_grants,
+                "xianxia_ability_grants": [dict(grant) for grant in ability_grants],
+                "rank_ability_grants_status": (
+                    XIANXIA_MARTIAL_ART_RANK_ABILITY_GRANTS_STATUS_KIND_TAGS_SEEDED
+                    if rank_available
+                    else None
+                ),
                 "rank_available_in_seed": rank_available,
                 "is_incomplete_rank": not rank_available,
                 "rank_completion_status": (
@@ -931,6 +1193,49 @@ def _build_martial_art_rank_records(
             }
         )
     return records
+
+
+def _build_rank_ability_grants(
+    *,
+    martial_art_key: str,
+    martial_art_slug: str,
+    rank_key: str,
+    grants: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for grant in grants:
+        ability_key = str(grant["ability_key"])
+        ability_slug = ability_key.replace("_", "-")
+        ability_ref = f"xianxia:{martial_art_slug}:{rank_key}:{ability_slug}"
+        records.append(
+            {
+                "martial_art_key": martial_art_key,
+                "martial_art_slug": martial_art_slug,
+                "rank_key": rank_key,
+                "ability_key": ability_key,
+                "ability_slug": ability_slug,
+                "ability_ref": ability_ref,
+                "name": str(grant["name"]),
+                "kind": str(grant["kind"]),
+                "kind_key": str(grant["kind_key"]),
+                "ability_kind": str(grant["ability_kind"]),
+                "ability_kind_key": str(grant["ability_kind_key"]),
+            }
+        )
+    return records
+
+
+def _rank_record_ability_grants(
+    rank_records: list[dict[str, Any]],
+    rank_key: str,
+) -> list[dict[str, Any]]:
+    for record in rank_records:
+        if record.get("rank_key") == rank_key:
+            raw_grants = record.get("ability_grants")
+            if isinstance(raw_grants, list):
+                return [dict(grant) for grant in raw_grants if isinstance(grant, dict)]
+            return []
+    return []
 
 
 def _martial_art_rank_keys_for(martial_art_key: str) -> list[str]:
@@ -958,6 +1263,26 @@ def _martial_art_rank_resource_grants_for(
     }
 
 
+def _martial_art_rank_ability_grants_for(
+    martial_art_key: str,
+    rank_keys: list[str],
+) -> dict[str, list[dict[str, Any]]]:
+    rank_ability_grants = _XIANXIA_MARTIAL_ART_RANK_ABILITY_GRANTS.get(martial_art_key)
+    if rank_ability_grants is None:
+        raise ValueError(
+            f"Xianxia Martial Art {martial_art_key!r} is missing rank ability grants."
+        )
+    actual_rank_keys = tuple(rank_ability_grants)
+    if actual_rank_keys != tuple(rank_keys):
+        raise ValueError(
+            f"Xianxia Martial Art {martial_art_key!r} rank ability grants do not match its rank set."
+        )
+    return {
+        rank_key: [dict(grant) for grant in rank_ability_grants[rank_key]]
+        for rank_key in rank_keys
+    }
+
+
 _XIANXIA_SYSTEMS_SEED_PAYLOAD = _load_xianxia_systems_seed_payload()
 XIANXIA_SYSTEMS_SEED_SOURCE_TITLE = str(_XIANXIA_SYSTEMS_SEED_PAYLOAD["source_title"])
 XIANXIA_SYSTEMS_SEED_VERSION = str(_XIANXIA_SYSTEMS_SEED_PAYLOAD["version"])
@@ -980,6 +1305,15 @@ _XIANXIA_MARTIAL_ART_RANK_RESOURCE_GRANTS = {
     }
     for martial_art_key, rank_grants in _XIANXIA_SYSTEMS_SEED_PAYLOAD[
         "martial_art_rank_resource_grants"
+    ].items()
+}
+_XIANXIA_MARTIAL_ART_RANK_ABILITY_GRANTS = {
+    str(martial_art_key): {
+        str(rank_key): [dict(grant) for grant in grants]
+        for rank_key, grants in rank_grants.items()
+    }
+    for martial_art_key, rank_grants in _XIANXIA_SYSTEMS_SEED_PAYLOAD[
+        "martial_art_rank_ability_grants"
     ].items()
 }
 _XIANXIA_MARTIAL_ART_RANK_SETS = {
