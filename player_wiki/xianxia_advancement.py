@@ -6,6 +6,7 @@ from typing import Any
 from .xianxia_character_model import XIANXIA_ENERGY_KEYS
 
 
+XIANXIA_CULTIVATION_ENERGY_INSIGHT_COST = 1
 XIANXIA_MARTIAL_ART_RANK_KEYS = (
     "initiate",
     "novice",
@@ -20,6 +21,11 @@ XIANXIA_MARTIAL_ART_RANK_LABELS = {
     "master": "Master",
     "legendary": "Legendary",
 }
+XIANXIA_ENERGY_LABELS = {
+    "jing": "Jing",
+    "qi": "Qi",
+    "shen": "Shen",
+}
 
 
 @dataclass(frozen=True)
@@ -33,6 +39,82 @@ class XianxiaMartialArtAdvanceResult:
     teacher_breakthrough_note: str
     legendary_quest_note: str = ""
     legendary_prerequisite_note: str = ""
+
+
+@dataclass(frozen=True)
+class XianxiaCultivationEnergySpendResult:
+    definition: Any
+    energy_key: str
+    energy_name: str
+    insight_cost: int
+    new_maximum: int
+    notes: str = ""
+
+
+def spend_xianxia_cultivation_energy_definition(
+    definition: Any,
+    *,
+    energy_key: str,
+    notes: str = "",
+) -> XianxiaCultivationEnergySpendResult:
+    normalized_energy_key = normalize_xianxia_energy_key(energy_key)
+    if normalized_energy_key not in XIANXIA_ENERGY_KEYS:
+        raise ValueError("Choose Jing, Qi, or Shen for Cultivation.")
+
+    payload = definition.to_dict()
+    xianxia = dict(payload.get("xianxia") or {})
+    insight = dict(xianxia.get("insight") or {})
+    available = _non_negative_int(insight.get("available"), default=0)
+    spent = _non_negative_int(insight.get("spent"), default=0)
+    insight_cost = XIANXIA_CULTIVATION_ENERGY_INSIGHT_COST
+    energy_name = energy_label(normalized_energy_key)
+    if available < insight_cost:
+        raise ValueError(
+            f"Cultivation needs {insight_cost} Insight to increase {energy_name}; "
+            f"only {available} available."
+        )
+
+    increases = {key: 0 for key in XIANXIA_ENERGY_KEYS}
+    increases[normalized_energy_key] = 1
+    energies = _apply_energy_maximum_increases(xianxia.get("energies"), increases)
+    new_maximum = _non_negative_int(
+        dict(energies.get(normalized_energy_key) or {}).get("max"),
+        default=0,
+    )
+    xianxia["energies"] = energies
+    xianxia["insight"] = {
+        "available": available - insight_cost,
+        "spent": spent + insight_cost,
+    }
+
+    history = [
+        dict(record)
+        for record in list(xianxia.get("advancement_history") or [])
+        if isinstance(record, dict) and record
+    ]
+    clean_notes = _clean_note(notes)
+    event = {
+        "action": "cultivation_energy_increase",
+        "amount": insight_cost,
+        "target": energy_name,
+        "energy_key": normalized_energy_key,
+        "energy_maximum_increase": 1,
+        "new_energy_maximum": new_maximum,
+    }
+    if clean_notes:
+        event["notes"] = clean_notes
+    history.append(event)
+    xianxia["advancement_history"] = history
+    payload["xianxia"] = xianxia
+
+    return XianxiaCultivationEnergySpendResult(
+        definition=definition.__class__.from_dict(payload),
+        energy_key=normalized_energy_key,
+        energy_name=energy_name,
+        insight_cost=insight_cost,
+        new_maximum=new_maximum,
+        notes=clean_notes,
+    )
 
 
 def advance_xianxia_martial_art_rank_definition(
@@ -232,6 +314,23 @@ def normalize_xianxia_martial_art_rank_key(value: Any) -> str:
         .replace("-", "_")
         .replace(" ", "_")
     )
+
+
+def normalize_xianxia_energy_key(value: Any) -> str:
+    return (
+        str(value if value is not None else "")
+        .strip()
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+    )
+
+
+def energy_label(energy_key: str) -> str:
+    normalized = normalize_xianxia_energy_key(energy_key)
+    if normalized in XIANXIA_ENERGY_LABELS:
+        return XIANXIA_ENERGY_LABELS[normalized]
+    return normalized.replace("_", " ").title() if normalized else "Energy"
 
 
 def rank_label(rank_key: str) -> str:

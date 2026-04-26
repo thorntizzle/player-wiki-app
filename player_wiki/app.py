@@ -87,7 +87,9 @@ from .character_importer import write_yaml
 from .character_profile import ensure_profile_class_rows, profile_class_level_text, profile_class_rows, profile_primary_class_ref
 from .character_service import CharacterStateValidationError, build_initial_state, merge_state_with_definition
 from .xianxia_advancement import (
+    XIANXIA_CULTIVATION_ENERGY_INSIGHT_COST,
     advance_xianxia_martial_art_rank_definition,
+    spend_xianxia_cultivation_energy_definition,
     normalize_xianxia_martial_art_rank_key,
     rank_label as xianxia_martial_art_rank_label,
 )
@@ -1363,6 +1365,15 @@ def present_xianxia_cultivation_context(character: dict[str, object], xianxia: d
     resources = dict(xianxia_read.get("resources") or {})
     insight = dict(resources.get("insight") or {"available": 0, "spent": 0})
     insight_available = int(insight.get("available") or 0)
+    energies = []
+    for raw_energy in list(resources.get("energies") or []):
+        if not isinstance(raw_energy, dict):
+            continue
+        energy = dict(raw_energy)
+        energy["insight_cost"] = XIANXIA_CULTIVATION_ENERGY_INSIGHT_COST
+        energy["has_enough_insight"] = insight_available >= XIANXIA_CULTIVATION_ENERGY_INSIGHT_COST
+        energy["shortfall"] = max(0, XIANXIA_CULTIVATION_ENERGY_INSIGHT_COST - insight_available)
+        energies.append(energy)
     martial_arts = []
     for index, raw_art in enumerate(list(xianxia_read.get("martial_arts") or [])):
         art = dict(raw_art or {}) if isinstance(raw_art, dict) else {}
@@ -1382,6 +1393,9 @@ def present_xianxia_cultivation_context(character: dict[str, object], xianxia: d
             ("amount", "Amount"),
             ("downtime", "Downtime"),
             ("target", "Target"),
+            ("energy_key", "Energy key"),
+            ("energy_maximum_increase", "Energy maximum increase"),
+            ("new_energy_maximum", "New Energy maximum"),
             ("rank", "Rank"),
             ("systems_ref", "Systems ref"),
             ("teacher_breakthrough_note", "Teacher/breakthrough note"),
@@ -1405,6 +1419,7 @@ def present_xianxia_cultivation_context(character: dict[str, object], xianxia: d
 
     return {
         "insight": insight,
+        "energies": energies,
         "martial_arts": martial_arts,
         "generic_techniques": list(xianxia_read.get("generic_techniques") or []),
         "history": history_records,
@@ -11786,6 +11801,18 @@ def create_app() -> Flask:
                         notes=request.form.get("gathering_insight_notes", ""),
                     )
                     success_message = "Gathering Insight recorded."
+                elif cultivation_action == "spend_cultivation_energy":
+                    redirect_anchor = "xianxia-cultivation-energy"
+                    energy_result = spend_xianxia_cultivation_energy_definition(
+                        record.definition,
+                        energy_key=request.form.get("energy_key", ""),
+                        notes=request.form.get("cultivation_energy_notes", ""),
+                    )
+                    definition = energy_result.definition
+                    success_message = (
+                        f"Spent {energy_result.insight_cost} Insight on Cultivation "
+                        f"to increase {energy_result.energy_name}."
+                    )
                 elif cultivation_action == "advance_martial_art_rank":
                     redirect_anchor = "xianxia-cultivation-martial-arts"
                     raw_martial_art_index = request.form.get("martial_art_index", "")

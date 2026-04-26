@@ -1602,6 +1602,139 @@ def test_xianxia_cultivation_route_records_gathering_insight_downtime_gains(
     assert _character_state_revision(app, "insight-gatherer") == current_revision
 
 
+def test_xianxia_cultivation_route_spends_insight_to_increase_energy(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+                "default_visibility": "dm",
+            }
+        ]
+
+    _write_campaign_config(app, _mutate)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Energy Cultivator"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+
+    cultivation_html = client.get(
+        "/campaigns/linden-pass/characters/energy-cultivator/cultivation"
+    ).get_data(as_text=True)
+    assert 'name="cultivation_action" value="spend_cultivation_energy"' in cultivation_html
+    assert 'name="energy_key" value="qi"' in cultivation_html
+    assert "Spend 1 Insight to increase Qi by 1." in cultivation_html
+    assert "Needs 1 more available Insight." in cultivation_html
+
+    starting_revision = _character_state_revision(app, "energy-cultivator")
+    insufficient_response = client.post(
+        "/campaigns/linden-pass/characters/energy-cultivator/cultivation",
+        data={
+            "expected_revision": str(starting_revision),
+            "cultivation_action": "spend_cultivation_energy",
+            "energy_key": "qi",
+        },
+        follow_redirects=True,
+    )
+    assert insufficient_response.status_code == 200
+    assert (
+        "Cultivation needs 1 Insight to increase Qi; only 0 available."
+        in insufficient_response.get_data(as_text=True)
+    )
+    definition_payload = _read_character_definition(app, "energy-cultivator")
+    assert definition_payload["xianxia"]["insight"] == {"available": 0, "spent": 0}
+    assert definition_payload["xianxia"]["energies"] == {
+        "jing": {"max": 1},
+        "qi": {"max": 1},
+        "shen": {"max": 1},
+    }
+    assert definition_payload["xianxia"]["advancement_history"] == []
+    assert _character_state_revision(app, "energy-cultivator") == starting_revision
+
+    insight_response = client.post(
+        "/campaigns/linden-pass/characters/energy-cultivator/cultivation",
+        data={
+            "expected_revision": str(starting_revision),
+            "cultivation_action": "save_insight",
+            "insight_available": "2",
+            "insight_spent": "0",
+        },
+        follow_redirects=False,
+    )
+    assert insight_response.status_code == 302
+
+    current_revision = _character_state_revision(app, "energy-cultivator")
+    spend_response = client.post(
+        "/campaigns/linden-pass/characters/energy-cultivator/cultivation",
+        data={
+            "expected_revision": str(current_revision),
+            "cultivation_action": "spend_cultivation_energy",
+            "energy_key": "qi",
+            "cultivation_energy_notes": "Cultivated a moonlit reservoir.",
+        },
+        follow_redirects=False,
+    )
+    assert spend_response.status_code == 302
+    assert spend_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/energy-cultivator/cultivation#xianxia-cultivation-energy"
+    )
+
+    definition_payload = _read_character_definition(app, "energy-cultivator")
+    xianxia = definition_payload["xianxia"]
+    assert xianxia["insight"] == {"available": 1, "spent": 1}
+    assert xianxia["energies"] == {
+        "jing": {"max": 1},
+        "qi": {"max": 2},
+        "shen": {"max": 1},
+    }
+    assert xianxia["advancement_history"] == [
+        {
+            "action": "cultivation_energy_increase",
+            "amount": 1,
+            "target": "Qi",
+            "energy_key": "qi",
+            "energy_maximum_increase": 1,
+            "new_energy_maximum": 2,
+            "notes": "Cultivated a moonlit reservoir.",
+        }
+    ]
+    with app.app_context():
+        repository = app.extensions["character_repository"]
+        record = repository.get_character("linden-pass", "energy-cultivator")
+        assert record is not None
+        assert record.state_record.state["xianxia"]["energies"] == {
+            "jing": {"current": 1},
+            "qi": {"current": 1},
+            "shen": {"current": 1},
+        }
+    assert _character_state_revision(app, "energy-cultivator") == current_revision + 1
+
+    updated_html = client.get(
+        "/campaigns/linden-pass/characters/energy-cultivator/cultivation"
+    ).get_data(as_text=True)
+    assert "Current 1 / Max 2" in updated_html
+    assert "Cultivation Energy Increase" in updated_html
+    assert "Target:" in updated_html
+    assert "Qi" in updated_html
+    assert "Energy maximum increase:" in updated_html
+    assert "New Energy maximum:" in updated_html
+    assert "Cultivated a moonlit reservoir." in updated_html
+
+    resources_html = client.get(
+        "/campaigns/linden-pass/characters/energy-cultivator?page=resources"
+    ).get_data(as_text=True)
+    assert "<h3>Qi</h3>" in resources_html
+    assert "Current 1 / Max 2" in resources_html
+
+
 def test_xianxia_cultivation_route_spends_insight_to_advance_martial_art_rank(
     app, client, sign_in, users
 ):
