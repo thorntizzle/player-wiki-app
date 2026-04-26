@@ -55,6 +55,7 @@ from .xianxia_systems_seed import (
     XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY,
     XIANXIA_SYSTEMS_SEED_VERSION,
     build_xianxia_systems_seed_entries,
+    get_xianxia_entry_facet_definition,
 )
 
 LICENSE_CLASS_LABELS = {
@@ -934,11 +935,24 @@ class SystemsService:
                 library_slug=library.library_slug,
                 source_id=source.source_id,
                 is_enabled=True,
-                default_visibility=VISIBILITY_PLAYERS,
+                default_visibility=self.get_custom_campaign_entry_default_visibility(campaign_slug),
                 updated_by_user_id=actor_user_id,
             )
         _systems_service_cache_clear()
         return source
+
+    def get_custom_campaign_entry_default_visibility(self, campaign_slug: str) -> str:
+        library = self.get_campaign_library(campaign_slug)
+        if library is not None and library.library_slug.lower() == XIANXIA_SYSTEM_CODE.lower():
+            return VISIBILITY_DM
+        campaign = self._get_campaign(campaign_slug)
+        if (
+            campaign is not None
+            and str(getattr(campaign, "system", "") or "").strip().lower()
+            == XIANXIA_SYSTEM_CODE.lower()
+        ):
+            return VISIBILITY_DM
+        return VISIBILITY_PLAYERS
 
     def is_campaign_custom_entry(self, campaign_slug: str, entry: SystemsEntryRecord) -> bool:
         source_state = self.get_campaign_source_state(campaign_slug, entry.source_id)
@@ -1355,6 +1369,14 @@ class SystemsService:
         body = {
             "markdown": normalized_body_markdown,
         }
+        if library.library_slug.lower() == XIANXIA_SYSTEM_CODE.lower():
+            self._stamp_xianxia_custom_entry_metadata(
+                metadata=metadata,
+                body=body,
+                entry_type=normalized_entry_type,
+                slug=slug,
+                title=normalized_title,
+            )
         existing_slug_entry = self.store.get_entry_by_slug(library.library_slug, slug)
         if existing_slug_entry is not None and existing_slug_entry.entry_key != entry_key:
             raise SystemsPolicyValidationError("That custom Systems entry slug is already in use.")
@@ -1386,6 +1408,76 @@ class SystemsService:
         if refreshed_entry is None:
             raise RuntimeError("Failed to reload custom Systems entry.")
         return refreshed_entry
+
+    def _stamp_xianxia_custom_entry_metadata(
+        self,
+        *,
+        metadata: dict[str, object],
+        body: dict[str, object],
+        entry_type: str,
+        slug: str,
+        title: str,
+    ) -> None:
+        facet = get_xianxia_entry_facet_definition(entry_type)
+        if facet is None:
+            return
+
+        facet_key = str(facet["key"])
+        metadata["xianxia_custom_entry"] = True
+        metadata["xianxia_entry_facets"] = [facet_key]
+        metadata["xianxia_entry_facet_labels"] = [str(facet["label"])]
+        body["xianxia_custom_entry"] = True
+        body["xianxia_entry_facets"] = [facet_key]
+
+        support_state = str(facet.get("support_state") or "").strip()
+        if support_state:
+            metadata["support_state"] = support_state
+            metadata["xianxia_support_state"] = support_state
+            body["support_state"] = support_state
+            body["xianxia_support_state"] = support_state
+
+        if facet_key != "martial_art":
+            return
+
+        martial_art_key = re.sub(r"[^a-z0-9_]+", "_", slug.lower()).strip("_")
+        if not martial_art_key:
+            martial_art_key = re.sub(r"[^a-z0-9_]+", "_", title.lower()).strip("_")
+        metadata.update(
+            {
+                "catalog_role": "parent",
+                "xianxia_catalog_role": "parent",
+                "custom_martial_art": True,
+                "xianxia_custom_martial_art": True,
+                "martial_art_key": martial_art_key,
+                "xianxia_martial_art_key": martial_art_key,
+                "martial_art_slug": slug,
+                "xianxia_martial_art_slug": slug,
+                "rank_records_seeded": False,
+                "rank_records_status": "gm_authored_custom_markdown",
+                "rank_completion_status": "gm_authored_custom_markdown",
+                "xianxia_rank_completion_status": "gm_authored_custom_markdown",
+            }
+        )
+        body["xianxia_martial_art"] = {
+            "catalog_role": "parent",
+            "custom_martial_art": True,
+            "xianxia_custom_martial_art": True,
+            "martial_art_key": martial_art_key,
+            "xianxia_martial_art_key": martial_art_key,
+            "martial_art_slug": slug,
+            "xianxia_martial_art_slug": slug,
+            "rank_records_seeded": False,
+            "rank_records_status": "gm_authored_custom_markdown",
+            "rank_completion_status": "gm_authored_custom_markdown",
+            "rank_records": [],
+            "xianxia_martial_art_rank_records": [],
+            "missing_rank_records": [],
+            "xianxia_martial_art_missing_rank_records": [],
+            "parent_note": (
+                "GM-created custom Martial Art authored through the campaign custom "
+                "Systems entry path."
+            ),
+        }
 
     def get_campaign_policy(self, campaign_slug: str) -> CampaignSystemsPolicyRecord | None:
         library = self.get_campaign_library(campaign_slug)

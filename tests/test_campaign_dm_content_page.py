@@ -6,10 +6,14 @@ import sqlite3
 from uuid import uuid4
 import zipfile
 
+import yaml
+
 from player_wiki.app import create_app
+from player_wiki.campaign_visibility import VISIBILITY_DM, VISIBILITY_PLAYERS
 from player_wiki.config import Config
 from player_wiki.db import init_database
 from player_wiki.auth_store import AuthStore
+from player_wiki.system_policy import XIANXIA_SYSTEM_CODE
 from tests.sample_data import build_test_campaigns_dir
 
 TEST_STATBLOCK_MARKDOWN = b"""AT-A-GLANCE (Quick Reference)
@@ -392,6 +396,9 @@ def test_dm_content_systems_page_can_create_edit_archive_and_restore_custom_entr
         assert entry.source_path == "Linden Pass table notes"
         assert "storm dock signal" in entry.search_text
         assert "<h2>Effect</h2>" in entry.rendered_html
+        source_state = service.get_campaign_source_state("linden-pass", "CUSTOM-LINDEN-PASS")
+        assert source_state is not None
+        assert source_state.default_visibility == VISIBILITY_PLAYERS
         override = store.get_campaign_entry_override("linden-pass", entry.entry_key)
         assert override is not None
         assert override.visibility_override == "players"
@@ -475,6 +482,108 @@ def test_dm_content_systems_page_can_create_edit_archive_and_restore_custom_entr
         assert override is not None
         assert override.is_enabled_override is None
         assert service.is_entry_enabled_for_campaign("linden-pass", entry) is True
+
+
+def test_xianxia_dm_content_systems_page_can_create_custom_martial_art_entries(
+    app, client, sign_in, users
+):
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = "xianxia"
+    payload["systems_library"] = "xianxia"
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        app.extensions["systems_service"].ensure_builtin_library_seeded(XIANXIA_SYSTEM_CODE)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    management_page = client.get("/campaigns/linden-pass/dm-content/systems")
+    management_body = management_page.get_data(as_text=True)
+
+    assert management_page.status_code == 200
+    assert '<option value="martial_art"' in management_body
+    assert "Martial Arts" in management_body
+    custom_visibility_index = management_body.index('select name="custom_entry_visibility"')
+    custom_visibility_block = management_body[custom_visibility_index: custom_visibility_index + 500]
+    assert '<option value="dm" selected' in custom_visibility_block
+    assert '<option value="players" selected' not in custom_visibility_block
+
+    create_response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/custom-entries",
+        data={
+            "return_to": "dm-content-systems",
+            "custom_entry_title": "Jade Meteor Palm",
+            "custom_entry_slug": "jade-meteor-palm",
+            "custom_entry_type": "martial_art",
+            "custom_entry_visibility": VISIBILITY_DM,
+            "custom_entry_provenance": "GM table custom art",
+            "custom_entry_search_metadata": "starter option jade meteor",
+            "custom_entry_body_markdown": (
+                "## Ranks\n"
+                "Initiate: Jade energy gathers in the palm.\n\n"
+                "Novice: The strike falls like a meteor."
+            ),
+        },
+        follow_redirects=False,
+    )
+
+    assert create_response.status_code == 302
+    assert "/campaigns/linden-pass/dm-content/systems" in create_response.headers["Location"]
+    assert "#systems-custom-entry-custom-linden-pass-jade-meteor-palm" in create_response.headers["Location"]
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        entry = service.get_custom_campaign_entry_by_slug(
+            "linden-pass",
+            "custom-linden-pass-jade-meteor-palm",
+        )
+        assert entry is not None
+        assert entry.entry_type == "martial_art"
+        assert entry.source_id == "CUSTOM-LINDEN-PASS"
+        assert entry.metadata["xianxia_entry_facets"] == ["martial_art"]
+        assert entry.metadata["xianxia_entry_facet_labels"] == ["Martial Art"]
+        assert entry.metadata["catalog_role"] == "parent"
+        assert entry.metadata["xianxia_custom_martial_art"] is True
+        assert entry.metadata["rank_records_status"] == "gm_authored_custom_markdown"
+        assert entry.body["xianxia_martial_art"]["catalog_role"] == "parent"
+        assert entry.body["xianxia_martial_art"]["rank_records"] == []
+        assert entry.body["xianxia_martial_art"]["parent_note"].startswith(
+            "GM-created custom Martial Art"
+        )
+        source_state = service.get_campaign_source_state("linden-pass", "CUSTOM-LINDEN-PASS")
+        assert source_state is not None
+        assert source_state.default_visibility == VISIBILITY_DM
+        override = store.get_campaign_entry_override("linden-pass", entry.entry_key)
+        assert override is not None
+        assert override.visibility_override == VISIBILITY_DM
+        assert override.is_enabled_override is None
+        assert service.is_entry_enabled_for_campaign("linden-pass", entry) is True
+
+    category_response = client.get(
+        "/campaigns/linden-pass/systems/sources/CUSTOM-LINDEN-PASS/types/martial_art"
+    )
+    category_body = category_response.get_data(as_text=True)
+    assert category_response.status_code == 200
+    assert "Echoes of the Alloy Coast Custom Systems: Martial Arts" in category_body
+    assert "Jade Meteor Palm" in category_body
+    assert "Showing all 1 martial arts in this source." in category_body
+
+    search_response = client.get("/campaigns/linden-pass/systems?q=meteor")
+    search_body = search_response.get_data(as_text=True)
+    assert search_response.status_code == 200
+    assert "Jade Meteor Palm" in search_body
+    assert "CUSTOM-LINDEN-PASS" in search_body
+
+    detail_response = client.get(
+        "/campaigns/linden-pass/systems/entries/custom-linden-pass-jade-meteor-palm"
+    )
+    detail_body = detail_response.get_data(as_text=True)
+    assert detail_response.status_code == 200
+    assert "Jade Meteor Palm" in detail_body
+    assert "Campaign-owned custom entry." in detail_body
+    assert "Jade energy gathers in the palm." in detail_body
 
 
 def test_dm_can_upload_statblock_and_use_it_to_seed_an_npc_combatant(app, client, sign_in, users):

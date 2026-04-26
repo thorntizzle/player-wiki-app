@@ -1095,7 +1095,7 @@ def build_dm_custom_systems_entry_form(
         "title": "",
         "slug_leaf": "",
         "entry_type": "rule",
-        "visibility": "players",
+        "visibility": visibility,
         "provenance": "",
         "search_metadata": "",
         "body_markdown": "",
@@ -6872,7 +6872,9 @@ def create_app() -> Flask:
                 }
             )
 
-        custom_entry_form_visibility = "players"
+        custom_entry_form_visibility = systems_service.get_custom_campaign_entry_default_visibility(
+            campaign_slug
+        )
         if custom_systems_edit_entry is not None:
             edit_override = systems_service.store.get_campaign_entry_override(
                 campaign_slug,
