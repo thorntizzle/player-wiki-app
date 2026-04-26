@@ -112,6 +112,23 @@
             </div>
           </section>
 
+          <section class="builder-section">
+            <h3>GM Grants</h3>
+            <div class="builder-field-grid">
+              <label class="field">
+                <span>Starting Dao</span>
+                <input
+                  type="number"
+                  name="{{ builder.dao_field.input_name }}"
+                  value="{{ builder.dao_field.value }}"
+                  min="{{ builder.dao_field.min }}"
+                  max="{{ builder.dao_field.max }}"
+                  step="1"
+                >
+              </label>
+            </div>
+          </section>
+
           <div class="builder-actions">
             <button type="submit">Create character</button>
           </div>
@@ -157,7 +174,7 @@
           </div>
           <div>
             <span class="meta">Dao</span>
-            <strong>0 / {{ builder.defaults.dao_max }}</strong>
+            <strong>{{ builder.defaults.dao_current }} / {{ builder.defaults.dao_max }}</strong>
           </div>
           <div>
             <span class="meta">Insight</span>

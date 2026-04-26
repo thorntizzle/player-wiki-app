@@ -541,6 +541,15 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     assert "Starting Defaults" in create_html
     assert "Yin / Yang" in create_html
     assert "1 / 1" in create_html
+    assert '<span class="meta">Dao</span>' in create_html
+    dao_default_index = create_html.index('<span class="meta">Dao</span>')
+    dao_default_html = create_html[dao_default_index: dao_default_index + 120]
+    assert "<strong>0 / 3</strong>" in dao_default_html
+    assert 'name="dao_current"' in create_html
+    dao_input_index = create_html.index('name="dao_current"')
+    dao_input_html = create_html[dao_input_index - 80: dao_input_index + 180]
+    assert 'value="0"' in dao_input_html
+    assert 'max="3"' in dao_input_html
     assert '<span class="meta">Insight</span>' in create_html
     insight_default_index = create_html.index('<span class="meta">Insight</span>')
     insight_default_html = create_html[insight_default_index: insight_default_index + 120]
@@ -791,6 +800,38 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
         "submitted total is 2."
     ) in under_budget_energy_response.get_data(as_text=True)
 
+    invalid_dao_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            "name": "Dao Typo",
+            "character_slug": "",
+            **_attribute_data(),
+            **_effort_data(),
+            **_energy_data(),
+            "dao_current": "flowing",
+        },
+        follow_redirects=False,
+    )
+    assert invalid_dao_response.status_code == 400
+    assert "Starting Dao must be a whole number." in invalid_dao_response.get_data(as_text=True)
+
+    over_cap_dao_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            "name": "Dao Overcap",
+            "character_slug": "",
+            **_attribute_data(),
+            **_effort_data(),
+            **_energy_data(),
+            "dao_current": "4",
+        },
+        follow_redirects=False,
+    )
+    assert over_cap_dao_response.status_code == 400
+    assert "Starting Dao cannot exceed 3 at character creation." in over_cap_dao_response.get_data(
+        as_text=True
+    )
+
     submit_response = client.post(
         "/campaigns/linden-pass/characters/new",
         data={
@@ -875,6 +916,27 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     }
     assert state["xianxia"]["yin_yang"] == {"yin_current": 1, "yang_current": 1}
     assert state["xianxia"]["dao"] == {"current": 0}
+
+    grant_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            "name": "Dao Granted",
+            "character_slug": "",
+            **_attribute_data(),
+            **_effort_data(),
+            **_energy_data(),
+            "dao_current": "2",
+        },
+        follow_redirects=False,
+    )
+    assert grant_response.status_code == 302
+    assert grant_response.headers["Location"].endswith("/campaigns/linden-pass/characters/dao-granted")
+
+    grant_definition_payload = _read_character_definition(app, "dao-granted")
+    assert grant_definition_payload["xianxia"]["dao"] == {"max": 3}
+    grant_record = get_character("dao-granted")
+    assert grant_record is not None
+    assert grant_record.state_record.state["xianxia"]["dao"] == {"current": 2}
 
     expected_messages = {
         "edit": app_module.NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE,

@@ -5,6 +5,7 @@ from typing import Any
 from .auth_store import isoformat, utcnow
 from .character_builder import CharacterBuildError
 from .character_models import CharacterDefinition, CharacterImportMetadata
+from .character_service import build_initial_state
 from .repository import slugify
 from .system_policy import XIANXIA_SYSTEM_CODE
 from .xianxia_character_model import (
@@ -13,6 +14,7 @@ from .xianxia_character_model import (
     XIANXIA_EFFORT_KEYS,
     XIANXIA_EFFORT_LABELS,
     XIANXIA_ENERGY_KEYS,
+    normalize_xianxia_state_payload,
     validate_xianxia_definition_payload,
 )
 
@@ -25,6 +27,8 @@ XIANXIA_EFFORT_MAX_AT_CREATION = 3
 XIANXIA_ENERGY_CREATION_POINTS = 3
 XIANXIA_YIN_DEFAULT_MAX = 1
 XIANXIA_YANG_DEFAULT_MAX = 1
+XIANXIA_DAO_DEFAULT_CURRENT = 0
+XIANXIA_DAO_DEFAULT_MAX = 3
 XIANXIA_INSIGHT_DEFAULT_AVAILABLE = 0
 XIANXIA_INSIGHT_DEFAULT_SPENT = 0
 XIANXIA_ENERGY_LABELS = {
@@ -81,13 +85,20 @@ def build_xianxia_character_create_context(
             "defense": 10,
             "yin_max": XIANXIA_YIN_DEFAULT_MAX,
             "yang_max": XIANXIA_YANG_DEFAULT_MAX,
-            "dao_max": 3,
+            "dao_current": XIANXIA_DAO_DEFAULT_CURRENT,
+            "dao_max": XIANXIA_DAO_DEFAULT_MAX,
             "insight_available": XIANXIA_INSIGHT_DEFAULT_AVAILABLE,
             "insight_spent": XIANXIA_INSIGHT_DEFAULT_SPENT,
         },
         "attribute_fields": attribute_fields,
         "effort_fields": effort_fields,
         "energy_fields": energy_fields,
+        "dao_field": {
+            "input_name": "dao_current",
+            "value": values["dao_current"],
+            "min": 0,
+            "max": XIANXIA_DAO_DEFAULT_MAX,
+        },
     }
 
 
@@ -162,6 +173,9 @@ def build_xianxia_character_definition(
                     "yin_max": XIANXIA_YIN_DEFAULT_MAX,
                     "yang_max": XIANXIA_YANG_DEFAULT_MAX,
                 },
+                "dao": {
+                    "max": XIANXIA_DAO_DEFAULT_MAX,
+                },
                 "insight": {
                     "available": XIANXIA_INSIGHT_DEFAULT_AVAILABLE,
                     "spent": XIANXIA_INSIGHT_DEFAULT_SPENT,
@@ -184,6 +198,18 @@ def build_xianxia_character_definition(
     return definition, import_metadata
 
 
+def build_xianxia_character_initial_state(
+    definition: CharacterDefinition,
+    form_values: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    dao_current = _validate_xianxia_create_dao_current(form_values or {})
+    initial_state = build_initial_state(definition)
+    xianxia_state = dict(initial_state.get("xianxia") or {})
+    xianxia_state["dao"] = {"current": dao_current}
+    initial_state["xianxia"] = normalize_xianxia_state_payload(definition, xianxia_state)
+    return initial_state
+
+
 def _normalize_xianxia_create_values(values: dict[str, Any]) -> dict[str, Any]:
     return {
         "name": " ".join(str(values.get("name") or "").split()).strip(),
@@ -200,6 +226,7 @@ def _normalize_xianxia_create_values(values: dict[str, Any]) -> dict[str, Any]:
             key: _normalize_xianxia_create_energy_value(values, key)
             for key in XIANXIA_ENERGY_KEYS
         },
+        "dao_current": _normalize_xianxia_create_dao_current_value(values),
     }
 
 
@@ -394,6 +421,23 @@ def _validate_xianxia_create_energies(values: dict[str, Any]) -> dict[str, int]:
     return {key: energy_scores[key] for key in XIANXIA_ENERGY_KEYS}
 
 
+def _validate_xianxia_create_dao_current(values: dict[str, Any]) -> int:
+    raw_value = _normalize_xianxia_create_dao_current_value(values)
+    if raw_value == "":
+        return XIANXIA_DAO_DEFAULT_CURRENT
+    try:
+        dao_current = int(raw_value)
+    except ValueError:
+        raise CharacterBuildError("Starting Dao must be a whole number.") from None
+    if dao_current < 0:
+        raise CharacterBuildError("Starting Dao cannot be negative.")
+    if dao_current > XIANXIA_DAO_DEFAULT_MAX:
+        raise CharacterBuildError(
+            f"Starting Dao cannot exceed {XIANXIA_DAO_DEFAULT_MAX} at character creation."
+        )
+    return dao_current
+
+
 def _normalize_xianxia_create_attribute_value(values: dict[str, Any], key: str) -> str:
     raw_attributes = values.get("attributes")
     if isinstance(raw_attributes, dict) and key in raw_attributes:
@@ -424,6 +468,17 @@ def _normalize_xianxia_create_energy_value(values: dict[str, Any], key: str) -> 
             value = value.get("max")
     else:
         value = values.get(_xianxia_energy_input_name(key), 0)
+    return _clean_form_value(value)
+
+
+def _normalize_xianxia_create_dao_current_value(values: dict[str, Any]) -> str:
+    raw_dao = values.get("dao")
+    if "dao_current" in values:
+        value = values.get("dao_current")
+    elif isinstance(raw_dao, dict) and "current" in raw_dao:
+        value = raw_dao.get("current")
+    else:
+        value = XIANXIA_DAO_DEFAULT_CURRENT
     return _clean_form_value(value)
 
 

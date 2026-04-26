@@ -89,6 +89,7 @@ from .character_service import CharacterStateValidationError, build_initial_stat
 from .xianxia_character_builder import (
     build_xianxia_character_create_context,
     build_xianxia_character_definition,
+    build_xianxia_character_initial_state,
 )
 from .combat_presenter import DND_5E_CONDITION_OPTIONS, present_combat_tracker
 from .character_presenter import (
@@ -11171,6 +11172,7 @@ def create_app() -> Flask:
                     create_context,
                     form_values,
                 )
+                initial_state = build_xianxia_character_initial_state(definition, form_values)
             except CharacterBuildError as exc:
                 flash(str(exc), "error")
                 return render_xianxia_character_create_page(campaign_slug, create_context, status_code=400)
@@ -11188,7 +11190,7 @@ def create_app() -> Flask:
 
             write_yaml(definition_path, definition.to_dict())
             write_yaml(import_path, import_metadata.to_dict())
-            character_state_store.initialize_state_if_missing(definition, build_initial_state(definition))
+            character_state_store.initialize_state_if_missing(definition, initial_state)
             flash(f"{definition.name} created.", "success")
             return redirect(
                 url_for(
