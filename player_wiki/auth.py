@@ -28,6 +28,7 @@ from .campaign_visibility import (
     VISIBILITY_PLAYERS,
     VISIBILITY_PRIVATE,
     VISIBILITY_PUBLIC,
+    build_default_campaign_visibility_by_scope,
     is_valid_visibility_scope,
     most_private_visibility,
 )
@@ -496,13 +497,29 @@ def get_campaign_visibility_settings(campaign_slug: str) -> dict[str, str]:
     if campaign_slug in cache:
         return dict(cache[campaign_slug])
 
-    settings = dict(DEFAULT_CAMPAIGN_VISIBILITY_BY_SCOPE)
+    settings = get_campaign_default_visibility_settings(campaign_slug)
     for setting in get_auth_store().list_campaign_visibility_settings(campaign_slug):
         if setting.scope in CAMPAIGN_VISIBILITY_SCOPES:
             settings[setting.scope] = setting.visibility
 
     cache[campaign_slug] = dict(settings)
     return settings
+
+
+def get_campaign_default_visibility_settings(campaign_slug: str) -> dict[str, str]:
+    campaign = get_repository().get_campaign(campaign_slug)
+    system_code = campaign.system if campaign is not None else ""
+    return build_default_campaign_visibility_by_scope(system_code)
+
+
+def get_campaign_default_scope_visibility(campaign_slug: str, scope: str) -> str:
+    normalized_scope = scope.strip().lower()
+    if not is_valid_visibility_scope(normalized_scope):
+        return VISIBILITY_PRIVATE
+    return get_campaign_default_visibility_settings(campaign_slug).get(
+        normalized_scope,
+        DEFAULT_CAMPAIGN_VISIBILITY_BY_SCOPE[normalized_scope],
+    )
 
 
 def clear_campaign_visibility_cache(campaign_slug: str | None = None) -> None:
@@ -521,7 +538,7 @@ def get_campaign_scope_visibility(campaign_slug: str, scope: str) -> str:
         return VISIBILITY_PRIVATE
     return get_campaign_visibility_settings(campaign_slug).get(
         normalized_scope,
-        DEFAULT_CAMPAIGN_VISIBILITY_BY_SCOPE[normalized_scope],
+        get_campaign_default_scope_visibility(campaign_slug, normalized_scope),
     )
 
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .system_policy import system_policy_for_code
+
 CAMPAIGN_VISIBILITY_SCOPES = ("campaign", "wiki", "systems", "session", "combat", "characters", "dm_content")
 CAMPAIGN_VISIBILITY_SCOPE_LABELS = {
     "campaign": "Campaign",
@@ -41,6 +43,17 @@ DEFAULT_CAMPAIGN_VISIBILITY_BY_SCOPE = {
 }
 
 
+def build_default_campaign_visibility_by_scope(system_code: object = "") -> dict[str, str]:
+    defaults = dict(DEFAULT_CAMPAIGN_VISIBILITY_BY_SCOPE)
+    policy = system_policy_for_code(system_code)
+    for scope, visibility in policy.default_campaign_visibility_by_scope:
+        normalized_scope = str(scope or "").strip().lower()
+        normalized_visibility = normalize_visibility_choice(str(visibility or ""))
+        if is_valid_visibility_scope(normalized_scope) and is_valid_visibility(normalized_visibility):
+            defaults[normalized_scope] = normalized_visibility
+    return defaults
+
+
 def is_valid_visibility_scope(value: str) -> bool:
     return value in CAMPAIGN_VISIBILITY_SCOPES
 
@@ -61,8 +74,8 @@ def most_private_visibility(left: str, right: str) -> str:
     return right_visibility
 
 
-def get_default_visibility(scope: str) -> str:
-    return DEFAULT_CAMPAIGN_VISIBILITY_BY_SCOPE.get(scope, VISIBILITY_PRIVATE)
+def get_default_visibility(scope: str, system_code: object = "") -> str:
+    return build_default_campaign_visibility_by_scope(system_code).get(scope, VISIBILITY_PRIVATE)
 
 
 def list_visibility_choices(*, include_private: bool) -> list[dict[str, str]]:

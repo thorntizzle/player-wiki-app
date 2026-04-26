@@ -12,7 +12,8 @@ from player_wiki.dnd5e_rules_reference import (
     build_dnd5e_rules_reference_entries,
 )
 from player_wiki.auth_store import AuthStore, utcnow
-from player_wiki.campaign_visibility import VISIBILITY_DM
+from player_wiki.auth import get_campaign_scope_visibility, get_effective_campaign_visibility
+from player_wiki.campaign_visibility import VISIBILITY_DM, VISIBILITY_PUBLIC
 from player_wiki.system_policy import XIANXIA_SYSTEM_CODE
 from player_wiki.systems_service import XIANXIA_HOMEBREW_SOURCE_ID
 from player_wiki.systems_importer import Dnd5eSystemsImporter
@@ -175,6 +176,39 @@ def test_xianxia_homebrew_source_policy_defaults_dm_only_when_campaign_selects_l
         assert state.is_enabled is False
         assert state.default_visibility == VISIBILITY_DM
         assert state.is_configured is False
+
+
+def test_xianxia_campaign_systems_scope_defaults_dm_only_while_wiki_stays_visible(
+    app, client, sign_in, users
+):
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = "xianxia"
+    payload["systems_library"] = "xianxia"
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        assert get_campaign_scope_visibility("linden-pass", "systems") == VISIBILITY_DM
+        assert get_effective_campaign_visibility("linden-pass", "systems") == VISIBILITY_DM
+        assert get_campaign_scope_visibility("linden-pass", "wiki") == VISIBILITY_PUBLIC
+        assert get_effective_campaign_visibility("linden-pass", "wiki") == VISIBILITY_PUBLIC
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    campaign = client.get("/campaigns/linden-pass")
+    wiki_page = client.get("/campaigns/linden-pass/pages/index")
+    systems = client.get("/campaigns/linden-pass/systems")
+
+    assert campaign.status_code == 200
+    assert wiki_page.status_code == 200
+    assert 'href="/campaigns/linden-pass/systems"' not in campaign.get_data(as_text=True)
+    assert systems.status_code == 404
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    dm_systems = client.get("/campaigns/linden-pass/systems")
+
+    assert dm_systems.status_code == 200
 
 
 def test_shared_core_systems_edit_flow_stays_separate_from_overrides_and_custom_entries(

@@ -40,6 +40,7 @@ class SystemCodePolicy:
     code: str
     label: str
     default_systems_library_slug: str
+    default_campaign_visibility_by_scope: tuple[tuple[str, str], ...] = ()
     supports_combat_tracker: bool = False
     supports_dnd5e_statblock_upload: bool = False
     supports_native_character_tools: bool = False
@@ -91,6 +92,7 @@ _SYSTEM_POLICIES = {
         code=XIANXIA_SYSTEM_CODE,
         label=XIANXIA_SYSTEM_CODE,
         default_systems_library_slug=XIANXIA_SYSTEM_CODE,
+        default_campaign_visibility_by_scope=(("systems", "dm"),),
         native_character_create_lane=CHARACTER_ROUTE_LANE_XIANXIA,
         character_read_lane=CHARACTER_ROUTE_LANE_XIANXIA,
         character_session_lane=CHARACTER_ROUTE_LANE_XIANXIA,

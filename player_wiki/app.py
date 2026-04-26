@@ -35,6 +35,7 @@ from .auth import (
     clear_campaign_visibility_cache,
     get_accessible_campaign_entries,
     get_auth_store,
+    get_campaign_default_scope_visibility,
     get_campaign_role,
     get_current_user,
     get_current_user_preferences,
@@ -129,7 +130,6 @@ from .character_store import CharacterStateConflictError, CharacterStateStore
 from .campaign_visibility import (
     CAMPAIGN_VISIBILITY_SCOPE_LABELS,
     CAMPAIGN_VISIBILITY_SCOPES,
-    DEFAULT_CAMPAIGN_VISIBILITY_BY_SCOPE,
     VISIBILITY_LABELS,
     VISIBILITY_PRIVATE,
     is_valid_visibility,
@@ -6713,7 +6713,7 @@ def create_app() -> Flask:
             configured_visibility = get_auth_store().get_campaign_visibility_setting(campaign_slug, scope)
             current_visibility = configured_visibility.visibility if configured_visibility is not None else ""
             effective_visibility = get_effective_campaign_visibility(campaign_slug, scope)
-            base_visibility = current_visibility or DEFAULT_CAMPAIGN_VISIBILITY_BY_SCOPE[scope]
+            base_visibility = current_visibility or get_campaign_default_scope_visibility(campaign_slug, scope)
             visibility_rows.append(
                 {
                     "scope": scope,
@@ -8181,7 +8181,7 @@ def create_app() -> Flask:
         changed_scopes: list[str] = []
         for scope in CAMPAIGN_VISIBILITY_SCOPES:
             current_visibility = auth_store_instance.get_campaign_visibility_setting(campaign_slug, scope)
-            default_visibility = DEFAULT_CAMPAIGN_VISIBILITY_BY_SCOPE[scope]
+            default_visibility = get_campaign_default_scope_visibility(campaign_slug, scope)
             selected_visibility = normalize_visibility_choice(
                 request.form.get(
                     f"{scope}_visibility",
