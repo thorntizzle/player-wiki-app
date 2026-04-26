@@ -20,7 +20,7 @@ from .xianxia_character_model import (
 )
 from .xianxia_equipment_inference import infer_xianxia_required_equipment
 
-XIANXIA_CHARACTER_BUILDER_VERSION = "2026-04-26.05"
+XIANXIA_CHARACTER_BUILDER_VERSION = "2026-04-26.06"
 XIANXIA_CHARACTER_CREATE_SOURCE_PATH = "builder://xianxia-create"
 XIANXIA_REALM_DEFAULT = "Mortal"
 XIANXIA_ACTIONS_PER_TURN_DEFAULT = 2
@@ -280,6 +280,15 @@ def build_xianxia_character_definition(
                 },
                 "equipment": required_equipment,
                 "martial_arts": martial_arts,
+                "generic_techniques": [],
+                "variants": [],
+                "dao_immolating_techniques": {
+                    "prepared": [],
+                    "use_history": [],
+                },
+                "approval_requests": [],
+                "companions": [],
+                "advancement_history": [],
             },
         }
     )

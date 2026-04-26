@@ -1099,6 +1099,11 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
             **_energy_data(),
             **_skill_data(),
             **_martial_art_data(),
+            "generic_techniques": "Cloud-Stepping Feint",
+            "starting_armor": "Silk armor",
+            "starting_supplies": "Spirit rice",
+            "starting_coin": "100 gp",
+            "non_required_gear": "Travel lantern",
         },
         follow_redirects=False,
     )
@@ -1109,6 +1114,16 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     assert definition_payload["system"] == XIANXIA_SYSTEM_CODE
     assert definition_payload["source"]["source_type"] == "xianxia_character_builder"
     assert definition_payload["spellcasting"] == {}
+    assert definition_payload["proficiencies"] == {
+        "armor": [],
+        "weapons": [],
+        "tools": [],
+        "languages": [],
+        "tool_expertise": [],
+    }
+    assert definition_payload["attacks"] == []
+    assert definition_payload["features"] == []
+    assert definition_payload["equipment_catalog"] == []
     assert definition_payload["xianxia"]["realm"] == "Mortal"
     assert definition_payload["xianxia"]["actions_per_turn"] == 2
     assert definition_payload["xianxia"]["honor"] == "Honorable"
@@ -1190,6 +1205,14 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
         },
     ]
     assert definition_payload["xianxia"]["generic_techniques"] == []
+    assert definition_payload["xianxia"]["variants"] == []
+    assert definition_payload["xianxia"]["dao_immolating_techniques"] == {
+        "prepared": [],
+        "use_history": [],
+    }
+    assert definition_payload["xianxia"]["approval_requests"] == []
+    assert definition_payload["xianxia"]["companions"] == []
+    assert definition_payload["xianxia"]["advancement_history"] == []
 
     import_payload = yaml.safe_load(
         (
@@ -1209,6 +1232,8 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     assert state["vitals"] == {"current_hp": 10, "temp_hp": 0}
     assert state["spell_slots"] == []
     assert state["resources"] == []
+    assert state["inventory"] == []
+    assert state["currency"] == {"cp": 0, "sp": 0, "ep": 0, "gp": 0, "pp": 0, "other": []}
     assert state["xianxia"]["vitals"] == {
         "current_hp": 10,
         "temp_hp": 0,
@@ -1222,6 +1247,7 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     }
     assert state["xianxia"]["yin_yang"] == {"yin_current": 1, "yang_current": 1}
     assert state["xianxia"]["dao"] == {"current": 0}
+    assert state["xianxia"]["inventory"] == {"enabled": False, "quantities": []}
 
     armored_response = client.post(
         "/campaigns/linden-pass/characters/new",
