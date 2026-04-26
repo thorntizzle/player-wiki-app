@@ -12731,6 +12731,8 @@ def create_app() -> Flask:
                 expected_revision=expected_revision,
                 current_hp=request.form.get("current_hp"),
                 temp_hp=request.form.get("temp_hp"),
+                current_stance=request.form.get("current_stance"),
+                temp_stance=request.form.get("temp_stance"),
                 hp_delta=request.form.get("hp_delta"),
                 temp_hp_delta=request.form.get("temp_hp_delta"),
                 clear_temp_hp=request.form.get("clear_temp_hp") == "1",

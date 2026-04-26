@@ -50,6 +50,8 @@ class CharacterStateService:
         expected_revision: int,
         current_hp: Any | None = None,
         temp_hp: Any | None = None,
+        current_stance: Any | None = None,
+        temp_stance: Any | None = None,
         hp_delta: Any | None = None,
         temp_hp_delta: Any | None = None,
         clear_temp_hp: bool = False,
@@ -64,6 +66,12 @@ class CharacterStateService:
             temp_hp_delta=temp_hp_delta,
             clear_temp_hp=clear_temp_hp,
         )
+        if is_xianxia_system(record.definition.system):
+            self._apply_xianxia_stance_update(
+                state,
+                current_stance=current_stance,
+                temp_stance=temp_stance,
+            )
         return self._replace_state(
             record,
             state,
@@ -351,6 +359,28 @@ class CharacterStateService:
         vitals["current_hp"] = next_current_hp
         vitals["temp_hp"] = next_temp_hp
         state["vitals"] = vitals
+
+    def _apply_xianxia_stance_update(
+        self,
+        state: dict[str, Any],
+        *,
+        current_stance: Any | None = None,
+        temp_stance: Any | None = None,
+    ) -> None:
+        if (
+            (current_stance is None or str(current_stance).strip() == "")
+            and (temp_stance is None or str(temp_stance).strip() == "")
+        ):
+            return
+
+        xianxia_state = dict(state.get("xianxia") or {})
+        vitals = dict(xianxia_state.get("vitals") or {})
+        if current_stance is not None and str(current_stance).strip() != "":
+            vitals["current_stance"] = int(current_stance)
+        if temp_stance is not None and str(temp_stance).strip() != "":
+            vitals["temp_stance"] = int(temp_stance)
+        xianxia_state["vitals"] = vitals
+        state["xianxia"] = xianxia_state
 
     def _apply_resource_update(
         self,
