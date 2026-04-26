@@ -257,6 +257,17 @@ def test_xianxia_read_sheet_uses_system_specific_subpages(
     assert "Features" not in quick_html
     assert "Spellcasting" not in quick_html
 
+    spellcasting_response = client.get(
+        "/campaigns/linden-pass/characters/subpage-crane?page=spellcasting"
+    )
+    assert spellcasting_response.status_code == 200
+    spellcasting_html = unescape(spellcasting_response.get_data(as_text=True))
+    assert "At a glance" in spellcasting_html
+    assert "?page=spellcasting" not in spellcasting_html
+    assert "/spellcasting/" not in spellcasting_html
+    assert "Spell slots" not in spellcasting_html
+    assert "Spellcasting" not in spellcasting_html
+
     martial_arts_response = client.get(
         "/campaigns/linden-pass/characters/subpage-crane?page=martial_arts"
     )
