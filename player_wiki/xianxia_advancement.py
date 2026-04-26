@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from .xianxia_character_model import (
+    XIANXIA_ATTRIBUTE_KEYS,
+    XIANXIA_ATTRIBUTE_LABELS,
     XIANXIA_EFFORT_KEYS,
     XIANXIA_EFFORT_LABELS,
     XIANXIA_ENERGY_KEYS,
@@ -16,6 +18,10 @@ XIANXIA_CONDITIONING_INSIGHT_COST = 1
 XIANXIA_CONDITIONING_HP_INCREASE = 10
 XIANXIA_CONDITIONING_HP_MAXIMUM = 50
 XIANXIA_CONDITIONING_EFFORT_INCREASE = 2
+XIANXIA_TRAINING_INSIGHT_COST = 1
+XIANXIA_TRAINING_STANCE_INCREASE = 10
+XIANXIA_TRAINING_STANCE_MAXIMUM = 50
+XIANXIA_TRAINING_ATTRIBUTE_INCREASE = 2
 XIANXIA_MARTIAL_ART_RANK_KEYS = (
     "initiate",
     "novice",
@@ -77,6 +83,18 @@ class XianxiaMeditationSpendResult:
 
 @dataclass(frozen=True)
 class XianxiaConditioningSpendResult:
+    definition: Any
+    target_kind: str
+    target_key: str
+    target_name: str
+    insight_cost: int
+    increase: int
+    new_value: int
+    notes: str = ""
+
+
+@dataclass(frozen=True)
+class XianxiaTrainingSpendResult:
     definition: Any
     target_kind: str
     target_key: str
@@ -321,6 +339,106 @@ def spend_xianxia_conditioning_definition(
     )
 
 
+def spend_xianxia_training_definition(
+    definition: Any,
+    *,
+    training_target: str,
+    attribute_key: str = "",
+    notes: str = "",
+) -> XianxiaTrainingSpendResult:
+    target_kind = normalize_xianxia_training_target(training_target)
+    if target_kind not in {"stance", "attribute"}:
+        raise ValueError("Choose Stance or an Attribute for Training.")
+
+    payload = definition.to_dict()
+    xianxia = dict(payload.get("xianxia") or {})
+    insight = dict(xianxia.get("insight") or {})
+    available = _non_negative_int(insight.get("available"), default=0)
+    spent = _non_negative_int(insight.get("spent"), default=0)
+    insight_cost = XIANXIA_TRAINING_INSIGHT_COST
+    if available < insight_cost:
+        target_name = "Stance" if target_kind == "stance" else attribute_label(attribute_key)
+        raise ValueError(
+            f"Training needs {insight_cost} Insight to increase {target_name}; "
+            f"only {available} available."
+        )
+
+    clean_notes = _clean_note(notes)
+    history = [
+        dict(record)
+        for record in list(xianxia.get("advancement_history") or [])
+        if isinstance(record, dict) and record
+    ]
+
+    if target_kind == "stance":
+        durability = dict(xianxia.get("durability") or {})
+        current_stance_max = _non_negative_int(durability.get("stance_max"), default=10)
+        if current_stance_max >= XIANXIA_TRAINING_STANCE_MAXIMUM:
+            raise ValueError(
+                f"Training cannot increase Stance above {XIANXIA_TRAINING_STANCE_MAXIMUM}."
+            )
+        new_stance_max = min(
+            XIANXIA_TRAINING_STANCE_MAXIMUM,
+            current_stance_max + XIANXIA_TRAINING_STANCE_INCREASE,
+        )
+        increase = new_stance_max - current_stance_max
+        durability["stance_max"] = new_stance_max
+        xianxia["durability"] = durability
+        event = {
+            "action": "training_stance_increase",
+            "amount": insight_cost,
+            "target": "Stance",
+            "stance_maximum_increase": increase,
+            "new_stance_maximum": new_stance_max,
+            "stance_maximum_cap": XIANXIA_TRAINING_STANCE_MAXIMUM,
+        }
+        target_key = "stance"
+        target_name = "Stance"
+        new_value = new_stance_max
+    else:
+        normalized_attribute_key = normalize_xianxia_attribute_key(attribute_key)
+        if normalized_attribute_key not in XIANXIA_ATTRIBUTE_KEYS:
+            raise ValueError("Choose a valid Attribute for Training.")
+        attributes = dict(xianxia.get("attributes") or {})
+        current_score = _non_negative_int(attributes.get(normalized_attribute_key), default=0)
+        new_score = current_score + XIANXIA_TRAINING_ATTRIBUTE_INCREASE
+        attributes[normalized_attribute_key] = new_score
+        xianxia["attributes"] = attributes
+        target_key = normalized_attribute_key
+        target_name = attribute_label(normalized_attribute_key)
+        increase = XIANXIA_TRAINING_ATTRIBUTE_INCREASE
+        new_value = new_score
+        event = {
+            "action": "training_attribute_increase",
+            "amount": insight_cost,
+            "target": target_name,
+            "attribute_key": normalized_attribute_key,
+            "attribute_point_increase": increase,
+            "new_attribute_score": new_score,
+        }
+
+    if clean_notes:
+        event["notes"] = clean_notes
+    history.append(event)
+    xianxia["advancement_history"] = history
+    xianxia["insight"] = {
+        "available": available - insight_cost,
+        "spent": spent + insight_cost,
+    }
+    payload["xianxia"] = xianxia
+
+    return XianxiaTrainingSpendResult(
+        definition=definition.__class__.from_dict(payload),
+        target_kind=target_kind,
+        target_key=target_key,
+        target_name=target_name,
+        insight_cost=insight_cost,
+        increase=increase,
+        new_value=new_value,
+        notes=clean_notes,
+    )
+
+
 def advance_xianxia_martial_art_rank_definition(
     definition: Any,
     *,
@@ -550,7 +668,27 @@ def normalize_xianxia_conditioning_target(value: Any) -> str:
     )
 
 
+def normalize_xianxia_training_target(value: Any) -> str:
+    return (
+        str(value if value is not None else "")
+        .strip()
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+    )
+
+
 def normalize_xianxia_effort_key(value: Any) -> str:
+    return (
+        str(value if value is not None else "")
+        .strip()
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+    )
+
+
+def normalize_xianxia_attribute_key(value: Any) -> str:
     return (
         str(value if value is not None else "")
         .strip()
@@ -579,6 +717,13 @@ def effort_label(effort_key: str) -> str:
     if normalized in XIANXIA_EFFORT_LABELS:
         return XIANXIA_EFFORT_LABELS[normalized]
     return normalized.replace("_", " ").title() if normalized else "Effort"
+
+
+def attribute_label(attribute_key: str) -> str:
+    normalized = normalize_xianxia_attribute_key(attribute_key)
+    if normalized in XIANXIA_ATTRIBUTE_LABELS:
+        return XIANXIA_ATTRIBUTE_LABELS[normalized]
+    return normalized.replace("_", " ").title() if normalized else "Attribute"
 
 
 def rank_label(rank_key: str) -> str:

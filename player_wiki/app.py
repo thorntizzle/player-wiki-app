@@ -93,10 +93,15 @@ from .xianxia_advancement import (
     XIANXIA_CONDITIONING_INSIGHT_COST,
     XIANXIA_CULTIVATION_ENERGY_INSIGHT_COST,
     XIANXIA_MEDITATION_INSIGHT_COST,
+    XIANXIA_TRAINING_ATTRIBUTE_INCREASE,
+    XIANXIA_TRAINING_INSIGHT_COST,
+    XIANXIA_TRAINING_STANCE_INCREASE,
+    XIANXIA_TRAINING_STANCE_MAXIMUM,
     advance_xianxia_martial_art_rank_definition,
     spend_xianxia_conditioning_definition,
     spend_xianxia_cultivation_energy_definition,
     spend_xianxia_meditation_definition,
+    spend_xianxia_training_definition,
     normalize_xianxia_martial_art_rank_key,
     rank_label as xianxia_martial_art_rank_label,
 )
@@ -1425,6 +1430,41 @@ def present_xianxia_cultivation_context(character: dict[str, object], xianxia: d
         effort["has_enough_insight"] = insight_available >= XIANXIA_CONDITIONING_INSIGHT_COST
         effort["shortfall"] = max(0, XIANXIA_CONDITIONING_INSIGHT_COST - insight_available)
         conditioning_efforts.append(effort)
+    stance_resource = {}
+    for raw_resource in list(resources.get("durability") or []):
+        if not isinstance(raw_resource, dict):
+            continue
+        if str(raw_resource.get("key") or "").strip() == "stance":
+            stance_resource = dict(raw_resource)
+            break
+    stance_maximum = int(stance_resource.get("max") or 0) if stance_resource else 0
+    stance_projected_maximum = min(
+        XIANXIA_TRAINING_STANCE_MAXIMUM,
+        stance_maximum + XIANXIA_TRAINING_STANCE_INCREASE,
+    )
+    training_stance = {
+        "key": "stance",
+        "label": "Stance",
+        "current": int(stance_resource.get("current") or 0) if stance_resource else 0,
+        "max": stance_maximum,
+        "cap": XIANXIA_TRAINING_STANCE_MAXIMUM,
+        "insight_cost": XIANXIA_TRAINING_INSIGHT_COST,
+        "stance_increase": max(0, stance_projected_maximum - stance_maximum),
+        "projected_max": stance_projected_maximum,
+        "has_enough_insight": insight_available >= XIANXIA_TRAINING_INSIGHT_COST,
+        "shortfall": max(0, XIANXIA_TRAINING_INSIGHT_COST - insight_available),
+        "can_increase": stance_maximum < XIANXIA_TRAINING_STANCE_MAXIMUM,
+    }
+    training_attributes = []
+    for raw_attribute in list(xianxia_read.get("attributes") or []):
+        if not isinstance(raw_attribute, dict):
+            continue
+        attribute = dict(raw_attribute)
+        attribute["insight_cost"] = XIANXIA_TRAINING_INSIGHT_COST
+        attribute["attribute_increase"] = XIANXIA_TRAINING_ATTRIBUTE_INCREASE
+        attribute["has_enough_insight"] = insight_available >= XIANXIA_TRAINING_INSIGHT_COST
+        attribute["shortfall"] = max(0, XIANXIA_TRAINING_INSIGHT_COST - insight_available)
+        training_attributes.append(attribute)
     martial_arts = []
     for index, raw_art in enumerate(list(xianxia_read.get("martial_arts") or [])):
         art = dict(raw_art or {}) if isinstance(raw_art, dict) else {}
@@ -1456,6 +1496,12 @@ def present_xianxia_cultivation_context(character: dict[str, object], xianxia: d
             ("effort_key", "Effort key"),
             ("effort_point_increase", "Effort point increase"),
             ("new_effort_score", "New Effort score"),
+            ("stance_maximum_increase", "Stance maximum increase"),
+            ("new_stance_maximum", "New Stance maximum"),
+            ("stance_maximum_cap", "Stance maximum cap"),
+            ("attribute_key", "Attribute key"),
+            ("attribute_point_increase", "Attribute point increase"),
+            ("new_attribute_score", "New Attribute score"),
             ("rank", "Rank"),
             ("systems_ref", "Systems ref"),
             ("teacher_breakthrough_note", "Teacher/breakthrough note"),
@@ -1484,6 +1530,10 @@ def present_xianxia_cultivation_context(character: dict[str, object], xianxia: d
         "conditioning": {
             "hp": conditioning_hp,
             "efforts": conditioning_efforts,
+        },
+        "training": {
+            "stance": training_stance,
+            "attributes": training_attributes,
         },
         "martial_arts": martial_arts,
         "generic_techniques": list(xianxia_read.get("generic_techniques") or []),
@@ -11902,6 +11952,19 @@ def create_app() -> Flask:
                     success_message = (
                         f"Spent {conditioning_result.insight_cost} Insight on Conditioning "
                         f"to increase {conditioning_result.target_name}."
+                    )
+                elif cultivation_action == "spend_training":
+                    redirect_anchor = "xianxia-cultivation-training"
+                    training_result = spend_xianxia_training_definition(
+                        record.definition,
+                        training_target=request.form.get("training_target", ""),
+                        attribute_key=request.form.get("attribute_key", ""),
+                        notes=request.form.get("training_notes", ""),
+                    )
+                    definition = training_result.definition
+                    success_message = (
+                        f"Spent {training_result.insight_cost} Insight on Training "
+                        f"to increase {training_result.target_name}."
                     )
                 elif cultivation_action == "advance_martial_art_rank":
                     redirect_anchor = "xianxia-cultivation-martial-arts"

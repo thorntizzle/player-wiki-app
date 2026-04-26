@@ -2024,6 +2024,172 @@ def test_xianxia_cultivation_route_spends_insight_on_conditioning_for_hp_or_effo
     assert "Current 10 / Max 20" in resources_html
 
 
+def test_xianxia_cultivation_route_spends_insight_on_training_for_stance_or_attribute(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+                "default_visibility": "dm",
+            }
+        ]
+
+    _write_campaign_config(app, _mutate)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Training Adept"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+
+    cultivation_html = client.get(
+        "/campaigns/linden-pass/characters/training-adept/cultivation"
+    ).get_data(as_text=True)
+    assert 'name="cultivation_action" value="spend_training"' in cultivation_html
+    assert 'name="training_target" value="stance"' in cultivation_html
+    assert 'name="training_target" value="attribute"' in cultivation_html
+    assert 'name="attribute_key" value="con"' in cultivation_html
+    assert "Spend 1 Insight to increase Stance maximum by 10." in cultivation_html
+    assert "Spend 1 Insight to add 2 Constitution points." in cultivation_html
+    assert "Needs 1 more available Insight." in cultivation_html
+
+    starting_revision = _character_state_revision(app, "training-adept")
+    insufficient_response = client.post(
+        "/campaigns/linden-pass/characters/training-adept/cultivation",
+        data={
+            "expected_revision": str(starting_revision),
+            "cultivation_action": "spend_training",
+            "training_target": "stance",
+        },
+        follow_redirects=True,
+    )
+    assert insufficient_response.status_code == 200
+    assert (
+        "Training needs 1 Insight to increase Stance; only 0 available."
+        in insufficient_response.get_data(as_text=True)
+    )
+    definition_payload = _read_character_definition(app, "training-adept")
+    assert definition_payload["xianxia"]["insight"] == {"available": 0, "spent": 0}
+    assert definition_payload["xianxia"]["durability"]["stance_max"] == 10
+    assert definition_payload["xianxia"]["attributes"]["con"] == 3
+    assert definition_payload["xianxia"]["advancement_history"] == []
+    assert _character_state_revision(app, "training-adept") == starting_revision
+
+    insight_response = client.post(
+        "/campaigns/linden-pass/characters/training-adept/cultivation",
+        data={
+            "expected_revision": str(starting_revision),
+            "cultivation_action": "save_insight",
+            "insight_available": "2",
+            "insight_spent": "0",
+        },
+        follow_redirects=False,
+    )
+    assert insight_response.status_code == 302
+
+    current_revision = _character_state_revision(app, "training-adept")
+    stance_response = client.post(
+        "/campaigns/linden-pass/characters/training-adept/cultivation",
+        data={
+            "expected_revision": str(current_revision),
+            "cultivation_action": "spend_training",
+            "training_target": "stance",
+            "training_notes": "Holding horse stance beneath the waterfall.",
+        },
+        follow_redirects=False,
+    )
+    assert stance_response.status_code == 302
+    assert stance_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/training-adept/cultivation#xianxia-cultivation-training"
+    )
+
+    definition_payload = _read_character_definition(app, "training-adept")
+    xianxia = definition_payload["xianxia"]
+    assert xianxia["insight"] == {"available": 1, "spent": 1}
+    assert xianxia["durability"]["stance_max"] == 20
+    assert xianxia["attributes"]["con"] == 3
+    assert xianxia["advancement_history"] == [
+        {
+            "action": "training_stance_increase",
+            "amount": 1,
+            "target": "Stance",
+            "stance_maximum_increase": 10,
+            "new_stance_maximum": 20,
+            "stance_maximum_cap": 50,
+            "notes": "Holding horse stance beneath the waterfall.",
+        }
+    ]
+    with app.app_context():
+        repository = app.extensions["character_repository"]
+        record = repository.get_character("linden-pass", "training-adept")
+        assert record is not None
+        assert record.state_record.state["xianxia"]["vitals"]["current_stance"] == 10
+    assert _character_state_revision(app, "training-adept") == current_revision + 1
+
+    attribute_revision = _character_state_revision(app, "training-adept")
+    attribute_response = client.post(
+        "/campaigns/linden-pass/characters/training-adept/cultivation",
+        data={
+            "expected_revision": str(attribute_revision),
+            "cultivation_action": "spend_training",
+            "training_target": "attribute",
+            "attribute_key": "con",
+            "training_notes": "Tempered core and breath.",
+        },
+        follow_redirects=False,
+    )
+    assert attribute_response.status_code == 302
+
+    definition_payload = _read_character_definition(app, "training-adept")
+    xianxia = definition_payload["xianxia"]
+    assert xianxia["insight"] == {"available": 0, "spent": 2}
+    assert xianxia["durability"]["stance_max"] == 20
+    assert xianxia["durability"]["defense"] == 15
+    assert xianxia["attributes"]["con"] == 5
+    assert xianxia["advancement_history"][-1] == {
+        "action": "training_attribute_increase",
+        "amount": 1,
+        "target": "Constitution",
+        "attribute_key": "con",
+        "attribute_point_increase": 2,
+        "new_attribute_score": 5,
+        "notes": "Tempered core and breath.",
+    }
+    assert _character_state_revision(app, "training-adept") == attribute_revision + 1
+
+    updated_html = client.get(
+        "/campaigns/linden-pass/characters/training-adept/cultivation"
+    ).get_data(as_text=True)
+    assert "Current max 20 / Cap 50" in updated_html
+    assert "Current score 5" in updated_html
+    assert "Training Stance Increase" in updated_html
+    assert "Stance maximum increase:" in updated_html
+    assert "New Stance maximum:" in updated_html
+    assert "Training Attribute Increase" in updated_html
+    assert "Attribute point increase:" in updated_html
+    assert "New Attribute score:" in updated_html
+
+    resources_html = client.get(
+        "/campaigns/linden-pass/characters/training-adept?page=resources"
+    ).get_data(as_text=True)
+    assert "<h3>Stance</h3>" in resources_html
+    assert "Current 10 / Max 20" in resources_html
+
+    equipment_html = client.get(
+        "/campaigns/linden-pass/characters/training-adept?page=equipment"
+    ).get_data(as_text=True)
+    assert "Defense calculation" in equipment_html
+    assert "Constitution" in equipment_html
+    assert "Defense = 10 + 0 + 5" in equipment_html
+    assert "15" in equipment_html
+
+
 def test_xianxia_cultivation_route_spends_insight_to_advance_martial_art_rank(
     app, client, sign_in, users
 ):

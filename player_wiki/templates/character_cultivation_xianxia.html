@@ -283,6 +283,84 @@
     </div>
   </section>
 
+  <section class="read-section" id="xianxia-cultivation-training">
+    <div class="section-heading">
+      <h2>Training</h2>
+    </div>
+    <div class="feature-stack">
+      <article class="feature-row">
+        <div class="feature-row__header">
+          <h3>{{ cultivation.training.stance.label }}</h3>
+          <p class="meta">
+            Current max {{ cultivation.training.stance.max }} / Cap {{ cultivation.training.stance.cap }}
+          </p>
+        </div>
+        <form
+          class="stack-form"
+          method="post"
+          action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+        >
+          <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+          <input type="hidden" name="cultivation_action" value="spend_training">
+          <input type="hidden" name="training_target" value="stance">
+          <p class="meta">
+            Spend {{ cultivation.training.stance.insight_cost }} Insight to increase Stance maximum by {{ cultivation.training.stance.stance_increase }}.
+          </p>
+          <label>
+            Notes
+            <textarea name="training_notes" rows="2"></textarea>
+          </label>
+          {% if not cultivation.training.stance.has_enough_insight %}
+            <p class="meta">Needs {{ cultivation.training.stance.shortfall }} more available Insight.</p>
+          {% elif not cultivation.training.stance.can_increase %}
+            <p class="meta">Stance maximum is already at the Training cap.</p>
+          {% endif %}
+          <div class="hero-actions">
+            <button
+              type="submit"
+              {% if not cultivation.training.stance.has_enough_insight or not cultivation.training.stance.can_increase %}disabled{% endif %}
+            >
+              Increase Stance
+            </button>
+          </div>
+        </form>
+      </article>
+      {% for attribute in cultivation.training.attributes %}
+        <article class="feature-row">
+          <div class="feature-row__header">
+            <h3>{{ attribute.label }}</h3>
+            <p class="meta">Current score {{ attribute.score }}</p>
+          </div>
+          <form
+            class="stack-form"
+            method="post"
+            action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+          >
+            <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+            <input type="hidden" name="cultivation_action" value="spend_training">
+            <input type="hidden" name="training_target" value="attribute">
+            <input type="hidden" name="attribute_key" value="{{ attribute.key }}">
+            <p class="meta">
+              Spend {{ attribute.insight_cost }} Insight to add {{ attribute.attribute_increase }} {{ attribute.label }} points.
+            </p>
+            <label>
+              Notes
+              <textarea name="training_notes" rows="2"></textarea>
+            </label>
+            {% if not attribute.has_enough_insight %}
+              <p class="meta">Needs {{ attribute.shortfall }} more available Insight.</p>
+            {% endif %}
+            <div class="hero-actions">
+              <button type="submit" {% if not attribute.has_enough_insight %}disabled{% endif %}>
+                Increase {{ attribute.label }}
+              </button>
+            </div>
+          </form>
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+
   <section class="read-section" id="xianxia-cultivation-martial-arts">
     <div class="section-heading">
       <h2>Martial Arts</h2>
