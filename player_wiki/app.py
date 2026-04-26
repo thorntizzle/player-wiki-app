@@ -1384,6 +1384,7 @@ def present_xianxia_cultivation_context(character: dict[str, object], xianxia: d
             ("target", "Target"),
             ("rank", "Rank"),
             ("systems_ref", "Systems ref"),
+            ("teacher_breakthrough_note", "Teacher/breakthrough note"),
             ("notes", "Notes"),
         ):
             value = raw_record.get(key)
@@ -1454,6 +1455,12 @@ def _xianxia_martial_art_advancement_context(
         "insight_cost": insight_cost,
         "has_enough_insight": has_enough_insight,
         "shortfall": max(0, insight_cost - insight_available),
+        "teacher_breakthrough_requirement": str(
+            next_step.get("teacher_breakthrough_requirement") or ""
+        ).strip(),
+        "teacher_breakthrough_note": str(
+            next_step.get("teacher_breakthrough_note") or ""
+        ).strip(),
     }
 
 

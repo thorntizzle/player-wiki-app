@@ -1708,17 +1708,79 @@ def test_xianxia_cultivation_route_spends_insight_to_advance_martial_art_rank(
     ).get_data(as_text=True)
     assert "Current rank: Novice" in updated_html
     assert "Spend 1 Insight to advance to Apprentice." in updated_html
+    teacher_note = (
+        "Requires learning under a Master. Teacher requirements are stored as notes "
+        "for now rather than enforced advancement blockers."
+    )
+    assert teacher_note in updated_html
     assert "Martial Art Rank Advance" in updated_html
     assert "Rank:" in updated_html
     assert "Novice" in updated_html
+
+    next_revision = _character_state_revision(app, "rank-crane")
+    apprentice_response = client.post(
+        "/campaigns/linden-pass/characters/rank-crane/cultivation",
+        data={
+            "expected_revision": str(next_revision),
+            "cultivation_action": "advance_martial_art_rank",
+            "martial_art_index": "0",
+            "target_rank_key": "apprentice",
+        },
+        follow_redirects=False,
+    )
+    assert apprentice_response.status_code == 302
+    assert apprentice_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/rank-crane/cultivation#xianxia-cultivation-martial-arts"
+    )
+
+    definition_payload = _read_character_definition(app, "rank-crane")
+    xianxia = definition_payload["xianxia"]
+    assert xianxia["insight"] == {"available": 0, "spent": 2}
+    assert xianxia["energies"] == {
+        "jing": {"max": 3},
+        "qi": {"max": 2},
+        "shen": {"max": 2},
+    }
+    first_art = xianxia["martial_arts"][0]
+    assert first_art["current_rank_key"] == "apprentice"
+    assert first_art["current_rank"] == "Apprentice"
+    assert "xianxia:demons-fist:apprentice" in first_art["learned_rank_refs"]
+    assert first_art["rank_energy_maximum_increases"] == {
+        "novice": {"jing": 1, "qi": 1, "shen": 0},
+        "apprentice": {"jing": 1, "qi": 0, "shen": 1},
+    }
+    assert first_art["rank_teacher_breakthrough_notes"] == {
+        "apprentice": {
+            "requirement": "master",
+            "note": teacher_note,
+        }
+    }
+    assert xianxia["advancement_history"][-1] == {
+        "action": "martial_art_rank_advance",
+        "amount": 1,
+        "target": "Demon's Fist",
+        "rank": "Apprentice",
+        "rank_ref": "xianxia:demons-fist:apprentice",
+        "systems_ref": first_art["systems_ref"],
+        "energy_maximum_increases": {"jing": 1, "qi": 0, "shen": 1},
+        "teacher_breakthrough_requirement": "master",
+        "teacher_breakthrough_note": teacher_note,
+    }
+
+    apprentice_html = client.get(
+        "/campaigns/linden-pass/characters/rank-crane/cultivation"
+    ).get_data(as_text=True)
+    assert "Teacher/breakthrough note:" in apprentice_html
+    assert teacher_note in apprentice_html
     resources_html = client.get(
         "/campaigns/linden-pass/characters/rank-crane?page=resources"
     ).get_data(as_text=True)
     assert "<h3>Jing</h3>" in resources_html
     assert "<h3>Qi</h3>" in resources_html
+    assert "Current 1 / Max 3" in resources_html
     assert "Current 1 / Max 2" in resources_html
     assert "<h3>Shen</h3>" in resources_html
-    assert "Current 1 / Max 1" in resources_html
+    assert "Current 1 / Max 2" in resources_html
 
 
 def test_xianxia_cultivation_rank_advance_requires_next_rank_and_insight(

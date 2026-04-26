@@ -29,6 +29,8 @@ class XianxiaMartialArtAdvanceResult:
     rank_name: str
     insight_cost: int
     energy_maximum_increases: dict[str, int]
+    teacher_breakthrough_requirement: str
+    teacher_breakthrough_note: str
 
 
 def advance_xianxia_martial_art_rank_definition(
@@ -115,6 +117,8 @@ def advance_xianxia_martial_art_rank_definition(
             f"{martial_art_name} {rank_label(rank_key)} does not have "
             "rank-granted Jing, Qi, or Shen maximum increases."
         )
+    teacher_breakthrough_requirement = _teacher_breakthrough_requirement(target_record)
+    teacher_breakthrough_note = _teacher_breakthrough_note(target_record)
 
     rank_ref = str(target_record.get("rank_ref") or "").strip()
     learned_rank_refs = _ensure_recorded_learned_rank_refs(
@@ -135,6 +139,13 @@ def advance_xianxia_martial_art_rank_definition(
     )
     rank_energy_maximum_increases[rank_key] = dict(energy_maximum_increases)
     martial_art["rank_energy_maximum_increases"] = rank_energy_maximum_increases
+    if teacher_breakthrough_requirement != "none" or teacher_breakthrough_note:
+        rank_teacher_breakthrough_notes = _rank_teacher_breakthrough_notes(martial_art)
+        rank_teacher_breakthrough_notes[rank_key] = {
+            "requirement": teacher_breakthrough_requirement,
+            "note": teacher_breakthrough_note,
+        }
+        martial_art["rank_teacher_breakthrough_notes"] = rank_teacher_breakthrough_notes
     martial_art["insight_spent"] = _non_negative_int(
         martial_art.get("insight_spent"),
         default=0,
@@ -166,6 +177,10 @@ def advance_xianxia_martial_art_rank_definition(
     if systems_ref:
         event["systems_ref"] = systems_ref
     event["energy_maximum_increases"] = dict(energy_maximum_increases)
+    if teacher_breakthrough_requirement != "none":
+        event["teacher_breakthrough_requirement"] = teacher_breakthrough_requirement
+    if teacher_breakthrough_note:
+        event["teacher_breakthrough_note"] = teacher_breakthrough_note
     history.append(event)
     xianxia["advancement_history"] = history
     payload["xianxia"] = xianxia
@@ -177,6 +192,8 @@ def advance_xianxia_martial_art_rank_definition(
         rank_name=rank_label(rank_key),
         insight_cost=insight_cost,
         energy_maximum_increases=energy_maximum_increases,
+        teacher_breakthrough_requirement=teacher_breakthrough_requirement,
+        teacher_breakthrough_note=teacher_breakthrough_note,
     )
 
 
@@ -345,6 +362,49 @@ def _energy_maximum_increases(rank_record: dict[str, Any]) -> dict[str, int]:
         key: _non_negative_int(increases.get(key), default=0)
         for key in XIANXIA_ENERGY_KEYS
     }
+
+
+def _teacher_breakthrough_requirement(rank_record: dict[str, Any]) -> str:
+    return (
+        normalize_xianxia_martial_art_rank_key(
+            rank_record.get("teacher_breakthrough_requirement")
+        )
+        or "none"
+    )
+
+
+def _teacher_breakthrough_note(rank_record: dict[str, Any]) -> str:
+    return " ".join(
+        str(rank_record.get("teacher_breakthrough_note") or "").split()
+    ).strip()
+
+
+def _rank_teacher_breakthrough_notes(
+    record: dict[str, Any],
+) -> dict[str, dict[str, str]]:
+    raw_notes = record.get("rank_teacher_breakthrough_notes")
+    if not isinstance(raw_notes, dict):
+        return {}
+    normalized: dict[str, dict[str, str]] = {}
+    for raw_rank_key, raw_note in raw_notes.items():
+        rank_key = normalize_xianxia_martial_art_rank_key(raw_rank_key)
+        if not rank_key:
+            continue
+        if isinstance(raw_note, dict):
+            requirement = (
+                normalize_xianxia_martial_art_rank_key(raw_note.get("requirement"))
+                or "none"
+            )
+            note = " ".join(str(raw_note.get("note") or "").split()).strip()
+        else:
+            requirement = "none"
+            note = " ".join(str(raw_note or "").split()).strip()
+        if requirement != "none" or note:
+            normalized[rank_key] = {
+                "requirement": requirement,
+                "note": note,
+            }
+    return normalized
 
 
 def _apply_energy_maximum_increases(

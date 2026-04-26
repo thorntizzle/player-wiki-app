@@ -167,6 +167,12 @@
                     <p class="meta">
                       Spend {{ art.advancement.insight_cost }} Insight to advance to {{ art.advancement.next_rank_label }}.
                     </p>
+                    {% if art.advancement.teacher_breakthrough_note %}
+                      <p class="meta">
+                        <strong>Teacher/Breakthrough:</strong>
+                        {{ art.advancement.teacher_breakthrough_note }}
+                      </p>
+                    {% endif %}
                     {% if not art.advancement.has_enough_insight %}
                       <p class="meta">Needs {{ art.advancement.shortfall }} more available Insight.</p>
                     {% endif %}
