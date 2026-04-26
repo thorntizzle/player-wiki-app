@@ -269,7 +269,8 @@ def test_xianxia_effort_definitions_encode_magic_effort_as_canonical_label():
 
 def test_xianxia_core_rule_seed_entries_cover_milestone_one_references():
     entries = build_xianxia_systems_seed_entries()
-    entry_map = {entry["slug"]: entry for entry in entries}
+    rule_entries = [entry for entry in entries if entry["entry_type"] == "rule"]
+    entry_map = {entry["slug"]: entry for entry in rule_entries}
     required_slugs = {
         "checks-and-difficulty",
         "easy-normal-and-hard",
@@ -303,13 +304,16 @@ def test_xianxia_core_rule_seed_entries_cover_milestone_one_references():
     }
 
     assert set(entry_map) == required_slugs
-    assert all(entry["entry_type"] == "rule" for entry in entries)
-    assert all(entry["metadata"]["seed_storage_strategy"] == XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY for entry in entries)
-    assert all(entry["metadata"]["seed_version"] == XIANXIA_SYSTEMS_SEED_VERSION for entry in entries)
-    assert all(entry["metadata"]["xianxia_rule_key"] for entry in entries)
-    assert all(entry["metadata"]["rule_key"] for entry in entries)
-    assert all(entry["metadata"]["xianxia_entry_facets"] for entry in entries)
-    assert all(entry["body"]["sections"] for entry in entries)
+    assert all(entry["entry_type"] == "rule" for entry in rule_entries)
+    assert all(
+        entry["metadata"]["seed_storage_strategy"] == XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY
+        for entry in rule_entries
+    )
+    assert all(entry["metadata"]["seed_version"] == XIANXIA_SYSTEMS_SEED_VERSION for entry in rule_entries)
+    assert all(entry["metadata"]["xianxia_rule_key"] for entry in rule_entries)
+    assert all(entry["metadata"]["rule_key"] for entry in rule_entries)
+    assert all(entry["metadata"]["xianxia_entry_facets"] for entry in rule_entries)
+    assert all(entry["body"]["sections"] for entry in rule_entries)
     assert entry_map["efforts-and-damage"]["metadata"]["rule_key"] == "efforts_and_damage"
     assert "magic effort" in entry_map["efforts-and-damage"]["search_text"]
     assert entry_map["efforts-and-damage"]["metadata"]["effort_labels"]["magic"] == "Magic Effort"
@@ -333,6 +337,63 @@ def test_xianxia_core_rule_seed_entries_cover_milestone_one_references():
     assert "bing ti" in bing_ti_errata["search_text"]
     assert "jing" in bing_ti_errata["search_text"]
     assert "read Ji as Jing" in bing_ti_errata["rendered_html"]
+
+
+def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
+    entries = build_xianxia_systems_seed_entries()
+    martial_art_entries = [entry for entry in entries if entry["entry_type"] == "martial_art"]
+    expected_titles = [
+        "Demon's Fist",
+        "Heavenly Palm",
+        "Taoist Blade",
+        "Drunken Fist",
+        "Striking Adder",
+        "Bloody Saber",
+        "Phoenix Descending",
+        "Dragon Ascending",
+        "Armored Elephant",
+        "Swaying Willow",
+        "Thundering Harmonics",
+        "Shadow Puppet Theater",
+        "Baihu Style",
+        "Shuai Jiao",
+        "Bing Ti",
+        "Spiritualists' Binding Seals",
+        "Formless Fist",
+        "Cherry Blossom Swallow",
+        "Ink-Stained Historian",
+        "Manifesting Brush",
+        "Beastmaster",
+        "Beast-Tamer",
+        "Courtier's Sting",
+        "Madam's Piercing Blood",
+        "Blooming Curse",
+        "Rippling Melodies",
+        "Strategist's Acumen",
+        "Broken Tiger's Vessel",
+        "The Four Winds",
+        "Flying Daggers",
+    ]
+
+    assert [entry["title"] for entry in martial_art_entries] == expected_titles
+    assert [entry["metadata"]["martial_art_catalog_order"] for entry in martial_art_entries] == list(
+        range(1, 31)
+    )
+    assert all(entry["metadata"]["xianxia_entry_facets"] == ["martial_art"] for entry in martial_art_entries)
+    assert all(entry["metadata"]["catalog_role"] == "parent" for entry in martial_art_entries)
+    assert all(entry["metadata"]["rank_records_seeded"] is False for entry in martial_art_entries)
+    assert all(entry["metadata"]["rank_records_status"] == "deferred" for entry in martial_art_entries)
+    assert all(entry["body"]["xianxia_martial_art"]["catalog_role"] == "parent" for entry in martial_art_entries)
+    assert all("Structured rank records and ability grants are deferred" in entry["rendered_html"] for entry in martial_art_entries)
+
+    entry_map = {entry["slug"]: entry for entry in martial_art_entries}
+    assert entry_map["demons-fist"]["metadata"]["martial_art_style"] == "Unarmed Martial Art"
+    assert "unarmed martial art" in entry_map["demons-fist"]["search_text"]
+    assert entry_map["spiritualists-binding-seals"]["body"]["xianxia_martial_art"]["parent_note"].startswith(
+        "Against Spirit and Divine targets"
+    )
+    assert "Ji" not in entry_map["bing-ti"]["rendered_html"]
+    assert "Qi Fist Technique" not in entry_map["demons-fist"]["rendered_html"]
 
 
 def test_xianxia_condition_and_status_seed_entries_are_forced_reference_only():
@@ -398,7 +459,6 @@ def test_xianxia_curated_seed_manifest_replaces_stale_shared_rows(app):
         entries = store.list_entries_for_source(
             XIANXIA_SYSTEM_CODE,
             XIANXIA_HOMEBREW_SOURCE_ID,
-            entry_type="rule",
             limit=None,
         )
         expected_titles = {entry["title"] for entry in build_xianxia_systems_seed_entries()}
@@ -588,7 +648,12 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
         assert "Dao" in {entry.title for entry in search_results}
         assert "DND Dao Breathing" not in {entry.title for entry in search_results}
         assert {entry.library_slug for entry in search_results} == {XIANXIA_SYSTEM_CODE}
-        assert len(rule_entries) == len(build_xianxia_systems_seed_entries())
+        seed_rule_count = sum(
+            1
+            for entry in build_xianxia_systems_seed_entries()
+            if entry["entry_type"] == "rule"
+        )
+        assert len(rule_entries) == seed_rule_count
         assert "Dao" in {entry.title for entry in rule_entries}
         assert {entry.library_slug for entry in rule_entries} == {XIANXIA_SYSTEM_CODE}
         assert service.get_entry_by_slug_for_campaign("linden-pass", "dnd-dao-breathing") is None
@@ -599,6 +664,10 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
     rule_category = client.get(
         f"/campaigns/linden-pass/systems/sources/{XIANXIA_HOMEBREW_SOURCE_ID}/types/rule"
     )
+    martial_art_category = client.get(
+        f"/campaigns/linden-pass/systems/sources/{XIANXIA_HOMEBREW_SOURCE_ID}/types/martial_art"
+    )
+    demons_fist_entry = client.get("/campaigns/linden-pass/systems/entries/demons-fist")
     dnd_entry = client.get("/campaigns/linden-pass/systems/entries/dnd-dao-breathing")
 
     assert systems.status_code == 200
@@ -611,14 +680,29 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
     source_html = source.get_data(as_text=True)
     assert "Xianxia Homebrew" in source_html
     assert "DND Impostor Xianxia Source" not in source_html
-    seed_count = len(build_xianxia_systems_seed_entries())
-    assert f"{seed_count} browsable entries across 1" in source_html
+    seed_entries = build_xianxia_systems_seed_entries()
+    seed_count = len(seed_entries)
+    seed_rule_count = sum(1 for entry in seed_entries if entry["entry_type"] == "rule")
+    assert f"{seed_count} browsable entries across 2" in source_html
 
     assert rule_category.status_code == 200
     category_html = rule_category.get_data(as_text=True)
     assert "Dao" in category_html
     assert "DND Dao Breathing" not in category_html
-    assert f"Showing all {seed_count} rules in this source." in category_html
+    assert f"Showing all {seed_rule_count} rules in this source." in category_html
+
+    assert martial_art_category.status_code == 200
+    martial_art_html = martial_art_category.get_data(as_text=True)
+    assert "Demon&#39;s Fist" in martial_art_html
+    assert "Flying Daggers" in martial_art_html
+    assert "Showing all 30 martial arts in this source." in martial_art_html
+
+    assert demons_fist_entry.status_code == 200
+    demons_fist_html = demons_fist_entry.get_data(as_text=True)
+    assert "Demon&#39;s Fist" in demons_fist_html
+    assert "Catalog Parent" in demons_fist_html
+    assert "Structured rank records and ability grants are deferred" in demons_fist_html
+    assert "Qi Fist Technique" not in demons_fist_html
 
     assert dnd_entry.status_code == 404
 

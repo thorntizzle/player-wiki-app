@@ -1,5 +1,5 @@
 {
-  "version": "2026-04-26.3",
+  "version": "2026-04-26.4",
   "source_id": "XIANXIA-HOMEBREW",
   "source_title": "Xianxia Homebrew",
   "storage_strategy": "curated_seed_data",
@@ -957,6 +957,1243 @@
             "In Bing Ti's Legendary rank, read Ji as Jing.",
             "This records the GM clarification only; the Martial Art catalog entry remains deferred to the Martial Arts seed slice."
           ]
+        }
+      ]
+    },
+    {
+      "title": "Demon's Fist",
+      "entry_type": "martial_art",
+      "slug": "demons-fist",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Unarmed Martial Art"],
+      "summary": "Shared Systems parent entry for the Demon's Fist Martial Art.",
+      "metadata": {
+        "martial_art_key": "demons_fist",
+        "xianxia_martial_art_key": "demons_fist",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 1,
+        "martial_art_style": "Unarmed Martial Art",
+        "source_line_range": "86-96",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "demons_fist",
+          "catalog_order": 1,
+          "style": "Unarmed Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Demon's Fist Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Unarmed Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Heavenly Palm",
+      "entry_type": "martial_art",
+      "slug": "heavenly-palm",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Unarmed Martial Art"],
+      "summary": "Shared Systems parent entry for the Heavenly Palm Martial Art.",
+      "metadata": {
+        "martial_art_key": "heavenly_palm",
+        "xianxia_martial_art_key": "heavenly_palm",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 2,
+        "martial_art_style": "Unarmed Martial Art",
+        "source_line_range": "98-108",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "heavenly_palm",
+          "catalog_order": 2,
+          "style": "Unarmed Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Heavenly Palm Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Unarmed Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Taoist Blade",
+      "entry_type": "martial_art",
+      "slug": "taoist-blade",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Jian Sword Martial Art"],
+      "summary": "Shared Systems parent entry for the Taoist Blade Martial Art.",
+      "metadata": {
+        "martial_art_key": "taoist_blade",
+        "xianxia_martial_art_key": "taoist_blade",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 3,
+        "martial_art_style": "Jian Sword Martial Art",
+        "source_line_range": "110-120",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "taoist_blade",
+          "catalog_order": 3,
+          "style": "Jian Sword Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Taoist Blade Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Jian Sword Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Drunken Fist",
+      "entry_type": "martial_art",
+      "slug": "drunken-fist",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Unarmed Martial Art", "intoxication"],
+      "summary": "Shared Systems parent entry for the Drunken Fist Martial Art.",
+      "metadata": {
+        "martial_art_key": "drunken_fist",
+        "xianxia_martial_art_key": "drunken_fist",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 4,
+        "martial_art_style": "Unarmed Martial Art",
+        "source_line_range": "122-132",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "drunken_fist",
+          "catalog_order": 4,
+          "style": "Unarmed Martial Art",
+          "parent_note": "Intoxication no longer penalizes the user; using these techniques while not intoxicated is penalized.",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Drunken Fist Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": [
+            "Unarmed Martial Art. Intoxication no longer penalizes the user; using these techniques while not intoxicated is penalized."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Striking Adder",
+      "entry_type": "martial_art",
+      "slug": "striking-adder",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Bo and Spear Martial Art"],
+      "summary": "Shared Systems parent entry for the Striking Adder Martial Art.",
+      "metadata": {
+        "martial_art_key": "striking_adder",
+        "xianxia_martial_art_key": "striking_adder",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 5,
+        "martial_art_style": "Bo and Spear Martial Art",
+        "source_line_range": "134-144",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "striking_adder",
+          "catalog_order": 5,
+          "style": "Bo and Spear Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Striking Adder Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Bo and Spear Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Bloody Saber",
+      "entry_type": "martial_art",
+      "slug": "bloody-saber",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Saber Sword Martial Art"],
+      "summary": "Shared Systems parent entry for the Bloody Saber Martial Art.",
+      "metadata": {
+        "martial_art_key": "bloody_saber",
+        "xianxia_martial_art_key": "bloody_saber",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 6,
+        "martial_art_style": "Saber Sword Martial Art",
+        "source_line_range": "146-156",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "bloody_saber",
+          "catalog_order": 6,
+          "style": "Saber Sword Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Bloody Saber Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Saber Sword Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Phoenix Descending",
+      "entry_type": "martial_art",
+      "slug": "phoenix-descending",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Spiritual Martial Art"],
+      "summary": "Shared Systems parent entry for the Phoenix Descending Martial Art.",
+      "metadata": {
+        "martial_art_key": "phoenix_descending",
+        "xianxia_martial_art_key": "phoenix_descending",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 7,
+        "martial_art_style": "Spiritual Martial Art",
+        "source_line_range": "158-168",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "phoenix_descending",
+          "catalog_order": 7,
+          "style": "Spiritual Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Phoenix Descending Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Spiritual Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Dragon Ascending",
+      "entry_type": "martial_art",
+      "slug": "dragon-ascending",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Spiritual Martial Art"],
+      "summary": "Shared Systems parent entry for the Dragon Ascending Martial Art.",
+      "metadata": {
+        "martial_art_key": "dragon_ascending",
+        "xianxia_martial_art_key": "dragon_ascending",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 8,
+        "martial_art_style": "Spiritual Martial Art",
+        "source_line_range": "170-180",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "dragon_ascending",
+          "catalog_order": 8,
+          "style": "Spiritual Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Dragon Ascending Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Spiritual Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Armored Elephant",
+      "entry_type": "martial_art",
+      "slug": "armored-elephant",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Universal Martial Art"],
+      "summary": "Shared Systems parent entry for the Armored Elephant Martial Art.",
+      "metadata": {
+        "martial_art_key": "armored_elephant",
+        "xianxia_martial_art_key": "armored_elephant",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 9,
+        "martial_art_style": "Universal Martial Art",
+        "source_line_range": "182-192",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "armored_elephant",
+          "catalog_order": 9,
+          "style": "Universal Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Armored Elephant Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Universal Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Swaying Willow",
+      "entry_type": "martial_art",
+      "slug": "swaying-willow",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Universal Martial Art"],
+      "summary": "Shared Systems parent entry for the Swaying Willow Martial Art.",
+      "metadata": {
+        "martial_art_key": "swaying_willow",
+        "xianxia_martial_art_key": "swaying_willow",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 10,
+        "martial_art_style": "Universal Martial Art",
+        "source_line_range": "194-204",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "swaying_willow",
+          "catalog_order": 10,
+          "style": "Universal Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Swaying Willow Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Universal Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Thundering Harmonics",
+      "entry_type": "martial_art",
+      "slug": "thundering-harmonics",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Instrument Martial Art"],
+      "summary": "Shared Systems parent entry for the Thundering Harmonics Martial Art.",
+      "metadata": {
+        "martial_art_key": "thundering_harmonics",
+        "xianxia_martial_art_key": "thundering_harmonics",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 11,
+        "martial_art_style": "Instrument Martial Art",
+        "source_line_range": "206-216",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "thundering_harmonics",
+          "catalog_order": 11,
+          "style": "Instrument Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Thundering Harmonics Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Instrument Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Shadow Puppet Theater",
+      "entry_type": "martial_art",
+      "slug": "shadow-puppet-theater",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Puppet Martial Art"],
+      "summary": "Shared Systems parent entry for the Shadow Puppet Theater Martial Art.",
+      "metadata": {
+        "martial_art_key": "shadow_puppet_theater",
+        "xianxia_martial_art_key": "shadow_puppet_theater",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 12,
+        "martial_art_style": "Puppet Martial Art",
+        "source_line_range": "218-228",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "shadow_puppet_theater",
+          "catalog_order": 12,
+          "style": "Puppet Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Shadow Puppet Theater Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Puppet Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Baihu Style",
+      "entry_type": "martial_art",
+      "slug": "baihu-style",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Unarmed Martial Art"],
+      "summary": "Shared Systems parent entry for the Baihu Style Martial Art.",
+      "metadata": {
+        "martial_art_key": "baihu_style",
+        "xianxia_martial_art_key": "baihu_style",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 13,
+        "martial_art_style": "Unarmed Martial Art",
+        "source_line_range": "230-240",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "baihu_style",
+          "catalog_order": 13,
+          "style": "Unarmed Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Baihu Style Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Unarmed Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Shuai Jiao",
+      "entry_type": "martial_art",
+      "slug": "shuai-jiao",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Unarmed Martial Art"],
+      "summary": "Shared Systems parent entry for the Shuai Jiao Martial Art.",
+      "metadata": {
+        "martial_art_key": "shuai_jiao",
+        "xianxia_martial_art_key": "shuai_jiao",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 14,
+        "martial_art_style": "Unarmed Martial Art",
+        "source_line_range": "242-252",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "shuai_jiao",
+          "catalog_order": 14,
+          "style": "Unarmed Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Shuai Jiao Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Unarmed Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Bing Ti",
+      "entry_type": "martial_art",
+      "slug": "bing-ti",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Ice Elemental Martial Art"],
+      "summary": "Shared Systems parent entry for the Bing Ti Martial Art.",
+      "metadata": {
+        "martial_art_key": "bing_ti",
+        "xianxia_martial_art_key": "bing_ti",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 15,
+        "martial_art_style": "Ice Elemental Martial Art",
+        "source_line_range": "254-264",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "bing_ti",
+          "catalog_order": 15,
+          "style": "Ice Elemental Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Bing Ti Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Ice Elemental Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Spiritualists' Binding Seals",
+      "entry_type": "martial_art",
+      "slug": "spiritualists-binding-seals",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Spiritual Martial Art", "talismans", "seals"],
+      "summary": "Shared Systems parent entry for the Spiritualists' Binding Seals Martial Art.",
+      "metadata": {
+        "martial_art_key": "spiritualists_binding_seals",
+        "xianxia_martial_art_key": "spiritualists_binding_seals",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 16,
+        "martial_art_style": "Spiritual Martial Art",
+        "source_line_range": "266-276",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "spiritualists_binding_seals",
+          "catalog_order": 16,
+          "style": "Spiritual Martial Art",
+          "parent_note": "Against Spirit and Divine targets, these Talismans also automatically deal Ultimate Effort damage.",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Spiritualists' Binding Seals Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": [
+            "Spiritual Martial Art. Against Spirit and Divine targets, these Talismans also automatically deal Ultimate Effort damage."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Formless Fist",
+      "entry_type": "martial_art",
+      "slug": "formless-fist",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Unarmed Spiritual Martial Art", "incorporeal beings", "spirits"],
+      "summary": "Shared Systems parent entry for the Formless Fist Martial Art.",
+      "metadata": {
+        "martial_art_key": "formless_fist",
+        "xianxia_martial_art_key": "formless_fist",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 17,
+        "martial_art_style": "Unarmed Spiritual Martial Art",
+        "source_line_range": "278-288",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "formless_fist",
+          "catalog_order": 17,
+          "style": "Unarmed Spiritual Martial Art",
+          "parent_note": "Able to damage incorporeal beings and Spirits.",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Formless Fist Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Unarmed Spiritual Martial Art. Able to damage incorporeal beings and Spirits."]
+        }
+      ]
+    },
+    {
+      "title": "Cherry Blossom Swallow",
+      "entry_type": "martial_art",
+      "slug": "cherry-blossom-swallow",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Sword Martial Art"],
+      "summary": "Shared Systems parent entry for the Cherry Blossom Swallow Martial Art.",
+      "metadata": {
+        "martial_art_key": "cherry_blossom_swallow",
+        "xianxia_martial_art_key": "cherry_blossom_swallow",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 18,
+        "martial_art_style": "Sword Martial Art",
+        "source_line_range": "290-300",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "cherry_blossom_swallow",
+          "catalog_order": 18,
+          "style": "Sword Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Cherry Blossom Swallow Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Sword Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Ink-Stained Historian",
+      "entry_type": "martial_art",
+      "slug": "ink-stained-historian",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Spiritual Martial Art"],
+      "summary": "Shared Systems parent entry for the Ink-Stained Historian Martial Art.",
+      "metadata": {
+        "martial_art_key": "ink_stained_historian",
+        "xianxia_martial_art_key": "ink_stained_historian",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 19,
+        "martial_art_style": "Spiritual Martial Art",
+        "source_line_range": "302-308",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "ink_stained_historian",
+          "catalog_order": 19,
+          "style": "Spiritual Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Ink-Stained Historian Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Spiritual Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Manifesting Brush",
+      "entry_type": "martial_art",
+      "slug": "manifesting-brush",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Spiritual Martial Art"],
+      "summary": "Shared Systems parent entry for the Manifesting Brush Martial Art.",
+      "metadata": {
+        "martial_art_key": "manifesting_brush",
+        "xianxia_martial_art_key": "manifesting_brush",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 20,
+        "martial_art_style": "Spiritual Martial Art",
+        "source_line_range": "310-314",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "manifesting_brush",
+          "catalog_order": 20,
+          "style": "Spiritual Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Manifesting Brush Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Spiritual Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Beastmaster",
+      "entry_type": "martial_art",
+      "slug": "beastmaster",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Druidic Martial Art"],
+      "summary": "Shared Systems parent entry for the Beastmaster Martial Art.",
+      "metadata": {
+        "martial_art_key": "beastmaster",
+        "xianxia_martial_art_key": "beastmaster",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 21,
+        "martial_art_style": "Druidic Martial Art",
+        "source_line_range": "316-322",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "beastmaster",
+          "catalog_order": 21,
+          "style": "Druidic Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Beastmaster Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Druidic Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Beast-Tamer",
+      "entry_type": "martial_art",
+      "slug": "beast-tamer",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Instrument Martial Art"],
+      "summary": "Shared Systems parent entry for the Beast-Tamer Martial Art.",
+      "metadata": {
+        "martial_art_key": "beast_tamer",
+        "xianxia_martial_art_key": "beast_tamer",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 22,
+        "martial_art_style": "Instrument Martial Art",
+        "source_line_range": "324-328",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "beast_tamer",
+          "catalog_order": 22,
+          "style": "Instrument Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Beast-Tamer Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Instrument Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Courtier's Sting",
+      "entry_type": "martial_art",
+      "slug": "courtiers-sting",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Assassination Martial Art"],
+      "summary": "Shared Systems parent entry for the Courtier's Sting Martial Art.",
+      "metadata": {
+        "martial_art_key": "courtiers_sting",
+        "xianxia_martial_art_key": "courtiers_sting",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 23,
+        "martial_art_style": "Assassination Martial Art",
+        "source_line_range": "330-334",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "courtiers_sting",
+          "catalog_order": 23,
+          "style": "Assassination Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Courtier's Sting Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Assassination Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Madam's Piercing Blood",
+      "entry_type": "martial_art",
+      "slug": "madams-piercing-blood",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Blood Martial Arts"],
+      "summary": "Shared Systems parent entry for the Madam's Piercing Blood Martial Art.",
+      "metadata": {
+        "martial_art_key": "madams_piercing_blood",
+        "xianxia_martial_art_key": "madams_piercing_blood",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 24,
+        "martial_art_style": "Blood Martial Arts",
+        "source_line_range": "336-340",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "madams_piercing_blood",
+          "catalog_order": 24,
+          "style": "Blood Martial Arts",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Madam's Piercing Blood Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Blood Martial Arts"]
+        }
+      ]
+    },
+    {
+      "title": "Blooming Curse",
+      "entry_type": "martial_art",
+      "slug": "blooming-curse",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Spiritual Martial Art"],
+      "summary": "Shared Systems parent entry for the Blooming Curse Martial Art.",
+      "metadata": {
+        "martial_art_key": "blooming_curse",
+        "xianxia_martial_art_key": "blooming_curse",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 25,
+        "martial_art_style": "Spiritual Martial Art",
+        "source_line_range": "342-346",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "blooming_curse",
+          "catalog_order": 25,
+          "style": "Spiritual Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Blooming Curse Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Spiritual Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Rippling Melodies",
+      "entry_type": "martial_art",
+      "slug": "rippling-melodies",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Instrument Martial Art"],
+      "summary": "Shared Systems parent entry for the Rippling Melodies Martial Art.",
+      "metadata": {
+        "martial_art_key": "rippling_melodies",
+        "xianxia_martial_art_key": "rippling_melodies",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 26,
+        "martial_art_style": "Instrument Martial Art",
+        "source_line_range": "348-350",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "rippling_melodies",
+          "catalog_order": 26,
+          "style": "Instrument Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Rippling Melodies Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Instrument Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Strategist's Acumen",
+      "entry_type": "martial_art",
+      "slug": "strategists-acumen",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Spiritual Martial Art"],
+      "summary": "Shared Systems parent entry for the Strategist's Acumen Martial Art.",
+      "metadata": {
+        "martial_art_key": "strategists_acumen",
+        "xianxia_martial_art_key": "strategists_acumen",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 27,
+        "martial_art_style": "Spiritual Martial Art",
+        "source_line_range": "352-356",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "strategists_acumen",
+          "catalog_order": 27,
+          "style": "Spiritual Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Strategist's Acumen Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Spiritual Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Broken Tiger's Vessel",
+      "entry_type": "martial_art",
+      "slug": "broken-tigers-vessel",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Spiritual Martial Art"],
+      "summary": "Shared Systems parent entry for the Broken Tiger's Vessel Martial Art.",
+      "metadata": {
+        "martial_art_key": "broken_tigers_vessel",
+        "xianxia_martial_art_key": "broken_tigers_vessel",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 28,
+        "martial_art_style": "Spiritual Martial Art",
+        "source_line_range": "358-364",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "broken_tigers_vessel",
+          "catalog_order": 28,
+          "style": "Spiritual Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Broken Tiger's Vessel Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Spiritual Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "The Four Winds",
+      "entry_type": "martial_art",
+      "slug": "the-four-winds",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Wind Elemental Martial Art"],
+      "summary": "Shared Systems parent entry for The Four Winds Martial Art.",
+      "metadata": {
+        "martial_art_key": "the_four_winds",
+        "xianxia_martial_art_key": "the_four_winds",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 29,
+        "martial_art_style": "Wind Elemental Martial Art",
+        "source_line_range": "366-372",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "the_four_winds",
+          "catalog_order": 29,
+          "style": "Wind Elemental Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for The Four Winds Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Wind Elemental Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Flying Daggers",
+      "entry_type": "martial_art",
+      "slug": "flying-daggers",
+      "source_page": "Xianxia Homebrew Martial Arts catalog",
+      "facets": ["martial_art"],
+      "aliases": ["Dagger Martial Art"],
+      "summary": "Shared Systems parent entry for the Flying Daggers Martial Art.",
+      "metadata": {
+        "martial_art_key": "flying_daggers",
+        "xianxia_martial_art_key": "flying_daggers",
+        "catalog_role": "parent",
+        "martial_art_catalog_order": 30,
+        "martial_art_style": "Dagger Martial Art",
+        "source_line_range": "374-382",
+        "rank_records_seeded": false,
+        "rank_records_status": "deferred"
+      },
+      "body": {
+        "xianxia_martial_art": {
+          "key": "flying_daggers",
+          "catalog_order": 30,
+          "style": "Dagger Martial Art",
+          "catalog_role": "parent",
+          "rank_records_seeded": false,
+          "rank_records_status": "deferred"
+        }
+      },
+      "sections": [
+        {
+          "title": "Catalog Parent",
+          "paragraphs": [
+            "This is the shared Systems parent entry for the Flying Daggers Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+          ]
+        },
+        {
+          "title": "Style",
+          "paragraphs": ["Dagger Martial Art"]
         }
       ]
     }
