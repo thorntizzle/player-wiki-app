@@ -88,6 +88,14 @@ XIANXIA_AURA_ACTIVATION_RULE_ENTRY_KEY = (
 )
 XIANXIA_HONOR_RULE_ENTRY_KEY = f"xianxia|rule|{XIANXIA_HOMEBREW_SOURCE_ID.lower()}|honor"
 XIANXIA_SKILLS_RULE_ENTRY_KEY = f"xianxia|rule|{XIANXIA_HOMEBREW_SOURCE_ID.lower()}|skills"
+XIANXIA_RULE_TEXT_REFERENCE_SPECS = (
+    ("Ranges and Distance", "ranges-and-distance"),
+    ("Timing and Initiative", "timing-and-initiative"),
+    ("Critical Hits", "critical-hits"),
+    ("Sneak Attacks", "sneak-attacks"),
+    ("Minions", "minions"),
+    ("Companion Derivation", "companion-derivation"),
+)
 ATTACK_NAME_SUFFIX_PATTERN = re.compile(r"\s*\([^)]*\)\s*$")
 
 
@@ -234,6 +242,14 @@ def present_character_detail(
         )
         if is_xianxia_character
         else None
+    )
+    xianxia_rule_text_references = (
+        present_xianxia_rule_text_references(
+            campaign,
+            systems_service=systems_service,
+        )
+        if is_xianxia_character
+        else []
     )
     xianxia_active_state_reminders = (
         present_xianxia_active_state_reminders(
@@ -858,6 +874,7 @@ def present_character_detail(
         "xianxia_difficulty_states": xianxia_difficulty_states,
         "xianxia_honor_interactions": xianxia_honor_interactions,
         "xianxia_skill_use_guardrails": xianxia_skill_use_guardrails,
+        "xianxia_rule_text_references": xianxia_rule_text_references,
         "xianxia_active_state_reminders": xianxia_active_state_reminders,
         "xianxia_stance_break": xianxia_stance_break,
         "attack_reminders": attack_reminders,
@@ -1309,6 +1326,55 @@ def present_xianxia_skill_use_guardrails(
         ),
         "reference_lines": reference_lines,
     }
+
+
+def present_xianxia_rule_text_references(
+    campaign: Campaign,
+    *,
+    systems_service: Any | None = None,
+) -> list[dict[str, Any]]:
+    if systems_service is None:
+        return []
+
+    references: list[dict[str, Any]] = []
+    for default_title, slug in XIANXIA_RULE_TEXT_REFERENCE_SPECS:
+        entry_key = f"xianxia|rule|{XIANXIA_HOMEBREW_SOURCE_ID.lower()}|{slug}"
+        entry = systems_service.get_entry_for_campaign(campaign.slug, entry_key)
+        if entry is None:
+            entry = systems_service.get_entry_by_slug_for_campaign(campaign.slug, slug)
+        if entry is None:
+            continue
+
+        reference_lines = _extract_xianxia_rule_reference_lines(entry)
+        if not reference_lines:
+            continue
+
+        metadata = dict(getattr(entry, "metadata", {}) or {})
+        body = dict(getattr(entry, "body", {}) or {})
+        support_state = str(
+            metadata.get("support_state") or body.get("support_state") or ""
+        ).strip()
+        title = str(getattr(entry, "title", "") or default_title)
+        references.append(
+            {
+                "title": title,
+                "support_label": "Reference only"
+                if support_state == "reference_only"
+                else "",
+                "reference_lines": reference_lines,
+                "rule_href": build_systems_entry_href(
+                    campaign.slug,
+                    {
+                        "slug": str(getattr(entry, "slug", "") or slug),
+                        "title": title,
+                        "entry_type": "rule",
+                        "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                    },
+                ),
+            }
+        )
+
+    return references
 
 
 def present_xianxia_active_state_reminders(

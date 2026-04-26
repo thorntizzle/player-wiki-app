@@ -543,6 +543,57 @@ def test_xianxia_quick_reference_displays_skill_use_guardrails(
     assert "Skills can affect surroundings or pre-battle preparation when the GM agrees." in html
 
 
+def test_xianxia_quick_reference_displays_rules_text_references(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Reference Scholar"),
+        follow_redirects=False,
+    )
+
+    assert create_response.status_code == 302
+
+    response = client.get("/campaigns/linden-pass/characters/reference-scholar?page=quick")
+
+    assert response.status_code == 200
+    html = unescape(response.get_data(as_text=True))
+    assert "Rules text references" in html
+    assert "/campaigns/linden-pass/systems/entries/ranges-and-distance" in html
+    assert "/campaigns/linden-pass/systems/entries/timing-and-initiative" in html
+    assert "/campaigns/linden-pass/systems/entries/critical-hits" in html
+    assert "/campaigns/linden-pass/systems/entries/sneak-attacks" in html
+    assert "/campaigns/linden-pass/systems/entries/minions" in html
+    assert "/campaigns/linden-pass/systems/entries/companion-derivation" in html
+    assert "Touch requires physical contact through a Melee Attack." in html
+    assert "Close means within 5 feet, adjacent, or dueling." in html
+    assert "Once-per-combat means once per combat encounter." in html
+    assert (
+        "Critical Hits automatically hit and deal additional +Ultimate Effort damage."
+        in html
+    )
+    assert (
+        "Sneak Attack only occurs under specific circumstances, such as a Martial Art "
+        "or Technique explicitly enabling it or the target being completely off guard."
+    ) in html
+    assert (
+        "Minions are NPCs whose Realm and HP/Stance are lower than the player characters"
+        in html
+    )
+    assert (
+        "Companions usually use half the user's Stats plus any listed modifications"
+        in html
+    )
+    assert "Richer companion automation is deferred." in html
+    assert "Reference only" in html
+
+
 def test_xianxia_quick_reference_displays_active_stance_and_aura_reminders_without_state_automation(
     app,
     client,

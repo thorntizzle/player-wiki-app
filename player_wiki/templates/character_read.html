@@ -251,6 +251,32 @@
         </section>
       {% endif %}
 
+      {% if show_quick_sections and character.xianxia_rule_text_references %}
+        <section class="read-section" id="xianxia-rule-text-references">
+          <div class="section-heading">
+            <h2>Rules text references</h2>
+          </div>
+          <div class="detail-grid">
+            {% for reference in character.xianxia_rule_text_references %}
+              <article class="detail-card">
+                <div class="section-heading">
+                  <h3>{{ reference.title }}</h3>
+                  {% if reference.support_label %}
+                    <span class="meta">{{ reference.support_label }}</span>
+                  {% endif %}
+                </div>
+                {% if reference.rule_href %}
+                  <p><a href="{{ reference.rule_href }}">{{ reference.title }} rule</a></p>
+                {% endif %}
+                {% for line in reference.reference_lines %}
+                  <p>{{ line }}</p>
+                {% endfor %}
+              </article>
+            {% endfor %}
+          </div>
+        </section>
+      {% endif %}
+
       {% if show_quick_sections and character.xianxia_actions %}
         <section class="read-section" id="xianxia-action-count">
           <div class="section-heading">
