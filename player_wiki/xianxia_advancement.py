@@ -31,6 +31,8 @@ class XianxiaMartialArtAdvanceResult:
     energy_maximum_increases: dict[str, int]
     teacher_breakthrough_requirement: str
     teacher_breakthrough_note: str
+    legendary_quest_note: str = ""
+    legendary_prerequisite_note: str = ""
 
 
 def advance_xianxia_martial_art_rank_definition(
@@ -40,6 +42,7 @@ def advance_xianxia_martial_art_rank_definition(
     systems_service: Any,
     martial_art_index: int,
     target_rank_key: str,
+    legendary_quest_note: str = "",
 ) -> XianxiaMartialArtAdvanceResult:
     payload = definition.to_dict()
     xianxia = dict(payload.get("xianxia") or {})
@@ -54,10 +57,6 @@ def advance_xianxia_martial_art_rank_definition(
     rank_key = normalize_xianxia_martial_art_rank_key(target_rank_key)
     if rank_key not in XIANXIA_MARTIAL_ART_RANK_KEYS:
         raise ValueError("Choose a valid Martial Art rank to advance.")
-    if rank_key == "legendary":
-        raise ValueError(
-            "Legendary rank recording needs the later quest or mythic-master note workflow."
-        )
 
     martial_art = dict(martial_arts[martial_art_index])
     systems_ref = dict(martial_art.get("systems_ref") or {})
@@ -81,15 +80,18 @@ def advance_xianxia_martial_art_rank_definition(
     learned_rank_keys = _learned_rank_keys(martial_art, learned_rank_refs)
     if rank_key in learned_rank_keys:
         raise ValueError(f"{martial_art_name} already has {rank_label(rank_key)} recorded.")
+    if rank_key == "legendary":
+        missing_prior_ranks = _missing_prior_rank_keys(rank_catalog, learned_rank_keys)
+        if missing_prior_ranks:
+            missing_rank_names = ", ".join(rank_label(key) for key in missing_prior_ranks)
+            raise ValueError(
+                f"Record {missing_rank_names} for {martial_art_name} before Legendary."
+            )
 
     next_rank = _next_available_rank(rank_catalog, learned_rank_keys)
     if next_rank is None:
         raise ValueError(f"{martial_art_name} has no additional structured rank to advance.")
     next_rank_key = normalize_xianxia_martial_art_rank_key(next_rank.get("rank_key"))
-    if next_rank_key == "legendary":
-        raise ValueError(
-            "Legendary rank recording needs the later quest or mythic-master note workflow."
-        )
     if next_rank_key != rank_key:
         raise ValueError(
             f"Advance {martial_art_name} to {rank_label(next_rank_key)} "
@@ -119,6 +121,13 @@ def advance_xianxia_martial_art_rank_definition(
         )
     teacher_breakthrough_requirement = _teacher_breakthrough_requirement(target_record)
     teacher_breakthrough_note = _teacher_breakthrough_note(target_record)
+    legendary_prerequisite_note = _legendary_prerequisite_note(target_record)
+    clean_legendary_quest_note = _clean_note(legendary_quest_note)
+    if rank_key == "legendary" and not clean_legendary_quest_note:
+        raise ValueError(
+            f"Record a quest or mythic-master note before advancing {martial_art_name} "
+            "to Legendary."
+        )
 
     rank_ref = str(target_record.get("rank_ref") or "").strip()
     learned_rank_refs = _ensure_recorded_learned_rank_refs(
@@ -146,6 +155,17 @@ def advance_xianxia_martial_art_rank_definition(
             "note": teacher_breakthrough_note,
         }
         martial_art["rank_teacher_breakthrough_notes"] = rank_teacher_breakthrough_notes
+    if rank_key == "legendary":
+        rank_legendary_notes = _rank_legendary_prerequisite_notes(martial_art)
+        rank_legendary_notes[rank_key] = {
+            "requirement": "quest_or_mythic_master",
+            "note": clean_legendary_quest_note,
+        }
+        if legendary_prerequisite_note:
+            rank_legendary_notes[rank_key]["prerequisite_note"] = (
+                legendary_prerequisite_note
+            )
+        martial_art["rank_legendary_prerequisite_notes"] = rank_legendary_notes
     martial_art["insight_spent"] = _non_negative_int(
         martial_art.get("insight_spent"),
         default=0,
@@ -181,6 +201,11 @@ def advance_xianxia_martial_art_rank_definition(
         event["teacher_breakthrough_requirement"] = teacher_breakthrough_requirement
     if teacher_breakthrough_note:
         event["teacher_breakthrough_note"] = teacher_breakthrough_note
+    if rank_key == "legendary":
+        event["legendary_prerequisite"] = "quest_or_mythic_master"
+        event["legendary_quest_note"] = clean_legendary_quest_note
+        if legendary_prerequisite_note:
+            event["legendary_prerequisite_note"] = legendary_prerequisite_note
     history.append(event)
     xianxia["advancement_history"] = history
     payload["xianxia"] = xianxia
@@ -194,6 +219,8 @@ def advance_xianxia_martial_art_rank_definition(
         energy_maximum_increases=energy_maximum_increases,
         teacher_breakthrough_requirement=teacher_breakthrough_requirement,
         teacher_breakthrough_note=teacher_breakthrough_note,
+        legendary_quest_note=clean_legendary_quest_note,
+        legendary_prerequisite_note=legendary_prerequisite_note,
     )
 
 
@@ -337,6 +364,24 @@ def _next_available_rank(
     return None
 
 
+def _missing_prior_rank_keys(
+    rank_catalog: list[dict[str, Any]],
+    learned_rank_keys: set[str],
+) -> list[str]:
+    available_rank_keys = {
+        normalize_xianxia_martial_art_rank_key(record.get("rank_key"))
+        for record in rank_catalog
+        if not _xianxia_rank_record_is_incomplete(record)
+    }
+    missing: list[str] = []
+    for rank_key in XIANXIA_MARTIAL_ART_RANK_KEYS:
+        if rank_key == "legendary":
+            break
+        if rank_key in available_rank_keys and rank_key not in learned_rank_keys:
+            missing.append(rank_key)
+    return missing
+
+
 def _ensure_recorded_learned_rank_refs(
     learned_rank_refs: list[str],
     learned_rank_keys: set[str],
@@ -374,9 +419,15 @@ def _teacher_breakthrough_requirement(rank_record: dict[str, Any]) -> str:
 
 
 def _teacher_breakthrough_note(rank_record: dict[str, Any]) -> str:
-    return " ".join(
-        str(rank_record.get("teacher_breakthrough_note") or "").split()
-    ).strip()
+    return _clean_note(rank_record.get("teacher_breakthrough_note"))
+
+
+def _legendary_prerequisite_note(rank_record: dict[str, Any]) -> str:
+    return _clean_note(rank_record.get("legendary_prerequisite_note"))
+
+
+def _clean_note(value: Any) -> str:
+    return " ".join(str(value or "").split()).strip()
 
 
 def _rank_teacher_breakthrough_notes(
@@ -404,6 +455,38 @@ def _rank_teacher_breakthrough_notes(
                 "requirement": requirement,
                 "note": note,
             }
+    return normalized
+
+
+def _rank_legendary_prerequisite_notes(
+    record: dict[str, Any],
+) -> dict[str, dict[str, str]]:
+    raw_notes = record.get("rank_legendary_prerequisite_notes")
+    if not isinstance(raw_notes, dict):
+        return {}
+    normalized: dict[str, dict[str, str]] = {}
+    for raw_rank_key, raw_note in raw_notes.items():
+        rank_key = normalize_xianxia_martial_art_rank_key(raw_rank_key)
+        if not rank_key:
+            continue
+        if isinstance(raw_note, dict):
+            requirement = (
+                normalize_xianxia_martial_art_rank_key(raw_note.get("requirement"))
+                or "quest_or_mythic_master"
+            )
+            note = _clean_note(raw_note.get("note"))
+            prerequisite_note = _clean_note(raw_note.get("prerequisite_note"))
+        else:
+            requirement = "quest_or_mythic_master"
+            note = _clean_note(raw_note)
+            prerequisite_note = ""
+        if note:
+            normalized[rank_key] = {
+                "requirement": requirement,
+                "note": note,
+            }
+            if prerequisite_note:
+                normalized[rank_key]["prerequisite_note"] = prerequisite_note
     return normalized
 
 

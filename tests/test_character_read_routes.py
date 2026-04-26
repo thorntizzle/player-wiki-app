@@ -1782,6 +1782,114 @@ def test_xianxia_cultivation_route_spends_insight_to_advance_martial_art_rank(
     assert "<h3>Shen</h3>" in resources_html
     assert "Current 1 / Max 2" in resources_html
 
+    insight_revision = _character_state_revision(app, "rank-crane")
+    insight_response = client.post(
+        "/campaigns/linden-pass/characters/rank-crane/cultivation",
+        data={
+            "expected_revision": str(insight_revision),
+            "cultivation_action": "save_insight",
+            "insight_available": "2",
+            "insight_spent": "2",
+        },
+        follow_redirects=False,
+    )
+    assert insight_response.status_code == 302
+
+    master_revision = _character_state_revision(app, "rank-crane")
+    master_response = client.post(
+        "/campaigns/linden-pass/characters/rank-crane/cultivation",
+        data={
+            "expected_revision": str(master_revision),
+            "cultivation_action": "advance_martial_art_rank",
+            "martial_art_index": "0",
+            "target_rank_key": "master",
+        },
+        follow_redirects=False,
+    )
+    assert master_response.status_code == 302
+
+    master_html = client.get(
+        "/campaigns/linden-pass/characters/rank-crane/cultivation"
+    ).get_data(as_text=True)
+    legendary_requirement = (
+        "Requires all previous ranks in the Martial Art plus a quest or "
+        "mythic-level master; primarily narrative completion rather than a "
+        "purely mechanical purchase."
+    )
+    assert 'name="target_rank_key" value="legendary"' in master_html
+    assert 'name="legendary_quest_note"' in master_html
+    assert "Quest or mythic-master note" in master_html
+    assert legendary_requirement in master_html
+
+    legendary_revision = _character_state_revision(app, "rank-crane")
+    missing_note_response = client.post(
+        "/campaigns/linden-pass/characters/rank-crane/cultivation",
+        data={
+            "expected_revision": str(legendary_revision),
+            "cultivation_action": "advance_martial_art_rank",
+            "martial_art_index": "0",
+            "target_rank_key": "legendary",
+            "legendary_quest_note": " ",
+        },
+        follow_redirects=True,
+    )
+    assert missing_note_response.status_code == 200
+    assert (
+        "Record a quest or mythic-master note before advancing Demon&#39;s Fist to Legendary."
+        in missing_note_response.get_data(as_text=True)
+    )
+    assert _character_state_revision(app, "rank-crane") == legendary_revision
+
+    legendary_note = "Completed the Furnace Trial with a mythic-level master."
+    legendary_response = client.post(
+        "/campaigns/linden-pass/characters/rank-crane/cultivation",
+        data={
+            "expected_revision": str(legendary_revision),
+            "cultivation_action": "advance_martial_art_rank",
+            "martial_art_index": "0",
+            "target_rank_key": "legendary",
+            "legendary_quest_note": legendary_note,
+        },
+        follow_redirects=False,
+    )
+    assert legendary_response.status_code == 302
+
+    definition_payload = _read_character_definition(app, "rank-crane")
+    xianxia = definition_payload["xianxia"]
+    first_art = xianxia["martial_arts"][0]
+    assert xianxia["insight"] == {"available": 0, "spent": 4}
+    assert first_art["current_rank_key"] == "legendary"
+    assert first_art["current_rank"] == "Legendary"
+    assert "xianxia:demons-fist:legendary" in first_art["learned_rank_refs"]
+    assert first_art["rank_legendary_prerequisite_notes"] == {
+        "legendary": {
+            "requirement": "quest_or_mythic_master",
+            "note": legendary_note,
+            "prerequisite_note": legendary_requirement,
+        }
+    }
+    assert xianxia["advancement_history"][-1] == {
+        "action": "martial_art_rank_advance",
+        "amount": 1,
+        "target": "Demon's Fist",
+        "rank": "Legendary",
+        "rank_ref": "xianxia:demons-fist:legendary",
+        "systems_ref": first_art["systems_ref"],
+        "energy_maximum_increases": {"jing": 2, "qi": 1, "shen": 1},
+        "teacher_breakthrough_requirement": "ascension_breakthrough",
+        "teacher_breakthrough_note": "Requires an Ascension Breakthrough.",
+        "legendary_prerequisite": "quest_or_mythic_master",
+        "legendary_quest_note": legendary_note,
+        "legendary_prerequisite_note": legendary_requirement,
+    }
+
+    legendary_html = client.get(
+        "/campaigns/linden-pass/characters/rank-crane/cultivation"
+    ).get_data(as_text=True)
+    assert "Current rank: Legendary" in legendary_html
+    assert "Legendary quest/mythic-master note:" in legendary_html
+    assert legendary_note in legendary_html
+
 
 def test_xianxia_cultivation_rank_advance_requires_next_rank_and_insight(
     app, client, sign_in, users
@@ -1843,6 +1951,24 @@ def test_xianxia_cultivation_rank_advance_requires_next_rank_and_insight(
     assert (
         "Demon&#39;s Fist needs 1 Insight to advance to Novice; only 0 available."
         in insufficient_response.get_data(as_text=True)
+    )
+    assert _character_state_revision(app, "rank-guard-crane") == starting_revision
+
+    legendary_skip_response = client.post(
+        "/campaigns/linden-pass/characters/rank-guard-crane/cultivation",
+        data={
+            "expected_revision": str(starting_revision),
+            "cultivation_action": "advance_martial_art_rank",
+            "martial_art_index": "0",
+            "target_rank_key": "legendary",
+            "legendary_quest_note": "Completed a mythic-master quest.",
+        },
+        follow_redirects=True,
+    )
+    assert legendary_skip_response.status_code == 200
+    assert (
+        "Record Novice, Apprentice, Master for Demon&#39;s Fist before Legendary."
+        in legendary_skip_response.get_data(as_text=True)
     )
     assert _character_state_revision(app, "rank-guard-crane") == starting_revision
 

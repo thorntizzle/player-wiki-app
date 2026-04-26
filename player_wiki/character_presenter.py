@@ -2428,6 +2428,9 @@ def _present_xianxia_rank_progress(
                 "teacher_breakthrough_note": str(
                     rank_record.get("teacher_breakthrough_note") or ""
                 ).strip(),
+                "legendary_prerequisite_note": str(
+                    rank_record.get("legendary_prerequisite_note") or ""
+                ).strip(),
             }
         )
 

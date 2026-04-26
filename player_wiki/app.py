@@ -1385,6 +1385,8 @@ def present_xianxia_cultivation_context(character: dict[str, object], xianxia: d
             ("rank", "Rank"),
             ("systems_ref", "Systems ref"),
             ("teacher_breakthrough_note", "Teacher/breakthrough note"),
+            ("legendary_prerequisite_note", "Legendary requirement"),
+            ("legendary_quest_note", "Legendary quest/mythic-master note"),
             ("notes", "Notes"),
         ):
             value = raw_record.get(key)
@@ -1438,11 +1440,6 @@ def _xianxia_martial_art_advancement_context(
         }
 
     next_rank_key = normalize_xianxia_martial_art_rank_key(next_step.get("key"))
-    if next_rank_key == "legendary":
-        return {
-            "status": "legendary_deferred",
-            "message": "Legendary rank recording needs the later quest or mythic-master note workflow.",
-        }
 
     insight_cost = int(next_step.get("insight_cost") or 0)
     has_enough_insight = insight_cost > 0 and insight_available >= insight_cost
@@ -1460,6 +1457,10 @@ def _xianxia_martial_art_advancement_context(
         ).strip(),
         "teacher_breakthrough_note": str(
             next_step.get("teacher_breakthrough_note") or ""
+        ).strip(),
+        "requires_legendary_note": next_rank_key == "legendary",
+        "legendary_prerequisite_note": str(
+            next_step.get("legendary_prerequisite_note") or ""
         ).strip(),
     }
 
@@ -11800,6 +11801,10 @@ def create_app() -> Flask:
                         systems_service=get_systems_service(),
                         martial_art_index=martial_art_index,
                         target_rank_key=request.form.get("target_rank_key", ""),
+                        legendary_quest_note=request.form.get(
+                            "legendary_quest_note",
+                            "",
+                        ),
                     )
                     definition = rank_result.definition
                     success_message = (

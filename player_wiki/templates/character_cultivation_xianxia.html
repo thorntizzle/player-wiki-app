@@ -173,6 +173,22 @@
                         {{ art.advancement.teacher_breakthrough_note }}
                       </p>
                     {% endif %}
+                    {% if art.advancement.requires_legendary_note %}
+                      {% if art.advancement.legendary_prerequisite_note %}
+                        <p class="meta">
+                          <strong>Legendary Requirement:</strong>
+                          {{ art.advancement.legendary_prerequisite_note }}
+                        </p>
+                      {% endif %}
+                      <label>
+                        Quest or mythic-master note
+                        <textarea
+                          name="legendary_quest_note"
+                          rows="3"
+                          required
+                        ></textarea>
+                      </label>
+                    {% endif %}
                     {% if not art.advancement.has_enough_insight %}
                       <p class="meta">Needs {{ art.advancement.shortfall }} more available Insight.</p>
                     {% endif %}
