@@ -265,11 +265,19 @@
       <h2>Equipment</h2>
     </div>
     <div class="detail-grid">
+      {% set defense = xianxia_sheet.quick_reference.defense %}
       <article class="detail-card">
-        <h3>Defense</h3>
-        <p><strong>{{ xianxia_sheet.equipment.defense }}</strong></p>
-        {% if xianxia_sheet.quick_reference.defense %}
-          <p class="meta">Formula: {{ xianxia_sheet.quick_reference.defense.formula }}</p>
+        <h3>Defense calculation</h3>
+        {% if defense %}
+          <p><strong>{{ defense.value }}</strong></p>
+          <ul class="plain-list slot-list">
+            <li><span>Base</span><strong>{{ defense.base }}</strong></li>
+            <li><span>Manual armor bonus</span><strong>{{ defense.manual_armor_bonus }}</strong></li>
+            <li><span>Constitution</span><strong>{{ defense.constitution }}</strong></li>
+          </ul>
+          <p class="meta">Defense = {{ defense.formula }}</p>
+        {% else %}
+          <p><strong>{{ xianxia_sheet.equipment.defense }}</strong></p>
         {% endif %}
         <p class="meta">Manual armor bonus: {{ xianxia_sheet.equipment.manual_armor_bonus }}</p>
       </article>

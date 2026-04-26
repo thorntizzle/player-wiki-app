@@ -365,8 +365,13 @@ def test_xianxia_read_sheet_uses_system_specific_subpages(
     )
     assert equipment_response.status_code == 200
     equipment_html = unescape(equipment_response.get_data(as_text=True))
+    assert "Defense calculation" in equipment_html
+    assert "Base" in equipment_html
+    assert "<strong>10</strong>" in equipment_html
     assert "Manual armor bonus: 2" in equipment_html
-    assert "Formula: 10 + 2 + 3" in equipment_html
+    assert "Constitution" in equipment_html
+    assert "Defense = 10 + 2 + 3" in equipment_html
+    assert "<strong>15</strong>" in equipment_html
     assert "Necessary weapons" in equipment_html
     assert "Necessary tools" in equipment_html
     assert "Fishing rod, spear, or net" in equipment_html
