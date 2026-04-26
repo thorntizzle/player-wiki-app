@@ -20,6 +20,8 @@ from player_wiki.xianxia_systems_seed import (
     XIANXIA_ENERGY_KEYS,
     XIANXIA_EFFORT_KEYS,
     XIANXIA_ENTRY_FACET_KEYS,
+    XIANXIA_GENERIC_TECHNIQUE_DEFAULT_SUPPORT_STATE,
+    XIANXIA_GENERIC_TECHNIQUE_DETAILS_STATUS_COST_PREREQ_RESOURCE_RANGE_EFFORT_RESET_SUPPORT_SEEDED,
     XIANXIA_MAGIC_EFFORT_CANONICAL_LABEL,
     XIANXIA_MARTIAL_ART_ABILITY_KIND_KEYS,
     XIANXIA_MARTIAL_ART_ABILITY_DEFAULT_SUPPORT_STATE,
@@ -40,6 +42,7 @@ from player_wiki.xianxia_systems_seed import (
     _build_seed_entry,
     build_xianxia_entry_facet_definitions,
     build_xianxia_effort_definitions,
+    build_xianxia_generic_technique_details,
     build_xianxia_martial_art_rank_ability_effects,
     build_xianxia_martial_art_rank_ability_grants,
     build_xianxia_martial_art_rank_definitions,
@@ -907,27 +910,78 @@ def test_xianxia_generic_technique_seed_entries_cover_requirements_catalog():
     )
     assert all(entry["metadata"]["xianxia_entry_facets"] == ["generic_technique"] for entry in generic_entries)
     assert all(entry["metadata"]["catalog_role"] == "standalone_generic_technique" for entry in generic_entries)
+    generic_technique_details = build_xianxia_generic_technique_details()
+    assert tuple(generic_technique_details) == tuple(
+        entry["metadata"]["generic_technique_key"] for entry in generic_entries
+    )
+    assert all(entry["metadata"]["generic_technique_details_seeded"] is True for entry in generic_entries)
     assert all(
         entry["metadata"]["generic_technique_details_status"]
-        == "text_seeded_structured_metadata_deferred"
+        == XIANXIA_GENERIC_TECHNIQUE_DETAILS_STATUS_COST_PREREQ_RESOURCE_RANGE_EFFORT_RESET_SUPPORT_SEEDED
         for entry in generic_entries
     )
-    assert all("insight_cost" not in entry["metadata"] for entry in generic_entries)
-    assert all("resource_costs" not in entry["metadata"] for entry in generic_entries)
-    assert all("range_tags" not in entry["metadata"] for entry in generic_entries)
-    assert all("reset_cadence" not in entry["metadata"] for entry in generic_entries)
+    assert all(entry["metadata"]["insight_cost"] > 0 for entry in generic_entries)
+    assert all(isinstance(entry["metadata"]["prerequisites"], list) for entry in generic_entries)
+    assert all(isinstance(entry["metadata"]["resource_costs"], list) for entry in generic_entries)
+    assert all(isinstance(entry["metadata"]["range_tags"], list) for entry in generic_entries)
+    assert all(isinstance(entry["metadata"]["effort_tags"], list) for entry in generic_entries)
+    assert all("reset_cadence" in entry["metadata"] for entry in generic_entries)
+    assert all(
+        entry["metadata"]["support_state"] == XIANXIA_GENERIC_TECHNIQUE_DEFAULT_SUPPORT_STATE
+        for entry in generic_entries
+    )
+    assert all(
+        entry["body"]["xianxia_generic_technique"]["details_status"]
+        == XIANXIA_GENERIC_TECHNIQUE_DETAILS_STATUS_COST_PREREQ_RESOURCE_RANGE_EFFORT_RESET_SUPPORT_SEEDED
+        for entry in generic_entries
+    )
 
     entry_map = {entry["slug"]: entry for entry in generic_entries}
     qi_blast = entry_map["qi-blast"]
     assert qi_blast["metadata"]["generic_technique_key"] == "qi_blast"
+    assert qi_blast["metadata"]["insight_cost"] == 1
+    assert qi_blast["metadata"]["resource_costs"] == [
+        {"resource_key": "qi", "amount": 1, "timing": "near_range_use"},
+        {
+            "resource_key": "qi",
+            "amount": 2,
+            "timing": "far_range_option",
+            "note": "Costs 2 Qi for Far range.",
+        },
+    ]
+    assert qi_blast["metadata"]["range_tags"] == ["near", "far"]
+    assert qi_blast["metadata"]["effort_tags"] == ["magic_effort_damage"]
+    assert qi_blast["metadata"]["reset_cadence"] is None
     assert qi_blast["body"]["xianxia_generic_technique"]["source_text"].startswith(
         "[1] Qi Blast: Spend a point of Qi"
     )
+    assert qi_blast["body"]["xianxia_generic_technique"]["insight_cost"] == 1
     assert "Spend a point of Qi" in qi_blast["rendered_html"]
+    assert "Insight Cost" in qi_blast["rendered_html"]
+    assert "magic effort damage" in qi_blast["rendered_html"]
     assert "qi blast" in qi_blast["search_text"]
+    assert "magic_effort_damage" in qi_blast["search_text"]
+
+    scolding_backhand = entry_map["scolding-backhand"]
+    assert scolding_backhand["metadata"]["reset_cadence"] == "once_per_combat"
+    assert scolding_backhand["metadata"]["prerequisites"][0]["kind"] == "target_comparison"
+    assert scolding_backhand["metadata"]["effort_tags"] == ["basic_effort_damage"]
+
+    meteor_walk = entry_map["meteor-walk"]
+    assert meteor_walk["metadata"]["insight_cost"] == 8
+    assert meteor_walk["metadata"]["prerequisites"] == [
+        {"kind": "realm", "value": "immortal", "label": "Immortal Status"}
+    ]
+    assert meteor_walk["metadata"]["resource_costs"] == [{"resource_key": "shen", "amount": 1}]
+
+    enhanced_recollection = entry_map["enhanced-recollection"]
+    assert enhanced_recollection["metadata"]["insight_cost"] == 6
+    assert enhanced_recollection["metadata"]["prerequisites"][0]["value"] == "recollect"
 
     enhanced_flowing_dao = entry_map["enhanced-flowing-dao"]
     assert enhanced_flowing_dao["metadata"]["generic_technique_catalog_order"] == 33
+    assert enhanced_flowing_dao["metadata"]["insight_cost"] == 5
+    assert enhanced_flowing_dao["metadata"]["prerequisites"][0]["value"] == "flowing_dao"
     assert "Gain an additional +1 Action" in enhanced_flowing_dao["rendered_html"]
 
 
@@ -1268,6 +1322,14 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
     qi_blast_html = qi_blast_entry.get_data(as_text=True)
     assert "Qi Blast" in qi_blast_html
     assert "Spend a point of Qi" in qi_blast_html
+    assert "Technique Details" in qi_blast_html
+    assert "Insight Cost" in qi_blast_html
+    assert "Resource Costs" in qi_blast_html
+    assert "qi 1" in qi_blast_html
+    assert "Effort Tags" in qi_blast_html
+    assert "magic effort damage" in qi_blast_html
+    assert "Support State" in qi_blast_html
+    assert "reference only" in qi_blast_html
 
     assert dnd_entry.status_code == 404
 

@@ -88,6 +88,11 @@ XIANXIA_MARTIAL_ART_ABILITY_KIND_LABELS = {
 }
 XIANXIA_MARTIAL_ART_ABILITY_SUPPORT_STATES = frozenset({"reference_only", "modeled"})
 XIANXIA_MARTIAL_ART_ABILITY_DEFAULT_SUPPORT_STATE = "reference_only"
+XIANXIA_GENERIC_TECHNIQUE_DETAILS_STATUS_COST_PREREQ_RESOURCE_RANGE_EFFORT_RESET_SUPPORT_SEEDED = (
+    "cost_prerequisite_resource_range_effort_reset_support_seeded"
+)
+XIANXIA_GENERIC_TECHNIQUE_SUPPORT_STATES = frozenset({"reference_only", "modeled"})
+XIANXIA_GENERIC_TECHNIQUE_DEFAULT_SUPPORT_STATE = "reference_only"
 
 
 @lru_cache(maxsize=1)
@@ -107,6 +112,7 @@ def _load_xianxia_systems_seed_payload() -> dict[str, Any]:
     raw_martial_art_rank_resource_grants = payload.get("martial_art_rank_resource_grants")
     raw_martial_art_rank_ability_grants = payload.get("martial_art_rank_ability_grants")
     raw_martial_art_rank_ability_effects = payload.get("martial_art_rank_ability_effects")
+    raw_generic_technique_details = payload.get("generic_technique_details")
     raw_entries = payload.get("entries")
 
     if source_id != XIANXIA_HOMEBREW_SOURCE_ID:
@@ -137,6 +143,9 @@ def _load_xianxia_systems_seed_payload() -> dict[str, Any]:
     )
     if not isinstance(raw_entries, list):
         raise ValueError("Xianxia Systems seed payload must include an entries list.")
+    payload["generic_technique_details"] = _normalize_generic_technique_details(
+        raw_generic_technique_details
+    )
     _validate_martial_art_rank_resource_grants_cover_entries(
         payload["martial_art_rank_resource_grants"],
         raw_entries,
@@ -146,6 +155,10 @@ def _load_xianxia_systems_seed_payload() -> dict[str, Any]:
         payload["martial_art_rank_ability_grants"],
         raw_entries,
         payload["martial_art_rank_sets"],
+    )
+    _validate_generic_technique_details_cover_entries(
+        payload["generic_technique_details"],
+        raw_entries,
     )
 
     return payload
@@ -220,6 +233,13 @@ def build_xianxia_martial_art_rank_ability_effects() -> dict[str, dict[str, dict
             for rank_key, rank_effects in rank_effects_by_art.items()
         }
         for martial_art_key, rank_effects_by_art in _XIANXIA_MARTIAL_ART_RANK_ABILITY_EFFECTS.items()
+    }
+
+
+def build_xianxia_generic_technique_details() -> dict[str, dict[str, Any]]:
+    return {
+        generic_technique_key: _copy_generic_technique_detail(detail)
+        for generic_technique_key, detail in _XIANXIA_GENERIC_TECHNIQUE_DETAILS.items()
     }
 
 
@@ -308,6 +328,8 @@ def _build_seed_entry(raw_spec: dict[str, Any], *, index: int, source_path: str)
     body.setdefault("sections", sections)
     if entry_type == "martial_art":
         _stamp_martial_art_rank_records(metadata, body, slug=slug)
+    if entry_type == "generic_technique":
+        _stamp_generic_technique_details(metadata, body, slug=slug)
     search_parts = [
         title,
         entry_type,
@@ -320,6 +342,8 @@ def _build_seed_entry(raw_spec: dict[str, Any], *, index: int, source_path: str)
     if entry_type == "martial_art":
         search_parts.extend(_martial_art_draft_search_parts(body))
         search_parts.extend(_martial_art_ability_search_parts(body))
+    if entry_type == "generic_technique":
+        search_parts.extend(_generic_technique_details_search_parts(body))
     rendered_html = str(raw_spec.get("rendered_html") or "").strip() or _render_seed_entry_html(
         summary=summary,
         aliases=aliases,
@@ -328,6 +352,8 @@ def _build_seed_entry(raw_spec: dict[str, Any], *, index: int, source_path: str)
     if entry_type == "martial_art":
         rendered_html += _render_martial_art_rank_records_html(body)
         rendered_html += _render_martial_art_draft_marker_html(body)
+    if entry_type == "generic_technique":
+        rendered_html += _render_generic_technique_details_html(body)
     return {
         "entry_key": entry_key,
         "entry_type": entry_type,
@@ -890,6 +916,115 @@ def _normalize_ability_tag_list(raw_tags: object, *, context: str) -> list[str]:
     return normalized
 
 
+def _normalize_generic_technique_details(raw_details: object) -> dict[str, dict[str, Any]]:
+    if not isinstance(raw_details, dict):
+        raise ValueError(
+            "Xianxia Systems seed payload must include a generic_technique_details object."
+        )
+
+    normalized: dict[str, dict[str, Any]] = {}
+    for raw_key, raw_detail in raw_details.items():
+        generic_technique_key = _normalize_identifier(raw_key)
+        if not generic_technique_key:
+            raise ValueError("Xianxia Generic Technique details include a blank key.")
+        if generic_technique_key in normalized:
+            raise ValueError(
+                f"Xianxia Generic Technique details for {generic_technique_key!r} are duplicated."
+            )
+        if not isinstance(raw_detail, dict):
+            raise ValueError(
+                f"Xianxia Generic Technique details for {generic_technique_key!r} must be an object."
+            )
+
+        insight_cost = _normalize_non_negative_int(
+            raw_detail.get("insight_cost"),
+            context=f"Xianxia Generic Technique {generic_technique_key!r} insight_cost",
+        )
+        if insight_cost <= 0:
+            raise ValueError(
+                f"Xianxia Generic Technique {generic_technique_key!r} insight_cost must be positive."
+            )
+        support_state = _normalize_identifier(
+            raw_detail.get("support_state")
+            or raw_detail.get("support")
+            or XIANXIA_GENERIC_TECHNIQUE_DEFAULT_SUPPORT_STATE
+        )
+        if support_state not in XIANXIA_GENERIC_TECHNIQUE_SUPPORT_STATES:
+            raise ValueError(
+                f"Xianxia Generic Technique {generic_technique_key!r} uses unsupported "
+                f"support_state {support_state!r}."
+            )
+
+        reset_cadence = _normalize_identifier(
+            raw_detail.get("reset_cadence") or raw_detail.get("reset")
+        )
+        normalized[generic_technique_key] = {
+            "insight_cost": insight_cost,
+            "prerequisites": _normalize_generic_technique_prerequisites(
+                raw_detail.get("prerequisites"),
+                context=f"Xianxia Generic Technique {generic_technique_key!r} prerequisites",
+            ),
+            "resource_costs": _normalize_ability_resource_costs(
+                raw_detail.get("resource_costs", raw_detail.get("costs")),
+                context=f"Xianxia Generic Technique {generic_technique_key!r} resource_costs",
+            ),
+            "range_tags": _normalize_ability_tag_list(
+                raw_detail.get("range_tags", raw_detail.get("ranges")),
+                context=f"Xianxia Generic Technique {generic_technique_key!r} range_tags",
+            ),
+            "effort_tags": _normalize_ability_tag_list(
+                raw_detail.get("effort_tags", raw_detail.get("efforts")),
+                context=f"Xianxia Generic Technique {generic_technique_key!r} effort_tags",
+            ),
+            "reset_cadence": reset_cadence or None,
+            "support_state": support_state,
+            "xianxia_support_state": support_state,
+        }
+    return normalized
+
+
+def _normalize_generic_technique_prerequisites(
+    raw_prerequisites: object,
+    *,
+    context: str,
+) -> list[dict[str, str]]:
+    if raw_prerequisites is None:
+        return []
+    if not isinstance(raw_prerequisites, list):
+        raise ValueError(f"{context} must be a list.")
+
+    normalized: list[dict[str, str]] = []
+    for index, raw_prerequisite in enumerate(raw_prerequisites, start=1):
+        if isinstance(raw_prerequisite, str):
+            label = raw_prerequisite.strip()
+            kind = "requirement"
+            value = _normalize_identifier(label)
+            note = ""
+        elif isinstance(raw_prerequisite, dict):
+            label = str(raw_prerequisite.get("label") or raw_prerequisite.get("name") or "").strip()
+            kind = _normalize_identifier(raw_prerequisite.get("kind") or "requirement")
+            value = _normalize_identifier(raw_prerequisite.get("value") or label)
+            note = str(raw_prerequisite.get("note") or "").strip()
+        else:
+            raise ValueError(f"{context} {index} must be a string or object.")
+
+        if not label:
+            raise ValueError(f"{context} {index} is missing a label.")
+        if not kind:
+            raise ValueError(f"{context} {index} is missing a kind.")
+        if not value:
+            raise ValueError(f"{context} {index} is missing a value.")
+        record = {
+            "kind": kind,
+            "value": value,
+            "label": label,
+        }
+        if note:
+            record["note"] = note
+        normalized.append(record)
+    return normalized
+
+
 def _normalize_rank_ability_grants(
     raw_grants: list[object],
     *,
@@ -1057,6 +1192,45 @@ def _validate_martial_art_rank_ability_grants_cover_entries(
         raise ValueError(
             "Xianxia Martial Art rank ability grants include unknown Martial Arts: "
             + ", ".join(extra_martial_art_keys)
+            + "."
+        )
+
+
+def _validate_generic_technique_details_cover_entries(
+    generic_technique_details: dict[str, dict[str, Any]],
+    raw_entries: list[Any],
+) -> None:
+    expected_generic_technique_keys: set[str] = set()
+    for raw_entry in raw_entries:
+        if not isinstance(raw_entry, dict):
+            continue
+        if _normalize_identifier(raw_entry.get("entry_type")) != "generic_technique":
+            continue
+        raw_metadata = raw_entry.get("metadata")
+        metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+        generic_technique_key = _normalize_identifier(
+            metadata.get("generic_technique_key")
+            or metadata.get("xianxia_generic_technique_key")
+            or raw_entry.get("slug")
+            or raw_entry.get("title")
+        )
+        if not generic_technique_key:
+            raise ValueError(
+                "Xianxia Generic Technique seed entry is missing a Generic Technique key."
+            )
+        expected_generic_technique_keys.add(generic_technique_key)
+        if generic_technique_key not in generic_technique_details:
+            raise ValueError(
+                f"Xianxia Generic Technique details are missing {generic_technique_key!r}."
+            )
+
+    extra_generic_technique_keys = sorted(
+        set(generic_technique_details) - expected_generic_technique_keys
+    )
+    if extra_generic_technique_keys:
+        raise ValueError(
+            "Xianxia Generic Technique details include unknown Generic Techniques: "
+            + ", ".join(extra_generic_technique_keys)
             + "."
         )
 
@@ -1272,6 +1446,48 @@ def _stamp_martial_art_rank_records(metadata: dict[str, Any], body: dict[str, An
         )
 
 
+def _stamp_generic_technique_details(metadata: dict[str, Any], body: dict[str, Any], *, slug: str) -> None:
+    generic_technique_key = _normalize_identifier(
+        metadata.get("generic_technique_key")
+        or metadata.get("xianxia_generic_technique_key")
+        or slug
+    )
+    details = _generic_technique_details_for(generic_technique_key)
+    metadata["generic_technique_details_seeded"] = True
+    metadata["generic_technique_details_status"] = (
+        XIANXIA_GENERIC_TECHNIQUE_DETAILS_STATUS_COST_PREREQ_RESOURCE_RANGE_EFFORT_RESET_SUPPORT_SEEDED
+    )
+    metadata["insight_cost"] = int(details["insight_cost"])
+    metadata["prerequisites"] = [dict(prerequisite) for prerequisite in details["prerequisites"]]
+    metadata["resource_costs"] = [dict(cost) for cost in details["resource_costs"]]
+    metadata["range_tags"] = list(details["range_tags"])
+    metadata["effort_tags"] = list(details["effort_tags"])
+    metadata["reset_cadence"] = details["reset_cadence"]
+    metadata["support_state"] = str(details["support_state"])
+    metadata["xianxia_support_state"] = str(details["xianxia_support_state"])
+
+    generic_technique_body = body.get("xianxia_generic_technique")
+    if not isinstance(generic_technique_body, dict):
+        generic_technique_body = {}
+        body["xianxia_generic_technique"] = generic_technique_body
+    generic_technique_body["details_seeded"] = True
+    generic_technique_body["details_status"] = (
+        XIANXIA_GENERIC_TECHNIQUE_DETAILS_STATUS_COST_PREREQ_RESOURCE_RANGE_EFFORT_RESET_SUPPORT_SEEDED
+    )
+    generic_technique_body["insight_cost"] = int(details["insight_cost"])
+    generic_technique_body["prerequisites"] = [
+        dict(prerequisite) for prerequisite in details["prerequisites"]
+    ]
+    generic_technique_body["resource_costs"] = [dict(cost) for cost in details["resource_costs"]]
+    generic_technique_body["range_tags"] = list(details["range_tags"])
+    generic_technique_body["effort_tags"] = list(details["effort_tags"])
+    generic_technique_body["reset_cadence"] = details["reset_cadence"]
+    generic_technique_body["support_state"] = str(details["support_state"])
+    generic_technique_body["xianxia_support_state"] = str(details["xianxia_support_state"])
+    body["support_state"] = str(details["support_state"])
+    body["xianxia_support_state"] = str(details["xianxia_support_state"])
+
+
 def _build_martial_art_draft_note(missing_rank_names: list[str]) -> str:
     missing_label = ", ".join(missing_rank_names)
     return (
@@ -1332,6 +1548,43 @@ def _martial_art_ability_search_parts(body: dict[str, Any]) -> list[str]:
     return parts
 
 
+def _generic_technique_details_search_parts(body: dict[str, Any]) -> list[str]:
+    generic_technique_body = body.get("xianxia_generic_technique")
+    if not isinstance(generic_technique_body, dict):
+        return []
+
+    parts = [
+        str(generic_technique_body.get("insight_cost") or ""),
+        str(generic_technique_body.get("reset_cadence") or ""),
+        str(generic_technique_body.get("support_state") or ""),
+    ]
+    parts.extend(str(value) for value in generic_technique_body.get("range_tags") or [])
+    parts.extend(str(value) for value in generic_technique_body.get("effort_tags") or [])
+    for prerequisite in generic_technique_body.get("prerequisites") or []:
+        if not isinstance(prerequisite, dict):
+            continue
+        parts.extend(
+            [
+                str(prerequisite.get("kind") or ""),
+                str(prerequisite.get("value") or ""),
+                str(prerequisite.get("label") or ""),
+                str(prerequisite.get("note") or ""),
+            ]
+        )
+    for cost in generic_technique_body.get("resource_costs") or []:
+        if not isinstance(cost, dict):
+            continue
+        parts.extend(
+            [
+                str(cost.get("resource_key") or ""),
+                str(cost.get("amount") or ""),
+                str(cost.get("timing") or ""),
+                str(cost.get("note") or ""),
+            ]
+        )
+    return parts
+
+
 def _render_martial_art_draft_marker_html(body: dict[str, Any]) -> str:
     martial_art_body = body.get("xianxia_martial_art")
     if not isinstance(martial_art_body, dict):
@@ -1353,6 +1606,52 @@ def _render_martial_art_draft_marker_html(body: dict[str, Any]) -> str:
         parts.append(f"<p>{escape(note)}</p>")
     if missing_ranks:
         parts.append(f"<p><strong>Missing higher ranks:</strong> {escape(missing_ranks)}</p>")
+    parts.append("</section>")
+    return "".join(parts)
+
+
+def _render_generic_technique_details_html(body: dict[str, Any]) -> str:
+    generic_technique_body = body.get("xianxia_generic_technique")
+    if not isinstance(generic_technique_body, dict):
+        return ""
+    if not generic_technique_body.get("details_seeded"):
+        return ""
+
+    parts = ["<section>", "<h2>Technique Details</h2>"]
+    insight_cost = generic_technique_body.get("insight_cost")
+    if insight_cost is not None:
+        parts.append(f"<p><strong>Insight Cost:</strong> {escape(str(insight_cost))}</p>")
+
+    prerequisites = _format_generic_technique_prerequisites(
+        generic_technique_body.get("prerequisites")
+    )
+    if prerequisites:
+        parts.append(f"<p><strong>Prerequisites:</strong> {prerequisites}</p>")
+
+    resource_costs = _format_resource_costs(generic_technique_body.get("resource_costs"))
+    if resource_costs:
+        parts.append(f"<p><strong>Resource Costs:</strong> {resource_costs}</p>")
+
+    ranges = _format_string_tags(generic_technique_body.get("range_tags"))
+    if ranges:
+        parts.append(f"<p><strong>Ranges:</strong> {ranges}</p>")
+
+    effort_tags = _format_string_tags(generic_technique_body.get("effort_tags"))
+    if effort_tags:
+        parts.append(f"<p><strong>Effort Tags:</strong> {effort_tags}</p>")
+
+    reset_cadence = str(generic_technique_body.get("reset_cadence") or "").strip()
+    if reset_cadence:
+        parts.append(
+            "<p><strong>Reset Cadence:</strong> "
+            f"{escape(reset_cadence.replace('_', ' '))}</p>"
+        )
+
+    support_state = str(generic_technique_body.get("support_state") or "").strip()
+    if support_state:
+        parts.append(
+            f"<p><strong>Support State:</strong> {escape(support_state.replace('_', ' '))}</p>"
+        )
     parts.append("</section>")
     return "".join(parts)
 
@@ -1475,6 +1774,21 @@ def _format_resource_costs(value: object) -> str:
         if not resource_key or amount is None:
             continue
         parts.append(f"{resource_key.replace('_', ' ')} {amount}")
+    return ", ".join(escape(part) for part in parts)
+
+
+def _format_generic_technique_prerequisites(value: object) -> str:
+    if not isinstance(value, list):
+        return ""
+    parts: list[str] = []
+    for prerequisite in value:
+        if not isinstance(prerequisite, dict):
+            continue
+        label = str(prerequisite.get("label") or "").strip()
+        note = str(prerequisite.get("note") or "").strip()
+        if not label:
+            continue
+        parts.append(f"{label} ({note})" if note else label)
     return ", ".join(escape(part) for part in parts)
 
 
@@ -1652,6 +1966,31 @@ def _copy_rank_ability_effect(effect: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _copy_generic_technique_detail(detail: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "insight_cost": int(detail["insight_cost"]),
+        "prerequisites": [
+            dict(prerequisite)
+            for prerequisite in detail.get("prerequisites", [])
+            if isinstance(prerequisite, dict)
+        ],
+        "resource_costs": [
+            dict(cost)
+            for cost in detail.get("resource_costs", [])
+            if isinstance(cost, dict)
+        ],
+        "range_tags": list(detail.get("range_tags", [])),
+        "effort_tags": list(detail.get("effort_tags", [])),
+        "reset_cadence": detail.get("reset_cadence"),
+        "support_state": str(detail.get("support_state") or XIANXIA_GENERIC_TECHNIQUE_DEFAULT_SUPPORT_STATE),
+        "xianxia_support_state": str(
+            detail.get("xianxia_support_state")
+            or detail.get("support_state")
+            or XIANXIA_GENERIC_TECHNIQUE_DEFAULT_SUPPORT_STATE
+        ),
+    }
+
+
 def _rank_record_ability_grants(
     rank_records: list[dict[str, Any]],
     rank_key: str,
@@ -1724,6 +2063,15 @@ def _martial_art_rank_ability_effects_for(
     }
 
 
+def _generic_technique_details_for(generic_technique_key: str) -> dict[str, Any]:
+    details = _XIANXIA_GENERIC_TECHNIQUE_DETAILS.get(generic_technique_key)
+    if details is None:
+        raise ValueError(
+            f"Xianxia Generic Technique {generic_technique_key!r} is missing details metadata."
+        )
+    return _copy_generic_technique_detail(details)
+
+
 _XIANXIA_SYSTEMS_SEED_PAYLOAD = _load_xianxia_systems_seed_payload()
 XIANXIA_SYSTEMS_SEED_SOURCE_TITLE = str(_XIANXIA_SYSTEMS_SEED_PAYLOAD["source_title"])
 XIANXIA_SYSTEMS_SEED_VERSION = str(_XIANXIA_SYSTEMS_SEED_PAYLOAD["version"])
@@ -1767,6 +2115,12 @@ _XIANXIA_MARTIAL_ART_RANK_ABILITY_EFFECTS = {
     }
     for martial_art_key, rank_effects_by_art in _XIANXIA_SYSTEMS_SEED_PAYLOAD[
         "martial_art_rank_ability_effects"
+    ].items()
+}
+_XIANXIA_GENERIC_TECHNIQUE_DETAILS = {
+    str(generic_technique_key): _copy_generic_technique_detail(detail)
+    for generic_technique_key, detail in _XIANXIA_SYSTEMS_SEED_PAYLOAD[
+        "generic_technique_details"
     ].items()
 }
 _XIANXIA_MARTIAL_ART_RANK_SETS = {

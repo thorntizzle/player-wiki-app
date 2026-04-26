@@ -1,5 +1,5 @@
 {
-  "version": "2026-04-26.12",
+  "version": "2026-04-26.13",
   "source_id": "XIANXIA-HOMEBREW",
   "source_title": "Xianxia Homebrew",
   "storage_strategy": "curated_seed_data",
@@ -858,6 +858,102 @@
       "initiate": {"skybound_tether_technique": {"costs": ["qi:1"], "ranges": ["attack_target", "adjacent"], "durations": ["until_tether_broken"]}},
       "novice": {"fowler_s_snare_technique": {"costs": ["jing:1"], "ranges": ["near"], "damage": ["damage_bonus", "critical_threshold_18", "movement_penalty"], "durations": ["after_successful_attack", "3_rounds", "next_turn"]}}
     }
+  },
+  "generic_technique_details": {
+    "cultivation": {"insight_cost": 1, "support_state": "reference_only"},
+    "meditation": {"insight_cost": 1, "support_state": "reference_only"},
+    "conditioning": {"insight_cost": 1, "efforts": ["effort_point_gain"], "support_state": "reference_only"},
+    "training": {"insight_cost": 1, "support_state": "reference_only"},
+    "qi_blast": {
+      "insight_cost": 1,
+      "costs": [
+        {"resource": "qi", "amount": 1, "timing": "near_range_use"},
+        {"resource": "qi", "amount": 2, "timing": "far_range_option", "note": "Costs 2 Qi for Far range."}
+      ],
+      "ranges": ["near", "far"],
+      "efforts": ["magic_effort_damage"],
+      "support_state": "reference_only"
+    },
+    "scolding_backhand": {
+      "insight_cost": 1,
+      "prerequisites": [
+        {"kind": "target_comparison", "value": "lower_martial_art_realm_honor_or_reputation", "label": "Target's highest Martial Art or Realm is lower, or the target is less Honorable/Reputable"}
+      ],
+      "ranges": ["attack_target"],
+      "efforts": ["basic_effort_damage"],
+      "reset_cadence": "once_per_combat",
+      "support_state": "reference_only"
+    },
+    "wind_glide": {
+      "insight_cost": 2,
+      "prerequisites": [
+        {"kind": "environment", "value": "high_place_or_exceedingly_windy_area", "label": "High place or exceedingly windy area"}
+      ],
+      "ranges": ["far"],
+      "support_state": "reference_only"
+    },
+    "great_leap": {"insight_cost": 4, "costs": ["jing:1"], "ranges": ["double_far"], "support_state": "reference_only"},
+    "meteor_walk": {
+      "insight_cost": 8,
+      "prerequisites": [{"kind": "realm", "value": "immortal", "label": "Immortal Status"}],
+      "costs": ["shen:1"],
+      "ranges": ["ley_lines", "long_distance_travel"],
+      "support_state": "reference_only"
+    },
+    "flight": {
+      "insight_cost": 12,
+      "prerequisites": [{"kind": "realm", "value": "immortal", "label": "Immortal Status"}],
+      "costs": ["qi:1"],
+      "ranges": ["self", "combat_movement", "travel"],
+      "support_state": "reference_only"
+    },
+    "duelist": {
+      "insight_cost": 3,
+      "prerequisites": [{"kind": "combat_state", "value": "in_duel", "label": "While in a Duel"}],
+      "costs": [{"resource": "jing_or_qi", "amount": 1, "timing": "opponent_disengage_attempt"}],
+      "ranges": ["duel_target"],
+      "efforts": ["attack_bonus", "damage_bonus"],
+      "support_state": "reference_only"
+    },
+    "flash_step": {"insight_cost": 2, "costs": ["jing:1"], "ranges": ["self", "movement"], "support_state": "reference_only"},
+    "speed_blitz": {
+      "insight_cost": 5,
+      "prerequisites": [{"kind": "timing", "value": "beginning_of_combat", "label": "Beginning of combat"}],
+      "ranges": ["far", "adjacent", "close"],
+      "reset_cadence": "once_per_combat",
+      "support_state": "reference_only"
+    },
+    "graceful_balance": {"insight_cost": 1, "ranges": ["self"], "support_state": "reference_only"},
+    "kip_up": {"insight_cost": 3, "ranges": ["self"], "support_state": "reference_only"},
+    "water_run": {"insight_cost": 4, "ranges": ["self", "movement"], "support_state": "reference_only"},
+    "yin_healing": {"insight_cost": 4, "costs": ["yin:1"], "ranges": ["self", "target"], "efforts": ["magic_effort_healing"], "support_state": "reference_only"},
+    "yin_cleansing": {"insight_cost": 3, "costs": ["yin:1"], "ranges": ["touch", "self"], "support_state": "reference_only"},
+    "yin_regeneration": {"insight_cost": 6, "costs": ["yin:1"], "ranges": ["self"], "efforts": ["magic_effort_healing"], "support_state": "reference_only"},
+    "yin_fortification": {"insight_cost": 1, "costs": ["yin:1"], "ranges": ["self"], "efforts": ["defense_bonus"], "support_state": "reference_only"},
+    "yang_enhancement": {"insight_cost": 1, "costs": ["yang:1"], "ranges": ["self"], "efforts": ["attack_bonus"], "support_state": "reference_only"},
+    "yang_sundering": {
+      "insight_cost": 3,
+      "costs": [{"resource": "yang", "amount": 1, "timing": "triggering_spend"}],
+      "ranges": ["next_successful_attack_target"],
+      "efforts": ["damage_bonus", "stance_recovery_block"],
+      "support_state": "reference_only"
+    },
+    "two_finger_disarmament": {
+      "insight_cost": 2,
+      "prerequisites": [{"kind": "trigger", "value": "attacked_by_weapon", "label": "Attacked by a Weapon"}],
+      "ranges": ["weapon_attacker"],
+      "support_state": "reference_only"
+    },
+    "throat_crush": {"insight_cost": 4, "costs": ["action:1"], "ranges": ["attack_target"], "support_state": "reference_only"},
+    "knuckle_splitter": {"insight_cost": 4, "costs": ["action:1"], "ranges": ["attack_target"], "support_state": "reference_only"},
+    "cyclone_barrage": {"insight_cost": 5, "ranges": ["near", "area_near"], "efforts": ["basic_effort_damage", "weapon_effort_damage"], "support_state": "reference_only"},
+    "disorientating_palm_strike": {"insight_cost": 2, "costs": ["qi:1"], "ranges": ["unarmed_attack_target"], "efforts": ["basic_effort_stance_damage"], "support_state": "reference_only"},
+    "pressing_stance_break": {"insight_cost": 2, "prerequisites": [{"kind": "trigger", "value": "first_attack_drops_target_stance_to_zero", "label": "First time your Attack drops a Target's Stance to 0"}], "ranges": ["attack_target"], "efforts": ["double_damage"], "support_state": "reference_only"},
+    "piercing_blow": {"insight_cost": 3, "costs": ["qi:1"], "ranges": ["unarmed_attack_target"], "efforts": ["hp_damage_conversion"], "support_state": "reference_only"},
+    "cushioning_sway": {"insight_cost": 2, "costs": ["jing:1"], "ranges": ["self", "attacker"], "efforts": ["damage_reduction"], "support_state": "reference_only"},
+    "enhanced_recuperation": {"insight_cost": 5, "prerequisites": [{"kind": "basic_action", "value": "recoup", "label": "Recoup Action"}], "ranges": ["self"], "support_state": "reference_only"},
+    "enhanced_recollection": {"insight_cost": 6, "prerequisites": [{"kind": "basic_action", "value": "recollect", "label": "Recollect Action"}], "ranges": ["self"], "support_state": "reference_only"},
+    "enhanced_flowing_dao": {"insight_cost": 5, "prerequisites": [{"kind": "basic_action", "value": "flowing_dao", "label": "Flowing Dao Action"}], "ranges": ["self"], "support_state": "reference_only"}
   },
   "entries": [
     {
