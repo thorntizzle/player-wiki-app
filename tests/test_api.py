@@ -11,6 +11,10 @@ import yaml
 
 from player_wiki.auth_store import AuthStore
 from player_wiki.systems_importer import Dnd5eSystemsImporter
+from player_wiki.xianxia_character_model import (
+    XIANXIA_CHARACTER_DEFINITION_SCHEMA_VERSION,
+    XIANXIA_DEFINITION_FIELD_KEYS,
+)
 
 
 def api_headers(token: str) -> dict[str, str]:
@@ -865,6 +869,137 @@ def test_api_content_character_management_can_upsert_and_delete_files(client, ap
         assert state_store.get_state("linden-pass", "api-scout") is None
 
     assert not (campaigns_dir / "linden-pass" / "characters" / "api-scout" / "definition.yaml").exists()
+
+
+def test_api_content_xianxia_definition_round_trips_through_save_and_load(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-xianxia-round-trip-api")
+    campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])
+    config_path = campaigns_dir / "linden-pass" / "campaign.yaml"
+    config_payload = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    config_payload["system"] = "Xianxia"
+    config_payload["systems_library"] = "Xianxia"
+    config_path.write_text(yaml.safe_dump(config_payload, sort_keys=False), encoding="utf-8")
+
+    definition_payload = {
+        "name": "Round Trip Cultivator",
+        "status": "active",
+        "system": "xianxia",
+        "xianxia": {
+            "realm": "Immortal",
+            "action_count": "3",
+            "honor": "venerable",
+            "reputation": "Known among border sects",
+            "attributes": {"str": "2", "dex": 1, "con": 3, "int": 0, "wis": 1, "cha": 0},
+            "efforts": {
+                "basic": 1,
+                "weapon": 2,
+                "guns_explosive": 0,
+                "magic": 1,
+                "ultimate": 1,
+            },
+            "energy_maxima": {"jing": "3", "qi": 2, "shen": 1},
+            "yin_yang": {"yin_max": "2", "yang_max": "1"},
+            "dao_max": 3,
+            "insight": {"available": "5", "spent": "1"},
+            "durability": {
+                "hp_max": "18",
+                "stance_max": "14",
+                "manual_armor_bonus": "2",
+                "defense": "15",
+            },
+            "skills": {"trained": ["Tea Ceremony", "Strategy", "Tea Ceremony"]},
+            "equipment": {
+                "necessary_weapons": [{"name": "Jian", "reason": "Required by Heavenly Palm"}],
+                "necessary_tools": ["Calligraphy brush"],
+            },
+            "martial_arts": [
+                {
+                    "systems_ref": {"slug": "heavenly-palm", "entry_type": "martial_art"},
+                    "current_rank": "Novice",
+                    "learned_rank_refs": ["xianxia:heavenly-palm:initiate"],
+                }
+            ],
+            "generic_techniques": [
+                {"systems_ref": {"slug": "qi-blast", "entry_type": "generic_technique"}}
+            ],
+            "variants": [{"variant_type": "karmic_constraint", "name": "Falling Palm Oath"}],
+            "dao_immolating_records": {
+                "prepared": [{"name": "Ashen Bell"}],
+                "history": [{"name": "River-Cleaving Spark", "approval_status": "approved"}],
+            },
+            "approval_requests": [{"request_type": "ascendant_art", "status": "pending"}],
+            "companions": [{"name": "Ink phantom", "source_ref": "xianxia:ink-stained-historian"}],
+            "advancement_history": [{"action": "gather_insight", "amount": 1}],
+        },
+    }
+
+    create_response = client.put(
+        "/api/v1/campaigns/linden-pass/content/characters/round-trip-cultivator",
+        headers=api_headers(dm_token),
+        json={"definition": definition_payload},
+    )
+
+    assert create_response.status_code == 200
+    create_character_file = create_response.get_json()["character_file"]
+    assert create_character_file["state_created"] is True
+    saved_definition = create_character_file["definition"]
+    saved_xianxia = saved_definition["xianxia"]
+
+    assert saved_definition["campaign_slug"] == "linden-pass"
+    assert saved_definition["character_slug"] == "round-trip-cultivator"
+    assert saved_definition["system"] == "Xianxia"
+    assert saved_xianxia["schema_version"] == XIANXIA_CHARACTER_DEFINITION_SCHEMA_VERSION
+    assert saved_xianxia["realm"] == "Immortal"
+    assert saved_xianxia["actions_per_turn"] == 3
+    assert saved_xianxia["honor"] == "Venerable"
+    assert saved_xianxia["attributes"]["str"] == 2
+    assert saved_xianxia["energies"]["jing"] == {"max": 3}
+    assert saved_xianxia["skills"]["trained"] == ["Tea Ceremony", "Strategy"]
+    assert saved_xianxia["equipment"]["necessary_tools"] == [{"name": "Calligraphy brush"}]
+    assert saved_xianxia["dao_immolating_techniques"]["use_history"][0]["name"] == "River-Cleaving Spark"
+    assert "vitals" not in saved_xianxia
+    assert "active_stance" not in saved_xianxia
+    assert "notes" not in saved_xianxia
+
+    detail_response = client.get(
+        "/api/v1/campaigns/linden-pass/content/characters/round-trip-cultivator",
+        headers=api_headers(dm_token),
+    )
+
+    assert detail_response.status_code == 200
+    loaded_definition = detail_response.get_json()["character_file"]["definition"]
+    assert loaded_definition == saved_definition
+
+    definition_path = (
+        campaigns_dir
+        / "linden-pass"
+        / "characters"
+        / "round-trip-cultivator"
+        / "definition.yaml"
+    )
+    saved_file_definition = yaml.safe_load(definition_path.read_text(encoding="utf-8"))
+    assert tuple(saved_file_definition["xianxia"]) == XIANXIA_DEFINITION_FIELD_KEYS
+    assert saved_file_definition == saved_definition
+
+    with app.app_context():
+        record = app.extensions["character_repository"].get_character(
+            "linden-pass",
+            "round-trip-cultivator",
+        )
+        assert record is not None
+        assert record.definition.to_dict() == saved_definition
+
+    save_loaded_response = client.put(
+        "/api/v1/campaigns/linden-pass/content/characters/round-trip-cultivator",
+        headers=api_headers(dm_token),
+        json={"definition": loaded_definition},
+    )
+
+    assert save_loaded_response.status_code == 200
+    round_tripped_file = save_loaded_response.get_json()["character_file"]
+    assert round_tripped_file["state_created"] is False
+    assert round_tripped_file["definition"] == saved_definition
+    assert yaml.safe_load(definition_path.read_text(encoding="utf-8")) == saved_definition
 
 
 def test_api_content_xianxia_definition_update_preserves_sqlite_mutable_state_split(client, app, users):
