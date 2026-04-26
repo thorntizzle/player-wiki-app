@@ -5,7 +5,10 @@ from html import unescape
 
 import yaml
 
-from player_wiki.xianxia_character_model import derive_xianxia_difficulty_state_adjustments
+from player_wiki.xianxia_character_model import (
+    derive_xianxia_difficulty_state_adjustments,
+    derive_xianxia_honor_interaction_reminders,
+)
 from player_wiki.systems_service import XIANXIA_HOMEBREW_SOURCE_ID
 
 
@@ -212,6 +215,57 @@ def test_xianxia_difficulty_state_helper_presents_capped_final_dc_states():
     ]
 
 
+def test_xianxia_honor_interaction_helper_presents_directional_contexts():
+    majestic = derive_xianxia_honor_interaction_reminders("Majestic")
+    assert majestic["honor"] == "Majestic"
+    assert majestic["summary"] == (
+        "Orthodox sects and individuals +5, Demonic backgrounds -5, "
+        "Criminal backgrounds -5"
+    )
+    assert [
+        (context["key"], context["modifier_label"])
+        for context in majestic["contexts"]
+    ] == [
+        ("orthodox", "+5"),
+        ("demonic", "-5"),
+        ("criminal", "-5"),
+    ]
+
+    demonic = derive_xianxia_honor_interaction_reminders("demonic")
+    assert demonic["honor"] == "Demonic"
+    assert [
+        (context["key"], context["modifier_label"])
+        for context in demonic["contexts"]
+    ] == [
+        ("orthodox", "-5"),
+        ("demonic", "+5"),
+        ("criminal", "+5"),
+    ]
+
+    venerable = derive_xianxia_honor_interaction_reminders("Venerable")
+    assert [
+        (context["key"], context["modifier_label"])
+        for context in venerable["contexts"]
+    ] == [
+        ("orthodox", "+3"),
+        ("demonic", "-3"),
+        ("criminal", "-3"),
+    ]
+
+    disgraced = derive_xianxia_honor_interaction_reminders("Disgraced")
+    assert [
+        (context["key"], context["modifier_label"])
+        for context in disgraced["contexts"]
+    ] == [
+        ("orthodox", "-3"),
+        ("demonic", "+3"),
+        ("criminal", "+3"),
+    ]
+
+    honorable = derive_xianxia_honor_interaction_reminders("Honorable")
+    assert {context["modifier_label"] for context in honorable["contexts"]} == {"0"}
+
+
 def test_xianxia_dao_persists_across_session_surface_saves_and_rests(
     app,
     client,
@@ -398,6 +452,67 @@ def test_xianxia_quick_reference_displays_stance_break_only_at_zero_stance(
     assert "/campaigns/linden-pass/systems/entries/stance" in broken_html
     assert "When current Stance reaches 0, the character's Stance breaks." in broken_html
     assert "Stance recovers with one day of rest unless another effect prevents recovery." in broken_html
+
+
+def test_xianxia_quick_reference_displays_honor_interaction_reminders(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    _write_raw_xianxia_character_definition(
+        app,
+        "majestic-honor",
+        {
+            "campaign_slug": "linden-pass",
+            "character_slug": "majestic-honor",
+            "name": "Majestic Honor",
+            "status": "active",
+            "system": "Xianxia",
+            "xianxia": {
+                "honor": "Majestic",
+                "attributes": {
+                    "str": 0,
+                    "dex": 0,
+                    "con": 0,
+                    "int": 0,
+                    "wis": 0,
+                    "cha": 0,
+                },
+            },
+        },
+    )
+
+    response = client.get("/campaigns/linden-pass/characters/majestic-honor?page=quick")
+
+    assert response.status_code == 200
+    html = unescape(response.get_data(as_text=True))
+    assert "Honor interactions" in html
+    assert "Current Honor: Majestic" in html
+    assert "/campaigns/linden-pass/systems/entries/honor" in html
+    assert "Orthodox sects and individuals" in html
+    assert "Demonic backgrounds" in html
+    assert "Criminal backgrounds" in html
+    assert "<strong>+5</strong>" in html
+    assert html.count("<strong>-5</strong>") >= 2
+    assert (
+        "Venerable and Majestic grant +3 and +5 with orthodox sects and individuals."
+        in html
+    )
+    assert (
+        "Disgraced and Demonic grant +3 and +5 with demonic or criminal backgrounds."
+        in html
+    )
+    assert (
+        "When dealing with the opposite Honor alignment, the same value applies as a penalty."
+        in html
+    )
+    assert (
+        "Honor interactions = Orthodox sects and individuals +5, Demonic backgrounds -5, "
+        "Criminal backgrounds -5."
+    ) in html
 
 
 def test_xianxia_quick_reference_displays_active_stance_and_aura_reminders_without_state_automation(

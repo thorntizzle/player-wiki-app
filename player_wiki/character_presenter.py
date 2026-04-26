@@ -46,6 +46,7 @@ from .xianxia_character_model import (
     derive_xianxia_defense,
     derive_xianxia_difficulty_state_adjustments,
     derive_xianxia_effort_damage_strings,
+    derive_xianxia_honor_interaction_reminders,
 )
 
 ABILITY_ORDER = (
@@ -85,6 +86,7 @@ XIANXIA_STANCE_ACTIVATION_RULE_ENTRY_KEY = (
 XIANXIA_AURA_ACTIVATION_RULE_ENTRY_KEY = (
     f"xianxia|rule|{XIANXIA_HOMEBREW_SOURCE_ID.lower()}|aura-activation-rules"
 )
+XIANXIA_HONOR_RULE_ENTRY_KEY = f"xianxia|rule|{XIANXIA_HOMEBREW_SOURCE_ID.lower()}|honor"
 ATTACK_NAME_SUFFIX_PATTERN = re.compile(r"\s*\([^)]*\)\s*$")
 
 
@@ -212,6 +214,15 @@ def present_character_detail(
     )
     xianxia_difficulty_states = (
         present_xianxia_difficulty_states()
+        if is_xianxia_character
+        else None
+    )
+    xianxia_honor_interactions = (
+        present_xianxia_honor_interactions(
+            campaign,
+            definition.xianxia,
+            systems_service=systems_service,
+        )
         if is_xianxia_character
         else None
     )
@@ -836,6 +847,7 @@ def present_character_detail(
         "xianxia_effort_damage": xianxia_effort_damage,
         "xianxia_check_formula": xianxia_check_formula,
         "xianxia_difficulty_states": xianxia_difficulty_states,
+        "xianxia_honor_interactions": xianxia_honor_interactions,
         "xianxia_active_state_reminders": xianxia_active_state_reminders,
         "xianxia_stance_break": xianxia_stance_break,
         "attack_reminders": attack_reminders,
@@ -1203,6 +1215,53 @@ def present_xianxia_check_formula() -> dict[str, str]:
 
 def present_xianxia_difficulty_states() -> dict[str, Any]:
     return derive_xianxia_difficulty_state_adjustments()
+
+
+def present_xianxia_honor_interactions(
+    campaign: Campaign,
+    xianxia_payload: dict[str, Any],
+    *,
+    systems_service: Any | None = None,
+) -> dict[str, Any]:
+    payload = dict(xianxia_payload or {})
+    presentation = derive_xianxia_honor_interaction_reminders(payload.get("honor"))
+    entry = None
+    if systems_service is not None:
+        entry = systems_service.get_entry_for_campaign(
+            campaign.slug,
+            XIANXIA_HONOR_RULE_ENTRY_KEY,
+        )
+        if entry is None:
+            entry = systems_service.get_entry_by_slug_for_campaign(campaign.slug, "honor")
+
+    rule_title = str(getattr(entry, "title", "") or "Honor")
+    metadata = dict(getattr(entry, "metadata", {}) or {}) if entry is not None else {}
+    body = dict(getattr(entry, "body", {}) or {}) if entry is not None else {}
+    support_state = str(
+        metadata.get("support_state") or body.get("support_state") or ""
+    ).strip()
+    presentation.update(
+        {
+            "status_label": f"Current Honor: {presentation['honor']}",
+            "rule_title": rule_title,
+            "rule_href": build_systems_entry_href(
+                campaign.slug,
+                {
+                    "slug": str(getattr(entry, "slug", "") or "honor"),
+                    "title": rule_title,
+                    "entry_type": "rule",
+                    "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                },
+            ),
+            "support_label": "Reference only" if support_state == "reference_only" else "",
+            "reference_lines": (
+                _extract_xianxia_rule_reference_lines(entry)
+                if entry is not None
+                else []
+            ),
+        }
+    )
+    return presentation
 
 
 def present_xianxia_active_state_reminders(

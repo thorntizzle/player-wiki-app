@@ -42,6 +42,11 @@ XIANXIA_DIFFICULTY_STATE_ADJUSTMENTS = (
     ("normal", "Normal", 0),
     ("hard", "HARD", 3),
 )
+XIANXIA_HONOR_INTERACTION_CONTEXTS = (
+    ("orthodox", "Orthodox sects and individuals"),
+    ("demonic", "Demonic backgrounds"),
+    ("criminal", "Criminal backgrounds"),
+)
 
 XIANXIA_DEFINITION_FIELD_KEYS = (
     "schema_version",
@@ -97,6 +102,14 @@ _HONOR_LABELS = {
     "honorable": "Honorable",
     "disgraced": "Disgraced",
     "demonic": "Demonic",
+}
+
+_HONOR_INTERACTION_MODIFIERS = {
+    "Venerable": {"orthodox": 3, "demonic": -3, "criminal": -3},
+    "Majestic": {"orthodox": 5, "demonic": -5, "criminal": -5},
+    "Honorable": {"orthodox": 0, "demonic": 0, "criminal": 0},
+    "Disgraced": {"orthodox": -3, "demonic": 3, "criminal": 3},
+    "Demonic": {"orthodox": -5, "demonic": 5, "criminal": 5},
 }
 
 _DEFERRED_DEFINITION_KEYS = {
@@ -310,6 +323,36 @@ def derive_xianxia_difficulty_state_adjustments() -> dict[str, Any]:
         "resolution_note": (
             "Resolve EASY/HARD influences to one final DC state before applying "
             "the listed adjustment."
+        ),
+    }
+
+
+def derive_xianxia_honor_interaction_reminders(honor: Any) -> dict[str, Any]:
+    """Return directional Xianxia Honor modifiers for social contexts."""
+
+    normalized_honor = _normalize_choice(
+        honor,
+        choices=_HONOR_LABELS,
+        default="Honorable",
+    )
+    modifier_map = _HONOR_INTERACTION_MODIFIERS.get(
+        normalized_honor,
+        _HONOR_INTERACTION_MODIFIERS["Honorable"],
+    )
+    contexts = [
+        {
+            "key": key,
+            "label": label,
+            "modifier": modifier_map.get(key, 0),
+            "modifier_label": _format_dc_adjustment(modifier_map.get(key, 0)),
+        }
+        for key, label in XIANXIA_HONOR_INTERACTION_CONTEXTS
+    ]
+    return {
+        "honor": normalized_honor,
+        "contexts": contexts,
+        "summary": ", ".join(
+            f"{context['label']} {context['modifier_label']}" for context in contexts
         ),
     }
 

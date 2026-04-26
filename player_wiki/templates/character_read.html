@@ -202,6 +202,39 @@
         </section>
       {% endif %}
 
+      {% if show_quick_sections and character.xianxia_honor_interactions %}
+        <section class="read-section" id="xianxia-honor-interactions">
+          <div class="section-heading">
+            <h2>Honor interactions</h2>
+            {% if character.xianxia_honor_interactions.rule_href %}
+              <a class="button-link subtle" href="{{ character.xianxia_honor_interactions.rule_href }}">{{ character.xianxia_honor_interactions.rule_title }} rule</a>
+            {% endif %}
+          </div>
+          <div class="glance-grid">
+            {% for context in character.xianxia_honor_interactions.contexts %}
+              <div class="glance-card">
+                <span class="meta">{{ context.label }}</span>
+                <strong>{{ context.modifier_label }}</strong>
+                <span class="meta">Interaction modifier</span>
+              </div>
+            {% endfor %}
+          </div>
+          <article class="detail-card">
+            <div class="section-heading">
+              <h3>Honor context</h3>
+              <span class="meta">{{ character.xianxia_honor_interactions.status_label }}</span>
+            </div>
+            {% if character.xianxia_honor_interactions.support_label %}
+              <p class="meta">{{ character.xianxia_honor_interactions.support_label }}</p>
+            {% endif %}
+            {% for line in character.xianxia_honor_interactions.reference_lines %}
+              <p>{{ line }}</p>
+            {% endfor %}
+            <p class="meta">Honor interactions = {{ character.xianxia_honor_interactions.summary }}.</p>
+          </article>
+        </section>
+      {% endif %}
+
       {% if show_quick_sections and character.xianxia_actions %}
         <section class="read-section" id="xianxia-action-count">
           <div class="section-heading">
