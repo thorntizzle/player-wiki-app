@@ -37,6 +37,40 @@
         <strong>{{ cultivation.generic_techniques | length }}</strong>
       </div>
     </div>
+    <article class="detail-card session-card">
+      <form
+        class="stack-form"
+        method="post"
+        action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+      >
+        <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+        <div class="detail-grid">
+          <label>
+            Insight available
+            <input
+              type="number"
+              name="insight_available"
+              min="0"
+              step="1"
+              value="{{ cultivation.insight.available }}"
+            >
+          </label>
+          <label>
+            Insight spent
+            <input
+              type="number"
+              name="insight_spent"
+              min="0"
+              step="1"
+              value="{{ cultivation.insight.spent }}"
+            >
+          </label>
+        </div>
+        <div class="hero-actions">
+          <button type="submit">Save Insight</button>
+        </div>
+      </form>
+    </article>
   </section>
 
   <section class="read-section" id="xianxia-cultivation-martial-arts">

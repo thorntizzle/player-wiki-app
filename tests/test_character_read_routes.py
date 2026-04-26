@@ -1422,6 +1422,92 @@ def test_xianxia_cultivation_route_is_separate_from_dnd_level_up(
     assert "/campaigns/linden-pass/characters/cultivation-crane/level-up" not in cultivation_html
 
 
+def test_xianxia_cultivation_route_tracks_insight_available_and_spent(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+                "default_visibility": "dm",
+            }
+        ]
+
+    _write_campaign_config(app, _mutate)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Insight Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+
+    cultivation_response = client.get(
+        "/campaigns/linden-pass/characters/insight-crane/cultivation"
+    )
+    assert cultivation_response.status_code == 200
+    cultivation_html = cultivation_response.get_data(as_text=True)
+    assert 'name="insight_available"' in cultivation_html
+    assert 'name="insight_spent"' in cultivation_html
+
+    starting_revision = _character_state_revision(app, "insight-crane")
+    update_response = client.post(
+        "/campaigns/linden-pass/characters/insight-crane/cultivation",
+        data={
+            "expected_revision": str(starting_revision),
+            "insight_available": "7",
+            "insight_spent": "3",
+        },
+        follow_redirects=False,
+    )
+    assert update_response.status_code == 302
+    assert update_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/insight-crane/cultivation#xianxia-cultivation-insight"
+    )
+
+    definition_payload = _read_character_definition(app, "insight-crane")
+    assert definition_payload["xianxia"]["insight"] == {"available": 7, "spent": 3}
+    assert definition_payload["xianxia"]["advancement_history"] == []
+    assert _character_state_revision(app, "insight-crane") == starting_revision + 1
+
+    updated_html = client.get(
+        "/campaigns/linden-pass/characters/insight-crane/cultivation"
+    ).get_data(as_text=True)
+    assert 'name="insight_available"' in updated_html
+    assert 'value="7"' in updated_html
+    assert 'name="insight_spent"' in updated_html
+    assert 'value="3"' in updated_html
+    assert "No advancement history is recorded on this sheet yet." in updated_html
+
+    resources_html = client.get(
+        "/campaigns/linden-pass/characters/insight-crane?page=resources"
+    ).get_data(as_text=True)
+    assert "<h3>Insight</h3>" in resources_html
+    assert "Spent 3" in resources_html
+
+    current_revision = _character_state_revision(app, "insight-crane")
+    invalid_response = client.post(
+        "/campaigns/linden-pass/characters/insight-crane/cultivation",
+        data={
+            "expected_revision": str(current_revision),
+            "insight_available": "-1",
+            "insight_spent": "4",
+        },
+        follow_redirects=True,
+    )
+    assert invalid_response.status_code == 200
+    assert "Insight available must be zero or greater." in invalid_response.get_data(as_text=True)
+    assert _read_character_definition(app, "insight-crane")["xianxia"]["insight"] == {
+        "available": 7,
+        "spent": 3,
+    }
+    assert _character_state_revision(app, "insight-crane") == current_revision
+
+
 def test_xianxia_create_picker_allows_seeded_and_gm_custom_martial_arts(
     app, client, sign_in, users
 ):

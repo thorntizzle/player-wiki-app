@@ -1391,6 +1391,17 @@ def present_xianxia_cultivation_context(character: dict[str, object], xianxia: d
     }
 
 
+def update_xianxia_insight_definition(definition, *, available: int, spent: int):
+    payload = definition.to_dict()
+    xianxia = dict(payload.get("xianxia") or {})
+    xianxia["insight"] = {
+        "available": int(available),
+        "spent": int(spent),
+    }
+    payload["xianxia"] = xianxia
+    return definition.__class__.from_dict(payload)
+
+
 def normalize_combat_return_view(value: str) -> str:
     normalized = (value or "").strip().lower()
     if normalized in {"dm", "status"}:
@@ -11598,7 +11609,7 @@ def create_app() -> Flask:
             )
         )
 
-    @app.get("/campaigns/<campaign_slug>/characters/<character_slug>/cultivation")
+    @app.route("/campaigns/<campaign_slug>/characters/<character_slug>/cultivation", methods=["GET", "POST"])
     @campaign_scope_access_required("characters")
     def character_xianxia_cultivation_view(campaign_slug: str, character_slug: str):
         if not can_manage_campaign_session(campaign_slug):
@@ -11616,6 +11627,66 @@ def create_app() -> Flask:
                     "character_read_view",
                     campaign_slug=campaign_slug,
                     character_slug=character_slug,
+                )
+            )
+
+        if request.method == "POST":
+            user = get_current_user()
+            if user is None:
+                abort(403)
+
+            try:
+                expected_revision = parse_expected_revision()
+                insight_available = normalize_dm_player_wiki_int(
+                    request.form.get("insight_available", ""),
+                    field_label="Insight available",
+                )
+                insight_spent = normalize_dm_player_wiki_int(
+                    request.form.get("insight_spent", ""),
+                    field_label="Insight spent",
+                )
+                definition = update_xianxia_insight_definition(
+                    record.definition,
+                    available=insight_available,
+                    spent=insight_spent,
+                )
+                definition = finalize_character_definition_for_write(
+                    campaign_slug,
+                    definition,
+                    campaign=campaign,
+                )
+                import_metadata = build_managed_character_import_metadata(
+                    campaign_slug,
+                    record.definition.character_slug,
+                    record.import_metadata,
+                )
+                merged_state = merge_state_with_definition(
+                    definition,
+                    record.state_record.state,
+                )
+                character_state_store.replace_state(
+                    definition,
+                    merged_state,
+                    expected_revision=expected_revision,
+                    updated_by_user_id=user.id,
+                )
+                config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
+                character_dir = config.characters_dir / character_slug
+                write_yaml(character_dir / "definition.yaml", definition.to_dict())
+                write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
+            except CharacterStateConflictError:
+                flash("This sheet changed in another session. Refresh the page and try again.", "error")
+            except (CharacterStateValidationError, ValueError) as exc:
+                flash(str(exc), "error")
+            else:
+                flash("Insight counters saved.", "success")
+
+            return redirect(
+                url_for(
+                    "character_xianxia_cultivation_view",
+                    campaign_slug=campaign_slug,
+                    character_slug=character_slug,
+                    _anchor="xianxia-cultivation-insight",
                 )
             )
 
