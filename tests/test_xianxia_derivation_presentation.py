@@ -1349,6 +1349,230 @@ def test_xianxia_session_notes_allow_editable_users_to_update_notes(
     assert "Track the jade token between scenes." in sheet_html
 
 
+def test_xianxia_session_resources_reject_stale_revision_conflicts(
+    client,
+    sign_in,
+    users,
+    app,
+    get_character,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Session Conflict Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    record = get_character("session-conflict-crane")
+    assert record is not None
+    stale_revision = record.state_record.revision
+
+    first = client.post(
+        "/campaigns/linden-pass/characters/session-conflict-crane/session/vitals",
+        data={
+            "expected_revision": stale_revision,
+            "current_hp": "8",
+            "temp_hp": "1",
+            "current_stance": "6",
+            "temp_stance": "2",
+            "current_jing": "0",
+            "current_qi": "1",
+            "current_shen": "0",
+            "current_yin": "0",
+            "current_yang": "1",
+            "current_dao": "2",
+            "mode": "session",
+            "page": "resources",
+            "return_view": "session-character",
+        },
+        follow_redirects=False,
+    )
+    assert first.status_code == 302
+
+    second = client.post(
+        "/campaigns/linden-pass/characters/session-conflict-crane/session/vitals",
+        data={
+            "expected_revision": stale_revision,
+            "current_hp": "1",
+            "temp_hp": "9",
+            "current_stance": "1",
+            "temp_stance": "9",
+            "current_jing": "1",
+            "current_qi": "0",
+            "current_shen": "1",
+            "current_yin": "1",
+            "current_yang": "0",
+            "current_dao": "3",
+            "mode": "session",
+            "page": "resources",
+            "return_view": "session-character",
+        },
+        follow_redirects=True,
+    )
+
+    assert second.status_code == 200
+    conflict_html = unescape(second.get_data(as_text=True))
+    assert "This sheet changed in another session. Refresh the page and try again." in conflict_html
+    assert 'name="current_hp" value="8" min="0" max="10"' in conflict_html
+    assert 'name="temp_hp" value="1" min="0"' in conflict_html
+    assert 'name="current_stance" value="6" min="0" max="10"' in conflict_html
+    assert 'name="current_dao" value="2" min="0" max="3"' in conflict_html
+
+    updated = get_character("session-conflict-crane")
+    assert updated is not None
+    assert updated.state_record.revision == stale_revision + 1
+    assert updated.state_record.state["vitals"] == {"current_hp": 8, "temp_hp": 1}
+    assert updated.state_record.state["xianxia"]["vitals"] == {
+        "current_hp": 8,
+        "temp_hp": 1,
+        "current_stance": 6,
+        "temp_stance": 2,
+    }
+    assert updated.state_record.state["xianxia"]["energies"] == {
+        "jing": {"current": 0},
+        "qi": {"current": 1},
+        "shen": {"current": 0},
+    }
+    assert updated.state_record.state["xianxia"]["yin_yang"] == {
+        "yin_current": 0,
+        "yang_current": 1,
+    }
+    assert updated.state_record.state["xianxia"]["dao"] == {"current": 2}
+
+
+def test_xianxia_session_active_state_rejects_stale_revision_conflicts(
+    client,
+    sign_in,
+    users,
+    app,
+    get_character,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Active Conflict Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    record = get_character("active-conflict-crane")
+    assert record is not None
+    stale_revision = record.state_record.revision
+
+    first = client.post(
+        "/campaigns/linden-pass/characters/active-conflict-crane/session/xianxia-active-state",
+        data={
+            "expected_revision": stale_revision,
+            "active_stance_name": "Stone Root",
+            "active_aura_name": "Azure Bell",
+            "mode": "session",
+            "page": "resources",
+            "return_view": "session-character",
+        },
+        follow_redirects=False,
+    )
+    assert first.status_code == 302
+
+    second = client.post(
+        "/campaigns/linden-pass/characters/active-conflict-crane/session/xianxia-active-state",
+        data={
+            "expected_revision": stale_revision,
+            "active_stance_name": "Flowing Reed",
+            "active_aura_name": "Scarlet Wind",
+            "mode": "session",
+            "page": "resources",
+            "return_view": "session-character",
+        },
+        follow_redirects=True,
+    )
+
+    assert second.status_code == 200
+    conflict_html = unescape(second.get_data(as_text=True))
+    assert "This sheet changed in another session. Refresh the page and try again." in conflict_html
+    assert 'name="active_stance_name" value="Stone Root"' in conflict_html
+    assert 'name="active_aura_name" value="Azure Bell"' in conflict_html
+    assert "Flowing Reed" not in conflict_html
+    assert "Scarlet Wind" not in conflict_html
+
+    updated = get_character("active-conflict-crane")
+    assert updated is not None
+    assert updated.state_record.revision == stale_revision + 1
+    assert updated.state_record.state["xianxia"]["active_stance"] == {"name": "Stone Root"}
+    assert updated.state_record.state["xianxia"]["active_aura"] == {"name": "Azure Bell"}
+
+
+def test_xianxia_session_note_conflict_stays_on_session_surface(
+    client,
+    sign_in,
+    users,
+    app,
+    get_character,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Note Conflict Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    record = get_character("note-conflict-crane")
+    assert record is not None
+    stale_revision = record.state_record.revision
+
+    first = client.post(
+        "/campaigns/linden-pass/characters/note-conflict-crane/session/notes",
+        data={
+            "expected_revision": stale_revision,
+            "player_notes_markdown": "Existing Xianxia session note.",
+            "mode": "session",
+            "page": "notes",
+            "return_view": "session-character",
+        },
+        follow_redirects=False,
+    )
+    assert first.status_code == 302
+
+    conflict = client.post(
+        "/campaigns/linden-pass/characters/note-conflict-crane/session/notes",
+        data={
+            "expected_revision": stale_revision,
+            "player_notes_markdown": "Draft note from stale Xianxia session state.",
+            "mode": "session",
+            "page": "notes",
+            "return_view": "session-character",
+        },
+        follow_redirects=True,
+    )
+
+    assert conflict.status_code == 409
+    conflict_html = unescape(conflict.get_data(as_text=True))
+    assert "Session Character" in conflict_html
+    assert "Save note" in conflict_html
+    assert "Draft note from stale Xianxia session state." in conflict_html
+    assert "This sheet changed in another session. Refresh the page and try again." in conflict_html
+
+    updated = get_character("note-conflict-crane")
+    assert updated is not None
+    assert updated.state_record.revision == stale_revision + 1
+    assert updated.state_record.state["notes"]["player_notes_markdown"] == (
+        "Existing Xianxia session note."
+    )
+    assert updated.state_record.state["xianxia"]["notes"] == {
+        "player_notes_markdown": "Existing Xianxia session note."
+    }
+
+
 def test_xianxia_martial_arts_page_marks_incomplete_rank_progress(
     client,
     sign_in,
