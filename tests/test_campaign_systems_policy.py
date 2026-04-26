@@ -299,6 +299,7 @@ def test_xianxia_core_rule_seed_entries_cover_milestone_one_references():
         "minions",
         "companion-derivation",
         "gm-approval-gates",
+        "bing-ti-legendary-errata",
     }
 
     assert set(entry_map) == required_slugs
@@ -320,6 +321,18 @@ def test_xianxia_core_rule_seed_entries_cover_milestone_one_references():
     )
     assert entry_map["dying-and-unconsciousness"]["metadata"]["support_state"] == "reference_only"
     assert entry_map["minions"]["metadata"]["support_state"] == "reference_only"
+    bing_ti_errata = entry_map["bing-ti-legendary-errata"]
+    assert bing_ti_errata["metadata"]["support_state"] == "reference_only"
+    assert bing_ti_errata["metadata"]["xianxia_rule_key"] == "bing_ti_legendary_errata"
+    assert bing_ti_errata["metadata"]["xianxia_errata"] == {
+        "subject": "Bing Ti",
+        "scope": "Legendary rank",
+        "incorrect_text": "Ji",
+        "corrected_text": "Jing",
+    }
+    assert "bing ti" in bing_ti_errata["search_text"]
+    assert "jing" in bing_ti_errata["search_text"]
+    assert "read Ji as Jing" in bing_ti_errata["rendered_html"]
 
 
 def test_xianxia_condition_and_status_seed_entries_are_forced_reference_only():

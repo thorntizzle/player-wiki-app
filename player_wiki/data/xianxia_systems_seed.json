@@ -1,5 +1,5 @@
 {
-  "version": "2026-04-26.2",
+  "version": "2026-04-26.3",
   "source_id": "XIANXIA-HOMEBREW",
   "source_title": "Xianxia Homebrew",
   "storage_strategy": "curated_seed_data",
@@ -916,6 +916,46 @@
             "Ascendant Arts require explicit GM approval in addition to their Insight cost.",
             "Dao Immolating Techniques may be prepared ahead of time or invented at use time; preparation is not required, but it can make GM approval easier.",
             "Dao Immolating Techniques require explicit GM approval at the time of use and are more narrative than mechanical."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Bing Ti Legendary Errata",
+      "entry_type": "rule",
+      "slug": "bing-ti-legendary-errata",
+      "facets": ["rule", "martial_art", "martial_art_rank"],
+      "aliases": ["Bing Ti", "Legendary rank", "Ji", "Jing", "errata"],
+      "summary": "Bing Ti's Legendary rank uses Jing wherever the reviewed draft says Ji.",
+      "metadata": {
+        "rule_key": "bing_ti_legendary_errata",
+        "rule_facets": ["errata", "martial_art", "martial_art_rank", "jing"],
+        "support_state": "reference_only",
+        "xianxia_support_state": "reference_only",
+        "xianxia_rule_key": "bing_ti_legendary_errata",
+        "xianxia_errata": {
+          "subject": "Bing Ti",
+          "scope": "Legendary rank",
+          "incorrect_text": "Ji",
+          "corrected_text": "Jing"
+        }
+      },
+      "body": {
+        "support_state": "reference_only",
+        "xianxia_support_state": "reference_only",
+        "xianxia_errata": {
+          "subject": "Bing Ti",
+          "scope": "Legendary rank",
+          "incorrect_text": "Ji",
+          "corrected_text": "Jing"
+        }
+      },
+      "sections": [
+        {
+          "title": "Correction",
+          "bullets": [
+            "In Bing Ti's Legendary rank, read Ji as Jing.",
+            "This records the GM clarification only; the Martial Art catalog entry remains deferred to the Martial Arts seed slice."
           ]
         }
       ]
