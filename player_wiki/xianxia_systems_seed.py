@@ -32,6 +32,7 @@ XIANXIA_ENTRY_FACET_KEYS = (
     "stance",
     "aura",
     "generic_technique",
+    "basic_action",
     "condition",
     "status",
     "range_rule",
@@ -43,7 +44,9 @@ XIANXIA_ENTRY_FACET_KEYS = (
     "companion_rule",
     "gm_approval_rule",
 )
-XIANXIA_REFERENCE_ONLY_ENTRY_FACET_KEYS = frozenset({"condition", "status"})
+XIANXIA_REFERENCE_ONLY_ENTRY_FACET_KEYS = frozenset(
+    {"basic_action", "condition", "status"}
+)
 XIANXIA_FACET_SUPPORT_STATES = frozenset({"reference_only", "modeled"})
 XIANXIA_EFFORT_KEYS = (
     "basic",

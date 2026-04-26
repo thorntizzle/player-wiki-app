@@ -240,6 +240,7 @@ def test_xianxia_entry_facet_definitions_cover_milestone_one_concepts():
         "stance",
         "aura",
         "generic_technique",
+        "basic_action",
         "condition",
         "status",
         "range_rule",
@@ -268,6 +269,8 @@ def test_xianxia_entry_facet_definitions_cover_milestone_one_concepts():
     assert facet_map["armor"]["default_entry_type"] == "armor"
     assert facet_map["martial_art"]["default_entry_type"] == "martial_art"
     assert facet_map["generic_technique"]["default_entry_type"] == "generic_technique"
+    assert facet_map["basic_action"]["default_entry_type"] == "basic_action"
+    assert facet_map["basic_action"]["support_state"] == "reference_only"
     assert facet_map["condition"]["default_entry_type"] == "rule"
     assert facet_map["condition"]["support_state"] == "reference_only"
     assert facet_map["status"]["default_entry_type"] == "rule"
@@ -278,6 +281,10 @@ def test_xianxia_entry_facet_definitions_cover_milestone_one_concepts():
     assert martial_art_facet is not None
     assert martial_art_facet["key"] == "martial_art"
     assert martial_art_facet["label"] == "Martial Art"
+    basic_action_facet = get_xianxia_entry_facet_definition("basic-action")
+    assert basic_action_facet is not None
+    assert basic_action_facet["key"] == "basic_action"
+    assert basic_action_facet["label"] == "Basic Action"
 
 
 def test_xianxia_effort_definitions_encode_magic_effort_as_canonical_label():
@@ -1082,12 +1089,80 @@ def test_xianxia_generic_technique_seed_entries_cover_requirements_catalog():
     assert "Gain an additional +1 Action" in enhanced_flowing_dao["rendered_html"]
 
 
-def test_xianxia_condition_and_status_seed_entries_are_forced_reference_only():
-    for facet in ("condition", "status"):
+def test_xianxia_basic_action_seed_entries_cover_requirements_catalog():
+    entries = build_xianxia_systems_seed_entries()
+    basic_action_entries = [entry for entry in entries if entry["entry_type"] == "basic_action"]
+    expected_titles = [
+        "Recoup",
+        "Recollect",
+        "Duel",
+        "Taunt",
+        "Wide Dispatch",
+        "Flowing Dao",
+        "Throat Jab",
+        "Knuckle Strike",
+        "Defend",
+        "All-Out Offense",
+        "Parry",
+    ]
+
+    assert [entry["title"] for entry in basic_action_entries] == expected_titles
+    assert [entry["metadata"]["basic_action_catalog_order"] for entry in basic_action_entries] == list(
+        range(1, 12)
+    )
+    assert all(entry["metadata"]["xianxia_entry_facets"] == ["basic_action"] for entry in basic_action_entries)
+    assert all(entry["metadata"]["catalog_role"] == "basic_action" for entry in basic_action_entries)
+    assert all(
+        entry["metadata"]["basic_action_details_status"] == "text_seeded_structured_metadata_deferred"
+        for entry in basic_action_entries
+    )
+    assert all(entry["metadata"]["support_state"] == "reference_only" for entry in basic_action_entries)
+    assert all(entry["metadata"]["xianxia_support_state"] == "reference_only" for entry in basic_action_entries)
+    assert all(entry["body"]["support_state"] == "reference_only" for entry in basic_action_entries)
+    assert all(
+        entry["body"]["xianxia_basic_action"]["details_status"]
+        == "text_seeded_structured_metadata_deferred"
+        for entry in basic_action_entries
+    )
+    assert all("range_tags" not in entry["metadata"] for entry in basic_action_entries)
+    assert all("timing_tags" not in entry["metadata"] for entry in basic_action_entries)
+
+    entry_map = {entry["slug"]: entry for entry in basic_action_entries}
+    assert entry_map["recoup"]["metadata"]["basic_action_key"] == "recoup"
+    assert "recover 10 Stance" in entry_map["recoup"]["body"]["xianxia_basic_action"]["source_text"]
+    assert "recover 10 Stance" in entry_map["recoup"]["rendered_html"]
+    assert "recoup action" in entry_map["recoup"]["search_text"]
+
+    duel = entry_map["duel"]
+    assert duel["metadata"]["xianxia_basic_action_key"] == "duel"
+    assert "Ranged Attacks are automatically made HARD" in duel["rendered_html"]
+    assert "minion" in duel["search_text"]
+
+    flowing_dao = entry_map["flowing-dao"]
+    assert flowing_dao["metadata"]["basic_action_catalog_order"] == 6
+    assert "spend a point of Dao" in flowing_dao["rendered_html"]
+
+    defend = entry_map["defend"]
+    assert defend["title"] == "Defend"
+    assert "Defend Stance" in defend["metadata"]["aliases"]
+    assert "Defense is +5" in defend["rendered_html"]
+
+    all_out_offense = entry_map["all-out-offense"]
+    assert all_out_offense["metadata"]["basic_action_key"] == "all_out_offense"
+    assert "Deal an additional +5 Damage" in all_out_offense["rendered_html"]
+
+    parry = entry_map["parry"]
+    assert parry["metadata"]["basic_action_catalog_order"] == 11
+    assert "Counter-Attack" in parry["rendered_html"]
+    assert "Weapon Effort" in parry["rendered_html"]
+
+
+def test_xianxia_reference_only_seed_entry_facets_are_forced_reference_only():
+    for facet in ("basic_action", "condition", "status"):
         entry = _build_seed_entry(
             {
                 "title": f"Reference {facet}",
-                "entry_type": "rule",
+                "entry_type": facet,
                 "facets": [facet],
                 "summary": f"Reference-only Xianxia {facet} reminder.",
             },
@@ -1095,7 +1170,7 @@ def test_xianxia_condition_and_status_seed_entries_are_forced_reference_only():
             source_path="managed:test",
         )
 
-        assert entry["entry_type"] == "rule"
+        assert entry["entry_type"] == facet
         assert entry["metadata"]["facets"] == [facet]
         assert entry["metadata"]["support_state"] == "reference_only"
         assert entry["metadata"]["xianxia_support_state"] == "reference_only"
@@ -1356,8 +1431,12 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
     generic_technique_category = client.get(
         f"/campaigns/linden-pass/systems/sources/{XIANXIA_HOMEBREW_SOURCE_ID}/types/generic_technique"
     )
+    basic_action_category = client.get(
+        f"/campaigns/linden-pass/systems/sources/{XIANXIA_HOMEBREW_SOURCE_ID}/types/basic_action"
+    )
     demons_fist_entry = client.get("/campaigns/linden-pass/systems/entries/demons-fist")
     qi_blast_entry = client.get("/campaigns/linden-pass/systems/entries/qi-blast")
+    recoup_entry = client.get("/campaigns/linden-pass/systems/entries/recoup")
     dnd_entry = client.get("/campaigns/linden-pass/systems/entries/dnd-dao-breathing")
 
     assert systems.status_code == 200
@@ -1376,8 +1455,12 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
     seed_generic_technique_count = sum(
         1 for entry in seed_entries if entry["entry_type"] == "generic_technique"
     )
-    assert f"{seed_count} browsable entries across 3" in source_html
+    seed_basic_action_count = sum(
+        1 for entry in seed_entries if entry["entry_type"] == "basic_action"
+    )
+    assert f"{seed_count} browsable entries across 4" in source_html
     assert "Generic Techniques" in source_html
+    assert "Basic Actions" in source_html
 
     assert rule_category.status_code == 200
     category_html = rule_category.get_data(as_text=True)
@@ -1397,6 +1480,14 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
     assert "Enhanced Flowing Dao" in generic_technique_html
     assert f"Showing all {seed_generic_technique_count} generic techniques in this source." in (
         generic_technique_html
+    )
+
+    assert basic_action_category.status_code == 200
+    basic_action_html = basic_action_category.get_data(as_text=True)
+    assert "Recoup" in basic_action_html
+    assert "Parry" in basic_action_html
+    assert f"Showing all {seed_basic_action_count} basic actions in this source." in (
+        basic_action_html
     )
 
     assert demons_fist_entry.status_code == 200
@@ -1423,6 +1514,11 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
     assert "Insight Cost" in qi_blast_html
     assert "Resource Costs" in qi_blast_html
     assert "qi 1" in qi_blast_html
+
+    assert recoup_entry.status_code == 200
+    recoup_html = recoup_entry.get_data(as_text=True)
+    assert "Recoup" in recoup_html
+    assert "Spend an Action and 1 Energy" in recoup_html
     assert "Effort Tags" in qi_blast_html
     assert "magic effort damage" in qi_blast_html
     assert "Support State" in qi_blast_html

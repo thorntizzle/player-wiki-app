@@ -1,5 +1,5 @@
 {
-  "version": "2026-04-26.15",
+  "version": "2026-04-26.16",
   "source_id": "XIANXIA-HOMEBREW",
   "source_title": "Xianxia Homebrew",
   "storage_strategy": "curated_seed_data",
@@ -129,6 +129,14 @@
       "group": "catalog",
       "default_entry_type": "generic_technique",
       "summary": "Standalone purchasable Generic Techniques and Maneuvers learned with Insight after character creation."
+    },
+    {
+      "key": "basic_action",
+      "label": "Basic Action",
+      "group": "catalog",
+      "default_entry_type": "basic_action",
+      "support_state": "reference_only",
+      "summary": "Core Xianxia Basic Actions and basic Stances stored as reference-only Systems catalog entries."
     },
     {
       "key": "condition",
@@ -3993,6 +4001,369 @@
         {
           "title": "Source Text",
           "paragraphs": ["[5] Enhanced Flowing Dao: Gain an additional +1 Action or Regain 10 HP/Stance."]
+        }
+      ]
+    },
+    {
+      "title": "Recoup",
+      "entry_type": "basic_action",
+      "slug": "recoup",
+      "source_page": "Xianxia Homebrew Basic Actions",
+      "facets": ["basic_action"],
+      "aliases": ["Recoup Action", "Basic Action"],
+      "summary": "Reference-only Xianxia Basic Action for spending an Action and Energy to recover Stance.",
+      "search_text": "basic action recoup stance energy",
+      "metadata": {
+        "basic_action_key": "recoup",
+        "xianxia_basic_action_key": "recoup",
+        "catalog_role": "basic_action",
+        "basic_action_catalog_order": 1,
+        "basic_action_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "456-478"
+      },
+      "body": {
+        "xianxia_basic_action": {
+          "key": "recoup",
+          "catalog_order": 1,
+          "catalog_role": "basic_action",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "Recoup: Spend an Action and 1 Energy of any kind and recover 10 Stance."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["Recoup: Spend an Action and 1 Energy of any kind and recover 10 Stance."]
+        }
+      ]
+    },
+    {
+      "title": "Recollect",
+      "entry_type": "basic_action",
+      "slug": "recollect",
+      "source_page": "Xianxia Homebrew Basic Actions",
+      "facets": ["basic_action"],
+      "aliases": ["Recollect Action", "Basic Action"],
+      "summary": "Reference-only Xianxia Basic Action for meditating through a Turn to recover Energy.",
+      "search_text": "basic action recollect meditate energy",
+      "metadata": {
+        "basic_action_key": "recollect",
+        "xianxia_basic_action_key": "recollect",
+        "catalog_role": "basic_action",
+        "basic_action_catalog_order": 2,
+        "basic_action_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "456-478"
+      },
+      "body": {
+        "xianxia_basic_action": {
+          "key": "recollect",
+          "catalog_order": 2,
+          "catalog_role": "basic_action",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "Recollect: Spend the Turn meditating and gathering the Energies of the air, recover 1 Point of any Energy."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["Recollect: Spend the Turn meditating and gathering the Energies of the air, recover 1 Point of any Energy."]
+        }
+      ]
+    },
+    {
+      "title": "Duel",
+      "entry_type": "basic_action",
+      "slug": "duel",
+      "source_page": "Xianxia Homebrew Basic Actions",
+      "facets": ["basic_action"],
+      "aliases": ["Duel Action", "Basic Action"],
+      "summary": "Reference-only Xianxia Basic Action for locking melee attackers into a close-combat exchange.",
+      "search_text": "basic action duel melee close combat ranged hard minion disengage",
+      "metadata": {
+        "basic_action_key": "duel",
+        "xianxia_basic_action_key": "duel",
+        "catalog_role": "basic_action",
+        "basic_action_catalog_order": 3,
+        "basic_action_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "456-478"
+      },
+      "body": {
+        "xianxia_basic_action": {
+          "key": "duel",
+          "catalog_order": 3,
+          "catalog_role": "basic_action",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "Duel: After performing a Melee Attack a Character can choose to initiate a Duel against their Target. Doing so will lock both Characters into a heated exchange of close-combat blows in which neither can easily escape nor can outsiders easily interfere in. Ranged Attacks are automatically made HARD while in a Duel, and outside Ranged Attacks shot at either of the characters that are engaged in a Duel has a chance of hitting the wrong Target. A character may choose to Disengage from a Duel with an Action and Move one space away from their former opponent. Minions can not engage Duels themselves but can be engaged in Duels."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["Duel: After performing a Melee Attack a Character can choose to initiate a Duel against their Target. Doing so will lock both Characters into a heated exchange of close-combat blows in which neither can easily escape nor can outsiders easily interfere in. Ranged Attacks are automatically made HARD while in a Duel, and outside Ranged Attacks shot at either of the characters that are engaged in a Duel has a chance of hitting the wrong Target. A character may choose to Disengage from a Duel with an Action and Move one space away from their former opponent. Minions can not engage Duels themselves but can be engaged in Duels."]
+        }
+      ]
+    },
+    {
+      "title": "Taunt",
+      "entry_type": "basic_action",
+      "slug": "taunt",
+      "source_page": "Xianxia Homebrew Basic Actions",
+      "facets": ["basic_action"],
+      "aliases": ["Taunt Action", "Basic Action"],
+      "summary": "Reference-only Xianxia Basic Action for contesting Charisma against a target's Wisdom.",
+      "search_text": "basic action taunt charisma wisdom contested",
+      "metadata": {
+        "basic_action_key": "taunt",
+        "xianxia_basic_action_key": "taunt",
+        "catalog_role": "basic_action",
+        "basic_action_catalog_order": 4,
+        "basic_action_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "456-478"
+      },
+      "body": {
+        "xianxia_basic_action": {
+          "key": "taunt",
+          "catalog_order": 4,
+          "catalog_role": "basic_action",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "Taunt: Spend an Action and make a contested CHA check against the Target's WIS. On a Success the Target must spend at least one Action Moving towards or Attacking you next Turn."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["Taunt: Spend an Action and make a contested CHA check against the Target's WIS. On a Success the Target must spend at least one Action Moving towards or Attacking you next Turn."]
+        }
+      ]
+    },
+    {
+      "title": "Wide Dispatch",
+      "entry_type": "basic_action",
+      "slug": "wide-dispatch",
+      "source_page": "Xianxia Homebrew Basic Actions",
+      "facets": ["basic_action"],
+      "aliases": ["Wide Dispatch Action", "Basic Action"],
+      "summary": "Reference-only Xianxia Basic Action for making a limited area attack against nearby Minion targets.",
+      "search_text": "basic action wide dispatch area attack minion basic effort weapon effort",
+      "metadata": {
+        "basic_action_key": "wide_dispatch",
+        "xianxia_basic_action_key": "wide_dispatch",
+        "catalog_role": "basic_action",
+        "basic_action_catalog_order": 5,
+        "basic_action_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "456-478"
+      },
+      "body": {
+        "xianxia_basic_action": {
+          "key": "wide_dispatch",
+          "catalog_order": 5,
+          "catalog_role": "basic_action",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "Wide Dispatch: You may choose to make an Area of Effect Attack against all Minion Targets within 3 Spaces of you. However this Attack can only deal Basic (If Unarmed) or Weapon Effort Damage (If Armed)."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["Wide Dispatch: You may choose to make an Area of Effect Attack against all Minion Targets within 3 Spaces of you. However this Attack can only deal Basic (If Unarmed) or Weapon Effort Damage (If Armed)."]
+        }
+      ]
+    },
+    {
+      "title": "Flowing Dao",
+      "entry_type": "basic_action",
+      "slug": "flowing-dao",
+      "source_page": "Xianxia Homebrew Basic Actions",
+      "facets": ["basic_action"],
+      "aliases": ["Flowing Dao Action", "Basic Action"],
+      "summary": "Reference-only Xianxia Basic Action for spending Dao to gain an Action or recover HP/Stance.",
+      "search_text": "basic action flowing dao action recover hp stance",
+      "metadata": {
+        "basic_action_key": "flowing_dao",
+        "xianxia_basic_action_key": "flowing_dao",
+        "catalog_role": "basic_action",
+        "basic_action_catalog_order": 6,
+        "basic_action_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "456-478"
+      },
+      "body": {
+        "xianxia_basic_action": {
+          "key": "flowing_dao",
+          "catalog_order": 6,
+          "catalog_role": "basic_action",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "Flowing Dao: Once per Turn, you may spend a point of Dao to either gain +1 additional Action or Regain 5 HP/Stance."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["Flowing Dao: Once per Turn, you may spend a point of Dao to either gain +1 additional Action or Regain 5 HP/Stance."]
+        }
+      ]
+    },
+    {
+      "title": "Throat Jab",
+      "entry_type": "basic_action",
+      "slug": "throat-jab",
+      "source_page": "Xianxia Homebrew Basic Actions",
+      "facets": ["basic_action"],
+      "aliases": ["Throat Jab Action", "Basic Action"],
+      "summary": "Reference-only Xianxia Basic Action for forcing a Constitution check against vocalizing or incantations.",
+      "search_text": "basic action throat jab constitution vocalize incantation",
+      "metadata": {
+        "basic_action_key": "throat_jab",
+        "xianxia_basic_action_key": "throat_jab",
+        "catalog_role": "basic_action",
+        "basic_action_catalog_order": 7,
+        "basic_action_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "456-478"
+      },
+      "body": {
+        "xianxia_basic_action": {
+          "key": "throat_jab",
+          "catalog_order": 7,
+          "catalog_role": "basic_action",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "Throat Jab: Spend an Action, Target must make a successful CON check or be unable to vocalize or use incantations for 1 Round."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["Throat Jab: Spend an Action, Target must make a successful CON check or be unable to vocalize or use incantations for 1 Round."]
+        }
+      ]
+    },
+    {
+      "title": "Knuckle Strike",
+      "entry_type": "basic_action",
+      "slug": "knuckle-strike",
+      "source_page": "Xianxia Homebrew Basic Actions",
+      "facets": ["basic_action"],
+      "aliases": ["Knuckle Strike Action", "Basic Action"],
+      "summary": "Reference-only Xianxia Basic Action for forcing a Dexterity check against using Mudras.",
+      "search_text": "basic action knuckle strike dexterity mudras",
+      "metadata": {
+        "basic_action_key": "knuckle_strike",
+        "xianxia_basic_action_key": "knuckle_strike",
+        "catalog_role": "basic_action",
+        "basic_action_catalog_order": 8,
+        "basic_action_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "456-478"
+      },
+      "body": {
+        "xianxia_basic_action": {
+          "key": "knuckle_strike",
+          "catalog_order": 8,
+          "catalog_role": "basic_action",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "Knuckle Strike: Spend an Action, Target must make a successful DEX check or be unable to use Mudras for 1 Round."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["Knuckle Strike: Spend an Action, Target must make a successful DEX check or be unable to use Mudras for 1 Round."]
+        }
+      ]
+    },
+    {
+      "title": "Defend",
+      "entry_type": "basic_action",
+      "slug": "defend",
+      "source_page": "Xianxia Homebrew Basic Actions",
+      "facets": ["basic_action"],
+      "aliases": ["Defend Stance", "Defend (Stance)", "Basic Action"],
+      "summary": "Reference-only Xianxia Basic Stance that trades Attack for Defense and damage reduction.",
+      "search_text": "basic action defend stance defense attack damage reduction",
+      "metadata": {
+        "basic_action_key": "defend",
+        "xianxia_basic_action_key": "defend",
+        "catalog_role": "basic_action",
+        "basic_action_catalog_order": 9,
+        "basic_action_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "456-478"
+      },
+      "body": {
+        "xianxia_basic_action": {
+          "key": "defend",
+          "catalog_order": 9,
+          "catalog_role": "basic_action",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "Defend (Stance): Spend an Action, While Active your Defense is +5 and your Attacks are -5. If Hit you take 5 less Damage."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["Defend (Stance): Spend an Action, While Active your Defense is +5 and your Attacks are -5. If Hit you take 5 less Damage."]
+        }
+      ]
+    },
+    {
+      "title": "All-Out Offense",
+      "entry_type": "basic_action",
+      "slug": "all-out-offense",
+      "source_page": "Xianxia Homebrew Basic Actions",
+      "facets": ["basic_action"],
+      "aliases": ["All-Out Offense Stance", "All-Out Offense (Stance)", "Basic Action"],
+      "summary": "Reference-only Xianxia Basic Stance that trades Defense for Attack and additional damage.",
+      "search_text": "basic action all-out offense stance attack defense damage",
+      "metadata": {
+        "basic_action_key": "all_out_offense",
+        "xianxia_basic_action_key": "all_out_offense",
+        "catalog_role": "basic_action",
+        "basic_action_catalog_order": 10,
+        "basic_action_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "456-478"
+      },
+      "body": {
+        "xianxia_basic_action": {
+          "key": "all_out_offense",
+          "catalog_order": 10,
+          "catalog_role": "basic_action",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "All-Out Offense (Stance): Spend an Action, While Active your Attack is +5 and your Defense is -5. Deal an additional +5 Damage."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["All-Out Offense (Stance): Spend an Action, While Active your Attack is +5 and your Defense is -5. Deal an additional +5 Damage."]
+        }
+      ]
+    },
+    {
+      "title": "Parry",
+      "entry_type": "basic_action",
+      "slug": "parry",
+      "source_page": "Xianxia Homebrew Basic Actions",
+      "facets": ["basic_action"],
+      "aliases": ["Parry Stance", "Parry (Stance)", "Basic Action"],
+      "summary": "Reference-only Xianxia Basic Stance for a stationary defensive posture and counter-attack reminder.",
+      "search_text": "basic action parry stance defense attack counter-attack weapon effort",
+      "metadata": {
+        "basic_action_key": "parry",
+        "xianxia_basic_action_key": "parry",
+        "catalog_role": "basic_action",
+        "basic_action_catalog_order": 11,
+        "basic_action_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "456-478"
+      },
+      "body": {
+        "xianxia_basic_action": {
+          "key": "parry",
+          "catalog_order": 11,
+          "catalog_role": "basic_action",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "Parry (Stance): Spend an Action, While Active add +3 to Defense and Attack, you can not Move while this Stance is Active. If your opponent Attacks and misses you may make an immediate Counter-Attack, dealing an additional Weapon Effort in Damage if successful."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["Parry (Stance): Spend an Action, While Active add +3 to Defense and Attack, you can not Move while this Stance is Active. If your opponent Attacks and misses you may make an immediate Counter-Attack, dealing an additional Weapon Effort in Damage if successful."]
         }
       ]
     }
