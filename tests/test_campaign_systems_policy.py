@@ -16,6 +16,12 @@ from player_wiki.auth import get_campaign_scope_visibility, get_effective_campai
 from player_wiki.campaign_visibility import VISIBILITY_DM, VISIBILITY_PLAYERS, VISIBILITY_PUBLIC
 from player_wiki.system_policy import DND_5E_SYSTEM_CODE, XIANXIA_SYSTEM_CODE
 from player_wiki.systems_service import XIANXIA_HOMEBREW_SOURCE_ID
+from player_wiki.xianxia_systems_seed import (
+    XIANXIA_SYSTEMS_SEED_DATA_RELATIVE_PATH,
+    XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY,
+    XIANXIA_SYSTEMS_SEED_VERSION,
+    build_xianxia_systems_seed_entries,
+)
 from player_wiki.systems_importer import Dnd5eSystemsImporter
 from player_wiki.systems_models import SystemsEntryRecord
 from tests.test_systems_importer import (
@@ -155,6 +161,49 @@ def test_xianxia_builtin_systems_library_identity_seeds_initial_homebrew_source(
         assert homebrew_source.public_visibility_allowed is False
         assert homebrew_source.requires_unofficial_notice is False
         assert store.count_entries_for_source(XIANXIA_SYSTEM_CODE, XIANXIA_HOMEBREW_SOURCE_ID) == 0
+        assert build_xianxia_systems_seed_entries() == []
+
+        source_catalog_entry = service._source_catalog_entry(homebrew_source)
+        assert source_catalog_entry is not None
+        assert source_catalog_entry["seed_storage_strategy"] == XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY
+        assert source_catalog_entry["seed_data_path"] == XIANXIA_SYSTEMS_SEED_DATA_RELATIVE_PATH
+        assert source_catalog_entry["seed_version"] == XIANXIA_SYSTEMS_SEED_VERSION
+
+
+def test_xianxia_empty_curated_seed_manifest_does_not_delete_existing_shared_rows(app):
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+
+        service.ensure_builtin_library_seeded(XIANXIA_SYSTEM_CODE)
+        store.replace_entries_for_source(
+            XIANXIA_SYSTEM_CODE,
+            XIANXIA_HOMEBREW_SOURCE_ID,
+            entries=[
+                {
+                    "entry_key": "xianxia|rule|xianxia-homebrew|admin-authored-draft",
+                    "entry_type": "rule",
+                    "slug": "admin-authored-draft",
+                    "title": "Admin Authored Draft",
+                    "search_text": "admin authored draft xianxia homebrew",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"rule_key": "admin-authored-draft"},
+                    "body": {},
+                    "rendered_html": "<p>Temporary shared draft row.</p>",
+                }
+            ],
+        )
+
+        service.ensure_builtin_library_seeded(XIANXIA_SYSTEM_CODE)
+        entries = store.list_entries_for_source(
+            XIANXIA_SYSTEM_CODE,
+            XIANXIA_HOMEBREW_SOURCE_ID,
+            entry_type="rule",
+            limit=None,
+        )
+
+        assert [entry.title for entry in entries] == ["Admin Authored Draft"]
 
 
 def test_xianxia_homebrew_source_policy_defaults_dm_only_when_campaign_selects_library(app):

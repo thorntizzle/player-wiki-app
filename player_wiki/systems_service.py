@@ -48,6 +48,14 @@ from .system_policy import (
     default_systems_library_slug,
     is_dnd_5e_systems_library,
 )
+from .xianxia_systems_seed import (
+    XIANXIA_HOMEBREW_SOURCE_ID,
+    XIANXIA_SYSTEMS_SEED_DATA_RELATIVE_PATH,
+    XIANXIA_SYSTEMS_SEED_SOURCE_TITLE,
+    XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY,
+    XIANXIA_SYSTEMS_SEED_VERSION,
+    build_xianxia_systems_seed_entries,
+)
 
 LICENSE_CLASS_LABELS = {
     "app_reference": "App-authored reference",
@@ -611,8 +619,6 @@ ABILITY_NAME_LABELS = {
     "cha": "Charisma",
 }
 
-XIANXIA_HOMEBREW_SOURCE_ID = "XIANXIA-HOMEBREW"
-
 DND_5E_SOURCE_CATALOG = (
     {
         "source_id": DND5E_RULES_REFERENCE_SOURCE_ID,
@@ -719,11 +725,14 @@ DND_5E_SOURCE_CATALOG = (
 XIANXIA_SOURCE_CATALOG = (
     {
         "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
-        "title": "Xianxia Homebrew",
+        "title": XIANXIA_SYSTEMS_SEED_SOURCE_TITLE,
         "license_class": "open_license",
         "public_visibility_allowed": False,
         "requires_unofficial_notice": False,
         "default_visibility": VISIBILITY_DM,
+        "seed_storage_strategy": XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY,
+        "seed_data_path": XIANXIA_SYSTEMS_SEED_DATA_RELATIVE_PATH,
+        "seed_version": XIANXIA_SYSTEMS_SEED_VERSION,
     },
 )
 
@@ -873,6 +882,7 @@ class SystemsService:
                 requires_unofficial_notice=bool(source.get("requires_unofficial_notice", True)),
             )
         self._ensure_builtin_reference_entries_seeded(library.library_slug)
+        self._ensure_xianxia_systems_entries_seeded(library.library_slug)
         return library
 
     def get_campaign_library_slug(self, campaign_slug: str) -> str:
@@ -3623,6 +3633,28 @@ class SystemsService:
         self.store.replace_entries_for_source(
             library_slug,
             DND5E_RULES_REFERENCE_SOURCE_ID,
+            entries=expected_entries,
+        )
+
+    def _ensure_xianxia_systems_entries_seeded(self, library_slug: str) -> None:
+        if library_slug != XIANXIA_SYSTEM_CODE:
+            return
+        expected_entries = build_xianxia_systems_seed_entries()
+        if not expected_entries:
+            return
+        sentinel_entry_key = str(expected_entries[0]["entry_key"])
+        sentinel_entry = self.store.get_entry(library_slug, sentinel_entry_key)
+        existing_count = self.store.count_entries_for_source(library_slug, XIANXIA_HOMEBREW_SOURCE_ID)
+        if (
+            sentinel_entry is not None
+            and sentinel_entry.source_id == XIANXIA_HOMEBREW_SOURCE_ID
+            and str((sentinel_entry.metadata or {}).get("seed_version") or "") == XIANXIA_SYSTEMS_SEED_VERSION
+            and existing_count == len(expected_entries)
+        ):
+            return
+        self.store.replace_entries_for_source(
+            library_slug,
+            XIANXIA_HOMEBREW_SOURCE_ID,
             entries=expected_entries,
         )
 
