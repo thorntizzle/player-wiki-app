@@ -118,6 +118,8 @@ XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_NOTE_NO_MASTER_REQUIRED = (
 XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_STATUS_LEARNABLE_WITHOUT_MASTER = (
     "learnable_without_master"
 )
+XIANXIA_BASIC_ACTION_DETAILS_STATUS_RANGE_TIMING_SEEDED = "range_timing_metadata_seeded"
+XIANXIA_BASIC_ACTION_DEFAULT_SUPPORT_STATE = "reference_only"
 
 
 @lru_cache(maxsize=1)
@@ -138,6 +140,7 @@ def _load_xianxia_systems_seed_payload() -> dict[str, Any]:
     raw_martial_art_rank_ability_grants = payload.get("martial_art_rank_ability_grants")
     raw_martial_art_rank_ability_effects = payload.get("martial_art_rank_ability_effects")
     raw_generic_technique_details = payload.get("generic_technique_details")
+    raw_basic_action_details = payload.get("basic_action_details")
     raw_entries = payload.get("entries")
 
     if source_id != XIANXIA_HOMEBREW_SOURCE_ID:
@@ -171,6 +174,9 @@ def _load_xianxia_systems_seed_payload() -> dict[str, Any]:
     payload["generic_technique_details"] = _normalize_generic_technique_details(
         raw_generic_technique_details
     )
+    payload["basic_action_details"] = _normalize_basic_action_details(
+        raw_basic_action_details
+    )
     _validate_martial_art_rank_resource_grants_cover_entries(
         payload["martial_art_rank_resource_grants"],
         raw_entries,
@@ -183,6 +189,10 @@ def _load_xianxia_systems_seed_payload() -> dict[str, Any]:
     )
     _validate_generic_technique_details_cover_entries(
         payload["generic_technique_details"],
+        raw_entries,
+    )
+    _validate_basic_action_details_cover_entries(
+        payload["basic_action_details"],
         raw_entries,
     )
 
@@ -265,6 +275,13 @@ def build_xianxia_generic_technique_details() -> dict[str, dict[str, Any]]:
     return {
         generic_technique_key: _copy_generic_technique_detail(detail)
         for generic_technique_key, detail in _XIANXIA_GENERIC_TECHNIQUE_DETAILS.items()
+    }
+
+
+def build_xianxia_basic_action_details() -> dict[str, dict[str, Any]]:
+    return {
+        basic_action_key: _copy_basic_action_detail(detail)
+        for basic_action_key, detail in _XIANXIA_BASIC_ACTION_DETAILS.items()
     }
 
 
@@ -355,6 +372,8 @@ def _build_seed_entry(raw_spec: dict[str, Any], *, index: int, source_path: str)
         _stamp_martial_art_rank_records(metadata, body, slug=slug)
     if entry_type == "generic_technique":
         _stamp_generic_technique_details(metadata, body, slug=slug)
+    if entry_type == "basic_action":
+        _stamp_basic_action_details(metadata, body, slug=slug)
     search_parts = [
         title,
         entry_type,
@@ -369,6 +388,8 @@ def _build_seed_entry(raw_spec: dict[str, Any], *, index: int, source_path: str)
         search_parts.extend(_martial_art_ability_search_parts(body))
     if entry_type == "generic_technique":
         search_parts.extend(_generic_technique_details_search_parts(body))
+    if entry_type == "basic_action":
+        search_parts.extend(_basic_action_details_search_parts(body))
     rendered_html = str(raw_spec.get("rendered_html") or "").strip() or _render_seed_entry_html(
         summary=summary,
         aliases=aliases,
@@ -379,6 +400,8 @@ def _build_seed_entry(raw_spec: dict[str, Any], *, index: int, source_path: str)
         rendered_html += _render_martial_art_draft_marker_html(body)
     if entry_type == "generic_technique":
         rendered_html += _render_generic_technique_details_html(body)
+    if entry_type == "basic_action":
+        rendered_html += _render_basic_action_details_html(body)
     return {
         "entry_key": entry_key,
         "entry_type": entry_type,
@@ -1055,6 +1078,67 @@ def _normalize_generic_technique_details(raw_details: object) -> dict[str, dict[
     return normalized
 
 
+def _normalize_basic_action_details(raw_details: object) -> dict[str, dict[str, Any]]:
+    if not isinstance(raw_details, dict):
+        raise ValueError(
+            "Xianxia Systems seed payload must include a basic_action_details object."
+        )
+
+    normalized: dict[str, dict[str, Any]] = {}
+    for raw_key, raw_detail in raw_details.items():
+        basic_action_key = _normalize_identifier(raw_key)
+        if not basic_action_key:
+            raise ValueError("Xianxia Basic Action details include a blank key.")
+        if basic_action_key in normalized:
+            raise ValueError(
+                f"Xianxia Basic Action details for {basic_action_key!r} are duplicated."
+            )
+        if not isinstance(raw_detail, dict):
+            raise ValueError(
+                f"Xianxia Basic Action details for {basic_action_key!r} must be an object."
+            )
+
+        support_state = _normalize_identifier(
+            raw_detail.get("support_state")
+            or raw_detail.get("support")
+            or XIANXIA_BASIC_ACTION_DEFAULT_SUPPORT_STATE
+        )
+        if support_state != XIANXIA_BASIC_ACTION_DEFAULT_SUPPORT_STATE:
+            raise ValueError(
+                f"Xianxia Basic Action {basic_action_key!r} must remain reference_only "
+                "in Milestone 1."
+            )
+
+        range_tags = _normalize_ability_tag_list(
+            raw_detail.get("range_tags", raw_detail.get("ranges")),
+            context=f"Xianxia Basic Action {basic_action_key!r} range_tags",
+        )
+        timing_tags = _normalize_ability_tag_list(
+            raw_detail.get("timing_tags", raw_detail.get("timing")),
+            context=f"Xianxia Basic Action {basic_action_key!r} timing_tags",
+        )
+        range_notes = _normalize_string_list(
+            raw_detail.get("range_notes", raw_detail.get("range_note"))
+        )
+        timing_notes = _normalize_string_list(
+            raw_detail.get("timing_notes", raw_detail.get("timing_note"))
+        )
+        if not range_tags and not timing_tags and not range_notes and not timing_notes:
+            raise ValueError(
+                f"Xianxia Basic Action {basic_action_key!r} must include range or timing metadata."
+            )
+
+        normalized[basic_action_key] = {
+            "range_tags": range_tags,
+            "timing_tags": timing_tags,
+            "range_notes": range_notes,
+            "timing_notes": timing_notes,
+            "support_state": support_state,
+            "xianxia_support_state": support_state,
+        }
+    return normalized
+
+
 def _normalize_generic_technique_prerequisites(
     raw_prerequisites: object,
     *,
@@ -1303,6 +1387,41 @@ def _validate_generic_technique_details_cover_entries(
         raise ValueError(
             "Xianxia Generic Technique details include unknown Generic Techniques: "
             + ", ".join(extra_generic_technique_keys)
+            + "."
+        )
+
+
+def _validate_basic_action_details_cover_entries(
+    basic_action_details: dict[str, dict[str, Any]],
+    raw_entries: list[Any],
+) -> None:
+    expected_basic_action_keys: set[str] = set()
+    for raw_entry in raw_entries:
+        if not isinstance(raw_entry, dict):
+            continue
+        if _normalize_identifier(raw_entry.get("entry_type")) != "basic_action":
+            continue
+        raw_metadata = raw_entry.get("metadata")
+        metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+        basic_action_key = _normalize_identifier(
+            metadata.get("basic_action_key")
+            or metadata.get("xianxia_basic_action_key")
+            or raw_entry.get("slug")
+            or raw_entry.get("title")
+        )
+        if not basic_action_key:
+            raise ValueError("Xianxia Basic Action seed entry is missing a Basic Action key.")
+        expected_basic_action_keys.add(basic_action_key)
+        if basic_action_key not in basic_action_details:
+            raise ValueError(
+                f"Xianxia Basic Action details are missing {basic_action_key!r}."
+            )
+
+    extra_basic_action_keys = sorted(set(basic_action_details) - expected_basic_action_keys)
+    if extra_basic_action_keys:
+        raise ValueError(
+            "Xianxia Basic Action details include unknown Basic Actions: "
+            + ", ".join(extra_basic_action_keys)
             + "."
         )
 
@@ -1619,6 +1738,50 @@ def _stamp_generic_technique_details(
     body["xianxia_support_state"] = str(details["xianxia_support_state"])
 
 
+def _stamp_basic_action_details(
+    metadata: dict[str, Any],
+    body: dict[str, Any],
+    *,
+    slug: str,
+) -> None:
+    basic_action_key = _normalize_identifier(
+        metadata.get("basic_action_key")
+        or metadata.get("xianxia_basic_action_key")
+        or slug
+    )
+    raw_details = _XIANXIA_BASIC_ACTION_DETAILS.get(basic_action_key)
+    if raw_details is None:
+        return
+    details = _copy_basic_action_detail(raw_details)
+    metadata["basic_action_details_seeded"] = True
+    metadata["basic_action_details_status"] = (
+        XIANXIA_BASIC_ACTION_DETAILS_STATUS_RANGE_TIMING_SEEDED
+    )
+    metadata["range_tags"] = list(details["range_tags"])
+    metadata["timing_tags"] = list(details["timing_tags"])
+    metadata["range_notes"] = list(details["range_notes"])
+    metadata["timing_notes"] = list(details["timing_notes"])
+    metadata["support_state"] = str(details["support_state"])
+    metadata["xianxia_support_state"] = str(details["xianxia_support_state"])
+
+    basic_action_body = body.get("xianxia_basic_action")
+    if not isinstance(basic_action_body, dict):
+        basic_action_body = {}
+        body["xianxia_basic_action"] = basic_action_body
+    basic_action_body["details_seeded"] = True
+    basic_action_body["details_status"] = (
+        XIANXIA_BASIC_ACTION_DETAILS_STATUS_RANGE_TIMING_SEEDED
+    )
+    basic_action_body["range_tags"] = list(details["range_tags"])
+    basic_action_body["timing_tags"] = list(details["timing_tags"])
+    basic_action_body["range_notes"] = list(details["range_notes"])
+    basic_action_body["timing_notes"] = list(details["timing_notes"])
+    basic_action_body["support_state"] = str(details["support_state"])
+    basic_action_body["xianxia_support_state"] = str(details["xianxia_support_state"])
+    body["support_state"] = str(details["support_state"])
+    body["xianxia_support_state"] = str(details["xianxia_support_state"])
+
+
 def _build_martial_art_draft_note(missing_rank_names: list[str]) -> str:
     missing_label = ", ".join(missing_rank_names)
     return (
@@ -1724,6 +1887,22 @@ def _generic_technique_details_search_parts(body: dict[str, Any]) -> list[str]:
     return parts
 
 
+def _basic_action_details_search_parts(body: dict[str, Any]) -> list[str]:
+    basic_action_body = body.get("xianxia_basic_action")
+    if not isinstance(basic_action_body, dict):
+        return []
+
+    parts = [
+        str(basic_action_body.get("support_state") or ""),
+        str(basic_action_body.get("details_status") or ""),
+    ]
+    parts.extend(str(value) for value in basic_action_body.get("range_tags") or [])
+    parts.extend(str(value) for value in basic_action_body.get("timing_tags") or [])
+    parts.extend(str(value) for value in basic_action_body.get("range_notes") or [])
+    parts.extend(str(value) for value in basic_action_body.get("timing_notes") or [])
+    return parts
+
+
 def _render_martial_art_draft_marker_html(body: dict[str, Any]) -> str:
     martial_art_body = body.get("xianxia_martial_art")
     if not isinstance(martial_art_body, dict):
@@ -1818,6 +1997,51 @@ def _render_generic_technique_details_html(body: dict[str, Any]) -> str:
         )
 
     support_state = str(generic_technique_body.get("support_state") or "").strip()
+    if support_state:
+        parts.append(
+            f"<p><strong>Support State:</strong> {escape(support_state.replace('_', ' '))}</p>"
+        )
+    parts.append("</section>")
+    return "".join(parts)
+
+
+def _render_basic_action_details_html(body: dict[str, Any]) -> str:
+    basic_action_body = body.get("xianxia_basic_action")
+    if not isinstance(basic_action_body, dict):
+        return ""
+    if not basic_action_body.get("details_seeded"):
+        return ""
+
+    parts = ["<section>", "<h2>Basic Action Details</h2>"]
+    ranges = _format_string_tags(basic_action_body.get("range_tags"))
+    if ranges:
+        parts.append(f"<p><strong>Ranges:</strong> {ranges}</p>")
+
+    range_notes = [
+        str(value).strip()
+        for value in basic_action_body.get("range_notes") or []
+        if str(value).strip()
+    ]
+    if range_notes:
+        parts.append("<ul>")
+        parts.extend(f"<li>{escape(note)}</li>" for note in range_notes)
+        parts.append("</ul>")
+
+    timing = _format_string_tags(basic_action_body.get("timing_tags"))
+    if timing:
+        parts.append(f"<p><strong>Timing:</strong> {timing}</p>")
+
+    timing_notes = [
+        str(value).strip()
+        for value in basic_action_body.get("timing_notes") or []
+        if str(value).strip()
+    ]
+    if timing_notes:
+        parts.append("<ul>")
+        parts.extend(f"<li>{escape(note)}</li>" for note in timing_notes)
+        parts.append("</ul>")
+
+    support_state = str(basic_action_body.get("support_state") or "").strip()
     if support_state:
         parts.append(
             f"<p><strong>Support State:</strong> {escape(support_state.replace('_', ' '))}</p>"
@@ -2200,6 +2424,23 @@ def _copy_generic_technique_detail(detail: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _copy_basic_action_detail(detail: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "range_tags": list(detail.get("range_tags", [])),
+        "timing_tags": list(detail.get("timing_tags", [])),
+        "range_notes": list(detail.get("range_notes", [])),
+        "timing_notes": list(detail.get("timing_notes", [])),
+        "support_state": str(
+            detail.get("support_state") or XIANXIA_BASIC_ACTION_DEFAULT_SUPPORT_STATE
+        ),
+        "xianxia_support_state": str(
+            detail.get("xianxia_support_state")
+            or detail.get("support_state")
+            or XIANXIA_BASIC_ACTION_DEFAULT_SUPPORT_STATE
+        ),
+    }
+
+
 def _rank_record_ability_grants(
     rank_records: list[dict[str, Any]],
     rank_key: str,
@@ -2281,6 +2522,15 @@ def _generic_technique_details_for(generic_technique_key: str) -> dict[str, Any]
     return _copy_generic_technique_detail(details)
 
 
+def _basic_action_details_for(basic_action_key: str) -> dict[str, Any]:
+    details = _XIANXIA_BASIC_ACTION_DETAILS.get(basic_action_key)
+    if details is None:
+        raise ValueError(
+            f"Xianxia Basic Action {basic_action_key!r} is missing details metadata."
+        )
+    return _copy_basic_action_detail(details)
+
+
 _XIANXIA_SYSTEMS_SEED_PAYLOAD = _load_xianxia_systems_seed_payload()
 XIANXIA_SYSTEMS_SEED_SOURCE_TITLE = str(_XIANXIA_SYSTEMS_SEED_PAYLOAD["source_title"])
 XIANXIA_SYSTEMS_SEED_VERSION = str(_XIANXIA_SYSTEMS_SEED_PAYLOAD["version"])
@@ -2330,6 +2580,12 @@ _XIANXIA_GENERIC_TECHNIQUE_DETAILS = {
     str(generic_technique_key): _copy_generic_technique_detail(detail)
     for generic_technique_key, detail in _XIANXIA_SYSTEMS_SEED_PAYLOAD[
         "generic_technique_details"
+    ].items()
+}
+_XIANXIA_BASIC_ACTION_DETAILS = {
+    str(basic_action_key): _copy_basic_action_detail(detail)
+    for basic_action_key, detail in _XIANXIA_SYSTEMS_SEED_PAYLOAD[
+        "basic_action_details"
     ].items()
 }
 _XIANXIA_MARTIAL_ART_RANK_SETS = {

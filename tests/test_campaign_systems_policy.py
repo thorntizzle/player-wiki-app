@@ -19,6 +19,8 @@ from player_wiki.systems_service import XIANXIA_HOMEBREW_SOURCE_ID
 from player_wiki.xianxia_systems_seed import (
     XIANXIA_ENERGY_KEYS,
     XIANXIA_EFFORT_KEYS,
+    XIANXIA_BASIC_ACTION_DEFAULT_SUPPORT_STATE,
+    XIANXIA_BASIC_ACTION_DETAILS_STATUS_RANGE_TIMING_SEEDED,
     XIANXIA_ENTRY_FACET_KEYS,
     XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_NOTE_INSIGHT_STARTS_AT_0,
     XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_REASON_INSIGHT_STARTS_AT_0,
@@ -48,6 +50,7 @@ from player_wiki.xianxia_systems_seed import (
     XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY,
     XIANXIA_SYSTEMS_SEED_VERSION,
     _build_seed_entry,
+    build_xianxia_basic_action_details,
     build_xianxia_entry_facet_definitions,
     build_xianxia_effort_definitions,
     build_xianxia_generic_technique_details,
@@ -1112,47 +1115,111 @@ def test_xianxia_basic_action_seed_entries_cover_requirements_catalog():
     )
     assert all(entry["metadata"]["xianxia_entry_facets"] == ["basic_action"] for entry in basic_action_entries)
     assert all(entry["metadata"]["catalog_role"] == "basic_action" for entry in basic_action_entries)
+    basic_action_details = build_xianxia_basic_action_details()
+    assert tuple(basic_action_details) == tuple(
+        entry["metadata"]["basic_action_key"] for entry in basic_action_entries
+    )
+    assert all(entry["metadata"]["basic_action_details_seeded"] is True for entry in basic_action_entries)
     assert all(
-        entry["metadata"]["basic_action_details_status"] == "text_seeded_structured_metadata_deferred"
+        entry["metadata"]["basic_action_details_status"]
+        == XIANXIA_BASIC_ACTION_DETAILS_STATUS_RANGE_TIMING_SEEDED
         for entry in basic_action_entries
     )
-    assert all(entry["metadata"]["support_state"] == "reference_only" for entry in basic_action_entries)
-    assert all(entry["metadata"]["xianxia_support_state"] == "reference_only" for entry in basic_action_entries)
-    assert all(entry["body"]["support_state"] == "reference_only" for entry in basic_action_entries)
+    assert all(isinstance(entry["metadata"]["range_tags"], list) for entry in basic_action_entries)
+    assert all(isinstance(entry["metadata"]["timing_tags"], list) for entry in basic_action_entries)
+    assert all(entry["metadata"]["timing_tags"] for entry in basic_action_entries)
+    assert all(
+        entry["metadata"]["support_state"] == XIANXIA_BASIC_ACTION_DEFAULT_SUPPORT_STATE
+        for entry in basic_action_entries
+    )
+    assert all(
+        entry["metadata"]["xianxia_support_state"] == XIANXIA_BASIC_ACTION_DEFAULT_SUPPORT_STATE
+        for entry in basic_action_entries
+    )
+    assert all(
+        entry["body"]["support_state"] == XIANXIA_BASIC_ACTION_DEFAULT_SUPPORT_STATE
+        for entry in basic_action_entries
+    )
     assert all(
         entry["body"]["xianxia_basic_action"]["details_status"]
-        == "text_seeded_structured_metadata_deferred"
+        == XIANXIA_BASIC_ACTION_DETAILS_STATUS_RANGE_TIMING_SEEDED
         for entry in basic_action_entries
     )
-    assert all("range_tags" not in entry["metadata"] for entry in basic_action_entries)
-    assert all("timing_tags" not in entry["metadata"] for entry in basic_action_entries)
+    assert all(
+        entry["body"]["xianxia_basic_action"]["range_tags"] == entry["metadata"]["range_tags"]
+        for entry in basic_action_entries
+    )
+    assert all(
+        entry["body"]["xianxia_basic_action"]["timing_tags"] == entry["metadata"]["timing_tags"]
+        for entry in basic_action_entries
+    )
 
     entry_map = {entry["slug"]: entry for entry in basic_action_entries}
     assert entry_map["recoup"]["metadata"]["basic_action_key"] == "recoup"
+    assert entry_map["recoup"]["metadata"]["range_tags"] == ["self"]
+    assert entry_map["recoup"]["metadata"]["timing_tags"] == ["action"]
     assert "recover 10 Stance" in entry_map["recoup"]["body"]["xianxia_basic_action"]["source_text"]
     assert "recover 10 Stance" in entry_map["recoup"]["rendered_html"]
+    assert "Basic Action Details" in entry_map["recoup"]["rendered_html"]
+    assert "Ranges" in entry_map["recoup"]["rendered_html"]
+    assert "Timing" in entry_map["recoup"]["rendered_html"]
     assert "recoup action" in entry_map["recoup"]["search_text"]
+    assert "range_timing_metadata_seeded" in entry_map["recoup"]["search_text"]
 
     duel = entry_map["duel"]
     assert duel["metadata"]["xianxia_basic_action_key"] == "duel"
+    assert duel["metadata"]["range_tags"] == [
+        "melee_attack_target",
+        "close_combat",
+        "one_space_disengage",
+    ]
+    assert duel["metadata"]["timing_tags"] == [
+        "after_melee_attack",
+        "action_to_disengage",
+        "while_duel_active",
+    ]
     assert "Ranged Attacks are automatically made HARD" in duel["rendered_html"]
+    assert "one Space away" in duel["rendered_html"]
     assert "minion" in duel["search_text"]
+    assert "close_combat" in duel["search_text"]
 
     flowing_dao = entry_map["flowing-dao"]
     assert flowing_dao["metadata"]["basic_action_catalog_order"] == 6
+    assert flowing_dao["metadata"]["range_tags"] == ["self"]
+    assert flowing_dao["metadata"]["timing_tags"] == ["once_per_turn"]
     assert "spend a point of Dao" in flowing_dao["rendered_html"]
+
+    throat_jab = entry_map["throat-jab"]
+    assert throat_jab["metadata"]["timing_tags"] == ["action", "1_round"]
+    assert "1 Round" in throat_jab["rendered_html"]
+
+    wide_dispatch = entry_map["wide-dispatch"]
+    assert wide_dispatch["metadata"]["range_tags"] == [
+        "area_within_3_spaces",
+        "minion_targets",
+    ]
+    assert "15 feet" in wide_dispatch["rendered_html"]
 
     defend = entry_map["defend"]
     assert defend["title"] == "Defend"
     assert "Defend Stance" in defend["metadata"]["aliases"]
+    assert defend["metadata"]["range_tags"] == ["self"]
+    assert defend["metadata"]["timing_tags"] == ["action", "while_active"]
     assert "Defense is +5" in defend["rendered_html"]
 
     all_out_offense = entry_map["all-out-offense"]
     assert all_out_offense["metadata"]["basic_action_key"] == "all_out_offense"
+    assert all_out_offense["metadata"]["timing_tags"] == ["action", "while_active"]
     assert "Deal an additional +5 Damage" in all_out_offense["rendered_html"]
 
     parry = entry_map["parry"]
     assert parry["metadata"]["basic_action_catalog_order"] == 11
+    assert parry["metadata"]["range_tags"] == ["self", "opponent_attacking_self"]
+    assert parry["metadata"]["timing_tags"] == [
+        "action",
+        "while_active",
+        "immediate_counter_attack",
+    ]
     assert "Counter-Attack" in parry["rendered_html"]
     assert "Weapon Effort" in parry["rendered_html"]
 
@@ -1519,6 +1586,11 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
     recoup_html = recoup_entry.get_data(as_text=True)
     assert "Recoup" in recoup_html
     assert "Spend an Action and 1 Energy" in recoup_html
+    assert "Basic Action Details" in recoup_html
+    assert "Ranges" in recoup_html
+    assert "self" in recoup_html
+    assert "Timing" in recoup_html
+    assert "action" in recoup_html
     assert "Effort Tags" in qi_blast_html
     assert "magic effort damage" in qi_blast_html
     assert "Support State" in qi_blast_html

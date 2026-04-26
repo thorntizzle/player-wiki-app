@@ -1,5 +1,5 @@
 {
-  "version": "2026-04-26.16",
+  "version": "2026-04-26.17",
   "source_id": "XIANXIA-HOMEBREW",
   "source_title": "Xianxia Homebrew",
   "storage_strategy": "curated_seed_data",
@@ -962,6 +962,75 @@
     "enhanced_recuperation": {"insight_cost": 5, "prerequisites": [{"kind": "basic_action", "value": "recoup", "label": "Recoup Action"}], "ranges": ["self"], "support_state": "reference_only"},
     "enhanced_recollection": {"insight_cost": 6, "prerequisites": [{"kind": "basic_action", "value": "recollect", "label": "Recollect Action"}], "ranges": ["self"], "support_state": "reference_only"},
     "enhanced_flowing_dao": {"insight_cost": 5, "prerequisites": [{"kind": "basic_action", "value": "flowing_dao", "label": "Flowing Dao Action"}], "ranges": ["self"], "support_state": "reference_only"}
+  },
+  "basic_action_details": {
+    "recoup": {
+      "ranges": ["self"],
+      "timing": ["action"],
+      "timing_notes": ["Spend an Action and 1 Energy of any kind to recover Stance."],
+      "support_state": "reference_only"
+    },
+    "recollect": {
+      "ranges": ["self"],
+      "timing": ["full_turn"],
+      "timing_notes": ["Spend the Turn meditating to recover 1 point of any Energy."],
+      "support_state": "reference_only"
+    },
+    "duel": {
+      "ranges": ["melee_attack_target", "close_combat", "one_space_disengage"],
+      "range_notes": ["Duel starts after a Melee Attack; disengaging moves one Space away from the former opponent."],
+      "timing": ["after_melee_attack", "action_to_disengage", "while_duel_active"],
+      "timing_notes": ["Ranged Attacks are HARD while the Duel remains active."],
+      "support_state": "reference_only"
+    },
+    "taunt": {
+      "ranges": ["target"],
+      "timing": ["action", "next_turn"],
+      "timing_notes": ["On success, the target must spend at least one Action moving toward or attacking you next Turn."],
+      "support_state": "reference_only"
+    },
+    "wide_dispatch": {
+      "ranges": ["area_within_3_spaces", "minion_targets"],
+      "range_notes": ["Three Spaces equals 15 feet under the Xianxia Space definition."],
+      "timing": ["attack_action"],
+      "support_state": "reference_only"
+    },
+    "flowing_dao": {
+      "ranges": ["self"],
+      "timing": ["once_per_turn"],
+      "timing_notes": ["Spend 1 Dao once per Turn to gain +1 Action or regain HP/Stance."],
+      "support_state": "reference_only"
+    },
+    "throat_jab": {
+      "ranges": ["target"],
+      "timing": ["action", "1_round"],
+      "timing_notes": ["On a failed CON check, the target cannot vocalize or use incantations for 1 Round."],
+      "support_state": "reference_only"
+    },
+    "knuckle_strike": {
+      "ranges": ["target"],
+      "timing": ["action", "1_round"],
+      "timing_notes": ["On a failed DEX check, the target cannot use Mudras for 1 Round."],
+      "support_state": "reference_only"
+    },
+    "defend": {
+      "ranges": ["self"],
+      "timing": ["action", "while_active"],
+      "timing_notes": ["The Defense and damage-reduction modifiers last while the Stance is active."],
+      "support_state": "reference_only"
+    },
+    "all_out_offense": {
+      "ranges": ["self"],
+      "timing": ["action", "while_active"],
+      "timing_notes": ["The Attack, Defense, and damage modifiers last while the Stance is active."],
+      "support_state": "reference_only"
+    },
+    "parry": {
+      "ranges": ["self", "opponent_attacking_self"],
+      "timing": ["action", "while_active", "immediate_counter_attack"],
+      "timing_notes": ["The Stance prevents movement while active; a missed opposing Attack can trigger an immediate Counter-Attack."],
+      "support_state": "reference_only"
+    }
   },
   "entries": [
     {
