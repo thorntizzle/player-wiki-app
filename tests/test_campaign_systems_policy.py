@@ -4,6 +4,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+import yaml
 
 from player_wiki.dnd5e_rules_reference import (
     DND5E_RULES_REFERENCE_SOURCE_ID,
@@ -11,7 +12,9 @@ from player_wiki.dnd5e_rules_reference import (
     build_dnd5e_rules_reference_entries,
 )
 from player_wiki.auth_store import AuthStore, utcnow
+from player_wiki.campaign_visibility import VISIBILITY_DM
 from player_wiki.system_policy import XIANXIA_SYSTEM_CODE
+from player_wiki.systems_service import XIANXIA_HOMEBREW_SOURCE_ID
 from player_wiki.systems_importer import Dnd5eSystemsImporter
 from player_wiki.systems_models import SystemsEntryRecord
 from tests.test_systems_importer import (
@@ -130,7 +133,7 @@ def test_dm_can_open_systems_control_panel_and_visibility_panel_shows_systems_sc
     assert 'class="checkbox-label"' in systems_html
 
 
-def test_xianxia_builtin_systems_library_identity_seeds_without_sources(app):
+def test_xianxia_builtin_systems_library_identity_seeds_initial_homebrew_source(app):
     with app.app_context():
         service = app.extensions["systems_service"]
         store = app.extensions["systems_store"]
@@ -142,7 +145,36 @@ def test_xianxia_builtin_systems_library_identity_seeds_without_sources(app):
         assert library.title == XIANXIA_SYSTEM_CODE
         assert library.system_code == XIANXIA_SYSTEM_CODE
         assert store.get_library(XIANXIA_SYSTEM_CODE) == library
-        assert store.list_sources(XIANXIA_SYSTEM_CODE) == []
+        sources = store.list_sources(XIANXIA_SYSTEM_CODE)
+        assert [source.source_id for source in sources] == [XIANXIA_HOMEBREW_SOURCE_ID]
+
+        homebrew_source = sources[0]
+        assert homebrew_source.title == "Xianxia Homebrew"
+        assert homebrew_source.license_class == "open_license"
+        assert homebrew_source.public_visibility_allowed is False
+        assert homebrew_source.requires_unofficial_notice is False
+        assert store.count_entries_for_source(XIANXIA_SYSTEM_CODE, XIANXIA_HOMEBREW_SOURCE_ID) == 0
+
+
+def test_xianxia_homebrew_source_policy_defaults_dm_only_when_campaign_selects_library(app):
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = "xianxia"
+    payload["systems_library"] = "xianxia"
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        service = app.extensions["systems_service"]
+
+        state = service.get_campaign_source_state("linden-pass", XIANXIA_HOMEBREW_SOURCE_ID)
+
+        assert state is not None
+        assert state.source.library_slug == XIANXIA_SYSTEM_CODE
+        assert state.source.source_id == XIANXIA_HOMEBREW_SOURCE_ID
+        assert state.is_enabled is False
+        assert state.default_visibility == VISIBILITY_DM
+        assert state.is_configured is False
 
 
 def test_shared_core_systems_edit_flow_stays_separate_from_overrides_and_custom_entries(

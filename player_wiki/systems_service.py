@@ -611,6 +611,8 @@ ABILITY_NAME_LABELS = {
     "cha": "Charisma",
 }
 
+XIANXIA_HOMEBREW_SOURCE_ID = "XIANXIA-HOMEBREW"
+
 DND_5E_SOURCE_CATALOG = (
     {
         "source_id": DND5E_RULES_REFERENCE_SOURCE_ID,
@@ -714,6 +716,17 @@ DND_5E_SOURCE_CATALOG = (
     },
 )
 
+XIANXIA_SOURCE_CATALOG = (
+    {
+        "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+        "title": "Xianxia Homebrew",
+        "license_class": "open_license",
+        "public_visibility_allowed": False,
+        "requires_unofficial_notice": False,
+        "default_visibility": VISIBILITY_DM,
+    },
+)
+
 BUILTIN_LIBRARY_CATALOG = {
     DND_5E_SYSTEM_CODE: {
         "title": "DND 5E",
@@ -723,7 +736,7 @@ BUILTIN_LIBRARY_CATALOG = {
     XIANXIA_SYSTEM_CODE: {
         "title": XIANXIA_SYSTEM_CODE,
         "system_code": XIANXIA_SYSTEM_CODE,
-        "sources": (),
+        "sources": XIANXIA_SOURCE_CATALOG,
     }
 }
 
