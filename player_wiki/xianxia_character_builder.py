@@ -16,13 +16,15 @@ from .xianxia_character_model import (
     validate_xianxia_definition_payload,
 )
 
-XIANXIA_CHARACTER_BUILDER_VERSION = "2026-04-26.01"
+XIANXIA_CHARACTER_BUILDER_VERSION = "2026-04-26.02"
 XIANXIA_CHARACTER_CREATE_SOURCE_PATH = "builder://xianxia-create"
 XIANXIA_ATTRIBUTE_CREATION_POINTS = 6
 XIANXIA_ATTRIBUTE_MAX_AT_CREATION = 3
 XIANXIA_EFFORT_CREATION_POINTS = 5
 XIANXIA_EFFORT_MAX_AT_CREATION = 3
 XIANXIA_ENERGY_CREATION_POINTS = 3
+XIANXIA_YIN_DEFAULT_MAX = 1
+XIANXIA_YANG_DEFAULT_MAX = 1
 XIANXIA_ENERGY_LABELS = {
     "jing": "Jing",
     "qi": "Qi",
@@ -75,8 +77,8 @@ def build_xianxia_character_create_context(
             "stance_max": 10,
             "manual_armor_bonus": 0,
             "defense": 10,
-            "yin_max": 1,
-            "yang_max": 1,
+            "yin_max": XIANXIA_YIN_DEFAULT_MAX,
+            "yang_max": XIANXIA_YANG_DEFAULT_MAX,
             "dao_max": 3,
             "insight_available": 0,
             "insight_spent": 0,
@@ -154,6 +156,10 @@ def build_xianxia_character_definition(
                 "attributes": attribute_scores,
                 "efforts": effort_scores,
                 "energies": {key: {"max": energy_scores[key]} for key in XIANXIA_ENERGY_KEYS},
+                "yin_yang": {
+                    "yin_max": XIANXIA_YIN_DEFAULT_MAX,
+                    "yang_max": XIANXIA_YANG_DEFAULT_MAX,
+                },
             },
         }
     )
