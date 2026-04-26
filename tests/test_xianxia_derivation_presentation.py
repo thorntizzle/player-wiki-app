@@ -39,6 +39,17 @@ def _configure_xianxia_campaign(app) -> None:
     _write_campaign_config(app, _mutate)
 
 
+def _systems_ref(entry) -> dict[str, str]:
+    return {
+        "library_slug": entry.library_slug,
+        "source_id": entry.source_id,
+        "entry_key": entry.entry_key,
+        "slug": entry.slug,
+        "title": entry.title,
+        "entry_type": entry.entry_type,
+    }
+
+
 def _valid_xianxia_create_data(name: str = "Armored Crane") -> dict[str, str]:
     return {
         "name": name,
@@ -202,13 +213,26 @@ def test_xianxia_read_presenter_context_collects_first_pass_sheet_facts(
     first_art = xianxia_read["martial_arts"][0]
     assert first_art["name"] == "Demon's Fist"
     assert first_art["href"] == "/campaigns/linden-pass/systems/entries/demons-fist"
-    assert first_art["learned_rank_refs"] == [
-        {
-            "ref": "xianxia:demons-fist:initiate",
-            "label": "Initiate",
-            "href": "/campaigns/linden-pass/systems/entries/demons-fist#xianxia-demons-fist-initiate",
-        }
-    ]
+    first_rank = first_art["learned_rank_refs"][0]
+    assert first_rank["ref"] == "xianxia:demons-fist:initiate"
+    assert first_rank["label"] == "Initiate"
+    assert first_rank["href"] == (
+        "/campaigns/linden-pass/systems/entries/demons-fist#xianxia-demons-fist-initiate"
+    )
+    assert first_rank["abilities"][0] == {
+        "name": "Qi Fist Technique",
+        "href": (
+            "/campaigns/linden-pass/systems/entries/demons-fist"
+            "#xianxia-demons-fist-initiate-qi-fist-technique"
+        ),
+        "ref": "xianxia:demons-fist:initiate:qi-fist-technique",
+        "kind": "Technique",
+        "support_label": "Reference only",
+    }
+    assert xianxia_read["basic_actions"][0]["title"] == "Recoup"
+    assert xianxia_read["basic_actions"][0]["href"] == (
+        "/campaigns/linden-pass/systems/entries/recoup"
+    )
     assert xianxia_read["quick_reference"]["defense"]["value"] == 15
     assert xianxia_read["quick_reference"]["actions"]["actions_per_turn"] == 2
     assert character["spellcasting"] is None
@@ -219,6 +243,7 @@ def test_xianxia_read_sheet_uses_system_specific_subpages(
     sign_in,
     users,
     app,
+    get_character,
 ):
     _configure_xianxia_campaign(app)
     sign_in(users["dm"]["email"], users["dm"]["password"])
@@ -234,6 +259,22 @@ def test_xianxia_read_sheet_uses_system_specific_subpages(
     )
 
     assert create_response.status_code == 302
+    with app.app_context():
+        qi_blast = app.extensions["systems_service"].get_entry_by_slug_for_campaign(
+            "linden-pass",
+            "qi-blast",
+        )
+        assert qi_blast is not None
+    record = get_character("subpage-crane")
+    assert record is not None
+    payload = record.definition.to_dict()
+    payload["xianxia"]["generic_techniques"] = [
+        {
+            "name": "Qi Blast",
+            "systems_ref": _systems_ref(qi_blast),
+        }
+    ]
+    _write_raw_xianxia_character_definition(app, "subpage-crane", payload)
 
     quick_response = client.get("/campaigns/linden-pass/characters/subpage-crane?page=quick")
 
@@ -277,6 +318,11 @@ def test_xianxia_read_sheet_uses_system_specific_subpages(
     assert "Demon's Fist" in martial_arts_html
     assert "Current rank: Initiate" in martial_arts_html
     assert "/campaigns/linden-pass/systems/entries/demons-fist#xianxia-demons-fist-initiate" in martial_arts_html
+    assert "Qi Fist Technique" in martial_arts_html
+    assert (
+        "/campaigns/linden-pass/systems/entries/demons-fist"
+        "#xianxia-demons-fist-initiate-qi-fist-technique"
+    ) in martial_arts_html
     assert "Features and traits" not in martial_arts_html
 
     techniques_response = client.get(
@@ -285,7 +331,12 @@ def test_xianxia_read_sheet_uses_system_specific_subpages(
     assert techniques_response.status_code == 200
     techniques_html = unescape(techniques_response.get_data(as_text=True))
     assert "Generic Techniques" in techniques_html
-    assert "No Generic Techniques are recorded on this sheet yet." in techniques_html
+    assert "Qi Blast" in techniques_html
+    assert "/campaigns/linden-pass/systems/entries/qi-blast" in techniques_html
+    assert "Basic Actions" in techniques_html
+    assert "/campaigns/linden-pass/systems/entries/recoup" in techniques_html
+    assert "/campaigns/linden-pass/systems/entries/throat-jab" in techniques_html
+    assert "Reference only" in techniques_html
 
     resources_response = client.get(
         "/campaigns/linden-pass/characters/subpage-crane?page=resources"

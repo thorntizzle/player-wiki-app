@@ -1686,21 +1686,18 @@ def test_xianxia_generic_techniques_and_basic_actions_browse_search_and_link_fro
         profile["background"] = ""
         profile["background_ref"] = {}
         payload["profile"] = profile
+        payload["system"] = XIANXIA_SYSTEM_CODE
         payload["spellcasting"] = {}
-        payload["features"] = [
-            {
-                "id": "xianxia-generic-technique-qi-blast",
-                "name": "Qi Blast",
-                "category": "custom_feature",
-                "systems_ref": _systems_ref(qi_blast),
-            },
-            {
-                "id": "xianxia-basic-action-throat-jab",
-                "name": "Throat Jab",
-                "category": "custom_feature",
-                "systems_ref": _systems_ref(throat_jab),
-            },
-        ]
+        payload["features"] = []
+        payload["xianxia"] = {
+            **dict(payload.get("xianxia") or {}),
+            "generic_techniques": [
+                {
+                    "name": "Qi Blast",
+                    "systems_ref": _systems_ref(qi_blast),
+                }
+            ],
+        }
 
     _write_character_definition(app, "arden-march", _mutate_character)
 
@@ -1716,7 +1713,9 @@ def test_xianxia_generic_techniques_and_basic_actions_browse_search_and_link_fro
     )
     generic_search_response = client.get("/campaigns/linden-pass/systems/search?q=Qi+Blast")
     basic_action_search_response = client.get("/campaigns/linden-pass/systems/search?q=Throat+Jab")
-    sheet_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=features")
+    generic_entry_response = client.get("/campaigns/linden-pass/systems/entries/qi-blast")
+    basic_action_entry_response = client.get("/campaigns/linden-pass/systems/entries/throat-jab")
+    sheet_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=techniques")
 
     assert source_response.status_code == 200
     source_html = source_response.get_data(as_text=True)
@@ -1754,14 +1753,22 @@ def test_xianxia_generic_techniques_and_basic_actions_browse_search_and_link_fro
     assert "Throat Jab" in basic_action_search_html
     assert "/campaigns/linden-pass/systems/entries/throat-jab" in basic_action_search_html
 
+    assert generic_entry_response.status_code == 200
+    generic_entry_html = generic_entry_response.get_data(as_text=True)
+    assert "Spend a point of Qi" in generic_entry_html
+    assert "Insight Cost" in generic_entry_html
+
+    assert basic_action_entry_response.status_code == 200
+    basic_action_entry_html = basic_action_entry_response.get_data(as_text=True)
+    assert "Basic Action Details" in basic_action_entry_html
+    assert "1 Round" in basic_action_entry_html
+
     assert sheet_response.status_code == 200
     sheet_html = sheet_response.get_data(as_text=True)
     assert 'href="/campaigns/linden-pass/systems/entries/qi-blast"' in sheet_html
     assert 'href="/campaigns/linden-pass/systems/entries/throat-jab"' in sheet_html
-    assert "Spend a point of Qi" in sheet_html
-    assert "Insight Cost" in sheet_html
-    assert "Basic Action Details" in sheet_html
-    assert "1 Round" in sheet_html
+    assert "Generic Techniques" in sheet_html
+    assert "Basic Actions" in sheet_html
     assert "?page=spellcasting" not in sheet_html
 
 

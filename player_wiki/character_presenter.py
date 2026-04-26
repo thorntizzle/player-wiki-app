@@ -294,6 +294,7 @@ def present_character_detail(
             campaign,
             definition.xianxia,
             state,
+            systems_service=systems_service,
             xianxia_defense=xianxia_defense,
             xianxia_actions=xianxia_actions,
             xianxia_effort_damage=xianxia_effort_damage,
@@ -1599,6 +1600,7 @@ def present_xianxia_read_context(
     xianxia_definition: dict[str, Any],
     state: dict[str, Any],
     *,
+    systems_service: Any | None = None,
     xianxia_defense: dict[str, Any] | None = None,
     xianxia_actions: dict[str, Any] | None = None,
     xianxia_effort_damage: dict[str, Any] | None = None,
@@ -1755,11 +1757,17 @@ def present_xianxia_read_context(
             xianxia.get("martial_arts"),
             default_name="Martial Art",
             include_rank_refs=True,
+            systems_service=systems_service,
         ),
         "generic_techniques": _present_xianxia_linked_records(
             campaign.slug,
             xianxia.get("generic_techniques"),
             default_name="Generic Technique",
+            systems_service=systems_service,
+        ),
+        "basic_actions": _present_xianxia_basic_action_links(
+            campaign.slug,
+            systems_service=systems_service,
         ),
         "inventory": {
             "enabled": bool(dict(xianxia_state.get("inventory") or {}).get("enabled")),
@@ -1860,12 +1868,25 @@ def _present_xianxia_linked_records(
     *,
     default_name: str,
     include_rank_refs: bool = False,
+    systems_service: Any | None = None,
 ) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for value in list(values or []):
         payload = dict(value or {}) if isinstance(value, dict) else {"name": value}
         systems_ref = dict(payload.get("systems_ref") or {})
-        name = str(payload.get("name") or systems_ref.get("title") or default_name).strip()
+        entry = _xianxia_entry_for_linked_record(
+            campaign_slug,
+            systems_ref=systems_ref,
+            systems_service=systems_service,
+        )
+        if entry is not None and not systems_ref:
+            systems_ref = _systems_ref_for_entry(entry)
+        name = str(
+            payload.get("name")
+            or systems_ref.get("title")
+            or getattr(entry, "title", "")
+            or default_name
+        ).strip()
         href = build_character_entry_href(
             campaign_slug,
             systems_ref=systems_ref,
@@ -1886,26 +1907,41 @@ def _present_xianxia_linked_records(
             "starting_package": bool(payload.get("starting_package")),
         }
         if include_rank_refs:
+            rank_records_by_ref = _xianxia_rank_records_by_ref(entry)
             record["learned_rank_refs"] = _present_xianxia_rank_refs(
                 list(payload.get("learned_rank_refs") or []),
                 parent_href=href,
+                rank_records_by_ref=rank_records_by_ref,
             )
         records.append(record)
     return records
 
 
-def _present_xianxia_rank_refs(values: list[Any], *, parent_href: str) -> list[dict[str, str]]:
-    rank_refs: list[dict[str, str]] = []
+def _present_xianxia_rank_refs(
+    values: list[Any],
+    *,
+    parent_href: str,
+    rank_records_by_ref: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    rank_refs: list[dict[str, Any]] = []
+    rank_records = dict(rank_records_by_ref or {})
     for value in values:
         ref = str(value or "").strip()
         if not ref:
             continue
         href = f"{parent_href}#{_xianxia_anchor_id_for_ref(ref)}" if parent_href else ""
+        rank_record = dict(rank_records.get(ref) or {})
         rank_refs.append(
             {
                 "ref": ref,
-                "label": humanize_value(ref.rsplit(":", 1)[-1]) or ref,
+                "label": str(rank_record.get("rank_name") or "").strip()
+                or humanize_value(ref.rsplit(":", 1)[-1])
+                or ref,
                 "href": href,
+                "abilities": _present_xianxia_rank_abilities(
+                    rank_record.get("ability_grants"),
+                    parent_href=parent_href,
+                ),
             }
         )
     return rank_refs
@@ -1914,6 +1950,146 @@ def _present_xianxia_rank_refs(values: list[Any], *, parent_href: str) -> list[d
 def _xianxia_anchor_id_for_ref(value: str) -> str:
     anchor = re.sub(r"[^A-Za-z0-9_-]+", "-", value.strip()).strip("-").lower()
     return anchor or "xianxia-ref"
+
+
+def _present_xianxia_rank_abilities(
+    values: Any,
+    *,
+    parent_href: str,
+) -> list[dict[str, str]]:
+    abilities: list[dict[str, str]] = []
+    for value in list(values or []):
+        payload = dict(value or {}) if isinstance(value, dict) else {}
+        ability_ref = str(payload.get("ability_ref") or "").strip()
+        if not payload and not ability_ref:
+            continue
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            name = humanize_value(payload.get("ability_key")) or "Rank ability"
+        href = f"{parent_href}#{_xianxia_anchor_id_for_ref(ability_ref)}" if parent_href and ability_ref else ""
+        abilities.append(
+            {
+                "name": name,
+                "href": href,
+                "ref": ability_ref,
+                "kind": str(payload.get("kind") or humanize_value(payload.get("kind_key"))).strip(),
+                "support_label": _xianxia_support_label(
+                    payload.get("support_state") or payload.get("xianxia_support_state")
+                ),
+            }
+        )
+    return abilities
+
+
+def _present_xianxia_basic_action_links(
+    campaign_slug: str,
+    *,
+    systems_service: Any | None = None,
+) -> list[dict[str, str]]:
+    if systems_service is None:
+        return []
+
+    entries = systems_service.list_entries_for_campaign_source(
+        campaign_slug,
+        XIANXIA_HOMEBREW_SOURCE_ID,
+        entry_type="basic_action",
+    )
+    entries = sorted(entries, key=_xianxia_catalog_entry_sort_key)
+    actions: list[dict[str, str]] = []
+    for entry in entries:
+        metadata = dict(getattr(entry, "metadata", {}) or {})
+        body = dict(getattr(entry, "body", {}) or {})
+        action_body = dict(body.get("xianxia_basic_action") or {})
+        support_state = (
+            metadata.get("support_state")
+            or metadata.get("xianxia_support_state")
+            or action_body.get("support_state")
+            or action_body.get("xianxia_support_state")
+        )
+        actions.append(
+            {
+                "title": str(getattr(entry, "title", "") or "Basic Action"),
+                "href": build_systems_entry_href(campaign_slug, _systems_ref_for_entry(entry)),
+                "support_label": _xianxia_support_label(support_state),
+                "range_tags": ", ".join(
+                    humanize_value(tag) for tag in list(action_body.get("range_tags") or []) if str(tag).strip()
+                ),
+                "timing_tags": ", ".join(
+                    humanize_value(tag) for tag in list(action_body.get("timing_tags") or []) if str(tag).strip()
+                ),
+            }
+        )
+    return actions
+
+
+def _xianxia_entry_for_linked_record(
+    campaign_slug: str,
+    *,
+    systems_ref: dict[str, Any],
+    systems_service: Any | None,
+) -> Any | None:
+    if systems_service is None:
+        return None
+    entry_key = str(systems_ref.get("entry_key") or "").strip()
+    if entry_key:
+        entry = systems_service.get_entry_for_campaign(campaign_slug, entry_key)
+        if entry is not None:
+            return entry
+    slug = str(systems_ref.get("slug") or "").strip()
+    if slug:
+        return systems_service.get_entry_by_slug_for_campaign(campaign_slug, slug)
+    return None
+
+
+def _xianxia_rank_records_by_ref(entry: Any | None) -> dict[str, dict[str, Any]]:
+    if entry is None:
+        return {}
+    metadata = dict(getattr(entry, "metadata", {}) or {})
+    body = dict(getattr(entry, "body", {}) or {})
+    martial_art_body = dict(body.get("xianxia_martial_art") or {})
+    raw_records = (
+        metadata.get("martial_art_rank_records")
+        or metadata.get("xianxia_martial_art_rank_records")
+        or martial_art_body.get("rank_records")
+        or martial_art_body.get("xianxia_martial_art_rank_records")
+        or []
+    )
+    records: dict[str, dict[str, Any]] = {}
+    for value in list(raw_records or []):
+        record = dict(value or {}) if isinstance(value, dict) else {}
+        rank_ref = str(record.get("rank_ref") or "").strip()
+        if rank_ref:
+            records[rank_ref] = record
+    return records
+
+
+def _systems_ref_for_entry(entry: Any) -> dict[str, str]:
+    return {
+        "library_slug": str(getattr(entry, "library_slug", "") or ""),
+        "source_id": str(getattr(entry, "source_id", "") or ""),
+        "entry_key": str(getattr(entry, "entry_key", "") or ""),
+        "slug": str(getattr(entry, "slug", "") or ""),
+        "title": str(getattr(entry, "title", "") or ""),
+        "entry_type": str(getattr(entry, "entry_type", "") or ""),
+    }
+
+
+def _xianxia_catalog_entry_sort_key(entry: Any) -> tuple[int, str]:
+    metadata = dict(getattr(entry, "metadata", {}) or {})
+    order = _coerce_int(
+        metadata.get("basic_action_catalog_order")
+        or metadata.get("generic_technique_catalog_order")
+        or metadata.get("martial_art_catalog_order"),
+        default=10_000,
+    )
+    return (order, str(getattr(entry, "title", "") or "").casefold())
+
+
+def _xianxia_support_label(value: Any) -> str:
+    support_state = str(value or "").strip()
+    if support_state == "reference_only":
+        return "Reference only"
+    return humanize_value(support_state)
 
 
 def _present_xianxia_active_state(record: dict[str, Any], *, label: str) -> dict[str, Any]:

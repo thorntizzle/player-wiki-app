@@ -42,6 +42,30 @@
                         {% endfor %}
                       </div>
                     </div>
+                    {% for rank in art.learned_rank_refs %}
+                      {% if rank.abilities %}
+                        <div>
+                          <h4>{{ rank.label }} abilities</h4>
+                          <ul class="plain-list slot-list">
+                            {% for ability in rank.abilities %}
+                              <li>
+                                {% if ability.href %}
+                                  <a href="{{ ability.href }}">{{ ability.name }}</a>
+                                {% else %}
+                                  <span>{{ ability.name }}</span>
+                                {% endif %}
+                                {% if ability.kind %}
+                                  <strong>{{ ability.kind }}</strong>
+                                {% endif %}
+                                {% if ability.support_label %}
+                                  <span class="meta">{{ ability.support_label }}</span>
+                                {% endif %}
+                              </li>
+                            {% endfor %}
+                          </ul>
+                        </div>
+                      {% endif %}
+                    {% endfor %}
                   </div>
                 {% endif %}
               </article>
@@ -82,6 +106,34 @@
           </ul>
         {% else %}
           <p class="meta">No Generic Techniques are recorded on this sheet yet.</p>
+        {% endif %}
+      </article>
+      <article class="detail-card">
+        <h3>Basic Actions</h3>
+        {% if xianxia_sheet.basic_actions %}
+          <ul class="plain-list slot-list">
+            {% for action in xianxia_sheet.basic_actions %}
+              <li>
+                {% if action.href %}
+                  <a href="{{ action.href }}">{{ action.title }}</a>
+                {% else %}
+                  <span>{{ action.title }}</span>
+                {% endif %}
+                {% if action.support_label %}
+                  <strong>{{ action.support_label }}</strong>
+                {% endif %}
+              </li>
+              {% if action.range_tags or action.timing_tags %}
+                <li class="meta">
+                  {% if action.range_tags %}Range: {{ action.range_tags }}{% endif %}
+                  {% if action.range_tags and action.timing_tags %} | {% endif %}
+                  {% if action.timing_tags %}Timing: {{ action.timing_tags }}{% endif %}
+                </li>
+              {% endif %}
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="meta">No Basic Action Systems entries are available for this campaign.</p>
         {% endif %}
       </article>
 
