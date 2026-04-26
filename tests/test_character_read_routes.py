@@ -492,6 +492,16 @@ def test_dnd5e_character_routes_keep_native_affordances_with_xianxia_policy_pres
 def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_path(
     app, client, sign_in, users, get_character
 ):
+    def _attribute_data() -> dict[str, str]:
+        return {
+            "attribute_str": "1",
+            "attribute_dex": "1",
+            "attribute_con": "1",
+            "attribute_int": "1",
+            "attribute_wis": "1",
+            "attribute_cha": "1",
+        }
+
     def _mutate(payload: dict) -> None:
         payload["system"] = "xianxia"
         payload["systems_library"] = "xianxia"
@@ -513,6 +523,15 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     create_html = create_response.get_data(as_text=True)
     assert "Xianxia Character" in create_html
     assert "Starting Defaults" in create_html
+    for attribute_label in (
+        "Strength",
+        "Dexterity",
+        "Constitution",
+        "Intelligence",
+        "Wisdom",
+        "Charisma",
+    ):
+        assert attribute_label in create_html
     assert "Native Level 1 Builder" not in create_html
     assert "Spell Preview" not in create_html
     assert XIANXIA_NATIVE_CHARACTER_CREATE_UNSUPPORTED_MESSAGE not in create_html
@@ -525,9 +544,30 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     assert missing_name.status_code == 400
     assert "Character name is required." in missing_name.get_data(as_text=True)
 
+    missing_attributes = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={"name": "Attribute Gap", "character_slug": ""},
+        follow_redirects=False,
+    )
+    assert missing_attributes.status_code == 400
+    assert (
+        "Missing Xianxia attributes: Strength, Dexterity, Constitution, "
+        "Intelligence, Wisdom, and Charisma."
+    ) in missing_attributes.get_data(as_text=True)
+
+    invalid_attributes = _attribute_data()
+    invalid_attributes["attribute_dex"] = "quick"
+    invalid_attribute_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={"name": "Attribute Typo", "character_slug": "", **invalid_attributes},
+        follow_redirects=False,
+    )
+    assert invalid_attribute_response.status_code == 400
+    assert "Dexterity must be a whole number." in invalid_attribute_response.get_data(as_text=True)
+
     submit_response = client.post(
         "/campaigns/linden-pass/characters/new",
-        data={"name": "Lotus Wake", "character_slug": ""},
+        data={"name": "Lotus Wake", "character_slug": "", **_attribute_data()},
         follow_redirects=False,
     )
     assert submit_response.status_code == 302
@@ -540,6 +580,14 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     assert definition_payload["xianxia"]["realm"] == "Mortal"
     assert definition_payload["xianxia"]["honor"] == "Honorable"
     assert definition_payload["xianxia"]["reputation"] == "Unknown"
+    assert definition_payload["xianxia"]["attributes"] == {
+        "str": 1,
+        "dex": 1,
+        "con": 1,
+        "int": 1,
+        "wis": 1,
+        "cha": 1,
+    }
     assert definition_payload["xianxia"]["durability"] == {
         "hp_max": 10,
         "stance_max": 10,

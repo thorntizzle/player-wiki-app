@@ -9,6 +9,14 @@ XIANXIA_CHARACTER_DEFINITION_SCHEMA_VERSION = 1
 XIANXIA_CHARACTER_STATE_SCHEMA_VERSION = 1
 
 XIANXIA_ATTRIBUTE_KEYS = ("str", "dex", "con", "int", "wis", "cha")
+XIANXIA_ATTRIBUTE_LABELS = {
+    "str": "Strength",
+    "dex": "Dexterity",
+    "con": "Constitution",
+    "int": "Intelligence",
+    "wis": "Wisdom",
+    "cha": "Charisma",
+}
 XIANXIA_EFFORT_KEYS = ("basic", "weapon", "guns_explosive", "magic", "ultimate")
 XIANXIA_ENERGY_KEYS = ("jing", "qi", "shen")
 
