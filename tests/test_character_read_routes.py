@@ -532,9 +532,35 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
             "trained_skill_3": "Calligraphy",
         }
 
+    def _martial_art_data() -> dict[str, str]:
+        return {
+            "martial_art_1_slug": "demons-fist",
+            "martial_art_1_rank": "novice",
+            "martial_art_2_slug": "heavenly-palm",
+            "martial_art_2_rank": "initiate",
+            "martial_art_3_slug": "",
+            "martial_art_3_rank": "",
+        }
+
+    def _three_initiate_martial_art_data() -> dict[str, str]:
+        return {
+            "martial_art_1_slug": "demons-fist",
+            "martial_art_1_rank": "initiate",
+            "martial_art_2_slug": "heavenly-palm",
+            "martial_art_2_rank": "initiate",
+            "martial_art_3_slug": "taoist-blade",
+            "martial_art_3_rank": "initiate",
+        }
+
     def _mutate(payload: dict) -> None:
         payload["system"] = "xianxia"
         payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+            }
+        ]
 
     _write_campaign_config(app, _mutate)
 
@@ -600,6 +626,13 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     assert 'name="trained_skill_1"' in create_html
     assert 'name="trained_skill_2"' in create_html
     assert 'name="trained_skill_3"' in create_html
+    assert "Starting Martial Arts" in create_html
+    assert 'name="martial_art_1_slug"' in create_html
+    assert 'name="martial_art_1_rank"' in create_html
+    assert 'value="demons-fist"' in create_html
+    assert 'value="heavenly-palm"' in create_html
+    assert 'value="initiate"' in create_html
+    assert 'value="novice"' in create_html
     assert "Native Level 1 Builder" not in create_html
     assert "Spell Preview" not in create_html
     assert XIANXIA_NATIVE_CHARACTER_CREATE_UNSUPPORTED_MESSAGE not in create_html
@@ -887,6 +920,105 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
         duplicate_skills_response.get_data(as_text=True)
     )
 
+    missing_martial_arts_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            "name": "Martial Gap",
+            "character_slug": "",
+            **_attribute_data(),
+            **_effort_data(),
+            **_energy_data(),
+            **_skill_data(),
+        },
+        follow_redirects=False,
+    )
+    assert missing_martial_arts_response.status_code == 400
+    assert (
+        "Xianxia character creation requires a starting Martial Arts package: "
+        "one Novice plus one Initiate, or three Initiates."
+    ) in missing_martial_arts_response.get_data(as_text=True)
+
+    illegal_two_initiates = _martial_art_data()
+    illegal_two_initiates["martial_art_1_rank"] = "initiate"
+    illegal_two_initiates_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            "name": "Two Initiates",
+            "character_slug": "",
+            **_attribute_data(),
+            **_effort_data(),
+            **_energy_data(),
+            **_skill_data(),
+            **illegal_two_initiates,
+        },
+        follow_redirects=False,
+    )
+    assert illegal_two_initiates_response.status_code == 400
+    assert (
+        "Starting Martial Arts must be one Novice plus one Initiate, or three Initiates."
+    ) in illegal_two_initiates_response.get_data(as_text=True)
+
+    illegal_novice_plus_two = _three_initiate_martial_art_data()
+    illegal_novice_plus_two["martial_art_1_rank"] = "novice"
+    illegal_novice_plus_two_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            "name": "Novice Plus Two",
+            "character_slug": "",
+            **_attribute_data(),
+            **_effort_data(),
+            **_energy_data(),
+            **_skill_data(),
+            **illegal_novice_plus_two,
+        },
+        follow_redirects=False,
+    )
+    assert illegal_novice_plus_two_response.status_code == 400
+    assert (
+        "Starting Martial Arts must be one Novice plus one Initiate, or three Initiates."
+    ) in illegal_novice_plus_two_response.get_data(as_text=True)
+
+    unavailable_novice = _martial_art_data()
+    unavailable_novice["martial_art_1_slug"] = "rippling-melodies"
+    unavailable_novice["martial_art_1_rank"] = "novice"
+    unavailable_novice_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            "name": "Unavailable Novice",
+            "character_slug": "",
+            **_attribute_data(),
+            **_effort_data(),
+            **_energy_data(),
+            **_skill_data(),
+            **unavailable_novice,
+        },
+        follow_redirects=False,
+    )
+    assert unavailable_novice_response.status_code == 400
+    assert (
+        "Rippling Melodies does not have Novice rank available in Systems metadata."
+    ) in unavailable_novice_response.get_data(as_text=True)
+
+    unknown_martial_art = _martial_art_data()
+    unknown_martial_art["martial_art_1_slug"] = "missing-art"
+    unknown_martial_art_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            "name": "Unknown Art",
+            "character_slug": "",
+            **_attribute_data(),
+            **_effort_data(),
+            **_energy_data(),
+            **_skill_data(),
+            **unknown_martial_art,
+        },
+        follow_redirects=False,
+    )
+    assert unknown_martial_art_response.status_code == 400
+    assert "Unsupported starting Martial Art: missing-art." in unknown_martial_art_response.get_data(
+        as_text=True
+    )
+
     invalid_armor_response = client.post(
         "/campaigns/linden-pass/characters/new",
         data={
@@ -930,6 +1062,7 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
             **_effort_data(),
             **_energy_data(),
             **_skill_data(),
+            **_martial_art_data(),
             "dao_current": "flowing",
         },
         follow_redirects=False,
@@ -946,6 +1079,7 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
             **_effort_data(),
             **_energy_data(),
             **_skill_data(),
+            **_martial_art_data(),
             "dao_current": "4",
         },
         follow_redirects=False,
@@ -964,6 +1098,7 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
             **_effort_data(),
             **_energy_data(),
             **_skill_data(),
+            **_martial_art_data(),
         },
         follow_redirects=False,
     )
@@ -1010,7 +1145,43 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     assert definition_payload["xianxia"]["skills"] == {
         "trained": ["Fishing", "Court Etiquette", "Calligraphy"]
     }
-    assert definition_payload["xianxia"]["martial_arts"] == []
+    assert definition_payload["xianxia"]["martial_arts"] == [
+        {
+            "name": "Demon's Fist",
+            "systems_ref": {
+                "library_slug": XIANXIA_SYSTEM_CODE,
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "entry_key": "xianxia|martial_art|xianxia-homebrew|demons-fist",
+                "slug": "demons-fist",
+                "title": "Demon's Fist",
+                "entry_type": "martial_art",
+            },
+            "current_rank": "Novice",
+            "current_rank_key": "novice",
+            "learned_rank_refs": [
+                "xianxia:demons-fist:initiate",
+                "xianxia:demons-fist:novice",
+            ],
+            "starting_package": True,
+            "rank_records_status": "rank_advancement_metadata_seeded",
+        },
+        {
+            "name": "Heavenly Palm",
+            "systems_ref": {
+                "library_slug": XIANXIA_SYSTEM_CODE,
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "entry_key": "xianxia|martial_art|xianxia-homebrew|heavenly-palm",
+                "slug": "heavenly-palm",
+                "title": "Heavenly Palm",
+                "entry_type": "martial_art",
+            },
+            "current_rank": "Initiate",
+            "current_rank_key": "initiate",
+            "learned_rank_refs": ["xianxia:heavenly-palm:initiate"],
+            "starting_package": True,
+            "rank_records_status": "rank_advancement_metadata_seeded",
+        },
+    ]
     assert definition_payload["xianxia"]["generic_techniques"] == []
 
     import_payload = yaml.safe_load(
@@ -1054,6 +1225,7 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
             **_effort_data(),
             **_energy_data(),
             **_skill_data(),
+            **_martial_art_data(),
             "manual_armor_bonus": "2",
         },
         follow_redirects=False,
@@ -1081,6 +1253,7 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
             **_effort_data(),
             **_energy_data(),
             **_skill_data(),
+            **_three_initiate_martial_art_data(),
             "dao_current": "2",
         },
         follow_redirects=False,
@@ -1090,6 +1263,10 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
 
     grant_definition_payload = _read_character_definition(app, "dao-granted")
     assert grant_definition_payload["xianxia"]["dao"] == {"max": 3}
+    assert [
+        martial_art["current_rank_key"]
+        for martial_art in grant_definition_payload["xianxia"]["martial_arts"]
+    ] == ["initiate", "initiate", "initiate"]
     grant_record = get_character("dao-granted")
     assert grant_record is not None
     assert grant_record.state_record.state["xianxia"]["dao"] == {"current": 2}

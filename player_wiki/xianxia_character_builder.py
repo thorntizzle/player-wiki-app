@@ -38,17 +38,37 @@ XIANXIA_DAO_DEFAULT_MAX = 3
 XIANXIA_INSIGHT_DEFAULT_AVAILABLE = 0
 XIANXIA_INSIGHT_DEFAULT_SPENT = 0
 XIANXIA_TRAINED_SKILL_COUNT = 3
+XIANXIA_STARTING_MARTIAL_ART_SLOTS = 3
+XIANXIA_STARTING_MARTIAL_ART_RANKS = (
+    {"key": "initiate", "label": "Initiate"},
+    {"key": "novice", "label": "Novice"},
+)
+XIANXIA_STARTING_MARTIAL_ART_LEARNED_RANKS = {
+    "initiate": ("initiate",),
+    "novice": ("initiate", "novice"),
+}
 XIANXIA_ENERGY_LABELS = {
     "jing": "Jing",
     "qi": "Qi",
     "shen": "Shen",
 }
+XIANXIA_MARTIAL_ART_RANK_LABELS = {
+    "initiate": "Initiate",
+    "novice": "Novice",
+}
 
 
 def build_xianxia_character_create_context(
     form_values: dict[str, str] | None = None,
+    *,
+    systems_service: Any | None = None,
+    campaign_slug: str = "",
 ) -> dict[str, Any]:
     values = _normalize_xianxia_create_values(form_values or {})
+    martial_art_options = _list_xianxia_create_martial_art_options(
+        systems_service,
+        campaign_slug,
+    )
     manual_armor_bonus = values["manual_armor_bonus"]
     defense = derive_xianxia_defense(
         attributes=values["attributes"],
@@ -94,6 +114,25 @@ def build_xianxia_character_create_context(
         }
         for index in range(1, XIANXIA_TRAINED_SKILL_COUNT + 1)
     ]
+    martial_art_values = _normalize_xianxia_create_martial_art_values(values)
+    martial_art_fields = [
+        {
+            "index": index,
+            "art_input_name": _xianxia_martial_art_slug_input_name(index),
+            "rank_input_name": _xianxia_martial_art_rank_input_name(index),
+            "selected_slug": (
+                martial_art_values[index - 1]["slug"]
+                if index <= len(martial_art_values)
+                else ""
+            ),
+            "selected_rank": (
+                martial_art_values[index - 1]["rank_key"]
+                if index <= len(martial_art_values)
+                else ""
+            ),
+        }
+        for index in range(1, XIANXIA_STARTING_MARTIAL_ART_SLOTS + 1)
+    ]
     return {
         "values": values,
         "defaults": {
@@ -127,6 +166,10 @@ def build_xianxia_character_create_context(
             "min": 0,
             "max": XIANXIA_DAO_DEFAULT_MAX,
         },
+        "martial_art_options": martial_art_options,
+        "martial_art_option_map": _build_xianxia_martial_art_option_map(martial_art_options),
+        "martial_art_fields": martial_art_fields,
+        "martial_art_rank_choices": list(XIANXIA_STARTING_MARTIAL_ART_RANKS),
     }
 
 
@@ -154,6 +197,10 @@ def build_xianxia_character_definition(
     energy_scores = _validate_xianxia_create_energies(form_values or {})
     manual_armor_bonus = _validate_xianxia_create_manual_armor_bonus(form_values or {})
     trained_skills = _validate_xianxia_create_trained_skills(form_values or {})
+    martial_arts = _validate_xianxia_create_starting_martial_arts(
+        form_values or {},
+        create_context.get("martial_art_option_map"),
+    )
     defense = derive_xianxia_defense(
         attributes=attribute_scores,
         manual_armor_bonus=manual_armor_bonus,
@@ -225,6 +272,7 @@ def build_xianxia_character_definition(
                 "skills": {
                     "trained": trained_skills,
                 },
+                "martial_arts": martial_arts,
             },
         }
     )
@@ -274,6 +322,7 @@ def _normalize_xianxia_create_values(values: dict[str, Any]) -> dict[str, Any]:
         "manual_armor_bonus": _normalize_xianxia_create_manual_armor_bonus_value(values),
         "dao_current": _normalize_xianxia_create_dao_current_value(values),
         "trained_skills": _normalize_xianxia_create_trained_skill_values(values),
+        "martial_arts": _normalize_xianxia_create_martial_art_values(values),
     }
 
 
@@ -513,6 +562,78 @@ def _validate_xianxia_create_trained_skills(values: dict[str, Any]) -> list[str]
     return trained_skills
 
 
+def _validate_xianxia_create_starting_martial_arts(
+    values: dict[str, Any],
+    option_map: Any,
+) -> list[dict[str, Any]]:
+    options_by_slug = dict(option_map or {}) if isinstance(option_map, dict) else {}
+    martial_art_values = _normalize_xianxia_create_martial_art_values(values)
+    selected_values = [
+        value
+        for value in martial_art_values
+        if str(value.get("slug") or "").strip() or str(value.get("rank_key") or "").strip()
+    ]
+    if not selected_values:
+        raise CharacterBuildError(
+            "Xianxia character creation requires a starting Martial Arts package: "
+            "one Novice plus one Initiate, or three Initiates."
+        )
+    if not options_by_slug:
+        raise CharacterBuildError(
+            "No enabled Xianxia Martial Art Systems entries are available for character creation."
+        )
+
+    errors: list[str] = []
+    selected_records: list[dict[str, Any]] = []
+    seen_slugs: set[str] = set()
+    duplicate_titles: list[str] = []
+    for value in selected_values:
+        slug = str(value.get("slug") or "").strip()
+        rank_key = str(value.get("rank_key") or "").strip()
+        if not slug or not rank_key:
+            errors.append("Each selected starting Martial Art needs both a Martial Art and a rank.")
+            continue
+        option = options_by_slug.get(_normalize_martial_art_option_slug(slug))
+        if option is None:
+            errors.append(f"Unsupported starting Martial Art: {slug}.")
+            continue
+        if rank_key not in XIANXIA_MARTIAL_ART_RANK_LABELS:
+            errors.append("Starting Martial Art ranks must be Initiate or Novice.")
+            continue
+        option_slug = str(option["slug"])
+        if option_slug in seen_slugs:
+            duplicate_titles.append(str(option["title"]))
+            continue
+        seen_slugs.add(option_slug)
+        available_rank_keys = set(option.get("available_starting_rank_keys") or ())
+        if rank_key not in available_rank_keys:
+            errors.append(
+                f"{option['title']} does not have "
+                f"{XIANXIA_MARTIAL_ART_RANK_LABELS[rank_key]} rank available in Systems metadata."
+            )
+            continue
+        selected_records.append(
+            _build_xianxia_starting_martial_art_record(option, rank_key)
+        )
+
+    if duplicate_titles:
+        errors.append(
+            "Starting Martial Arts must be distinct; duplicates: "
+            f"{_format_label_list(duplicate_titles)}."
+        )
+
+    rank_keys = [str(record["current_rank_key"]) for record in selected_records]
+    legal_novice_package = sorted(rank_keys) == ["initiate", "novice"]
+    legal_initiate_package = rank_keys == ["initiate", "initiate", "initiate"]
+    if selected_records and not (legal_novice_package or legal_initiate_package):
+        errors.append(
+            "Starting Martial Arts must be one Novice plus one Initiate, or three Initiates."
+        )
+    if errors:
+        raise CharacterBuildError(" ".join(errors))
+    return selected_records
+
+
 def _validate_xianxia_create_manual_armor_bonus(values: dict[str, Any]) -> int:
     raw_value = _normalize_xianxia_create_manual_armor_bonus_value(values)
     if raw_value == "":
@@ -598,6 +719,84 @@ def _normalize_xianxia_create_trained_skill_values(values: dict[str, Any]) -> li
     return normalized
 
 
+def _normalize_xianxia_create_martial_art_values(values: dict[str, Any]) -> list[dict[str, str]]:
+    raw_values = _extract_xianxia_martial_art_values(values)
+    normalized = [
+        {
+            "slug": _normalize_martial_art_option_slug(
+                raw_value.get("slug")
+                if isinstance(raw_value, dict)
+                else ""
+            ),
+            "rank_key": _normalize_xianxia_starting_martial_art_rank_key(
+                raw_value.get("rank_key")
+                if isinstance(raw_value, dict)
+                else ""
+            ),
+        }
+        for raw_value in raw_values
+    ]
+    if len(normalized) < XIANXIA_STARTING_MARTIAL_ART_SLOTS:
+        normalized.extend(
+            {"slug": "", "rank_key": ""}
+            for _ in range(XIANXIA_STARTING_MARTIAL_ART_SLOTS - len(normalized))
+        )
+    return normalized[:XIANXIA_STARTING_MARTIAL_ART_SLOTS]
+
+
+def _extract_xianxia_martial_art_values(values: dict[str, Any]) -> list[dict[str, Any]]:
+    indexed_values: list[dict[str, Any]] = []
+    for index in range(1, XIANXIA_STARTING_MARTIAL_ART_SLOTS + 1):
+        slug_key = _xianxia_martial_art_slug_input_name(index)
+        rank_key = _xianxia_martial_art_rank_input_name(index)
+        alternate_slug_key = f"starting_martial_art_{index}_slug"
+        alternate_rank_key = f"starting_martial_art_{index}_rank"
+        if (
+            slug_key in values
+            or rank_key in values
+            or alternate_slug_key in values
+            or alternate_rank_key in values
+        ):
+            indexed_values.append(
+                {
+                    "slug": values.get(slug_key, values.get(alternate_slug_key, "")),
+                    "rank_key": values.get(rank_key, values.get(alternate_rank_key, "")),
+                }
+            )
+    if indexed_values:
+        return indexed_values
+
+    raw_martial_arts = values.get("martial_arts")
+    if isinstance(raw_martial_arts, (list, tuple)):
+        return [_coerce_xianxia_martial_art_value(value) for value in raw_martial_arts]
+    if isinstance(raw_martial_arts, dict):
+        return [_coerce_xianxia_martial_art_value(raw_martial_arts)]
+    return []
+
+
+def _coerce_xianxia_martial_art_value(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {"slug": value, "rank_key": ""}
+    systems_ref = value.get("systems_ref")
+    systems_ref = systems_ref if isinstance(systems_ref, dict) else {}
+    return {
+        "slug": (
+            value.get("slug")
+            or value.get("entry_slug")
+            or systems_ref.get("slug")
+            or systems_ref.get("entry_slug")
+            or value.get("systems_ref")
+        ),
+        "rank_key": (
+            value.get("rank_key")
+            or value.get("current_rank_key")
+            or value.get("starting_rank_key")
+            or value.get("rank")
+            or value.get("current_rank")
+        ),
+    }
+
+
 def _extract_xianxia_trained_skill_values(values: dict[str, Any]) -> list[Any]:
     indexed_values: list[tuple[int, Any]] = []
     for raw_key, value in values.items():
@@ -650,6 +849,168 @@ def _xianxia_energy_input_name(key: str) -> str:
 
 def _xianxia_trained_skill_input_name(index: int) -> str:
     return f"trained_skill_{index}"
+
+
+def _xianxia_martial_art_slug_input_name(index: int) -> str:
+    return f"martial_art_{index}_slug"
+
+
+def _xianxia_martial_art_rank_input_name(index: int) -> str:
+    return f"martial_art_{index}_rank"
+
+
+def _list_xianxia_create_martial_art_options(
+    systems_service: Any | None,
+    campaign_slug: str,
+) -> list[dict[str, Any]]:
+    if systems_service is None or not str(campaign_slug or "").strip():
+        return []
+    list_entries = getattr(systems_service, "list_enabled_entries_for_campaign", None)
+    if not callable(list_entries):
+        return []
+    entries = [
+        entry
+        for entry in list_entries(campaign_slug, entry_type="martial_art", limit=None)
+        if str(getattr(entry, "entry_type", "") or "").strip().lower() == "martial_art"
+    ]
+    options = [_build_xianxia_martial_art_option(entry) for entry in entries]
+    return sorted(
+        options,
+        key=lambda option: (
+            option["sort_order"],
+            option["title"].casefold(),
+            option["source_id"].casefold(),
+        ),
+    )
+
+
+def _build_xianxia_martial_art_option(entry: Any) -> dict[str, Any]:
+    metadata = dict(getattr(entry, "metadata", {}) or {})
+    body = dict(getattr(entry, "body", {}) or {})
+    rank_records = _xianxia_martial_art_rank_records(metadata, body)
+    rank_refs = {
+        str(record.get("rank_key") or "").strip(): str(record.get("rank_ref") or "").strip()
+        for record in rank_records
+        if str(record.get("rank_key") or "").strip()
+    }
+    available_rank_keys = tuple(
+        rank_key
+        for rank_key in ("initiate", "novice")
+        if rank_key in rank_refs
+    )
+    is_custom_martial_art = bool(
+        metadata.get("xianxia_custom_martial_art")
+        or metadata.get("custom_martial_art")
+        or dict(body.get("xianxia_martial_art") or {}).get("xianxia_custom_martial_art")
+    )
+    if is_custom_martial_art and not available_rank_keys:
+        available_rank_keys = ("initiate", "novice")
+        rank_refs = {
+            rank_key: f"xianxia:{getattr(entry, 'slug', '')}:{rank_key}"
+            for rank_key in available_rank_keys
+        }
+    catalog_order = metadata.get("martial_art_catalog_order")
+    try:
+        sort_order = int(catalog_order)
+    except (TypeError, ValueError):
+        sort_order = 10000
+    return {
+        "slug": _normalize_martial_art_option_slug(getattr(entry, "slug", "")),
+        "title": str(getattr(entry, "title", "") or "").strip(),
+        "entry_key": str(getattr(entry, "entry_key", "") or "").strip(),
+        "entry_type": str(getattr(entry, "entry_type", "") or "").strip(),
+        "source_id": str(getattr(entry, "source_id", "") or "").strip(),
+        "library_slug": str(getattr(entry, "library_slug", "") or "").strip(),
+        "available_starting_rank_keys": available_rank_keys,
+        "rank_refs": rank_refs,
+        "rank_records_status": str(metadata.get("rank_records_status") or "").strip(),
+        "custom_martial_art": is_custom_martial_art,
+        "sort_order": sort_order,
+    }
+
+
+def _xianxia_martial_art_rank_records(
+    metadata: dict[str, Any],
+    body: dict[str, Any],
+) -> list[dict[str, Any]]:
+    raw_records = metadata.get("xianxia_martial_art_rank_records")
+    if raw_records is None:
+        raw_records = metadata.get("martial_art_rank_records")
+    martial_art_body = body.get("xianxia_martial_art")
+    if not raw_records and isinstance(martial_art_body, dict):
+        raw_records = (
+            martial_art_body.get("xianxia_martial_art_rank_records")
+            or martial_art_body.get("rank_records")
+        )
+    records: list[dict[str, Any]] = []
+    for record in list(raw_records or []):
+        if not isinstance(record, dict):
+            continue
+        if record.get("rank_available_in_seed") is False:
+            continue
+        rank_key = _normalize_xianxia_starting_martial_art_rank_key(record.get("rank_key"))
+        if rank_key not in XIANXIA_MARTIAL_ART_RANK_LABELS:
+            continue
+        records.append({**record, "rank_key": rank_key})
+    return records
+
+
+def _build_xianxia_martial_art_option_map(
+    options: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    return {
+        _normalize_martial_art_option_slug(option.get("slug")): option
+        for option in options
+        if _normalize_martial_art_option_slug(option.get("slug"))
+    }
+
+
+def _build_xianxia_starting_martial_art_record(
+    option: dict[str, Any],
+    rank_key: str,
+) -> dict[str, Any]:
+    learned_rank_refs = [
+        _rank_ref_for_starting_martial_art(option, learned_rank_key)
+        for learned_rank_key in XIANXIA_STARTING_MARTIAL_ART_LEARNED_RANKS[rank_key]
+    ]
+    record = {
+        "name": option["title"],
+        "systems_ref": {
+            "library_slug": option["library_slug"],
+            "source_id": option["source_id"],
+            "entry_key": option["entry_key"],
+            "slug": option["slug"],
+            "title": option["title"],
+            "entry_type": option["entry_type"],
+        },
+        "current_rank": XIANXIA_MARTIAL_ART_RANK_LABELS[rank_key],
+        "current_rank_key": rank_key,
+        "learned_rank_refs": learned_rank_refs,
+        "starting_package": True,
+    }
+    if option.get("rank_records_status"):
+        record["rank_records_status"] = option["rank_records_status"]
+    if option.get("custom_martial_art"):
+        record["custom_martial_art"] = True
+        record["xianxia_custom_martial_art"] = True
+    return record
+
+
+def _rank_ref_for_starting_martial_art(option: dict[str, Any], rank_key: str) -> str:
+    rank_ref = str(dict(option.get("rank_refs") or {}).get(rank_key) or "").strip()
+    if rank_ref:
+        return rank_ref
+    return f"xianxia:{option['slug']}:{rank_key}"
+
+
+def _normalize_martial_art_option_slug(value: Any) -> str:
+    return str(value if value is not None else "").strip().casefold()
+
+
+def _normalize_xianxia_starting_martial_art_rank_key(value: Any) -> str:
+    normalized = str(value if value is not None else "").strip().lower().replace(" ", "_")
+    normalized = normalized.replace("-", "_")
+    return normalized
 
 
 def _clean_form_value(value: Any) -> str:

@@ -130,6 +130,40 @@
           </section>
 
           <section class="builder-section">
+            <h3>Starting Martial Arts</h3>
+            {% if builder.martial_art_options %}
+              <div class="builder-field-grid">
+                {% for field in builder.martial_art_fields %}
+                  <label class="field">
+                    <span>Martial Art {{ field.index }}</span>
+                    <select name="{{ field.art_input_name }}">
+                      <option value="">Choose Martial Art</option>
+                      {% for option in builder.martial_art_options %}
+                        <option value="{{ option.slug }}" {% if field.selected_slug == option.slug %}selected{% endif %}>
+                          {{ option.title }}{% if option.source_id %} ({{ option.source_id }}){% endif %}
+                        </option>
+                      {% endfor %}
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Starting Rank {{ field.index }}</span>
+                    <select name="{{ field.rank_input_name }}">
+                      <option value="">Choose Rank</option>
+                      {% for rank in builder.martial_art_rank_choices %}
+                        <option value="{{ rank.key }}" {% if field.selected_rank == rank.key %}selected{% endif %}>
+                          {{ rank.label }}
+                        </option>
+                      {% endfor %}
+                    </select>
+                  </label>
+                {% endfor %}
+              </div>
+            {% else %}
+              <p class="meta">Enable a Xianxia Martial Art Systems source before creating a character.</p>
+            {% endif %}
+          </section>
+
+          <section class="builder-section">
             <h3>GM Grants</h3>
             <div class="builder-field-grid">
               <label class="field">

@@ -11162,7 +11162,11 @@ def create_app() -> Flask:
             )
         if create_lane == CHARACTER_ROUTE_LANE_XIANXIA:
             form_values = dict(request.form if request.method == "POST" else request.args)
-            create_context = build_xianxia_character_create_context(form_values)
+            create_context = build_xianxia_character_create_context(
+                form_values,
+                systems_service=get_systems_service(),
+                campaign_slug=campaign_slug,
+            )
             if request.method != "POST":
                 return render_xianxia_character_create_page(campaign_slug, create_context)
 
