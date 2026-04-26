@@ -546,6 +546,14 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     create_html = create_response.get_data(as_text=True)
     assert "Xianxia Character" in create_html
     assert "Starting Defaults" in create_html
+    assert '<span class="meta">Realm</span>' in create_html
+    realm_default_index = create_html.index('<span class="meta">Realm</span>')
+    realm_default_html = create_html[realm_default_index: realm_default_index + 120]
+    assert "<strong>Mortal</strong>" in realm_default_html
+    assert '<span class="meta">Actions</span>' in create_html
+    actions_default_index = create_html.index('<span class="meta">Actions</span>')
+    actions_default_html = create_html[actions_default_index: actions_default_index + 120]
+    assert "<strong>2</strong>" in actions_default_html
     assert "Yin / Yang" in create_html
     assert "1 / 1" in create_html
     assert '<span class="meta">Dao</span>' in create_html
@@ -898,6 +906,7 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     assert definition_payload["source"]["source_type"] == "xianxia_character_builder"
     assert definition_payload["spellcasting"] == {}
     assert definition_payload["xianxia"]["realm"] == "Mortal"
+    assert definition_payload["xianxia"]["actions_per_turn"] == 2
     assert definition_payload["xianxia"]["honor"] == "Honorable"
     assert definition_payload["xianxia"]["reputation"] == "Unknown"
     assert definition_payload["xianxia"]["attributes"] == {

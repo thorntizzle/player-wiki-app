@@ -21,6 +21,8 @@ from .xianxia_character_model import (
 
 XIANXIA_CHARACTER_BUILDER_VERSION = "2026-04-26.03"
 XIANXIA_CHARACTER_CREATE_SOURCE_PATH = "builder://xianxia-create"
+XIANXIA_REALM_DEFAULT = "Mortal"
+XIANXIA_ACTIONS_PER_TURN_DEFAULT = 2
 XIANXIA_ATTRIBUTE_CREATION_POINTS = 6
 XIANXIA_ATTRIBUTE_MAX_AT_CREATION = 3
 XIANXIA_EFFORT_CREATION_POINTS = 5
@@ -84,8 +86,8 @@ def build_xianxia_character_create_context(
     return {
         "values": values,
         "defaults": {
-            "realm": "Mortal",
-            "actions_per_turn": 2,
+            "realm": XIANXIA_REALM_DEFAULT,
+            "actions_per_turn": XIANXIA_ACTIONS_PER_TURN_DEFAULT,
             "honor": "Honorable",
             "reputation": "Unknown",
             "hp_max": XIANXIA_HP_DEFAULT_MAX,
@@ -154,7 +156,7 @@ def build_xianxia_character_definition(
             "system": XIANXIA_SYSTEM_CODE,
             "profile": {
                 "class_level_text": "Mortal Xianxia Character",
-                "realm": "Mortal",
+                "realm": XIANXIA_REALM_DEFAULT,
                 "honor": "Honorable",
                 "reputation": "Unknown",
             },
@@ -185,6 +187,8 @@ def build_xianxia_character_definition(
                 "parse_warnings": [],
             },
             "xianxia": {
+                "realm": XIANXIA_REALM_DEFAULT,
+                "actions_per_turn": XIANXIA_ACTIONS_PER_TURN_DEFAULT,
                 "attributes": attribute_scores,
                 "efforts": effort_scores,
                 "energies": {key: {"max": energy_scores[key]} for key in XIANXIA_ENERGY_KEYS},
