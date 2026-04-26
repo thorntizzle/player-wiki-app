@@ -200,3 +200,65 @@ def test_xianxia_difficulty_state_helper_presents_capped_final_dc_states():
         {"key": "normal", "label": "Normal", "adjustment": 0, "adjustment_label": "0"},
         {"key": "hard", "label": "HARD", "adjustment": 3, "adjustment_label": "+3"},
     ]
+
+
+def test_xianxia_dao_persists_across_session_surface_saves_and_rests(
+    app,
+    client,
+    sign_in,
+    users,
+    get_character,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={**_valid_xianxia_create_data("Dao Keeper"), "dao_current": "2"},
+        follow_redirects=False,
+    )
+
+    assert create_response.status_code == 302
+
+    record = get_character("dao-keeper")
+    assert record is not None
+    assert record.state_record.state["xianxia"]["dao"] == {"current": 2}
+
+    session_response = client.get(
+        "/campaigns/linden-pass/session/character?character=dao-keeper&page=quick"
+    )
+
+    assert session_response.status_code == 200
+    record_after_session_read = get_character("dao-keeper")
+    assert record_after_session_read.state_record.revision == record.state_record.revision
+    assert record_after_session_read.state_record.state["xianxia"]["dao"] == {"current": 2}
+
+    vitals_response = client.post(
+        "/campaigns/linden-pass/characters/dao-keeper/session/vitals",
+        data={
+            "expected_revision": record_after_session_read.state_record.revision,
+            "current_hp": "7",
+            "temp_hp": "1",
+        },
+        follow_redirects=False,
+    )
+
+    assert vitals_response.status_code == 302
+    record_after_vitals = get_character("dao-keeper")
+    assert record_after_vitals.state_record.state["vitals"] == {"current_hp": 7, "temp_hp": 1}
+    assert record_after_vitals.state_record.state["xianxia"]["vitals"]["current_hp"] == 7
+    assert record_after_vitals.state_record.state["xianxia"]["dao"] == {"current": 2}
+
+    for rest_type in ("short", "long"):
+        rest_response = client.post(
+            f"/campaigns/linden-pass/characters/dao-keeper/session/rest/{rest_type}",
+            data={
+                "expected_revision": record_after_vitals.state_record.revision,
+                "confirm_rest": "1",
+            },
+            follow_redirects=False,
+        )
+
+        assert rest_response.status_code == 302
+        record_after_vitals = get_character("dao-keeper")
+        assert record_after_vitals.state_record.state["xianxia"]["dao"] == {"current": 2}
