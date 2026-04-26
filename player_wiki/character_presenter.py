@@ -36,6 +36,7 @@ from .character_spell_slots import normalize_spell_slot_lane_id, spell_slot_lane
 from .models import Campaign
 from .repository import build_alias_index, normalize_lookup, render_obsidian_links
 from .system_policy import is_xianxia_system
+from .xianxia_systems_seed import XIANXIA_HOMEBREW_SOURCE_ID
 from .xianxia_character_model import (
     XIANXIA_EFFORT_KEYS,
     XIANXIA_EFFORT_LABELS,
@@ -77,6 +78,7 @@ REDUNDANT_PASSIVE_FEATURE_NAMES = {
     "martial archetype",
     "psi warrior",
 }
+XIANXIA_STANCE_RULE_ENTRY_KEY = f"xianxia|rule|{XIANXIA_HOMEBREW_SOURCE_ID.lower()}|stance"
 ATTACK_NAME_SUFFIX_PATTERN = re.compile(r"\s*\([^)]*\)\s*$")
 
 
@@ -204,6 +206,15 @@ def present_character_detail(
     )
     xianxia_difficulty_states = (
         present_xianxia_difficulty_states()
+        if is_xianxia_character
+        else None
+    )
+    xianxia_stance_break = (
+        present_xianxia_stance_break_reference(
+            campaign,
+            state,
+            systems_service=systems_service,
+        )
         if is_xianxia_character
         else None
     )
@@ -810,6 +821,7 @@ def present_character_detail(
         "xianxia_effort_damage": xianxia_effort_damage,
         "xianxia_check_formula": xianxia_check_formula,
         "xianxia_difficulty_states": xianxia_difficulty_states,
+        "xianxia_stance_break": xianxia_stance_break,
         "attack_reminders": attack_reminders,
         "defensive_rules": defensive_rules,
         "death_save_summary": death_save_summary,
@@ -1175,6 +1187,65 @@ def present_xianxia_check_formula() -> dict[str, str]:
 
 def present_xianxia_difficulty_states() -> dict[str, Any]:
     return derive_xianxia_difficulty_state_adjustments()
+
+
+def present_xianxia_stance_break_reference(
+    campaign: Campaign,
+    state: dict[str, Any],
+    *,
+    systems_service: Any | None = None,
+) -> dict[str, Any] | None:
+    xianxia_state = dict(state.get("xianxia") or {})
+    xianxia_vitals = dict(xianxia_state.get("vitals") or {})
+    current_stance = _coerce_int(xianxia_vitals.get("current_stance"), default=0)
+    if current_stance != 0:
+        return None
+
+    entry = None
+    if systems_service is not None:
+        entry = systems_service.get_entry_for_campaign(
+            campaign.slug,
+            XIANXIA_STANCE_RULE_ENTRY_KEY,
+        )
+        if entry is None:
+            entry = systems_service.get_entry_by_slug_for_campaign(campaign.slug, "stance")
+
+    reference_lines: list[str] = []
+    recovery_lines: list[str] = []
+    if entry is not None:
+        for section in list(dict(entry.body or {}).get("sections") or []):
+            section_payload = dict(section or {})
+            for raw_bullet in list(section_payload.get("bullets") or []):
+                bullet = str(raw_bullet or "").strip()
+                if not bullet:
+                    continue
+                normalized = bullet.lower()
+                if (
+                    "current stance reaches 0" in normalized
+                    or "stance breaks" in normalized
+                    or "stance break" in normalized
+                ):
+                    reference_lines.append(bullet)
+                elif "stance recovers" in normalized:
+                    recovery_lines.append(bullet)
+
+    if not reference_lines:
+        reference_lines.append("Current Stance is 0.")
+
+    systems_ref = {
+        "slug": "stance",
+        "title": str(getattr(entry, "title", "") or "Stance"),
+        "entry_type": "rule",
+        "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+    }
+    return {
+        "current_stance": current_stance,
+        "status_label": "Current Stance 0",
+        "reference_lines": reference_lines,
+        "recovery_lines": recovery_lines,
+        "rule_title": systems_ref["title"],
+        "rule_href": build_systems_entry_href(campaign.slug, systems_ref),
+    }
 
 
 def build_reference_sections(

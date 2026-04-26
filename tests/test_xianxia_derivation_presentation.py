@@ -357,3 +357,44 @@ def test_xianxia_one_day_rest_recovers_mutable_pools_and_preserves_dao(
     }
     assert rested_state["xianxia"]["yin_yang"] == {"yin_current": 1, "yang_current": 1}
     assert rested_state["xianxia"]["dao"] == {"current": 2}
+
+
+def test_xianxia_quick_reference_displays_stance_break_only_at_zero_stance(
+    app,
+    client,
+    sign_in,
+    users,
+    get_character,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Broken Stance"),
+        follow_redirects=False,
+    )
+
+    assert create_response.status_code == 302
+
+    normal_response = client.get("/campaigns/linden-pass/characters/broken-stance?page=quick")
+
+    assert normal_response.status_code == 200
+    normal_html = unescape(normal_response.get_data(as_text=True))
+    assert "Stance Break" not in normal_html
+
+    record = get_character("broken-stance")
+    assert record is not None
+    broken_state = deepcopy(record.state_record.state)
+    broken_state["xianxia"]["vitals"]["current_stance"] = 0
+    _replace_character_state(app, record, broken_state)
+
+    broken_response = client.get("/campaigns/linden-pass/characters/broken-stance?page=quick")
+
+    assert broken_response.status_code == 200
+    broken_html = unescape(broken_response.get_data(as_text=True))
+    assert "Stance Break" in broken_html
+    assert "Current Stance 0" in broken_html
+    assert "/campaigns/linden-pass/systems/entries/stance" in broken_html
+    assert "When current Stance reaches 0, the character's Stance breaks." in broken_html
+    assert "Stance recovers with one day of rest unless another effect prevents recovery." in broken_html
