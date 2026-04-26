@@ -163,6 +163,26 @@
         </section>
       {% endif %}
 
+      {% if show_quick_sections and character.xianxia_check_formula %}
+        <section class="read-section" id="xianxia-check-formula">
+          <div class="section-heading">
+            <h2>Check formula</h2>
+          </div>
+          <div class="glance-grid">
+            <div class="glance-card">
+              <span class="meta">Check</span>
+              <strong>{{ character.xianxia_check_formula.formula }}</strong>
+            </div>
+            <div class="glance-card">
+              <span class="meta">Spend bonus</span>
+              <strong>{{ character.xianxia_check_formula.spend_bonus }}</strong>
+              <span class="meta">{{ character.xianxia_check_formula.spend_bonus_detail }}</span>
+            </div>
+          </div>
+          <p class="meta">Check formula = {{ character.xianxia_check_formula.summary }}</p>
+        </section>
+      {% endif %}
+
       {% if show_quick_sections and character.xianxia_actions %}
         <section class="read-section" id="xianxia-action-count">
           <div class="section-heading">

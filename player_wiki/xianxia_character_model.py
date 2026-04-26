@@ -34,6 +34,9 @@ XIANXIA_EFFORT_DAMAGE_DICE = {
 }
 XIANXIA_ENERGY_KEYS = ("jing", "qi", "shen")
 XIANXIA_DEFENSE_BASE = 10
+XIANXIA_CHECK_FORMULA = "1d20 + Attribute + Realm modifier + situational modifiers"
+XIANXIA_CHECK_SPEND_BONUS = "+1d6"
+XIANXIA_CHECK_SPEND_BONUS_DETAIL = "per spent Energy/Yin/Yang point"
 
 XIANXIA_DEFINITION_FIELD_KEYS = (
     "schema_version",
@@ -267,6 +270,20 @@ def derive_xianxia_effort_damage_strings() -> dict[str, str]:
     return {
         key: f"{XIANXIA_EFFORT_DAMAGE_DICE[key]} + {XIANXIA_EFFORT_LABELS[key]}"
         for key in XIANXIA_EFFORT_KEYS
+    }
+
+
+def derive_xianxia_check_formula_strings() -> dict[str, str]:
+    """Return the first-pass Xianxia check formula reminder strings."""
+
+    return {
+        "formula": XIANXIA_CHECK_FORMULA,
+        "spend_bonus": XIANXIA_CHECK_SPEND_BONUS,
+        "spend_bonus_detail": XIANXIA_CHECK_SPEND_BONUS_DETAIL,
+        "summary": (
+            f"{XIANXIA_CHECK_FORMULA}, plus "
+            f"{XIANXIA_CHECK_SPEND_BONUS} {XIANXIA_CHECK_SPEND_BONUS_DETAIL}."
+        ),
     }
 
 

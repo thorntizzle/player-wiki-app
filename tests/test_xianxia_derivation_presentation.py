@@ -114,6 +114,14 @@ def test_xianxia_quick_reference_presents_derived_defense(
 
     assert sheet_response.status_code == 200
     html = unescape(sheet_response.get_data(as_text=True))
+    assert "Check formula" in html
+    assert "1d20 + Attribute + Realm modifier + situational modifiers" in html
+    assert "+1d6" in html
+    assert "per spent Energy/Yin/Yang point" in html
+    assert (
+        "Check formula = 1d20 + Attribute + Realm modifier + situational modifiers, "
+        "plus +1d6 per spent Energy/Yin/Yang point."
+    ) in html
     assert "Action count" in html
     assert "Actions per turn" in html
     assert "Actions per turn = Mortal -> 2 actions per turn" in html

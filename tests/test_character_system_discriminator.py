@@ -18,6 +18,7 @@ from player_wiki.xianxia_character_model import (
     XIANXIA_STATE_FIELD_KEYS,
     XianxiaDefinitionValidationError,
     derive_xianxia_actions_per_turn,
+    derive_xianxia_check_formula_strings,
     derive_xianxia_defense,
     derive_xianxia_effort_damage_strings,
     validate_xianxia_definition_payload,
@@ -247,6 +248,18 @@ def test_xianxia_effort_damage_strings_use_canonical_dice_and_effort_labels():
         "guns_explosive": "1d8 + Guns/Explosive",
         "magic": "1d10 + Magic",
         "ultimate": "1d12 + Ultimate",
+    }
+
+
+def test_xianxia_check_formula_strings_use_gm_clarified_formula():
+    assert derive_xianxia_check_formula_strings() == {
+        "formula": "1d20 + Attribute + Realm modifier + situational modifiers",
+        "spend_bonus": "+1d6",
+        "spend_bonus_detail": "per spent Energy/Yin/Yang point",
+        "summary": (
+            "1d20 + Attribute + Realm modifier + situational modifiers, "
+            "plus +1d6 per spent Energy/Yin/Yang point."
+        ),
     }
 
 
