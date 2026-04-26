@@ -148,6 +148,7 @@ def test_xianxia_builtin_systems_library_identity_seeds_initial_homebrew_source(
     with app.app_context():
         service = app.extensions["systems_service"]
         store = app.extensions["systems_store"]
+        seed_entries = build_xianxia_systems_seed_entries()
 
         library = service.ensure_builtin_library_seeded(XIANXIA_SYSTEM_CODE)
 
@@ -164,8 +165,19 @@ def test_xianxia_builtin_systems_library_identity_seeds_initial_homebrew_source(
         assert homebrew_source.license_class == "open_license"
         assert homebrew_source.public_visibility_allowed is False
         assert homebrew_source.requires_unofficial_notice is False
-        assert store.count_entries_for_source(XIANXIA_SYSTEM_CODE, XIANXIA_HOMEBREW_SOURCE_ID) == 0
-        assert build_xianxia_systems_seed_entries() == []
+        assert store.count_entries_for_source(XIANXIA_SYSTEM_CODE, XIANXIA_HOMEBREW_SOURCE_ID) == len(seed_entries)
+        seeded_titles = {
+            entry.title
+            for entry in store.list_entries_for_source(
+                XIANXIA_SYSTEM_CODE,
+                XIANXIA_HOMEBREW_SOURCE_ID,
+                entry_type="rule",
+                limit=None,
+            )
+        }
+        assert "Checks and Difficulty" in seeded_titles
+        assert "Energy: Jing, Qi, and Shen" in seeded_titles
+        assert "GM Approval Gates" in seeded_titles
 
         source_catalog_entry = service._source_catalog_entry(homebrew_source)
         assert source_catalog_entry is not None
@@ -234,6 +246,54 @@ def test_xianxia_entry_facet_definitions_cover_milestone_one_concepts():
     assert martial_art_facet["label"] == "Martial Art"
 
 
+def test_xianxia_core_rule_seed_entries_cover_milestone_one_references():
+    entries = build_xianxia_systems_seed_entries()
+    entry_map = {entry["slug"]: entry for entry in entries}
+    required_slugs = {
+        "checks-and-difficulty",
+        "easy-normal-and-hard",
+        "attributes",
+        "efforts-and-damage",
+        "energy-jing-qi-and-shen",
+        "yin-and-yang",
+        "dao",
+        "hit-points",
+        "stance",
+        "defense",
+        "insight",
+        "realm-and-actions",
+        "honor",
+        "reputation",
+        "skills",
+        "basic-actions",
+        "cultivation-time",
+        "one-day-rest",
+        "ranges-and-distance",
+        "timing-and-initiative",
+        "stance-activation-rules",
+        "aura-activation-rules",
+        "dying-and-unconsciousness",
+        "critical-hits",
+        "sneak-attacks",
+        "minions",
+        "companion-derivation",
+        "gm-approval-gates",
+    }
+
+    assert set(entry_map) == required_slugs
+    assert all(entry["entry_type"] == "rule" for entry in entries)
+    assert all(entry["metadata"]["seed_storage_strategy"] == XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY for entry in entries)
+    assert all(entry["metadata"]["seed_version"] == XIANXIA_SYSTEMS_SEED_VERSION for entry in entries)
+    assert all(entry["metadata"]["xianxia_rule_key"] for entry in entries)
+    assert all(entry["metadata"]["rule_key"] for entry in entries)
+    assert all(entry["metadata"]["xianxia_entry_facets"] for entry in entries)
+    assert all(entry["body"]["sections"] for entry in entries)
+    assert entry_map["efforts-and-damage"]["metadata"]["rule_key"] == "efforts_and_damage"
+    assert "magic effort" in entry_map["efforts-and-damage"]["search_text"]
+    assert entry_map["dying-and-unconsciousness"]["metadata"]["support_state"] == "reference_only"
+    assert entry_map["minions"]["metadata"]["support_state"] == "reference_only"
+
+
 def test_xianxia_condition_and_status_seed_entries_are_forced_reference_only():
     for facet in ("condition", "status"):
         entry = _build_seed_entry(
@@ -268,7 +328,7 @@ def test_xianxia_condition_and_status_seed_entries_are_forced_reference_only():
         )
 
 
-def test_xianxia_empty_curated_seed_manifest_does_not_delete_existing_shared_rows(app):
+def test_xianxia_curated_seed_manifest_replaces_stale_shared_rows(app):
     with app.app_context():
         service = app.extensions["systems_service"]
         store = app.extensions["systems_store"]
@@ -300,8 +360,11 @@ def test_xianxia_empty_curated_seed_manifest_does_not_delete_existing_shared_row
             entry_type="rule",
             limit=None,
         )
+        expected_titles = {entry["title"] for entry in build_xianxia_systems_seed_entries()}
+        seeded_titles = {entry.title for entry in entries}
 
-        assert [entry.title for entry in entries] == ["Admin Authored Draft"]
+        assert seeded_titles == expected_titles
+        assert "Admin Authored Draft" not in seeded_titles
 
 
 def test_xianxia_homebrew_source_policy_defaults_dm_only_when_campaign_selects_library(app):
@@ -373,30 +436,11 @@ def test_xianxia_source_policy_defaults_entries_dm_only_while_player_wiki_stays_
     ]
     campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
-    entry_slug = "dao-breathing"
+    entry_slug = "dao"
     with app.app_context():
         app.extensions["repository_store"].refresh()
         service = app.extensions["systems_service"]
-        store = app.extensions["systems_store"]
         service.ensure_builtin_library_seeded(XIANXIA_SYSTEM_CODE)
-        store.replace_entries_for_source(
-            XIANXIA_SYSTEM_CODE,
-            XIANXIA_HOMEBREW_SOURCE_ID,
-            entries=[
-                {
-                    "entry_key": f"xianxia|rule|{XIANXIA_HOMEBREW_SOURCE_ID.lower()}|{entry_slug}",
-                    "entry_type": "rule",
-                    "slug": entry_slug,
-                    "title": "Dao Breathing",
-                    "search_text": "dao breathing xianxia homebrew",
-                    "player_safe_default": True,
-                    "dm_heavy": False,
-                    "metadata": {"rule_key": "dao_breathing"},
-                    "body": {},
-                    "rendered_html": "<p>Dao Breathing is a Xianxia test rule.</p>",
-                }
-            ],
-        )
 
         state = service.get_campaign_source_state("linden-pass", XIANXIA_HOMEBREW_SOURCE_ID)
         entry = service.get_entry_by_slug_for_campaign("linden-pass", entry_slug)
@@ -433,9 +477,9 @@ def test_xianxia_source_policy_defaults_entries_dm_only_while_player_wiki_stays_
 
     assert dm_systems.status_code == 200
     assert dm_search.status_code == 200
-    assert "Dao Breathing" in dm_search.get_data(as_text=True)
+    assert "Dao" in dm_search.get_data(as_text=True)
     assert dm_entry.status_code == 200
-    assert "Dao Breathing" in dm_entry.get_data(as_text=True)
+    assert "Dao is a capped narrative and combat resource" in dm_entry.get_data(as_text=True)
 
 
 def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
@@ -486,36 +530,6 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
                 }
             ],
         )
-        store.replace_entries_for_source(
-            XIANXIA_SYSTEM_CODE,
-            XIANXIA_HOMEBREW_SOURCE_ID,
-            entries=[
-                {
-                    "entry_key": "xianxia|rule|xianxia-homebrew|dao-breathing",
-                    "entry_type": "rule",
-                    "slug": "dao-breathing",
-                    "title": "Dao Breathing",
-                    "search_text": "dao breathing xianxia homebrew",
-                    "player_safe_default": True,
-                    "dm_heavy": False,
-                    "metadata": {"rule_key": "dao_breathing"},
-                    "body": {},
-                    "rendered_html": "<p>Dao Breathing is a Xianxia test rule.</p>",
-                },
-                {
-                    "entry_key": "xianxia|martial_art|xianxia-homebrew|heavenly-palm",
-                    "entry_type": "martial_art",
-                    "slug": "heavenly-palm",
-                    "title": "Heavenly Palm",
-                    "search_text": "heavenly palm xianxia homebrew martial art",
-                    "player_safe_default": True,
-                    "dm_heavy": False,
-                    "metadata": {"facet": "martial_art"},
-                    "body": {},
-                    "rendered_html": "<p>Heavenly Palm is a Xianxia martial art.</p>",
-                },
-            ],
-        )
 
         search_results = service.search_entries_for_campaign(
             "linden-pass",
@@ -530,9 +544,11 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
             limit=None,
         )
 
-        assert [entry.title for entry in search_results] == ["Dao Breathing"]
+        assert "Dao" in {entry.title for entry in search_results}
+        assert "DND Dao Breathing" not in {entry.title for entry in search_results}
         assert {entry.library_slug for entry in search_results} == {XIANXIA_SYSTEM_CODE}
-        assert [entry.title for entry in rule_entries] == ["Dao Breathing"]
+        assert len(rule_entries) == len(build_xianxia_systems_seed_entries())
+        assert "Dao" in {entry.title for entry in rule_entries}
         assert {entry.library_slug for entry in rule_entries} == {XIANXIA_SYSTEM_CODE}
         assert service.get_entry_by_slug_for_campaign("linden-pass", "dnd-dao-breathing") is None
 
@@ -546,7 +562,7 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
 
     assert systems.status_code == 200
     systems_html = systems.get_data(as_text=True)
-    assert "Dao Breathing" in systems_html
+    assert "Dao" in systems_html
     assert "DND Dao Breathing" not in systems_html
     assert "DND Impostor Xianxia Source" not in systems_html
 
@@ -554,13 +570,14 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
     source_html = source.get_data(as_text=True)
     assert "Xianxia Homebrew" in source_html
     assert "DND Impostor Xianxia Source" not in source_html
-    assert "2 browsable entries across 2" in source_html
+    seed_count = len(build_xianxia_systems_seed_entries())
+    assert f"{seed_count} browsable entries across 1" in source_html
 
     assert rule_category.status_code == 200
     category_html = rule_category.get_data(as_text=True)
-    assert "Dao Breathing" in category_html
+    assert "Dao" in category_html
     assert "DND Dao Breathing" not in category_html
-    assert "Showing all 1 rules in this source." in category_html
+    assert f"Showing all {seed_count} rules in this source." in category_html
 
     assert dnd_entry.status_code == 404
 

@@ -1,5 +1,5 @@
 {
-  "version": "2026-04-25.1",
+  "version": "2026-04-26.1",
   "source_id": "XIANXIA-HOMEBREW",
   "source_title": "Xianxia Homebrew",
   "storage_strategy": "curated_seed_data",
@@ -203,5 +203,680 @@
       "summary": "Reference entries for explicit GM approval gates such as Karmic Constraints, Ascendant Arts, and Dao Immolating use."
     }
   ],
-  "entries": []
+  "entries": [
+    {
+      "title": "Checks and Difficulty",
+      "entry_type": "rule",
+      "slug": "checks-and-difficulty",
+      "facets": ["rule"],
+      "aliases": ["check formula", "d20 checks", "difficulty"],
+      "summary": "Xianxia checks roll 1d20 plus an Attribute, Realm modifier, and situational modifiers against a final DC.",
+      "metadata": {
+        "rule_key": "checks_and_difficulty",
+        "rule_facets": ["check_formula", "difficulty", "d20"],
+        "xianxia_rule_key": "checks_and_difficulty"
+      },
+      "sections": [
+        {
+          "title": "Check Formula",
+          "paragraphs": [
+            "A normal check is 1d20 + Attribute + Realm modifier + situational modifiers. Add +1d6 for each point of appropriate Energy, Yin, or Yang spent. A result that equals or exceeds the final DC succeeds."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "EASY, Normal, and HARD",
+      "entry_type": "rule",
+      "slug": "easy-normal-and-hard",
+      "facets": ["rule"],
+      "aliases": ["EASY", "Normal", "HARD", "DC states"],
+      "summary": "EASY, Normal, and HARD are final DC states, not unbounded stacking bonuses.",
+      "metadata": {
+        "rule_key": "easy_normal_hard",
+        "rule_facets": ["difficulty", "dc_state"],
+        "xianxia_rule_key": "easy_normal_hard"
+      },
+      "sections": [
+        {
+          "title": "DC States",
+          "bullets": [
+            "EASY lowers the final DC by 3.",
+            "Normal leaves the final DC unchanged.",
+            "HARD raises the final DC by 3.",
+            "EASY and HARD influences shift the final state against each other instead of stacking into larger bonuses or penalties."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Attributes",
+      "entry_type": "rule",
+      "slug": "attributes",
+      "facets": ["attribute"],
+      "aliases": ["Strength", "Dexterity", "Constitution", "Intelligence", "Wisdom", "Charisma"],
+      "summary": "Xianxia uses the six standard Attributes for checks and character creation budgets.",
+      "metadata": {
+        "rule_key": "attributes",
+        "rule_facets": ["attribute", "character_creation"],
+        "xianxia_rule_key": "attributes"
+      },
+      "sections": [
+        {
+          "title": "Attribute Set",
+          "bullets": [
+            "The six Attributes are Strength, Dexterity, Constitution, Intelligence, Wisdom, and Charisma.",
+            "Starting characters spend 6 creation points across Attributes.",
+            "No Attribute can exceed 3 at character creation unless the GM explicitly overrides the budget."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Efforts and Damage",
+      "entry_type": "rule",
+      "slug": "efforts-and-damage",
+      "facets": ["effort"],
+      "aliases": ["Basic Effort", "Weapon Effort", "Guns/Explosive Effort", "Magic Effort", "Ultimate Effort"],
+      "summary": "Efforts are separate from Attributes and add their score to the matching effort die for damage.",
+      "metadata": {
+        "rule_key": "efforts_and_damage",
+        "rule_facets": ["effort", "damage"],
+        "xianxia_rule_key": "efforts_and_damage"
+      },
+      "sections": [
+        {
+          "title": "Effort Families",
+          "bullets": [
+            "Basic Effort uses 1d4 + Basic.",
+            "Weapon Effort uses 1d6 + Weapon.",
+            "Guns/Explosive Effort uses 1d8 + Guns/Explosive.",
+            "Magic Effort uses 1d10 + Magic.",
+            "Ultimate Effort uses 1d12 + Ultimate."
+          ]
+        },
+        {
+          "title": "Creation Budget",
+          "bullets": [
+            "Starting characters spend 5 creation points across Efforts.",
+            "No Effort can exceed 3 at character creation unless the GM explicitly overrides the budget."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Energy: Jing, Qi, and Shen",
+      "entry_type": "rule",
+      "slug": "energy-jing-qi-and-shen",
+      "facets": ["energy"],
+      "aliases": ["Jing", "Qi", "Shen", "Energy"],
+      "summary": "Jing, Qi, and Shen are spendable Energies with separate maximums and action themes.",
+      "metadata": {
+        "rule_key": "energy_jing_qi_shen",
+        "rule_facets": ["energy", "jing", "qi", "shen"],
+        "xianxia_rule_key": "energy_jing_qi_shen"
+      },
+      "sections": [
+        {
+          "title": "Energy Uses",
+          "bullets": [
+            "Jing supports physical actions.",
+            "Qi supports mystical or skill-based actions.",
+            "Shen supports spiritual or magical actions.",
+            "A character may spend an appropriate Energy point for +1d6 on a check.",
+            "Starting characters spend 3 creation points across Jing, Qi, and Shen."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Yin and Yang",
+      "entry_type": "rule",
+      "slug": "yin-and-yang",
+      "facets": ["yin_yang"],
+      "aliases": ["Yin", "Yang"],
+      "summary": "Yin and Yang are separate spendable pools that start at 1 each.",
+      "metadata": {
+        "rule_key": "yin_and_yang",
+        "rule_facets": ["yin_yang", "resource_pool"],
+        "xianxia_rule_key": "yin_and_yang"
+      },
+      "sections": [
+        {
+          "title": "GM-Ruled Action Support",
+          "bullets": [
+            "Yin supports offensive or physical actions.",
+            "Yang supports defensive or magical actions.",
+            "A character may spend an appropriate Yin or Yang point for +1d6 on a check.",
+            "Yin and Yang recover with one day of rest unless another effect prevents recovery."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Dao",
+      "entry_type": "rule",
+      "slug": "dao",
+      "facets": ["dao"],
+      "aliases": ["Dao pool", "Dao cap"],
+      "summary": "Dao is a capped narrative and combat resource that persists until spent.",
+      "metadata": {
+        "rule_key": "dao",
+        "rule_facets": ["dao", "resource_pool"],
+        "xianxia_rule_key": "dao"
+      },
+      "sections": [
+        {
+          "title": "Dao Rules",
+          "bullets": [
+            "Dao is capped at 3.",
+            "Dao starts at 0 unless the GM explicitly grants accumulated Dao.",
+            "Dao may be gained through Energy spend, roleplay, or certain Martial Arts.",
+            "Dao does not reset at session start or after rest.",
+            "Dao is held until spent on difficulty reduction or later Dao actions."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Hit Points",
+      "entry_type": "rule",
+      "slug": "hit-points",
+      "facets": ["rule"],
+      "aliases": ["HP"],
+      "summary": "Hit Points are the character's injury track and start with a maximum of 10.",
+      "metadata": {
+        "rule_key": "hit_points",
+        "rule_facets": ["hp", "durability"],
+        "xianxia_rule_key": "hit_points"
+      },
+      "sections": [
+        {
+          "title": "HP Baseline",
+          "bullets": [
+            "Starting HP maximum is 10.",
+            "Current HP is clamped to the current HP maximum.",
+            "Dropping to 0 HP puts the character in the Dying state.",
+            "HP recovers with one day of rest unless another effect prevents recovery."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Stance",
+      "entry_type": "rule",
+      "slug": "stance",
+      "facets": ["stance"],
+      "aliases": ["Stance Break", "Stance maximum"],
+      "summary": "Stance is a second durability track that starts with a maximum of 10.",
+      "metadata": {
+        "rule_key": "stance",
+        "rule_facets": ["stance", "durability"],
+        "xianxia_rule_key": "stance"
+      },
+      "sections": [
+        {
+          "title": "Stance Baseline",
+          "bullets": [
+            "Starting Stance maximum is 10.",
+            "Current Stance is clamped to the current Stance maximum.",
+            "When current Stance reaches 0, the character's Stance breaks.",
+            "Stance recovers with one day of rest unless another effect prevents recovery."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Defense",
+      "entry_type": "rule",
+      "slug": "defense",
+      "facets": ["armor"],
+      "aliases": ["Armor", "Defense bonus"],
+      "summary": "Defense is derived from base 10, armor bonus, and Constitution.",
+      "metadata": {
+        "rule_key": "defense",
+        "rule_facets": ["defense", "armor"],
+        "xianxia_rule_key": "defense"
+      },
+      "sections": [
+        {
+          "title": "Formula",
+          "paragraphs": [
+            "Defense equals 10 + armor bonus + Constitution. Milestone 1 uses a manual armor bonus until detailed armor quality and stat tiers are defined."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Insight",
+      "entry_type": "rule",
+      "slug": "insight",
+      "facets": ["rule"],
+      "aliases": ["Insight currency", "advancement"],
+      "summary": "Insight is the advancement currency for Martial Arts, cultivation, training, meditation, conditioning, and Generic Techniques.",
+      "metadata": {
+        "rule_key": "insight",
+        "rule_facets": ["insight", "advancement"],
+        "xianxia_rule_key": "insight"
+      },
+      "sections": [
+        {
+          "title": "Insight Baseline",
+          "bullets": [
+            "Insight starts at 0.",
+            "Generic Techniques cannot be learned at character creation because they require spending Insight unless the GM grants an exception.",
+            "Martial Art teacher requirements are notes for now rather than enforced advancement blockers."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Realm and Actions",
+      "entry_type": "rule",
+      "slug": "realm-and-actions",
+      "facets": ["realm"],
+      "aliases": ["Mortal", "Immortal", "Divine", "actions per turn", "realm ascension"],
+      "summary": "Realm defines major character tier, action count, and ascension rebuild rules.",
+      "metadata": {
+        "rule_key": "realm_and_actions",
+        "rule_facets": ["realm", "actions", "ascension"],
+        "xianxia_rule_key": "realm_and_actions"
+      },
+      "sections": [
+        {
+          "title": "Realm Actions",
+          "bullets": [
+            "Mortal characters have 2 total Actions.",
+            "Immortal characters have 3 total Actions.",
+            "Divine characters have 4 total Actions."
+          ]
+        },
+        {
+          "title": "Ascension Reference",
+          "bullets": [
+            "Immortal ascension requires 1 year of seclusion, rebuilds Attributes and Efforts with 15 points, and has a starting max of 6 in any one Stat.",
+            "Divine ascension requires 100 years of seclusion, rebuilds Attributes and Efforts with 25 points, and has a starting max of 12 in any one Stat.",
+            "Realm ascension resets only Attributes and Efforts; Energies, Yin/Yang, HP, Stance, Insight, Martial Arts, Generic Techniques, and other character data remain unchanged."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Honor",
+      "entry_type": "rule",
+      "slug": "honor",
+      "facets": ["honor_rank"],
+      "aliases": ["Honor rank", "Honorable", "Venerable", "Majestic", "Disgraced", "Demonic"],
+      "summary": "Honor is a directional social modifier tied to orthodox, demonic, and criminal contexts.",
+      "metadata": {
+        "rule_key": "honor",
+        "rule_facets": ["honor", "social"],
+        "xianxia_rule_key": "honor"
+      },
+      "sections": [
+        {
+          "title": "Honor Interactions",
+          "bullets": [
+            "Honorable is neutral and is the default starting Honor.",
+            "Venerable and Majestic grant +3 and +5 with orthodox sects and individuals.",
+            "Disgraced and Demonic grant +3 and +5 with demonic or criminal backgrounds.",
+            "When dealing with the opposite Honor alignment, the same value applies as a penalty."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Reputation",
+      "entry_type": "rule",
+      "slug": "reputation",
+      "facets": ["rule"],
+      "aliases": ["Unknown reputation"],
+      "summary": "Reputation starts at Unknown and is a narrative roleplay convenience rather than a hard mechanic.",
+      "metadata": {
+        "rule_key": "reputation",
+        "rule_facets": ["reputation", "social"],
+        "xianxia_rule_key": "reputation"
+      },
+      "sections": [
+        {
+          "title": "Reputation Baseline",
+          "paragraphs": [
+            "Reputation should record how a character is known in the world, but Milestone 1 does not treat it as an automated check modifier."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Skills",
+      "entry_type": "rule",
+      "slug": "skills",
+      "facets": ["skill_rule"],
+      "aliases": ["trained skills", "skill use"],
+      "summary": "Skills are freeform trained non-combat specialties that can make relevant checks EASY.",
+      "metadata": {
+        "rule_key": "skills",
+        "rule_facets": ["skill", "trained_skill"],
+        "xianxia_rule_key": "skills"
+      },
+      "sections": [
+        {
+          "title": "Skill Guardrails",
+          "bullets": [
+            "Starting characters choose exactly 3 trained skills.",
+            "A trained skill can make a relevant check EASY.",
+            "Skills cannot be used in active battle to affect Attacks or Damage.",
+            "Skills can affect surroundings or pre-battle preparation when the GM agrees."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Basic Actions",
+      "entry_type": "rule",
+      "slug": "basic-actions",
+      "facets": ["rule"],
+      "aliases": ["Recoup", "Recollect", "Duel", "Taunt", "Wide Dispatch", "Flowing Dao", "Throat Jab", "Knuckle Strike", "Defend", "All-Out Offense", "Parry"],
+      "summary": "Basic Actions are core Xianxia action references; individual automation remains deferred.",
+      "metadata": {
+        "rule_key": "basic_actions",
+        "rule_facets": ["basic_action", "action_reference"],
+        "support_state": "reference_only",
+        "xianxia_rule_key": "basic_actions"
+      },
+      "sections": [
+        {
+          "title": "Known Basic Actions",
+          "paragraphs": [
+            "The core Basic Action reference covers Recoup, Recollect, Duel, Taunt, Wide Dispatch, Flowing Dao, Throat Jab, Knuckle Strike, Defend, All-Out Offense, and Parry."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Cultivation Time",
+      "entry_type": "rule",
+      "slug": "cultivation-time",
+      "facets": ["rule"],
+      "aliases": ["Gathering Insight", "cultivation", "downtime"],
+      "summary": "Cultivation time records advancement downtime and GM-reviewed growth rather than a combat automation loop.",
+      "metadata": {
+        "rule_key": "cultivation_time",
+        "rule_facets": ["cultivation", "downtime", "advancement"],
+        "support_state": "reference_only",
+        "xianxia_rule_key": "cultivation_time"
+      },
+      "sections": [
+        {
+          "title": "Downtime Reference",
+          "bullets": [
+            "Gathering Insight is a downtime gain path.",
+            "Cultivation, Meditation, Conditioning, Training, Martial Art rank advancement, and Generic Technique learning spend Insight later in advancement workflows.",
+            "Realm ascension seclusion uses the Realm timing rules: 1 year for Immortal and 100 years for Divine.",
+            "Milestone 1 does not add calendar automation for cultivation time."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "One-Day Rest",
+      "entry_type": "rule",
+      "slug": "one-day-rest",
+      "facets": ["rule"],
+      "aliases": ["rest recovery", "day rest"],
+      "summary": "One day of rest recovers the normal Xianxia pools except Dao unless another effect blocks recovery.",
+      "metadata": {
+        "rule_key": "one_day_rest",
+        "rule_facets": ["rest", "recovery"],
+        "xianxia_rule_key": "one_day_rest"
+      },
+      "sections": [
+        {
+          "title": "Recovery",
+          "bullets": [
+            "Outside battle, HP recovers with one day of rest unless another effect prevents recovery.",
+            "Outside battle, Stance recovers with one day of rest unless another effect prevents recovery.",
+            "Energy, Yin, and Yang recover with one day of rest unless another effect prevents recovery.",
+            "Dao does not reset after rest and remains held until spent."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Ranges and Distance",
+      "entry_type": "rule",
+      "slug": "ranges-and-distance",
+      "facets": ["range_rule"],
+      "aliases": ["Touch", "Close", "Near", "Far", "Space", "feet"],
+      "summary": "Xianxia range labels map to feet, adjacency, and 5-foot spaces.",
+      "metadata": {
+        "rule_key": "ranges_and_distance",
+        "rule_facets": ["range", "distance"],
+        "xianxia_rule_key": "ranges_and_distance"
+      },
+      "sections": [
+        {
+          "title": "Range Labels",
+          "bullets": [
+            "Touch requires physical contact through a Melee Attack.",
+            "Close means within 5 feet, adjacent, or dueling.",
+            "Near means up to 30 feet.",
+            "Far means up to 60 feet.",
+            "One Space is a 5-foot square.",
+            "Area dimensions such as 30x30 are measured in feet."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Timing and Initiative",
+      "entry_type": "rule",
+      "slug": "timing-and-initiative",
+      "facets": ["timing_rule"],
+      "aliases": ["Turn", "Round", "Day", "initiative", "once per combat"],
+      "summary": "Timing terms define turns, rounds, days, initiative order, and once-per-combat limits.",
+      "metadata": {
+        "rule_key": "timing_and_initiative",
+        "rule_facets": ["timing", "initiative"],
+        "support_state": "reference_only",
+        "xianxia_rule_key": "timing_and_initiative"
+      },
+      "sections": [
+        {
+          "title": "Timing Terms",
+          "bullets": [
+            "A Turn is one character's time for Actions in combat.",
+            "A Round is the full pass through every participant's Turn in initiative order.",
+            "Initiative is set at the beginning of combat with a Dex Check, runs highest to lowest, and is not rerolled each Round.",
+            "A Day is 24 hours.",
+            "Once-per-combat means once per combat encounter."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Stance Activation Rules",
+      "entry_type": "rule",
+      "slug": "stance-activation-rules",
+      "facets": ["stance"],
+      "aliases": ["active Stance", "Stance rules"],
+      "summary": "A character can have only one Stance active at a time.",
+      "metadata": {
+        "rule_key": "stance_activation_rules",
+        "rule_facets": ["stance", "active_state"],
+        "support_state": "reference_only",
+        "xianxia_rule_key": "stance_activation_rules"
+      },
+      "sections": [
+        {
+          "title": "Active Stance",
+          "bullets": [
+            "Entering a Stance costs an Action plus any Stance-specific costs.",
+            "A Stance ends when the character's Stance breaks.",
+            "A Stance ends when the character switches Stances.",
+            "A Stance ends when the character can no longer maintain the Stance's requirements."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Aura Activation Rules",
+      "entry_type": "rule",
+      "slug": "aura-activation-rules",
+      "facets": ["aura"],
+      "aliases": ["active Aura", "Aura rules"],
+      "summary": "A character can have only one Aura active at a time.",
+      "metadata": {
+        "rule_key": "aura_activation_rules",
+        "rule_facets": ["aura", "active_state"],
+        "support_state": "reference_only",
+        "xianxia_rule_key": "aura_activation_rules"
+      },
+      "sections": [
+        {
+          "title": "Active Aura",
+          "paragraphs": [
+            "Auras are assumed to remain active once activated unless the Aura says otherwise or the GM overrules it."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Dying and Unconsciousness",
+      "entry_type": "rule",
+      "slug": "dying-and-unconsciousness",
+      "facets": ["dying_rule"],
+      "aliases": ["Dying", "Dying Rounds", "unconscious"],
+      "summary": "Dropping to 0 HP puts a character in the Dying state; Dying Rounds tracking remains deferred automation.",
+      "metadata": {
+        "rule_key": "dying_and_unconsciousness",
+        "rule_facets": ["dying", "unconscious"],
+        "support_state": "reference_only",
+        "xianxia_rule_key": "dying_and_unconsciousness"
+      },
+      "sections": [
+        {
+          "title": "Dying Reference",
+          "bullets": [
+            "When a character drops to 0 HP, the player rolls 1d6; the result is the number of Dying Rounds available.",
+            "During those Dying Rounds, the character must roll a natural 20 on a raw d20, be healed by an ally, receive item healing, or have the battle end to stop dying.",
+            "A dying character is unconscious, cannot take Actions, cannot interact or speak, and is unaware of their surroundings.",
+            "Milestone 1 stores this as reference text and does not implement Dying Rounds tracking."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Critical Hits",
+      "entry_type": "rule",
+      "slug": "critical-hits",
+      "facets": ["critical_hit_rule"],
+      "aliases": ["natural 20", "Ultimate Effort"],
+      "summary": "Critical Hits automatically hit and add Ultimate Effort damage.",
+      "metadata": {
+        "rule_key": "critical_hits",
+        "rule_facets": ["critical_hit", "damage"],
+        "support_state": "reference_only",
+        "xianxia_rule_key": "critical_hits"
+      },
+      "sections": [
+        {
+          "title": "Critical Hit Reference",
+          "paragraphs": [
+            "Critical Hits occur on a natural 20, or on a lower natural roll when modified by a Martial Art or Technique. Critical Hits automatically hit and deal additional +Ultimate Effort damage."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Sneak Attacks",
+      "entry_type": "rule",
+      "slug": "sneak-attacks",
+      "facets": ["sneak_attack_rule"],
+      "aliases": ["Sneak Attack", "off guard"],
+      "summary": "Sneak Attack is a special kind of Critical Hit enabled by explicit circumstances.",
+      "metadata": {
+        "rule_key": "sneak_attacks",
+        "rule_facets": ["sneak_attack", "critical_hit"],
+        "support_state": "reference_only",
+        "xianxia_rule_key": "sneak_attacks"
+      },
+      "sections": [
+        {
+          "title": "Sneak Attack Reference",
+          "paragraphs": [
+            "Sneak Attack only occurs under specific circumstances, such as a Martial Art or Technique explicitly enabling it or the target being completely off guard."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Minions",
+      "entry_type": "rule",
+      "slug": "minions",
+      "facets": ["minion_tag"],
+      "aliases": ["Minion tag", "fodder enemies"],
+      "summary": "Minion is a tag for generic fodder enemies and martial artists.",
+      "metadata": {
+        "rule_key": "minions",
+        "rule_facets": ["minion", "npc_reference"],
+        "support_state": "reference_only",
+        "xianxia_rule_key": "minions"
+      },
+      "sections": [
+        {
+          "title": "Minion Reference",
+          "paragraphs": [
+            "Minions are NPCs whose Realm and HP/Stance are lower than the player characters, usually fragile enough to be removed in a single blow, such as an NPC with only 5 HP and 5 Stance."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Companion Derivation",
+      "entry_type": "rule",
+      "slug": "companion-derivation",
+      "facets": ["companion_rule"],
+      "aliases": ["puppets", "phantoms", "animals", "companions"],
+      "summary": "Puppets, phantoms, animals, and similar companions derive from the user's Stats unless their creating ability says otherwise.",
+      "metadata": {
+        "rule_key": "companion_derivation",
+        "rule_facets": ["companion", "derived_stats"],
+        "support_state": "reference_only",
+        "xianxia_rule_key": "companion_derivation"
+      },
+      "sections": [
+        {
+          "title": "Companion Reference",
+          "paragraphs": [
+            "Companions usually use half the user's Stats plus any listed modifications from the ability that creates or commands them. Richer companion automation is deferred."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "GM Approval Gates",
+      "entry_type": "rule",
+      "slug": "gm-approval-gates",
+      "facets": ["gm_approval_rule"],
+      "aliases": ["Karmic Constraints", "Ascendant Arts", "Dao Immolating Techniques", "GM approval"],
+      "summary": "Karmic Constraints, Ascendant Arts, and Dao Immolating Techniques require explicit GM approval.",
+      "metadata": {
+        "rule_key": "gm_approval_gates",
+        "rule_facets": ["gm_approval", "karmic_constraint", "ascendant_art", "dao_immolating"],
+        "support_state": "reference_only",
+        "xianxia_rule_key": "gm_approval_gates"
+      },
+      "sections": [
+        {
+          "title": "Approval Requirements",
+          "bullets": [
+            "Karmic Constraints require explicit GM approval in addition to their Insight cost.",
+            "Ascendant Arts require explicit GM approval in addition to their Insight cost.",
+            "Dao Immolating Techniques may be prepared ahead of time or invented at use time; preparation is not required, but it can make GM approval easier.",
+            "Dao Immolating Techniques require explicit GM approval at the time of use and are more narrative than mechanical."
+          ]
+        }
+      ]
+    }
+  ]
 }
