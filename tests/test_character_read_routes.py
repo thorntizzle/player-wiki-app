@@ -502,6 +502,13 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
             "attribute_cha": "1",
         }
 
+    def _armored_attribute_data() -> dict[str, str]:
+        data = _attribute_data()
+        data["attribute_con"] = "3"
+        data["attribute_wis"] = "0"
+        data["attribute_cha"] = "0"
+        return data
+
     def _effort_data() -> dict[str, str]:
         return {
             "effort_basic": "1",
@@ -545,6 +552,12 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     dao_default_index = create_html.index('<span class="meta">Dao</span>')
     dao_default_html = create_html[dao_default_index: dao_default_index + 120]
     assert "<strong>0 / 3</strong>" in dao_default_html
+    assert 'name="manual_armor_bonus"' in create_html
+    manual_armor_input_index = create_html.index('name="manual_armor_bonus"')
+    manual_armor_input_html = create_html[manual_armor_input_index - 80: manual_armor_input_index + 180]
+    assert 'value="0"' in manual_armor_input_html
+    assert 'min="0"' in manual_armor_input_html
+    assert '<span class="meta">Armor</span>' in create_html
     assert 'name="dao_current"' in create_html
     dao_input_index = create_html.index('name="dao_current"')
     dao_input_html = create_html[dao_input_index - 80: dao_input_index + 180]
@@ -800,6 +813,40 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
         "submitted total is 2."
     ) in under_budget_energy_response.get_data(as_text=True)
 
+    invalid_armor_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            "name": "Armor Typo",
+            "character_slug": "",
+            **_attribute_data(),
+            **_effort_data(),
+            **_energy_data(),
+            "manual_armor_bonus": "silk",
+        },
+        follow_redirects=False,
+    )
+    assert invalid_armor_response.status_code == 400
+    assert "Manual armor bonus must be a whole number." in invalid_armor_response.get_data(
+        as_text=True
+    )
+
+    negative_armor_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            "name": "Armor Negative",
+            "character_slug": "",
+            **_attribute_data(),
+            **_effort_data(),
+            **_energy_data(),
+            "manual_armor_bonus": "-1",
+        },
+        follow_redirects=False,
+    )
+    assert negative_armor_response.status_code == 400
+    assert "Manual armor bonus cannot be negative." in negative_armor_response.get_data(
+        as_text=True
+    )
+
     invalid_dao_response = client.post(
         "/campaigns/linden-pass/characters/new",
         data={
@@ -877,7 +924,7 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
         "hp_max": 10,
         "stance_max": 10,
         "manual_armor_bonus": 0,
-        "defense": 10,
+        "defense": 11,
     }
     assert definition_payload["xianxia"]["yin_yang"] == {"yin_max": 1, "yang_max": 1}
     assert definition_payload["xianxia"]["dao"] == {"max": 3}
@@ -916,6 +963,32 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     }
     assert state["xianxia"]["yin_yang"] == {"yin_current": 1, "yang_current": 1}
     assert state["xianxia"]["dao"] == {"current": 0}
+
+    armored_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            "name": "Armored Wake",
+            "character_slug": "",
+            **_armored_attribute_data(),
+            **_effort_data(),
+            **_energy_data(),
+            "manual_armor_bonus": "2",
+        },
+        follow_redirects=False,
+    )
+    assert armored_response.status_code == 302
+    assert armored_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/armored-wake"
+    )
+
+    armored_definition_payload = _read_character_definition(app, "armored-wake")
+    assert armored_definition_payload["xianxia"]["attributes"]["con"] == 3
+    assert armored_definition_payload["xianxia"]["durability"] == {
+        "hp_max": 10,
+        "stance_max": 10,
+        "manual_armor_bonus": 2,
+        "defense": 15,
+    }
 
     grant_response = client.post(
         "/campaigns/linden-pass/characters/new",

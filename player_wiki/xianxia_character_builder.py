@@ -14,6 +14,7 @@ from .xianxia_character_model import (
     XIANXIA_EFFORT_KEYS,
     XIANXIA_EFFORT_LABELS,
     XIANXIA_ENERGY_KEYS,
+    derive_xianxia_defense,
     normalize_xianxia_state_payload,
     validate_xianxia_definition_payload,
 )
@@ -28,7 +29,6 @@ XIANXIA_ENERGY_CREATION_POINTS = 3
 XIANXIA_HP_DEFAULT_MAX = 10
 XIANXIA_STANCE_DEFAULT_MAX = 10
 XIANXIA_MANUAL_ARMOR_BONUS_DEFAULT = 0
-XIANXIA_DEFENSE_DEFAULT = 10
 XIANXIA_YIN_DEFAULT_MAX = 1
 XIANXIA_YANG_DEFAULT_MAX = 1
 XIANXIA_DAO_DEFAULT_CURRENT = 0
@@ -46,6 +46,11 @@ def build_xianxia_character_create_context(
     form_values: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     values = _normalize_xianxia_create_values(form_values or {})
+    manual_armor_bonus = values["manual_armor_bonus"]
+    defense = derive_xianxia_defense(
+        attributes=values["attributes"],
+        manual_armor_bonus=manual_armor_bonus,
+    )
     attribute_fields = [
         {
             "key": key,
@@ -85,8 +90,8 @@ def build_xianxia_character_create_context(
             "reputation": "Unknown",
             "hp_max": XIANXIA_HP_DEFAULT_MAX,
             "stance_max": XIANXIA_STANCE_DEFAULT_MAX,
-            "manual_armor_bonus": XIANXIA_MANUAL_ARMOR_BONUS_DEFAULT,
-            "defense": XIANXIA_DEFENSE_DEFAULT,
+            "manual_armor_bonus": manual_armor_bonus,
+            "defense": defense,
             "yin_max": XIANXIA_YIN_DEFAULT_MAX,
             "yang_max": XIANXIA_YANG_DEFAULT_MAX,
             "dao_current": XIANXIA_DAO_DEFAULT_CURRENT,
@@ -97,6 +102,11 @@ def build_xianxia_character_create_context(
         "attribute_fields": attribute_fields,
         "effort_fields": effort_fields,
         "energy_fields": energy_fields,
+        "manual_armor_field": {
+            "input_name": "manual_armor_bonus",
+            "value": manual_armor_bonus,
+            "min": 0,
+        },
         "dao_field": {
             "input_name": "dao_current",
             "value": values["dao_current"],
@@ -128,6 +138,11 @@ def build_xianxia_character_definition(
     attribute_scores = _validate_xianxia_create_attributes(form_values or {})
     effort_scores = _validate_xianxia_create_efforts(form_values or {})
     energy_scores = _validate_xianxia_create_energies(form_values or {})
+    manual_armor_bonus = _validate_xianxia_create_manual_armor_bonus(form_values or {})
+    defense = derive_xianxia_defense(
+        attributes=attribute_scores,
+        manual_armor_bonus=manual_armor_bonus,
+    )
 
     created_at = isoformat(utcnow())
     definition = CharacterDefinition.from_dict(
@@ -187,8 +202,8 @@ def build_xianxia_character_definition(
                 "durability": {
                     "hp_max": XIANXIA_HP_DEFAULT_MAX,
                     "stance_max": XIANXIA_STANCE_DEFAULT_MAX,
-                    "manual_armor_bonus": XIANXIA_MANUAL_ARMOR_BONUS_DEFAULT,
-                    "defense": XIANXIA_DEFENSE_DEFAULT,
+                    "manual_armor_bonus": manual_armor_bonus,
+                    "defense": defense,
                 },
             },
         }
@@ -236,6 +251,7 @@ def _normalize_xianxia_create_values(values: dict[str, Any]) -> dict[str, Any]:
             key: _normalize_xianxia_create_energy_value(values, key)
             for key in XIANXIA_ENERGY_KEYS
         },
+        "manual_armor_bonus": _normalize_xianxia_create_manual_armor_bonus_value(values),
         "dao_current": _normalize_xianxia_create_dao_current_value(values),
     }
 
@@ -448,6 +464,19 @@ def _validate_xianxia_create_dao_current(values: dict[str, Any]) -> int:
     return dao_current
 
 
+def _validate_xianxia_create_manual_armor_bonus(values: dict[str, Any]) -> int:
+    raw_value = _normalize_xianxia_create_manual_armor_bonus_value(values)
+    if raw_value == "":
+        return XIANXIA_MANUAL_ARMOR_BONUS_DEFAULT
+    try:
+        manual_armor_bonus = int(raw_value)
+    except ValueError:
+        raise CharacterBuildError("Manual armor bonus must be a whole number.") from None
+    if manual_armor_bonus < 0:
+        raise CharacterBuildError("Manual armor bonus cannot be negative.")
+    return manual_armor_bonus
+
+
 def _normalize_xianxia_create_attribute_value(values: dict[str, Any], key: str) -> str:
     raw_attributes = values.get("attributes")
     if isinstance(raw_attributes, dict) and key in raw_attributes:
@@ -489,6 +518,26 @@ def _normalize_xianxia_create_dao_current_value(values: dict[str, Any]) -> str:
         value = raw_dao.get("current")
     else:
         value = XIANXIA_DAO_DEFAULT_CURRENT
+    return _clean_form_value(value)
+
+
+def _normalize_xianxia_create_manual_armor_bonus_value(values: dict[str, Any]) -> str:
+    raw_durability = values.get("durability")
+    raw_armor = values.get("armor")
+    if "manual_armor_bonus" in values:
+        value = values.get("manual_armor_bonus")
+    elif "armor_bonus" in values:
+        value = values.get("armor_bonus")
+    elif isinstance(raw_durability, dict) and "manual_armor_bonus" in raw_durability:
+        value = raw_durability.get("manual_armor_bonus")
+    elif isinstance(raw_durability, dict) and "armor_bonus" in raw_durability:
+        value = raw_durability.get("armor_bonus")
+    elif isinstance(raw_armor, dict) and "manual_armor_bonus" in raw_armor:
+        value = raw_armor.get("manual_armor_bonus")
+    elif isinstance(raw_armor, dict) and "armor_bonus" in raw_armor:
+        value = raw_armor.get("armor_bonus")
+    else:
+        value = XIANXIA_MANUAL_ARMOR_BONUS_DEFAULT
     return _clean_form_value(value)
 
 

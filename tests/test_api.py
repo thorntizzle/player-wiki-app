@@ -948,7 +948,7 @@ def test_api_content_xianxia_definition_round_trips_through_save_and_load(client
                 "hp_max": "18",
                 "stance_max": "14",
                 "manual_armor_bonus": "2",
-                "defense": "15",
+                "defense": "99",
             },
             "skills": {"trained": ["Tea Ceremony", "Strategy", "Tea Ceremony"]},
             "equipment": {
@@ -997,6 +997,7 @@ def test_api_content_xianxia_definition_round_trips_through_save_and_load(client
     assert saved_xianxia["honor"] == "Venerable"
     assert saved_xianxia["attributes"]["str"] == 2
     assert saved_xianxia["energies"]["jing"] == {"max": 3}
+    assert saved_xianxia["durability"]["defense"] == 15
     assert saved_xianxia["skills"]["trained"] == ["Tea Ceremony", "Strategy"]
     assert saved_xianxia["equipment"]["necessary_tools"] == [{"name": "Calligraphy brush"}]
     assert saved_xianxia["dao_immolating_techniques"]["use_history"][0]["name"] == "River-Cleaving Spark"

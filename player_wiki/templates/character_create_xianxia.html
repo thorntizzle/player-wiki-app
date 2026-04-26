@@ -116,6 +116,16 @@
             <h3>GM Grants</h3>
             <div class="builder-field-grid">
               <label class="field">
+                <span>Manual Armor Bonus</span>
+                <input
+                  type="number"
+                  name="{{ builder.manual_armor_field.input_name }}"
+                  value="{{ builder.manual_armor_field.value }}"
+                  min="{{ builder.manual_armor_field.min }}"
+                  step="1"
+                >
+              </label>
+              <label class="field">
                 <span>Starting Dao</span>
                 <input
                   type="number"
@@ -163,6 +173,10 @@
           <div>
             <span class="meta">Stance</span>
             <strong>{{ builder.defaults.stance_max }}</strong>
+          </div>
+          <div>
+            <span class="meta">Armor</span>
+            <strong>{{ builder.defaults.manual_armor_bonus }}</strong>
           </div>
           <div>
             <span class="meta">Defense</span>

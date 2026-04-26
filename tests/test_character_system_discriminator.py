@@ -17,6 +17,7 @@ from player_wiki.xianxia_character_model import (
     XIANXIA_DEFINITION_FIELD_KEYS,
     XIANXIA_STATE_FIELD_KEYS,
     XianxiaDefinitionValidationError,
+    derive_xianxia_defense,
     validate_xianxia_definition_payload,
     xianxia_definition_validation_errors,
 )
@@ -94,7 +95,7 @@ def test_xianxia_definition_normalizes_stable_definition_fields():
                     "hp_max": 18,
                     "stance_max": 14,
                     "manual_armor_bonus": 2,
-                    "defense": 15,
+                    "defense": 99,
                 },
                 "skills": {"trained": ["Tea Ceremony", "Strategy", "Tea Ceremony"]},
                 "equipment": {
@@ -144,6 +145,7 @@ def test_xianxia_definition_normalizes_stable_definition_fields():
         "manual_armor_bonus": 2,
         "defense": 15,
     }
+    assert derive_xianxia_defense(attributes=xianxia["attributes"], manual_armor_bonus=2) == 15
     assert xianxia["skills"]["trained"] == ["Tea Ceremony", "Strategy"]
     assert xianxia["equipment"]["necessary_weapons"] == [
         {"name": "Jian", "reason": "Required by Heavenly Palm"}

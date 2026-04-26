@@ -26,6 +26,7 @@ XIANXIA_EFFORT_LABELS = {
     "ultimate": "Ultimate",
 }
 XIANXIA_ENERGY_KEYS = ("jing", "qi", "shen")
+XIANXIA_DEFENSE_BASE = 10
 
 XIANXIA_DEFINITION_FIELD_KEYS = (
     "schema_version",
@@ -150,6 +151,10 @@ def normalize_xianxia_definition_payload(payload: dict[str, Any]) -> dict[str, A
             key="defense_bonus",
         )
     manual_armor_bonus = _normalize_int(raw_manual_armor_bonus, default=0)
+    attributes = _normalize_int_key_map(
+        _first_mapping(raw_xianxia, normalized_payload, raw_stats, key="attributes"),
+        XIANXIA_ATTRIBUTE_KEYS,
+    )
 
     xianxia_definition = {
         "schema_version": XIANXIA_CHARACTER_DEFINITION_SCHEMA_VERSION,
@@ -164,10 +169,7 @@ def normalize_xianxia_definition_payload(payload: dict[str, Any]) -> dict[str, A
             _first_present(raw_xianxia, normalized_payload, raw_profile, key="reputation"),
             default="Unknown",
         ),
-        "attributes": _normalize_int_key_map(
-            _first_mapping(raw_xianxia, normalized_payload, raw_stats, key="attributes"),
-            XIANXIA_ATTRIBUTE_KEYS,
-        ),
+        "attributes": attributes,
         "efforts": _normalize_int_key_map(
             _first_mapping(raw_xianxia, normalized_payload, raw_stats, key="efforts"),
             XIANXIA_EFFORT_KEYS,
@@ -194,9 +196,9 @@ def normalize_xianxia_definition_payload(payload: dict[str, Any]) -> dict[str, A
                 default=10,
             ),
             "manual_armor_bonus": manual_armor_bonus,
-            "defense": _normalize_int(
-                _first_present(raw_durability, raw_xianxia, normalized_payload, key="defense"),
-                default=10,
+            "defense": derive_xianxia_defense(
+                attributes=attributes,
+                manual_armor_bonus=manual_armor_bonus,
             ),
         },
         "skills": {
@@ -233,6 +235,19 @@ def normalize_xianxia_definition_payload(payload: dict[str, Any]) -> dict[str, A
 
     normalized_payload["xianxia"] = xianxia_definition
     return normalized_payload
+
+
+def derive_xianxia_defense(
+    *,
+    attributes: dict[str, Any] | None = None,
+    manual_armor_bonus: Any = 0,
+) -> int:
+    """Return Xianxia Defense from base 10, manual armor bonus, and Constitution."""
+
+    raw_attributes = dict(attributes or {})
+    constitution = _normalize_int(raw_attributes.get("con"), default=0)
+    armor_bonus = _normalize_int(manual_armor_bonus, default=0)
+    return XIANXIA_DEFENSE_BASE + armor_bonus + constitution
 
 
 def validate_xianxia_definition_payload(payload: dict[str, Any]) -> dict[str, Any]:
