@@ -86,6 +86,11 @@ from .character_editor import (
 from .character_importer import write_yaml
 from .character_profile import ensure_profile_class_rows, profile_class_level_text, profile_class_rows, profile_primary_class_ref
 from .character_service import CharacterStateValidationError, build_initial_state, merge_state_with_definition
+from .xianxia_advancement import (
+    advance_xianxia_martial_art_rank_definition,
+    normalize_xianxia_martial_art_rank_key,
+    rank_label as xianxia_martial_art_rank_label,
+)
 from .xianxia_character_builder import (
     build_xianxia_character_create_context,
     build_xianxia_character_definition,
@@ -1356,6 +1361,17 @@ def xianxia_read_subpage_context_for_redirect(definition) -> dict[str, object] |
 def present_xianxia_cultivation_context(character: dict[str, object], xianxia: dict[str, object]) -> dict[str, object]:
     xianxia_read = dict(character.get("xianxia_read") or {})
     resources = dict(xianxia_read.get("resources") or {})
+    insight = dict(resources.get("insight") or {"available": 0, "spent": 0})
+    insight_available = int(insight.get("available") or 0)
+    martial_arts = []
+    for index, raw_art in enumerate(list(xianxia_read.get("martial_arts") or [])):
+        art = dict(raw_art or {}) if isinstance(raw_art, dict) else {}
+        art["index"] = index
+        art["advancement"] = _xianxia_martial_art_advancement_context(
+            art,
+            insight_available=insight_available,
+        )
+        martial_arts.append(art)
     history_records = []
     for index, raw_record in enumerate(list(xianxia.get("advancement_history") or []), start=1):
         if not isinstance(raw_record, dict):
@@ -1385,10 +1401,59 @@ def present_xianxia_cultivation_context(character: dict[str, object], xianxia: d
         )
 
     return {
-        "insight": dict(resources.get("insight") or {"available": 0, "spent": 0}),
-        "martial_arts": list(xianxia_read.get("martial_arts") or []),
+        "insight": insight,
+        "martial_arts": martial_arts,
         "generic_techniques": list(xianxia_read.get("generic_techniques") or []),
         "history": history_records,
+    }
+
+
+def _xianxia_martial_art_advancement_context(
+    art: dict[str, object],
+    *,
+    insight_available: int,
+) -> dict[str, object]:
+    rank_progress = dict(art.get("rank_progress") or {})
+    steps = [
+        dict(step)
+        for step in list(rank_progress.get("steps") or [])
+        if isinstance(step, dict)
+    ]
+    next_step = None
+    for step in steps:
+        if bool(step.get("is_learned")):
+            continue
+        next_step = step
+        break
+    if not next_step:
+        return {
+            "status": "complete",
+            "message": "No further structured rank is currently available.",
+        }
+    if bool(next_step.get("is_incomplete")):
+        return {
+            "status": "incomplete",
+            "message": "The next higher rank is marked as intentional draft content.",
+        }
+
+    next_rank_key = normalize_xianxia_martial_art_rank_key(next_step.get("key"))
+    if next_rank_key == "legendary":
+        return {
+            "status": "legendary_deferred",
+            "message": "Legendary rank recording needs the later quest or mythic-master note workflow.",
+        }
+
+    insight_cost = int(next_step.get("insight_cost") or 0)
+    has_enough_insight = insight_cost > 0 and insight_available >= insight_cost
+    return {
+        "status": "available",
+        "next_rank_key": next_rank_key,
+        "next_rank_label": str(
+            next_step.get("label") or xianxia_martial_art_rank_label(next_rank_key)
+        ),
+        "insight_cost": insight_cost,
+        "has_enough_insight": has_enough_insight,
+        "shortfall": max(0, insight_cost - insight_available),
     }
 
 
@@ -11713,6 +11778,27 @@ def create_app() -> Flask:
                         notes=request.form.get("gathering_insight_notes", ""),
                     )
                     success_message = "Gathering Insight recorded."
+                elif cultivation_action == "advance_martial_art_rank":
+                    redirect_anchor = "xianxia-cultivation-martial-arts"
+                    raw_martial_art_index = request.form.get("martial_art_index", "")
+                    if not str(raw_martial_art_index or "").strip():
+                        raise ValueError("Martial Art selection is required.")
+                    martial_art_index = normalize_dm_player_wiki_int(
+                        raw_martial_art_index,
+                        field_label="Martial Art selection",
+                    )
+                    rank_result = advance_xianxia_martial_art_rank_definition(
+                        record.definition,
+                        campaign_slug=campaign_slug,
+                        systems_service=get_systems_service(),
+                        martial_art_index=martial_art_index,
+                        target_rank_key=request.form.get("target_rank_key", ""),
+                    )
+                    definition = rank_result.definition
+                    success_message = (
+                        f"Spent {rank_result.insight_cost} Insight to advance "
+                        f"{rank_result.martial_art_name} to {rank_result.rank_name}."
+                    )
                 else:
                     raise ValueError("Unsupported cultivation action. Refresh the page and try again.")
                 definition = finalize_character_definition_for_write(

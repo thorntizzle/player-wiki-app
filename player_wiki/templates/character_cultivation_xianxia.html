@@ -154,6 +154,31 @@
                     {% endfor %}
                   </div>
                 {% endif %}
+                {% if art.advancement.status == "available" %}
+                  <form
+                    class="stack-form"
+                    method="post"
+                    action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+                  >
+                    <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                    <input type="hidden" name="cultivation_action" value="advance_martial_art_rank">
+                    <input type="hidden" name="martial_art_index" value="{{ art.index }}">
+                    <input type="hidden" name="target_rank_key" value="{{ art.advancement.next_rank_key }}">
+                    <p class="meta">
+                      Spend {{ art.advancement.insight_cost }} Insight to advance to {{ art.advancement.next_rank_label }}.
+                    </p>
+                    {% if not art.advancement.has_enough_insight %}
+                      <p class="meta">Needs {{ art.advancement.shortfall }} more available Insight.</p>
+                    {% endif %}
+                    <div class="hero-actions">
+                      <button type="submit" {% if not art.advancement.has_enough_insight %}disabled{% endif %}>
+                        Advance to {{ art.advancement.next_rank_label }}
+                      </button>
+                    </div>
+                  </form>
+                {% elif art.advancement.message %}
+                  <p class="meta">{{ art.advancement.message }}</p>
+                {% endif %}
               </article>
             {% endfor %}
           </div>

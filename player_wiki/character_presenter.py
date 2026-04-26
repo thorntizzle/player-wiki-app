@@ -2408,12 +2408,20 @@ def _present_xianxia_rank_progress(
         steps.append(
             {
                 "key": rank_key,
+                "rank_ref": rank_ref,
                 "label": label,
                 "href": href,
                 "status_label": status_label,
                 "is_learned": is_learned,
                 "is_current": is_current,
                 "is_incomplete": is_incomplete,
+                "insight_cost": _coerce_int(rank_record.get("insight_cost"), default=0),
+                "prerequisite_rank_key": _normalize_xianxia_rank_key(
+                    rank_record.get("prerequisite_rank_key")
+                ),
+                "prerequisite_rank_name": str(
+                    rank_record.get("prerequisite_rank_name") or ""
+                ).strip(),
             }
         )
 

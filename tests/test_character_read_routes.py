@@ -1602,6 +1602,163 @@ def test_xianxia_cultivation_route_records_gathering_insight_downtime_gains(
     assert _character_state_revision(app, "insight-gatherer") == current_revision
 
 
+def test_xianxia_cultivation_route_spends_insight_to_advance_martial_art_rank(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+                "default_visibility": "dm",
+            }
+        ]
+
+    _write_campaign_config(app, _mutate)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Rank Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+
+    starting_revision = _character_state_revision(app, "rank-crane")
+    insight_response = client.post(
+        "/campaigns/linden-pass/characters/rank-crane/cultivation",
+        data={
+            "expected_revision": str(starting_revision),
+            "cultivation_action": "save_insight",
+            "insight_available": "2",
+            "insight_spent": "0",
+        },
+        follow_redirects=False,
+    )
+    assert insight_response.status_code == 302
+
+    cultivation_html = client.get(
+        "/campaigns/linden-pass/characters/rank-crane/cultivation"
+    ).get_data(as_text=True)
+    assert (
+        'name="cultivation_action" value="advance_martial_art_rank"'
+        in cultivation_html
+    )
+    assert 'name="target_rank_key" value="novice"' in cultivation_html
+    assert "Spend 1 Insight to advance to Novice." in cultivation_html
+
+    current_revision = _character_state_revision(app, "rank-crane")
+    advance_response = client.post(
+        "/campaigns/linden-pass/characters/rank-crane/cultivation",
+        data={
+            "expected_revision": str(current_revision),
+            "cultivation_action": "advance_martial_art_rank",
+            "martial_art_index": "0",
+            "target_rank_key": "novice",
+        },
+        follow_redirects=False,
+    )
+    assert advance_response.status_code == 302
+    assert advance_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/rank-crane/cultivation#xianxia-cultivation-martial-arts"
+    )
+
+    definition_payload = _read_character_definition(app, "rank-crane")
+    xianxia = definition_payload["xianxia"]
+    assert xianxia["insight"] == {"available": 1, "spent": 1}
+    first_art = xianxia["martial_arts"][0]
+    assert first_art["current_rank_key"] == "novice"
+    assert first_art["current_rank"] == "Novice"
+    assert "xianxia:demons-fist:novice" in first_art["learned_rank_refs"]
+    assert first_art["insight_spent"] == 1
+    assert xianxia["advancement_history"] == [
+        {
+            "action": "martial_art_rank_advance",
+            "amount": 1,
+            "target": "Demon's Fist",
+            "rank": "Novice",
+            "rank_ref": "xianxia:demons-fist:novice",
+            "systems_ref": first_art["systems_ref"],
+        }
+    ]
+    assert _character_state_revision(app, "rank-crane") == current_revision + 1
+
+    updated_html = client.get(
+        "/campaigns/linden-pass/characters/rank-crane/cultivation"
+    ).get_data(as_text=True)
+    assert "Current rank: Novice" in updated_html
+    assert "Spend 1 Insight to advance to Apprentice." in updated_html
+    assert "Martial Art Rank Advance" in updated_html
+    assert "Rank:" in updated_html
+    assert "Novice" in updated_html
+
+
+def test_xianxia_cultivation_rank_advance_requires_next_rank_and_insight(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+                "default_visibility": "dm",
+            }
+        ]
+
+    _write_campaign_config(app, _mutate)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Rank Guard Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+
+    starting_revision = _character_state_revision(app, "rank-guard-crane")
+    skip_response = client.post(
+        "/campaigns/linden-pass/characters/rank-guard-crane/cultivation",
+        data={
+            "expected_revision": str(starting_revision),
+            "cultivation_action": "advance_martial_art_rank",
+            "martial_art_index": "0",
+            "target_rank_key": "apprentice",
+        },
+        follow_redirects=True,
+    )
+    assert skip_response.status_code == 200
+    assert (
+        "Advance Demon&#39;s Fist to Novice before Apprentice."
+        in skip_response.get_data(as_text=True)
+    )
+    assert _read_character_definition(app, "rank-guard-crane")["xianxia"]["insight"] == {
+        "available": 0,
+        "spent": 0,
+    }
+    assert _character_state_revision(app, "rank-guard-crane") == starting_revision
+
+    insufficient_response = client.post(
+        "/campaigns/linden-pass/characters/rank-guard-crane/cultivation",
+        data={
+            "expected_revision": str(starting_revision),
+            "cultivation_action": "advance_martial_art_rank",
+            "martial_art_index": "0",
+            "target_rank_key": "novice",
+        },
+        follow_redirects=True,
+    )
+    assert insufficient_response.status_code == 200
+    assert (
+        "Demon&#39;s Fist needs 1 Insight to advance to Novice; only 0 available."
+        in insufficient_response.get_data(as_text=True)
+    )
+    assert _character_state_revision(app, "rank-guard-crane") == starting_revision
+
+
 def test_xianxia_create_picker_allows_seeded_and_gm_custom_martial_arts(
     app, client, sign_in, users
 ):
