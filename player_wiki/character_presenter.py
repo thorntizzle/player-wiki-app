@@ -367,12 +367,13 @@ def present_character_detail(
     if is_xianxia_character:
         xianxia_payload = dict(definition.xianxia or {})
         xianxia_durability = dict(xianxia_payload.get("durability") or {})
+        display_max_hp = _coerce_int(xianxia_durability.get("hp_max"), default=10)
         overview_stats = [
             {
                 "label": "Current HP",
                 "value": (
                     f"{int(vitals.get('current_hp') or 0)} / "
-                    f"{_coerce_int(xianxia_durability.get('hp_max'), default=10)}"
+                    f"{display_max_hp}"
                 ),
             },
             {"label": "Temp HP", "value": str(int(vitals.get("temp_hp") or 0))},
@@ -921,7 +922,11 @@ def present_character_detail(
         "name": definition.name,
         "state_revision": record.state_record.revision,
         "current_hp": int(vitals.get("current_hp") or 0),
-        "max_hp": int(stats.get("max_hp") or 0),
+        "max_hp": (
+            display_max_hp
+            if is_xianxia_character
+            else int(stats.get("max_hp") or 0)
+        ),
         "temp_hp": int(vitals.get("temp_hp") or 0),
         "player_notes_markdown": player_notes_markdown,
         "player_notes_html": render_campaign_markdown(campaign, player_notes_markdown)

@@ -747,6 +747,93 @@ def test_xianxia_session_character_uses_read_sheet_subpage_chrome(
     assert ">Spellcasting<" not in legacy_html
 
 
+def test_xianxia_session_resources_allow_hp_and_temp_hp_updates(
+    client,
+    sign_in,
+    users,
+    app,
+    get_character,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Session HP Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    resources_response = client.get(
+        "/campaigns/linden-pass/session/character?character=session-hp-crane&page=resources"
+    )
+
+    assert resources_response.status_code == 200
+    resources_html = unescape(resources_response.get_data(as_text=True))
+    assert 'id="session-vitals"' in resources_html
+    assert 'name="current_hp" value="10" min="0" max="10"' in resources_html
+    assert 'name="temp_hp" value="0" min="0"' in resources_html
+    assert "Save HP" in resources_html
+
+    record = get_character("session-hp-crane")
+    assert record is not None
+    response = client.post(
+        "/campaigns/linden-pass/characters/session-hp-crane/session/vitals",
+        data={
+            "expected_revision": record.state_record.revision,
+            "current_hp": "7",
+            "temp_hp": "3",
+            "mode": "session",
+            "page": "resources",
+            "return_view": "session-character",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert (
+        "/campaigns/linden-pass/session/character?character=session-hp-crane"
+        "&page=resources#session-vitals"
+    ) in response.headers["Location"]
+    updated = get_character("session-hp-crane")
+    assert updated is not None
+    assert updated.state_record.state["vitals"] == {"current_hp": 7, "temp_hp": 3}
+    assert updated.state_record.state["xianxia"]["vitals"]["current_hp"] == 7
+    assert updated.state_record.state["xianxia"]["vitals"]["temp_hp"] == 3
+
+    sheet_response = client.get(
+        "/campaigns/linden-pass/characters/session-hp-crane?mode=session&page=resources"
+    )
+    assert sheet_response.status_code == 200
+    sheet_html = unescape(sheet_response.get_data(as_text=True))
+    assert 'id="session-vitals"' in sheet_html
+    assert 'name="current_hp" value="7" min="0" max="10"' in sheet_html
+
+    response = client.post(
+        "/campaigns/linden-pass/characters/session-hp-crane/session/vitals",
+        data={
+            "expected_revision": updated.state_record.revision,
+            "current_hp": "6",
+            "temp_hp": "1",
+            "mode": "session",
+            "page": "resources",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert "/campaigns/linden-pass/characters/session-hp-crane?" in response.headers["Location"]
+    assert "mode=session" in response.headers["Location"]
+    assert "page=resources" in response.headers["Location"]
+    assert response.headers["Location"].endswith("#session-vitals")
+    updated = get_character("session-hp-crane")
+    assert updated is not None
+    assert updated.state_record.state["vitals"] == {"current_hp": 6, "temp_hp": 1}
+    assert updated.state_record.state["xianxia"]["vitals"]["current_hp"] == 6
+    assert updated.state_record.state["xianxia"]["vitals"]["temp_hp"] == 1
+
+
 def test_xianxia_martial_arts_page_marks_incomplete_rank_progress(
     client,
     sign_in,

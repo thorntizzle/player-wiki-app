@@ -246,6 +246,38 @@
     <div class="section-heading">
       <h2>Resources</h2>
     </div>
+    {% if is_session_mode | default(false) %}
+      <article class="detail-card" id="session-vitals">
+        <div class="section-heading">
+          <div>
+            <h3>HP</h3>
+            <p class="meta">HP {{ character.current_hp }} / {{ character.max_hp }}{% if character.temp_hp %} | Temp HP {{ character.temp_hp }}{% endif %}</p>
+          </div>
+        </div>
+        <form
+          class="session-vitals-form"
+          data-character-sheet-edit-form="vitals"
+          method="post"
+          action="{{ url_for('character_session_vitals', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+        >
+          <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+          <input type="hidden" name="mode" value="session">
+          <input type="hidden" name="page" value="{{ character_subpage }}">
+          {% if session_return_view | default("") %}
+            <input type="hidden" name="return_view" value="{{ session_return_view }}">
+          {% endif %}
+          <label class="session-field">
+            <span>Current HP</span>
+            <input type="number" name="current_hp" value="{{ character.current_hp }}" min="0" max="{{ character.max_hp }}">
+          </label>
+          <label class="session-field">
+            <span>Temp HP</span>
+            <input type="number" name="temp_hp" value="{{ character.temp_hp }}" min="0">
+          </label>
+          <button class="button-link" type="submit">Save HP</button>
+        </form>
+      </article>
+    {% endif %}
     <div class="resource-grid">
       {% for resource in xianxia_sheet.resources.durability %}
         <article class="resource-card">

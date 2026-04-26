@@ -93,6 +93,7 @@ from .xianxia_character_builder import (
 )
 from .combat_presenter import DND_5E_CONDITION_OPTIONS, present_combat_tracker
 from .character_presenter import (
+    XIANXIA_READ_SUBPAGE_LABELS,
     build_character_entry_href,
     format_signed,
     present_character_detail,
@@ -205,6 +206,7 @@ from .system_policy import (
     supports_dnd5e_character_spellcasting_tools,
     supports_dnd5e_statblock_upload,
     supports_dnd5e_systems_import,
+    is_xianxia_system,
     supports_native_character_advancement,
     supports_native_character_create,
     supports_native_character_tools,
@@ -1336,6 +1338,17 @@ def normalize_session_character_subpage(
     if candidate in allowed_labels:
         return candidate
     return "overview"
+
+
+def xianxia_read_subpage_context_for_redirect(definition) -> dict[str, object] | None:
+    if not is_xianxia_system(getattr(definition, "system", "")):
+        return None
+    return {
+        "subpages": [
+            {"slug": slug, "label": label}
+            for slug, label in XIANXIA_READ_SUBPAGE_LABELS
+        ]
+    }
 
 
 def normalize_combat_return_view(value: str) -> str:
@@ -2491,6 +2504,7 @@ def create_app() -> Flask:
                 has_session_mode_access(campaign_slug, character_slug)
                 and campaign_supports_character_controls_routes(campaign)
             ),
+            xianxia_read=xianxia_read_subpage_context_for_redirect(record.definition),
         )
         mode = request.values.get("mode", "").strip().lower()
         route_values = {
@@ -2573,6 +2587,7 @@ def create_app() -> Flask:
                     or spellcasting_payload.get("slot_lanes")
                 )
             ),
+            xianxia_read=xianxia_read_subpage_context_for_redirect(record.definition),
         )
         route_values: dict[str, object] = {
             "campaign_slug": campaign_slug,
