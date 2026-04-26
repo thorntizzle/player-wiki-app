@@ -71,56 +71,14 @@ from .session_models import (
 )
 from .systems_importer import Dnd5eSystemsImporter, SUPPORTED_ENTRY_TYPES
 from .systems_ingest import SystemsIngestError, extracted_systems_archive
+from .systems_labels import (
+    SYSTEMS_SOURCE_INDEX_HIDDEN_ENTRY_TYPES,
+    systems_entry_type_label,
+    systems_entry_type_sort_key,
+)
 from .systems_service import LICENSE_CLASS_LABELS, SystemsPolicyValidationError
 from .system_policy import supports_combat_tracker
 from .version import build_app_metadata
-
-SYSTEMS_ENTRY_TYPE_LABELS = {
-    "action": "Actions",
-    "background": "Backgrounds",
-    "book": "Book Chapters",
-    "class": "Classes",
-    "classfeature": "Class Features",
-    "condition": "Conditions",
-    "disease": "Diseases",
-    "feat": "Feats",
-    "item": "Items",
-    "monster": "Monsters",
-    "optionalfeature": "Optional Features",
-    "race": "Races",
-    "rule": "Rules",
-    "sense": "Senses",
-    "skill": "Skills",
-    "spell": "Spells",
-    "status": "Statuses",
-    "subclass": "Subclasses",
-    "subclassfeature": "Subclass Features",
-    "variantrule": "Variant Rules",
-}
-SYSTEMS_ENTRY_TYPE_ORDER = (
-    "book",
-    "class",
-    "subclass",
-    "classfeature",
-    "subclassfeature",
-    "spell",
-    "feat",
-    "optionalfeature",
-    "item",
-    "race",
-    "rule",
-    "background",
-    "action",
-    "skill",
-    "sense",
-    "variantrule",
-    "condition",
-    "status",
-    "disease",
-    "monster",
-)
-SYSTEMS_SOURCE_INDEX_HIDDEN_ENTRY_TYPES = {"classfeature", "optionalfeature", "subclassfeature"}
-
 
 def register_api(app) -> None:
     api = Blueprint("api", __name__, url_prefix="/api/v1")
@@ -307,16 +265,6 @@ def register_api(app) -> None:
         if normalized in {"0", "false", "no", "off"}:
             return False
         raise ValueError(f"{label} must be true or false.")
-
-    def entry_type_label(entry_type: str) -> str:
-        normalized = str(entry_type or "").strip().lower()
-        return SYSTEMS_ENTRY_TYPE_LABELS.get(normalized, normalized.replace("_", " ").title())
-
-    def systems_entry_type_sort_key(entry_type: str) -> tuple[int, str]:
-        try:
-            return (SYSTEMS_ENTRY_TYPE_ORDER.index(entry_type), entry_type)
-        except ValueError:
-            return (len(SYSTEMS_ENTRY_TYPE_ORDER), entry_type)
 
     def serialize_user(user) -> dict[str, Any]:
         return {
@@ -601,9 +549,12 @@ def register_api(app) -> None:
                         "source_ref": build_session_article_systems_source_ref(entry.slug),
                         "source_kind": SESSION_ARTICLE_SOURCE_KIND_SYSTEMS,
                         "title": entry.title,
-                        "subtitle": f"{entry_type_label(entry.entry_type)} - {entry.source_id}",
+                        "subtitle": f"{systems_entry_type_label(entry.entry_type)} - {entry.source_id}",
                         "kind_label": "Systems",
-                        "select_label": f"{entry.title} - Systems - {entry_type_label(entry.entry_type)} - {entry.source_id}",
+                        "select_label": (
+                            f"{entry.title} - Systems - {systems_entry_type_label(entry.entry_type)} - "
+                            f"{entry.source_id}"
+                        ),
                     }
                 )
                 if len(results) >= limit:
@@ -807,7 +758,7 @@ def register_api(app) -> None:
             "source_id": entry.source_id,
             "entry_key": entry.entry_key,
             "entry_type": entry.entry_type,
-            "entry_type_label": entry_type_label(entry.entry_type),
+            "entry_type_label": systems_entry_type_label(entry.entry_type),
             "slug": entry.slug,
             "title": entry.title,
             "source_page": entry.source_page,
@@ -1634,7 +1585,7 @@ def register_api(app) -> None:
         all_entry_groups = [
             {
                 "entry_type": entry_type,
-                "entry_type_label": entry_type_label(entry_type),
+                "entry_type_label": systems_entry_type_label(entry_type),
                 "count": count,
             }
             for entry_type, count in systems_service.list_entry_type_counts_for_campaign_source(campaign_slug, source_id)
@@ -1702,7 +1653,7 @@ def register_api(app) -> None:
                 "campaign": serialize_campaign(get_repository().get_campaign(campaign_slug)),
                 "source": serialize_systems_source_state(campaign_slug, state),
                 "entry_type": normalized_entry_type,
-                "entry_type_label": entry_type_label(normalized_entry_type),
+                "entry_type_label": systems_entry_type_label(normalized_entry_type),
                 "query": query,
                 "entry_count": entry_count,
                 "filtered_entry_count": len(entries),

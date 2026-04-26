@@ -174,6 +174,14 @@ from .session_presenter import (
 )
 from .systems_importer import Dnd5eSystemsImporter, SUPPORTED_ENTRY_TYPES
 from .systems_ingest import SystemsIngestError, extracted_systems_archive
+from .systems_labels import (
+    SYSTEMS_ENTRY_TYPE_LABELS,
+    SYSTEMS_SOURCE_INDEX_HIDDEN_ENTRY_TYPES,
+    systems_entry_type_choice_labels,
+    systems_entry_type_label,
+    systems_entry_type_sort_key,
+    systems_source_browse_intro,
+)
 from .systems_service import LICENSE_CLASS_LABELS, SystemsPolicyValidationError, SystemsService
 from .systems_store import SystemsStore
 from .system_policy import (
@@ -450,60 +458,6 @@ BUILDER_RELEVANT_CAMPAIGN_SECTIONS = frozenset(
 CHARACTER_PORTRAIT_ALT_MAX_LENGTH = 200
 CHARACTER_PORTRAIT_CAPTION_MAX_LENGTH = 300
 CHARACTER_PORTRAIT_MAX_BYTES = 8 * 1024 * 1024
-SYSTEMS_ENTRY_TYPE_LABELS = {
-    "action": "Actions",
-    "background": "Backgrounds",
-    "book": "Book Chapters",
-    "class": "Classes",
-    "classfeature": "Class Features",
-    "condition": "Conditions",
-    "disease": "Diseases",
-    "feat": "Feats",
-    "item": "Items",
-    "monster": "Monsters",
-    "optionalfeature": "Optional Features",
-    "race": "Races",
-    "rule": "Rules",
-    "sense": "Senses",
-    "skill": "Skills",
-    "spell": "Spells",
-    "status": "Statuses",
-    "subclass": "Subclasses",
-    "subclassfeature": "Subclass Features",
-    "variantrule": "Variant Rules",
-}
-SYSTEMS_ENTRY_TYPE_ORDER = (
-    "book",
-    "class",
-    "subclass",
-    "classfeature",
-    "subclassfeature",
-    "spell",
-    "feat",
-    "optionalfeature",
-    "item",
-    "race",
-    "rule",
-    "background",
-    "action",
-    "skill",
-    "sense",
-    "variantrule",
-    "condition",
-    "status",
-    "disease",
-    "monster",
-)
-SYSTEMS_SOURCE_INDEX_HIDDEN_ENTRY_TYPES = {"classfeature", "optionalfeature", "subclassfeature"}
-
-
-def systems_entry_type_sort_key(entry_type: str) -> tuple[int, str]:
-    try:
-        return (SYSTEMS_ENTRY_TYPE_ORDER.index(entry_type), entry_type)
-    except ValueError:
-        return (len(SYSTEMS_ENTRY_TYPE_ORDER), entry_type)
-
-
 def normalize_session_article_form_mode(value: str) -> str:
     normalized = (value or "").strip().lower()
     if normalized in SESSION_ARTICLE_FORM_MODES:
@@ -1062,13 +1016,14 @@ def build_dm_player_wiki_page_summary(campaign, record, *, removal_safety=None) 
     }
 
 
-def build_dm_custom_systems_entry_type_choices() -> list[dict[str, str]]:
+def build_dm_custom_systems_entry_type_choices(*, library_slug: str = "") -> list[dict[str, str]]:
+    entry_type_labels = systems_entry_type_choice_labels(library_slug)
     return [
         {
             "value": entry_type,
-            "label": SYSTEMS_ENTRY_TYPE_LABELS.get(entry_type, entry_type.replace("_", " ").title()),
+            "label": entry_type_labels.get(entry_type, systems_entry_type_label(entry_type)),
         }
-        for entry_type in sorted(SYSTEMS_ENTRY_TYPE_LABELS, key=systems_entry_type_sort_key)
+        for entry_type in sorted(entry_type_labels, key=systems_entry_type_sort_key)
     ]
 
 
@@ -6994,7 +6949,9 @@ def create_app() -> Flask:
                 form_data=custom_systems_entry_form_data,
                 visibility=custom_entry_form_visibility,
             ),
-            "custom_systems_entry_type_choices": build_dm_custom_systems_entry_type_choices(),
+            "custom_systems_entry_type_choices": build_dm_custom_systems_entry_type_choices(
+                library_slug=library_slug,
+            ),
             "custom_systems_entry_visibility_choices": list_visibility_choices(include_private=include_private),
             "systems_import_form": build_systems_import_form(systems_import_form_data),
             "systems_import_source_choices": import_source_choices,
@@ -7212,7 +7169,7 @@ def create_app() -> Flask:
             all_entry_groups.append(
                 {
                     "entry_type": entry_type,
-                    "label": SYSTEMS_ENTRY_TYPE_LABELS.get(entry_type, entry_type.replace("_", " ").title()),
+                    "label": systems_entry_type_label(entry_type),
                     "count": len(accessible_entries),
                 }
             )
@@ -7295,6 +7252,7 @@ def create_app() -> Flask:
         return {
             "campaign": campaign,
             "source_state": state,
+            "source_browse_intro": systems_source_browse_intro(state.source.library_slug),
             "entry_groups": entry_groups,
             "book_entries": book_entries,
             "book_visibility_policy_note": book_visibility_policy_note,
@@ -7352,10 +7310,7 @@ def create_app() -> Flask:
             "campaign": campaign,
             "source_state": state,
             "entry_type": normalized_entry_type,
-            "entry_type_label": SYSTEMS_ENTRY_TYPE_LABELS.get(
-                normalized_entry_type,
-                normalized_entry_type.replace("_", " ").title(),
-            ),
+            "entry_type_label": systems_entry_type_label(normalized_entry_type),
             "entries": entries,
             "query": normalized_query,
             "entry_count": entry_count,

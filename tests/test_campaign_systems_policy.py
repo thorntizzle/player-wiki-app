@@ -623,6 +623,99 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
     assert dnd_entry.status_code == 404
 
 
+def test_xianxia_systems_source_and_category_labels_use_xianxia_vocabulary(
+    app, client, sign_in, users
+):
+    source_id = "XIANXIA-LABEL-TEST"
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = "xianxia"
+    payload["systems_library"] = "xianxia"
+    payload["systems_sources"] = [
+        {
+            "source_id": source_id,
+            "enabled": True,
+        }
+    ]
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        service.ensure_builtin_library_seeded(XIANXIA_SYSTEM_CODE)
+        store.upsert_source(
+            XIANXIA_SYSTEM_CODE,
+            source_id,
+            title="Xianxia Label Test",
+            license_class="open_license",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        store.upsert_entry(
+            XIANXIA_SYSTEM_CODE,
+            source_id,
+            entry_key="xianxia|martial_art|label-test|azure-cloud-fist",
+            entry_type="martial_art",
+            slug="xianxia-azure-cloud-fist",
+            title="Azure Cloud Fist",
+            search_text="azure cloud fist martial art",
+            player_safe_default=True,
+            metadata={"xianxia_entry_facets": ["martial_art"]},
+            body={},
+            rendered_html="<p>A test Martial Art entry.</p>",
+        )
+        store.upsert_entry(
+            XIANXIA_SYSTEM_CODE,
+            source_id,
+            entry_key="xianxia|generic_technique|label-test|meteor-step",
+            entry_type="generic_technique",
+            slug="xianxia-meteor-step",
+            title="Meteor Step",
+            search_text="meteor step generic technique",
+            player_safe_default=True,
+            metadata={"xianxia_entry_facets": ["generic_technique"]},
+            body={},
+            rendered_html="<p>A test Generic Technique entry.</p>",
+        )
+        store.upsert_entry(
+            XIANXIA_SYSTEM_CODE,
+            source_id,
+            entry_key="xianxia|equipment|label-test|jade-compass",
+            entry_type="equipment",
+            slug="xianxia-jade-compass",
+            title="Jade Compass",
+            search_text="jade compass equipment",
+            player_safe_default=True,
+            metadata={"xianxia_entry_facets": ["equipment"]},
+            body={},
+            rendered_html="<p>A test equipment entry.</p>",
+        )
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    source = client.get(f"/campaigns/linden-pass/systems/sources/{source_id}")
+    martial_art_category = client.get(
+        f"/campaigns/linden-pass/systems/sources/{source_id}/types/martial_art"
+    )
+
+    assert source.status_code == 200
+    source_html = source.get_data(as_text=True)
+    assert "Choose a Xianxia content category" in source_html
+    assert "Player&#39;s Handbook" not in source_html
+    assert "Martial Arts" in source_html
+    assert "Generic Techniques" in source_html
+    assert "Equipment" in source_html
+    assert "Subclasses" not in source_html
+
+    assert martial_art_category.status_code == 200
+    category_html = martial_art_category.get_data(as_text=True)
+    assert "Xianxia Label Test: Martial Arts" in category_html
+    assert "Browse Martial Arts" in category_html
+    assert "Azure Cloud Fist" in category_html
+    assert "Showing all 1 martial arts in this source." in category_html
+    assert "Category: Martial Arts" in category_html
+
+
 def test_dm_can_later_enable_xianxia_systems_for_players_through_existing_controls(
     app, client, sign_in, users
 ):
