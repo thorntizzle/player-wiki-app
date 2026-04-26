@@ -5,9 +5,11 @@ from html import unescape
 
 import yaml
 
+from player_wiki.character_models import CharacterDefinition
 from player_wiki.xianxia_character_model import (
     derive_xianxia_difficulty_state_adjustments,
     derive_xianxia_honor_interaction_reminders,
+    normalize_xianxia_state_payload,
 )
 from player_wiki.systems_service import XIANXIA_HOMEBREW_SOURCE_ID
 
@@ -213,6 +215,71 @@ def test_xianxia_difficulty_state_helper_presents_capped_final_dc_states():
         {"key": "normal", "label": "Normal", "adjustment": 0, "adjustment_label": "0"},
         {"key": "hard", "label": "HARD", "adjustment": 3, "adjustment_label": "+3"},
     ]
+
+
+def test_xianxia_state_normalizer_clamps_current_pools_without_resetting_reference_state():
+    definition = CharacterDefinition.from_dict(
+        {
+            "campaign_slug": "linden-pass",
+            "character_slug": "clamp-sage",
+            "name": "Clamp Sage",
+            "status": "active",
+            "system": "Xianxia",
+            "xianxia": {
+                "energy_maxima": {"jing": 2, "qi": 1, "shen": 0},
+                "yin_yang": {"yin_max": 1, "yang_max": 3},
+                "dao_max": 3,
+                "durability": {"hp_max": 10, "stance_max": 8},
+            },
+        }
+    )
+
+    state = normalize_xianxia_state_payload(
+        definition,
+        {
+            "vitals": {
+                "current_hp": "99",
+                "temp_hp": "99",
+                "current_stance": "22",
+                "temp_stance": "77",
+            },
+            "energies": {
+                "jing": {"current": "9"},
+                "qi": {"current": "-1"},
+                "shen": {"current": "6"},
+            },
+            "yin_yang": {"yin_current": "7", "yang_current": "-2"},
+            "dao": {"current": "8"},
+            "active_stance": {"name": "Stone Root"},
+            "active_aura": {"name": "Azure Bell", "systems_ref": {"slug": "azure-bell"}},
+            "inventory": {
+                "enabled": True,
+                "quantities": [{"id": "spirit-rice", "name": "Spirit rice", "quantity": 2}],
+            },
+            "notes": {"player_notes_markdown": "Track recovery blockers manually."},
+        },
+    )
+
+    assert state["vitals"] == {
+        "current_hp": 10,
+        "temp_hp": 99,
+        "current_stance": 8,
+        "temp_stance": 77,
+    }
+    assert state["energies"] == {
+        "jing": {"current": 2},
+        "qi": {"current": 0},
+        "shen": {"current": 0},
+    }
+    assert state["yin_yang"] == {"yin_current": 1, "yang_current": 0}
+    assert state["dao"] == {"current": 3}
+    assert state["active_stance"] == {"name": "Stone Root"}
+    assert state["active_aura"] == {"name": "Azure Bell", "systems_ref": {"slug": "azure-bell"}}
+    assert state["inventory"] == {
+        "enabled": True,
+        "quantities": [{"id": "spirit-rice", "name": "Spirit rice", "quantity": 2}],
+    }
+    assert state["notes"] == {"player_notes_markdown": "Track recovery blockers manually."}
 
 
 def test_xianxia_honor_interaction_helper_presents_directional_contexts():
