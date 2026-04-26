@@ -8,11 +8,13 @@ import yaml
 from .character_models import CharacterDefinition, CharacterImportMetadata, CharacterRecord
 from .character_service import build_initial_state
 from .character_store import CharacterStateStore
+from .system_policy import DND_5E_SYSTEM_CODE, normalize_system_code
 
 
 @dataclass(slots=True)
 class CampaignCharacterConfig:
     campaign_slug: str
+    system: str
     campaign_dir: Path
     characters_dir: Path
     source_root: Path
@@ -32,6 +34,7 @@ def load_campaign_character_config(campaigns_dir: Path, campaign_slug: str) -> C
 
     return CampaignCharacterConfig(
         campaign_slug=raw_config.get("slug", campaign_slug),
+        system=normalize_system_code(raw_config.get("system")) or DND_5E_SYSTEM_CODE,
         campaign_dir=campaign_dir,
         characters_dir=characters_dir,
         source_root=source_root,
@@ -73,6 +76,7 @@ class CharacterRepository:
             return None
 
         definition_payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
+        definition_payload.setdefault("system", config.system)
         import_payload = yaml.safe_load(import_path.read_text(encoding="utf-8")) or {}
         definition = CharacterDefinition.from_dict(definition_payload)
         state_record = self.state_store.get_state(campaign_slug, character_slug)

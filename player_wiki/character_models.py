@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from .system_policy import DND_5E_SYSTEM_CODE, normalize_system_code
+
 
 def _normalize_proficiency_text(value: Any) -> str:
     return " ".join(str(value or "").split()).strip()
@@ -39,6 +41,7 @@ class CharacterDefinition:
     reference_notes: dict[str, Any]
     resource_templates: list[dict[str, Any]]
     source: dict[str, Any]
+    system: str = DND_5E_SYSTEM_CODE
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -46,6 +49,7 @@ class CharacterDefinition:
             "character_slug": self.character_slug,
             "name": self.name,
             "status": self.status,
+            "system": normalize_system_code(self.system) or DND_5E_SYSTEM_CODE,
             "profile": self.profile,
             "stats": self.stats,
             "skills": self.skills,
@@ -92,6 +96,10 @@ class CharacterDefinition:
             reference_notes=dict(payload.get("reference_notes") or {}),
             resource_templates=list(payload.get("resource_templates") or []),
             source=dict(payload.get("source") or {}),
+            system=normalize_system_code(
+                payload.get("system") or payload.get("system_code") or DND_5E_SYSTEM_CODE
+            )
+            or DND_5E_SYSTEM_CODE,
         )
 
 

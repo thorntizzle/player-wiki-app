@@ -467,6 +467,7 @@ def write_campaign_character_file(
     normalized_definition_payload["campaign_slug"] = campaign_slug
     normalized_definition_payload["character_slug"] = character_slug
     normalized_definition_payload.setdefault("status", "active")
+    normalized_definition_payload.setdefault("system", config.system)
     if not normalized_definition_payload.get("name"):
         normalized_definition_payload["name"] = slugify(character_slug).replace("-", " ").title()
     definition = CharacterDefinition.from_dict(normalized_definition_payload)

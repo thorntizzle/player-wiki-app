@@ -45,6 +45,7 @@ from .character_source_matrix import DEFAULT_NATIVE_SOURCE_MATRIX_POLICY, PHB_SO
 from .managed_resource_registry import resolve_managed_resource_family_and_member
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
+from .system_policy import is_dnd_5e_system
 
 CHARACTER_BUILDER_VERSION = "2026-04-20.01"
 BUILDER_STATIC_CACHE_MAX_ENTRIES = 12
@@ -20948,6 +20949,8 @@ def normalize_definition_to_native_model(
     resolved_background: SystemsEntryRecord | None = None,
 ) -> CharacterDefinition:
     payload = deepcopy(definition.to_dict())
+    if not is_dnd_5e_system(payload.get("system")):
+        return CharacterDefinition.from_dict(payload)
     payload["source"] = _seed_source_hp_baseline_from_definition(payload.get("source"), definition)
     seeded_definition = CharacterDefinition.from_dict(payload)
     resolved_entries = _resolve_definition_sheet_entries(

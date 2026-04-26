@@ -818,6 +818,7 @@ def test_api_content_character_management_can_upsert_and_delete_files(client, ap
     character_file = create_response.get_json()["character_file"]
     assert character_file["definition"]["character_slug"] == "api-scout"
     assert character_file["definition"]["name"] == "API Scout"
+    assert character_file["definition"]["system"] == "DND-5E"
     assert character_file["state_created"] is True
 
     list_response = client.get(
@@ -836,6 +837,7 @@ def test_api_content_character_management_can_upsert_and_delete_files(client, ap
 
     assert detail_response.status_code == 200
     assert detail_response.get_json()["character_file"]["import_metadata"]["parser_version"] == "api-test"
+    assert detail_response.get_json()["character_file"]["definition"]["system"] == "DND-5E"
 
     with app.app_context():
         store = AuthStore()
