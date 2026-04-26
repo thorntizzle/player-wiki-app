@@ -17,6 +17,7 @@ from player_wiki.xianxia_character_model import (
     XIANXIA_DEFINITION_FIELD_KEYS,
     XIANXIA_STATE_FIELD_KEYS,
     XianxiaDefinitionValidationError,
+    derive_xianxia_actions_per_turn,
     derive_xianxia_defense,
     validate_xianxia_definition_payload,
     xianxia_definition_validation_errors,
@@ -211,6 +212,33 @@ def test_xianxia_definition_accepts_requirements_sketch_top_level_aliases():
     assert xianxia["insight"] == {"available": 1, "spent": 0}
 
 
+@pytest.mark.parametrize(
+    ("realm", "expected_actions"),
+    (
+        ("Mortal", 2),
+        ("Immortal", 3),
+        ("Divine", 4),
+    ),
+)
+def test_xianxia_action_count_is_derived_from_realm(realm: str, expected_actions: int):
+    definition = CharacterDefinition.from_dict(
+        _minimal_definition_payload(
+            system="xianxia",
+            xianxia={
+                "realm": realm,
+                "actions_per_turn": 99,
+                "action_count": "99",
+            },
+        )
+    )
+
+    xianxia = definition.to_dict()["xianxia"]
+
+    assert derive_xianxia_actions_per_turn(realm) == expected_actions
+    assert xianxia["realm"] == realm
+    assert xianxia["actions_per_turn"] == expected_actions
+
+
 def test_xianxia_definition_validation_helpers_accept_stable_payloads():
     definition = CharacterDefinition.from_dict(
         _minimal_definition_payload(
@@ -268,7 +296,7 @@ def test_xianxia_definition_validation_helpers_report_invalid_payloads():
 
     errors = xianxia_definition_validation_errors(payload)
 
-    assert "xianxia.actions_per_turn must match the Mortal realm default of 2." in errors
+    assert not any("xianxia.actions_per_turn" in error for error in errors)
     assert "xianxia.attributes.str cannot be negative." in errors
     assert "xianxia.efforts.magic cannot be negative." in errors
     assert "xianxia.energies.jing.max cannot be negative." in errors

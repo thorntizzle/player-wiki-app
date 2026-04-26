@@ -36,7 +36,11 @@ from .character_spell_slots import normalize_spell_slot_lane_id, spell_slot_lane
 from .models import Campaign
 from .repository import build_alias_index, normalize_lookup, render_obsidian_links
 from .system_policy import is_xianxia_system
-from .xianxia_character_model import XIANXIA_DEFENSE_BASE, derive_xianxia_defense
+from .xianxia_character_model import (
+    XIANXIA_DEFENSE_BASE,
+    derive_xianxia_actions_per_turn,
+    derive_xianxia_defense,
+)
 
 ABILITY_ORDER = (
     ("str", "strength", "Strength"),
@@ -178,6 +182,11 @@ def present_character_detail(
         if is_xianxia_character
         else None
     )
+    xianxia_actions = (
+        present_xianxia_action_count_derivation(definition.xianxia)
+        if is_xianxia_character
+        else None
+    )
     notes_payload = dict(state.get("notes") or {})
     resource_lookup = {
         str(resource.get("id") or ""): resource for resource in list(state.get("resources") or [])
@@ -205,6 +214,14 @@ def present_character_detail(
                 ),
             },
             {"label": "Temp HP", "value": str(int(vitals.get("temp_hp") or 0))},
+            {
+                "label": "Realm",
+                "value": str((xianxia_actions or {}).get("realm") or "Mortal"),
+            },
+            {
+                "label": "Actions per turn",
+                "value": str((xianxia_actions or {}).get("actions_per_turn") or 2),
+            },
             {
                 "label": "Defense",
                 "value": str((xianxia_defense or {}).get("value", 0)),
@@ -769,6 +786,7 @@ def present_character_detail(
         ],
         "overview_stats": overview_stats,
         "xianxia_defense": xianxia_defense,
+        "xianxia_actions": xianxia_actions,
         "attack_reminders": attack_reminders,
         "defensive_rules": defensive_rules,
         "death_save_summary": death_save_summary,
@@ -1098,6 +1116,17 @@ def present_xianxia_defense_derivation(xianxia_payload: dict[str, Any]) -> dict[
         "manual_armor_bonus": manual_armor_bonus,
         "constitution": constitution,
         "formula": f"{XIANXIA_DEFENSE_BASE} + {manual_armor_bonus} + {constitution}",
+    }
+
+
+def present_xianxia_action_count_derivation(xianxia_payload: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(xianxia_payload or {})
+    realm = str(payload.get("realm") or "Mortal").strip() or "Mortal"
+    actions_per_turn = derive_xianxia_actions_per_turn(realm)
+    return {
+        "realm": realm,
+        "actions_per_turn": actions_per_turn,
+        "formula": f"{realm} -> {actions_per_turn} actions per turn",
     }
 
 

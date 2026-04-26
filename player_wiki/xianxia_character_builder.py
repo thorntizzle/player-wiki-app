@@ -14,6 +14,7 @@ from .xianxia_character_model import (
     XIANXIA_EFFORT_KEYS,
     XIANXIA_EFFORT_LABELS,
     XIANXIA_ENERGY_KEYS,
+    derive_xianxia_actions_per_turn,
     derive_xianxia_defense,
     normalize_xianxia_state_payload,
     validate_xianxia_definition_payload,
@@ -23,7 +24,7 @@ from .xianxia_equipment_inference import infer_xianxia_required_equipment
 XIANXIA_CHARACTER_BUILDER_VERSION = "2026-04-26.06"
 XIANXIA_CHARACTER_CREATE_SOURCE_PATH = "builder://xianxia-create"
 XIANXIA_REALM_DEFAULT = "Mortal"
-XIANXIA_ACTIONS_PER_TURN_DEFAULT = 2
+XIANXIA_ACTIONS_PER_TURN_DEFAULT = derive_xianxia_actions_per_turn(XIANXIA_REALM_DEFAULT)
 XIANXIA_ATTRIBUTE_CREATION_POINTS = 6
 XIANXIA_ATTRIBUTE_MAX_AT_CREATION = 3
 XIANXIA_EFFORT_CREATION_POINTS = 5

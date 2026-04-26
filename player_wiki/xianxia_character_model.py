@@ -114,14 +114,7 @@ def normalize_xianxia_definition_payload(payload: dict[str, Any]) -> dict[str, A
         choices=_REALM_LABELS,
         default="Mortal",
     )
-    actions_per_turn = _normalize_int(
-        _first_present(raw_xianxia, normalized_payload, raw_profile, key="actions_per_turn")
-        if _has_any(raw_xianxia, normalized_payload, raw_profile, key="actions_per_turn")
-        else _first_present(raw_xianxia, normalized_payload, raw_profile, key="action_count"),
-        default=_REALM_ACTION_DEFAULTS.get(realm, 2),
-    )
-    if actions_per_turn < 0:
-        actions_per_turn = _REALM_ACTION_DEFAULTS.get(realm, 2)
+    actions_per_turn = derive_xianxia_actions_per_turn(realm)
 
     raw_durability = _first_mapping(raw_xianxia, raw_stats, key="durability")
     raw_equipment = _first_mapping(raw_xianxia, normalized_payload, key="equipment")
@@ -248,6 +241,17 @@ def derive_xianxia_defense(
     constitution = _normalize_int(raw_attributes.get("con"), default=0)
     armor_bonus = _normalize_int(manual_armor_bonus, default=0)
     return XIANXIA_DEFENSE_BASE + armor_bonus + constitution
+
+
+def derive_xianxia_actions_per_turn(realm: Any) -> int:
+    """Return the fixed Xianxia action count for a normalized Realm."""
+
+    normalized_realm = _normalize_choice(
+        realm,
+        choices=_REALM_LABELS,
+        default="Mortal",
+    )
+    return _REALM_ACTION_DEFAULTS.get(normalized_realm, _REALM_ACTION_DEFAULTS["Mortal"])
 
 
 def validate_xianxia_definition_payload(payload: dict[str, Any]) -> dict[str, Any]:

@@ -163,6 +163,25 @@
         </section>
       {% endif %}
 
+      {% if show_quick_sections and character.xianxia_actions %}
+        <section class="read-section" id="xianxia-action-count">
+          <div class="section-heading">
+            <h2>Action count</h2>
+          </div>
+          <div class="glance-grid">
+            <div class="glance-card">
+              <span class="meta">Realm</span>
+              <strong>{{ character.xianxia_actions.realm }}</strong>
+            </div>
+            <div class="glance-card">
+              <span class="meta">Actions per turn</span>
+              <strong>{{ character.xianxia_actions.actions_per_turn }}</strong>
+            </div>
+          </div>
+          <p class="meta">Actions per turn = {{ character.xianxia_actions.formula }}</p>
+        </section>
+      {% endif %}
+
       {% if show_quick_sections and character.xianxia_defense %}
         <section class="read-section" id="xianxia-defense-derivation">
           <div class="section-heading">
