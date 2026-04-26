@@ -18,13 +18,17 @@ from .xianxia_character_model import (
     validate_xianxia_definition_payload,
 )
 
-XIANXIA_CHARACTER_BUILDER_VERSION = "2026-04-26.02"
+XIANXIA_CHARACTER_BUILDER_VERSION = "2026-04-26.03"
 XIANXIA_CHARACTER_CREATE_SOURCE_PATH = "builder://xianxia-create"
 XIANXIA_ATTRIBUTE_CREATION_POINTS = 6
 XIANXIA_ATTRIBUTE_MAX_AT_CREATION = 3
 XIANXIA_EFFORT_CREATION_POINTS = 5
 XIANXIA_EFFORT_MAX_AT_CREATION = 3
 XIANXIA_ENERGY_CREATION_POINTS = 3
+XIANXIA_HP_DEFAULT_MAX = 10
+XIANXIA_STANCE_DEFAULT_MAX = 10
+XIANXIA_MANUAL_ARMOR_BONUS_DEFAULT = 0
+XIANXIA_DEFENSE_DEFAULT = 10
 XIANXIA_YIN_DEFAULT_MAX = 1
 XIANXIA_YANG_DEFAULT_MAX = 1
 XIANXIA_DAO_DEFAULT_CURRENT = 0
@@ -79,10 +83,10 @@ def build_xianxia_character_create_context(
             "actions_per_turn": 2,
             "honor": "Honorable",
             "reputation": "Unknown",
-            "hp_max": 10,
-            "stance_max": 10,
-            "manual_armor_bonus": 0,
-            "defense": 10,
+            "hp_max": XIANXIA_HP_DEFAULT_MAX,
+            "stance_max": XIANXIA_STANCE_DEFAULT_MAX,
+            "manual_armor_bonus": XIANXIA_MANUAL_ARMOR_BONUS_DEFAULT,
+            "defense": XIANXIA_DEFENSE_DEFAULT,
             "yin_max": XIANXIA_YIN_DEFAULT_MAX,
             "yang_max": XIANXIA_YANG_DEFAULT_MAX,
             "dao_current": XIANXIA_DAO_DEFAULT_CURRENT,
@@ -179,6 +183,12 @@ def build_xianxia_character_definition(
                 "insight": {
                     "available": XIANXIA_INSIGHT_DEFAULT_AVAILABLE,
                     "spent": XIANXIA_INSIGHT_DEFAULT_SPENT,
+                },
+                "durability": {
+                    "hp_max": XIANXIA_HP_DEFAULT_MAX,
+                    "stance_max": XIANXIA_STANCE_DEFAULT_MAX,
+                    "manual_armor_bonus": XIANXIA_MANUAL_ARMOR_BONUS_DEFAULT,
+                    "defense": XIANXIA_DEFENSE_DEFAULT,
                 },
             },
         }
