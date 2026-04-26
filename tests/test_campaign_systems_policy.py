@@ -14,7 +14,7 @@ from player_wiki.dnd5e_rules_reference import (
 from player_wiki.auth_store import AuthStore, utcnow
 from player_wiki.auth import get_campaign_scope_visibility, get_effective_campaign_visibility
 from player_wiki.campaign_visibility import VISIBILITY_DM, VISIBILITY_PLAYERS, VISIBILITY_PUBLIC
-from player_wiki.system_policy import XIANXIA_SYSTEM_CODE
+from player_wiki.system_policy import DND_5E_SYSTEM_CODE, XIANXIA_SYSTEM_CODE
 from player_wiki.systems_service import XIANXIA_HOMEBREW_SOURCE_ID
 from player_wiki.systems_importer import Dnd5eSystemsImporter
 from player_wiki.systems_models import SystemsEntryRecord
@@ -289,6 +289,133 @@ def test_xianxia_source_policy_defaults_entries_dm_only_while_player_wiki_stays_
     assert "Dao Breathing" in dm_search.get_data(as_text=True)
     assert dm_entry.status_code == 200
     assert "Dao Breathing" in dm_entry.get_data(as_text=True)
+
+
+def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
+    app, client, sign_in, users
+):
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = "xianxia"
+    payload["systems_library"] = "xianxia"
+    payload["systems_sources"] = [
+        {
+            "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+            "enabled": True,
+        }
+    ]
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        service.ensure_builtin_library_seeded(XIANXIA_SYSTEM_CODE)
+        service.ensure_builtin_library_seeded(DND_5E_SYSTEM_CODE)
+
+        store.upsert_source(
+            DND_5E_SYSTEM_CODE,
+            XIANXIA_HOMEBREW_SOURCE_ID,
+            title="DND Impostor Xianxia Source",
+            license_class="open_license",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        store.replace_entries_for_source(
+            DND_5E_SYSTEM_CODE,
+            XIANXIA_HOMEBREW_SOURCE_ID,
+            entries=[
+                {
+                    "entry_key": "dnd-5e|rule|xianxia-homebrew|dnd-dao-breathing",
+                    "entry_type": "rule",
+                    "slug": "dnd-dao-breathing",
+                    "title": "DND Dao Breathing",
+                    "search_text": "dao breathing xianxia homebrew dnd",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"rule_key": "dnd_dao_breathing"},
+                    "body": {},
+                    "rendered_html": "<p>This DND-5E row must not appear in Xianxia.</p>",
+                }
+            ],
+        )
+        store.replace_entries_for_source(
+            XIANXIA_SYSTEM_CODE,
+            XIANXIA_HOMEBREW_SOURCE_ID,
+            entries=[
+                {
+                    "entry_key": "xianxia|rule|xianxia-homebrew|dao-breathing",
+                    "entry_type": "rule",
+                    "slug": "dao-breathing",
+                    "title": "Dao Breathing",
+                    "search_text": "dao breathing xianxia homebrew",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"rule_key": "dao_breathing"},
+                    "body": {},
+                    "rendered_html": "<p>Dao Breathing is a Xianxia test rule.</p>",
+                },
+                {
+                    "entry_key": "xianxia|martial_art|xianxia-homebrew|heavenly-palm",
+                    "entry_type": "martial_art",
+                    "slug": "heavenly-palm",
+                    "title": "Heavenly Palm",
+                    "search_text": "heavenly palm xianxia homebrew martial art",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"facet": "martial_art"},
+                    "body": {},
+                    "rendered_html": "<p>Heavenly Palm is a Xianxia martial art.</p>",
+                },
+            ],
+        )
+
+        search_results = service.search_entries_for_campaign(
+            "linden-pass",
+            query="Dao",
+            include_source_ids=[XIANXIA_HOMEBREW_SOURCE_ID],
+            limit=None,
+        )
+        rule_entries = service.list_entries_for_campaign_source(
+            "linden-pass",
+            XIANXIA_HOMEBREW_SOURCE_ID,
+            entry_type="rule",
+            limit=None,
+        )
+
+        assert [entry.title for entry in search_results] == ["Dao Breathing"]
+        assert {entry.library_slug for entry in search_results} == {XIANXIA_SYSTEM_CODE}
+        assert [entry.title for entry in rule_entries] == ["Dao Breathing"]
+        assert {entry.library_slug for entry in rule_entries} == {XIANXIA_SYSTEM_CODE}
+        assert service.get_entry_by_slug_for_campaign("linden-pass", "dnd-dao-breathing") is None
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    systems = client.get("/campaigns/linden-pass/systems/search?q=Dao")
+    source = client.get(f"/campaigns/linden-pass/systems/sources/{XIANXIA_HOMEBREW_SOURCE_ID}")
+    rule_category = client.get(
+        f"/campaigns/linden-pass/systems/sources/{XIANXIA_HOMEBREW_SOURCE_ID}/types/rule"
+    )
+    dnd_entry = client.get("/campaigns/linden-pass/systems/entries/dnd-dao-breathing")
+
+    assert systems.status_code == 200
+    systems_html = systems.get_data(as_text=True)
+    assert "Dao Breathing" in systems_html
+    assert "DND Dao Breathing" not in systems_html
+    assert "DND Impostor Xianxia Source" not in systems_html
+
+    assert source.status_code == 200
+    source_html = source.get_data(as_text=True)
+    assert "Xianxia Homebrew" in source_html
+    assert "DND Impostor Xianxia Source" not in source_html
+    assert "2 browsable entries across 2" in source_html
+
+    assert rule_category.status_code == 200
+    category_html = rule_category.get_data(as_text=True)
+    assert "Dao Breathing" in category_html
+    assert "DND Dao Breathing" not in category_html
+    assert "Showing all 1 rules in this source." in category_html
+
+    assert dnd_entry.status_code == 404
 
 
 def test_dm_can_later_enable_xianxia_systems_for_players_through_existing_controls(
