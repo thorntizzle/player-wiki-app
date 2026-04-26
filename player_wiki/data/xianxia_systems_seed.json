@@ -1,5 +1,5 @@
 {
-  "version": "2026-04-26.11",
+  "version": "2026-04-26.12",
   "source_id": "XIANXIA-HOMEBREW",
   "source_title": "Xianxia Homebrew",
   "storage_strategy": "curated_seed_data",
@@ -2808,6 +2808,1095 @@
         {
           "title": "Style",
           "paragraphs": ["Dagger Martial Art"]
+        }
+      ]
+    },
+    {
+      "title": "Cultivation",
+      "entry_type": "generic_technique",
+      "slug": "cultivation",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Cultivation.",
+      "search_text": "generic technique maneuver standalone insight cultivation",
+      "metadata": {
+        "generic_technique_key": "cultivation",
+        "xianxia_generic_technique_key": "cultivation",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 1,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "cultivation",
+          "catalog_order": 1,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[1] Cultivation: Increase an Energy by +1 (Can be taken multiple times.)"
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[1] Cultivation: Increase an Energy by +1 (Can be taken multiple times.)"]
+        }
+      ]
+    },
+    {
+      "title": "Meditation",
+      "entry_type": "generic_technique",
+      "slug": "meditation",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Meditation.",
+      "search_text": "generic technique maneuver standalone insight meditation",
+      "metadata": {
+        "generic_technique_key": "meditation",
+        "xianxia_generic_technique_key": "meditation",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 2,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "meditation",
+          "catalog_order": 2,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[1] Meditation: Increase Yin or Yang by +1 (Can be taken multiple times.)"
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[1] Meditation: Increase Yin or Yang by +1 (Can be taken multiple times.)"]
+        }
+      ]
+    },
+    {
+      "title": "Conditioning",
+      "entry_type": "generic_technique",
+      "slug": "conditioning",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Conditioning.",
+      "search_text": "generic technique maneuver standalone insight conditioning",
+      "metadata": {
+        "generic_technique_key": "conditioning",
+        "xianxia_generic_technique_key": "conditioning",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 3,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "conditioning",
+          "catalog_order": 3,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[1] Conditioning: +10 HP OR +2 Effort Points (Can be taken multiple times. Max HP of 50.)"
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[1] Conditioning: +10 HP OR +2 Effort Points (Can be taken multiple times. Max HP of 50.)"]
+        }
+      ]
+    },
+    {
+      "title": "Training",
+      "entry_type": "generic_technique",
+      "slug": "training",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Training.",
+      "search_text": "generic technique maneuver standalone insight training",
+      "metadata": {
+        "generic_technique_key": "training",
+        "xianxia_generic_technique_key": "training",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 4,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "training",
+          "catalog_order": 4,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[1] Training: +10 Stance OR +2 Attribute Points (Can be taken multiple times. Max Stance of 50.)"
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[1] Training: +10 Stance OR +2 Attribute Points (Can be taken multiple times. Max Stance of 50.)"]
+        }
+      ]
+    },
+    {
+      "title": "Qi Blast",
+      "entry_type": "generic_technique",
+      "slug": "qi-blast",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Qi Blast.",
+      "search_text": "generic technique maneuver standalone insight qi blast",
+      "metadata": {
+        "generic_technique_key": "qi_blast",
+        "xianxia_generic_technique_key": "qi_blast",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 5,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "qi_blast",
+          "catalog_order": 5,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[1] Qi Blast: Spend a point of Qi, fire a Ranged Qi Attack up to NEAR Distance (2 Qi for FAR) that deals Magical Effort Damage."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[1] Qi Blast: Spend a point of Qi, fire a Ranged Qi Attack up to NEAR Distance (2 Qi for FAR) that deals Magical Effort Damage."]
+        }
+      ]
+    },
+    {
+      "title": "Scolding Backhand",
+      "entry_type": "generic_technique",
+      "slug": "scolding-backhand",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Scolding Backhand.",
+      "search_text": "generic technique maneuver standalone insight scolding backhand",
+      "metadata": {
+        "generic_technique_key": "scolding_backhand",
+        "xianxia_generic_technique_key": "scolding_backhand",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 6,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "scolding_backhand",
+          "catalog_order": 6,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[1] Scolding Backhand: Deal additional Basic Effort Damage and make their next roll HARD if the Target's highest Martial Art or Realm is lower than yours, or if they are less Honorable/Reputable than you. Can only be done once a Combat."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[1] Scolding Backhand: Deal additional Basic Effort Damage and make their next roll HARD if the Target's highest Martial Art or Realm is lower than yours, or if they are less Honorable/Reputable than you. Can only be done once a Combat."]
+        }
+      ]
+    },
+    {
+      "title": "Wind Glide",
+      "entry_type": "generic_technique",
+      "slug": "wind-glide",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Wind Glide.",
+      "search_text": "generic technique maneuver standalone insight wind glide",
+      "metadata": {
+        "generic_technique_key": "wind_glide",
+        "xianxia_generic_technique_key": "wind_glide",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 7,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "wind_glide",
+          "catalog_order": 7,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[2] Wind Glide: You can naturally glide upon the winds up to FAR Distance (need to leap off a high place or the area must be exceedingly windy)."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[2] Wind Glide: You can naturally glide upon the winds up to FAR Distance (need to leap off a high place or the area must be exceedingly windy)."]
+        }
+      ]
+    },
+    {
+      "title": "Great Leap",
+      "entry_type": "generic_technique",
+      "slug": "great-leap",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Great Leap.",
+      "search_text": "generic technique maneuver standalone insight great leap",
+      "metadata": {
+        "generic_technique_key": "great_leap",
+        "xianxia_generic_technique_key": "great_leap",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 8,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "great_leap",
+          "catalog_order": 8,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[4] Great Leap: Spend a point of Jing and leap up to Double FAR Distance."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[4] Great Leap: Spend a point of Jing and leap up to Double FAR Distance."]
+        }
+      ]
+    },
+    {
+      "title": "Meteor Walk",
+      "entry_type": "generic_technique",
+      "slug": "meteor-walk",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Meteor Walk.",
+      "search_text": "generic technique maneuver standalone insight meteor walk",
+      "metadata": {
+        "generic_technique_key": "meteor_walk",
+        "xianxia_generic_technique_key": "meteor_walk",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 9,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "meteor_walk",
+          "catalog_order": 9,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[8] Meteor Walk: Requires Immortal Status. Spend a point of Shen to temporarily become energy and enter into the flow of Ley Lines. Being able to travel long distances along these pre-established paths within a much shorter timeframe."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[8] Meteor Walk: Requires Immortal Status. Spend a point of Shen to temporarily become energy and enter into the flow of Ley Lines. Being able to travel long distances along these pre-established paths within a much shorter timeframe."]
+        }
+      ]
+    },
+    {
+      "title": "Flight",
+      "entry_type": "generic_technique",
+      "slug": "flight",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Flight.",
+      "search_text": "generic technique maneuver standalone insight flight",
+      "metadata": {
+        "generic_technique_key": "flight",
+        "xianxia_generic_technique_key": "flight",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 10,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "flight",
+          "catalog_order": 10,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[12] Flight: Requires Immortal Status. Spend a point of Qi to enter into Flight, Move at standard rate during Combat. Move at a rate of 6 Distance during Travel."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[12] Flight: Requires Immortal Status. Spend a point of Qi to enter into Flight, Move at standard rate during Combat. Move at a rate of 6 Distance during Travel."]
+        }
+      ]
+    },
+    {
+      "title": "Duelist",
+      "entry_type": "generic_technique",
+      "slug": "duelist",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Duelist.",
+      "search_text": "generic technique maneuver standalone insight duelist",
+      "metadata": {
+        "generic_technique_key": "duelist",
+        "xianxia_generic_technique_key": "duelist",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 11,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "duelist",
+          "catalog_order": 11,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[3] Duelist: Gain +2 Attack and +3 Damage while in a Duel. If your opponent attempts to Disengage from the Duel you may spend a point of Jing or Qi to force the Target to make a DEX/STR Check to successfully Disengage."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[3] Duelist: Gain +2 Attack and +3 Damage while in a Duel. If your opponent attempts to Disengage from the Duel you may spend a point of Jing or Qi to force the Target to make a DEX/STR Check to successfully Disengage."]
+        }
+      ]
+    },
+    {
+      "title": "Flash Step",
+      "entry_type": "generic_technique",
+      "slug": "flash-step",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Flash Step.",
+      "search_text": "generic technique maneuver standalone insight flash step",
+      "metadata": {
+        "generic_technique_key": "flash_step",
+        "xianxia_generic_technique_key": "flash_step",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 12,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "flash_step",
+          "catalog_order": 12,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[2] Flash Step: Spend a point of Jing, your next Movement is Doubled."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[2] Flash Step: Spend a point of Jing, your next Movement is Doubled."]
+        }
+      ]
+    },
+    {
+      "title": "Speed Blitz",
+      "entry_type": "generic_technique",
+      "slug": "speed-blitz",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Speed Blitz.",
+      "search_text": "generic technique maneuver standalone insight speed blitz",
+      "metadata": {
+        "generic_technique_key": "speed_blitz",
+        "xianxia_generic_technique_key": "speed_blitz",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 13,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "speed_blitz",
+          "catalog_order": 13,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[5] Speed Blitz: At the beginning of Combat you may immediately Move to an adjacent space/CLOSE Combat with any enemy within FAR Distance."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[5] Speed Blitz: At the beginning of Combat you may immediately Move to an adjacent space/CLOSE Combat with any enemy within FAR Distance."]
+        }
+      ]
+    },
+    {
+      "title": "Graceful Balance",
+      "entry_type": "generic_technique",
+      "slug": "graceful-balance",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Graceful Balance.",
+      "search_text": "generic technique maneuver standalone insight graceful balance",
+      "metadata": {
+        "generic_technique_key": "graceful_balance",
+        "xianxia_generic_technique_key": "graceful_balance",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 14,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "graceful_balance",
+          "catalog_order": 14,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[1] Graceful Balance: You can stand upon even the most narrow or unstable surfaces without penalty."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[1] Graceful Balance: You can stand upon even the most narrow or unstable surfaces without penalty."]
+        }
+      ]
+    },
+    {
+      "title": "Kip-Up",
+      "entry_type": "generic_technique",
+      "slug": "kip-up",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Kip-Up.",
+      "search_text": "generic technique maneuver standalone insight kip up",
+      "metadata": {
+        "generic_technique_key": "kip_up",
+        "xianxia_generic_technique_key": "kip_up",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 15,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "kip_up",
+          "catalog_order": 15,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[3] Kip-Up: No longer needs to spend an Action to get up from Prone."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[3] Kip-Up: No longer needs to spend an Action to get up from Prone."]
+        }
+      ]
+    },
+    {
+      "title": "Water Run",
+      "entry_type": "generic_technique",
+      "slug": "water-run",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Water Run.",
+      "search_text": "generic technique maneuver standalone insight water run",
+      "metadata": {
+        "generic_technique_key": "water_run",
+        "xianxia_generic_technique_key": "water_run",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 16,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "water_run",
+          "catalog_order": 16,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[4] Water Run: You can Move across water as though it were ground."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[4] Water Run: You can Move across water as though it were ground."]
+        }
+      ]
+    },
+    {
+      "title": "Yin Healing",
+      "entry_type": "generic_technique",
+      "slug": "yin-healing",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Yin Healing.",
+      "search_text": "generic technique maneuver standalone insight yin healing",
+      "metadata": {
+        "generic_technique_key": "yin_healing",
+        "xianxia_generic_technique_key": "yin_healing",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 17,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "yin_healing",
+          "catalog_order": 17,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[4] Yin Healing: Spend a point of Yin and Heal Magical Effort on Target or Self."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[4] Yin Healing: Spend a point of Yin and Heal Magical Effort on Target or Self."]
+        }
+      ]
+    },
+    {
+      "title": "Yin Cleansing",
+      "entry_type": "generic_technique",
+      "slug": "yin-cleansing",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Yin Cleansing.",
+      "search_text": "generic technique maneuver standalone insight yin cleansing",
+      "metadata": {
+        "generic_technique_key": "yin_cleansing",
+        "xianxia_generic_technique_key": "yin_cleansing",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 18,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "yin_cleansing",
+          "catalog_order": 18,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[3] Yin Cleansing: Spend a point of Yin and cleanse any DoT or Status Effect on a Target you are Touching or Self (Except Qi Deviation)."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[3] Yin Cleansing: Spend a point of Yin and cleanse any DoT or Status Effect on a Target you are Touching or Self (Except Qi Deviation)."]
+        }
+      ]
+    },
+    {
+      "title": "Yin Regeneration",
+      "entry_type": "generic_technique",
+      "slug": "yin-regeneration",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Yin Regeneration.",
+      "search_text": "generic technique maneuver standalone insight yin regeneration",
+      "metadata": {
+        "generic_technique_key": "yin_regeneration",
+        "xianxia_generic_technique_key": "yin_regeneration",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 19,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "yin_regeneration",
+          "catalog_order": 19,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[6] Yin Regeneration: Spend a point of Yin Heal Magical Effort for the next 3 Rounds."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[6] Yin Regeneration: Spend a point of Yin Heal Magical Effort for the next 3 Rounds."]
+        }
+      ]
+    },
+    {
+      "title": "Yin Fortification",
+      "entry_type": "generic_technique",
+      "slug": "yin-fortification",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Yin Fortification.",
+      "search_text": "generic technique maneuver standalone insight yin fortification",
+      "metadata": {
+        "generic_technique_key": "yin_fortification",
+        "xianxia_generic_technique_key": "yin_fortification",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 20,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "yin_fortification",
+          "catalog_order": 20,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[1] Yin Fortification: Spend a point of Yin and gain an additional +3 Defense for the next 3 Rounds."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[1] Yin Fortification: Spend a point of Yin and gain an additional +3 Defense for the next 3 Rounds."]
+        }
+      ]
+    },
+    {
+      "title": "Yang Enhancement",
+      "entry_type": "generic_technique",
+      "slug": "yang-enhancement",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Yang Enhancement.",
+      "search_text": "generic technique maneuver standalone insight yang enhancement",
+      "metadata": {
+        "generic_technique_key": "yang_enhancement",
+        "xianxia_generic_technique_key": "yang_enhancement",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 21,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "yang_enhancement",
+          "catalog_order": 21,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[1] Yang Enhancement: Spend a point of Yang and gain an additional +3 to your Attack rolls for the next 3 Rounds."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[1] Yang Enhancement: Spend a point of Yang and gain an additional +3 to your Attack rolls for the next 3 Rounds."]
+        }
+      ]
+    },
+    {
+      "title": "Yang Sundering",
+      "entry_type": "generic_technique",
+      "slug": "yang-sundering",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Yang Sundering.",
+      "search_text": "generic technique maneuver standalone insight yang sundering",
+      "metadata": {
+        "generic_technique_key": "yang_sundering",
+        "xianxia_generic_technique_key": "yang_sundering",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 22,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "yang_sundering",
+          "catalog_order": 22,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[3] Yang Sundering: When you spend a point of Yang, whether for an Attack or Damage bonus, add an additional +2d6 to your next successful Attack's Damage. Your Target can not recover Stance for 1 Round."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[3] Yang Sundering: When you spend a point of Yang, whether for an Attack or Damage bonus, add an additional +2d6 to your next successful Attack's Damage. Your Target can not recover Stance for 1 Round."]
+        }
+      ]
+    },
+    {
+      "title": "Two-Finger Disarmament",
+      "entry_type": "generic_technique",
+      "slug": "two-finger-disarmament",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Two-Finger Disarmament.",
+      "search_text": "generic technique maneuver standalone insight two finger disarmament",
+      "metadata": {
+        "generic_technique_key": "two_finger_disarmament",
+        "xianxia_generic_technique_key": "two_finger_disarmament",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 23,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "two_finger_disarmament",
+          "catalog_order": 23,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[2] Two-Finger Disarmament: If Attacked by a Weapon, roll an Unarmed Counterattack if yours is Higher you disarm your assailant. If you are of a Higher Realm you do this automatically."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[2] Two-Finger Disarmament: If Attacked by a Weapon, roll an Unarmed Counterattack if yours is Higher you disarm your assailant. If you are of a Higher Realm you do this automatically."]
+        }
+      ]
+    },
+    {
+      "title": "Throat Crush",
+      "entry_type": "generic_technique",
+      "slug": "throat-crush",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Throat Crush.",
+      "search_text": "generic technique maneuver standalone insight throat crush",
+      "metadata": {
+        "generic_technique_key": "throat_crush",
+        "xianxia_generic_technique_key": "throat_crush",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 24,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "throat_crush",
+          "catalog_order": 24,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[4] Throat Crush: Spend an Action and aim for the throat and force your Target to make a HARD CON check. If they fail they are unable to speak or perform incantations for 2 Rounds."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[4] Throat Crush: Spend an Action and aim for the throat and force your Target to make a HARD CON check. If they fail they are unable to speak or perform incantations for 2 Rounds."]
+        }
+      ]
+    },
+    {
+      "title": "Knuckle Splitter",
+      "entry_type": "generic_technique",
+      "slug": "knuckle-splitter",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Knuckle Splitter.",
+      "search_text": "generic technique maneuver standalone insight knuckle splitter",
+      "metadata": {
+        "generic_technique_key": "knuckle_splitter",
+        "xianxia_generic_technique_key": "knuckle_splitter",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 25,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "knuckle_splitter",
+          "catalog_order": 25,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[4] Knuckle Splitter: Spend an Action and strike your Target's fingers with painful precision. Target must make a HARD DEX Check, if they fail they are unable to perform Mudras for 2 Rounds."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[4] Knuckle Splitter: Spend an Action and strike your Target's fingers with painful precision. Target must make a HARD DEX Check, if they fail they are unable to perform Mudras for 2 Rounds."]
+        }
+      ]
+    },
+    {
+      "title": "Cyclone Barrage",
+      "entry_type": "generic_technique",
+      "slug": "cyclone-barrage",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Cyclone Barrage.",
+      "search_text": "generic technique maneuver standalone insight cyclone barrage",
+      "metadata": {
+        "generic_technique_key": "cyclone_barrage",
+        "xianxia_generic_technique_key": "cyclone_barrage",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 26,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "cyclone_barrage",
+          "catalog_order": 26,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[5] Cyclone Barrage: You may choose to make an Area of Effect Attack against all Targets within NEAR Distance of you. However this Attack can only deal Basic (If Unarmed) or Weapon Effort Damage (If Armed)."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[5] Cyclone Barrage: You may choose to make an Area of Effect Attack against all Targets within NEAR Distance of you. However this Attack can only deal Basic (If Unarmed) or Weapon Effort Damage (If Armed)."]
+        }
+      ]
+    },
+    {
+      "title": "Disorientating Palm Strike",
+      "entry_type": "generic_technique",
+      "slug": "disorientating-palm-strike",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Disorientating Palm Strike.",
+      "search_text": "generic technique maneuver standalone insight disorientating palm strike",
+      "metadata": {
+        "generic_technique_key": "disorientating_palm_strike",
+        "xianxia_generic_technique_key": "disorientating_palm_strike",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 27,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "disorientating_palm_strike",
+          "catalog_order": 27,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[2] Disorientating Palm Strike: Spend a point of Qi, your next Successful Unarmed Attack deals additional Basic Effort Stance Damage. Your Target must make a Successful CON check or lose 1 Action next Turn."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[2] Disorientating Palm Strike: Spend a point of Qi, your next Successful Unarmed Attack deals additional Basic Effort Stance Damage. Your Target must make a Successful CON check or lose 1 Action next Turn."]
+        }
+      ]
+    },
+    {
+      "title": "Pressing Stance Break",
+      "entry_type": "generic_technique",
+      "slug": "pressing-stance-break",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Pressing Stance Break.",
+      "search_text": "generic technique maneuver standalone insight pressing stance break",
+      "metadata": {
+        "generic_technique_key": "pressing_stance_break",
+        "xianxia_generic_technique_key": "pressing_stance_break",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 28,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "pressing_stance_break",
+          "catalog_order": 28,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[2] Pressing Stance Break: The first time your Attack drops a Target's Stance to 0 deal Double Damage. For 1 Round they can't recover Stance."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[2] Pressing Stance Break: The first time your Attack drops a Target's Stance to 0 deal Double Damage. For 1 Round they can't recover Stance."]
+        }
+      ]
+    },
+    {
+      "title": "Piercing Blow",
+      "entry_type": "generic_technique",
+      "slug": "piercing-blow",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Piercing Blow.",
+      "search_text": "generic technique maneuver standalone insight piercing blow",
+      "metadata": {
+        "generic_technique_key": "piercing_blow",
+        "xianxia_generic_technique_key": "piercing_blow",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 29,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "piercing_blow",
+          "catalog_order": 29,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[3] Piercing Blow: Spend a point of Qi, Half of the Damage of your next Successful Unarmed Attack deals direct HP Damage."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[3] Piercing Blow: Spend a point of Qi, Half of the Damage of your next Successful Unarmed Attack deals direct HP Damage."]
+        }
+      ]
+    },
+    {
+      "title": "Cushioning Sway",
+      "entry_type": "generic_technique",
+      "slug": "cushioning-sway",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Cushioning Sway.",
+      "search_text": "generic technique maneuver standalone insight cushioning sway",
+      "metadata": {
+        "generic_technique_key": "cushioning_sway",
+        "xianxia_generic_technique_key": "cushioning_sway",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 30,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "cushioning_sway",
+          "catalog_order": 30,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[2] Cushioning Sway: Spend a point of Jing, the next Successful physical Attack made against you deals 10 less Damage. Must Move 5ft away from the Attacker at the end of the Action."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[2] Cushioning Sway: Spend a point of Jing, the next Successful physical Attack made against you deals 10 less Damage. Must Move 5ft away from the Attacker at the end of the Action."]
+        }
+      ]
+    },
+    {
+      "title": "Enhanced Recuperation",
+      "entry_type": "generic_technique",
+      "slug": "enhanced-recuperation",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Enhanced Recuperation.",
+      "search_text": "generic technique maneuver standalone insight enhanced recuperation",
+      "metadata": {
+        "generic_technique_key": "enhanced_recuperation",
+        "xianxia_generic_technique_key": "enhanced_recuperation",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 31,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "enhanced_recuperation",
+          "catalog_order": 31,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[5] Enhanced Recuperation: When you use the Recoup Action you recover 10+CON Stance."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[5] Enhanced Recuperation: When you use the Recoup Action you recover 10+CON Stance."]
+        }
+      ]
+    },
+    {
+      "title": "Enhanced Recollection",
+      "entry_type": "generic_technique",
+      "slug": "enhanced-recollection",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Enhanced Recollection.",
+      "search_text": "generic technique maneuver standalone insight enhanced recollection",
+      "metadata": {
+        "generic_technique_key": "enhanced_recollection",
+        "xianxia_generic_technique_key": "enhanced_recollection",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 32,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "enhanced_recollection",
+          "catalog_order": 32,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[6] Enhanced Recollection: When you use the Recollect Action you recover 1d3 Points of Energy."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[6] Enhanced Recollection: When you use the Recollect Action you recover 1d3 Points of Energy."]
+        }
+      ]
+    },
+    {
+      "title": "Enhanced Flowing Dao",
+      "entry_type": "generic_technique",
+      "slug": "enhanced-flowing-dao",
+      "source_page": "Xianxia Homebrew Generic Techniques and Maneuvers",
+      "facets": ["generic_technique"],
+      "aliases": ["Generic Technique", "Generic Maneuver"],
+      "summary": "Standalone Xianxia Generic Technique or Maneuver seed entry for Enhanced Flowing Dao.",
+      "search_text": "generic technique maneuver standalone insight enhanced flowing dao",
+      "metadata": {
+        "generic_technique_key": "enhanced_flowing_dao",
+        "xianxia_generic_technique_key": "enhanced_flowing_dao",
+        "catalog_role": "standalone_generic_technique",
+        "generic_technique_catalog_order": 33,
+        "generic_technique_details_status": "text_seeded_structured_metadata_deferred",
+        "source_line_range": "390-454"
+      },
+      "body": {
+        "xianxia_generic_technique": {
+          "key": "enhanced_flowing_dao",
+          "catalog_order": 33,
+          "catalog_role": "standalone_generic_technique",
+          "details_status": "text_seeded_structured_metadata_deferred",
+          "source_text": "[5] Enhanced Flowing Dao: Gain an additional +1 Action or Regain 10 HP/Stance."
+        }
+      },
+      "sections": [
+        {
+          "title": "Source Text",
+          "paragraphs": ["[5] Enhanced Flowing Dao: Gain an additional +1 Action or Regain 10 HP/Stance."]
         }
       ]
     }

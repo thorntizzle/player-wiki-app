@@ -862,6 +862,75 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
     assert qi_fist["ability_ref"] in demons_fist_html
 
 
+def test_xianxia_generic_technique_seed_entries_cover_requirements_catalog():
+    entries = build_xianxia_systems_seed_entries()
+    generic_entries = [entry for entry in entries if entry["entry_type"] == "generic_technique"]
+    expected_titles = [
+        "Cultivation",
+        "Meditation",
+        "Conditioning",
+        "Training",
+        "Qi Blast",
+        "Scolding Backhand",
+        "Wind Glide",
+        "Great Leap",
+        "Meteor Walk",
+        "Flight",
+        "Duelist",
+        "Flash Step",
+        "Speed Blitz",
+        "Graceful Balance",
+        "Kip-Up",
+        "Water Run",
+        "Yin Healing",
+        "Yin Cleansing",
+        "Yin Regeneration",
+        "Yin Fortification",
+        "Yang Enhancement",
+        "Yang Sundering",
+        "Two-Finger Disarmament",
+        "Throat Crush",
+        "Knuckle Splitter",
+        "Cyclone Barrage",
+        "Disorientating Palm Strike",
+        "Pressing Stance Break",
+        "Piercing Blow",
+        "Cushioning Sway",
+        "Enhanced Recuperation",
+        "Enhanced Recollection",
+        "Enhanced Flowing Dao",
+    ]
+
+    assert [entry["title"] for entry in generic_entries] == expected_titles
+    assert [entry["metadata"]["generic_technique_catalog_order"] for entry in generic_entries] == list(
+        range(1, 34)
+    )
+    assert all(entry["metadata"]["xianxia_entry_facets"] == ["generic_technique"] for entry in generic_entries)
+    assert all(entry["metadata"]["catalog_role"] == "standalone_generic_technique" for entry in generic_entries)
+    assert all(
+        entry["metadata"]["generic_technique_details_status"]
+        == "text_seeded_structured_metadata_deferred"
+        for entry in generic_entries
+    )
+    assert all("insight_cost" not in entry["metadata"] for entry in generic_entries)
+    assert all("resource_costs" not in entry["metadata"] for entry in generic_entries)
+    assert all("range_tags" not in entry["metadata"] for entry in generic_entries)
+    assert all("reset_cadence" not in entry["metadata"] for entry in generic_entries)
+
+    entry_map = {entry["slug"]: entry for entry in generic_entries}
+    qi_blast = entry_map["qi-blast"]
+    assert qi_blast["metadata"]["generic_technique_key"] == "qi_blast"
+    assert qi_blast["body"]["xianxia_generic_technique"]["source_text"].startswith(
+        "[1] Qi Blast: Spend a point of Qi"
+    )
+    assert "Spend a point of Qi" in qi_blast["rendered_html"]
+    assert "qi blast" in qi_blast["search_text"]
+
+    enhanced_flowing_dao = entry_map["enhanced-flowing-dao"]
+    assert enhanced_flowing_dao["metadata"]["generic_technique_catalog_order"] == 33
+    assert "Gain an additional +1 Action" in enhanced_flowing_dao["rendered_html"]
+
+
 def test_xianxia_condition_and_status_seed_entries_are_forced_reference_only():
     for facet in ("condition", "status"):
         entry = _build_seed_entry(
@@ -1133,7 +1202,11 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
     martial_art_category = client.get(
         f"/campaigns/linden-pass/systems/sources/{XIANXIA_HOMEBREW_SOURCE_ID}/types/martial_art"
     )
+    generic_technique_category = client.get(
+        f"/campaigns/linden-pass/systems/sources/{XIANXIA_HOMEBREW_SOURCE_ID}/types/generic_technique"
+    )
     demons_fist_entry = client.get("/campaigns/linden-pass/systems/entries/demons-fist")
+    qi_blast_entry = client.get("/campaigns/linden-pass/systems/entries/qi-blast")
     dnd_entry = client.get("/campaigns/linden-pass/systems/entries/dnd-dao-breathing")
 
     assert systems.status_code == 200
@@ -1149,7 +1222,11 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
     seed_entries = build_xianxia_systems_seed_entries()
     seed_count = len(seed_entries)
     seed_rule_count = sum(1 for entry in seed_entries if entry["entry_type"] == "rule")
-    assert f"{seed_count} browsable entries across 2" in source_html
+    seed_generic_technique_count = sum(
+        1 for entry in seed_entries if entry["entry_type"] == "generic_technique"
+    )
+    assert f"{seed_count} browsable entries across 3" in source_html
+    assert "Generic Techniques" in source_html
 
     assert rule_category.status_code == 200
     category_html = rule_category.get_data(as_text=True)
@@ -1162,6 +1239,14 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
     assert "Demon&#39;s Fist" in martial_art_html
     assert "Flying Daggers" in martial_art_html
     assert "Showing all 30 martial arts in this source." in martial_art_html
+
+    assert generic_technique_category.status_code == 200
+    generic_technique_html = generic_technique_category.get_data(as_text=True)
+    assert "Qi Blast" in generic_technique_html
+    assert "Enhanced Flowing Dao" in generic_technique_html
+    assert f"Showing all {seed_generic_technique_count} generic techniques in this source." in (
+        generic_technique_html
+    )
 
     assert demons_fist_entry.status_code == 200
     demons_fist_html = demons_fist_entry.get_data(as_text=True)
@@ -1178,6 +1263,11 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
     assert "xianxia:demons-fist:initiate:qi-fist-technique" in demons_fist_html
     assert 'id="xianxia-demons-fist-initiate-qi-fist-technique"' in demons_fist_html
     assert 'href="#xianxia-demons-fist-initiate-qi-fist-technique"' in demons_fist_html
+
+    assert qi_blast_entry.status_code == 200
+    qi_blast_html = qi_blast_entry.get_data(as_text=True)
+    assert "Qi Blast" in qi_blast_html
+    assert "Spend a point of Qi" in qi_blast_html
 
     assert dnd_entry.status_code == 404
 
