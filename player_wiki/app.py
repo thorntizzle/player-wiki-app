@@ -191,11 +191,13 @@ from .systems_labels import (
 from .systems_service import LICENSE_CLASS_LABELS, SystemsPolicyValidationError, SystemsService
 from .systems_store import SystemsStore
 from .system_policy import (
+    CHARACTER_ADVANCEMENT_LANE_XIANXIA_CULTIVATION,
     CHARACTER_ROUTE_LANE_DND5E,
     CHARACTER_ROUTE_LANE_XIANXIA,
     DND5E_CHARACTER_SPELLCASTING_TOOLS_UNSUPPORTED_MESSAGE,
     DND_5E_SYSTEM_CODE,
     NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE,
+    character_advancement_lane,
     character_advancement_unsupported_message,
     native_character_create_lane,
     native_character_create_unsupported_message,
@@ -1348,6 +1350,44 @@ def xianxia_read_subpage_context_for_redirect(definition) -> dict[str, object] |
             {"slug": slug, "label": label}
             for slug, label in XIANXIA_READ_SUBPAGE_LABELS
         ]
+    }
+
+
+def present_xianxia_cultivation_context(character: dict[str, object], xianxia: dict[str, object]) -> dict[str, object]:
+    xianxia_read = dict(character.get("xianxia_read") or {})
+    resources = dict(xianxia_read.get("resources") or {})
+    history_records = []
+    for index, raw_record in enumerate(list(xianxia.get("advancement_history") or []), start=1):
+        if not isinstance(raw_record, dict):
+            continue
+        action = str(raw_record.get("action") or raw_record.get("type") or "advancement").strip()
+        details = []
+        for key, label in (
+            ("amount", "Amount"),
+            ("target", "Target"),
+            ("rank", "Rank"),
+            ("systems_ref", "Systems ref"),
+            ("notes", "Notes"),
+        ):
+            value = raw_record.get(key)
+            if isinstance(value, dict):
+                value = value.get("title") or value.get("slug") or value.get("entry_key")
+            cleaned = str(value or "").strip()
+            if cleaned:
+                details.append({"label": label, "value": cleaned})
+        history_records.append(
+            {
+                "index": index,
+                "action": action.replace("_", " ").title() if action else "Advancement",
+                "details": details,
+            }
+        )
+
+    return {
+        "insight": dict(resources.get("insight") or {"available": 0, "spent": 0}),
+        "martial_arts": list(xianxia_read.get("martial_arts") or []),
+        "generic_techniques": list(xianxia_read.get("generic_techniques") or []),
+        "history": history_records,
     }
 
 
@@ -4106,6 +4146,7 @@ def create_app() -> Flask:
         builder_campaign_page_records = list_builder_campaign_page_records(campaign_slug, campaign)
         shared_item_catalog: dict[str, object] | None = None
         shared_spell_catalog: dict[str, object] | None = None
+        advancement_lane = character_advancement_lane(getattr(campaign, "system", ""))
 
         def get_read_item_catalog() -> dict[str, object]:
             nonlocal shared_item_catalog
@@ -4159,6 +4200,11 @@ def create_app() -> Flask:
             can_manage_character
             and level_up_readiness
             and level_up_readiness.get("status") == "repairable"
+        )
+        can_use_xianxia_cultivation = bool(
+            can_manage_character
+            and advancement_lane == CHARACTER_ADVANCEMENT_LANE_XIANXIA_CULTIVATION
+            and is_xianxia_system(getattr(record.definition, "system", ""))
         )
         can_retrain = False
         if retraining_page_records and bool(linked_feature_authoring.get("supported")):
@@ -4332,6 +4378,7 @@ def create_app() -> Flask:
                 native_character_tools_supported=native_character_tools_supported,
                 can_level_up=can_level_up,
                 can_prepare_level_up=can_prepare_level_up,
+                can_use_xianxia_cultivation=can_use_xianxia_cultivation,
                 can_retrain=can_retrain,
                 level_up_readiness=level_up_readiness,
                 linked_feature_authoring_message=(
@@ -11549,6 +11596,46 @@ def create_app() -> Flask:
                 campaign_slug=campaign_slug,
                 character_slug=character_slug,
             )
+        )
+
+    @app.get("/campaigns/<campaign_slug>/characters/<character_slug>/cultivation")
+    @campaign_scope_access_required("characters")
+    def character_xianxia_cultivation_view(campaign_slug: str, character_slug: str):
+        if not can_manage_campaign_session(campaign_slug):
+            abort(403)
+
+        campaign, record = load_character_context(campaign_slug, character_slug)
+        if (
+            character_advancement_lane(getattr(campaign, "system", ""))
+            != CHARACTER_ADVANCEMENT_LANE_XIANXIA_CULTIVATION
+            or not is_xianxia_system(getattr(record.definition, "system", ""))
+        ):
+            flash("Cultivation is only available for Xianxia character sheets.", "error")
+            return redirect(
+                url_for(
+                    "character_read_view",
+                    campaign_slug=campaign_slug,
+                    character_slug=character_slug,
+                )
+            )
+
+        character = present_character_detail(
+            campaign,
+            record,
+            include_player_notes_section=True,
+            systems_service=get_systems_service(),
+            campaign_page_records=list_visible_character_page_records(campaign_slug, campaign),
+        )
+        xianxia_read = character.get("xianxia_read")
+        if not isinstance(xianxia_read, dict):
+            abort(404)
+
+        return render_template(
+            "character_cultivation_xianxia.html",
+            campaign=campaign,
+            character=character,
+            cultivation=present_xianxia_cultivation_context(character, record.definition.xianxia),
+            active_nav="characters",
         )
 
     @app.route("/campaigns/<campaign_slug>/characters/<character_slug>/progression-repair", methods=["GET", "POST"])

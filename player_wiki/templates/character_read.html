@@ -61,6 +61,11 @@
                 </a>
               {% endif %}
             {% endif %}
+            {% if can_use_xianxia_cultivation %}
+              <a class="ghost-button" href="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
+                Cultivation
+              </a>
+            {% endif %}
             {% if is_session_mode %}
               <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='read', page=character_subpage) }}">
                 Back to character sheet
@@ -81,6 +86,12 @@
           <div class="hero-actions">
             <a class="ghost-button" href="{{ url_for('character_progression_repair_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
               Prepare for level-up
+            </a>
+          </div>
+        {% elif can_use_xianxia_cultivation %}
+          <div class="hero-actions">
+            <a class="ghost-button" href="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
+              Cultivation
             </a>
           </div>
         {% endif %}

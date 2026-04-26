@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block title %}Cultivation | {{ character.name }} | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Character cultivation</p>
+    <h1>Cultivation: {{ character.name }}</h1>
+    <p class="lede">Insight-based advancement for this Xianxia character.</p>
+    <div class="hero-actions">
+      <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">Back to sheet</a>
+      <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, page='martial_arts') }}">Martial Arts</a>
+      <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, page='techniques') }}">Techniques</a>
+      <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, page='resources') }}">Resources</a>
+    </div>
+  </section>
+
+  <section class="read-section" id="xianxia-cultivation-insight">
+    <div class="section-heading">
+      <h2>Insight</h2>
+    </div>
+    <div class="glance-grid">
+      <div class="glance-card">
+        <span class="meta">Available</span>
+        <strong>{{ cultivation.insight.available }}</strong>
+      </div>
+      <div class="glance-card">
+        <span class="meta">Spent</span>
+        <strong>{{ cultivation.insight.spent }}</strong>
+      </div>
+      <div class="glance-card">
+        <span class="meta">Martial Arts</span>
+        <strong>{{ cultivation.martial_arts | length }}</strong>
+      </div>
+      <div class="glance-card">
+        <span class="meta">Generic Techniques</span>
+        <strong>{{ cultivation.generic_techniques | length }}</strong>
+      </div>
+    </div>
+  </section>
+
+  <section class="read-section" id="xianxia-cultivation-martial-arts">
+    <div class="section-heading">
+      <h2>Martial Arts</h2>
+    </div>
+    {% if cultivation.martial_arts %}
+      <div class="feature-groups">
+        <section class="feature-group">
+          <div class="feature-stack">
+            {% for art in cultivation.martial_arts %}
+              <article class="feature-row">
+                <div class="feature-row__header">
+                  <h3>
+                    {% if art.href %}
+                      <a href="{{ art.href }}">{{ art.name }}</a>
+                    {% else %}
+                      {{ art.name }}
+                    {% endif %}
+                  </h3>
+                  <p class="meta">
+                    {% if art.current_rank %}Current rank: {{ art.current_rank }}{% else %}Rank not recorded{% endif %}
+                    {% if art.rank_records_status %} | {{ art.rank_records_status | replace('_', ' ') }}{% endif %}
+                  </p>
+                </div>
+                {% if art.rank_progress and art.rank_progress.steps %}
+                  <div class="skill-grid">
+                    {% for rank in art.rank_progress.steps %}
+                      <div class="skill-pill{% if rank.is_learned %} skill-pill--proficient{% endif %}">
+                        {% if rank.href %}
+                          <a href="{{ rank.href }}">{{ rank.label }}</a>
+                        {% else %}
+                          <span>{{ rank.label }}</span>
+                        {% endif %}
+                        <span class="meta">{{ rank.status_label }}</span>
+                      </div>
+                    {% endfor %}
+                  </div>
+                {% endif %}
+              </article>
+            {% endfor %}
+          </div>
+        </section>
+      </div>
+    {% else %}
+      <article class="detail-card">
+        <p class="meta">No Martial Arts are recorded on this sheet yet.</p>
+      </article>
+    {% endif %}
+  </section>
+
+  <section class="read-section" id="xianxia-cultivation-techniques">
+    <div class="section-heading">
+      <h2>Generic Techniques</h2>
+    </div>
+    <article class="detail-card">
+      {% if cultivation.generic_techniques %}
+        <ul class="plain-list slot-list">
+          {% for technique in cultivation.generic_techniques %}
+            <li>
+              {% if technique.href %}
+                <a href="{{ technique.href }}">{{ technique.name }}</a>
+              {% else %}
+                <span>{{ technique.name }}</span>
+              {% endif %}
+              {% if technique.insight_cost %}
+                <span class="meta">Insight {{ technique.insight_cost }}</span>
+              {% endif %}
+              {% if technique.support_label %}
+                <strong>{{ technique.support_label }}</strong>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="meta">No Generic Techniques are recorded on this sheet yet.</p>
+      {% endif %}
+    </article>
+  </section>
+
+  <section class="read-section" id="xianxia-cultivation-history">
+    <div class="section-heading">
+      <h2>Advancement History</h2>
+    </div>
+    {% if cultivation.history %}
+      <div class="feature-stack">
+        {% for event in cultivation.history %}
+          <article class="feature-row">
+            <div class="feature-row__header">
+              <h3>{{ event.action }}</h3>
+              <p class="meta">Entry {{ event.index }}</p>
+            </div>
+            {% if event.details %}
+              <ul class="plain-list slot-list">
+                {% for detail in event.details %}
+                  <li><strong>{{ detail.label }}:</strong> {{ detail.value }}</li>
+                {% endfor %}
+              </ul>
+            {% endif %}
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <article class="detail-card">
+        <p class="meta">No advancement history is recorded on this sheet yet.</p>
+      </article>
+    {% endif %}
+  </section>
+{% endblock %}

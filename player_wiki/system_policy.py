@@ -16,9 +16,9 @@ XIANXIA_NATIVE_CHARACTER_CREATE_UNSUPPORTED_MESSAGE = (
     "implemented yet. Use the roster and existing read/session sheets for now."
 )
 XIANXIA_CHARACTER_ADVANCEMENT_UNSUPPORTED_MESSAGE = (
-    "Xianxia advancement and cultivation are recognized as their own character lane, but those "
-    "routes are not implemented yet. Use the existing read/session sheet and Controls surfaces "
-    "for now."
+    "Xianxia advancement and cultivation use their own character lane. Use the Xianxia "
+    "Cultivation page instead of DND-5E level-up, repair, or retraining routes; individual "
+    "Insight spend and gain actions are not implemented yet."
 )
 DND5E_CHARACTER_PDF_IMPORT_UNSUPPORTED_MESSAGE = (
     f"PDF character import is currently only supported for {DND_5E_SYSTEM_CODE} campaigns."

@@ -75,6 +75,36 @@ def _write_character_state(app, character_slug: str, mutator) -> None:
         )
 
 
+def _valid_xianxia_create_data(name: str = "Cultivation Crane") -> dict[str, str]:
+    return {
+        "name": name,
+        "character_slug": "",
+        "attribute_str": "3",
+        "attribute_dex": "0",
+        "attribute_con": "3",
+        "attribute_int": "0",
+        "attribute_wis": "0",
+        "attribute_cha": "0",
+        "effort_basic": "3",
+        "effort_weapon": "1",
+        "effort_guns_explosive": "0",
+        "effort_magic": "1",
+        "effort_ultimate": "0",
+        "energy_jing": "1",
+        "energy_qi": "1",
+        "energy_shen": "1",
+        "trained_skill_1": "Fishing",
+        "trained_skill_2": "Calligraphy",
+        "trained_skill_3": "Tea Ceremony",
+        "martial_art_1_slug": "demons-fist",
+        "martial_art_1_rank": "initiate",
+        "martial_art_2_slug": "heavenly-palm",
+        "martial_art_2_rank": "initiate",
+        "martial_art_3_slug": "taoist-blade",
+        "martial_art_3_rank": "initiate",
+    }
+
+
 def _read_character_definition(app, character_slug: str) -> dict:
     definition_path = (
         app.config["TEST_CAMPAIGNS_DIR"]
@@ -1339,6 +1369,57 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     assert "Edit character" not in html
     assert "Level up" not in html
     assert "Prepare for level-up" not in html
+
+
+def test_xianxia_cultivation_route_is_separate_from_dnd_level_up(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+                "default_visibility": "dm",
+            }
+        ]
+
+    _write_campaign_config(app, _mutate)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Cultivation Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+    assert create_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/cultivation-crane"
+    )
+
+    sheet_response = client.get("/campaigns/linden-pass/characters/cultivation-crane")
+    assert sheet_response.status_code == 200
+    sheet_html = sheet_response.get_data(as_text=True)
+    assert "/campaigns/linden-pass/characters/cultivation-crane/cultivation" in sheet_html
+    assert "/campaigns/linden-pass/characters/cultivation-crane/level-up" not in sheet_html
+    assert "Level up" not in sheet_html
+    assert "Cultivation" in sheet_html
+
+    cultivation_response = client.get(
+        "/campaigns/linden-pass/characters/cultivation-crane/cultivation"
+    )
+    assert cultivation_response.status_code == 200
+    cultivation_html = cultivation_response.get_data(as_text=True)
+    assert "Character cultivation" in cultivation_html
+    assert "Insight-based advancement for this Xianxia character." in cultivation_html
+    assert "Available" in cultivation_html
+    assert "Spent" in cultivation_html
+    assert "Demon&#39;s Fist" in cultivation_html
+    assert "Heavenly Palm" in cultivation_html
+    assert "No advancement history is recorded on this sheet yet." in cultivation_html
+    assert "DND-5E native sheet model" not in cultivation_html
+    assert "/campaigns/linden-pass/characters/cultivation-crane/level-up" not in cultivation_html
 
 
 def test_xianxia_create_picker_allows_seeded_and_gm_custom_martial_arts(
