@@ -654,6 +654,43 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     assert negative_effort_response.status_code == 400
     assert "Weapon cannot be negative." in negative_effort_response.get_data(as_text=True)
 
+    over_budget_efforts = _effort_data()
+    over_budget_efforts["effort_basic"] = "2"
+    over_budget_effort_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            "name": "Effort Overbudget",
+            "character_slug": "",
+            **_attribute_data(),
+            **over_budget_efforts,
+        },
+        follow_redirects=False,
+    )
+    assert over_budget_effort_response.status_code == 400
+    assert (
+        "Xianxia Efforts must spend exactly 5 creation points; submitted total is 6."
+    ) in over_budget_effort_response.get_data(as_text=True)
+
+    over_cap_efforts = _effort_data()
+    over_cap_efforts["effort_weapon"] = "0"
+    over_cap_efforts["effort_guns_explosive"] = "0"
+    over_cap_efforts["effort_magic"] = "4"
+    over_cap_efforts["effort_ultimate"] = "0"
+    over_cap_effort_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            "name": "Effort Overcap",
+            "character_slug": "",
+            **_attribute_data(),
+            **over_cap_efforts,
+        },
+        follow_redirects=False,
+    )
+    assert over_cap_effort_response.status_code == 400
+    assert "Magic cannot exceed 3 at character creation." in over_cap_effort_response.get_data(
+        as_text=True
+    )
+
     submit_response = client.post(
         "/campaigns/linden-pass/characters/new",
         data={

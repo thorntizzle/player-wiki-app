@@ -20,6 +20,8 @@ XIANXIA_CHARACTER_BUILDER_VERSION = "2026-04-26.01"
 XIANXIA_CHARACTER_CREATE_SOURCE_PATH = "builder://xianxia-create"
 XIANXIA_ATTRIBUTE_CREATION_POINTS = 6
 XIANXIA_ATTRIBUTE_MAX_AT_CREATION = 3
+XIANXIA_EFFORT_CREATION_POINTS = 5
+XIANXIA_EFFORT_MAX_AT_CREATION = 3
 
 
 def build_xianxia_character_create_context(
@@ -42,6 +44,7 @@ def build_xianxia_character_create_context(
             "label": XIANXIA_EFFORT_LABELS[key],
             "input_name": _xianxia_effort_input_name(key),
             "value": values["efforts"][key],
+            "max": XIANXIA_EFFORT_MAX_AT_CREATION,
         }
         for key in XIANXIA_EFFORT_KEYS
     ]
@@ -268,10 +271,22 @@ def _validate_xianxia_create_efforts(values: dict[str, Any]) -> dict[str, int]:
         if effort_score < 0:
             errors.append(f"{label} cannot be negative.")
             continue
+        if effort_score > XIANXIA_EFFORT_MAX_AT_CREATION:
+            errors.append(
+                f"{label} cannot exceed {XIANXIA_EFFORT_MAX_AT_CREATION} at character creation."
+            )
         effort_scores[key] = effort_score
 
     if missing_labels:
         errors.append(f"Missing Xianxia efforts: {_format_label_list(missing_labels)}.")
+    if len(effort_scores) == len(XIANXIA_EFFORT_KEYS):
+        effort_total = sum(effort_scores.values())
+        if effort_total != XIANXIA_EFFORT_CREATION_POINTS:
+            errors.append(
+                "Xianxia Efforts must spend exactly "
+                f"{XIANXIA_EFFORT_CREATION_POINTS} creation points; submitted total is "
+                f"{effort_total}."
+            )
     if errors:
         raise CharacterBuildError(" ".join(errors))
 
