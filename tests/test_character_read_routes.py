@@ -541,6 +541,10 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     assert "Starting Defaults" in create_html
     assert "Yin / Yang" in create_html
     assert "1 / 1" in create_html
+    assert '<span class="meta">Insight</span>' in create_html
+    insight_default_index = create_html.index('<span class="meta">Insight</span>')
+    insight_default_html = create_html[insight_default_index: insight_default_index + 120]
+    assert "<strong>0</strong>" in insight_default_html
     for attribute_label in (
         "Strength",
         "Dexterity",

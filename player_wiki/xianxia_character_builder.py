@@ -25,6 +25,8 @@ XIANXIA_EFFORT_MAX_AT_CREATION = 3
 XIANXIA_ENERGY_CREATION_POINTS = 3
 XIANXIA_YIN_DEFAULT_MAX = 1
 XIANXIA_YANG_DEFAULT_MAX = 1
+XIANXIA_INSIGHT_DEFAULT_AVAILABLE = 0
+XIANXIA_INSIGHT_DEFAULT_SPENT = 0
 XIANXIA_ENERGY_LABELS = {
     "jing": "Jing",
     "qi": "Qi",
@@ -80,8 +82,8 @@ def build_xianxia_character_create_context(
             "yin_max": XIANXIA_YIN_DEFAULT_MAX,
             "yang_max": XIANXIA_YANG_DEFAULT_MAX,
             "dao_max": 3,
-            "insight_available": 0,
-            "insight_spent": 0,
+            "insight_available": XIANXIA_INSIGHT_DEFAULT_AVAILABLE,
+            "insight_spent": XIANXIA_INSIGHT_DEFAULT_SPENT,
         },
         "attribute_fields": attribute_fields,
         "effort_fields": effort_fields,
@@ -159,6 +161,10 @@ def build_xianxia_character_definition(
                 "yin_yang": {
                     "yin_max": XIANXIA_YIN_DEFAULT_MAX,
                     "yang_max": XIANXIA_YANG_DEFAULT_MAX,
+                },
+                "insight": {
+                    "available": XIANXIA_INSIGHT_DEFAULT_AVAILABLE,
+                    "spent": XIANXIA_INSIGHT_DEFAULT_SPENT,
                 },
             },
         }
