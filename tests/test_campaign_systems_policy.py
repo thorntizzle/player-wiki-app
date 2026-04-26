@@ -1236,6 +1236,77 @@ def test_xianxia_martial_art_parent_entry_renders_rank_info_and_ability_ref_link
     assert "reference only" in html
 
 
+def test_xianxia_incomplete_martial_arts_stay_visible_with_draft_markers(
+    app, client, sign_in, users
+):
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = "xianxia"
+    payload["systems_library"] = "xianxia"
+    payload["systems_sources"] = [
+        {
+            "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+            "enabled": True,
+        }
+    ]
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        service = app.extensions["systems_service"]
+        service.ensure_builtin_library_seeded(XIANXIA_SYSTEM_CODE)
+        incomplete_entry = service.get_entry_by_slug_for_campaign("linden-pass", "flying-daggers")
+        complete_entry = service.get_entry_by_slug_for_campaign("linden-pass", "demons-fist")
+
+        assert incomplete_entry is not None
+        assert incomplete_entry.entry_type == "martial_art"
+        assert incomplete_entry.metadata["rank_completion_status"] == (
+            XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_INTENTIONAL_DRAFT
+        )
+        assert incomplete_entry.metadata["missing_rank_names"] == [
+            "Apprentice",
+            "Master",
+            "Legendary",
+        ]
+        assert incomplete_entry.metadata["has_incomplete_ranks"] is True
+
+        assert complete_entry is not None
+        assert complete_entry.metadata["rank_completion_status"] == (
+            XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_COMPLETE
+        )
+        assert complete_entry.metadata["has_incomplete_ranks"] is False
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    category_response = client.get(
+        f"/campaigns/linden-pass/systems/sources/{XIANXIA_HOMEBREW_SOURCE_ID}/types/martial_art"
+    )
+    incomplete_response = client.get("/campaigns/linden-pass/systems/entries/flying-daggers")
+    complete_response = client.get("/campaigns/linden-pass/systems/entries/demons-fist")
+
+    assert category_response.status_code == 200
+    category_html = category_response.get_data(as_text=True)
+    assert "Flying Daggers" in category_html
+    assert "Demon&#39;s Fist" in category_html
+    assert "Showing all 30 martial arts in this source." in category_html
+
+    assert incomplete_response.status_code == 200
+    incomplete_html = incomplete_response.get_data(as_text=True)
+    assert "Flying Daggers" in incomplete_html
+    assert "Intentional Draft Content" in incomplete_html
+    assert "not an import failure" in incomplete_html
+    assert "Missing higher ranks:" in incomplete_html
+    assert "Apprentice, Master, Legendary" in incomplete_html
+    assert "<h2>Rank Records</h2>" in incomplete_html
+    assert "<h3>Initiate</h3>" in incomplete_html
+    assert "<h3>Novice</h3>" in incomplete_html
+
+    assert complete_response.status_code == 200
+    complete_html = complete_response.get_data(as_text=True)
+    assert "Demon&#39;s Fist" in complete_html
+    assert "Intentional Draft Content" not in complete_html
+    assert "Missing higher ranks:" not in complete_html
+
+
 def test_xianxia_systems_source_and_category_labels_use_xianxia_vocabulary(
     app, client, sign_in, users
 ):
