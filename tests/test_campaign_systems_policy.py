@@ -17,14 +17,18 @@ from player_wiki.campaign_visibility import VISIBILITY_DM, VISIBILITY_PLAYERS, V
 from player_wiki.system_policy import DND_5E_SYSTEM_CODE, XIANXIA_SYSTEM_CODE
 from player_wiki.systems_service import XIANXIA_HOMEBREW_SOURCE_ID
 from player_wiki.xianxia_systems_seed import (
+    XIANXIA_EFFORT_KEYS,
     XIANXIA_ENTRY_FACET_KEYS,
+    XIANXIA_MAGIC_EFFORT_CANONICAL_LABEL,
     XIANXIA_SYSTEMS_SEED_DATA_RELATIVE_PATH,
     XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY,
     XIANXIA_SYSTEMS_SEED_VERSION,
     _build_seed_entry,
     build_xianxia_entry_facet_definitions,
+    build_xianxia_effort_definitions,
     build_xianxia_systems_seed_entries,
     get_xianxia_entry_facet_definition,
+    get_xianxia_effort_definition,
 )
 from player_wiki.systems_importer import Dnd5eSystemsImporter
 from player_wiki.systems_models import SystemsEntryRecord
@@ -246,6 +250,23 @@ def test_xianxia_entry_facet_definitions_cover_milestone_one_concepts():
     assert martial_art_facet["label"] == "Martial Art"
 
 
+def test_xianxia_effort_definitions_encode_magic_effort_as_canonical_label():
+    definitions = build_xianxia_effort_definitions()
+    keys = tuple(definition["key"] for definition in definitions)
+
+    assert keys == XIANXIA_EFFORT_KEYS
+    assert XIANXIA_MAGIC_EFFORT_CANONICAL_LABEL == "Magic Effort"
+    assert all(definition["canonical_label"].endswith(" Effort") for definition in definitions)
+
+    magic_effort = get_xianxia_effort_definition("magic")
+    assert magic_effort is not None
+    assert magic_effort["label"] == "Magic"
+    assert magic_effort["canonical_label"] == XIANXIA_MAGIC_EFFORT_CANONICAL_LABEL
+    assert magic_effort["die"] == "1d10"
+    assert magic_effort["damage_bonus_key"] == "magic"
+    assert magic_effort["damage_expression"] == "1d10 + Magic"
+
+
 def test_xianxia_core_rule_seed_entries_cover_milestone_one_references():
     entries = build_xianxia_systems_seed_entries()
     entry_map = {entry["slug"]: entry for entry in entries}
@@ -290,6 +311,13 @@ def test_xianxia_core_rule_seed_entries_cover_milestone_one_references():
     assert all(entry["body"]["sections"] for entry in entries)
     assert entry_map["efforts-and-damage"]["metadata"]["rule_key"] == "efforts_and_damage"
     assert "magic effort" in entry_map["efforts-and-damage"]["search_text"]
+    assert entry_map["efforts-and-damage"]["metadata"]["effort_labels"]["magic"] == "Magic Effort"
+    assert entry_map["efforts-and-damage"]["body"]["effort_labels"]["magic"] == "Magic Effort"
+    assert entry_map["efforts-and-damage"]["metadata"]["xianxia_efforts"][3]["key"] == "magic"
+    assert (
+        entry_map["efforts-and-damage"]["metadata"]["xianxia_efforts"][3]["canonical_label"]
+        == "Magic Effort"
+    )
     assert entry_map["dying-and-unconsciousness"]["metadata"]["support_state"] == "reference_only"
     assert entry_map["minions"]["metadata"]["support_state"] == "reference_only"
 

@@ -45,6 +45,14 @@ XIANXIA_ENTRY_FACET_KEYS = (
 )
 XIANXIA_REFERENCE_ONLY_ENTRY_FACET_KEYS = frozenset({"condition", "status"})
 XIANXIA_FACET_SUPPORT_STATES = frozenset({"reference_only", "modeled"})
+XIANXIA_EFFORT_KEYS = (
+    "basic",
+    "weapon",
+    "guns_explosive",
+    "magic",
+    "ultimate",
+)
+XIANXIA_MAGIC_EFFORT_CANONICAL_LABEL = "Magic Effort"
 
 
 @lru_cache(maxsize=1)
@@ -58,6 +66,7 @@ def _load_xianxia_systems_seed_payload() -> dict[str, Any]:
     version = str(payload.get("version") or "").strip()
     storage_strategy = str(payload.get("storage_strategy") or "").strip()
     raw_entry_facets = payload.get("entry_facets")
+    raw_efforts = payload.get("efforts")
     raw_entries = payload.get("entries")
 
     if source_id != XIANXIA_HOMEBREW_SOURCE_ID:
@@ -73,6 +82,7 @@ def _load_xianxia_systems_seed_payload() -> dict[str, Any]:
             "Xianxia Systems seed payload must use the curated_seed_data storage strategy."
         )
     payload["entry_facets"] = _normalize_facet_definitions(raw_entry_facets)
+    payload["efforts"] = _normalize_effort_definitions(raw_efforts)
     if not isinstance(raw_entries, list):
         raise ValueError("Xianxia Systems seed payload must include an entries list.")
 
@@ -86,6 +96,16 @@ def build_xianxia_entry_facet_definitions() -> list[dict[str, Any]]:
 def get_xianxia_entry_facet_definition(facet_key: str) -> dict[str, Any] | None:
     normalized_key = _normalize_identifier(facet_key)
     definition = _XIANXIA_ENTRY_FACET_LOOKUP.get(normalized_key)
+    return dict(definition) if definition is not None else None
+
+
+def build_xianxia_effort_definitions() -> list[dict[str, Any]]:
+    return [dict(effort) for effort in _XIANXIA_EFFORT_DEFINITIONS]
+
+
+def get_xianxia_effort_definition(effort_key: str) -> dict[str, Any] | None:
+    normalized_key = _normalize_identifier(effort_key)
+    definition = _XIANXIA_EFFORT_LOOKUP.get(normalized_key)
     return dict(definition) if definition is not None else None
 
 
@@ -143,6 +163,13 @@ def _build_seed_entry(raw_spec: dict[str, Any], *, index: int, source_path: str)
         metadata["xianxia_support_state"] = "reference_only"
         body["support_state"] = "reference_only"
         body["xianxia_support_state"] = "reference_only"
+    if "effort" in facets:
+        effort_definitions = build_xianxia_effort_definitions()
+        effort_labels = _build_effort_label_map(effort_definitions)
+        metadata.setdefault("effort_labels", effort_labels)
+        metadata.setdefault("xianxia_efforts", effort_definitions)
+        body.setdefault("effort_labels", effort_labels)
+        body.setdefault("xianxia_efforts", effort_definitions)
     metadata.update(
         {
             "aliases": aliases,
@@ -270,6 +297,68 @@ def _normalize_facet_definitions(raw_facets: object) -> list[dict[str, Any]]:
     return definitions
 
 
+def _normalize_effort_definitions(raw_efforts: object) -> list[dict[str, Any]]:
+    if not isinstance(raw_efforts, list):
+        raise ValueError("Xianxia Systems seed payload must include an efforts list.")
+
+    definitions: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, raw_effort in enumerate(raw_efforts, start=1):
+        if not isinstance(raw_effort, dict):
+            raise ValueError(f"Xianxia effort definition {index} must be an object.")
+        key = _normalize_identifier(raw_effort.get("key"))
+        if not key:
+            raise ValueError(f"Xianxia effort definition {index} is missing key.")
+        if key in seen:
+            raise ValueError(f"Xianxia effort definition {key!r} is duplicated.")
+        seen.add(key)
+
+        label = str(raw_effort.get("label") or "").strip()
+        canonical_label = str(raw_effort.get("canonical_label") or "").strip()
+        die = str(raw_effort.get("die") or "").strip()
+        damage_bonus_key = _normalize_identifier(raw_effort.get("damage_bonus_key") or key)
+        damage_expression = str(raw_effort.get("damage_expression") or "").strip()
+        if not label:
+            raise ValueError(f"Xianxia effort definition {key!r} is missing label.")
+        if not canonical_label:
+            raise ValueError(f"Xianxia effort definition {key!r} is missing canonical_label.")
+        if not die:
+            raise ValueError(f"Xianxia effort definition {key!r} is missing die.")
+        if not damage_bonus_key:
+            raise ValueError(f"Xianxia effort definition {key!r} is missing damage_bonus_key.")
+        if not damage_expression:
+            raise ValueError(f"Xianxia effort definition {key!r} is missing damage_expression.")
+        if not canonical_label.endswith(" Effort"):
+            raise ValueError(
+                f"Xianxia effort definition {key!r} canonical_label must end with ' Effort'."
+            )
+        if key == "magic" and canonical_label != XIANXIA_MAGIC_EFFORT_CANONICAL_LABEL:
+            raise ValueError(
+                f"Xianxia magic effort canonical_label must be "
+                f"{XIANXIA_MAGIC_EFFORT_CANONICAL_LABEL!r}."
+            )
+
+        definitions.append(
+            {
+                "key": key,
+                "label": label,
+                "canonical_label": canonical_label,
+                "die": die,
+                "damage_bonus_key": damage_bonus_key,
+                "damage_expression": damage_expression,
+            }
+        )
+
+    actual_keys = tuple(definition["key"] for definition in definitions)
+    if actual_keys != XIANXIA_EFFORT_KEYS:
+        raise ValueError(
+            "Xianxia effort definitions do not match the Milestone 1 effort set: "
+            + ", ".join(actual_keys)
+            + "."
+        )
+    return definitions
+
+
 def _normalize_entry_facets(raw_facets: object, *, entry_type: str) -> list[str]:
     facets = [_normalize_identifier(value) for value in _normalize_string_list(raw_facets)]
     facets = [facet for facet in facets if facet]
@@ -300,9 +389,22 @@ def _reject_modeled_support_state(value: object, *, facets: list[str]) -> None:
     )
 
 
+def _build_effort_label_map(effort_definitions: list[dict[str, Any]]) -> dict[str, str]:
+    return {
+        str(effort["key"]): str(effort["canonical_label"])
+        for effort in effort_definitions
+    }
+
+
 _XIANXIA_SYSTEMS_SEED_PAYLOAD = _load_xianxia_systems_seed_payload()
 XIANXIA_SYSTEMS_SEED_SOURCE_TITLE = str(_XIANXIA_SYSTEMS_SEED_PAYLOAD["source_title"])
 XIANXIA_SYSTEMS_SEED_VERSION = str(_XIANXIA_SYSTEMS_SEED_PAYLOAD["version"])
+_XIANXIA_EFFORT_DEFINITIONS = tuple(
+    dict(effort) for effort in _XIANXIA_SYSTEMS_SEED_PAYLOAD["efforts"]
+)
+_XIANXIA_EFFORT_LOOKUP = {
+    str(effort["key"]): dict(effort) for effort in _XIANXIA_EFFORT_DEFINITIONS
+}
 _XIANXIA_ENTRY_FACET_DEFINITIONS = tuple(
     dict(facet) for facet in _XIANXIA_SYSTEMS_SEED_PAYLOAD["entry_facets"]
 )

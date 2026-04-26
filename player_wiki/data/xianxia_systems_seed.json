@@ -1,5 +1,5 @@
 {
-  "version": "2026-04-26.1",
+  "version": "2026-04-26.2",
   "source_id": "XIANXIA-HOMEBREW",
   "source_title": "Xianxia Homebrew",
   "storage_strategy": "curated_seed_data",
@@ -201,6 +201,48 @@
       "group": "approval_reference",
       "default_entry_type": "rule",
       "summary": "Reference entries for explicit GM approval gates such as Karmic Constraints, Ascendant Arts, and Dao Immolating use."
+    }
+  ],
+  "efforts": [
+    {
+      "key": "basic",
+      "label": "Basic",
+      "canonical_label": "Basic Effort",
+      "die": "1d4",
+      "damage_bonus_key": "basic",
+      "damage_expression": "1d4 + Basic"
+    },
+    {
+      "key": "weapon",
+      "label": "Weapon",
+      "canonical_label": "Weapon Effort",
+      "die": "1d6",
+      "damage_bonus_key": "weapon",
+      "damage_expression": "1d6 + Weapon"
+    },
+    {
+      "key": "guns_explosive",
+      "label": "Guns/Explosive",
+      "canonical_label": "Guns/Explosive Effort",
+      "die": "1d8",
+      "damage_bonus_key": "guns_explosive",
+      "damage_expression": "1d8 + Guns/Explosive"
+    },
+    {
+      "key": "magic",
+      "label": "Magic",
+      "canonical_label": "Magic Effort",
+      "die": "1d10",
+      "damage_bonus_key": "magic",
+      "damage_expression": "1d10 + Magic"
+    },
+    {
+      "key": "ultimate",
+      "label": "Ultimate",
+      "canonical_label": "Ultimate Effort",
+      "die": "1d12",
+      "damage_bonus_key": "ultimate",
+      "damage_expression": "1d12 + Ultimate"
     }
   ],
   "entries": [
