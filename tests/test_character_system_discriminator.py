@@ -19,6 +19,7 @@ from player_wiki.xianxia_character_model import (
     XianxiaDefinitionValidationError,
     derive_xianxia_actions_per_turn,
     derive_xianxia_defense,
+    derive_xianxia_effort_damage_strings,
     validate_xianxia_definition_payload,
     xianxia_definition_validation_errors,
 )
@@ -237,6 +238,16 @@ def test_xianxia_action_count_is_derived_from_realm(realm: str, expected_actions
     assert derive_xianxia_actions_per_turn(realm) == expected_actions
     assert xianxia["realm"] == realm
     assert xianxia["actions_per_turn"] == expected_actions
+
+
+def test_xianxia_effort_damage_strings_use_canonical_dice_and_effort_labels():
+    assert derive_xianxia_effort_damage_strings() == {
+        "basic": "1d4 + Basic",
+        "weapon": "1d6 + Weapon",
+        "guns_explosive": "1d8 + Guns/Explosive",
+        "magic": "1d10 + Magic",
+        "ultimate": "1d12 + Ultimate",
+    }
 
 
 def test_xianxia_definition_validation_helpers_accept_stable_payloads():

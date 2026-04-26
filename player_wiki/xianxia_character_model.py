@@ -25,6 +25,13 @@ XIANXIA_EFFORT_LABELS = {
     "magic": "Magic",
     "ultimate": "Ultimate",
 }
+XIANXIA_EFFORT_DAMAGE_DICE = {
+    "basic": "1d4",
+    "weapon": "1d6",
+    "guns_explosive": "1d8",
+    "magic": "1d10",
+    "ultimate": "1d12",
+}
 XIANXIA_ENERGY_KEYS = ("jing", "qi", "shen")
 XIANXIA_DEFENSE_BASE = 10
 
@@ -252,6 +259,15 @@ def derive_xianxia_actions_per_turn(realm: Any) -> int:
         default="Mortal",
     )
     return _REALM_ACTION_DEFAULTS.get(normalized_realm, _REALM_ACTION_DEFAULTS["Mortal"])
+
+
+def derive_xianxia_effort_damage_strings() -> dict[str, str]:
+    """Return Xianxia effort damage expressions keyed by effort identifier."""
+
+    return {
+        key: f"{XIANXIA_EFFORT_DAMAGE_DICE[key]} + {XIANXIA_EFFORT_LABELS[key]}"
+        for key in XIANXIA_EFFORT_KEYS
+    }
 
 
 def validate_xianxia_definition_payload(payload: dict[str, Any]) -> dict[str, Any]:

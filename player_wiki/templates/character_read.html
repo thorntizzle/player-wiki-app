@@ -209,6 +209,23 @@
         </section>
       {% endif %}
 
+      {% if show_quick_sections and character.xianxia_effort_damage %}
+        <section class="read-section" id="xianxia-effort-damage">
+          <div class="section-heading">
+            <h2>Effort damage</h2>
+          </div>
+          <div class="glance-grid">
+            {% for effort in character.xianxia_effort_damage.entries %}
+              <div class="glance-card">
+                <span class="meta">{{ effort.label }}</span>
+                <strong>{{ effort.damage }}</strong>
+                <span class="meta">Score {{ effort.score }}</span>
+              </div>
+            {% endfor %}
+          </div>
+        </section>
+      {% endif %}
+
       {% if show_quick_sections and character.defensive_rules %}
         <section class="read-section">
           <div class="section-heading">

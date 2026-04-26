@@ -37,9 +37,12 @@ from .models import Campaign
 from .repository import build_alias_index, normalize_lookup, render_obsidian_links
 from .system_policy import is_xianxia_system
 from .xianxia_character_model import (
+    XIANXIA_EFFORT_KEYS,
+    XIANXIA_EFFORT_LABELS,
     XIANXIA_DEFENSE_BASE,
     derive_xianxia_actions_per_turn,
     derive_xianxia_defense,
+    derive_xianxia_effort_damage_strings,
 )
 
 ABILITY_ORDER = (
@@ -184,6 +187,11 @@ def present_character_detail(
     )
     xianxia_actions = (
         present_xianxia_action_count_derivation(definition.xianxia)
+        if is_xianxia_character
+        else None
+    )
+    xianxia_effort_damage = (
+        present_xianxia_effort_damage_derivation(definition.xianxia)
         if is_xianxia_character
         else None
     )
@@ -787,6 +795,7 @@ def present_character_detail(
         "overview_stats": overview_stats,
         "xianxia_defense": xianxia_defense,
         "xianxia_actions": xianxia_actions,
+        "xianxia_effort_damage": xianxia_effort_damage,
         "attack_reminders": attack_reminders,
         "defensive_rules": defensive_rules,
         "death_save_summary": death_save_summary,
@@ -1128,6 +1137,22 @@ def present_xianxia_action_count_derivation(xianxia_payload: dict[str, Any]) -> 
         "actions_per_turn": actions_per_turn,
         "formula": f"{realm} -> {actions_per_turn} actions per turn",
     }
+
+
+def present_xianxia_effort_damage_derivation(xianxia_payload: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(xianxia_payload or {})
+    efforts = dict(payload.get("efforts") or {})
+    damage_strings = derive_xianxia_effort_damage_strings()
+    entries = [
+        {
+            "key": key,
+            "label": XIANXIA_EFFORT_LABELS[key],
+            "score": _coerce_int(efforts.get(key), default=0),
+            "damage": damage_strings[key],
+        }
+        for key in XIANXIA_EFFORT_KEYS
+    ]
+    return {"entries": entries}
 
 
 def build_reference_sections(

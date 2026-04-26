@@ -122,6 +122,13 @@ def test_xianxia_quick_reference_presents_derived_defense(
     assert "Constitution" in html
     assert "Defense = 10 + 2 + 3" in html
     assert "<strong>15</strong>" in html
+    assert "Effort damage" in html
+    assert "1d4 + Basic" in html
+    assert "1d6 + Weapon" in html
+    assert "1d8 + Guns/Explosive" in html
+    assert "1d10 + Magic" in html
+    assert "1d12 + Ultimate" in html
+    assert "Score 3" in html
     assert "Armor Class" not in html
 
 
