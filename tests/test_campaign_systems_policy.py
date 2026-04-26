@@ -17,10 +17,13 @@ from player_wiki.campaign_visibility import VISIBILITY_DM, VISIBILITY_PLAYERS, V
 from player_wiki.system_policy import DND_5E_SYSTEM_CODE, XIANXIA_SYSTEM_CODE
 from player_wiki.systems_service import XIANXIA_HOMEBREW_SOURCE_ID
 from player_wiki.xianxia_systems_seed import (
+    XIANXIA_ENTRY_FACET_KEYS,
     XIANXIA_SYSTEMS_SEED_DATA_RELATIVE_PATH,
     XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY,
     XIANXIA_SYSTEMS_SEED_VERSION,
+    build_xianxia_entry_facet_definitions,
     build_xianxia_systems_seed_entries,
+    get_xianxia_entry_facet_definition,
 )
 from player_wiki.systems_importer import Dnd5eSystemsImporter
 from player_wiki.systems_models import SystemsEntryRecord
@@ -168,6 +171,62 @@ def test_xianxia_builtin_systems_library_identity_seeds_initial_homebrew_source(
         assert source_catalog_entry["seed_storage_strategy"] == XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY
         assert source_catalog_entry["seed_data_path"] == XIANXIA_SYSTEMS_SEED_DATA_RELATIVE_PATH
         assert source_catalog_entry["seed_version"] == XIANXIA_SYSTEMS_SEED_VERSION
+
+
+def test_xianxia_entry_facet_definitions_cover_milestone_one_concepts():
+    expected_facets = (
+        "rule",
+        "attribute",
+        "effort",
+        "energy",
+        "yin_yang",
+        "dao",
+        "realm",
+        "honor_rank",
+        "skill_rule",
+        "equipment",
+        "armor",
+        "martial_art",
+        "martial_art_rank",
+        "technique",
+        "maneuver",
+        "stance",
+        "aura",
+        "generic_technique",
+        "range_rule",
+        "timing_rule",
+        "critical_hit_rule",
+        "sneak_attack_rule",
+        "dying_rule",
+        "minion_tag",
+        "companion_rule",
+        "gm_approval_rule",
+    )
+
+    definitions = build_xianxia_entry_facet_definitions()
+    keys = tuple(definition["key"] for definition in definitions)
+
+    assert XIANXIA_ENTRY_FACET_KEYS == expected_facets
+    assert keys == expected_facets
+    assert "condition" not in keys
+    assert "status" not in keys
+    assert all(definition["label"] for definition in definitions)
+    assert all(definition["group"] for definition in definitions)
+    assert all(definition["default_entry_type"] for definition in definitions)
+    assert all(definition["summary"] for definition in definitions)
+
+    facet_map = {definition["key"]: definition for definition in definitions}
+    assert facet_map["attribute"]["default_entry_type"] == "rule"
+    assert facet_map["equipment"]["default_entry_type"] == "equipment"
+    assert facet_map["armor"]["default_entry_type"] == "armor"
+    assert facet_map["martial_art"]["default_entry_type"] == "martial_art"
+    assert facet_map["generic_technique"]["default_entry_type"] == "generic_technique"
+    assert facet_map["dying_rule"]["default_entry_type"] == "rule"
+
+    martial_art_facet = get_xianxia_entry_facet_definition("martial-art")
+    assert martial_art_facet is not None
+    assert martial_art_facet["key"] == "martial_art"
+    assert martial_art_facet["label"] == "Martial Art"
 
 
 def test_xianxia_empty_curated_seed_manifest_does_not_delete_existing_shared_rows(app):

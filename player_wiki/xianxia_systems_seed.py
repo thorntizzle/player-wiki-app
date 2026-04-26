@@ -4,6 +4,7 @@ import json
 from functools import lru_cache
 from html import escape
 from pathlib import Path
+import re
 from typing import Any
 
 from .repository import slugify
@@ -12,6 +13,34 @@ XIANXIA_HOMEBREW_SOURCE_ID = "XIANXIA-HOMEBREW"
 XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY = "curated_seed_data"
 XIANXIA_SYSTEMS_SEED_DATA_RELATIVE_PATH = "player_wiki/data/xianxia_systems_seed.json"
 _XIANXIA_SYSTEMS_SEED_DATA_PATH = Path(__file__).resolve().parent / "data" / "xianxia_systems_seed.json"
+XIANXIA_ENTRY_FACET_KEYS = (
+    "rule",
+    "attribute",
+    "effort",
+    "energy",
+    "yin_yang",
+    "dao",
+    "realm",
+    "honor_rank",
+    "skill_rule",
+    "equipment",
+    "armor",
+    "martial_art",
+    "martial_art_rank",
+    "technique",
+    "maneuver",
+    "stance",
+    "aura",
+    "generic_technique",
+    "range_rule",
+    "timing_rule",
+    "critical_hit_rule",
+    "sneak_attack_rule",
+    "dying_rule",
+    "minion_tag",
+    "companion_rule",
+    "gm_approval_rule",
+)
 
 
 @lru_cache(maxsize=1)
@@ -24,6 +53,7 @@ def _load_xianxia_systems_seed_payload() -> dict[str, Any]:
     source_title = str(payload.get("source_title") or "").strip()
     version = str(payload.get("version") or "").strip()
     storage_strategy = str(payload.get("storage_strategy") or "").strip()
+    raw_entry_facets = payload.get("entry_facets")
     raw_entries = payload.get("entries")
 
     if source_id != XIANXIA_HOMEBREW_SOURCE_ID:
@@ -38,15 +68,21 @@ def _load_xianxia_systems_seed_payload() -> dict[str, Any]:
         raise ValueError(
             "Xianxia Systems seed payload must use the curated_seed_data storage strategy."
         )
+    payload["entry_facets"] = _normalize_facet_definitions(raw_entry_facets)
     if not isinstance(raw_entries, list):
         raise ValueError("Xianxia Systems seed payload must include an entries list.")
 
     return payload
 
 
-_XIANXIA_SYSTEMS_SEED_PAYLOAD = _load_xianxia_systems_seed_payload()
-XIANXIA_SYSTEMS_SEED_SOURCE_TITLE = str(_XIANXIA_SYSTEMS_SEED_PAYLOAD["source_title"])
-XIANXIA_SYSTEMS_SEED_VERSION = str(_XIANXIA_SYSTEMS_SEED_PAYLOAD["version"])
+def build_xianxia_entry_facet_definitions() -> list[dict[str, Any]]:
+    return [dict(facet) for facet in _XIANXIA_ENTRY_FACET_DEFINITIONS]
+
+
+def get_xianxia_entry_facet_definition(facet_key: str) -> dict[str, Any] | None:
+    normalized_key = _normalize_identifier(facet_key)
+    definition = _XIANXIA_ENTRY_FACET_LOOKUP.get(normalized_key)
+    return dict(definition) if definition is not None else None
 
 
 def build_xianxia_systems_seed_entries() -> list[dict[str, Any]]:
@@ -75,7 +111,7 @@ def _build_seed_entry(raw_spec: dict[str, Any], *, index: int, source_path: str)
         or f"xianxia|{entry_type}|{XIANXIA_HOMEBREW_SOURCE_ID.lower()}|{slug}"
     )
     aliases = _normalize_string_list(raw_spec.get("aliases"))
-    facets = _normalize_string_list(raw_spec.get("facets"))
+    facets = _normalize_entry_facets(raw_spec.get("facets"), entry_type=entry_type)
     summary = str(raw_spec.get("summary") or "").strip()
     sections = _normalize_sections(raw_spec.get("sections"))
     raw_metadata = raw_spec.get("metadata")
@@ -85,6 +121,7 @@ def _build_seed_entry(raw_spec: dict[str, Any], *, index: int, source_path: str)
         {
             "aliases": aliases,
             "facets": facets,
+            "xianxia_entry_facets": facets,
             "seed_version": XIANXIA_SYSTEMS_SEED_VERSION,
             "seed_storage_strategy": XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY,
             "source_kind": "app_reference",
@@ -101,6 +138,7 @@ def _build_seed_entry(raw_spec: dict[str, Any], *, index: int, source_path: str)
     body.setdefault("summary", summary)
     body.setdefault("aliases", aliases)
     body.setdefault("facets", facets)
+    body.setdefault("xianxia_entry_facets", facets)
     body.setdefault("sections", sections)
     search_parts = [
         title,
@@ -136,6 +174,94 @@ def _normalize_string_list(raw_values: object) -> list[str]:
     if not isinstance(raw_values, list):
         return []
     return [str(value).strip() for value in raw_values if str(value).strip()]
+
+
+def _normalize_identifier(value: object) -> str:
+    normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    normalized = re.sub(r"[^a-z0-9_]+", "_", normalized)
+    normalized = re.sub(r"_+", "_", normalized)
+    return normalized.strip("_")
+
+
+def _normalize_facet_definitions(raw_facets: object) -> list[dict[str, Any]]:
+    if not isinstance(raw_facets, list):
+        raise ValueError("Xianxia Systems seed payload must include an entry_facets list.")
+
+    definitions: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, raw_facet in enumerate(raw_facets, start=1):
+        if not isinstance(raw_facet, dict):
+            raise ValueError(f"Xianxia entry facet {index} must be an object.")
+        key = _normalize_identifier(raw_facet.get("key"))
+        if not key:
+            raise ValueError(f"Xianxia entry facet {index} is missing key.")
+        if key in seen:
+            raise ValueError(f"Xianxia entry facet {key!r} is duplicated.")
+        seen.add(key)
+        label = str(raw_facet.get("label") or "").strip()
+        group = _normalize_identifier(raw_facet.get("group"))
+        default_entry_type = _normalize_identifier(raw_facet.get("default_entry_type"))
+        summary = str(raw_facet.get("summary") or "").strip()
+        if not label:
+            raise ValueError(f"Xianxia entry facet {key!r} is missing label.")
+        if not group:
+            raise ValueError(f"Xianxia entry facet {key!r} is missing group.")
+        if not default_entry_type:
+            raise ValueError(f"Xianxia entry facet {key!r} is missing default_entry_type.")
+        if not summary:
+            raise ValueError(f"Xianxia entry facet {key!r} is missing summary.")
+        definitions.append(
+            {
+                "key": key,
+                "label": label,
+                "group": group,
+                "default_entry_type": default_entry_type,
+                "summary": summary,
+            }
+        )
+
+    expected = set(XIANXIA_ENTRY_FACET_KEYS)
+    actual = {definition["key"] for definition in definitions}
+    missing = sorted(expected - actual)
+    unexpected = sorted(actual - expected)
+    if missing or unexpected:
+        details = []
+        if missing:
+            details.append("missing " + ", ".join(missing))
+        if unexpected:
+            details.append("unexpected " + ", ".join(unexpected))
+        raise ValueError("Xianxia entry facets do not match the Milestone 1 facet set: " + "; ".join(details) + ".")
+    return definitions
+
+
+def _normalize_entry_facets(raw_facets: object, *, entry_type: str) -> list[str]:
+    facets = [_normalize_identifier(value) for value in _normalize_string_list(raw_facets)]
+    facets = [facet for facet in facets if facet]
+    if not facets and entry_type in _XIANXIA_ENTRY_FACET_LOOKUP:
+        facets = [entry_type]
+    if not facets:
+        raise ValueError("Xianxia Systems seed entries must include at least one defined facet.")
+
+    unknown = sorted({facet for facet in facets if facet not in _XIANXIA_ENTRY_FACET_LOOKUP})
+    if unknown:
+        raise ValueError("Xianxia Systems seed entry uses unknown facets: " + ", ".join(unknown) + ".")
+
+    normalized: list[str] = []
+    for facet in facets:
+        if facet not in normalized:
+            normalized.append(facet)
+    return normalized
+
+
+_XIANXIA_SYSTEMS_SEED_PAYLOAD = _load_xianxia_systems_seed_payload()
+XIANXIA_SYSTEMS_SEED_SOURCE_TITLE = str(_XIANXIA_SYSTEMS_SEED_PAYLOAD["source_title"])
+XIANXIA_SYSTEMS_SEED_VERSION = str(_XIANXIA_SYSTEMS_SEED_PAYLOAD["version"])
+_XIANXIA_ENTRY_FACET_DEFINITIONS = tuple(
+    dict(facet) for facet in _XIANXIA_SYSTEMS_SEED_PAYLOAD["entry_facets"]
+)
+_XIANXIA_ENTRY_FACET_LOOKUP = {
+    str(facet["key"]): dict(facet) for facet in _XIANXIA_ENTRY_FACET_DEFINITIONS
+}
 
 
 def _normalize_sections(raw_sections: object) -> list[dict[str, Any]]:

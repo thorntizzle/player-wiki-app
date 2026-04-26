@@ -1,7 +1,191 @@
 {
-  "version": "2026-04-25.0",
+  "version": "2026-04-25.1",
   "source_id": "XIANXIA-HOMEBREW",
   "source_title": "Xianxia Homebrew",
   "storage_strategy": "curated_seed_data",
+  "entry_facets": [
+    {
+      "key": "rule",
+      "label": "Rule",
+      "group": "core_rule",
+      "default_entry_type": "rule",
+      "summary": "General Xianxia rule reference entries that do not need a narrower facet."
+    },
+    {
+      "key": "attribute",
+      "label": "Attribute",
+      "group": "character_model",
+      "default_entry_type": "rule",
+      "summary": "Rules and references for the six Attributes used by Xianxia checks and character creation."
+    },
+    {
+      "key": "effort",
+      "label": "Effort",
+      "group": "character_model",
+      "default_entry_type": "rule",
+      "summary": "Rules and references for Basic, Weapon, Guns/Explosive, Magic, and Ultimate Effort values."
+    },
+    {
+      "key": "energy",
+      "label": "Energy",
+      "group": "character_model",
+      "default_entry_type": "rule",
+      "summary": "Rules and references for Jing, Qi, and Shen maximums, current pools, and spend hooks."
+    },
+    {
+      "key": "yin_yang",
+      "label": "Yin/Yang",
+      "group": "character_model",
+      "default_entry_type": "rule",
+      "summary": "Rules and references for Yin and Yang pools and their GM-clarified action support."
+    },
+    {
+      "key": "dao",
+      "label": "Dao",
+      "group": "character_model",
+      "default_entry_type": "rule",
+      "summary": "Rules and references for Dao gain, cap, persistence, and spend reminders."
+    },
+    {
+      "key": "realm",
+      "label": "Realm",
+      "group": "character_model",
+      "default_entry_type": "rule",
+      "summary": "Rules and references for Mortal, Immortal, and Divine realm state and action counts."
+    },
+    {
+      "key": "honor_rank",
+      "label": "Honor Rank",
+      "group": "character_model",
+      "default_entry_type": "rule",
+      "summary": "Rules and references for Honor ranks and social interaction directionality."
+    },
+    {
+      "key": "skill_rule",
+      "label": "Skill Rule",
+      "group": "character_model",
+      "default_entry_type": "rule",
+      "summary": "Rules and references for trained freeform skills and their non-combat boundaries."
+    },
+    {
+      "key": "equipment",
+      "label": "Equipment",
+      "group": "catalog",
+      "default_entry_type": "equipment",
+      "summary": "Entries for weapons, tools, and other Xianxia equipment that should stay outside DND-5E item assumptions."
+    },
+    {
+      "key": "armor",
+      "label": "Armor",
+      "group": "catalog",
+      "default_entry_type": "armor",
+      "summary": "Reference entries for armor as Defense-bearing gear while detailed armor quality tiers remain deferred."
+    },
+    {
+      "key": "martial_art",
+      "label": "Martial Art",
+      "group": "martial_art",
+      "default_entry_type": "martial_art",
+      "summary": "Parent entries for shared Xianxia Martial Arts, including seeded and GM-created arts."
+    },
+    {
+      "key": "martial_art_rank",
+      "label": "Martial Art Rank",
+      "group": "martial_art",
+      "default_entry_type": "martial_art_rank",
+      "summary": "Structured rank entries or embedded rank records for Initiate, Novice, Apprentice, Master, and Legendary progress."
+    },
+    {
+      "key": "technique",
+      "label": "Technique",
+      "group": "martial_art",
+      "default_entry_type": "technique",
+      "summary": "Martial Art ability entries or rank-granted ability records tagged as Techniques."
+    },
+    {
+      "key": "maneuver",
+      "label": "Maneuver",
+      "group": "martial_art",
+      "default_entry_type": "maneuver",
+      "summary": "Martial Art ability entries or rank-granted ability records tagged as Maneuvers."
+    },
+    {
+      "key": "stance",
+      "label": "Stance",
+      "group": "martial_art",
+      "default_entry_type": "stance",
+      "summary": "Entries or ability records for one-active-Stance rules and Stance-granting Martial Art abilities."
+    },
+    {
+      "key": "aura",
+      "label": "Aura",
+      "group": "martial_art",
+      "default_entry_type": "aura",
+      "summary": "Entries or ability records for one-active-Aura rules and Aura-granting Martial Art abilities."
+    },
+    {
+      "key": "generic_technique",
+      "label": "Generic Technique",
+      "group": "catalog",
+      "default_entry_type": "generic_technique",
+      "summary": "Standalone purchasable Generic Techniques and Maneuvers learned with Insight after character creation."
+    },
+    {
+      "key": "range_rule",
+      "label": "Range Rule",
+      "group": "combat_reference",
+      "default_entry_type": "rule",
+      "summary": "Reference entries for Touch, Close, Near, Far, Space, and feet-based area dimensions."
+    },
+    {
+      "key": "timing_rule",
+      "label": "Timing Rule",
+      "group": "combat_reference",
+      "default_entry_type": "rule",
+      "summary": "Reference entries for Turn, Round, Day, initiative order, and once-per-combat timing."
+    },
+    {
+      "key": "critical_hit_rule",
+      "label": "Critical Hit Rule",
+      "group": "combat_reference",
+      "default_entry_type": "rule",
+      "summary": "Reference entries for Critical Hit triggers and Ultimate Effort damage reminders."
+    },
+    {
+      "key": "sneak_attack_rule",
+      "label": "Sneak Attack Rule",
+      "group": "combat_reference",
+      "default_entry_type": "rule",
+      "summary": "Reference entries for Sneak Attack as a special Critical Hit enabled by explicit circumstances."
+    },
+    {
+      "key": "dying_rule",
+      "label": "Dying Rule",
+      "group": "combat_reference",
+      "default_entry_type": "rule",
+      "summary": "Reference entries for Dying state rules without implementing Dying Rounds tracking in Milestone 1."
+    },
+    {
+      "key": "minion_tag",
+      "label": "Minion Tag",
+      "group": "combat_reference",
+      "default_entry_type": "rule",
+      "summary": "Reference entries for Minion-tagged NPC concepts without encounter seeding or combat automation."
+    },
+    {
+      "key": "companion_rule",
+      "label": "Companion Rule",
+      "group": "combat_reference",
+      "default_entry_type": "rule",
+      "summary": "Reference entries for puppet, phantom, animal, and similar companion derivation rules without richer companion automation."
+    },
+    {
+      "key": "gm_approval_rule",
+      "label": "GM Approval Rule",
+      "group": "approval_reference",
+      "default_entry_type": "rule",
+      "summary": "Reference entries for explicit GM approval gates such as Karmic Constraints, Ascendant Arts, and Dao Immolating use."
+    }
+  ],
   "entries": []
 }
