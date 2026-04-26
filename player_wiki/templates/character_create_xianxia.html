@@ -72,6 +72,25 @@
             </div>
           </section>
 
+          <section class="builder-section">
+            <h3>Efforts</h3>
+            <div class="builder-field-grid">
+              {% for effort in builder.effort_fields %}
+                <label class="field">
+                  <span>{{ effort.label }}</span>
+                  <input
+                    type="number"
+                    name="{{ effort.input_name }}"
+                    value="{{ effort.value }}"
+                    min="0"
+                    step="1"
+                    required
+                  >
+                </label>
+              {% endfor %}
+            </div>
+          </section>
+
           <div class="builder-actions">
             <button type="submit">Create character</button>
           </div>

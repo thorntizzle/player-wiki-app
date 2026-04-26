@@ -502,6 +502,15 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
             "attribute_cha": "1",
         }
 
+    def _effort_data() -> dict[str, str]:
+        return {
+            "effort_basic": "1",
+            "effort_weapon": "1",
+            "effort_guns_explosive": "1",
+            "effort_magic": "1",
+            "effort_ultimate": "1",
+        }
+
     def _mutate(payload: dict) -> None:
         payload["system"] = "xianxia"
         payload["systems_library"] = "xianxia"
@@ -532,6 +541,8 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
         "Charisma",
     ):
         assert attribute_label in create_html
+    for effort_label in ("Basic", "Weapon", "Guns/Explosive", "Magic", "Ultimate"):
+        assert effort_label in create_html
     assert "Native Level 1 Builder" not in create_html
     assert "Spell Preview" not in create_html
     assert XIANXIA_NATIVE_CHARACTER_CREATE_UNSUPPORTED_MESSAGE not in create_html
@@ -559,7 +570,12 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     invalid_attributes["attribute_dex"] = "quick"
     invalid_attribute_response = client.post(
         "/campaigns/linden-pass/characters/new",
-        data={"name": "Attribute Typo", "character_slug": "", **invalid_attributes},
+        data={
+            "name": "Attribute Typo",
+            "character_slug": "",
+            **invalid_attributes,
+            **_effort_data(),
+        },
         follow_redirects=False,
     )
     assert invalid_attribute_response.status_code == 400
@@ -569,7 +585,12 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     over_budget_attributes["attribute_str"] = "2"
     over_budget_response = client.post(
         "/campaigns/linden-pass/characters/new",
-        data={"name": "Attribute Overbudget", "character_slug": "", **over_budget_attributes},
+        data={
+            "name": "Attribute Overbudget",
+            "character_slug": "",
+            **over_budget_attributes,
+            **_effort_data(),
+        },
         follow_redirects=False,
     )
     assert over_budget_response.status_code == 400
@@ -582,15 +603,65 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     over_cap_attributes["attribute_wis"] = "0"
     over_cap_response = client.post(
         "/campaigns/linden-pass/characters/new",
-        data={"name": "Attribute Overcap", "character_slug": "", **over_cap_attributes},
+        data={
+            "name": "Attribute Overcap",
+            "character_slug": "",
+            **over_cap_attributes,
+            **_effort_data(),
+        },
         follow_redirects=False,
     )
     assert over_cap_response.status_code == 400
     assert "Strength cannot exceed 3 at character creation." in over_cap_response.get_data(as_text=True)
 
+    missing_efforts = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={"name": "Effort Gap", "character_slug": "", **_attribute_data()},
+        follow_redirects=False,
+    )
+    assert missing_efforts.status_code == 400
+    assert "Missing Xianxia efforts: Basic, Weapon, Guns/Explosive, Magic, and Ultimate." in (
+        missing_efforts.get_data(as_text=True)
+    )
+
+    invalid_efforts = _effort_data()
+    invalid_efforts["effort_magic"] = "arcane"
+    invalid_effort_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            "name": "Effort Typo",
+            "character_slug": "",
+            **_attribute_data(),
+            **invalid_efforts,
+        },
+        follow_redirects=False,
+    )
+    assert invalid_effort_response.status_code == 400
+    assert "Magic must be a whole number." in invalid_effort_response.get_data(as_text=True)
+
+    negative_efforts = _effort_data()
+    negative_efforts["effort_weapon"] = "-1"
+    negative_effort_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            "name": "Effort Negative",
+            "character_slug": "",
+            **_attribute_data(),
+            **negative_efforts,
+        },
+        follow_redirects=False,
+    )
+    assert negative_effort_response.status_code == 400
+    assert "Weapon cannot be negative." in negative_effort_response.get_data(as_text=True)
+
     submit_response = client.post(
         "/campaigns/linden-pass/characters/new",
-        data={"name": "Lotus Wake", "character_slug": "", **_attribute_data()},
+        data={
+            "name": "Lotus Wake",
+            "character_slug": "",
+            **_attribute_data(),
+            **_effort_data(),
+        },
         follow_redirects=False,
     )
     assert submit_response.status_code == 302
@@ -610,6 +681,13 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
         "int": 1,
         "wis": 1,
         "cha": 1,
+    }
+    assert definition_payload["xianxia"]["efforts"] == {
+        "basic": 1,
+        "weapon": 1,
+        "guns_explosive": 1,
+        "magic": 1,
+        "ultimate": 1,
     }
     assert definition_payload["xianxia"]["durability"] == {
         "hp_max": 10,

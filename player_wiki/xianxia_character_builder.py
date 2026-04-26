@@ -11,6 +11,7 @@ from .xianxia_character_model import (
     XIANXIA_ATTRIBUTE_KEYS,
     XIANXIA_ATTRIBUTE_LABELS,
     XIANXIA_EFFORT_KEYS,
+    XIANXIA_EFFORT_LABELS,
     XIANXIA_ENERGY_KEYS,
     validate_xianxia_definition_payload,
 )
@@ -35,6 +36,15 @@ def build_xianxia_character_create_context(
         }
         for key in XIANXIA_ATTRIBUTE_KEYS
     ]
+    effort_fields = [
+        {
+            "key": key,
+            "label": XIANXIA_EFFORT_LABELS[key],
+            "input_name": _xianxia_effort_input_name(key),
+            "value": values["efforts"][key],
+        }
+        for key in XIANXIA_EFFORT_KEYS
+    ]
     return {
         "values": values,
         "defaults": {
@@ -53,7 +63,7 @@ def build_xianxia_character_create_context(
             "insight_spent": 0,
         },
         "attribute_fields": attribute_fields,
-        "effort_keys": list(XIANXIA_EFFORT_KEYS),
+        "effort_fields": effort_fields,
         "energy_keys": list(XIANXIA_ENERGY_KEYS),
     }
 
@@ -78,6 +88,7 @@ def build_xianxia_character_definition(
     if not character_slug:
         raise CharacterBuildError("Character slug is required.")
     attribute_scores = _validate_xianxia_create_attributes(form_values or {})
+    effort_scores = _validate_xianxia_create_efforts(form_values or {})
 
     created_at = isoformat(utcnow())
     definition = CharacterDefinition.from_dict(
@@ -121,6 +132,7 @@ def build_xianxia_character_definition(
             },
             "xianxia": {
                 "attributes": attribute_scores,
+                "efforts": effort_scores,
             },
         }
     )
@@ -146,6 +158,10 @@ def _normalize_xianxia_create_values(values: dict[str, Any]) -> dict[str, Any]:
         "attributes": {
             key: _normalize_xianxia_create_attribute_value(values, key)
             for key in XIANXIA_ATTRIBUTE_KEYS
+        },
+        "efforts": {
+            key: _normalize_xianxia_create_effort_value(values, key)
+            for key in XIANXIA_EFFORT_KEYS
         },
     }
 
@@ -212,6 +228,56 @@ def _validate_xianxia_create_attributes(values: dict[str, Any]) -> dict[str, int
     return {key: attribute_scores[key] for key in XIANXIA_ATTRIBUTE_KEYS}
 
 
+def _validate_xianxia_create_efforts(values: dict[str, Any]) -> dict[str, int]:
+    errors: list[str] = []
+    missing_labels: list[str] = []
+    effort_scores: dict[str, int] = {}
+    raw_efforts = values.get("efforts")
+    nested_efforts = raw_efforts if isinstance(raw_efforts, dict) else {}
+
+    unknown_keys = sorted({
+        *(
+            raw_key.removeprefix("effort_")
+            for raw_key in values
+            if raw_key.startswith("effort_")
+            and raw_key.removeprefix("effort_") not in XIANXIA_EFFORT_KEYS
+        ),
+        *(key for key in nested_efforts if key not in XIANXIA_EFFORT_KEYS),
+    })
+    if unknown_keys:
+        errors.append(f"Unsupported Xianxia efforts: {', '.join(unknown_keys)}.")
+
+    for key in XIANXIA_EFFORT_KEYS:
+        label = XIANXIA_EFFORT_LABELS[key]
+        input_name = _xianxia_effort_input_name(key)
+        if input_name in values:
+            raw_value = str(values.get(input_name) or "").strip()
+        elif key in nested_efforts:
+            raw_value = str(nested_efforts.get(key) or "").strip()
+        else:
+            missing_labels.append(label)
+            continue
+        if raw_value == "":
+            missing_labels.append(label)
+            continue
+        try:
+            effort_score = int(raw_value)
+        except ValueError:
+            errors.append(f"{label} must be a whole number.")
+            continue
+        if effort_score < 0:
+            errors.append(f"{label} cannot be negative.")
+            continue
+        effort_scores[key] = effort_score
+
+    if missing_labels:
+        errors.append(f"Missing Xianxia efforts: {_format_label_list(missing_labels)}.")
+    if errors:
+        raise CharacterBuildError(" ".join(errors))
+
+    return {key: effort_scores[key] for key in XIANXIA_EFFORT_KEYS}
+
+
 def _normalize_xianxia_create_attribute_value(values: dict[str, Any], key: str) -> str:
     raw_attributes = values.get("attributes")
     if isinstance(raw_attributes, dict) and key in raw_attributes:
@@ -221,8 +287,21 @@ def _normalize_xianxia_create_attribute_value(values: dict[str, Any], key: str) 
     return str(value if value is not None else "").strip()
 
 
+def _normalize_xianxia_create_effort_value(values: dict[str, Any], key: str) -> str:
+    raw_efforts = values.get("efforts")
+    if isinstance(raw_efforts, dict) and key in raw_efforts:
+        value = raw_efforts.get(key)
+    else:
+        value = values.get(_xianxia_effort_input_name(key), 0)
+    return str(value if value is not None else "").strip()
+
+
 def _xianxia_attribute_input_name(key: str) -> str:
     return f"attribute_{key}"
+
+
+def _xianxia_effort_input_name(key: str) -> str:
+    return f"effort_{key}"
 
 
 def _format_label_list(labels: list[str]) -> str:

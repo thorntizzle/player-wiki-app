@@ -18,6 +18,13 @@ XIANXIA_ATTRIBUTE_LABELS = {
     "cha": "Charisma",
 }
 XIANXIA_EFFORT_KEYS = ("basic", "weapon", "guns_explosive", "magic", "ultimate")
+XIANXIA_EFFORT_LABELS = {
+    "basic": "Basic",
+    "weapon": "Weapon",
+    "guns_explosive": "Guns/Explosive",
+    "magic": "Magic",
+    "ultimate": "Ultimate",
+}
 XIANXIA_ENERGY_KEYS = ("jing", "qi", "shen")
 
 XIANXIA_DEFINITION_FIELD_KEYS = (
