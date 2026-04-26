@@ -539,6 +539,159 @@ def test_xianxia_read_sheet_uses_system_specific_subpages(
     assert "Current owner" in controls_html
 
 
+def test_xianxia_read_sheet_renders_all_first_pass_subpages_and_systems_links(
+    client,
+    sign_in,
+    users,
+    app,
+    get_character,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            **_valid_xianxia_create_data("Rendering Link Crane"),
+            "manual_armor_bonus": "2",
+            "dao_current": "2",
+        },
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+
+    with app.app_context():
+        qi_blast = app.extensions["systems_service"].get_entry_by_slug_for_campaign(
+            "linden-pass",
+            "qi-blast",
+        )
+        assert qi_blast is not None
+
+    record = get_character("rendering-link-crane")
+    assert record is not None
+    payload = record.definition.to_dict()
+    payload["xianxia"]["generic_techniques"] = [
+        {
+            "name": "Qi Blast",
+            "systems_ref": _systems_ref(qi_blast),
+        }
+    ]
+    payload["xianxia"]["dao_immolating_techniques"]["prepared"] = [
+        {
+            "name": "Star-Severing Promise",
+            "status": "pending",
+            "notes": "Prepared for later GM approval.",
+        }
+    ]
+    _write_raw_xianxia_character_definition(app, "rendering-link-crane", payload)
+
+    record = get_character("rendering-link-crane")
+    assert record is not None
+    enriched_state = deepcopy(record.state_record.state)
+    enriched_state["notes"] = {
+        "player_notes_markdown": "Remember the jade token.",
+        "physical_description_markdown": "A crane-styled cultivator in river robes.",
+        "background_markdown": "Raised near the market docks.",
+        "session_notes": [],
+    }
+    enriched_state["inventory"] = [
+        {
+            "id": "jade-token",
+            "name": "Jade Token",
+            "quantity": 2,
+            "notes": "Sect marker.",
+        }
+    ]
+    _replace_character_state(app, record, enriched_state)
+
+    subpage_expectations = {
+        "quick": [
+            "At a glance",
+            "Check formula",
+            "/campaigns/linden-pass/systems/entries/honor",
+            "/campaigns/linden-pass/systems/entries/skills",
+            "/campaigns/linden-pass/systems/entries/ranges-and-distance",
+            "/campaigns/linden-pass/systems/entries/timing-and-initiative",
+            "/campaigns/linden-pass/systems/entries/critical-hits",
+            "/campaigns/linden-pass/systems/entries/sneak-attacks",
+            "/campaigns/linden-pass/systems/entries/minions",
+            "/campaigns/linden-pass/systems/entries/companion-derivation",
+            "/campaigns/linden-pass/systems/entries/stance-activation-rules",
+            "/campaigns/linden-pass/systems/entries/aura-activation-rules",
+        ],
+        "martial_arts": [
+            "Martial Arts",
+            "/campaigns/linden-pass/systems/entries/demons-fist",
+            "/campaigns/linden-pass/systems/entries/demons-fist#xianxia-demons-fist-initiate",
+            (
+                "/campaigns/linden-pass/systems/entries/demons-fist"
+                "#xianxia-demons-fist-initiate-qi-fist-technique"
+            ),
+        ],
+        "techniques": [
+            "Techniques",
+            "/campaigns/linden-pass/systems/entries/qi-blast",
+            "/campaigns/linden-pass/systems/entries/recoup",
+            "/campaigns/linden-pass/systems/entries/throat-jab",
+            "Prepared Dao Immolating Techniques",
+            "Star-Severing Promise",
+        ],
+        "resources": [
+            "Resources",
+            "Current 10 / Max 10",
+            "Current 2 / Max 3",
+        ],
+        "skills": [
+            "Skills",
+            "Fishing",
+            "/campaigns/linden-pass/systems/entries/skills",
+        ],
+        "equipment": [
+            "Equipment",
+            "Defense calculation",
+            "Defense = 10 + 2 + 3",
+            "Jian",
+            "Fishing rod, spear, or net",
+        ],
+        "inventory": [
+            "Inventory",
+            "xianxia-inventory",
+            "Jade Token",
+            "x2",
+        ],
+        "personal": [
+            "Personal",
+            "Physical Description",
+            "A crane-styled cultivator in river robes.",
+            "Background",
+            "Raised near the market docks.",
+        ],
+        "notes": [
+            "Notes",
+            "Remember the jade token.",
+        ],
+        "controls": [
+            "Controls",
+            "Player controls",
+            "Current owner",
+        ],
+    }
+
+    expected_subpage_links = tuple(subpage_expectations)
+    for page, expected_fragments in subpage_expectations.items():
+        response = client.get(
+            f"/campaigns/linden-pass/characters/rendering-link-crane?page={page}"
+        )
+        assert response.status_code == 200
+        html = unescape(response.get_data(as_text=True))
+        for expected_page in expected_subpage_links:
+            assert f"?page={expected_page}" in html
+        assert "?page=features" not in html
+        assert "?page=spellcasting" not in html
+        for fragment in expected_fragments:
+            assert fragment in html
+
+
 def test_xianxia_session_character_uses_read_sheet_subpage_chrome(
     client,
     sign_in,
