@@ -70,6 +70,9 @@ XIANXIA_MARTIAL_ART_RANK_RESOURCE_GRANTS_STATUS_ENERGY_MAXIMUMS_SEEDED = (
 XIANXIA_MARTIAL_ART_RANK_ABILITY_GRANTS_STATUS_KIND_TAGS_SEEDED = (
     "ability_kind_tags_seeded"
 )
+XIANXIA_MARTIAL_ART_RANK_ABILITY_EFFECTS_STATUS_COST_RANGE_DAMAGE_DURATION_SUPPORT_SEEDED = (
+    "cost_range_damage_duration_support_seeded"
+)
 XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_COMPLETE = "complete"
 XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_INTENTIONAL_DRAFT = "intentional_incomplete_draft"
 XIANXIA_MARTIAL_ART_MISSING_RANK_REASON_INTENTIONAL_DRAFT = "intentional_draft_content"
@@ -83,6 +86,8 @@ XIANXIA_MARTIAL_ART_ABILITY_KIND_LABELS = {
     "aura": "Aura",
     "other": "Other",
 }
+XIANXIA_MARTIAL_ART_ABILITY_SUPPORT_STATES = frozenset({"reference_only", "modeled"})
+XIANXIA_MARTIAL_ART_ABILITY_DEFAULT_SUPPORT_STATE = "reference_only"
 
 
 @lru_cache(maxsize=1)
@@ -101,6 +106,7 @@ def _load_xianxia_systems_seed_payload() -> dict[str, Any]:
     raw_martial_art_rank_sets = payload.get("martial_art_rank_sets")
     raw_martial_art_rank_resource_grants = payload.get("martial_art_rank_resource_grants")
     raw_martial_art_rank_ability_grants = payload.get("martial_art_rank_ability_grants")
+    raw_martial_art_rank_ability_effects = payload.get("martial_art_rank_ability_effects")
     raw_entries = payload.get("entries")
 
     if source_id != XIANXIA_HOMEBREW_SOURCE_ID:
@@ -124,6 +130,10 @@ def _load_xianxia_systems_seed_payload() -> dict[str, Any]:
     )
     payload["martial_art_rank_ability_grants"] = _normalize_martial_art_rank_ability_grants(
         raw_martial_art_rank_ability_grants
+    )
+    payload["martial_art_rank_ability_effects"] = _normalize_martial_art_rank_ability_effects(
+        raw_martial_art_rank_ability_effects,
+        payload["martial_art_rank_ability_grants"],
     )
     if not isinstance(raw_entries, list):
         raise ValueError("Xianxia Systems seed payload must include an entries list.")
@@ -188,6 +198,28 @@ def build_xianxia_martial_art_rank_ability_grants() -> dict[str, dict[str, list[
             for rank_key, grants in rank_grants.items()
         }
         for martial_art_key, rank_grants in _XIANXIA_MARTIAL_ART_RANK_ABILITY_GRANTS.items()
+    }
+
+
+def build_xianxia_martial_art_rank_ability_effects() -> dict[str, dict[str, dict[str, dict[str, Any]]]]:
+    return {
+        martial_art_key: {
+            rank_key: {
+                ability_key: {
+                    key: (
+                        [dict(item) for item in value]
+                        if key == "resource_costs"
+                        else list(value)
+                        if key in {"range_tags", "damage_effort_tags", "duration_tags"}
+                        else value
+                    )
+                    for key, value in effect.items()
+                }
+                for ability_key, effect in rank_effects.items()
+            }
+            for rank_key, rank_effects in rank_effects_by_art.items()
+        }
+        for martial_art_key, rank_effects_by_art in _XIANXIA_MARTIAL_ART_RANK_ABILITY_EFFECTS.items()
     }
 
 
@@ -667,6 +699,196 @@ def _normalize_martial_art_rank_ability_grants(
     return normalized
 
 
+def _normalize_martial_art_rank_ability_effects(
+    raw_ability_effects: object,
+    ability_grants: dict[str, dict[str, list[dict[str, Any]]]],
+) -> dict[str, dict[str, dict[str, dict[str, Any]]]]:
+    if not isinstance(raw_ability_effects, dict):
+        raise ValueError(
+            "Xianxia Systems seed payload must include a martial_art_rank_ability_effects object."
+        )
+
+    normalized: dict[str, dict[str, dict[str, dict[str, Any]]]] = {}
+    for raw_martial_art_key, raw_rank_effects in raw_ability_effects.items():
+        martial_art_key = _normalize_identifier(raw_martial_art_key)
+        if martial_art_key not in ability_grants:
+            raise ValueError(
+                f"Xianxia Martial Art ability effects include unknown Martial Art {martial_art_key!r}."
+            )
+        if martial_art_key in normalized:
+            raise ValueError(
+                f"Xianxia Martial Art ability effects for {martial_art_key!r} are duplicated."
+            )
+        if not isinstance(raw_rank_effects, dict):
+            raise ValueError(
+                f"Xianxia Martial Art ability effects for {martial_art_key!r} must be an object."
+            )
+
+        normalized_rank_effects: dict[str, dict[str, dict[str, Any]]] = {}
+        for raw_rank_key, raw_effects_by_ability in raw_rank_effects.items():
+            rank_key = _normalize_identifier(raw_rank_key)
+            if rank_key not in ability_grants[martial_art_key]:
+                raise ValueError(
+                    f"Xianxia Martial Art ability effects for {martial_art_key!r} "
+                    f"use unknown rank {rank_key!r}."
+                )
+            if rank_key in normalized_rank_effects:
+                raise ValueError(
+                    f"Xianxia Martial Art ability effects for {martial_art_key!r} "
+                    f"duplicate rank {rank_key!r}."
+                )
+            if not isinstance(raw_effects_by_ability, dict):
+                raise ValueError(
+                    f"Xianxia Martial Art ability effects for {martial_art_key!r} "
+                    f"rank {rank_key!r} must be an object."
+                )
+
+            known_ability_keys = {
+                str(grant["ability_key"])
+                for grant in ability_grants[martial_art_key][rank_key]
+            }
+            normalized_ability_effects: dict[str, dict[str, Any]] = {}
+            for raw_ability_key, raw_effect in raw_effects_by_ability.items():
+                ability_key = _normalize_identifier(raw_ability_key)
+                if ability_key not in known_ability_keys:
+                    raise ValueError(
+                        f"Xianxia Martial Art ability effects for {martial_art_key!r} "
+                        f"rank {rank_key!r} include unknown ability {ability_key!r}."
+                    )
+                if ability_key in normalized_ability_effects:
+                    raise ValueError(
+                        f"Xianxia Martial Art ability effects for {martial_art_key!r} "
+                        f"rank {rank_key!r} duplicate ability {ability_key!r}."
+                    )
+                normalized_ability_effects[ability_key] = _normalize_rank_ability_effect(
+                    raw_effect,
+                    context=(
+                        f"Xianxia Martial Art ability effects for {martial_art_key!r} "
+                        f"rank {rank_key!r} ability {ability_key!r}"
+                    ),
+                )
+            normalized_rank_effects[rank_key] = normalized_ability_effects
+
+        normalized[martial_art_key] = normalized_rank_effects
+
+    return normalized
+
+
+def _normalize_rank_ability_effect(
+    raw_effect: object,
+    *,
+    context: str,
+) -> dict[str, Any]:
+    if raw_effect is None:
+        raw_effect = {}
+    if not isinstance(raw_effect, dict):
+        raise ValueError(f"{context} must be an object.")
+
+    support_state = _normalize_identifier(
+        raw_effect.get("support_state")
+        or raw_effect.get("support")
+        or XIANXIA_MARTIAL_ART_ABILITY_DEFAULT_SUPPORT_STATE
+    )
+    if support_state not in XIANXIA_MARTIAL_ART_ABILITY_SUPPORT_STATES:
+        raise ValueError(f"{context} uses unsupported support_state {support_state!r}.")
+
+    return {
+        "resource_costs": _normalize_ability_resource_costs(
+            raw_effect.get("resource_costs", raw_effect.get("costs")),
+            context=f"{context} resource_costs",
+        ),
+        "range_tags": _normalize_ability_tag_list(
+            raw_effect.get("range_tags", raw_effect.get("ranges")),
+            context=f"{context} range_tags",
+        ),
+        "damage_effort_tags": _normalize_ability_tag_list(
+            raw_effect.get("damage_effort_tags", raw_effect.get("damage")),
+            context=f"{context} damage_effort_tags",
+        ),
+        "duration_tags": _normalize_ability_tag_list(
+            raw_effect.get("duration_tags", raw_effect.get("durations")),
+            context=f"{context} duration_tags",
+        ),
+        "support_state": support_state,
+        "xianxia_support_state": support_state,
+    }
+
+
+def _normalize_ability_resource_costs(raw_costs: object, *, context: str) -> list[dict[str, Any]]:
+    if raw_costs is None:
+        return []
+    if not isinstance(raw_costs, list):
+        raise ValueError(f"{context} must be a list.")
+
+    normalized: list[dict[str, Any]] = []
+    for index, raw_cost in enumerate(raw_costs, start=1):
+        if isinstance(raw_cost, str):
+            raw_cost_text = raw_cost.strip()
+            raw_resource, _, raw_amount = raw_cost_text.partition(":")
+            resource_key = _normalize_identifier(raw_resource)
+            amount = _normalize_resource_cost_amount(raw_amount or 1, context=f"{context} {index}")
+            record: dict[str, Any] = {"resource_key": resource_key, "amount": amount}
+        elif isinstance(raw_cost, dict):
+            resource_key = _normalize_identifier(
+                raw_cost.get("resource_key") or raw_cost.get("resource")
+            )
+            amount = _normalize_resource_cost_amount(
+                raw_cost.get("amount", 1),
+                context=f"{context} {index}",
+            )
+            record = {"resource_key": resource_key, "amount": amount}
+            timing = _normalize_identifier(raw_cost.get("timing"))
+            if timing:
+                record["timing"] = timing
+            note = str(raw_cost.get("note") or "").strip()
+            if note:
+                record["note"] = note
+        else:
+            raise ValueError(f"{context} {index} must be a string or object.")
+
+        if not resource_key:
+            raise ValueError(f"{context} {index} is missing a resource key.")
+        normalized.append(record)
+
+    return normalized
+
+
+def _normalize_resource_cost_amount(value: object, *, context: str) -> int | str:
+    if isinstance(value, bool):
+        raise ValueError(f"{context} amount must be a positive integer or text token.")
+    if isinstance(value, int):
+        if value <= 0:
+            raise ValueError(f"{context} amount must be positive.")
+        return value
+    amount_text = str(value or "").strip()
+    if not amount_text:
+        return 1
+    if amount_text.isdigit():
+        amount = int(amount_text)
+        if amount <= 0:
+            raise ValueError(f"{context} amount must be positive.")
+        return amount
+    normalized = _normalize_identifier(amount_text)
+    if not normalized:
+        raise ValueError(f"{context} amount must be a positive integer or text token.")
+    return normalized
+
+
+def _normalize_ability_tag_list(raw_tags: object, *, context: str) -> list[str]:
+    if raw_tags is None:
+        return []
+    if not isinstance(raw_tags, list):
+        raise ValueError(f"{context} must be a list.")
+    normalized: list[str] = []
+    for index, raw_tag in enumerate(raw_tags, start=1):
+        tag = _normalize_identifier(raw_tag)
+        if not tag:
+            raise ValueError(f"{context} {index} is missing a tag.")
+        if tag not in normalized:
+            normalized.append(tag)
+    return normalized
+
+
 def _normalize_rank_ability_grants(
     raw_grants: list[object],
     *,
@@ -901,6 +1123,7 @@ def _stamp_martial_art_rank_records(metadata: dict[str, Any], body: dict[str, An
     rank_keys = _martial_art_rank_keys_for(martial_art_key)
     rank_resource_grants = _martial_art_rank_resource_grants_for(martial_art_key, rank_keys)
     rank_ability_grants = _martial_art_rank_ability_grants_for(martial_art_key, rank_keys)
+    rank_ability_effects = _martial_art_rank_ability_effects_for(martial_art_key, rank_keys)
     rank_records = _build_martial_art_rank_records(
         martial_art_key=martial_art_key,
         martial_art_slug=slug,
@@ -908,6 +1131,7 @@ def _stamp_martial_art_rank_records(metadata: dict[str, Any], body: dict[str, An
         rank_available=True,
         rank_resource_grants=rank_resource_grants,
         rank_ability_grants=rank_ability_grants,
+        rank_ability_effects=rank_ability_effects,
     )
     missing_rank_keys = [
         rank_key for rank_key in XIANXIA_MARTIAL_ART_RANK_KEYS if rank_key not in rank_keys
@@ -919,6 +1143,7 @@ def _stamp_martial_art_rank_records(metadata: dict[str, Any], body: dict[str, An
         rank_available=False,
         rank_resource_grants={},
         rank_ability_grants={},
+        rank_ability_effects={},
     )
     missing_rank_names = [
         str(_XIANXIA_MARTIAL_ART_RANK_LOOKUP[rank_key]["rank_name"])
@@ -962,6 +1187,10 @@ def _stamp_martial_art_rank_records(metadata: dict[str, Any], body: dict[str, An
     metadata["rank_ability_grants_seeded"] = True
     metadata["rank_ability_grants_status"] = (
         XIANXIA_MARTIAL_ART_RANK_ABILITY_GRANTS_STATUS_KIND_TAGS_SEEDED
+    )
+    metadata["rank_ability_effects_seeded"] = True
+    metadata["rank_ability_effects_status"] = (
+        XIANXIA_MARTIAL_ART_RANK_ABILITY_EFFECTS_STATUS_COST_RANGE_DAMAGE_DURATION_SUPPORT_SEEDED
     )
     metadata["martial_art_rank_ability_grants"] = {
         rank_key: [dict(grant) for grant in _rank_record_ability_grants(rank_records, rank_key)]
@@ -1013,6 +1242,10 @@ def _stamp_martial_art_rank_records(metadata: dict[str, Any], body: dict[str, An
     martial_art_body["rank_ability_grants_seeded"] = True
     martial_art_body["rank_ability_grants_status"] = (
         XIANXIA_MARTIAL_ART_RANK_ABILITY_GRANTS_STATUS_KIND_TAGS_SEEDED
+    )
+    martial_art_body["rank_ability_effects_seeded"] = True
+    martial_art_body["rank_ability_effects_status"] = (
+        XIANXIA_MARTIAL_ART_RANK_ABILITY_EFFECTS_STATUS_COST_RANGE_DAMAGE_DURATION_SUPPORT_SEEDED
     )
     martial_art_body["rank_ability_grants"] = {
         rank_key: [dict(grant) for grant in _rank_record_ability_grants(rank_records, rank_key)]
@@ -1080,8 +1313,21 @@ def _martial_art_ability_search_parts(body: dict[str, Any]) -> list[str]:
                     str(grant.get("kind") or ""),
                     str(grant.get("kind_key") or ""),
                     str(grant.get("ability_ref") or ""),
+                    str(grant.get("support_state") or ""),
                 ]
             )
+            parts.extend(str(value) for value in grant.get("range_tags") or [])
+            parts.extend(str(value) for value in grant.get("damage_effort_tags") or [])
+            parts.extend(str(value) for value in grant.get("duration_tags") or [])
+            for cost in grant.get("resource_costs") or []:
+                if not isinstance(cost, dict):
+                    continue
+                parts.extend(
+                    [
+                        str(cost.get("resource_key") or ""),
+                        str(cost.get("amount") or ""),
+                    ]
+                )
     return parts
 
 
@@ -1118,6 +1364,7 @@ def _build_martial_art_rank_records(
     rank_available: bool,
     rank_resource_grants: dict[str, dict[str, int]],
     rank_ability_grants: dict[str, list[dict[str, Any]]],
+    rank_ability_effects: dict[str, dict[str, dict[str, Any]]],
 ) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for rank_key in rank_keys:
@@ -1133,6 +1380,7 @@ def _build_martial_art_rank_records(
                 martial_art_slug=martial_art_slug,
                 rank_key=rank_key,
                 grants=rank_ability_grants[rank_key],
+                ability_effects=rank_ability_effects.get(rank_key, {}),
             )
             if rank_available
             else []
@@ -1178,6 +1426,11 @@ def _build_martial_art_rank_records(
                     if rank_available
                     else None
                 ),
+                "rank_ability_effects_status": (
+                    XIANXIA_MARTIAL_ART_RANK_ABILITY_EFFECTS_STATUS_COST_RANGE_DAMAGE_DURATION_SUPPORT_SEEDED
+                    if rank_available
+                    else None
+                ),
                 "rank_available_in_seed": rank_available,
                 "is_incomplete_rank": not rank_available,
                 "rank_completion_status": (
@@ -1201,12 +1454,16 @@ def _build_rank_ability_grants(
     martial_art_slug: str,
     rank_key: str,
     grants: list[dict[str, Any]],
+    ability_effects: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for grant in grants:
         ability_key = str(grant["ability_key"])
         ability_slug = ability_key.replace("_", "-")
         ability_ref = f"xianxia:{martial_art_slug}:{rank_key}:{ability_slug}"
+        effect_metadata = _copy_rank_ability_effect(
+            ability_effects.get(ability_key) or _default_rank_ability_effect()
+        )
         records.append(
             {
                 "martial_art_key": martial_art_key,
@@ -1220,9 +1477,47 @@ def _build_rank_ability_grants(
                 "kind_key": str(grant["kind_key"]),
                 "ability_kind": str(grant["ability_kind"]),
                 "ability_kind_key": str(grant["ability_kind_key"]),
+                "resource_costs": effect_metadata["resource_costs"],
+                "range_tags": effect_metadata["range_tags"],
+                "damage_effort_tags": effect_metadata["damage_effort_tags"],
+                "duration_tags": effect_metadata["duration_tags"],
+                "support_state": str(effect_metadata["support_state"]),
+                "xianxia_support_state": str(effect_metadata["xianxia_support_state"]),
             }
         )
     return records
+
+
+def _default_rank_ability_effect() -> dict[str, Any]:
+    return {
+        "resource_costs": [],
+        "range_tags": [],
+        "damage_effort_tags": [],
+        "duration_tags": [],
+        "support_state": XIANXIA_MARTIAL_ART_ABILITY_DEFAULT_SUPPORT_STATE,
+        "xianxia_support_state": XIANXIA_MARTIAL_ART_ABILITY_DEFAULT_SUPPORT_STATE,
+    }
+
+
+def _copy_rank_ability_effect(effect: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "resource_costs": [
+            dict(cost)
+            for cost in effect.get("resource_costs", [])
+            if isinstance(cost, dict)
+        ],
+        "range_tags": list(effect.get("range_tags", [])),
+        "damage_effort_tags": list(effect.get("damage_effort_tags", [])),
+        "duration_tags": list(effect.get("duration_tags", [])),
+        "support_state": str(
+            effect.get("support_state") or XIANXIA_MARTIAL_ART_ABILITY_DEFAULT_SUPPORT_STATE
+        ),
+        "xianxia_support_state": str(
+            effect.get("xianxia_support_state")
+            or effect.get("support_state")
+            or XIANXIA_MARTIAL_ART_ABILITY_DEFAULT_SUPPORT_STATE
+        ),
+    }
 
 
 def _rank_record_ability_grants(
@@ -1283,6 +1578,20 @@ def _martial_art_rank_ability_grants_for(
     }
 
 
+def _martial_art_rank_ability_effects_for(
+    martial_art_key: str,
+    rank_keys: list[str],
+) -> dict[str, dict[str, dict[str, Any]]]:
+    raw_rank_effects = _XIANXIA_MARTIAL_ART_RANK_ABILITY_EFFECTS.get(martial_art_key, {})
+    return {
+        rank_key: {
+            ability_key: _copy_rank_ability_effect(effect)
+            for ability_key, effect in raw_rank_effects.get(rank_key, {}).items()
+        }
+        for rank_key in rank_keys
+    }
+
+
 _XIANXIA_SYSTEMS_SEED_PAYLOAD = _load_xianxia_systems_seed_payload()
 XIANXIA_SYSTEMS_SEED_SOURCE_TITLE = str(_XIANXIA_SYSTEMS_SEED_PAYLOAD["source_title"])
 XIANXIA_SYSTEMS_SEED_VERSION = str(_XIANXIA_SYSTEMS_SEED_PAYLOAD["version"])
@@ -1314,6 +1623,18 @@ _XIANXIA_MARTIAL_ART_RANK_ABILITY_GRANTS = {
     }
     for martial_art_key, rank_grants in _XIANXIA_SYSTEMS_SEED_PAYLOAD[
         "martial_art_rank_ability_grants"
+    ].items()
+}
+_XIANXIA_MARTIAL_ART_RANK_ABILITY_EFFECTS = {
+    str(martial_art_key): {
+        str(rank_key): {
+            str(ability_key): _copy_rank_ability_effect(effect)
+            for ability_key, effect in rank_effects.items()
+        }
+        for rank_key, rank_effects in rank_effects_by_art.items()
+    }
+    for martial_art_key, rank_effects_by_art in _XIANXIA_SYSTEMS_SEED_PAYLOAD[
+        "martial_art_rank_ability_effects"
     ].items()
 }
 _XIANXIA_MARTIAL_ART_RANK_SETS = {

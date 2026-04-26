@@ -1,5 +1,5 @@
 {
-  "version": "2026-04-26.9",
+  "version": "2026-04-26.10",
   "source_id": "XIANXIA-HOMEBREW",
   "source_title": "Xianxia Homebrew",
   "storage_strategy": "curated_seed_data",
@@ -675,6 +675,188 @@
     "flying_daggers": {
       "initiate": ["Skybound Tether Technique"],
       "novice": ["Fowler's Snare Technique"]
+    }
+  },
+  "martial_art_rank_ability_effects": {
+    "demons_fist": {
+      "initiate": {"qi_fist_technique": {"costs": ["qi:1"], "ranges": ["self"], "damage": ["weapon_effort_damage"], "durations": ["rest_of_combat"]}},
+      "novice": {"demon_s_rush_maneuver": {"durations": ["once_per_turn"]}},
+      "apprentice": {"armor_breaker_technique": {"costs": ["jing:1"], "damage": ["double_damage"]}},
+      "master": {"rakshasa_s_flurry_maneuver": {"ranges": ["same_target"]}},
+      "legendary": {"asura_s_wrath_technique": {"costs": ["shen:1"], "ranges": ["self", "adjacent_secondary_target"], "damage": ["attack_bonus", "damage_bonus", "damage_negation"], "durations": ["rest_of_combat"]}}
+    },
+    "heavenly_palm": {
+      "initiate": {"directing_palm_technique": {"costs": ["qi:1"], "ranges": ["self"], "damage": ["double_stance_damage"], "durations": ["rest_of_round"]}},
+      "novice": {"rolling_flow_maneuver": {"ranges": ["self"], "durations": ["once_per_round"]}},
+      "apprentice": {"meridian_block_technique": {"durations": ["rest_of_round"]}},
+      "master": {"heavenly_foresight_maneuver": {"ranges": ["adjacent"], "durations": ["once_per_round"]}},
+      "legendary": {"buddha_s_palm_technique": {"costs": ["shen:1"], "ranges": ["area_30_by_30_feet"], "durations": ["3_rounds"]}}
+    },
+    "taoist_blade": {
+      "initiate": {"wudang_sword_wave": {"costs": ["qi:1"], "ranges": ["far"], "damage": ["magical_effort_damage"]}},
+      "novice": {"spirit_sight_maneuver": {"costs": ["shen:1"], "ranges": ["self"], "damage": ["magical_attack_damage"], "durations": ["rest_of_battle"]}},
+      "apprentice": {"summoned_swords_technique": {"costs": ["qi:1"], "ranges": ["self", "far"], "damage": ["magical_attack_damage"], "durations": ["until_swords_spent"]}},
+      "master": {"taoist_way_maneuver": {"durations": ["once_per_round"]}},
+      "legendary": {"eternal_trigram_sword_furnace_technique": {"costs": ["yin:all", "yang:all"], "ranges": ["near"], "damage": ["double_spent_points_damage"]}}
+    },
+    "drunken_fist": {
+      "initiate": {"drunken_sway_stance": {"ranges": ["self"], "damage": ["double_stance_damage"], "durations": ["while_stance_active"]}},
+      "novice": {"foolish_strike_technique": {"costs": ["qi:1"], "durations": ["rest_of_round"]}},
+      "apprentice": {"tumbling_barrel_maneuver": {"ranges": ["near"], "durations": ["once_per_round"]}},
+      "master": {"drunken_flow_misdirect_maneuver": {"ranges": ["adjacent_enemies"], "damage": ["automatic_damage"]}},
+      "legendary": {"monkey_drinks_master_s_wine_technique": {"costs": ["jing:1", "alcohol:1"], "durations": ["rest_of_round"]}}
+    },
+    "striking_adder": {
+      "initiate": {"preemptive_strike_technique": {"costs": ["shen:1"], "durations": ["current_round"]}},
+      "novice": {"coiling_snake_maneuver": {"ranges": ["ranged_attacks_targeting_self"]}},
+      "apprentice": {"venomous_barb_technique": {"costs": ["shen:1"], "damage": ["weapon_effort_damage"], "durations": ["next_successful_attack", "3_rounds"]}},
+      "master": {"hypnotic_hiss_maneuver": {"ranges": ["far"], "durations": ["rest_of_combat", "until_saved"]}},
+      "legendary": {"broken_fang_technique": {"costs": ["yang:1", "shen:1"], "durations": ["next_damaging_attack", "rest_of_combat"]}}
+    },
+    "bloody_saber": {
+      "initiate": {"sanguine_sword_technique": {"costs": ["jing:1"], "damage": ["weapon_effort_damage"], "durations": ["next_successful_attack"]}},
+      "novice": {"bloodlusted_aura": {"costs": ["shen:1"], "ranges": ["opponents_entering_combat"], "durations": ["rest_of_round"]}},
+      "apprentice": {"ravagers_dance_technique": {"costs": ["jing:1"], "ranges": ["within_range"]}},
+      "master": {"bursting_body_maneuver": {"costs": ["self_damage:1d6"], "damage": ["double_damage", "half_damage_healing"]}},
+      "legendary": {"demon_general_s_boiling_blood_technique": {"costs": ["self_damage:energy_effort", "jing:1"], "ranges": ["adjacent"], "damage": ["magical_effort_damage"], "durations": ["3_turns"]}}
+    },
+    "phoenix_descending": {
+      "initiate": {"flaming_pinions_technique": {"costs": ["qi_or_shen:1"], "ranges": ["far", "single_target"], "damage": ["basic_effort_damage"]}},
+      "novice": {"burning_cleanse_aura": {"costs": ["shen:1"], "ranges": ["self"]}},
+      "apprentice": {"blazing_flight_technique": {"costs": ["shen:1"], "ranges": ["line_far_by_near"], "damage": ["magical_effort_damage"]}},
+      "master": {"phoenix_tears": {"costs": ["jing:1"], "damage": ["energy_effort_healing"], "durations": ["once_per_round"]}},
+      "legendary": {"phoenix_descent_technique": {"costs": ["shen:1"], "ranges": ["self", "melee", "ranged"], "damage": ["magical_effort_damage", "weapon_effort_backlash"], "durations": ["3_rounds", "rest_of_combat"]}}
+    },
+    "dragon_ascending": {
+      "initiate": {"dragon_s_flood_gate_technique": {"damage": ["magical_effort_damage", "energy_recovery"]}},
+      "novice": {"leaping_carp_maneuver": {"costs": ["qi:1"], "ranges": ["vertical_movement"]}},
+      "apprentice": {"destructive_tail_technique": {"costs": ["qi:1"], "ranges": ["near_cone"], "damage": ["magical_effort_damage"]}},
+      "master": {"dragon_s_pearl": {"ranges": ["near"], "damage": ["magical_effort_healing", "ultimate_effort_damage_plus_5", "energy_recovery"]}},
+      "legendary": {"dragon_s_ascent_technique": {"costs": ["shen:1"], "ranges": ["self", "cone"], "damage": ["magical_effort_damage", "weapon_effort_burn", "weapon_effort_backlash"], "durations": ["3_rounds", "once_per_round", "rest_of_combat"]}}
+    },
+    "armored_elephant": {
+      "initiate": {"rooted_mountain_stance": {"costs": ["jing:1"], "ranges": ["self"], "damage": ["temporary_hp", "temporary_stance"], "durations": ["while_stance_active"]}},
+      "novice": {"mammoth_s_bullrush_technique": {"costs": ["jing:1"], "durations": ["next_successful_attack"]}},
+      "apprentice": {"trampling_maneuver": {"ranges": ["move_through_enemy_space"], "damage": ["weapon_effort_damage"]}},
+      "master": {"iron_hide_technique": {"costs": ["jing_or_qi:1"], "ranges": ["self"], "damage": ["defense_bonus_to_damage"], "durations": ["rest_of_round"]}},
+      "legendary": {"trembling_heavens_technique": {"costs": ["shen:1"], "ranges": ["combat"], "durations": ["3_rounds"]}}
+    },
+    "swaying_willow": {
+      "initiate": {"whipping_branch_stance": {"costs": ["qi:1"], "ranges": ["self"], "damage": ["magic_effort_stance_recovery"], "durations": ["until_hit"]}},
+      "novice": {"snap_kick_technique": {"costs": ["jing:1"], "ranges": ["counterattack"]}},
+      "apprentice": {"entangled_roots_maneuver": {"costs": ["shen:1"], "ranges": ["melee_combatants"]}},
+      "master": {"raining_parry_technique": {"costs": ["qi:1", "shen:1"], "ranges": ["self"], "damage": ["physical_attack_negation"], "durations": ["end_of_round"]}},
+      "legendary": {"wind_s_whispering_smoke_maneuver": {"costs": ["shen:1", "qi:1"], "ranges": ["self"], "damage": ["half_physical_damage"], "durations": ["rest_of_combat", "until_defense_bonus_spent"]}}
+    },
+    "thundering_harmonics": {
+      "initiate": {"sonic_boom_technique": {"costs": ["qi:1"], "ranges": ["far"], "damage": ["energy_effort_damage"]}},
+      "novice": {"melodic_malady_technique": {"costs": ["qi:1"], "ranges": ["near"], "durations": ["rest_of_round"]}},
+      "apprentice": {"metronome_maneuver": {"ranges": ["line_of_sight"], "durations": ["once_per_round"]}},
+      "master": {"sound_barrier_burst_technique": {"costs": ["qi:1"], "ranges": ["far", "near"], "damage": ["energy_effort_damage", "energy_effort_damage_reduction"]}},
+      "legendary": {"heaven_s_defying_hymn_technique": {"costs": ["qi:1", "shen:1"], "damage": ["full_hp_stance_recovery"], "durations": ["once_per_character_per_combat"]}}
+    },
+    "shadow_puppet_theater": {
+      "initiate": {"puppeteering_technique": {"costs": ["shen:1"], "ranges": ["puppet"], "damage": ["weapon_effort_damage"], "durations": ["while_controlled"]}},
+      "novice": {"substitution_maneuver": {"ranges": ["puppet"]}},
+      "apprentice": {"hidden_inventory_technique": {"costs": ["jing_or_qi:1"], "damage": ["weapon_effort_damage", "weapon_effort_defense"]}},
+      "master": {"master_of_puppets_technique": {"costs": ["shen:1"], "ranges": ["puppet"], "durations": ["while_controlled"]}},
+      "legendary": {"spirit_strings_technique": {"costs": ["shen:1", "shen:1", "jing:1"], "ranges": ["melee", "puppet"], "durations": ["3_rounds", "dying_state"]}}
+    },
+    "baihu_style": {
+      "initiate": {"tiger_s_claw_technique": {"costs": ["jing:1"], "damage": ["double_stance_damage", "basic_effort_damage"], "durations": ["next_successful_attack"]}},
+      "novice": {"pouncing_follow_up_maneuver": {"ranges": ["same_target"]}},
+      "apprentice": {"pinning_sweep_technique": {"costs": ["qi:1"], "durations": ["until_successful_save"]}},
+      "master": {"tiger_s_fang_technique": {"costs": ["shen:1"], "damage": ["direct_hp_damage"]}},
+      "legendary": {"tiger_s_vessel": {"costs": ["shen:1"], "damage": ["direct_hp_damage", "weapon_effort_backlash"], "durations": ["once_per_combat", "3_rounds", "rest_of_combat"]}}
+    },
+    "shuai_jiao": {
+      "initiate": {"wrestler_s_stance": {"costs": ["jing:1"], "damage": ["basic_effort_damage"], "durations": ["while_grappling"]}},
+      "novice": {"takedown_and_throw_technique": {"costs": ["qi:1"], "ranges": ["near"], "damage": ["basic_effort_damage"]}},
+      "apprentice": {"tumble_and_roll_maneuver": {"costs": ["jing:1"], "ranges": ["near"], "damage": ["basic_effort_damage"]}},
+      "master": {"sprawling_lock_technique": {"costs": ["jing:1"], "damage": ["basic_effort_damage"], "durations": ["while_grappling"]}},
+      "legendary": {"meridian_stranglehold": {"costs": ["qi:2"], "durations": ["while_grappling"]}}
+    },
+    "bing_ti": {
+      "initiate": {"ice_manipulation_technique": {"costs": ["qi:1"], "ranges": ["far", "melee"], "damage": ["magical_effort_damage"]}},
+      "novice": {"frozen_body_technique": {"costs": ["shen:1"], "damage": ["half_damage_reduction"], "durations": ["rest_of_round"]}},
+      "apprentice": {"blizzard_s_haze_maneuver": {"ranges": ["near"], "durations": ["battle"]}},
+      "master": {"chilling_drain_touch_technique": {"costs": ["qi:1"], "ranges": ["melee"], "damage": ["max_hp_reduction"], "durations": ["rest_of_combat"]}},
+      "legendary": {"death_s_touch_deep_freeze_technique": {"costs": ["qi:1", "jing:1", "shen:1"], "ranges": ["grapple"], "durations": ["once_per_combat"]}}
+    },
+    "spiritualists_binding_seals": {
+      "initiate": {"misfortune_warding_talisman_technique": {"costs": ["shen:1"], "ranges": ["talisman"], "damage": ["attack_damage_bonus", "defense_bonus", "skill_check_bonus"]}},
+      "novice": {"sealing_talisman_technique": {"costs": ["shen:1"], "ranges": ["melee"], "durations": ["1_round"]}},
+      "apprentice": {"delayed_explosion_effect": {"costs": ["shen_or_qi:1"], "damage": ["ultimate_effort_damage", "ultimate_effort_healing"], "durations": ["3_rounds"]}},
+      "master": {"spirit_walk_maneuver": {"costs": ["shen:1"], "ranges": ["self"], "damage": ["magical_effort_damage"], "durations": ["while_in_spirit_realm"]}},
+      "legendary": {"10_000_year_demon_furnace_sealing_technique": {"costs": ["shen:1", "yin:1", "yang:1"], "damage": ["ultimate_effort_damage"], "durations": ["rest_of_combat"]}}
+    },
+    "formless_fist": {
+      "initiate": {"wavering_strike_technique": {"costs": ["qi:1"], "damage": ["dao_gain", "stance_recovery"], "durations": ["end_of_round"]}},
+      "novice": {"shaper_s_ripple_maneuver": {"ranges": ["near"], "damage": ["dao_gain"], "durations": ["current_round"]}},
+      "apprentice": {"formless_stance": {"costs": ["dao:1"], "ranges": ["self"], "durations": ["while_stance_active", "end_of_action", "end_of_round"]}},
+      "master": {"initiative_of_heavenly_dao_maneuver": {"costs": ["dao:1"], "durations": ["once_per_round"]}},
+      "legendary": {"foresight_of_the_true_dao": {"costs": ["dao:1", "shen:1", "dao:1"], "damage": ["reserved_d20", "hero_point", "negative_karma_damage_increase"], "durations": ["once_per_day", "once_per_round"]}}
+    },
+    "cherry_blossom_swallow": {
+      "initiate": {"iaido_draw_technique": {"costs": ["qi:1"], "ranges": ["melee"], "damage": ["weapon_effort_damage", "ultimate_effort_damage"]}},
+      "novice": {"bushido_stance": {"costs": ["jing:1"], "ranges": ["self"], "damage": ["attack_bonus", "damage_bonus"], "durations": ["while_stance_active"]}},
+      "apprentice": {"stampeding_barricade_technique": {"costs": ["qi:1"], "damage": ["current_stance_bonus_damage", "half_damage_healing"], "durations": ["next_successful_attack"]}},
+      "master": {"tsubame_gaeshi_technique": {"costs": ["qi:1", "jing:1"], "damage": ["ultimate_effort_damage"], "durations": ["next_attack"]}},
+      "legendary": {"warrior_s_death": {"costs": ["qi:1", "jing:1", "shen:1", "hp:all_but_1", "stance:all_but_1"], "damage": ["critical_hit", "automatic_hit"], "durations": ["3_rounds"]}}
+    },
+    "ink_stained_historian": {
+      "initiate": {"scholar_s_memorabilia_technique": {"costs": ["shen:1"], "ranges": ["phantom"], "durations": ["one_time_use"]}},
+      "novice": {"vividness_recall": {"costs": ["shen:1", "turn:1"], "ranges": ["phantom"], "durations": ["3_rounds", "prepared_beforehand"]}},
+      "apprentice": {"evocation_of_oaths_remembrance_ritual_technique": {"costs": ["shen:1", "jing:1", "incense:1"], "ranges": ["phantom"], "durations": ["until_incense_burns_out", "until_mission_complete"]}}
+    },
+    "manifesting_brush": {
+      "initiate": {"blotting_strike_technique": {"costs": ["qi_or_shen:1"], "ranges": ["far", "single_target", "3_squares"], "damage": ["magical_effort_damage", "basic_effort_damage"]}},
+      "novice": {"inkblind_veil_technique": {"costs": ["qi:1"], "ranges": ["far"], "durations": ["until_next_turn"]}}
+    },
+    "beastmaster": {
+      "initiate": {"the_animal_bond": {"ranges": ["animal_companion"], "damage": ["companion_stat_bonus"]}},
+      "novice": {"the_forging_bond_technique": {"costs": ["shen:1"], "ranges": ["animal_companion"], "damage": ["magical_effort_damage"], "durations": ["combat_participant"]}},
+      "apprentice": {"follow_the_leader_maneuver": {"costs": ["qi_or_jing:1"], "ranges": ["animal_companion"], "damage": ["easy_attack", "temporary_stance", "damage_bonus", "temporary_hp"]}}
+    },
+    "beast_tamer": {
+      "initiate": {"follow_the_leader_technique": {"costs": ["qi:1"], "ranges": ["mundane_animals"], "durations": ["10_minutes"]}},
+      "novice": {"primordial_harmony_maneuver": {"costs": ["shen:1"], "ranges": ["animal_companion"], "damage": ["attack_bonus", "defense_bonus", "damage_bonus"], "durations": ["end_of_turn"]}}
+    },
+    "courtiers_sting": {
+      "initiate": {"flashing_blade_technique": {"costs": ["qi:1"], "ranges": ["weapon_range"], "damage": ["weapon_effort_damage", "ultimate_effort_damage"], "durations": ["first_round_or_distracted_target"]}},
+      "novice": {"bouncing_rain_and_steel_thorns_iron_umbrella_stance": {"costs": ["qi:1", "jing:1"], "ranges": ["self"], "damage": ["half_damage_reduction", "damage_reflection"], "durations": ["while_stance_active"]}}
+    },
+    "madams_piercing_blood": {
+      "initiate": {"toxic_blood_coat_technique": {"costs": ["jing:1", "self_damage:weapon_effort"], "damage": ["magic_damage", "basic_effort_poison"], "durations": ["3_turns"]}},
+      "novice": {"luocha_s_vengeful_aura": {"costs": ["shen:1", "hp:1"], "ranges": ["5_feet_aura"], "durations": ["rest_of_round", "until_start_of_turn"]}}
+    },
+    "blooming_curse": {
+      "initiate": {"apparition_s_ghastly_beauty_aura": {"costs": ["shen:1"], "ranges": ["near", "line_of_sight"], "damage": ["sneak_attack_enablement"], "durations": ["while_aura_active"]}},
+      "novice": {"seeded_lilac_s_curse_technique": {"costs": ["shen:1"], "damage": ["magical_effort_damage"], "durations": ["while_aura_active", "up_to_3_curse_points"]}}
+    },
+    "rippling_melodies": {
+      "initiate": {"explosive_encore_technique": {"costs": ["shen:1"], "ranges": ["near"], "damage": ["magical_aoe_damage"]}}
+    },
+    "strategists_acumen": {
+      "initiate": {
+        "eagle_eyed_insight_maneuver": {"ranges": ["self", "allies"], "damage": ["initiative_bonus_magic_effort"], "durations": ["start_of_combat"]},
+        "flow_of_battle_maneuver": {"ranges": ["self_or_ally"], "damage": ["initiative_adjust_basic_effort"], "durations": ["end_of_round"]}
+      },
+      "novice": {"tactician_s_heavenly_gaze_stance": {"costs": ["dao:1"], "ranges": ["near", "self", "allies"], "damage": ["attack_bonus", "temporary_stance", "movement"], "durations": ["while_stance_active", "end_of_turn"]}}
+    },
+    "broken_tigers_vessel": {
+      "initiate": {"the_broken_tiger_s_vessel": {"costs": ["jing:1", "shen:1"], "ranges": ["self"], "damage": ["basic_regeneration", "damage_bonus"], "durations": ["once_per_day"]}},
+      "novice": {"the_tiger_s_domain": {"costs": ["jing:1", "shen:1"], "ranges": ["10_feet_aura"], "damage": ["healing_bonus"], "durations": ["once_per_turn", "night"]}},
+      "apprentice": {"symbiotic_reverse_possession_technique": {"costs": ["jing:2", "shen_or_jing:1"], "ranges": ["self"], "damage": ["ultimate_effort_damage", "half_physical_damage"], "durations": ["1d4_rounds", "once_per_combat"]}}
+    },
+    "the_four_winds": {
+      "initiate": {"gathering_slipstream_stance": {"costs": ["qi:1"], "ranges": ["self"], "damage": ["attack_bonus", "damage_bonus", "defense_bonus", "action_bonus"], "durations": ["while_stance_active", "start_of_round"]}},
+      "novice": {"bursting_gust_maneuver": {"costs": ["slipstream:1"], "ranges": ["self"], "durations": ["after_attack"]}},
+      "apprentice": {"sonic_break_technique": {"costs": ["slipstream:all"], "ranges": ["melee", "near"], "damage": ["ultimate_effort_damage"], "durations": ["while_stance_active"]}}
+    },
+    "flying_daggers": {
+      "initiate": {"skybound_tether_technique": {"costs": ["qi:1"], "ranges": ["attack_target", "adjacent"], "durations": ["until_tether_broken"]}},
+      "novice": {"fowler_s_snare_technique": {"costs": ["jing:1"], "ranges": ["near"], "damage": ["damage_bonus", "critical_threshold_18", "movement_penalty"], "durations": ["after_successful_attack", "3_rounds", "next_turn"]}}
     }
   },
   "entries": [
