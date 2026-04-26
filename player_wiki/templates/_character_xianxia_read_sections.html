@@ -477,3 +477,33 @@
     {% endif %}
   </section>
 {% endif %}
+
+{% if xianxia_sheet and character_subpage == 'notes' and (is_session_mode | default(false)) %}
+  <section class="read-section" id="session-notes">
+    <div class="section-heading">
+      <h2>Notes</h2>
+    </div>
+    <article class="detail-card session-card">
+      <form
+        class="stack-form"
+        data-character-sheet-edit-form="notes"
+        method="post"
+        action="{{ url_for('character_session_notes', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+      >
+        <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+        <input type="hidden" name="mode" value="session">
+        <input type="hidden" name="page" value="{{ character_subpage }}">
+        {% if session_return_view | default("") %}
+          <input type="hidden" name="return_view" value="{{ session_return_view }}">
+        {% endif %}
+        <label class="field">
+          <span>Markdown note</span>
+          <textarea name="player_notes_markdown">{{ character.player_notes_markdown }}</textarea>
+        </label>
+        {% if not (character_sheet_batch_save_enabled | default(false)) %}
+          <button type="submit">Save note</button>
+        {% endif %}
+      </form>
+    </article>
+  </section>
+{% endif %}

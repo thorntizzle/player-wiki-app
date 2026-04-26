@@ -1180,6 +1180,74 @@ def test_xianxia_session_resources_allow_dao_update_with_cap(
     assert updated.state_record.state["xianxia"]["dao"] == {"current": 3}
 
 
+def test_xianxia_session_notes_allow_editable_users_to_update_notes(
+    client,
+    sign_in,
+    users,
+    app,
+    get_character,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Session Note Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    session_response = client.get(
+        "/campaigns/linden-pass/session/character?character=session-note-crane&page=notes"
+    )
+
+    assert session_response.status_code == 200
+    session_html = unescape(session_response.get_data(as_text=True))
+    assert 'id="session-notes"' in session_html
+    assert 'data-character-sheet-edit-form="notes"' in session_html
+    assert 'name="player_notes_markdown"' in session_html
+    assert "Save note" in session_html
+
+    record = get_character("session-note-crane")
+    assert record is not None
+    response = client.post(
+        "/campaigns/linden-pass/characters/session-note-crane/session/notes",
+        data={
+            "expected_revision": record.state_record.revision,
+            "player_notes_markdown": "Track the jade token between scenes.",
+            "mode": "session",
+            "page": "notes",
+            "return_view": "session-character",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert (
+        "/campaigns/linden-pass/session/character?character=session-note-crane"
+        "&page=notes#session-notes"
+    ) in response.headers["Location"]
+    updated = get_character("session-note-crane")
+    assert updated is not None
+    assert (
+        updated.state_record.state["notes"]["player_notes_markdown"]
+        == "Track the jade token between scenes."
+    )
+    assert updated.state_record.state["xianxia"]["notes"] == {
+        "player_notes_markdown": "Track the jade token between scenes."
+    }
+
+    sheet_response = client.get(
+        "/campaigns/linden-pass/characters/session-note-crane?mode=session&page=notes"
+    )
+    assert sheet_response.status_code == 200
+    sheet_html = unescape(sheet_response.get_data(as_text=True))
+    assert 'id="session-notes"' in sheet_html
+    assert 'data-character-sheet-edit-form="notes"' in sheet_html
+    assert "Track the jade token between scenes." in sheet_html
+
+
 def test_xianxia_martial_arts_page_marks_incomplete_rank_progress(
     client,
     sign_in,
