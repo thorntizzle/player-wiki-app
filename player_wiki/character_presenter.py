@@ -43,6 +43,7 @@ from .xianxia_character_model import (
     derive_xianxia_actions_per_turn,
     derive_xianxia_check_formula_strings,
     derive_xianxia_defense,
+    derive_xianxia_difficulty_state_adjustments,
     derive_xianxia_effort_damage_strings,
 )
 
@@ -198,6 +199,11 @@ def present_character_detail(
     )
     xianxia_check_formula = (
         present_xianxia_check_formula()
+        if is_xianxia_character
+        else None
+    )
+    xianxia_difficulty_states = (
+        present_xianxia_difficulty_states()
         if is_xianxia_character
         else None
     )
@@ -803,6 +809,7 @@ def present_character_detail(
         "xianxia_actions": xianxia_actions,
         "xianxia_effort_damage": xianxia_effort_damage,
         "xianxia_check_formula": xianxia_check_formula,
+        "xianxia_difficulty_states": xianxia_difficulty_states,
         "attack_reminders": attack_reminders,
         "defensive_rules": defensive_rules,
         "death_save_summary": death_save_summary,
@@ -1164,6 +1171,10 @@ def present_xianxia_effort_damage_derivation(xianxia_payload: dict[str, Any]) ->
 
 def present_xianxia_check_formula() -> dict[str, str]:
     return derive_xianxia_check_formula_strings()
+
+
+def present_xianxia_difficulty_states() -> dict[str, Any]:
+    return derive_xianxia_difficulty_state_adjustments()
 
 
 def build_reference_sections(

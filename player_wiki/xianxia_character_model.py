@@ -37,6 +37,11 @@ XIANXIA_DEFENSE_BASE = 10
 XIANXIA_CHECK_FORMULA = "1d20 + Attribute + Realm modifier + situational modifiers"
 XIANXIA_CHECK_SPEND_BONUS = "+1d6"
 XIANXIA_CHECK_SPEND_BONUS_DETAIL = "per spent Energy/Yin/Yang point"
+XIANXIA_DIFFICULTY_STATE_ADJUSTMENTS = (
+    ("easy", "EASY", -3),
+    ("normal", "Normal", 0),
+    ("hard", "HARD", 3),
+)
 
 XIANXIA_DEFINITION_FIELD_KEYS = (
     "schema_version",
@@ -283,6 +288,28 @@ def derive_xianxia_check_formula_strings() -> dict[str, str]:
         "summary": (
             f"{XIANXIA_CHECK_FORMULA}, plus "
             f"{XIANXIA_CHECK_SPEND_BONUS} {XIANXIA_CHECK_SPEND_BONUS_DETAIL}."
+        ),
+    }
+
+
+def derive_xianxia_difficulty_state_adjustments() -> dict[str, Any]:
+    """Return the capped final Xianxia DC states for sheet presentation."""
+
+    states = [
+        {
+            "key": key,
+            "label": label,
+            "adjustment": adjustment,
+            "adjustment_label": _format_dc_adjustment(adjustment),
+        }
+        for key, label, adjustment in XIANXIA_DIFFICULTY_STATE_ADJUSTMENTS
+    ]
+    return {
+        "states": states,
+        "summary": "EASY -3, Normal 0, HARD +3",
+        "resolution_note": (
+            "Resolve EASY/HARD influences to one final DC state before applying "
+            "the listed adjustment."
         ),
     }
 
@@ -735,6 +762,12 @@ def _normalize_int(value: Any, *, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return int(default)
+
+
+def _format_dc_adjustment(value: int) -> str:
+    if value == 0:
+        return "0"
+    return f"{value:+d}"
 
 
 def _normalize_non_negative_int(value: Any, *, default: int = 0) -> int:

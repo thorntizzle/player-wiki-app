@@ -183,6 +183,25 @@
         </section>
       {% endif %}
 
+      {% if show_quick_sections and character.xianxia_difficulty_states %}
+        <section class="read-section" id="xianxia-difficulty-states">
+          <div class="section-heading">
+            <h2>Difficulty states</h2>
+          </div>
+          <div class="glance-grid">
+            {% for state in character.xianxia_difficulty_states.states %}
+              <div class="glance-card">
+                <span class="meta">{{ state.label }}</span>
+                <strong>{{ state.adjustment_label }}</strong>
+                <span class="meta">Final DC adjustment</span>
+              </div>
+            {% endfor %}
+          </div>
+          <p class="meta">Difficulty states = {{ character.xianxia_difficulty_states.summary }}.</p>
+          <p class="meta">{{ character.xianxia_difficulty_states.resolution_note }}</p>
+        </section>
+      {% endif %}
+
       {% if show_quick_sections and character.xianxia_actions %}
         <section class="read-section" id="xianxia-action-count">
           <div class="section-heading">

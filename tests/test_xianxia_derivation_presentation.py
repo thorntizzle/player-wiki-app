@@ -4,6 +4,7 @@ from html import unescape
 
 import yaml
 
+from player_wiki.xianxia_character_model import derive_xianxia_difficulty_state_adjustments
 from player_wiki.systems_service import XIANXIA_HOMEBREW_SOURCE_ID
 
 
@@ -122,6 +123,13 @@ def test_xianxia_quick_reference_presents_derived_defense(
         "Check formula = 1d20 + Attribute + Realm modifier + situational modifiers, "
         "plus +1d6 per spent Energy/Yin/Yang point."
     ) in html
+    assert "Difficulty states" in html
+    assert "Difficulty states = EASY -3, Normal 0, HARD +3." in html
+    assert "Final DC adjustment" in html
+    assert "<strong>-3</strong>" in html
+    assert "<strong>0</strong>" in html
+    assert "<strong>+3</strong>" in html
+    assert "Resolve EASY/HARD influences to one final DC state" in html
     assert "Action count" in html
     assert "Actions per turn" in html
     assert "Actions per turn = Mortal -> 2 actions per turn" in html
@@ -181,3 +189,14 @@ def test_xianxia_quick_reference_derives_actions_from_realm_not_stored_value(
     assert "Actions per turn = Divine -> 4 actions per turn" in html
     assert "<strong>Divine</strong>" in html
     assert "<strong>4</strong>" in html
+
+
+def test_xianxia_difficulty_state_helper_presents_capped_final_dc_states():
+    presentation = derive_xianxia_difficulty_state_adjustments()
+
+    assert presentation["summary"] == "EASY -3, Normal 0, HARD +3"
+    assert presentation["states"] == [
+        {"key": "easy", "label": "EASY", "adjustment": -3, "adjustment_label": "-3"},
+        {"key": "normal", "label": "Normal", "adjustment": 0, "adjustment_label": "0"},
+        {"key": "hard", "label": "HARD", "adjustment": 3, "adjustment_label": "+3"},
+    ]
