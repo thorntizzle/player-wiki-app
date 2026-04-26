@@ -163,6 +163,33 @@
         </section>
       {% endif %}
 
+      {% if show_quick_sections and character.xianxia_defense %}
+        <section class="read-section" id="xianxia-defense-derivation">
+          <div class="section-heading">
+            <h2>Defense calculation</h2>
+          </div>
+          <div class="glance-grid">
+            <div class="glance-card">
+              <span class="meta">Base</span>
+              <strong>{{ character.xianxia_defense.base }}</strong>
+            </div>
+            <div class="glance-card">
+              <span class="meta">Manual armor bonus</span>
+              <strong>{{ character.xianxia_defense.manual_armor_bonus }}</strong>
+            </div>
+            <div class="glance-card">
+              <span class="meta">Constitution</span>
+              <strong>{{ character.xianxia_defense.constitution }}</strong>
+            </div>
+            <div class="glance-card">
+              <span class="meta">Defense</span>
+              <strong>{{ character.xianxia_defense.value }}</strong>
+            </div>
+          </div>
+          <p class="meta">Defense = {{ character.xianxia_defense.formula }}</p>
+        </section>
+      {% endif %}
+
       {% if show_quick_sections and character.defensive_rules %}
         <section class="read-section">
           <div class="section-heading">

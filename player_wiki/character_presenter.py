@@ -35,6 +35,8 @@ from .character_service import merge_state_with_definition
 from .character_spell_slots import normalize_spell_slot_lane_id, spell_slot_lanes_from_spellcasting
 from .models import Campaign
 from .repository import build_alias_index, normalize_lookup, render_obsidian_links
+from .system_policy import is_xianxia_system
+from .xianxia_character_model import XIANXIA_DEFENSE_BASE, derive_xianxia_defense
 
 ABILITY_ORDER = (
     ("str", "strength", "Strength"),
@@ -170,6 +172,12 @@ def present_character_detail(
     vitals = dict(state.get("vitals") or {})
     stats = dict(definition.stats or {})
     profile = dict(definition.profile or {})
+    is_xianxia_character = is_xianxia_system(definition.system)
+    xianxia_defense = (
+        present_xianxia_defense_derivation(definition.xianxia)
+        if is_xianxia_character
+        else None
+    )
     notes_payload = dict(state.get("notes") or {})
     resource_lookup = {
         str(resource.get("id") or ""): resource for resource in list(state.get("resources") or [])
@@ -185,31 +193,49 @@ def present_character_detail(
         if build_character_inventory_item_ref(item)
     }
 
-    overview_stats = [
-        {"label": "Current HP", "value": f"{int(vitals.get('current_hp') or 0)} / {int(stats.get('max_hp') or 0)}"},
-        {"label": "Temp HP", "value": str(int(vitals.get("temp_hp") or 0))},
-        {"label": "Armor Class", "value": str(int(stats.get("armor_class") or 0))},
-        {"label": "Initiative", "value": format_signed(stats.get("initiative_bonus"))},
-        {"label": "Speed", "value": str(stats.get("speed") or "--")},
-        {"label": "Proficiency", "value": format_signed(stats.get("proficiency_bonus"))},
-        {"label": "Passive Perception", "value": str(int(stats.get("passive_perception") or 0))},
-        {"label": "Passive Insight", "value": str(int(stats.get("passive_insight") or 0))},
-        {"label": "Passive Investigation", "value": str(int(stats.get("passive_investigation") or 0))},
-    ]
-    if stats.get("carrying_capacity") not in (None, ""):
-        overview_stats.append(
+    if is_xianxia_character:
+        xianxia_payload = dict(definition.xianxia or {})
+        xianxia_durability = dict(xianxia_payload.get("durability") or {})
+        overview_stats = [
             {
-                "label": "Carrying Capacity",
-                "value": _format_weight_value(stats.get("carrying_capacity")) or "--",
-            }
-        )
-    if stats.get("push_drag_lift") not in (None, ""):
-        overview_stats.append(
+                "label": "Current HP",
+                "value": (
+                    f"{int(vitals.get('current_hp') or 0)} / "
+                    f"{_coerce_int(xianxia_durability.get('hp_max'), default=10)}"
+                ),
+            },
+            {"label": "Temp HP", "value": str(int(vitals.get("temp_hp") or 0))},
             {
-                "label": "Push / Drag / Lift",
-                "value": _format_weight_value(stats.get("push_drag_lift")) or "--",
-            }
-        )
+                "label": "Defense",
+                "value": str((xianxia_defense or {}).get("value", 0)),
+            },
+        ]
+    else:
+        overview_stats = [
+            {"label": "Current HP", "value": f"{int(vitals.get('current_hp') or 0)} / {int(stats.get('max_hp') or 0)}"},
+            {"label": "Temp HP", "value": str(int(vitals.get("temp_hp") or 0))},
+            {"label": "Armor Class", "value": str(int(stats.get("armor_class") or 0))},
+            {"label": "Initiative", "value": format_signed(stats.get("initiative_bonus"))},
+            {"label": "Speed", "value": str(stats.get("speed") or "--")},
+            {"label": "Proficiency", "value": format_signed(stats.get("proficiency_bonus"))},
+            {"label": "Passive Perception", "value": str(int(stats.get("passive_perception") or 0))},
+            {"label": "Passive Insight", "value": str(int(stats.get("passive_insight") or 0))},
+            {"label": "Passive Investigation", "value": str(int(stats.get("passive_investigation") or 0))},
+        ]
+        if stats.get("carrying_capacity") not in (None, ""):
+            overview_stats.append(
+                {
+                    "label": "Carrying Capacity",
+                    "value": _format_weight_value(stats.get("carrying_capacity")) or "--",
+                }
+            )
+        if stats.get("push_drag_lift") not in (None, ""):
+            overview_stats.append(
+                {
+                    "label": "Push / Drag / Lift",
+                    "value": _format_weight_value(stats.get("push_drag_lift")) or "--",
+                }
+            )
     death_saves = dict(vitals.get("death_saves") or {})
     death_save_summary = None
     if int(death_saves.get("successes") or 0) or int(death_saves.get("failures") or 0):
@@ -742,6 +768,7 @@ def present_character_detail(
             {"label": "Experience", "value": str(profile.get("experience_model") or "").strip()},
         ],
         "overview_stats": overview_stats,
+        "xianxia_defense": xianxia_defense,
         "attack_reminders": attack_reminders,
         "defensive_rules": defensive_rules,
         "death_save_summary": death_save_summary,
@@ -1055,6 +1082,25 @@ def present_defensive_rules(stats: dict[str, Any]) -> list[dict[str, Any]]:
     return defensive_rules
 
 
+def present_xianxia_defense_derivation(xianxia_payload: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(xianxia_payload or {})
+    attributes = dict(payload.get("attributes") or {})
+    durability = dict(payload.get("durability") or {})
+    manual_armor_bonus = _coerce_int(durability.get("manual_armor_bonus"), default=0)
+    constitution = _coerce_int(attributes.get("con"), default=0)
+    value = derive_xianxia_defense(
+        attributes=attributes,
+        manual_armor_bonus=manual_armor_bonus,
+    )
+    return {
+        "value": value,
+        "base": XIANXIA_DEFENSE_BASE,
+        "manual_armor_bonus": manual_armor_bonus,
+        "constitution": constitution,
+        "formula": f"{XIANXIA_DEFENSE_BASE} + {manual_armor_bonus} + {constitution}",
+    }
+
+
 def build_reference_sections(
     campaign: Campaign,
     definition_payload: dict[str, Any],
@@ -1245,6 +1291,15 @@ def humanize_value(value: Any) -> str:
     if not text:
         return ""
     return text.replace("_", " ").replace("-", " ").title()
+
+
+def _coerce_int(value: Any, *, default: int = 0) -> int:
+    if value is None or value == "":
+        return int(default)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
 
 
 def spell_level_label(level: int) -> str:
