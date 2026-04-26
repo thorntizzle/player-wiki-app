@@ -1145,6 +1145,13 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     assert definition_payload["xianxia"]["skills"] == {
         "trained": ["Fishing", "Court Etiquette", "Calligraphy"]
     }
+    assert definition_payload["xianxia"]["equipment"] == {
+        "necessary_weapons": [],
+        "necessary_tools": [
+            {"name": "Fishing rod, spear, or net", "reason": "Required for Fishing"},
+            {"name": "Calligraphy brush", "reason": "Required for Calligraphy"},
+        ],
+    }
     assert definition_payload["xianxia"]["martial_arts"] == [
         {
             "name": "Demon's Fist",
@@ -1263,6 +1270,15 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
 
     grant_definition_payload = _read_character_definition(app, "dao-granted")
     assert grant_definition_payload["xianxia"]["dao"] == {"max": 3}
+    assert grant_definition_payload["xianxia"]["equipment"] == {
+        "necessary_weapons": [
+            {"name": "Jian", "reason": "Required by Taoist Blade"},
+        ],
+        "necessary_tools": [
+            {"name": "Fishing rod, spear, or net", "reason": "Required for Fishing"},
+            {"name": "Calligraphy brush", "reason": "Required for Calligraphy"},
+        ],
+    }
     assert [
         martial_art["current_rank_key"]
         for martial_art in grant_definition_payload["xianxia"]["martial_arts"]

@@ -18,8 +18,9 @@ from .xianxia_character_model import (
     normalize_xianxia_state_payload,
     validate_xianxia_definition_payload,
 )
+from .xianxia_equipment_inference import infer_xianxia_required_equipment
 
-XIANXIA_CHARACTER_BUILDER_VERSION = "2026-04-26.04"
+XIANXIA_CHARACTER_BUILDER_VERSION = "2026-04-26.05"
 XIANXIA_CHARACTER_CREATE_SOURCE_PATH = "builder://xianxia-create"
 XIANXIA_REALM_DEFAULT = "Mortal"
 XIANXIA_ACTIONS_PER_TURN_DEFAULT = 2
@@ -197,9 +198,14 @@ def build_xianxia_character_definition(
     energy_scores = _validate_xianxia_create_energies(form_values or {})
     manual_armor_bonus = _validate_xianxia_create_manual_armor_bonus(form_values or {})
     trained_skills = _validate_xianxia_create_trained_skills(form_values or {})
-    martial_arts = _validate_xianxia_create_starting_martial_arts(
+    martial_art_selection = _validate_xianxia_create_starting_martial_art_selection(
         form_values or {},
         create_context.get("martial_art_option_map"),
+    )
+    martial_arts = martial_art_selection["records"]
+    required_equipment = infer_xianxia_required_equipment(
+        martial_arts=martial_art_selection["options"],
+        trained_skills=trained_skills,
     )
     defense = derive_xianxia_defense(
         attributes=attribute_scores,
@@ -272,6 +278,7 @@ def build_xianxia_character_definition(
                 "skills": {
                     "trained": trained_skills,
                 },
+                "equipment": required_equipment,
                 "martial_arts": martial_arts,
             },
         }
@@ -566,6 +573,16 @@ def _validate_xianxia_create_starting_martial_arts(
     values: dict[str, Any],
     option_map: Any,
 ) -> list[dict[str, Any]]:
+    return _validate_xianxia_create_starting_martial_art_selection(
+        values,
+        option_map,
+    )["records"]
+
+
+def _validate_xianxia_create_starting_martial_art_selection(
+    values: dict[str, Any],
+    option_map: Any,
+) -> dict[str, list[dict[str, Any]]]:
     options_by_slug = dict(option_map or {}) if isinstance(option_map, dict) else {}
     martial_art_values = _normalize_xianxia_create_martial_art_values(values)
     selected_values = [
@@ -585,6 +602,7 @@ def _validate_xianxia_create_starting_martial_arts(
 
     errors: list[str] = []
     selected_records: list[dict[str, Any]] = []
+    selected_options: list[dict[str, Any]] = []
     seen_slugs: set[str] = set()
     duplicate_titles: list[str] = []
     for value in selected_values:
@@ -615,6 +633,9 @@ def _validate_xianxia_create_starting_martial_arts(
         selected_records.append(
             _build_xianxia_starting_martial_art_record(option, rank_key)
         )
+        selected_option = dict(option)
+        selected_option["current_rank_key"] = rank_key
+        selected_options.append(selected_option)
 
     if duplicate_titles:
         errors.append(
@@ -631,7 +652,7 @@ def _validate_xianxia_create_starting_martial_arts(
         )
     if errors:
         raise CharacterBuildError(" ".join(errors))
-    return selected_records
+    return {"records": selected_records, "options": selected_options}
 
 
 def _validate_xianxia_create_manual_armor_bonus(values: dict[str, Any]) -> int:
@@ -928,6 +949,14 @@ def _build_xianxia_martial_art_option(
             rank_key: f"xianxia:{getattr(entry, 'slug', '')}:{rank_key}"
             for rank_key in available_rank_keys
         }
+    martial_art_body = dict(body.get("xianxia_martial_art") or {})
+    martial_art_style = str(
+        metadata.get("xianxia_martial_art_style")
+        or metadata.get("martial_art_style")
+        or martial_art_body.get("style")
+        or martial_art_body.get("martial_art_style")
+        or ""
+    ).strip()
     catalog_order = metadata.get("martial_art_catalog_order")
     try:
         sort_order = int(catalog_order)
@@ -940,6 +969,7 @@ def _build_xianxia_martial_art_option(
         "entry_type": str(getattr(entry, "entry_type", "") or "").strip(),
         "source_id": entry_source_id,
         "library_slug": str(getattr(entry, "library_slug", "") or "").strip(),
+        "martial_art_style": martial_art_style,
         "available_starting_rank_keys": available_rank_keys,
         "rank_refs": rank_refs,
         "rank_records_status": str(metadata.get("rank_records_status") or "").strip(),
