@@ -565,6 +565,29 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     assert invalid_attribute_response.status_code == 400
     assert "Dexterity must be a whole number." in invalid_attribute_response.get_data(as_text=True)
 
+    over_budget_attributes = _attribute_data()
+    over_budget_attributes["attribute_str"] = "2"
+    over_budget_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={"name": "Attribute Overbudget", "character_slug": "", **over_budget_attributes},
+        follow_redirects=False,
+    )
+    assert over_budget_response.status_code == 400
+    assert (
+        "Xianxia Attributes must spend exactly 6 creation points; submitted total is 7."
+    ) in over_budget_response.get_data(as_text=True)
+
+    over_cap_attributes = _attribute_data()
+    over_cap_attributes["attribute_str"] = "4"
+    over_cap_attributes["attribute_wis"] = "0"
+    over_cap_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={"name": "Attribute Overcap", "character_slug": "", **over_cap_attributes},
+        follow_redirects=False,
+    )
+    assert over_cap_response.status_code == 400
+    assert "Strength cannot exceed 3 at character creation." in over_cap_response.get_data(as_text=True)
+
     submit_response = client.post(
         "/campaigns/linden-pass/characters/new",
         data={"name": "Lotus Wake", "character_slug": "", **_attribute_data()},

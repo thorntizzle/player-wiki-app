@@ -17,6 +17,8 @@ from .xianxia_character_model import (
 
 XIANXIA_CHARACTER_BUILDER_VERSION = "2026-04-26.01"
 XIANXIA_CHARACTER_CREATE_SOURCE_PATH = "builder://xianxia-create"
+XIANXIA_ATTRIBUTE_CREATION_POINTS = 6
+XIANXIA_ATTRIBUTE_MAX_AT_CREATION = 3
 
 
 def build_xianxia_character_create_context(
@@ -29,6 +31,7 @@ def build_xianxia_character_create_context(
             "label": XIANXIA_ATTRIBUTE_LABELS[key],
             "input_name": _xianxia_attribute_input_name(key),
             "value": values["attributes"][key],
+            "max": XIANXIA_ATTRIBUTE_MAX_AT_CREATION,
         }
         for key in XIANXIA_ATTRIBUTE_KEYS
     ]
@@ -187,10 +190,22 @@ def _validate_xianxia_create_attributes(values: dict[str, Any]) -> dict[str, int
         if attribute_score < 0:
             errors.append(f"{label} cannot be negative.")
             continue
+        if attribute_score > XIANXIA_ATTRIBUTE_MAX_AT_CREATION:
+            errors.append(
+                f"{label} cannot exceed {XIANXIA_ATTRIBUTE_MAX_AT_CREATION} at character creation."
+            )
         attribute_scores[key] = attribute_score
 
     if missing_labels:
         errors.append(f"Missing Xianxia attributes: {_format_label_list(missing_labels)}.")
+    if len(attribute_scores) == len(XIANXIA_ATTRIBUTE_KEYS):
+        attribute_total = sum(attribute_scores.values())
+        if attribute_total != XIANXIA_ATTRIBUTE_CREATION_POINTS:
+            errors.append(
+                "Xianxia Attributes must spend exactly "
+                f"{XIANXIA_ATTRIBUTE_CREATION_POINTS} creation points; submitted total is "
+                f"{attribute_total}."
+            )
     if errors:
         raise CharacterBuildError(" ".join(errors))
 
