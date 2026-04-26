@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .xianxia_character_model import XIANXIA_ENERGY_KEYS
+
 
 XIANXIA_MARTIAL_ART_RANK_KEYS = (
     "initiate",
@@ -26,6 +28,7 @@ class XianxiaMartialArtAdvanceResult:
     martial_art_name: str
     rank_name: str
     insight_cost: int
+    energy_maximum_increases: dict[str, int]
 
 
 def advance_xianxia_martial_art_rank_definition(
@@ -106,6 +109,13 @@ def advance_xianxia_martial_art_rank_definition(
             f"{rank_label(rank_key)}; only {available} available."
         )
 
+    energy_maximum_increases = _energy_maximum_increases(target_record)
+    if not any(energy_maximum_increases.values()):
+        raise ValueError(
+            f"{martial_art_name} {rank_label(rank_key)} does not have "
+            "rank-granted Jing, Qi, or Shen maximum increases."
+        )
+
     rank_ref = str(target_record.get("rank_ref") or "").strip()
     learned_rank_refs = _ensure_recorded_learned_rank_refs(
         learned_rank_refs,
@@ -118,6 +128,13 @@ def advance_xianxia_martial_art_rank_definition(
     martial_art["current_rank_key"] = rank_key
     martial_art["current_rank"] = rank_label(rank_key)
     martial_art["learned_rank_refs"] = learned_rank_refs
+    rank_energy_maximum_increases = (
+        dict(martial_art.get("rank_energy_maximum_increases") or {})
+        if isinstance(martial_art.get("rank_energy_maximum_increases"), dict)
+        else {}
+    )
+    rank_energy_maximum_increases[rank_key] = dict(energy_maximum_increases)
+    martial_art["rank_energy_maximum_increases"] = rank_energy_maximum_increases
     martial_art["insight_spent"] = _non_negative_int(
         martial_art.get("insight_spent"),
         default=0,
@@ -128,6 +145,10 @@ def advance_xianxia_martial_art_rank_definition(
         "available": available - insight_cost,
         "spent": spent + insight_cost,
     }
+    xianxia["energies"] = _apply_energy_maximum_increases(
+        xianxia.get("energies"),
+        energy_maximum_increases,
+    )
     xianxia["martial_arts"] = martial_arts
     history = [
         dict(record)
@@ -144,6 +165,7 @@ def advance_xianxia_martial_art_rank_definition(
         event["rank_ref"] = rank_ref
     if systems_ref:
         event["systems_ref"] = systems_ref
+    event["energy_maximum_increases"] = dict(energy_maximum_increases)
     history.append(event)
     xianxia["advancement_history"] = history
     payload["xianxia"] = xianxia
@@ -154,6 +176,7 @@ def advance_xianxia_martial_art_rank_definition(
         martial_art_name=martial_art_name,
         rank_name=rank_label(rank_key),
         insight_cost=insight_cost,
+        energy_maximum_increases=energy_maximum_increases,
     )
 
 
@@ -309,6 +332,34 @@ def _ensure_recorded_learned_rank_refs(
         if rank_key in learned_rank_keys and rank_ref and rank_ref not in refs:
             refs.append(rank_ref)
     return refs
+
+
+def _energy_maximum_increases(rank_record: dict[str, Any]) -> dict[str, int]:
+    raw_increases = (
+        rank_record.get("energy_maximum_increases")
+        or rank_record.get("xianxia_energy_maximum_increases")
+        or {}
+    )
+    increases = dict(raw_increases) if isinstance(raw_increases, dict) else {}
+    return {
+        key: _non_negative_int(increases.get(key), default=0)
+        for key in XIANXIA_ENERGY_KEYS
+    }
+
+
+def _apply_energy_maximum_increases(
+    raw_energies: Any,
+    increases: dict[str, int],
+) -> dict[str, dict[str, int]]:
+    energies = dict(raw_energies or {}) if isinstance(raw_energies, dict) else {}
+    updated: dict[str, dict[str, int]] = {}
+    for key in XIANXIA_ENERGY_KEYS:
+        energy = dict(energies.get(key) or {})
+        current_max = _non_negative_int(energy.get("max"), default=0)
+        updated[key] = {
+            "max": current_max + _non_negative_int(increases.get(key), default=0)
+        }
+    return updated
 
 
 def _non_negative_int(value: Any, *, default: int = 0) -> int:

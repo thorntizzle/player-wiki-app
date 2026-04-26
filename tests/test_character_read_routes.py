@@ -1668,10 +1668,18 @@ def test_xianxia_cultivation_route_spends_insight_to_advance_martial_art_rank(
     definition_payload = _read_character_definition(app, "rank-crane")
     xianxia = definition_payload["xianxia"]
     assert xianxia["insight"] == {"available": 1, "spent": 1}
+    assert xianxia["energies"] == {
+        "jing": {"max": 2},
+        "qi": {"max": 2},
+        "shen": {"max": 1},
+    }
     first_art = xianxia["martial_arts"][0]
     assert first_art["current_rank_key"] == "novice"
     assert first_art["current_rank"] == "Novice"
     assert "xianxia:demons-fist:novice" in first_art["learned_rank_refs"]
+    assert first_art["rank_energy_maximum_increases"] == {
+        "novice": {"jing": 1, "qi": 1, "shen": 0}
+    }
     assert first_art["insight_spent"] == 1
     assert xianxia["advancement_history"] == [
         {
@@ -1681,8 +1689,18 @@ def test_xianxia_cultivation_route_spends_insight_to_advance_martial_art_rank(
             "rank": "Novice",
             "rank_ref": "xianxia:demons-fist:novice",
             "systems_ref": first_art["systems_ref"],
+            "energy_maximum_increases": {"jing": 1, "qi": 1, "shen": 0},
         }
     ]
+    with app.app_context():
+        repository = app.extensions["character_repository"]
+        record = repository.get_character("linden-pass", "rank-crane")
+        assert record is not None
+        assert record.state_record.state["xianxia"]["energies"] == {
+            "jing": {"current": 1},
+            "qi": {"current": 1},
+            "shen": {"current": 1},
+        }
     assert _character_state_revision(app, "rank-crane") == current_revision + 1
 
     updated_html = client.get(
@@ -1693,6 +1711,14 @@ def test_xianxia_cultivation_route_spends_insight_to_advance_martial_art_rank(
     assert "Martial Art Rank Advance" in updated_html
     assert "Rank:" in updated_html
     assert "Novice" in updated_html
+    resources_html = client.get(
+        "/campaigns/linden-pass/characters/rank-crane?page=resources"
+    ).get_data(as_text=True)
+    assert "<h3>Jing</h3>" in resources_html
+    assert "<h3>Qi</h3>" in resources_html
+    assert "Current 1 / Max 2" in resources_html
+    assert "<h3>Shen</h3>" in resources_html
+    assert "Current 1 / Max 1" in resources_html
 
 
 def test_xianxia_cultivation_rank_advance_requires_next_rank_and_insight(
