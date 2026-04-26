@@ -235,6 +235,22 @@
         </section>
       {% endif %}
 
+      {% if show_quick_sections and character.xianxia_skill_use_guardrails %}
+        <section class="read-section" id="xianxia-skill-use-guardrails">
+          <div class="section-heading">
+            <h2>Skill use guardrails</h2>
+            {% if character.xianxia_skill_use_guardrails.rule_href %}
+              <a class="button-link subtle" href="{{ character.xianxia_skill_use_guardrails.rule_href }}">{{ character.xianxia_skill_use_guardrails.rule_title }} rule</a>
+            {% endif %}
+          </div>
+          <article class="detail-card">
+            {% for line in character.xianxia_skill_use_guardrails.reference_lines %}
+              <p>{{ line }}</p>
+            {% endfor %}
+          </article>
+        </section>
+      {% endif %}
+
       {% if show_quick_sections and character.xianxia_actions %}
         <section class="read-section" id="xianxia-action-count">
           <div class="section-heading">

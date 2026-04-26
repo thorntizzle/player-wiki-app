@@ -515,6 +515,34 @@ def test_xianxia_quick_reference_displays_honor_interaction_reminders(
     ) in html
 
 
+def test_xianxia_quick_reference_displays_skill_use_guardrails(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Guarded Skill"),
+        follow_redirects=False,
+    )
+
+    assert create_response.status_code == 302
+
+    response = client.get("/campaigns/linden-pass/characters/guarded-skill?page=quick")
+
+    assert response.status_code == 200
+    html = unescape(response.get_data(as_text=True))
+    assert "Skill use guardrails" in html
+    assert "/campaigns/linden-pass/systems/entries/skills" in html
+    assert "Skills rule" in html
+    assert "Skills cannot be used in active battle to affect Attacks or Damage." in html
+    assert "Skills can affect surroundings or pre-battle preparation when the GM agrees." in html
+
+
 def test_xianxia_quick_reference_displays_active_stance_and_aura_reminders_without_state_automation(
     app,
     client,

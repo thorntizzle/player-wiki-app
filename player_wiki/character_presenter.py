@@ -87,6 +87,7 @@ XIANXIA_AURA_ACTIVATION_RULE_ENTRY_KEY = (
     f"xianxia|rule|{XIANXIA_HOMEBREW_SOURCE_ID.lower()}|aura-activation-rules"
 )
 XIANXIA_HONOR_RULE_ENTRY_KEY = f"xianxia|rule|{XIANXIA_HOMEBREW_SOURCE_ID.lower()}|honor"
+XIANXIA_SKILLS_RULE_ENTRY_KEY = f"xianxia|rule|{XIANXIA_HOMEBREW_SOURCE_ID.lower()}|skills"
 ATTACK_NAME_SUFFIX_PATTERN = re.compile(r"\s*\([^)]*\)\s*$")
 
 
@@ -221,6 +222,14 @@ def present_character_detail(
         present_xianxia_honor_interactions(
             campaign,
             definition.xianxia,
+            systems_service=systems_service,
+        )
+        if is_xianxia_character
+        else None
+    )
+    xianxia_skill_use_guardrails = (
+        present_xianxia_skill_use_guardrails(
+            campaign,
             systems_service=systems_service,
         )
         if is_xianxia_character
@@ -848,6 +857,7 @@ def present_character_detail(
         "xianxia_check_formula": xianxia_check_formula,
         "xianxia_difficulty_states": xianxia_difficulty_states,
         "xianxia_honor_interactions": xianxia_honor_interactions,
+        "xianxia_skill_use_guardrails": xianxia_skill_use_guardrails,
         "xianxia_active_state_reminders": xianxia_active_state_reminders,
         "xianxia_stance_break": xianxia_stance_break,
         "attack_reminders": attack_reminders,
@@ -1264,6 +1274,43 @@ def present_xianxia_honor_interactions(
     return presentation
 
 
+def present_xianxia_skill_use_guardrails(
+    campaign: Campaign,
+    *,
+    systems_service: Any | None = None,
+) -> dict[str, Any] | None:
+    if systems_service is None:
+        return None
+
+    entry = systems_service.get_entry_for_campaign(
+        campaign.slug,
+        XIANXIA_SKILLS_RULE_ENTRY_KEY,
+    )
+    if entry is None:
+        entry = systems_service.get_entry_by_slug_for_campaign(campaign.slug, "skills")
+    if entry is None:
+        return None
+
+    reference_lines = _extract_xianxia_skill_guardrail_lines(entry)
+    if not reference_lines:
+        return None
+
+    rule_title = str(getattr(entry, "title", "") or "Skills")
+    return {
+        "rule_title": rule_title,
+        "rule_href": build_systems_entry_href(
+            campaign.slug,
+            {
+                "slug": str(getattr(entry, "slug", "") or "skills"),
+                "title": rule_title,
+                "entry_type": "rule",
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+            },
+        ),
+        "reference_lines": reference_lines,
+    }
+
+
 def present_xianxia_active_state_reminders(
     campaign: Campaign,
     state: dict[str, Any],
@@ -1367,6 +1414,19 @@ def _extract_xianxia_rule_reference_lines(entry: Any) -> list[str]:
         seen.add(normalized)
         lines.append(line)
     return lines
+
+
+def _extract_xianxia_skill_guardrail_lines(entry: Any) -> list[str]:
+    guardrail_lines: list[str] = []
+    for line in _extract_xianxia_rule_reference_lines(entry):
+        normalized = line.casefold()
+        if (
+            "active battle" in normalized
+            or "pre-battle" in normalized
+            or "surroundings" in normalized
+        ):
+            guardrail_lines.append(line)
+    return guardrail_lines
 
 
 def present_xianxia_stance_break_reference(
