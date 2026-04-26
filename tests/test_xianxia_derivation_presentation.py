@@ -373,8 +373,15 @@ def test_xianxia_read_sheet_uses_system_specific_subpages(
     assert "Defense = 10 + 2 + 3" in equipment_html
     assert "<strong>15</strong>" in equipment_html
     assert "Necessary weapons" in equipment_html
+    assert "Jian" in equipment_html
+    assert "Required by Taoist Blade" in equipment_html
     assert "Necessary tools" in equipment_html
     assert "Fishing rod, spear, or net" in equipment_html
+    assert "Required for Fishing" in equipment_html
+    assert "Calligraphy brush" in equipment_html
+    assert "Required for Calligraphy" in equipment_html
+    assert "Tea set" in equipment_html
+    assert "Required for Tea Ceremony" in equipment_html
     assert "Attuned items" not in equipment_html
 
     inventory_response = client.get(
