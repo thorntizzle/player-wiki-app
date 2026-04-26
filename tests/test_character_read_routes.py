@@ -740,6 +740,131 @@ def test_xianxia_character_sheet_renders_and_links_xianxia_systems_entries(
     assert "DND impostor palm body must not render." not in entry_html
 
 
+def test_xianxia_generic_techniques_and_basic_actions_browse_search_and_link_from_sheet(
+    app, client, sign_in, users
+):
+    def _mutate_campaign(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+            }
+        ]
+
+    _write_campaign_config(app, _mutate_campaign)
+
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        service = app.extensions["systems_service"]
+        service.ensure_builtin_library_seeded(XIANXIA_SYSTEM_CODE)
+        qi_blast = service.get_entry_by_slug_for_campaign("linden-pass", "qi-blast")
+        throat_jab = service.get_entry_by_slug_for_campaign("linden-pass", "throat-jab")
+
+        assert qi_blast is not None
+        assert qi_blast.library_slug == XIANXIA_SYSTEM_CODE
+        assert qi_blast.entry_type == "generic_technique"
+        assert throat_jab is not None
+        assert throat_jab.library_slug == XIANXIA_SYSTEM_CODE
+        assert throat_jab.entry_type == "basic_action"
+
+    def _mutate_character(payload: dict) -> None:
+        profile = dict(payload.get("profile") or {})
+        profile["classes"] = [
+            {
+                "row_id": "xianxia-row-1",
+                "class_name": "Mortal Cultivator",
+                "level": 0,
+            }
+        ]
+        profile["class_level_text"] = "Mortal Cultivator"
+        profile["class_ref"] = {}
+        profile["subclass_ref"] = {}
+        profile["species"] = ""
+        profile["species_ref"] = {}
+        profile["background"] = ""
+        profile["background_ref"] = {}
+        payload["profile"] = profile
+        payload["spellcasting"] = {}
+        payload["features"] = [
+            {
+                "id": "xianxia-generic-technique-qi-blast",
+                "name": "Qi Blast",
+                "category": "custom_feature",
+                "systems_ref": _systems_ref(qi_blast),
+            },
+            {
+                "id": "xianxia-basic-action-throat-jab",
+                "name": "Throat Jab",
+                "category": "custom_feature",
+                "systems_ref": _systems_ref(throat_jab),
+            },
+        ]
+
+    _write_character_definition(app, "arden-march", _mutate_character)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    source_response = client.get(
+        f"/campaigns/linden-pass/systems/sources/{XIANXIA_HOMEBREW_SOURCE_ID}"
+    )
+    generic_category_response = client.get(
+        f"/campaigns/linden-pass/systems/sources/{XIANXIA_HOMEBREW_SOURCE_ID}/types/generic_technique"
+    )
+    basic_action_category_response = client.get(
+        f"/campaigns/linden-pass/systems/sources/{XIANXIA_HOMEBREW_SOURCE_ID}/types/basic_action"
+    )
+    generic_search_response = client.get("/campaigns/linden-pass/systems/search?q=Qi+Blast")
+    basic_action_search_response = client.get("/campaigns/linden-pass/systems/search?q=Throat+Jab")
+    sheet_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=features")
+
+    assert source_response.status_code == 200
+    source_html = source_response.get_data(as_text=True)
+    assert "Xianxia Homebrew" in source_html
+    assert "Generic Techniques" in source_html
+    assert "Basic Actions" in source_html
+    assert (
+        f"/campaigns/linden-pass/systems/sources/{XIANXIA_HOMEBREW_SOURCE_ID}/types/generic_technique"
+        in source_html
+    )
+    assert (
+        f"/campaigns/linden-pass/systems/sources/{XIANXIA_HOMEBREW_SOURCE_ID}/types/basic_action"
+        in source_html
+    )
+
+    assert generic_category_response.status_code == 200
+    generic_category_html = generic_category_response.get_data(as_text=True)
+    assert "Xianxia Homebrew: Generic Techniques" in generic_category_html
+    assert "Qi Blast" in generic_category_html
+    assert "/campaigns/linden-pass/systems/entries/qi-blast" in generic_category_html
+
+    assert basic_action_category_response.status_code == 200
+    basic_action_category_html = basic_action_category_response.get_data(as_text=True)
+    assert "Xianxia Homebrew: Basic Actions" in basic_action_category_html
+    assert "Throat Jab" in basic_action_category_html
+    assert "/campaigns/linden-pass/systems/entries/throat-jab" in basic_action_category_html
+
+    assert generic_search_response.status_code == 200
+    generic_search_html = generic_search_response.get_data(as_text=True)
+    assert "Qi Blast" in generic_search_html
+    assert "/campaigns/linden-pass/systems/entries/qi-blast" in generic_search_html
+
+    assert basic_action_search_response.status_code == 200
+    basic_action_search_html = basic_action_search_response.get_data(as_text=True)
+    assert "Throat Jab" in basic_action_search_html
+    assert "/campaigns/linden-pass/systems/entries/throat-jab" in basic_action_search_html
+
+    assert sheet_response.status_code == 200
+    sheet_html = sheet_response.get_data(as_text=True)
+    assert 'href="/campaigns/linden-pass/systems/entries/qi-blast"' in sheet_html
+    assert 'href="/campaigns/linden-pass/systems/entries/throat-jab"' in sheet_html
+    assert "Spend a point of Qi" in sheet_html
+    assert "Insight Cost" in sheet_html
+    assert "Basic Action Details" in sheet_html
+    assert "1 Round" in sheet_html
+    assert "?page=spellcasting" not in sheet_html
+
+
 def test_xianxia_blocks_dnd_spellcasting_management_routes(app, client, sign_in, users):
     def _mutate(payload: dict) -> None:
         payload["system"] = "xianxia"
