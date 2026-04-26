@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from html import unescape
 
 import yaml
@@ -89,6 +90,15 @@ def _write_raw_xianxia_character_definition(app, character_slug: str, definition
         ),
         encoding="utf-8",
     )
+
+
+def _replace_character_state(app, record, state: dict) -> None:
+    with app.app_context():
+        app.extensions["character_state_store"].replace_state(
+            record.definition,
+            state,
+            expected_revision=record.state_record.revision,
+        )
 
 
 def test_xianxia_quick_reference_presents_derived_defense(
@@ -262,3 +272,88 @@ def test_xianxia_dao_persists_across_session_surface_saves_and_rests(
         assert rest_response.status_code == 302
         record_after_vitals = get_character("dao-keeper")
         assert record_after_vitals.state_record.state["xianxia"]["dao"] == {"current": 2}
+
+
+def test_xianxia_one_day_rest_recovers_mutable_pools_and_preserves_dao(
+    app,
+    client,
+    sign_in,
+    users,
+    get_character,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={**_valid_xianxia_create_data("Resting Crane"), "dao_current": "2"},
+        follow_redirects=False,
+    )
+
+    assert create_response.status_code == 302
+    record = get_character("resting-crane")
+    assert record is not None
+
+    depleted_state = deepcopy(record.state_record.state)
+    depleted_state["vitals"] = {"current_hp": 4, "temp_hp": 2}
+    depleted_state["xianxia"]["vitals"] = {
+        "current_hp": 4,
+        "temp_hp": 2,
+        "current_stance": 3,
+        "temp_stance": 5,
+    }
+    depleted_state["xianxia"]["energies"] = {
+        "jing": {"current": 0},
+        "qi": {"current": 0},
+        "shen": {"current": 0},
+    }
+    depleted_state["xianxia"]["yin_yang"] = {"yin_current": 0, "yang_current": 0}
+    depleted_state["xianxia"]["dao"] = {"current": 2}
+    _replace_character_state(app, record, depleted_state)
+
+    depleted_record = get_character("resting-crane")
+    assert depleted_record is not None
+
+    with app.app_context():
+        preview = app.extensions["character_state_service"].preview_rest(depleted_record, "long")
+    preview_changes = {
+        change.label: (change.from_value, change.to_value)
+        for change in preview.changes
+    }
+
+    assert preview_changes == {
+        "HP": ("4 / 10", "10 / 10"),
+        "Stance": ("3 / 10", "10 / 10"),
+        "Jing Energy": ("0 / 1", "1 / 1"),
+        "Qi Energy": ("0 / 1", "1 / 1"),
+        "Shen Energy": ("0 / 1", "1 / 1"),
+        "Yin": ("0 / 1", "1 / 1"),
+        "Yang": ("0 / 1", "1 / 1"),
+    }
+
+    rest_response = client.post(
+        "/campaigns/linden-pass/characters/resting-crane/session/rest/long",
+        data={
+            "expected_revision": depleted_record.state_record.revision,
+            "confirm_rest": "1",
+        },
+        follow_redirects=False,
+    )
+
+    assert rest_response.status_code == 302
+    rested_record = get_character("resting-crane")
+    rested_state = rested_record.state_record.state
+    assert rested_state["vitals"] == {"current_hp": 10, "temp_hp": 2}
+    assert rested_state["xianxia"]["vitals"] == {
+        "current_hp": 10,
+        "temp_hp": 2,
+        "current_stance": 10,
+        "temp_stance": 5,
+    }
+    assert rested_state["xianxia"]["energies"] == {
+        "jing": {"current": 1},
+        "qi": {"current": 1},
+        "shen": {"current": 1},
+    }
+    assert rested_state["xianxia"]["yin_yang"] == {"yin_current": 1, "yang_current": 1}
+    assert rested_state["xianxia"]["dao"] == {"current": 2}

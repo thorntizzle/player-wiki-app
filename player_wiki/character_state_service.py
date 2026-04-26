@@ -7,6 +7,22 @@ from typing import Any
 from .character_models import CharacterRecord, CharacterStateRecord
 from .character_spell_slots import normalize_spell_slot_lane_id, spell_slot_lane_title_map
 from .character_store import CharacterStateStore
+from .system_policy import is_xianxia_system
+from .xianxia_character_model import (
+    XIANXIA_ENERGY_KEYS,
+    xianxia_energy_max,
+    xianxia_hp_max,
+    xianxia_stance_max,
+    xianxia_yang_max,
+    xianxia_yin_max,
+)
+
+
+_XIANXIA_ENERGY_LABELS = {
+    "jing": "Jing",
+    "qi": "Qi",
+    "shen": "Shen",
+}
 
 
 @dataclass(slots=True)
@@ -458,6 +474,7 @@ class CharacterStateService:
         changes = self._collect_rest_changes(
             state,
             normalized_rest,
+            definition=record.definition,
             spellcasting=record.definition.spellcasting,
         )
         return CharacterRestPreview(
@@ -485,6 +502,8 @@ class CharacterStateService:
         if normalized_rest == "long":
             for slot in list(state.get("spell_slots") or []):
                 slot["used"] = 0
+            if is_xianxia_system(record.definition.system):
+                self._apply_xianxia_one_day_rest(state, record.definition)
 
         return self._replace_state(
             record,
@@ -513,6 +532,7 @@ class CharacterStateService:
         state: dict[str, Any],
         rest_type: str,
         *,
+        definition: Any,
         spellcasting: dict[str, Any] | None = None,
     ) -> list[CharacterRestChange]:
         changes: list[CharacterRestChange] = []
@@ -532,6 +552,9 @@ class CharacterStateService:
             )
 
         if rest_type == "long":
+            if is_xianxia_system(getattr(definition, "system", None)):
+                changes.extend(self._collect_xianxia_one_day_rest_changes(state, definition))
+
             lane_titles = spell_slot_lane_title_map(spellcasting)
             total_lanes = len(lane_titles)
             for slot in list(state.get("spell_slots") or []):
@@ -553,6 +576,96 @@ class CharacterStateService:
                 )
 
         return changes
+
+    def _apply_xianxia_one_day_rest(self, state: dict[str, Any], definition: Any) -> None:
+        xianxia_state = dict(state.get("xianxia") or {})
+        vitals = dict(xianxia_state.get("vitals") or {})
+        hp_max = xianxia_hp_max(definition)
+        stance_max = xianxia_stance_max(definition)
+        vitals["current_hp"] = hp_max
+        vitals["current_stance"] = stance_max
+        xianxia_state["vitals"] = vitals
+
+        energies = {
+            key: {"current": xianxia_energy_max(definition, key)}
+            for key in XIANXIA_ENERGY_KEYS
+        }
+        xianxia_state["energies"] = energies
+        xianxia_state["yin_yang"] = {
+            "yin_current": xianxia_yin_max(definition),
+            "yang_current": xianxia_yang_max(definition),
+        }
+        state["xianxia"] = xianxia_state
+
+        shared_vitals = dict(state.get("vitals") or {})
+        shared_vitals["current_hp"] = hp_max
+        state["vitals"] = shared_vitals
+
+    def _collect_xianxia_one_day_rest_changes(
+        self,
+        state: dict[str, Any],
+        definition: Any,
+    ) -> list[CharacterRestChange]:
+        changes: list[CharacterRestChange] = []
+        xianxia_state = dict(state.get("xianxia") or {})
+        vitals = dict(xianxia_state.get("vitals") or {})
+        self._append_pool_recovery_change(
+            changes,
+            label="HP",
+            current=vitals.get("current_hp"),
+            maximum=xianxia_hp_max(definition),
+        )
+        self._append_pool_recovery_change(
+            changes,
+            label="Stance",
+            current=vitals.get("current_stance"),
+            maximum=xianxia_stance_max(definition),
+        )
+
+        energies = dict(xianxia_state.get("energies") or {})
+        for key in XIANXIA_ENERGY_KEYS:
+            energy = dict(energies.get(key) or {})
+            self._append_pool_recovery_change(
+                changes,
+                label=f"{_XIANXIA_ENERGY_LABELS[key]} Energy",
+                current=energy.get("current"),
+                maximum=xianxia_energy_max(definition, key),
+            )
+
+        yin_yang = dict(xianxia_state.get("yin_yang") or {})
+        self._append_pool_recovery_change(
+            changes,
+            label="Yin",
+            current=yin_yang.get("yin_current"),
+            maximum=xianxia_yin_max(definition),
+        )
+        self._append_pool_recovery_change(
+            changes,
+            label="Yang",
+            current=yin_yang.get("yang_current"),
+            maximum=xianxia_yang_max(definition),
+        )
+        return changes
+
+    def _append_pool_recovery_change(
+        self,
+        changes: list[CharacterRestChange],
+        *,
+        label: str,
+        current: Any,
+        maximum: int,
+    ) -> None:
+        current_value = max(0, int(current or 0))
+        max_value = max(0, int(maximum))
+        if current_value == max_value:
+            return
+        changes.append(
+            CharacterRestChange(
+                label=label,
+                from_value=self._resource_value_text(current_value, max_value),
+                to_value=self._resource_value_text(max_value, max_value),
+            )
+        )
 
     def _should_reset_resource(self, resource: dict[str, Any], rest_type: str) -> bool:
         reset_on = str(resource.get("reset_on") or "manual").strip().lower()
