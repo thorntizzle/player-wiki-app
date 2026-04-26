@@ -3,11 +3,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .xianxia_character_model import XIANXIA_ENERGY_KEYS
+from .xianxia_character_model import (
+    XIANXIA_EFFORT_KEYS,
+    XIANXIA_EFFORT_LABELS,
+    XIANXIA_ENERGY_KEYS,
+)
 
 
 XIANXIA_CULTIVATION_ENERGY_INSIGHT_COST = 1
 XIANXIA_MEDITATION_INSIGHT_COST = 1
+XIANXIA_CONDITIONING_INSIGHT_COST = 1
+XIANXIA_CONDITIONING_HP_INCREASE = 10
+XIANXIA_CONDITIONING_HP_MAXIMUM = 50
+XIANXIA_CONDITIONING_EFFORT_INCREASE = 2
 XIANXIA_MARTIAL_ART_RANK_KEYS = (
     "initiate",
     "novice",
@@ -64,6 +72,18 @@ class XianxiaMeditationSpendResult:
     yin_yang_name: str
     insight_cost: int
     new_maximum: int
+    notes: str = ""
+
+
+@dataclass(frozen=True)
+class XianxiaConditioningSpendResult:
+    definition: Any
+    target_kind: str
+    target_key: str
+    target_name: str
+    insight_cost: int
+    increase: int
+    new_value: int
     notes: str = ""
 
 
@@ -197,6 +217,106 @@ def spend_xianxia_meditation_definition(
         yin_yang_name=yin_yang_name,
         insight_cost=insight_cost,
         new_maximum=new_maximum,
+        notes=clean_notes,
+    )
+
+
+def spend_xianxia_conditioning_definition(
+    definition: Any,
+    *,
+    conditioning_target: str,
+    effort_key: str = "",
+    notes: str = "",
+) -> XianxiaConditioningSpendResult:
+    target_kind = normalize_xianxia_conditioning_target(conditioning_target)
+    if target_kind not in {"hp", "effort"}:
+        raise ValueError("Choose HP or an Effort for Conditioning.")
+
+    payload = definition.to_dict()
+    xianxia = dict(payload.get("xianxia") or {})
+    insight = dict(xianxia.get("insight") or {})
+    available = _non_negative_int(insight.get("available"), default=0)
+    spent = _non_negative_int(insight.get("spent"), default=0)
+    insight_cost = XIANXIA_CONDITIONING_INSIGHT_COST
+    if available < insight_cost:
+        target_name = "HP" if target_kind == "hp" else effort_label(effort_key)
+        raise ValueError(
+            f"Conditioning needs {insight_cost} Insight to increase {target_name}; "
+            f"only {available} available."
+        )
+
+    clean_notes = _clean_note(notes)
+    history = [
+        dict(record)
+        for record in list(xianxia.get("advancement_history") or [])
+        if isinstance(record, dict) and record
+    ]
+
+    if target_kind == "hp":
+        durability = dict(xianxia.get("durability") or {})
+        current_hp_max = _non_negative_int(durability.get("hp_max"), default=10)
+        if current_hp_max >= XIANXIA_CONDITIONING_HP_MAXIMUM:
+            raise ValueError(
+                f"Conditioning cannot increase HP above {XIANXIA_CONDITIONING_HP_MAXIMUM}."
+            )
+        new_hp_max = min(
+            XIANXIA_CONDITIONING_HP_MAXIMUM,
+            current_hp_max + XIANXIA_CONDITIONING_HP_INCREASE,
+        )
+        increase = new_hp_max - current_hp_max
+        durability["hp_max"] = new_hp_max
+        xianxia["durability"] = durability
+        event = {
+            "action": "conditioning_hp_increase",
+            "amount": insight_cost,
+            "target": "HP",
+            "hp_maximum_increase": increase,
+            "new_hp_maximum": new_hp_max,
+            "hp_maximum_cap": XIANXIA_CONDITIONING_HP_MAXIMUM,
+        }
+        target_key = "hp"
+        target_name = "HP"
+        new_value = new_hp_max
+    else:
+        normalized_effort_key = normalize_xianxia_effort_key(effort_key)
+        if normalized_effort_key not in XIANXIA_EFFORT_KEYS:
+            raise ValueError("Choose a valid Effort for Conditioning.")
+        efforts = dict(xianxia.get("efforts") or {})
+        current_score = _non_negative_int(efforts.get(normalized_effort_key), default=0)
+        new_score = current_score + XIANXIA_CONDITIONING_EFFORT_INCREASE
+        efforts[normalized_effort_key] = new_score
+        xianxia["efforts"] = efforts
+        target_key = normalized_effort_key
+        target_name = effort_label(normalized_effort_key)
+        increase = XIANXIA_CONDITIONING_EFFORT_INCREASE
+        new_value = new_score
+        event = {
+            "action": "conditioning_effort_increase",
+            "amount": insight_cost,
+            "target": target_name,
+            "effort_key": normalized_effort_key,
+            "effort_point_increase": increase,
+            "new_effort_score": new_score,
+        }
+
+    if clean_notes:
+        event["notes"] = clean_notes
+    history.append(event)
+    xianxia["advancement_history"] = history
+    xianxia["insight"] = {
+        "available": available - insight_cost,
+        "spent": spent + insight_cost,
+    }
+    payload["xianxia"] = xianxia
+
+    return XianxiaConditioningSpendResult(
+        definition=definition.__class__.from_dict(payload),
+        target_kind=target_kind,
+        target_key=target_key,
+        target_name=target_name,
+        insight_cost=insight_cost,
+        increase=increase,
+        new_value=new_value,
         notes=clean_notes,
     )
 
@@ -420,6 +540,26 @@ def normalize_xianxia_yin_yang_key(value: Any) -> str:
     )
 
 
+def normalize_xianxia_conditioning_target(value: Any) -> str:
+    return (
+        str(value if value is not None else "")
+        .strip()
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+    )
+
+
+def normalize_xianxia_effort_key(value: Any) -> str:
+    return (
+        str(value if value is not None else "")
+        .strip()
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+    )
+
+
 def energy_label(energy_key: str) -> str:
     normalized = normalize_xianxia_energy_key(energy_key)
     if normalized in XIANXIA_ENERGY_LABELS:
@@ -432,6 +572,13 @@ def yin_yang_label(yin_yang_key: str) -> str:
     if normalized in XIANXIA_YIN_YANG_LABELS:
         return XIANXIA_YIN_YANG_LABELS[normalized]
     return normalized.replace("_", " ").title() if normalized else "Yin/Yang"
+
+
+def effort_label(effort_key: str) -> str:
+    normalized = normalize_xianxia_effort_key(effort_key)
+    if normalized in XIANXIA_EFFORT_LABELS:
+        return XIANXIA_EFFORT_LABELS[normalized]
+    return normalized.replace("_", " ").title() if normalized else "Effort"
 
 
 def rank_label(rank_key: str) -> str:

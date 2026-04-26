@@ -205,6 +205,84 @@
     {% endif %}
   </section>
 
+  <section class="read-section" id="xianxia-cultivation-conditioning">
+    <div class="section-heading">
+      <h2>Conditioning</h2>
+    </div>
+    <div class="feature-stack">
+      <article class="feature-row">
+        <div class="feature-row__header">
+          <h3>{{ cultivation.conditioning.hp.label }}</h3>
+          <p class="meta">
+            Current max {{ cultivation.conditioning.hp.max }} / Cap {{ cultivation.conditioning.hp.cap }}
+          </p>
+        </div>
+        <form
+          class="stack-form"
+          method="post"
+          action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+        >
+          <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+          <input type="hidden" name="cultivation_action" value="spend_conditioning">
+          <input type="hidden" name="conditioning_target" value="hp">
+          <p class="meta">
+            Spend {{ cultivation.conditioning.hp.insight_cost }} Insight to increase HP maximum by {{ cultivation.conditioning.hp.hp_increase }}.
+          </p>
+          <label>
+            Notes
+            <textarea name="conditioning_notes" rows="2"></textarea>
+          </label>
+          {% if not cultivation.conditioning.hp.has_enough_insight %}
+            <p class="meta">Needs {{ cultivation.conditioning.hp.shortfall }} more available Insight.</p>
+          {% elif not cultivation.conditioning.hp.can_increase %}
+            <p class="meta">HP maximum is already at the Conditioning cap.</p>
+          {% endif %}
+          <div class="hero-actions">
+            <button
+              type="submit"
+              {% if not cultivation.conditioning.hp.has_enough_insight or not cultivation.conditioning.hp.can_increase %}disabled{% endif %}
+            >
+              Increase HP
+            </button>
+          </div>
+        </form>
+      </article>
+      {% for effort in cultivation.conditioning.efforts %}
+        <article class="feature-row">
+          <div class="feature-row__header">
+            <h3>{{ effort.label }}</h3>
+            <p class="meta">Current score {{ effort.score }}</p>
+          </div>
+          <form
+            class="stack-form"
+            method="post"
+            action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+          >
+            <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+            <input type="hidden" name="cultivation_action" value="spend_conditioning">
+            <input type="hidden" name="conditioning_target" value="effort">
+            <input type="hidden" name="effort_key" value="{{ effort.key }}">
+            <p class="meta">
+              Spend {{ effort.insight_cost }} Insight to add {{ effort.effort_increase }} {{ effort.label }} points.
+            </p>
+            <label>
+              Notes
+              <textarea name="conditioning_notes" rows="2"></textarea>
+            </label>
+            {% if not effort.has_enough_insight %}
+              <p class="meta">Needs {{ effort.shortfall }} more available Insight.</p>
+            {% endif %}
+            <div class="hero-actions">
+              <button type="submit" {% if not effort.has_enough_insight %}disabled{% endif %}>
+                Increase {{ effort.label }}
+              </button>
+            </div>
+          </form>
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+
   <section class="read-section" id="xianxia-cultivation-martial-arts">
     <div class="section-heading">
       <h2>Martial Arts</h2>

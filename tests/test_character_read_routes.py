@@ -1866,6 +1866,164 @@ def test_xianxia_cultivation_route_spends_insight_on_meditation_to_increase_yin_
     assert "Current 1 / Max 2" in resources_html
 
 
+def test_xianxia_cultivation_route_spends_insight_on_conditioning_for_hp_or_effort(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+                "default_visibility": "dm",
+            }
+        ]
+
+    _write_campaign_config(app, _mutate)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Conditioning Adept"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+
+    cultivation_html = client.get(
+        "/campaigns/linden-pass/characters/conditioning-adept/cultivation"
+    ).get_data(as_text=True)
+    assert 'name="cultivation_action" value="spend_conditioning"' in cultivation_html
+    assert 'name="conditioning_target" value="hp"' in cultivation_html
+    assert 'name="conditioning_target" value="effort"' in cultivation_html
+    assert 'name="effort_key" value="magic"' in cultivation_html
+    assert "Spend 1 Insight to increase HP maximum by 10." in cultivation_html
+    assert "Spend 1 Insight to add 2 Magic points." in cultivation_html
+    assert "Needs 1 more available Insight." in cultivation_html
+
+    starting_revision = _character_state_revision(app, "conditioning-adept")
+    insufficient_response = client.post(
+        "/campaigns/linden-pass/characters/conditioning-adept/cultivation",
+        data={
+            "expected_revision": str(starting_revision),
+            "cultivation_action": "spend_conditioning",
+            "conditioning_target": "hp",
+        },
+        follow_redirects=True,
+    )
+    assert insufficient_response.status_code == 200
+    assert (
+        "Conditioning needs 1 Insight to increase HP; only 0 available."
+        in insufficient_response.get_data(as_text=True)
+    )
+    definition_payload = _read_character_definition(app, "conditioning-adept")
+    assert definition_payload["xianxia"]["insight"] == {"available": 0, "spent": 0}
+    assert definition_payload["xianxia"]["durability"]["hp_max"] == 10
+    assert definition_payload["xianxia"]["efforts"]["magic"] == 1
+    assert definition_payload["xianxia"]["advancement_history"] == []
+    assert _character_state_revision(app, "conditioning-adept") == starting_revision
+
+    insight_response = client.post(
+        "/campaigns/linden-pass/characters/conditioning-adept/cultivation",
+        data={
+            "expected_revision": str(starting_revision),
+            "cultivation_action": "save_insight",
+            "insight_available": "2",
+            "insight_spent": "0",
+        },
+        follow_redirects=False,
+    )
+    assert insight_response.status_code == 302
+
+    current_revision = _character_state_revision(app, "conditioning-adept")
+    hp_response = client.post(
+        "/campaigns/linden-pass/characters/conditioning-adept/cultivation",
+        data={
+            "expected_revision": str(current_revision),
+            "cultivation_action": "spend_conditioning",
+            "conditioning_target": "hp",
+            "conditioning_notes": "Stone-body breathing.",
+        },
+        follow_redirects=False,
+    )
+    assert hp_response.status_code == 302
+    assert hp_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/conditioning-adept/cultivation#xianxia-cultivation-conditioning"
+    )
+
+    definition_payload = _read_character_definition(app, "conditioning-adept")
+    xianxia = definition_payload["xianxia"]
+    assert xianxia["insight"] == {"available": 1, "spent": 1}
+    assert xianxia["durability"]["hp_max"] == 20
+    assert xianxia["efforts"]["magic"] == 1
+    assert xianxia["advancement_history"] == [
+        {
+            "action": "conditioning_hp_increase",
+            "amount": 1,
+            "target": "HP",
+            "hp_maximum_increase": 10,
+            "new_hp_maximum": 20,
+            "hp_maximum_cap": 50,
+            "notes": "Stone-body breathing.",
+        }
+    ]
+    with app.app_context():
+        repository = app.extensions["character_repository"]
+        record = repository.get_character("linden-pass", "conditioning-adept")
+        assert record is not None
+        assert record.state_record.state["vitals"]["current_hp"] == 10
+        assert record.state_record.state["xianxia"]["vitals"]["current_hp"] == 10
+    assert _character_state_revision(app, "conditioning-adept") == current_revision + 1
+
+    effort_revision = _character_state_revision(app, "conditioning-adept")
+    effort_response = client.post(
+        "/campaigns/linden-pass/characters/conditioning-adept/cultivation",
+        data={
+            "expected_revision": str(effort_revision),
+            "cultivation_action": "spend_conditioning",
+            "conditioning_target": "effort",
+            "effort_key": "magic",
+            "conditioning_notes": "Refined spell-force output.",
+        },
+        follow_redirects=False,
+    )
+    assert effort_response.status_code == 302
+
+    definition_payload = _read_character_definition(app, "conditioning-adept")
+    xianxia = definition_payload["xianxia"]
+    assert xianxia["insight"] == {"available": 0, "spent": 2}
+    assert xianxia["durability"]["hp_max"] == 20
+    assert xianxia["efforts"]["magic"] == 3
+    assert xianxia["advancement_history"][-1] == {
+        "action": "conditioning_effort_increase",
+        "amount": 1,
+        "target": "Magic",
+        "effort_key": "magic",
+        "effort_point_increase": 2,
+        "new_effort_score": 3,
+        "notes": "Refined spell-force output.",
+    }
+    assert _character_state_revision(app, "conditioning-adept") == effort_revision + 1
+
+    updated_html = client.get(
+        "/campaigns/linden-pass/characters/conditioning-adept/cultivation"
+    ).get_data(as_text=True)
+    assert "Current max 20 / Cap 50" in updated_html
+    assert "Current score 3" in updated_html
+    assert "Conditioning Hp Increase" in updated_html
+    assert "HP maximum increase:" in updated_html
+    assert "New HP maximum:" in updated_html
+    assert "Conditioning Effort Increase" in updated_html
+    assert "Effort point increase:" in updated_html
+    assert "New Effort score:" in updated_html
+
+    resources_html = client.get(
+        "/campaigns/linden-pass/characters/conditioning-adept?page=resources"
+    ).get_data(as_text=True)
+    assert "<h3>HP</h3>" in resources_html
+    assert "Current 10 / Max 20" in resources_html
+
+
 def test_xianxia_cultivation_route_spends_insight_to_advance_martial_art_rank(
     app, client, sign_in, users
 ):
