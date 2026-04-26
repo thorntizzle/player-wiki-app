@@ -105,6 +105,16 @@ XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_NOTE_INSIGHT_STARTS_AT
 XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_STATUS_SEEDED = (
     "unavailable_by_default_insight_starts_at_0"
 )
+XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_NONE = "none"
+XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_REASON_NO_MASTER_REQUIRED = (
+    "generic_techniques_do_not_require_master"
+)
+XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_NOTE_NO_MASTER_REQUIRED = (
+    "Generic Techniques do not require a Master."
+)
+XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_STATUS_LEARNABLE_WITHOUT_MASTER = (
+    "learnable_without_master"
+)
 
 
 @lru_cache(maxsize=1)
@@ -979,6 +989,19 @@ def _normalize_generic_technique_details(raw_details: object) -> dict[str, dict[
                 f"Xianxia Generic Technique {generic_technique_key!r} must be unavailable "
                 "at character creation because Insight starts at 0."
             )
+        requires_master = bool(
+            raw_detail.get("requires_master") or raw_detail.get("master_required")
+        )
+        master_requirement = _normalize_identifier(
+            raw_detail.get("master_requirement")
+            or raw_detail.get("teacher_requirement")
+            or XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_NONE
+        )
+        if requires_master or master_requirement != XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_NONE:
+            raise ValueError(
+                f"Xianxia Generic Technique {generic_technique_key!r} must be "
+                "learnable without a Master."
+            )
         normalized[generic_technique_key] = {
             "insight_cost": insight_cost,
             "prerequisites": _normalize_generic_technique_prerequisites(
@@ -1012,6 +1035,18 @@ def _normalize_generic_technique_details(raw_details: object) -> dict[str, dict[
             ),
             "character_creation_availability_status": (
                 XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_STATUS_SEEDED
+            ),
+            "learnable_without_master": True,
+            "requires_master": False,
+            "master_requirement": XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_NONE,
+            "master_requirement_reason": (
+                XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_REASON_NO_MASTER_REQUIRED
+            ),
+            "master_requirement_note": (
+                XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_NOTE_NO_MASTER_REQUIRED
+            ),
+            "master_requirement_status": (
+                XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_STATUS_LEARNABLE_WITHOUT_MASTER
             ),
         }
     return normalized
@@ -1480,7 +1515,12 @@ def _stamp_martial_art_rank_records(metadata: dict[str, Any], body: dict[str, An
         )
 
 
-def _stamp_generic_technique_details(metadata: dict[str, Any], body: dict[str, Any], *, slug: str) -> None:
+def _stamp_generic_technique_details(
+    metadata: dict[str, Any],
+    body: dict[str, Any],
+    *,
+    slug: str,
+) -> None:
     generic_technique_key = _normalize_identifier(
         metadata.get("generic_technique_key")
         or metadata.get("xianxia_generic_technique_key")
@@ -1492,7 +1532,9 @@ def _stamp_generic_technique_details(metadata: dict[str, Any], body: dict[str, A
         XIANXIA_GENERIC_TECHNIQUE_DETAILS_STATUS_COST_PREREQ_RESOURCE_RANGE_EFFORT_RESET_SUPPORT_SEEDED
     )
     metadata["insight_cost"] = int(details["insight_cost"])
-    metadata["prerequisites"] = [dict(prerequisite) for prerequisite in details["prerequisites"]]
+    metadata["prerequisites"] = [
+        dict(prerequisite) for prerequisite in details["prerequisites"]
+    ]
     metadata["resource_costs"] = [dict(cost) for cost in details["resource_costs"]]
     metadata["range_tags"] = list(details["range_tags"])
     metadata["effort_tags"] = list(details["effort_tags"])
@@ -1514,6 +1556,12 @@ def _stamp_generic_technique_details(metadata: dict[str, Any], body: dict[str, A
     metadata["character_creation_availability_status"] = str(
         details["character_creation_availability_status"]
     )
+    metadata["learnable_without_master"] = bool(details["learnable_without_master"])
+    metadata["requires_master"] = bool(details["requires_master"])
+    metadata["master_requirement"] = str(details["master_requirement"])
+    metadata["master_requirement_reason"] = str(details["master_requirement_reason"])
+    metadata["master_requirement_note"] = str(details["master_requirement_note"])
+    metadata["master_requirement_status"] = str(details["master_requirement_status"])
 
     generic_technique_body = body.get("xianxia_generic_technique")
     if not isinstance(generic_technique_body, dict):
@@ -1527,7 +1575,9 @@ def _stamp_generic_technique_details(metadata: dict[str, Any], body: dict[str, A
     generic_technique_body["prerequisites"] = [
         dict(prerequisite) for prerequisite in details["prerequisites"]
     ]
-    generic_technique_body["resource_costs"] = [dict(cost) for cost in details["resource_costs"]]
+    generic_technique_body["resource_costs"] = [
+        dict(cost) for cost in details["resource_costs"]
+    ]
     generic_technique_body["range_tags"] = list(details["range_tags"])
     generic_technique_body["effort_tags"] = list(details["effort_tags"])
     generic_technique_body["reset_cadence"] = details["reset_cadence"]
@@ -1547,6 +1597,20 @@ def _stamp_generic_technique_details(metadata: dict[str, Any], body: dict[str, A
     )
     generic_technique_body["character_creation_availability_status"] = str(
         details["character_creation_availability_status"]
+    )
+    generic_technique_body["learnable_without_master"] = bool(
+        details["learnable_without_master"]
+    )
+    generic_technique_body["requires_master"] = bool(details["requires_master"])
+    generic_technique_body["master_requirement"] = str(details["master_requirement"])
+    generic_technique_body["master_requirement_reason"] = str(
+        details["master_requirement_reason"]
+    )
+    generic_technique_body["master_requirement_note"] = str(
+        details["master_requirement_note"]
+    )
+    generic_technique_body["master_requirement_status"] = str(
+        details["master_requirement_status"]
     )
     body["support_state"] = str(details["support_state"])
     body["xianxia_support_state"] = str(details["xianxia_support_state"])
@@ -1625,6 +1689,10 @@ def _generic_technique_details_search_parts(body: dict[str, Any]) -> list[str]:
         str(generic_technique_body.get("character_creation_availability_reason") or ""),
         str(generic_technique_body.get("character_creation_availability_note") or ""),
         str(generic_technique_body.get("character_creation_availability_status") or ""),
+        str(generic_technique_body.get("master_requirement") or ""),
+        str(generic_technique_body.get("master_requirement_reason") or ""),
+        str(generic_technique_body.get("master_requirement_note") or ""),
+        str(generic_technique_body.get("master_requirement_status") or ""),
     ]
     parts.extend(str(value) for value in generic_technique_body.get("range_tags") or [])
     parts.extend(str(value) for value in generic_technique_body.get("effort_tags") or [])
@@ -1710,6 +1778,22 @@ def _render_generic_technique_details_html(body: dict[str, Any]) -> str:
         parts.append(
             f"<p><strong>Character Creation:</strong> {character_creation_text}</p>"
         )
+
+    master_requirement = str(
+        generic_technique_body.get("master_requirement") or ""
+    ).strip()
+    if master_requirement:
+        master_requirement_note = str(
+            generic_technique_body.get("master_requirement_note") or ""
+        ).strip()
+        if generic_technique_body.get("learnable_without_master"):
+            master_requirement_text = "learnable without a Master"
+        else:
+            master_requirement_text = master_requirement.replace("_", " ")
+        learning_text = escape(master_requirement_text)
+        if master_requirement_note:
+            learning_text += f" ({escape(master_requirement_note)})"
+        parts.append(f"<p><strong>Learning:</strong> {learning_text}</p>")
 
     resource_costs = _format_resource_costs(generic_technique_body.get("resource_costs"))
     if resource_costs:
@@ -2065,7 +2149,9 @@ def _copy_generic_technique_detail(detail: dict[str, Any]) -> dict[str, Any]:
         "range_tags": list(detail.get("range_tags", [])),
         "effort_tags": list(detail.get("effort_tags", [])),
         "reset_cadence": detail.get("reset_cadence"),
-        "support_state": str(detail.get("support_state") or XIANXIA_GENERIC_TECHNIQUE_DEFAULT_SUPPORT_STATE),
+        "support_state": str(
+            detail.get("support_state") or XIANXIA_GENERIC_TECHNIQUE_DEFAULT_SUPPORT_STATE
+        ),
         "xianxia_support_state": str(
             detail.get("xianxia_support_state")
             or detail.get("support_state")
@@ -2089,6 +2175,24 @@ def _copy_generic_technique_detail(detail: dict[str, Any]) -> dict[str, Any]:
         "character_creation_availability_status": str(
             detail.get("character_creation_availability_status")
             or XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_STATUS_SEEDED
+        ),
+        "learnable_without_master": bool(detail.get("learnable_without_master", True)),
+        "requires_master": bool(detail.get("requires_master", False)),
+        "master_requirement": str(
+            detail.get("master_requirement")
+            or XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_NONE
+        ),
+        "master_requirement_reason": str(
+            detail.get("master_requirement_reason")
+            or XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_REASON_NO_MASTER_REQUIRED
+        ),
+        "master_requirement_note": str(
+            detail.get("master_requirement_note")
+            or XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_NOTE_NO_MASTER_REQUIRED
+        ),
+        "master_requirement_status": str(
+            detail.get("master_requirement_status")
+            or XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_STATUS_LEARNABLE_WITHOUT_MASTER
         ),
     }
 

@@ -26,6 +26,10 @@ from player_wiki.xianxia_systems_seed import (
     XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_UNAVAILABLE_BY_DEFAULT,
     XIANXIA_GENERIC_TECHNIQUE_DEFAULT_SUPPORT_STATE,
     XIANXIA_GENERIC_TECHNIQUE_DETAILS_STATUS_COST_PREREQ_RESOURCE_RANGE_EFFORT_RESET_SUPPORT_SEEDED,
+    XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_NONE,
+    XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_NOTE_NO_MASTER_REQUIRED,
+    XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_REASON_NO_MASTER_REQUIRED,
+    XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_STATUS_LEARNABLE_WITHOUT_MASTER,
     XIANXIA_MAGIC_EFFORT_CANONICAL_LABEL,
     XIANXIA_MARTIAL_ART_ABILITY_KIND_KEYS,
     XIANXIA_MARTIAL_ART_ABILITY_DEFAULT_SUPPORT_STATE,
@@ -943,7 +947,22 @@ def test_xianxia_generic_technique_seed_entries_cover_requirements_catalog():
         == XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_UNAVAILABLE_BY_DEFAULT
         for detail in generic_technique_details.values()
     )
-    assert all(entry["metadata"]["available_at_character_creation"] is False for entry in generic_entries)
+    assert all(
+        detail["learnable_without_master"] is True
+        for detail in generic_technique_details.values()
+    )
+    assert all(
+        detail["requires_master"] is False
+        for detail in generic_technique_details.values()
+    )
+    assert all(
+        detail["master_requirement"] == XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_NONE
+        for detail in generic_technique_details.values()
+    )
+    assert all(
+        entry["metadata"]["available_at_character_creation"] is False
+        for entry in generic_entries
+    )
     assert all(
         entry["metadata"]["character_creation_availability"]
         == XIANXIA_GENERIC_TECHNIQUE_CHARACTER_CREATION_AVAILABILITY_UNAVAILABLE_BY_DEFAULT
@@ -965,12 +984,44 @@ def test_xianxia_generic_technique_seed_entries_cover_requirements_catalog():
         for entry in generic_entries
     )
     assert all(
+        entry["metadata"]["learnable_without_master"] is True
+        for entry in generic_entries
+    )
+    assert all(entry["metadata"]["requires_master"] is False for entry in generic_entries)
+    assert all(
+        entry["metadata"]["master_requirement"] == XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_NONE
+        for entry in generic_entries
+    )
+    assert all(
+        entry["metadata"]["master_requirement_reason"]
+        == XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_REASON_NO_MASTER_REQUIRED
+        for entry in generic_entries
+    )
+    assert all(
+        entry["metadata"]["master_requirement_note"]
+        == XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_NOTE_NO_MASTER_REQUIRED
+        for entry in generic_entries
+    )
+    assert all(
+        entry["metadata"]["master_requirement_status"]
+        == XIANXIA_GENERIC_TECHNIQUE_MASTER_REQUIREMENT_STATUS_LEARNABLE_WITHOUT_MASTER
+        for entry in generic_entries
+    )
+    assert all(
         entry["body"]["xianxia_generic_technique"]["details_status"]
         == XIANXIA_GENERIC_TECHNIQUE_DETAILS_STATUS_COST_PREREQ_RESOURCE_RANGE_EFFORT_RESET_SUPPORT_SEEDED
         for entry in generic_entries
     )
     assert all(
         entry["body"]["xianxia_generic_technique"]["available_at_character_creation"] is False
+        for entry in generic_entries
+    )
+    assert all(
+        entry["body"]["xianxia_generic_technique"]["learnable_without_master"] is True
+        for entry in generic_entries
+    )
+    assert all(
+        entry["body"]["xianxia_generic_technique"]["requires_master"] is False
         for entry in generic_entries
     )
 
@@ -998,11 +1049,15 @@ def test_xianxia_generic_technique_seed_entries_cover_requirements_catalog():
     assert "Insight Cost" in qi_blast["rendered_html"]
     assert "Character Creation" in qi_blast["rendered_html"]
     assert "Insight starts at 0" in qi_blast["rendered_html"]
+    assert "Learning" in qi_blast["rendered_html"]
+    assert "learnable without a Master" in qi_blast["rendered_html"]
     assert "magic effort damage" in qi_blast["rendered_html"]
     assert "qi blast" in qi_blast["search_text"]
     assert "magic_effort_damage" in qi_blast["search_text"]
     assert "unavailable_by_default" in qi_blast["search_text"]
     assert "insight_starts_at_0" in qi_blast["search_text"]
+    assert "generic_techniques_do_not_require_master" in qi_blast["search_text"]
+    assert "learnable_without_master" in qi_blast["search_text"]
 
     scolding_backhand = entry_map["scolding-backhand"]
     assert scolding_backhand["metadata"]["reset_cadence"] == "once_per_combat"
