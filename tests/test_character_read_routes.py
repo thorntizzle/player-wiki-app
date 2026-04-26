@@ -525,6 +525,13 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
             "energy_shen": "1",
         }
 
+    def _skill_data() -> dict[str, str]:
+        return {
+            "trained_skill_1": "Fishing",
+            "trained_skill_2": "Court Etiquette",
+            "trained_skill_3": "Calligraphy",
+        }
+
     def _mutate(payload: dict) -> None:
         payload["system"] = "xianxia"
         payload["systems_library"] = "xianxia"
@@ -588,6 +595,11 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
         assert effort_label in create_html
     for energy_label in ("Jing", "Qi", "Shen"):
         assert energy_label in create_html
+    for skill_label in ("Trained Skill 1", "Trained Skill 2", "Trained Skill 3"):
+        assert skill_label in create_html
+    assert 'name="trained_skill_1"' in create_html
+    assert 'name="trained_skill_2"' in create_html
+    assert 'name="trained_skill_3"' in create_html
     assert "Native Level 1 Builder" not in create_html
     assert "Spell Preview" not in create_html
     assert XIANXIA_NATIVE_CHARACTER_CREATE_UNSUPPORTED_MESSAGE not in create_html
@@ -821,6 +833,60 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
         "submitted total is 2."
     ) in under_budget_energy_response.get_data(as_text=True)
 
+    missing_skills_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            "name": "Skill Gap",
+            "character_slug": "",
+            **_attribute_data(),
+            **_effort_data(),
+            **_energy_data(),
+        },
+        follow_redirects=False,
+    )
+    assert missing_skills_response.status_code == 400
+    assert (
+        "Xianxia character creation requires exactly 3 trained skills; submitted 0."
+    ) in missing_skills_response.get_data(as_text=True)
+
+    partial_skills = _skill_data()
+    partial_skills["trained_skill_3"] = ""
+    partial_skills_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            "name": "Skill Partial",
+            "character_slug": "",
+            **_attribute_data(),
+            **_effort_data(),
+            **_energy_data(),
+            **partial_skills,
+        },
+        follow_redirects=False,
+    )
+    assert partial_skills_response.status_code == 400
+    assert (
+        "Xianxia character creation requires exactly 3 trained skills; submitted 2."
+    ) in partial_skills_response.get_data(as_text=True)
+
+    duplicate_skills = _skill_data()
+    duplicate_skills["trained_skill_3"] = "fishing"
+    duplicate_skills_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            "name": "Skill Duplicate",
+            "character_slug": "",
+            **_attribute_data(),
+            **_effort_data(),
+            **_energy_data(),
+            **duplicate_skills,
+        },
+        follow_redirects=False,
+    )
+    assert duplicate_skills_response.status_code == 400
+    assert "Xianxia trained skills must be distinct; duplicates: fishing." in (
+        duplicate_skills_response.get_data(as_text=True)
+    )
+
     invalid_armor_response = client.post(
         "/campaigns/linden-pass/characters/new",
         data={
@@ -863,6 +929,7 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
             **_attribute_data(),
             **_effort_data(),
             **_energy_data(),
+            **_skill_data(),
             "dao_current": "flowing",
         },
         follow_redirects=False,
@@ -878,6 +945,7 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
             **_attribute_data(),
             **_effort_data(),
             **_energy_data(),
+            **_skill_data(),
             "dao_current": "4",
         },
         follow_redirects=False,
@@ -895,6 +963,7 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
             **_attribute_data(),
             **_effort_data(),
             **_energy_data(),
+            **_skill_data(),
         },
         follow_redirects=False,
     )
@@ -938,6 +1007,9 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     assert definition_payload["xianxia"]["yin_yang"] == {"yin_max": 1, "yang_max": 1}
     assert definition_payload["xianxia"]["dao"] == {"max": 3}
     assert definition_payload["xianxia"]["insight"] == {"available": 0, "spent": 0}
+    assert definition_payload["xianxia"]["skills"] == {
+        "trained": ["Fishing", "Court Etiquette", "Calligraphy"]
+    }
     assert definition_payload["xianxia"]["martial_arts"] == []
     assert definition_payload["xianxia"]["generic_techniques"] == []
 
@@ -981,6 +1053,7 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
             **_armored_attribute_data(),
             **_effort_data(),
             **_energy_data(),
+            **_skill_data(),
             "manual_armor_bonus": "2",
         },
         follow_redirects=False,
@@ -1007,6 +1080,7 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
             **_attribute_data(),
             **_effort_data(),
             **_energy_data(),
+            **_skill_data(),
             "dao_current": "2",
         },
         follow_redirects=False,

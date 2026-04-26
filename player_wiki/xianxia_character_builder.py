@@ -19,7 +19,7 @@ from .xianxia_character_model import (
     validate_xianxia_definition_payload,
 )
 
-XIANXIA_CHARACTER_BUILDER_VERSION = "2026-04-26.03"
+XIANXIA_CHARACTER_BUILDER_VERSION = "2026-04-26.04"
 XIANXIA_CHARACTER_CREATE_SOURCE_PATH = "builder://xianxia-create"
 XIANXIA_REALM_DEFAULT = "Mortal"
 XIANXIA_ACTIONS_PER_TURN_DEFAULT = 2
@@ -37,6 +37,7 @@ XIANXIA_DAO_DEFAULT_CURRENT = 0
 XIANXIA_DAO_DEFAULT_MAX = 3
 XIANXIA_INSIGHT_DEFAULT_AVAILABLE = 0
 XIANXIA_INSIGHT_DEFAULT_SPENT = 0
+XIANXIA_TRAINED_SKILL_COUNT = 3
 XIANXIA_ENERGY_LABELS = {
     "jing": "Jing",
     "qi": "Qi",
@@ -83,6 +84,16 @@ def build_xianxia_character_create_context(
         }
         for key in XIANXIA_ENERGY_KEYS
     ]
+    trained_skill_values = _normalize_xianxia_create_trained_skill_values(values)
+    trained_skill_fields = [
+        {
+            "index": index,
+            "label": f"Trained Skill {index}",
+            "input_name": _xianxia_trained_skill_input_name(index),
+            "value": trained_skill_values[index - 1] if index <= len(trained_skill_values) else "",
+        }
+        for index in range(1, XIANXIA_TRAINED_SKILL_COUNT + 1)
+    ]
     return {
         "values": values,
         "defaults": {
@@ -104,6 +115,7 @@ def build_xianxia_character_create_context(
         "attribute_fields": attribute_fields,
         "effort_fields": effort_fields,
         "energy_fields": energy_fields,
+        "trained_skill_fields": trained_skill_fields,
         "manual_armor_field": {
             "input_name": "manual_armor_bonus",
             "value": manual_armor_bonus,
@@ -141,6 +153,7 @@ def build_xianxia_character_definition(
     effort_scores = _validate_xianxia_create_efforts(form_values or {})
     energy_scores = _validate_xianxia_create_energies(form_values or {})
     manual_armor_bonus = _validate_xianxia_create_manual_armor_bonus(form_values or {})
+    trained_skills = _validate_xianxia_create_trained_skills(form_values or {})
     defense = derive_xianxia_defense(
         attributes=attribute_scores,
         manual_armor_bonus=manual_armor_bonus,
@@ -209,6 +222,9 @@ def build_xianxia_character_definition(
                     "manual_armor_bonus": manual_armor_bonus,
                     "defense": defense,
                 },
+                "skills": {
+                    "trained": trained_skills,
+                },
             },
         }
     )
@@ -257,6 +273,7 @@ def _normalize_xianxia_create_values(values: dict[str, Any]) -> dict[str, Any]:
         },
         "manual_armor_bonus": _normalize_xianxia_create_manual_armor_bonus_value(values),
         "dao_current": _normalize_xianxia_create_dao_current_value(values),
+        "trained_skills": _normalize_xianxia_create_trained_skill_values(values),
     }
 
 
@@ -468,6 +485,34 @@ def _validate_xianxia_create_dao_current(values: dict[str, Any]) -> int:
     return dao_current
 
 
+def _validate_xianxia_create_trained_skills(values: dict[str, Any]) -> list[str]:
+    trained_skills = [
+        _normalize_xianxia_trained_skill_name(value)
+        for value in _extract_xianxia_trained_skill_values(values)
+    ]
+    trained_skills = [skill for skill in trained_skills if skill]
+    if len(trained_skills) != XIANXIA_TRAINED_SKILL_COUNT:
+        raise CharacterBuildError(
+            "Xianxia character creation requires exactly "
+            f"{XIANXIA_TRAINED_SKILL_COUNT} trained skills; submitted "
+            f"{len(trained_skills)}."
+        )
+
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for skill in trained_skills:
+        marker = skill.casefold()
+        if marker in seen and skill not in duplicates:
+            duplicates.append(skill)
+        seen.add(marker)
+    if duplicates:
+        raise CharacterBuildError(
+            "Xianxia trained skills must be distinct; duplicates: "
+            f"{_format_label_list(duplicates)}."
+        )
+    return trained_skills
+
+
 def _validate_xianxia_create_manual_armor_bonus(values: dict[str, Any]) -> int:
     raw_value = _normalize_xianxia_create_manual_armor_bonus_value(values)
     if raw_value == "":
@@ -545,6 +590,52 @@ def _normalize_xianxia_create_manual_armor_bonus_value(values: dict[str, Any]) -
     return _clean_form_value(value)
 
 
+def _normalize_xianxia_create_trained_skill_values(values: dict[str, Any]) -> list[str]:
+    raw_values = _extract_xianxia_trained_skill_values(values)
+    normalized = [_normalize_xianxia_trained_skill_name(value) for value in raw_values]
+    if len(normalized) < XIANXIA_TRAINED_SKILL_COUNT:
+        normalized.extend([""] * (XIANXIA_TRAINED_SKILL_COUNT - len(normalized)))
+    return normalized
+
+
+def _extract_xianxia_trained_skill_values(values: dict[str, Any]) -> list[Any]:
+    indexed_values: list[tuple[int, Any]] = []
+    for raw_key, value in values.items():
+        key = str(raw_key)
+        if not key.startswith("trained_skill_"):
+            continue
+        suffix = key.removeprefix("trained_skill_")
+        if not suffix.isdecimal():
+            continue
+        index = int(suffix)
+        if index > 0:
+            indexed_values.append((index, value))
+    if indexed_values:
+        return [value for _, value in sorted(indexed_values)]
+
+    if "trained_skills" in values:
+        return _coerce_trained_skill_values(values.get("trained_skills"))
+
+    raw_skills = values.get("skills")
+    if isinstance(raw_skills, dict) and "trained" in raw_skills:
+        return _coerce_trained_skill_values(raw_skills.get("trained"))
+    return []
+
+
+def _coerce_trained_skill_values(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return [value]
+
+
+def _normalize_xianxia_trained_skill_name(value: Any) -> str:
+    if isinstance(value, dict):
+        value = value.get("name") or value.get("label")
+    return " ".join(str(value or "").split()).strip()
+
+
 def _xianxia_attribute_input_name(key: str) -> str:
     return f"attribute_{key}"
 
@@ -555,6 +646,10 @@ def _xianxia_effort_input_name(key: str) -> str:
 
 def _xianxia_energy_input_name(key: str) -> str:
     return f"energy_{key}"
+
+
+def _xianxia_trained_skill_input_name(index: int) -> str:
+    return f"trained_skill_{index}"
 
 
 def _clean_form_value(value: Any) -> str:

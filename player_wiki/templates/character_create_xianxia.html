@@ -113,6 +113,23 @@
           </section>
 
           <section class="builder-section">
+            <h3>Trained Skills</h3>
+            <div class="builder-field-grid">
+              {% for skill in builder.trained_skill_fields %}
+                <label class="field">
+                  <span>{{ skill.label }}</span>
+                  <input
+                    type="text"
+                    name="{{ skill.input_name }}"
+                    value="{{ skill.value }}"
+                    required
+                  >
+                </label>
+              {% endfor %}
+            </div>
+          </section>
+
+          <section class="builder-section">
             <h3>GM Grants</h3>
             <div class="builder-field-grid">
               <label class="field">
