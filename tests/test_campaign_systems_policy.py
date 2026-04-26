@@ -13,7 +13,7 @@ from player_wiki.dnd5e_rules_reference import (
 )
 from player_wiki.auth_store import AuthStore, utcnow
 from player_wiki.auth import get_campaign_scope_visibility, get_effective_campaign_visibility
-from player_wiki.campaign_visibility import VISIBILITY_DM, VISIBILITY_PUBLIC
+from player_wiki.campaign_visibility import VISIBILITY_DM, VISIBILITY_PLAYERS, VISIBILITY_PUBLIC
 from player_wiki.system_policy import XIANXIA_SYSTEM_CODE
 from player_wiki.systems_service import XIANXIA_HOMEBREW_SOURCE_ID
 from player_wiki.systems_importer import Dnd5eSystemsImporter
@@ -209,6 +209,77 @@ def test_xianxia_campaign_systems_scope_defaults_dm_only_while_wiki_stays_visibl
     dm_systems = client.get("/campaigns/linden-pass/systems")
 
     assert dm_systems.status_code == 200
+
+
+def test_dm_can_later_enable_xianxia_systems_for_players_through_existing_controls(
+    app, client, sign_in, users
+):
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = "xianxia"
+    payload["systems_library"] = "xianxia"
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        assert get_campaign_scope_visibility("linden-pass", "systems") == VISIBILITY_DM
+        state = app.extensions["systems_service"].get_campaign_source_state(
+            "linden-pass",
+            XIANXIA_HOMEBREW_SOURCE_ID,
+        )
+        assert state is not None
+        assert state.is_enabled is False
+        assert state.default_visibility == VISIBILITY_DM
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    scope_response = client.post(
+        "/campaigns/linden-pass/control-panel/visibility",
+        data={
+            "campaign_visibility": VISIBILITY_PUBLIC,
+            "wiki_visibility": VISIBILITY_PUBLIC,
+            "systems_visibility": VISIBILITY_PLAYERS,
+            "session_visibility": VISIBILITY_PLAYERS,
+            "combat_visibility": VISIBILITY_PLAYERS,
+            "characters_visibility": VISIBILITY_DM,
+            "dm_content_visibility": VISIBILITY_DM,
+        },
+        follow_redirects=True,
+    )
+    assert scope_response.status_code == 200
+    assert "Updated visibility for Systems." in scope_response.get_data(as_text=True)
+
+    source_form = build_source_form(app)
+    source_form[f"source_{XIANXIA_HOMEBREW_SOURCE_ID}_enabled"] = "1"
+    source_form[f"source_{XIANXIA_HOMEBREW_SOURCE_ID}_visibility"] = VISIBILITY_PLAYERS
+    source_response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/sources",
+        data=source_form,
+        follow_redirects=True,
+    )
+    assert source_response.status_code == 200
+    assert f"Updated systems sources: {XIANXIA_HOMEBREW_SOURCE_ID}." in source_response.get_data(as_text=True)
+
+    with app.app_context():
+        assert get_campaign_scope_visibility("linden-pass", "systems") == VISIBILITY_PLAYERS
+        state = app.extensions["systems_service"].get_campaign_source_state(
+            "linden-pass",
+            XIANXIA_HOMEBREW_SOURCE_ID,
+        )
+        assert state is not None
+        assert state.is_enabled is True
+        assert state.default_visibility == VISIBILITY_PLAYERS
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    campaign = client.get("/campaigns/linden-pass")
+    systems = client.get("/campaigns/linden-pass/systems")
+    source = client.get(f"/campaigns/linden-pass/systems/sources/{XIANXIA_HOMEBREW_SOURCE_ID}")
+
+    assert campaign.status_code == 200
+    assert 'href="/campaigns/linden-pass/systems"' in campaign.get_data(as_text=True)
+    assert systems.status_code == 200
+    assert "Xianxia Homebrew" in systems.get_data(as_text=True)
+    assert source.status_code == 200
+    assert "Xianxia Homebrew" in source.get_data(as_text=True)
 
 
 def test_shared_core_systems_edit_flow_stays_separate_from_overrides_and_custom_entries(
