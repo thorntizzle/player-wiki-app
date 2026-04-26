@@ -716,6 +716,95 @@ def test_xianxia_systems_source_and_category_labels_use_xianxia_vocabulary(
     assert "Category: Martial Arts" in category_html
 
 
+def test_xianxia_systems_entries_appear_on_expected_source_category_pages(
+    app, client, sign_in, users
+):
+    source_id = "XIANXIA-CATEGORY-TEST"
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = "xianxia"
+    payload["systems_library"] = "xianxia"
+    payload["systems_sources"] = [
+        {
+            "source_id": source_id,
+            "enabled": True,
+        }
+    ]
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    category_expectations = {
+        "rule": ("Rules", "Check Formula Reference"),
+        "martial_art": ("Martial Arts", "Azure Cloud Fist"),
+        "martial_art_rank": ("Martial Art Ranks", "Initiate Rank Reference"),
+        "generic_technique": ("Generic Techniques", "Meteor Step"),
+        "basic_action": ("Basic Actions", "Recoup"),
+        "equipment": ("Equipment", "Jade Compass"),
+        "armor": ("Armor", "Cloud Silk Armor"),
+    }
+
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        service.ensure_builtin_library_seeded(XIANXIA_SYSTEM_CODE)
+        store.upsert_source(
+            XIANXIA_SYSTEM_CODE,
+            source_id,
+            title="Xianxia Category Test",
+            license_class="open_license",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        store.replace_entries_for_source(
+            XIANXIA_SYSTEM_CODE,
+            source_id,
+            entries=[
+                {
+                    "entry_key": f"xianxia|{entry_type}|category-test|{entry_type}",
+                    "entry_type": entry_type,
+                    "slug": f"xianxia-category-{entry_type.replace('_', '-')}",
+                    "title": title,
+                    "search_text": f"{title.lower()} {label.lower()} xianxia",
+                    "player_safe_default": True,
+                    "metadata": {"xianxia_entry_facets": [entry_type]},
+                    "body": {},
+                    "rendered_html": f"<p>{title} test body.</p>",
+                }
+                for entry_type, (label, title) in category_expectations.items()
+            ],
+        )
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    source = client.get(f"/campaigns/linden-pass/systems/sources/{source_id}")
+
+    assert source.status_code == 200
+    source_html = source.get_data(as_text=True)
+    assert "Xianxia Category Test" in source_html
+    assert "This source currently has 7 browsable entries" in source_html
+    assert "across 7" in source_html
+
+    for entry_type, (label, title) in category_expectations.items():
+        category_href = f"/campaigns/linden-pass/systems/sources/{source_id}/types/{entry_type}"
+        assert category_href in source_html
+        assert label in source_html
+
+        category = client.get(category_href)
+        assert category.status_code == 200
+        category_html = category.get_data(as_text=True)
+        assert f"Xianxia Category Test: {label}" in category_html
+        assert f"Browse {label}" in category_html
+        assert f"Category: {label}" in category_html
+        assert title in category_html
+        assert f"Showing all 1 {label.lower()} in this source." in category_html
+
+        other_titles = {
+            other_title
+            for other_type, (_, other_title) in category_expectations.items()
+            if other_type != entry_type
+        }
+        assert all(other_title not in category_html for other_title in other_titles)
+
+
 def test_dm_can_later_enable_xianxia_systems_for_players_through_existing_controls(
     app, client, sign_in, users
 ):
