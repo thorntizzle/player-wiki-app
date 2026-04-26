@@ -132,6 +132,7 @@
         </section>
       {% endif %}
 
+      {% set is_xianxia_sheet = character.xianxia_read %}
       {% set show_quick_sections = character_subpage == 'quick' %}
       {% set show_spellcasting_sections = character_subpage == 'spellcasting' %}
       {% set show_feature_sections = character_subpage == 'features' %}
@@ -453,6 +454,10 @@
         {% include "_character_session_panels.html" %}
       {% endif %}
 
+      {% if is_xianxia_sheet %}
+        {% include "_character_xianxia_read_sections.html" %}
+      {% endif %}
+
       {% if character_sheet_batch_save_enabled %}
         {% include "_character_sheet_batch_save_bar.html" %}
       {% endif %}
@@ -477,7 +482,7 @@
         </section>
       {% endif %}
 
-      {% if show_quick_sections %}
+      {% if show_quick_sections and not is_xianxia_sheet %}
         <section class="read-section" id="character-quick-abilities-skills">
           <div class="section-heading">
             <h2>Abilities and skills</h2>
@@ -526,7 +531,7 @@
         </section>
       {% endif %}
 
-      {% if show_quick_sections and (character.attacks or character.hidden_attacks) %}
+      {% if show_quick_sections and not is_xianxia_sheet and (character.attacks or character.hidden_attacks) %}
         <section class="read-section">
           <div class="section-heading">
             <h2>Attacks</h2>
@@ -578,7 +583,7 @@
         </section>
       {% endif %}
 
-      {% if show_feature_sections and character.feature_groups %}
+      {% if show_feature_sections and not is_xianxia_sheet and character.feature_groups %}
         <section class="read-section">
           <div class="section-heading">
             <h2>Features and traits</h2>
@@ -624,7 +629,7 @@
         {% include "_character_spellcasting_section.html" %}
       {% endif %}
 
-      {% if show_equipment_sections %}
+      {% if show_equipment_sections and not is_xianxia_sheet %}
         <section class="read-section">
           <div class="section-heading">
             <h2>Equipment</h2>
@@ -730,7 +735,7 @@
         </section>
       {% endif %}
 
-      {% if show_inventory_sections and not is_session_mode %}
+      {% if show_inventory_sections and not is_session_mode and not is_xianxia_sheet %}
         <section class="read-section">
           <div class="section-heading">
             <div>

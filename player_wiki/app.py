@@ -1209,7 +1209,23 @@ def get_character_read_subpage_labels(
     *,
     include_spellcasting: bool = False,
     include_controls: bool = False,
+    xianxia_read: dict[str, object] | None = None,
 ) -> dict[str, str]:
+    if xianxia_read:
+        xianxia_labels: dict[str, str] = {}
+        for subpage in list(xianxia_read.get("subpages") or []):
+            if not isinstance(subpage, dict):
+                continue
+            slug = str(subpage.get("slug") or "").strip()
+            label = str(subpage.get("label") or "").strip()
+            if not slug or not label:
+                continue
+            if slug == "controls" and not include_controls:
+                continue
+            xianxia_labels[slug] = label
+        if xianxia_labels:
+            return xianxia_labels
+
     labels = {
         "quick": CHARACTER_READ_SUBPAGE_LABELS["quick"],
     }
@@ -1234,11 +1250,13 @@ def normalize_character_read_subpage(
     *,
     include_spellcasting: bool = False,
     include_controls: bool = False,
+    xianxia_read: dict[str, object] | None = None,
 ) -> str:
     normalized = (value or "").strip().lower()
     if normalized in get_character_read_subpage_labels(
         include_spellcasting=include_spellcasting,
         include_controls=include_controls,
+        xianxia_read=xianxia_read,
     ):
         return normalized
     return "quick"
@@ -4138,14 +4156,21 @@ def create_app() -> Flask:
         else:
             character.pop("spellcasting", None)
         include_spellcasting_subpage = bool(character.get("spellcasting"))
+        xianxia_read_context = (
+            dict(character.get("xianxia_read") or {})
+            if isinstance(character.get("xianxia_read"), dict)
+            else None
+        )
         available_character_subpages = get_character_read_subpage_labels(
             include_spellcasting=include_spellcasting_subpage,
             include_controls=include_controls_subpage,
+            xianxia_read=xianxia_read_context,
         )
         character_subpage = normalize_character_read_subpage(
             request.args.get("page", ""),
             include_spellcasting=include_spellcasting_subpage,
             include_controls=include_controls_subpage,
+            xianxia_read=xianxia_read_context,
         )
 
         character_controls = (

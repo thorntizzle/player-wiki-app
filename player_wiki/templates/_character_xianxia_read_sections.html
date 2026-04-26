@@ -1,0 +1,288 @@
+{% set xianxia_sheet = character.xianxia_read %}
+
+{% if xianxia_sheet and character_subpage == 'martial_arts' %}
+  <section class="read-section" id="xianxia-martial-arts">
+    <div class="section-heading">
+      <h2>Martial Arts</h2>
+    </div>
+    {% if xianxia_sheet.martial_arts %}
+      <div class="feature-groups">
+        <section class="feature-group">
+          <div class="feature-stack">
+            {% for art in xianxia_sheet.martial_arts %}
+              <article class="feature-row">
+                <div class="feature-row__header">
+                  <h3>
+                    {% if art.href %}
+                      <a href="{{ art.href }}">{{ art.name }}</a>
+                    {% else %}
+                      {{ art.name }}
+                    {% endif %}
+                  </h3>
+                  <p class="meta">
+                    {% if art.current_rank %}Current rank: {{ art.current_rank }}{% else %}Rank not recorded{% endif %}
+                    {% if art.starting_package %} | Starting package{% endif %}
+                    {% if art.custom %} | Custom Martial Art{% endif %}
+                    {% if art.rank_records_status %} | {{ art.rank_records_status | replace('_', ' ') }}{% endif %}
+                  </p>
+                </div>
+                {% if art.learned_rank_refs %}
+                  <div class="detail-cluster">
+                    <div>
+                      <h4>Learned ranks</h4>
+                      <div class="skill-grid">
+                        {% for rank in art.learned_rank_refs %}
+                          <div class="skill-pill skill-pill--proficient">
+                            {% if rank.href %}
+                              <a href="{{ rank.href }}">{{ rank.label }}</a>
+                            {% else %}
+                              <span>{{ rank.label }}</span>
+                            {% endif %}
+                          </div>
+                        {% endfor %}
+                      </div>
+                    </div>
+                  </div>
+                {% endif %}
+              </article>
+            {% endfor %}
+          </div>
+        </section>
+      </div>
+    {% else %}
+      <article class="detail-card">
+        <p class="meta">No Martial Arts are recorded on this sheet yet.</p>
+      </article>
+    {% endif %}
+  </section>
+{% endif %}
+
+{% if xianxia_sheet and character_subpage == 'techniques' %}
+  <section class="read-section" id="xianxia-techniques">
+    <div class="section-heading">
+      <h2>Techniques</h2>
+    </div>
+    <div class="detail-grid">
+      <article class="detail-card">
+        <h3>Generic Techniques</h3>
+        {% if xianxia_sheet.generic_techniques %}
+          <ul class="plain-list slot-list">
+            {% for technique in xianxia_sheet.generic_techniques %}
+              <li>
+                {% if technique.href %}
+                  <a href="{{ technique.href }}">{{ technique.name }}</a>
+                {% else %}
+                  <span>{{ technique.name }}</span>
+                {% endif %}
+                {% if technique.current_rank %}
+                  <strong>{{ technique.current_rank }}</strong>
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="meta">No Generic Techniques are recorded on this sheet yet.</p>
+        {% endif %}
+      </article>
+
+      {% set approval_groups = [
+        {"title": "Variants", "records": xianxia_sheet.approval.variants},
+        {"title": "Prepared Dao Immolating Techniques", "records": xianxia_sheet.approval.dao_immolating_prepared},
+        {"title": "Dao Immolating Use History", "records": xianxia_sheet.approval.dao_immolating_use_history},
+        {"title": "Approval Requests", "records": xianxia_sheet.approval.approval_requests},
+      ] %}
+      {% for group in approval_groups %}
+        <article class="detail-card">
+          <h3>{{ group.title }}</h3>
+          {% if group.records %}
+            <ul class="plain-list slot-list">
+              {% for record in group.records %}
+                <li>
+                  <span>{{ record.name }}</span>
+                  {% if record.status %}
+                    <strong>{{ record.status }}</strong>
+                  {% elif record.type %}
+                    <strong>{{ record.type }}</strong>
+                  {% endif %}
+                </li>
+                {% if record.notes %}
+                  <li class="meta">{{ record.notes }}</li>
+                {% endif %}
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="meta">No records yet.</p>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+{% endif %}
+
+{% if xianxia_sheet and character_subpage == 'resources' %}
+  <section class="read-section" id="xianxia-resources">
+    <div class="section-heading">
+      <h2>Resources</h2>
+    </div>
+    <div class="resource-grid">
+      {% for resource in xianxia_sheet.resources.durability %}
+        <article class="resource-card">
+          <h3>{{ resource.label }}</h3>
+          <p class="resource-card__value">{{ resource.current }} / {{ resource.max }}</p>
+          {% if resource.temp %}
+            <p class="meta">Temporary {{ resource.label }}: {{ resource.temp }}</p>
+          {% endif %}
+        </article>
+      {% endfor %}
+      {% for resource in xianxia_sheet.resources.energies %}
+        <article class="resource-card">
+          <h3>{{ resource.label }}</h3>
+          <p class="resource-card__value">{{ resource.current }} / {{ resource.max }}</p>
+        </article>
+      {% endfor %}
+      {% for resource in xianxia_sheet.resources.yin_yang %}
+        <article class="resource-card">
+          <h3>{{ resource.label }}</h3>
+          <p class="resource-card__value">{{ resource.current }} / {{ resource.max }}</p>
+        </article>
+      {% endfor %}
+      <article class="resource-card">
+        <h3>Dao</h3>
+        <p class="resource-card__value">{{ xianxia_sheet.resources.dao.current }} / {{ xianxia_sheet.resources.dao.max }}</p>
+      </article>
+      <article class="resource-card">
+        <h3>Insight</h3>
+        <p class="resource-card__value">{{ xianxia_sheet.resources.insight.available }}</p>
+        <p class="meta">Spent {{ xianxia_sheet.resources.insight.spent }}</p>
+      </article>
+    </div>
+    <div class="detail-grid">
+      <article class="detail-card">
+        <h3>{{ xianxia_sheet.active_state.stance.label }}</h3>
+        <p class="meta">{{ xianxia_sheet.active_state.stance.status_label }}</p>
+      </article>
+      <article class="detail-card">
+        <h3>{{ xianxia_sheet.active_state.aura.label }}</h3>
+        <p class="meta">{{ xianxia_sheet.active_state.aura.status_label }}</p>
+      </article>
+    </div>
+  </section>
+{% endif %}
+
+{% if xianxia_sheet and character_subpage == 'skills' %}
+  <section class="read-section" id="xianxia-skills">
+    <div class="section-heading">
+      <h2>Skills</h2>
+    </div>
+    {% if xianxia_sheet.skills.trained %}
+      <div class="skill-grid">
+        {% for skill in xianxia_sheet.skills.trained %}
+          <div class="skill-pill skill-pill--proficient">
+            <span>{{ skill.name }}</span>
+            <span class="meta">Trained</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <article class="detail-card">
+        <p class="meta">No trained skills are recorded on this sheet yet.</p>
+      </article>
+    {% endif %}
+
+    {% if xianxia_sheet.quick_reference.skill_use_guardrails %}
+      <div class="detail-cluster" id="xianxia-skills-guardrail">
+        <div class="section-heading">
+          <h3>Skill use guardrails</h3>
+          {% if xianxia_sheet.quick_reference.skill_use_guardrails.rule_href %}
+            <a class="button-link subtle" href="{{ xianxia_sheet.quick_reference.skill_use_guardrails.rule_href }}">{{ xianxia_sheet.quick_reference.skill_use_guardrails.rule_title }} rule</a>
+          {% endif %}
+        </div>
+        <article class="detail-card">
+          {% for line in xianxia_sheet.quick_reference.skill_use_guardrails.reference_lines %}
+            <p>{{ line }}</p>
+          {% endfor %}
+        </article>
+      </div>
+    {% endif %}
+  </section>
+{% endif %}
+
+{% if xianxia_sheet and character_subpage == 'equipment' %}
+  <section class="read-section" id="xianxia-equipment">
+    <div class="section-heading">
+      <h2>Equipment</h2>
+    </div>
+    <div class="detail-grid">
+      <article class="detail-card">
+        <h3>Defense</h3>
+        <p><strong>{{ xianxia_sheet.equipment.defense }}</strong></p>
+        {% if xianxia_sheet.quick_reference.defense %}
+          <p class="meta">Formula: {{ xianxia_sheet.quick_reference.defense.formula }}</p>
+        {% endif %}
+        <p class="meta">Manual armor bonus: {{ xianxia_sheet.equipment.manual_armor_bonus }}</p>
+      </article>
+      <article class="detail-card">
+        <h3>Necessary weapons</h3>
+        {% if xianxia_sheet.equipment.necessary_weapons %}
+          <ul class="plain-list slot-list">
+            {% for item in xianxia_sheet.equipment.necessary_weapons %}
+              <li>
+                <span>{{ item.name }}</span>
+                {% if item.reason %}<strong>{{ item.reason }}</strong>{% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="meta">No necessary weapons are recorded on this sheet yet.</p>
+        {% endif %}
+      </article>
+      <article class="detail-card">
+        <h3>Necessary tools</h3>
+        {% if xianxia_sheet.equipment.necessary_tools %}
+          <ul class="plain-list slot-list">
+            {% for item in xianxia_sheet.equipment.necessary_tools %}
+              <li>
+                <span>{{ item.name }}</span>
+                {% if item.reason %}<strong>{{ item.reason }}</strong>{% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="meta">No necessary tools are recorded on this sheet yet.</p>
+        {% endif %}
+      </article>
+    </div>
+  </section>
+{% endif %}
+
+{% if xianxia_sheet and character_subpage == 'inventory' %}
+  <section class="read-section" id="xianxia-inventory">
+    <div class="section-heading">
+      <h2>Inventory</h2>
+    </div>
+    {% if xianxia_sheet.inventory.quantities %}
+      <div class="inventory-list">
+        {% for item in xianxia_sheet.inventory.quantities %}
+          <article class="inventory-row">
+            <div class="inventory-row__header">
+              <h3>{{ item.name }}</h3>
+              <strong>x{{ item.quantity }}</strong>
+            </div>
+            {% if item.catalog_ref or item.id %}
+              <p class="meta">
+                {% if item.catalog_ref %}{{ item.catalog_ref }}{% else %}{{ item.id }}{% endif %}
+              </p>
+            {% endif %}
+            {% if item.notes %}
+              <p>{{ item.notes }}</p>
+            {% endif %}
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <article class="detail-card">
+        <p class="meta">No inventory quantities are recorded on this sheet yet.</p>
+      </article>
+    {% endif %}
+  </section>
+{% endif %}

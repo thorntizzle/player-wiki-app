@@ -1761,6 +1761,12 @@ def present_xianxia_read_context(
             xianxia.get("generic_techniques"),
             default_name="Generic Technique",
         ),
+        "inventory": {
+            "enabled": bool(dict(xianxia_state.get("inventory") or {}).get("enabled")),
+            "quantities": _present_xianxia_inventory_records(
+                dict(xianxia_state.get("inventory") or {}).get("quantities")
+            ),
+        },
         "approval": {
             "variants": _present_xianxia_named_records(xianxia.get("variants")),
             "dao_immolating_prepared": _present_xianxia_named_records(
@@ -1818,6 +1824,31 @@ def _present_xianxia_named_records(values: Any) -> list[dict[str, Any]]:
                     or ""
                 ).strip(),
                 "notes": str(payload.get("notes") or payload.get("approval_notes") or "").strip(),
+            }
+        )
+    return records
+
+
+def _present_xianxia_inventory_records(values: Any) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for value in list(values or []):
+        payload = dict(value or {}) if isinstance(value, dict) else {"name": value}
+        name = str(
+            payload.get("name")
+            or payload.get("label")
+            or payload.get("id")
+            or payload.get("catalog_ref")
+            or ""
+        ).strip()
+        if not name and not payload:
+            continue
+        records.append(
+            {
+                "name": name or "Unnamed item",
+                "quantity": _coerce_int(payload.get("quantity"), default=0),
+                "id": str(payload.get("id") or "").strip(),
+                "catalog_ref": str(payload.get("catalog_ref") or "").strip(),
+                "notes": str(payload.get("notes") or "").strip(),
             }
         )
     return records

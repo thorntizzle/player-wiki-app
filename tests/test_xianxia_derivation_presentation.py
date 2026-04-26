@@ -214,6 +214,120 @@ def test_xianxia_read_presenter_context_collects_first_pass_sheet_facts(
     assert character["spellcasting"] is None
 
 
+def test_xianxia_read_sheet_uses_system_specific_subpages(
+    client,
+    sign_in,
+    users,
+    app,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            **_valid_xianxia_create_data("Subpage Crane"),
+            "manual_armor_bonus": "2",
+            "dao_current": "2",
+        },
+        follow_redirects=False,
+    )
+
+    assert create_response.status_code == 302
+
+    quick_response = client.get("/campaigns/linden-pass/characters/subpage-crane?page=quick")
+
+    assert quick_response.status_code == 200
+    quick_html = unescape(quick_response.get_data(as_text=True))
+    for page in (
+        "quick",
+        "martial_arts",
+        "techniques",
+        "resources",
+        "skills",
+        "equipment",
+        "inventory",
+        "personal",
+        "notes",
+        "controls",
+    ):
+        assert f"?page={page}" in quick_html
+    assert "?page=features" not in quick_html
+    assert "?page=spellcasting" not in quick_html
+    assert "Features" not in quick_html
+    assert "Spellcasting" not in quick_html
+
+    martial_arts_response = client.get(
+        "/campaigns/linden-pass/characters/subpage-crane?page=martial_arts"
+    )
+    assert martial_arts_response.status_code == 200
+    martial_arts_html = unescape(martial_arts_response.get_data(as_text=True))
+    assert "Martial Arts" in martial_arts_html
+    assert "Demon's Fist" in martial_arts_html
+    assert "Current rank: Initiate" in martial_arts_html
+    assert "/campaigns/linden-pass/systems/entries/demons-fist#xianxia-demons-fist-initiate" in martial_arts_html
+    assert "Features and traits" not in martial_arts_html
+
+    techniques_response = client.get(
+        "/campaigns/linden-pass/characters/subpage-crane?page=techniques"
+    )
+    assert techniques_response.status_code == 200
+    techniques_html = unescape(techniques_response.get_data(as_text=True))
+    assert "Generic Techniques" in techniques_html
+    assert "No Generic Techniques are recorded on this sheet yet." in techniques_html
+
+    resources_response = client.get(
+        "/campaigns/linden-pass/characters/subpage-crane?page=resources"
+    )
+    assert resources_response.status_code == 200
+    resources_html = unescape(resources_response.get_data(as_text=True))
+    assert "Resources" in resources_html
+    assert "HP" in resources_html
+    assert "Stance" in resources_html
+    assert "Jing" in resources_html
+    assert "Yin" in resources_html
+    assert "Dao" in resources_html
+    assert "Insight" in resources_html
+    assert "No active Stance recorded" in resources_html
+
+    skills_response = client.get("/campaigns/linden-pass/characters/subpage-crane?page=skills")
+    assert skills_response.status_code == 200
+    skills_html = unescape(skills_response.get_data(as_text=True))
+    assert "Fishing" in skills_html
+    assert "Calligraphy" in skills_html
+    assert "Tea Ceremony" in skills_html
+    assert "Skill use guardrails" in skills_html
+
+    equipment_response = client.get(
+        "/campaigns/linden-pass/characters/subpage-crane?page=equipment"
+    )
+    assert equipment_response.status_code == 200
+    equipment_html = unescape(equipment_response.get_data(as_text=True))
+    assert "Manual armor bonus: 2" in equipment_html
+    assert "Formula: 10 + 2 + 3" in equipment_html
+    assert "Necessary weapons" in equipment_html
+    assert "Necessary tools" in equipment_html
+    assert "Fishing rod, spear, or net" in equipment_html
+    assert "Attuned items" not in equipment_html
+
+    inventory_response = client.get(
+        "/campaigns/linden-pass/characters/subpage-crane?page=inventory"
+    )
+    assert inventory_response.status_code == 200
+    inventory_html = unescape(inventory_response.get_data(as_text=True))
+    assert "Inventory" in inventory_html
+    assert "No inventory quantities are recorded on this sheet yet." in inventory_html
+    assert "Currency" not in inventory_html
+
+    controls_response = client.get(
+        "/campaigns/linden-pass/characters/subpage-crane?page=controls"
+    )
+    assert controls_response.status_code == 200
+    controls_html = unescape(controls_response.get_data(as_text=True))
+    assert "Player controls" in controls_html
+    assert "Current owner" in controls_html
+
+
 def test_xianxia_quick_reference_presents_derived_defense(
     app,
     client,
