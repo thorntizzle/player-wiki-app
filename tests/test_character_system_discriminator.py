@@ -9,6 +9,9 @@ from player_wiki.xianxia_character_model import (
     XIANXIA_CHARACTER_STATE_SCHEMA_VERSION,
     XIANXIA_DEFINITION_FIELD_KEYS,
     XIANXIA_STATE_FIELD_KEYS,
+    XianxiaDefinitionValidationError,
+    validate_xianxia_definition_payload,
+    xianxia_definition_validation_errors,
 )
 
 
@@ -199,6 +202,86 @@ def test_xianxia_definition_accepts_requirements_sketch_top_level_aliases():
     assert xianxia["insight"] == {"available": 1, "spent": 0}
 
 
+def test_xianxia_definition_validation_helpers_accept_stable_payloads():
+    definition = CharacterDefinition.from_dict(
+        _minimal_definition_payload(
+            system_code="xianxia",
+            xianxia={
+                "realm": "Mortal",
+                "actions_per_turn": 2,
+                "attributes": {"str": 1, "dex": 1, "con": 1, "int": 1, "wis": 1, "cha": 1},
+                "efforts": {
+                    "basic": 1,
+                    "weapon": 1,
+                    "guns_explosive": 1,
+                    "magic": 1,
+                    "ultimate": 1,
+                },
+                "energy_maxima": {"jing": 1, "qi": 1, "shen": 1},
+                "yin_yang": {"yin_max": 1, "yang_max": 1},
+                "dao_max": 3,
+                "insight": {"available": 0, "spent": 0},
+                "durability": {
+                    "hp_max": 10,
+                    "stance_max": 10,
+                    "manual_armor_bonus": 0,
+                    "defense": 11,
+                },
+                "skills": {"trained": ["Tea Ceremony"]},
+                "equipment": {"necessary_weapons": [{"name": "Jian"}], "necessary_tools": []},
+                "martial_arts": [{"systems_ref": {"slug": "heavenly-palm"}}],
+            },
+        )
+    )
+    payload = definition.to_dict()
+
+    assert xianxia_definition_validation_errors(payload) == []
+    assert validate_xianxia_definition_payload(payload)["xianxia"] == payload["xianxia"]
+
+
+def test_xianxia_definition_validation_helpers_report_invalid_payloads():
+    payload = _minimal_definition_payload(
+        system="xianxia",
+        xianxia={
+            "realm": "Mortal",
+            "actions_per_turn": 3,
+            "attributes": {"str": -1},
+            "efforts": {"magic": -1},
+            "energy_maxima": {"jing": -1},
+            "yin_yang": {"yin_max": -1},
+            "dao_max": 4,
+            "insight": {"available": -1},
+            "durability": {"hp_max": -1, "manual_armor_bonus": -1},
+            "martial_arts": [{}],
+            "dying": {"rounds_remaining": 4},
+        },
+    )
+
+    errors = xianxia_definition_validation_errors(payload)
+
+    assert "xianxia.actions_per_turn must match the Mortal realm default of 2." in errors
+    assert "xianxia.attributes.str cannot be negative." in errors
+    assert "xianxia.efforts.magic cannot be negative." in errors
+    assert "xianxia.energies.jing.max cannot be negative." in errors
+    assert "xianxia.yin_yang.yin_max cannot be negative." in errors
+    assert "xianxia.dao.max must be 3." in errors
+    assert "xianxia.insight.available cannot be negative." in errors
+    assert "xianxia.durability.hp_max cannot be negative." in errors
+    assert "xianxia.durability.manual_armor_bonus cannot be negative." in errors
+    assert "xianxia.martial_arts[0] must be a non-empty object." in errors
+    assert (
+        "xianxia.dying is not valid Xianxia definition data. "
+        "Dying Rounds belong to a future combat-state shape."
+    ) in errors
+
+    try:
+        validate_xianxia_definition_payload(payload)
+    except XianxiaDefinitionValidationError as exc:
+        assert exc.errors == errors
+    else:
+        raise AssertionError("Expected XianxiaDefinitionValidationError")
+
+
 def test_dnd5e_definition_does_not_emit_xianxia_definition_payload():
     definition = CharacterDefinition.from_dict(
         _minimal_definition_payload(
@@ -209,6 +292,7 @@ def test_dnd5e_definition_does_not_emit_xianxia_definition_payload():
 
     assert definition.system == DND_5E_SYSTEM_CODE
     assert "xianxia" not in definition.to_dict()
+    assert xianxia_definition_validation_errors(definition.to_dict()) == []
 
 
 def test_xianxia_initial_state_defines_mutable_session_state_shape():

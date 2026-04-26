@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from .system_policy import is_xianxia_system
+from .system_policy import is_xianxia_system, normalize_system_code
 
 XIANXIA_CHARACTER_DEFINITION_SCHEMA_VERSION = 1
 XIANXIA_CHARACTER_STATE_SCHEMA_VERSION = 1
@@ -67,6 +67,18 @@ _HONOR_LABELS = {
     "disgraced": "Disgraced",
     "demonic": "Demonic",
 }
+
+_DEFERRED_DEFINITION_KEYS = {
+    "dying": "Dying Rounds belong to a future combat-state shape.",
+    "dying_rounds": "Dying Rounds belong to a future combat-state shape.",
+    "dying_rounds_remaining": "Dying Rounds belong to a future combat-state shape.",
+}
+
+
+class XianxiaDefinitionValidationError(ValueError):
+    def __init__(self, errors: list[str]) -> None:
+        self.errors = list(errors)
+        super().__init__("; ".join(self.errors))
 
 
 def normalize_xianxia_definition_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -208,6 +220,78 @@ def normalize_xianxia_definition_payload(payload: dict[str, Any]) -> dict[str, A
     return normalized_payload
 
 
+def validate_xianxia_definition_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return a normalized Xianxia definition payload or raise with validation details."""
+
+    errors = xianxia_definition_validation_errors(payload)
+    if errors:
+        raise XianxiaDefinitionValidationError(errors)
+    return _normalized_definition_validation_payload(payload)
+
+
+def xianxia_definition_validation_errors(payload: dict[str, Any]) -> list[str]:
+    normalized_payload = _normalized_definition_validation_payload(payload)
+    if not is_xianxia_system(normalized_payload.get("system")):
+        return []
+
+    errors: list[str] = []
+    _collect_deferred_definition_key_errors(payload, errors)
+
+    xianxia = dict(normalized_payload.get("xianxia") or {})
+    if tuple(xianxia) != XIANXIA_DEFINITION_FIELD_KEYS:
+        expected = ", ".join(XIANXIA_DEFINITION_FIELD_KEYS)
+        errors.append(f"xianxia must use the stable definition field order: {expected}.")
+
+    _require_exact_int(
+        errors,
+        "xianxia.schema_version",
+        xianxia.get("schema_version"),
+        XIANXIA_CHARACTER_DEFINITION_SCHEMA_VERSION,
+    )
+
+    realm = xianxia.get("realm")
+    if realm not in _REALM_ACTION_DEFAULTS:
+        allowed = ", ".join(_REALM_ACTION_DEFAULTS)
+        errors.append(f"xianxia.realm must be one of: {allowed}.")
+
+    actions_per_turn = xianxia.get("actions_per_turn")
+    _require_non_negative_int(errors, "xianxia.actions_per_turn", actions_per_turn)
+    if realm in _REALM_ACTION_DEFAULTS and actions_per_turn != _REALM_ACTION_DEFAULTS[realm]:
+        errors.append(
+            f"xianxia.actions_per_turn must match the {realm} realm default of "
+            f"{_REALM_ACTION_DEFAULTS[realm]}."
+        )
+
+    if xianxia.get("honor") not in set(_HONOR_LABELS.values()):
+        allowed = ", ".join(_HONOR_LABELS.values())
+        errors.append(f"xianxia.honor must be one of: {allowed}.")
+    if not _normalize_text(xianxia.get("reputation")):
+        errors.append("xianxia.reputation is required.")
+
+    _validate_int_key_map(errors, "xianxia.attributes", xianxia.get("attributes"), XIANXIA_ATTRIBUTE_KEYS)
+    _validate_int_key_map(errors, "xianxia.efforts", xianxia.get("efforts"), XIANXIA_EFFORT_KEYS)
+    _validate_energy_maxima(errors, xianxia.get("energies"))
+    _validate_yin_yang(errors, xianxia.get("yin_yang"))
+    _validate_dao_definition(errors, xianxia.get("dao"))
+    _validate_insight_definition(errors, xianxia.get("insight"))
+    _validate_durability_definition(errors, xianxia.get("durability"))
+    _validate_skills_definition(errors, xianxia.get("skills"))
+    _validate_equipment_definition(errors, xianxia.get("equipment"))
+
+    for path in (
+        "xianxia.martial_arts",
+        "xianxia.generic_techniques",
+        "xianxia.variants",
+        "xianxia.approval_requests",
+        "xianxia.companions",
+        "xianxia.advancement_history",
+    ):
+        _validate_record_list(errors, path, _value_at_path(xianxia, path.removeprefix("xianxia.")))
+
+    _validate_dao_immolating_definition(errors, xianxia.get("dao_immolating_techniques"))
+    return errors
+
+
 def build_xianxia_initial_state_payload(definition: Any) -> dict[str, Any]:
     return normalize_xianxia_state_payload(definition, {})
 
@@ -301,6 +385,180 @@ def xianxia_yin_max(definition: Any) -> int:
 
 def xianxia_yang_max(definition: Any) -> int:
     return _normalize_int(_definition_yin_yang(definition).get("yang_max"), default=1)
+
+
+def _normalized_definition_validation_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized_system = normalize_system_code(payload.get("system") or payload.get("system_code"))
+    validation_payload = deepcopy(payload)
+    if normalized_system:
+        validation_payload["system"] = normalized_system
+    return normalize_xianxia_definition_payload(validation_payload)
+
+
+def _collect_deferred_definition_key_errors(payload: dict[str, Any], errors: list[str]) -> None:
+    raw_xianxia = payload.get("xianxia") if isinstance(payload.get("xianxia"), dict) else {}
+    for path, mapping in (("", payload), ("xianxia.", raw_xianxia)):
+        if not isinstance(mapping, dict):
+            continue
+        for key, reason in _DEFERRED_DEFINITION_KEYS.items():
+            if key in mapping:
+                errors.append(f"{path}{key} is not valid Xianxia definition data. {reason}")
+
+
+def _value_at_path(mapping: dict[str, Any], path: str) -> Any:
+    current: Any = mapping
+    for part in path.split("."):
+        current = dict(current or {}).get(part) if isinstance(current, dict) else None
+    return current
+
+
+def _require_exact_int(errors: list[str], path: str, value: Any, expected: int) -> None:
+    if not isinstance(value, int):
+        errors.append(f"{path} must be a whole number.")
+        return
+    if value != expected:
+        errors.append(f"{path} must be {expected}.")
+
+
+def _require_non_negative_int(errors: list[str], path: str, value: Any) -> None:
+    if not isinstance(value, int):
+        errors.append(f"{path} must be a whole number.")
+        return
+    if value < 0:
+        errors.append(f"{path} cannot be negative.")
+
+
+def _validate_int_key_map(
+    errors: list[str],
+    path: str,
+    value: Any,
+    keys: tuple[str, ...],
+) -> None:
+    if not isinstance(value, dict):
+        errors.append(f"{path} must be an object.")
+        return
+    for key in keys:
+        _require_non_negative_int(errors, f"{path}.{key}", value.get(key))
+    unknown = sorted(set(value) - set(keys))
+    if unknown:
+        errors.append(f"{path} uses unsupported keys: {', '.join(unknown)}.")
+
+
+def _validate_energy_maxima(errors: list[str], value: Any) -> None:
+    if not isinstance(value, dict):
+        errors.append("xianxia.energies must be an object.")
+        return
+    for key in XIANXIA_ENERGY_KEYS:
+        energy = value.get(key)
+        if not isinstance(energy, dict):
+            errors.append(f"xianxia.energies.{key} must be an object.")
+            continue
+        _require_non_negative_int(errors, f"xianxia.energies.{key}.max", energy.get("max"))
+        unknown = sorted(set(energy) - {"max"})
+        if unknown:
+            errors.append(f"xianxia.energies.{key} uses unsupported keys: {', '.join(unknown)}.")
+    unknown = sorted(set(value) - set(XIANXIA_ENERGY_KEYS))
+    if unknown:
+        errors.append(f"xianxia.energies uses unsupported keys: {', '.join(unknown)}.")
+
+
+def _validate_yin_yang(errors: list[str], value: Any) -> None:
+    if not isinstance(value, dict):
+        errors.append("xianxia.yin_yang must be an object.")
+        return
+    for key in ("yin_max", "yang_max"):
+        _require_non_negative_int(errors, f"xianxia.yin_yang.{key}", value.get(key))
+    unknown = sorted(set(value) - {"yin_max", "yang_max"})
+    if unknown:
+        errors.append(f"xianxia.yin_yang uses unsupported keys: {', '.join(unknown)}.")
+
+
+def _validate_dao_definition(errors: list[str], value: Any) -> None:
+    if not isinstance(value, dict):
+        errors.append("xianxia.dao must be an object.")
+        return
+    _require_exact_int(errors, "xianxia.dao.max", value.get("max"), 3)
+    unknown = sorted(set(value) - {"max"})
+    if unknown:
+        errors.append(f"xianxia.dao uses unsupported keys: {', '.join(unknown)}.")
+
+
+def _validate_insight_definition(errors: list[str], value: Any) -> None:
+    if not isinstance(value, dict):
+        errors.append("xianxia.insight must be an object.")
+        return
+    for key in ("available", "spent"):
+        _require_non_negative_int(errors, f"xianxia.insight.{key}", value.get(key))
+    unknown = sorted(set(value) - {"available", "spent"})
+    if unknown:
+        errors.append(f"xianxia.insight uses unsupported keys: {', '.join(unknown)}.")
+
+
+def _validate_durability_definition(errors: list[str], value: Any) -> None:
+    if not isinstance(value, dict):
+        errors.append("xianxia.durability must be an object.")
+        return
+    for key in ("hp_max", "stance_max", "manual_armor_bonus", "defense"):
+        _require_non_negative_int(errors, f"xianxia.durability.{key}", value.get(key))
+    unknown = sorted(set(value) - {"hp_max", "stance_max", "manual_armor_bonus", "defense"})
+    if unknown:
+        errors.append(f"xianxia.durability uses unsupported keys: {', '.join(unknown)}.")
+
+
+def _validate_skills_definition(errors: list[str], value: Any) -> None:
+    if not isinstance(value, dict):
+        errors.append("xianxia.skills must be an object.")
+        return
+    trained = value.get("trained")
+    if not isinstance(trained, list):
+        errors.append("xianxia.skills.trained must be a list.")
+    else:
+        for index, skill in enumerate(trained):
+            if not isinstance(skill, str) or not skill.strip():
+                errors.append(f"xianxia.skills.trained[{index}] must be a non-empty string.")
+    unknown = sorted(set(value) - {"trained"})
+    if unknown:
+        errors.append(f"xianxia.skills uses unsupported keys: {', '.join(unknown)}.")
+
+
+def _validate_equipment_definition(errors: list[str], value: Any) -> None:
+    if not isinstance(value, dict):
+        errors.append("xianxia.equipment must be an object.")
+        return
+    for key in ("necessary_weapons", "necessary_tools"):
+        _validate_record_list(errors, f"xianxia.equipment.{key}", value.get(key), require_name=True)
+    unknown = sorted(set(value) - {"necessary_weapons", "necessary_tools"})
+    if unknown:
+        errors.append(f"xianxia.equipment uses unsupported keys: {', '.join(unknown)}.")
+
+
+def _validate_dao_immolating_definition(errors: list[str], value: Any) -> None:
+    if not isinstance(value, dict):
+        errors.append("xianxia.dao_immolating_techniques must be an object.")
+        return
+    for key in ("prepared", "use_history"):
+        _validate_record_list(errors, f"xianxia.dao_immolating_techniques.{key}", value.get(key))
+    unknown = sorted(set(value) - {"prepared", "use_history"})
+    if unknown:
+        errors.append(f"xianxia.dao_immolating_techniques uses unsupported keys: {', '.join(unknown)}.")
+
+
+def _validate_record_list(
+    errors: list[str],
+    path: str,
+    value: Any,
+    *,
+    require_name: bool = False,
+) -> None:
+    if not isinstance(value, list):
+        errors.append(f"{path} must be a list.")
+        return
+    for index, record in enumerate(value):
+        if not isinstance(record, dict) or not record:
+            errors.append(f"{path}[{index}] must be a non-empty object.")
+            continue
+        if require_name and not _normalize_text(record.get("name")):
+            errors.append(f"{path}[{index}].name is required.")
 
 
 def _has_any(*mappings: dict[str, Any], key: str) -> bool:
