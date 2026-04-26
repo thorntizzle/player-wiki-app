@@ -38,6 +38,9 @@ from .repository import build_alias_index, normalize_lookup, render_obsidian_lin
 from .system_policy import is_xianxia_system
 from .xianxia_systems_seed import XIANXIA_HOMEBREW_SOURCE_ID
 from .xianxia_character_model import (
+    XIANXIA_ATTRIBUTE_KEYS,
+    XIANXIA_ATTRIBUTE_LABELS,
+    XIANXIA_ENERGY_KEYS,
     XIANXIA_EFFORT_KEYS,
     XIANXIA_EFFORT_LABELS,
     XIANXIA_DEFENSE_BASE,
@@ -96,6 +99,23 @@ XIANXIA_RULE_TEXT_REFERENCE_SPECS = (
     ("Minions", "minions"),
     ("Companion Derivation", "companion-derivation"),
 )
+XIANXIA_READ_SUBPAGE_LABELS = (
+    ("quick", "Quick Reference"),
+    ("martial_arts", "Martial Arts"),
+    ("techniques", "Techniques"),
+    ("resources", "Resources"),
+    ("skills", "Skills"),
+    ("equipment", "Equipment"),
+    ("inventory", "Inventory"),
+    ("personal", "Personal"),
+    ("notes", "Notes"),
+    ("controls", "Controls"),
+)
+XIANXIA_ENERGY_LABELS = {
+    "jing": "Jing",
+    "qi": "Qi",
+    "shen": "Shen",
+}
 ATTACK_NAME_SUFFIX_PATTERN = re.compile(r"\s*\([^)]*\)\s*$")
 
 
@@ -265,6 +285,25 @@ def present_character_detail(
             campaign,
             state,
             systems_service=systems_service,
+        )
+        if is_xianxia_character
+        else None
+    )
+    xianxia_read_context = (
+        present_xianxia_read_context(
+            campaign,
+            definition.xianxia,
+            state,
+            xianxia_defense=xianxia_defense,
+            xianxia_actions=xianxia_actions,
+            xianxia_effort_damage=xianxia_effort_damage,
+            xianxia_check_formula=xianxia_check_formula,
+            xianxia_difficulty_states=xianxia_difficulty_states,
+            xianxia_honor_interactions=xianxia_honor_interactions,
+            xianxia_skill_use_guardrails=xianxia_skill_use_guardrails,
+            xianxia_rule_text_references=xianxia_rule_text_references,
+            xianxia_active_state_reminders=xianxia_active_state_reminders,
+            xianxia_stance_break=xianxia_stance_break,
         )
         if is_xianxia_character
         else None
@@ -877,6 +916,7 @@ def present_character_detail(
         "xianxia_rule_text_references": xianxia_rule_text_references,
         "xianxia_active_state_reminders": xianxia_active_state_reminders,
         "xianxia_stance_break": xianxia_stance_break,
+        "xianxia_read": xianxia_read_context,
         "attack_reminders": attack_reminders,
         "defensive_rules": defensive_rules,
         "death_save_summary": death_save_summary,
@@ -1551,6 +1591,307 @@ def present_xianxia_stance_break_reference(
         "recovery_lines": recovery_lines,
         "rule_title": systems_ref["title"],
         "rule_href": build_systems_entry_href(campaign.slug, systems_ref),
+    }
+
+
+def present_xianxia_read_context(
+    campaign: Campaign,
+    xianxia_definition: dict[str, Any],
+    state: dict[str, Any],
+    *,
+    xianxia_defense: dict[str, Any] | None = None,
+    xianxia_actions: dict[str, Any] | None = None,
+    xianxia_effort_damage: dict[str, Any] | None = None,
+    xianxia_check_formula: dict[str, Any] | None = None,
+    xianxia_difficulty_states: dict[str, Any] | None = None,
+    xianxia_honor_interactions: dict[str, Any] | None = None,
+    xianxia_skill_use_guardrails: dict[str, Any] | None = None,
+    xianxia_rule_text_references: list[dict[str, Any]] | None = None,
+    xianxia_active_state_reminders: list[dict[str, Any]] | None = None,
+    xianxia_stance_break: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    xianxia = dict(xianxia_definition or {})
+    xianxia_state = dict(state.get("xianxia") or {})
+    shared_vitals = dict(state.get("vitals") or {})
+    xianxia_vitals = dict(xianxia_state.get("vitals") or {})
+    durability = dict(xianxia.get("durability") or {})
+    hp_max = _coerce_int(durability.get("hp_max"), default=10)
+    stance_max = _coerce_int(durability.get("stance_max"), default=10)
+    current_hp = _coerce_int(
+        shared_vitals.get("current_hp", xianxia_vitals.get("current_hp")),
+        default=hp_max,
+    )
+    temp_hp = _coerce_int(
+        shared_vitals.get("temp_hp", xianxia_vitals.get("temp_hp")),
+        default=0,
+    )
+    current_stance = _coerce_int(xianxia_vitals.get("current_stance"), default=stance_max)
+    temp_stance = _coerce_int(xianxia_vitals.get("temp_stance"), default=0)
+    energy_definition = dict(xianxia.get("energies") or {})
+    energy_state = dict(xianxia_state.get("energies") or {})
+    yin_yang_definition = dict(xianxia.get("yin_yang") or {})
+    yin_yang_state = dict(xianxia_state.get("yin_yang") or {})
+    dao_definition = dict(xianxia.get("dao") or {})
+    dao_state = dict(xianxia_state.get("dao") or {})
+    insight = dict(xianxia.get("insight") or {})
+    effort_damage = dict(xianxia_effort_damage or {})
+    effort_damage_entries = {
+        str(entry.get("key") or ""): dict(entry or {})
+        for entry in list(effort_damage.get("entries") or [])
+        if str(entry.get("key") or "").strip()
+    }
+    active_stance = _coerce_xianxia_active_state_record(xianxia_state.get("active_stance"))
+    active_aura = _coerce_xianxia_active_state_record(xianxia_state.get("active_aura"))
+    dao_immolating = dict(xianxia.get("dao_immolating_techniques") or {})
+
+    return {
+        "system_label": "Xianxia",
+        "subpages": [
+            {"slug": slug, "label": label}
+            for slug, label in XIANXIA_READ_SUBPAGE_LABELS
+        ],
+        "identity": {
+            "realm": str((xianxia_actions or {}).get("realm") or xianxia.get("realm") or "Mortal"),
+            "actions_per_turn": _coerce_int(
+                (xianxia_actions or {}).get("actions_per_turn"),
+                default=_coerce_int(xianxia.get("actions_per_turn"), default=2),
+            ),
+            "honor": str(xianxia.get("honor") or "Honorable"),
+            "reputation": str(xianxia.get("reputation") or "Unknown"),
+        },
+        "attributes": [
+            {
+                "key": key,
+                "label": XIANXIA_ATTRIBUTE_LABELS[key],
+                "score": _coerce_int(dict(xianxia.get("attributes") or {}).get(key), default=0),
+            }
+            for key in XIANXIA_ATTRIBUTE_KEYS
+        ],
+        "efforts": [
+            {
+                "key": key,
+                "label": XIANXIA_EFFORT_LABELS[key],
+                "score": _coerce_int(dict(xianxia.get("efforts") or {}).get(key), default=0),
+                "damage": str(effort_damage_entries.get(key, {}).get("damage") or ""),
+            }
+            for key in XIANXIA_EFFORT_KEYS
+        ],
+        "resources": {
+            "durability": [
+                {
+                    "key": "hp",
+                    "label": "HP",
+                    "current": current_hp,
+                    "max": hp_max,
+                    "temp": temp_hp,
+                },
+                {
+                    "key": "stance",
+                    "label": "Stance",
+                    "current": current_stance,
+                    "max": stance_max,
+                    "temp": temp_stance,
+                },
+            ],
+            "energies": [
+                {
+                    "key": key,
+                    "label": XIANXIA_ENERGY_LABELS[key],
+                    "current": _coerce_int(
+                        dict(energy_state.get(key) or {}).get("current"),
+                        default=_coerce_int(dict(energy_definition.get(key) or {}).get("max"), default=0),
+                    ),
+                    "max": _coerce_int(dict(energy_definition.get(key) or {}).get("max"), default=0),
+                }
+                for key in XIANXIA_ENERGY_KEYS
+            ],
+            "yin_yang": [
+                {
+                    "key": "yin",
+                    "label": "Yin",
+                    "current": _coerce_int(
+                        yin_yang_state.get("yin_current"),
+                        default=_coerce_int(yin_yang_definition.get("yin_max"), default=1),
+                    ),
+                    "max": _coerce_int(yin_yang_definition.get("yin_max"), default=1),
+                },
+                {
+                    "key": "yang",
+                    "label": "Yang",
+                    "current": _coerce_int(
+                        yin_yang_state.get("yang_current"),
+                        default=_coerce_int(yin_yang_definition.get("yang_max"), default=1),
+                    ),
+                    "max": _coerce_int(yin_yang_definition.get("yang_max"), default=1),
+                },
+            ],
+            "dao": {
+                "current": _coerce_int(dao_state.get("current"), default=0),
+                "max": _coerce_int(dao_definition.get("max"), default=3),
+            },
+            "insight": {
+                "available": _coerce_int(insight.get("available"), default=0),
+                "spent": _coerce_int(insight.get("spent"), default=0),
+            },
+        },
+        "skills": {
+            "trained": [
+                {"name": skill}
+                for skill in _text_list(dict(xianxia.get("skills") or {}).get("trained"))
+            ],
+        },
+        "equipment": {
+            "manual_armor_bonus": _coerce_int(durability.get("manual_armor_bonus"), default=0),
+            "defense": _coerce_int(durability.get("defense"), default=0),
+            "necessary_weapons": _present_xianxia_named_records(
+                dict(xianxia.get("equipment") or {}).get("necessary_weapons")
+            ),
+            "necessary_tools": _present_xianxia_named_records(
+                dict(xianxia.get("equipment") or {}).get("necessary_tools")
+            ),
+        },
+        "martial_arts": _present_xianxia_linked_records(
+            campaign.slug,
+            xianxia.get("martial_arts"),
+            default_name="Martial Art",
+            include_rank_refs=True,
+        ),
+        "generic_techniques": _present_xianxia_linked_records(
+            campaign.slug,
+            xianxia.get("generic_techniques"),
+            default_name="Generic Technique",
+        ),
+        "approval": {
+            "variants": _present_xianxia_named_records(xianxia.get("variants")),
+            "dao_immolating_prepared": _present_xianxia_named_records(
+                dao_immolating.get("prepared")
+            ),
+            "dao_immolating_use_history": _present_xianxia_named_records(
+                dao_immolating.get("use_history")
+            ),
+            "approval_requests": _present_xianxia_named_records(xianxia.get("approval_requests")),
+        },
+        "active_state": {
+            "stance": _present_xianxia_active_state(active_stance, label="Stance"),
+            "aura": _present_xianxia_active_state(active_aura, label="Aura"),
+        },
+        "quick_reference": {
+            "defense": xianxia_defense,
+            "actions": xianxia_actions,
+            "effort_damage": xianxia_effort_damage,
+            "check_formula": xianxia_check_formula,
+            "difficulty_states": xianxia_difficulty_states,
+            "honor_interactions": xianxia_honor_interactions,
+            "skill_use_guardrails": xianxia_skill_use_guardrails,
+            "rule_text_references": list(xianxia_rule_text_references or []),
+            "active_state_reminders": list(xianxia_active_state_reminders or []),
+            "stance_break": xianxia_stance_break,
+        },
+    }
+
+
+def _text_list(values: Any) -> list[str]:
+    return [str(value).strip() for value in list(values or []) if str(value).strip()]
+
+
+def _present_xianxia_named_records(values: Any) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for value in list(values or []):
+        payload = dict(value or {}) if isinstance(value, dict) else {"name": value}
+        name = str(payload.get("name") or payload.get("title") or "").strip()
+        if not name and not payload:
+            continue
+        records.append(
+            {
+                "name": name or "Unnamed record",
+                "reason": str(payload.get("reason") or "").strip(),
+                "status": str(
+                    payload.get("status")
+                    or payload.get("approval_status")
+                    or payload.get("request_status")
+                    or ""
+                ).strip(),
+                "type": str(
+                    payload.get("type")
+                    or payload.get("variant_type")
+                    or payload.get("request_type")
+                    or ""
+                ).strip(),
+                "notes": str(payload.get("notes") or payload.get("approval_notes") or "").strip(),
+            }
+        )
+    return records
+
+
+def _present_xianxia_linked_records(
+    campaign_slug: str,
+    values: Any,
+    *,
+    default_name: str,
+    include_rank_refs: bool = False,
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for value in list(values or []):
+        payload = dict(value or {}) if isinstance(value, dict) else {"name": value}
+        systems_ref = dict(payload.get("systems_ref") or {})
+        name = str(payload.get("name") or systems_ref.get("title") or default_name).strip()
+        href = build_character_entry_href(
+            campaign_slug,
+            systems_ref=systems_ref,
+            page_ref=payload.get("page_ref"),
+        )
+        record = {
+            "name": name or default_name,
+            "href": href,
+            "systems_ref": systems_ref,
+            "current_rank": str(
+                payload.get("current_rank")
+                or humanize_value(payload.get("current_rank_key"))
+                or ""
+            ).strip(),
+            "current_rank_key": str(payload.get("current_rank_key") or "").strip(),
+            "rank_records_status": str(payload.get("rank_records_status") or "").strip(),
+            "custom": bool(payload.get("custom_martial_art") or payload.get("xianxia_custom_martial_art")),
+            "starting_package": bool(payload.get("starting_package")),
+        }
+        if include_rank_refs:
+            record["learned_rank_refs"] = _present_xianxia_rank_refs(
+                list(payload.get("learned_rank_refs") or []),
+                parent_href=href,
+            )
+        records.append(record)
+    return records
+
+
+def _present_xianxia_rank_refs(values: list[Any], *, parent_href: str) -> list[dict[str, str]]:
+    rank_refs: list[dict[str, str]] = []
+    for value in values:
+        ref = str(value or "").strip()
+        if not ref:
+            continue
+        href = f"{parent_href}#{_xianxia_anchor_id_for_ref(ref)}" if parent_href else ""
+        rank_refs.append(
+            {
+                "ref": ref,
+                "label": humanize_value(ref.rsplit(":", 1)[-1]) or ref,
+                "href": href,
+            }
+        )
+    return rank_refs
+
+
+def _xianxia_anchor_id_for_ref(value: str) -> str:
+    anchor = re.sub(r"[^A-Za-z0-9_-]+", "-", value.strip()).strip("-").lower()
+    return anchor or "xianxia-ref"
+
+
+def _present_xianxia_active_state(record: dict[str, Any], *, label: str) -> dict[str, Any]:
+    name = str(record.get("name") or "").strip()
+    return {
+        "label": label,
+        "name": name,
+        "status_label": f"Active {label}: {name}" if name else f"No active {label} recorded",
+        "systems_ref": dict(record.get("systems_ref") or {}),
     }
 
 

@@ -5,6 +5,7 @@ from html import unescape
 
 import yaml
 
+from player_wiki.character_presenter import present_character_detail
 from player_wiki.character_models import CharacterDefinition
 from player_wiki.xianxia_character_model import (
     derive_xianxia_difficulty_state_adjustments,
@@ -104,6 +105,113 @@ def _replace_character_state(app, record, state: dict) -> None:
             state,
             expected_revision=record.state_record.revision,
         )
+
+
+def test_xianxia_read_presenter_context_collects_first_pass_sheet_facts(
+    app,
+    client,
+    sign_in,
+    users,
+    get_character,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            **_valid_xianxia_create_data("Presenter Context Crane"),
+            "manual_armor_bonus": "2",
+            "dao_current": "2",
+        },
+        follow_redirects=False,
+    )
+
+    assert create_response.status_code == 302
+    record = get_character("presenter-context-crane")
+    assert record is not None
+
+    with app.app_context():
+        campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
+        character = present_character_detail(
+            campaign,
+            record,
+            systems_service=app.extensions["systems_service"],
+        )
+
+    xianxia_read = character["xianxia_read"]
+    assert [subpage["label"] for subpage in xianxia_read["subpages"]] == [
+        "Quick Reference",
+        "Martial Arts",
+        "Techniques",
+        "Resources",
+        "Skills",
+        "Equipment",
+        "Inventory",
+        "Personal",
+        "Notes",
+        "Controls",
+    ]
+    assert xianxia_read["identity"] == {
+        "realm": "Mortal",
+        "actions_per_turn": 2,
+        "honor": "Honorable",
+        "reputation": "Unknown",
+    }
+    assert xianxia_read["resources"]["durability"] == [
+        {"key": "hp", "label": "HP", "current": 10, "max": 10, "temp": 0},
+        {"key": "stance", "label": "Stance", "current": 10, "max": 10, "temp": 0},
+    ]
+    assert xianxia_read["resources"]["energies"] == [
+        {"key": "jing", "label": "Jing", "current": 1, "max": 1},
+        {"key": "qi", "label": "Qi", "current": 1, "max": 1},
+        {"key": "shen", "label": "Shen", "current": 1, "max": 1},
+    ]
+    assert xianxia_read["resources"]["yin_yang"] == [
+        {"key": "yin", "label": "Yin", "current": 1, "max": 1},
+        {"key": "yang", "label": "Yang", "current": 1, "max": 1},
+    ]
+    assert xianxia_read["resources"]["dao"] == {"current": 2, "max": 3}
+    assert xianxia_read["resources"]["insight"] == {"available": 0, "spent": 0}
+    assert xianxia_read["attributes"][2] == {
+        "key": "con",
+        "label": "Constitution",
+        "score": 3,
+    }
+    assert xianxia_read["efforts"][0] == {
+        "key": "basic",
+        "label": "Basic",
+        "score": 3,
+        "damage": "1d4 + Basic",
+    }
+    assert xianxia_read["skills"]["trained"] == [
+        {"name": "Fishing"},
+        {"name": "Calligraphy"},
+        {"name": "Tea Ceremony"},
+    ]
+    assert xianxia_read["equipment"]["manual_armor_bonus"] == 2
+    assert xianxia_read["equipment"]["defense"] == 15
+    assert {
+        "name": "Fishing rod, spear, or net",
+        "reason": "Required for Fishing",
+        "status": "",
+        "type": "",
+        "notes": "",
+    } in xianxia_read["equipment"]["necessary_tools"]
+
+    first_art = xianxia_read["martial_arts"][0]
+    assert first_art["name"] == "Demon's Fist"
+    assert first_art["href"] == "/campaigns/linden-pass/systems/entries/demons-fist"
+    assert first_art["learned_rank_refs"] == [
+        {
+            "ref": "xianxia:demons-fist:initiate",
+            "label": "Initiate",
+            "href": "/campaigns/linden-pass/systems/entries/demons-fist#xianxia-demons-fist-initiate",
+        }
+    ]
+    assert xianxia_read["quick_reference"]["defense"]["value"] == 15
+    assert xianxia_read["quick_reference"]["actions"]["actions_per_turn"] == 2
+    assert character["spellcasting"] is None
 
 
 def test_xianxia_quick_reference_presents_derived_defense(
