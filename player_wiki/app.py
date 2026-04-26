@@ -1364,6 +1364,7 @@ def present_xianxia_cultivation_context(character: dict[str, object], xianxia: d
         details = []
         for key, label in (
             ("amount", "Amount"),
+            ("downtime", "Downtime"),
             ("target", "Target"),
             ("rank", "Rank"),
             ("systems_ref", "Systems ref"),
@@ -1398,6 +1399,51 @@ def update_xianxia_insight_definition(definition, *, available: int, spent: int)
         "available": int(available),
         "spent": int(spent),
     }
+    payload["xianxia"] = xianxia
+    return definition.__class__.from_dict(payload)
+
+
+def update_xianxia_gathering_insight_definition(
+    definition,
+    *,
+    amount: int,
+    downtime: str = "",
+    notes: str = "",
+):
+    gain_amount = int(amount)
+    if gain_amount <= 0:
+        raise ValueError("Gathered Insight must be at least 1.")
+
+    payload = definition.to_dict()
+    xianxia = dict(payload.get("xianxia") or {})
+    insight = dict(xianxia.get("insight") or {})
+    available = int(insight.get("available") or 0)
+    spent = int(insight.get("spent") or 0)
+    new_available = available + gain_amount
+    xianxia["insight"] = {
+        "available": new_available,
+        "spent": spent,
+    }
+
+    history = [
+        dict(record)
+        for record in list(xianxia.get("advancement_history") or [])
+        if isinstance(record, dict) and record
+    ]
+    event = {
+        "action": "gathering_insight",
+        "amount": gain_amount,
+        "target": "Insight",
+    }
+    clean_downtime = " ".join(str(downtime or "").split()).strip()
+    if clean_downtime:
+        event["downtime"] = clean_downtime
+    clean_notes = str(notes or "").strip()
+    if clean_notes:
+        event["notes"] = clean_notes
+    history.append(event)
+    xianxia["advancement_history"] = history
+
     payload["xianxia"] = xianxia
     return definition.__class__.from_dict(payload)
 
@@ -11635,21 +11681,40 @@ def create_app() -> Flask:
             if user is None:
                 abort(403)
 
+            redirect_anchor = "xianxia-cultivation-insight"
             try:
                 expected_revision = parse_expected_revision()
-                insight_available = normalize_dm_player_wiki_int(
-                    request.form.get("insight_available", ""),
-                    field_label="Insight available",
-                )
-                insight_spent = normalize_dm_player_wiki_int(
-                    request.form.get("insight_spent", ""),
-                    field_label="Insight spent",
-                )
-                definition = update_xianxia_insight_definition(
-                    record.definition,
-                    available=insight_available,
-                    spent=insight_spent,
-                )
+                cultivation_action = str(request.form.get("cultivation_action") or "save_insight").strip()
+                if cultivation_action == "save_insight":
+                    insight_available = normalize_dm_player_wiki_int(
+                        request.form.get("insight_available", ""),
+                        field_label="Insight available",
+                    )
+                    insight_spent = normalize_dm_player_wiki_int(
+                        request.form.get("insight_spent", ""),
+                        field_label="Insight spent",
+                    )
+                    definition = update_xianxia_insight_definition(
+                        record.definition,
+                        available=insight_available,
+                        spent=insight_spent,
+                    )
+                    success_message = "Insight counters saved."
+                elif cultivation_action == "record_gathering_insight":
+                    redirect_anchor = "xianxia-cultivation-gathering-insight"
+                    insight_gain = normalize_dm_player_wiki_int(
+                        request.form.get("insight_gain_amount", ""),
+                        field_label="Gathered Insight",
+                    )
+                    definition = update_xianxia_gathering_insight_definition(
+                        record.definition,
+                        amount=insight_gain,
+                        downtime=request.form.get("gathering_insight_downtime", ""),
+                        notes=request.form.get("gathering_insight_notes", ""),
+                    )
+                    success_message = "Gathering Insight recorded."
+                else:
+                    raise ValueError("Unsupported cultivation action. Refresh the page and try again.")
                 definition = finalize_character_definition_for_write(
                     campaign_slug,
                     definition,
@@ -11679,14 +11744,14 @@ def create_app() -> Flask:
             except (CharacterStateValidationError, ValueError) as exc:
                 flash(str(exc), "error")
             else:
-                flash("Insight counters saved.", "success")
+                flash(success_message, "success")
 
             return redirect(
                 url_for(
                     "character_xianxia_cultivation_view",
                     campaign_slug=campaign_slug,
                     character_slug=character_slug,
-                    _anchor="xianxia-cultivation-insight",
+                    _anchor=redirect_anchor,
                 )
             )
 

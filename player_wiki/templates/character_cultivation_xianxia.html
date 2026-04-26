@@ -44,6 +44,7 @@
         action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
       >
         <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+        <input type="hidden" name="cultivation_action" value="save_insight">
         <div class="detail-grid">
           <label>
             Insight available
@@ -68,6 +69,49 @@
         </div>
         <div class="hero-actions">
           <button type="submit">Save Insight</button>
+        </div>
+      </form>
+    </article>
+  </section>
+
+  <section class="read-section" id="xianxia-cultivation-gathering-insight">
+    <div class="section-heading">
+      <h2>Gathering Insight</h2>
+    </div>
+    <article class="detail-card session-card">
+      <form
+        class="stack-form"
+        method="post"
+        action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+      >
+        <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+        <input type="hidden" name="cultivation_action" value="record_gathering_insight">
+        <div class="detail-grid">
+          <label>
+            Insight gained
+            <input
+              type="number"
+              name="insight_gain_amount"
+              min="1"
+              step="1"
+              value="1"
+            >
+          </label>
+          <label>
+            Downtime
+            <input
+              type="text"
+              name="gathering_insight_downtime"
+              value=""
+            >
+          </label>
+        </div>
+        <label>
+          Notes
+          <textarea name="gathering_insight_notes" rows="3"></textarea>
+        </label>
+        <div class="hero-actions">
+          <button type="submit">Record Gain</button>
         </div>
       </form>
     </article>

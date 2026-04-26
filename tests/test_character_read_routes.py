@@ -1508,6 +1508,100 @@ def test_xianxia_cultivation_route_tracks_insight_available_and_spent(
     assert _character_state_revision(app, "insight-crane") == current_revision
 
 
+def test_xianxia_cultivation_route_records_gathering_insight_downtime_gains(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+                "default_visibility": "dm",
+            }
+        ]
+
+    _write_campaign_config(app, _mutate)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Insight Gatherer"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+
+    cultivation_response = client.get(
+        "/campaigns/linden-pass/characters/insight-gatherer/cultivation"
+    )
+    assert cultivation_response.status_code == 200
+    cultivation_html = cultivation_response.get_data(as_text=True)
+    assert 'name="cultivation_action" value="record_gathering_insight"' in cultivation_html
+    assert 'name="insight_gain_amount"' in cultivation_html
+    assert 'name="gathering_insight_downtime"' in cultivation_html
+    assert 'name="gathering_insight_notes"' in cultivation_html
+
+    starting_revision = _character_state_revision(app, "insight-gatherer")
+    gain_response = client.post(
+        "/campaigns/linden-pass/characters/insight-gatherer/cultivation",
+        data={
+            "expected_revision": str(starting_revision),
+            "cultivation_action": "record_gathering_insight",
+            "insight_gain_amount": "4",
+            "gathering_insight_downtime": "3 days between sessions",
+            "gathering_insight_notes": "Meditated under storm clouds.",
+        },
+        follow_redirects=False,
+    )
+    assert gain_response.status_code == 302
+    assert gain_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/insight-gatherer/cultivation#xianxia-cultivation-gathering-insight"
+    )
+
+    definition_payload = _read_character_definition(app, "insight-gatherer")
+    assert definition_payload["xianxia"]["insight"] == {"available": 4, "spent": 0}
+    assert definition_payload["xianxia"]["advancement_history"] == [
+        {
+            "action": "gathering_insight",
+            "amount": 4,
+            "target": "Insight",
+            "downtime": "3 days between sessions",
+            "notes": "Meditated under storm clouds.",
+        }
+    ]
+    assert _character_state_revision(app, "insight-gatherer") == starting_revision + 1
+
+    updated_html = client.get(
+        "/campaigns/linden-pass/characters/insight-gatherer/cultivation"
+    ).get_data(as_text=True)
+    assert "Gathering Insight" in updated_html
+    assert "Amount:" in updated_html
+    assert "4" in updated_html
+    assert "Downtime:" in updated_html
+    assert "3 days between sessions" in updated_html
+    assert "Notes:" in updated_html
+    assert "Meditated under storm clouds." in updated_html
+
+    current_revision = _character_state_revision(app, "insight-gatherer")
+    invalid_response = client.post(
+        "/campaigns/linden-pass/characters/insight-gatherer/cultivation",
+        data={
+            "expected_revision": str(current_revision),
+            "cultivation_action": "record_gathering_insight",
+            "insight_gain_amount": "0",
+        },
+        follow_redirects=True,
+    )
+    assert invalid_response.status_code == 200
+    assert "Gathered Insight must be at least 1." in invalid_response.get_data(as_text=True)
+    assert _read_character_definition(app, "insight-gatherer")["xianxia"]["insight"] == {
+        "available": 4,
+        "spent": 0,
+    }
+    assert _character_state_revision(app, "insight-gatherer") == current_revision
+
+
 def test_xianxia_create_picker_allows_seeded_and_gm_custom_martial_arts(
     app, client, sign_in, users
 ):
