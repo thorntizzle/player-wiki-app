@@ -55,6 +55,8 @@ class CharacterStateService:
         current_jing: Any | None = None,
         current_qi: Any | None = None,
         current_shen: Any | None = None,
+        current_yin: Any | None = None,
+        current_yang: Any | None = None,
         hp_delta: Any | None = None,
         temp_hp_delta: Any | None = None,
         clear_temp_hp: bool = False,
@@ -80,6 +82,11 @@ class CharacterStateService:
                 current_jing=current_jing,
                 current_qi=current_qi,
                 current_shen=current_shen,
+            )
+            self._apply_xianxia_yin_yang_update(
+                state,
+                current_yin=current_yin,
+                current_yang=current_yang,
             )
         return self._replace_state(
             record,
@@ -416,6 +423,28 @@ class CharacterStateService:
             energy["current"] = int(value)
             energies[key] = energy
         xianxia_state["energies"] = energies
+        state["xianxia"] = xianxia_state
+
+    def _apply_xianxia_yin_yang_update(
+        self,
+        state: dict[str, Any],
+        *,
+        current_yin: Any | None = None,
+        current_yang: Any | None = None,
+    ) -> None:
+        if (
+            (current_yin is None or str(current_yin).strip() == "")
+            and (current_yang is None or str(current_yang).strip() == "")
+        ):
+            return
+
+        xianxia_state = dict(state.get("xianxia") or {})
+        yin_yang = dict(xianxia_state.get("yin_yang") or {})
+        if current_yin is not None and str(current_yin).strip() != "":
+            yin_yang["yin_current"] = int(current_yin)
+        if current_yang is not None and str(current_yang).strip() != "":
+            yin_yang["yang_current"] = int(current_yang)
+        xianxia_state["yin_yang"] = yin_yang
         state["xianxia"] = xianxia_state
 
     def _apply_resource_update(

@@ -12736,6 +12736,8 @@ def create_app() -> Flask:
                 current_jing=request.form.get("current_jing"),
                 current_qi=request.form.get("current_qi"),
                 current_shen=request.form.get("current_shen"),
+                current_yin=request.form.get("current_yin"),
+                current_yang=request.form.get("current_yang"),
                 hp_delta=request.form.get("hp_delta"),
                 temp_hp_delta=request.form.get("temp_hp_delta"),
                 clear_temp_hp=request.form.get("clear_temp_hp") == "1",
