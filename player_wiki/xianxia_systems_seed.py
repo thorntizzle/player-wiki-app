@@ -53,6 +53,13 @@ XIANXIA_EFFORT_KEYS = (
     "ultimate",
 )
 XIANXIA_MAGIC_EFFORT_CANONICAL_LABEL = "Magic Effort"
+XIANXIA_MARTIAL_ART_RANK_KEYS = (
+    "initiate",
+    "novice",
+    "apprentice",
+    "master",
+    "legendary",
+)
 
 
 @lru_cache(maxsize=1)
@@ -67,6 +74,8 @@ def _load_xianxia_systems_seed_payload() -> dict[str, Any]:
     storage_strategy = str(payload.get("storage_strategy") or "").strip()
     raw_entry_facets = payload.get("entry_facets")
     raw_efforts = payload.get("efforts")
+    raw_martial_art_ranks = payload.get("martial_art_ranks")
+    raw_martial_art_rank_sets = payload.get("martial_art_rank_sets")
     raw_entries = payload.get("entries")
 
     if source_id != XIANXIA_HOMEBREW_SOURCE_ID:
@@ -83,6 +92,8 @@ def _load_xianxia_systems_seed_payload() -> dict[str, Any]:
         )
     payload["entry_facets"] = _normalize_facet_definitions(raw_entry_facets)
     payload["efforts"] = _normalize_effort_definitions(raw_efforts)
+    payload["martial_art_ranks"] = _normalize_martial_art_rank_definitions(raw_martial_art_ranks)
+    payload["martial_art_rank_sets"] = _normalize_martial_art_rank_sets(raw_martial_art_rank_sets)
     if not isinstance(raw_entries, list):
         raise ValueError("Xianxia Systems seed payload must include an entries list.")
 
@@ -106,6 +117,16 @@ def build_xianxia_effort_definitions() -> list[dict[str, Any]]:
 def get_xianxia_effort_definition(effort_key: str) -> dict[str, Any] | None:
     normalized_key = _normalize_identifier(effort_key)
     definition = _XIANXIA_EFFORT_LOOKUP.get(normalized_key)
+    return dict(definition) if definition is not None else None
+
+
+def build_xianxia_martial_art_rank_definitions() -> list[dict[str, Any]]:
+    return [dict(rank) for rank in _XIANXIA_MARTIAL_ART_RANK_DEFINITIONS]
+
+
+def get_xianxia_martial_art_rank_definition(rank_key: str) -> dict[str, Any] | None:
+    normalized_key = _normalize_identifier(rank_key)
+    definition = _XIANXIA_MARTIAL_ART_RANK_LOOKUP.get(normalized_key)
     return dict(definition) if definition is not None else None
 
 
@@ -192,6 +213,8 @@ def _build_seed_entry(raw_spec: dict[str, Any], *, index: int, source_path: str)
     body.setdefault("facets", facets)
     body.setdefault("xianxia_entry_facets", facets)
     body.setdefault("sections", sections)
+    if entry_type == "martial_art":
+        _stamp_martial_art_rank_records(metadata, body, slug=slug)
     search_parts = [
         title,
         entry_type,
@@ -359,6 +382,88 @@ def _normalize_effort_definitions(raw_efforts: object) -> list[dict[str, Any]]:
     return definitions
 
 
+def _normalize_martial_art_rank_definitions(raw_ranks: object) -> list[dict[str, Any]]:
+    if not isinstance(raw_ranks, list):
+        raise ValueError("Xianxia Systems seed payload must include a martial_art_ranks list.")
+
+    definitions: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, raw_rank in enumerate(raw_ranks, start=1):
+        if not isinstance(raw_rank, dict):
+            raise ValueError(f"Xianxia Martial Art rank definition {index} must be an object.")
+        key = _normalize_identifier(raw_rank.get("key"))
+        if not key:
+            raise ValueError(f"Xianxia Martial Art rank definition {index} is missing key.")
+        if key in seen:
+            raise ValueError(f"Xianxia Martial Art rank definition {key!r} is duplicated.")
+        seen.add(key)
+        rank_name = str(raw_rank.get("rank_name") or raw_rank.get("label") or "").strip()
+        if not rank_name:
+            raise ValueError(f"Xianxia Martial Art rank definition {key!r} is missing rank_name.")
+        definitions.append({"key": key, "rank_name": rank_name})
+
+    actual_keys = tuple(definition["key"] for definition in definitions)
+    if actual_keys != XIANXIA_MARTIAL_ART_RANK_KEYS:
+        raise ValueError(
+            "Xianxia Martial Art rank definitions do not match the Milestone 1 rank set: "
+            + ", ".join(actual_keys)
+            + "."
+        )
+    return definitions
+
+
+def _normalize_martial_art_rank_sets(raw_rank_sets: object) -> dict[str, Any]:
+    if not isinstance(raw_rank_sets, dict):
+        raise ValueError("Xianxia Systems seed payload must include a martial_art_rank_sets object.")
+
+    default_rank_keys = _normalize_rank_key_sequence(raw_rank_sets.get("default"), context="default")
+    if tuple(default_rank_keys) != XIANXIA_MARTIAL_ART_RANK_KEYS:
+        raise ValueError("Xianxia Martial Art default rank set must include all Milestone 1 ranks in order.")
+
+    by_martial_art_key: dict[str, list[str]] = {}
+    raw_by_key = raw_rank_sets.get("by_martial_art_key")
+    if raw_by_key is not None and not isinstance(raw_by_key, dict):
+        raise ValueError("Xianxia Martial Art rank-set overrides must be an object.")
+    if isinstance(raw_by_key, dict):
+        for raw_key, raw_rank_keys in raw_by_key.items():
+            martial_art_key = _normalize_identifier(raw_key)
+            if not martial_art_key:
+                raise ValueError("Xianxia Martial Art rank-set override is missing a Martial Art key.")
+            if martial_art_key in by_martial_art_key:
+                raise ValueError(f"Xianxia Martial Art rank-set override {martial_art_key!r} is duplicated.")
+            rank_keys = _normalize_rank_key_sequence(raw_rank_keys, context=martial_art_key)
+            if tuple(rank_keys) != XIANXIA_MARTIAL_ART_RANK_KEYS[: len(rank_keys)]:
+                raise ValueError(
+                    f"Xianxia Martial Art rank-set override {martial_art_key!r} must be a prefix of the "
+                    "Milestone 1 rank set."
+                )
+            by_martial_art_key[martial_art_key] = rank_keys
+
+    return {
+        "default": default_rank_keys,
+        "by_martial_art_key": by_martial_art_key,
+    }
+
+
+def _normalize_rank_key_sequence(raw_rank_keys: object, *, context: str) -> list[str]:
+    rank_keys = [_normalize_identifier(value) for value in _normalize_string_list(raw_rank_keys)]
+    rank_keys = [rank_key for rank_key in rank_keys if rank_key]
+    if not rank_keys:
+        raise ValueError(f"Xianxia Martial Art rank set {context!r} must include at least one rank.")
+    unknown = sorted({rank_key for rank_key in rank_keys if rank_key not in XIANXIA_MARTIAL_ART_RANK_KEYS})
+    if unknown:
+        raise ValueError(
+            f"Xianxia Martial Art rank set {context!r} uses unknown ranks: "
+            + ", ".join(unknown)
+            + "."
+        )
+    deduped: list[str] = []
+    for rank_key in rank_keys:
+        if rank_key not in deduped:
+            deduped.append(rank_key)
+    return deduped
+
+
 def _normalize_entry_facets(raw_facets: object, *, entry_type: str) -> list[str]:
     facets = [_normalize_identifier(value) for value in _normalize_string_list(raw_facets)]
     facets = [facet for facet in facets if facet]
@@ -396,6 +501,58 @@ def _build_effort_label_map(effort_definitions: list[dict[str, Any]]) -> dict[st
     }
 
 
+def _stamp_martial_art_rank_records(metadata: dict[str, Any], body: dict[str, Any], *, slug: str) -> None:
+    martial_art_key = _normalize_identifier(
+        metadata.get("martial_art_key") or metadata.get("xianxia_martial_art_key") or slug
+    )
+    rank_records = _build_martial_art_rank_records(
+        martial_art_key=martial_art_key,
+        martial_art_slug=slug,
+        rank_keys=_martial_art_rank_keys_for(martial_art_key),
+    )
+    metadata_rank_records = [dict(record) for record in rank_records]
+    body_rank_records = [dict(record) for record in rank_records]
+    metadata["rank_records_seeded"] = True
+    metadata["rank_records_status"] = "present_rank_names_seeded"
+    metadata["martial_art_rank_records"] = metadata_rank_records
+    metadata["xianxia_martial_art_rank_records"] = [dict(record) for record in rank_records]
+
+    martial_art_body = body.get("xianxia_martial_art")
+    if not isinstance(martial_art_body, dict):
+        martial_art_body = {}
+        body["xianxia_martial_art"] = martial_art_body
+    martial_art_body["rank_records_seeded"] = True
+    martial_art_body["rank_records_status"] = "present_rank_names_seeded"
+    martial_art_body["rank_records"] = body_rank_records
+    martial_art_body["xianxia_martial_art_rank_records"] = [dict(record) for record in rank_records]
+
+
+def _build_martial_art_rank_records(
+    *,
+    martial_art_key: str,
+    martial_art_slug: str,
+    rank_keys: list[str],
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for rank_key in rank_keys:
+        rank_definition = _XIANXIA_MARTIAL_ART_RANK_LOOKUP[rank_key]
+        records.append(
+            {
+                "martial_art_key": martial_art_key,
+                "martial_art_slug": martial_art_slug,
+                "rank_key": rank_key,
+                "rank_name": str(rank_definition["rank_name"]),
+                "rank_ref": f"xianxia:{martial_art_slug}:{rank_key}",
+            }
+        )
+    return records
+
+
+def _martial_art_rank_keys_for(martial_art_key: str) -> list[str]:
+    override = _XIANXIA_MARTIAL_ART_RANK_SETS["by_martial_art_key"].get(martial_art_key)
+    return list(override or _XIANXIA_MARTIAL_ART_RANK_SETS["default"])
+
+
 _XIANXIA_SYSTEMS_SEED_PAYLOAD = _load_xianxia_systems_seed_payload()
 XIANXIA_SYSTEMS_SEED_SOURCE_TITLE = str(_XIANXIA_SYSTEMS_SEED_PAYLOAD["source_title"])
 XIANXIA_SYSTEMS_SEED_VERSION = str(_XIANXIA_SYSTEMS_SEED_PAYLOAD["version"])
@@ -404,6 +561,18 @@ _XIANXIA_EFFORT_DEFINITIONS = tuple(
 )
 _XIANXIA_EFFORT_LOOKUP = {
     str(effort["key"]): dict(effort) for effort in _XIANXIA_EFFORT_DEFINITIONS
+}
+_XIANXIA_MARTIAL_ART_RANK_DEFINITIONS = tuple(
+    dict(rank) for rank in _XIANXIA_SYSTEMS_SEED_PAYLOAD["martial_art_ranks"]
+)
+_XIANXIA_MARTIAL_ART_RANK_LOOKUP = {
+    str(rank["key"]): dict(rank) for rank in _XIANXIA_MARTIAL_ART_RANK_DEFINITIONS
+}
+_XIANXIA_MARTIAL_ART_RANK_SETS = {
+    "default": list(_XIANXIA_SYSTEMS_SEED_PAYLOAD["martial_art_rank_sets"]["default"]),
+    "by_martial_art_key": dict(
+        _XIANXIA_SYSTEMS_SEED_PAYLOAD["martial_art_rank_sets"]["by_martial_art_key"]
+    ),
 }
 _XIANXIA_ENTRY_FACET_DEFINITIONS = tuple(
     dict(facet) for facet in _XIANXIA_SYSTEMS_SEED_PAYLOAD["entry_facets"]

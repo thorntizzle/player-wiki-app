@@ -20,15 +20,18 @@ from player_wiki.xianxia_systems_seed import (
     XIANXIA_EFFORT_KEYS,
     XIANXIA_ENTRY_FACET_KEYS,
     XIANXIA_MAGIC_EFFORT_CANONICAL_LABEL,
+    XIANXIA_MARTIAL_ART_RANK_KEYS,
     XIANXIA_SYSTEMS_SEED_DATA_RELATIVE_PATH,
     XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY,
     XIANXIA_SYSTEMS_SEED_VERSION,
     _build_seed_entry,
     build_xianxia_entry_facet_definitions,
     build_xianxia_effort_definitions,
+    build_xianxia_martial_art_rank_definitions,
     build_xianxia_systems_seed_entries,
     get_xianxia_entry_facet_definition,
     get_xianxia_effort_definition,
+    get_xianxia_martial_art_rank_definition,
 )
 from player_wiki.systems_importer import Dnd5eSystemsImporter
 from player_wiki.systems_models import SystemsEntryRecord
@@ -267,6 +270,24 @@ def test_xianxia_effort_definitions_encode_magic_effort_as_canonical_label():
     assert magic_effort["damage_expression"] == "1d10 + Magic"
 
 
+def test_xianxia_martial_art_rank_definitions_cover_milestone_one_rank_names():
+    definitions = build_xianxia_martial_art_rank_definitions()
+    keys = tuple(definition["key"] for definition in definitions)
+
+    assert keys == XIANXIA_MARTIAL_ART_RANK_KEYS
+    assert [definition["rank_name"] for definition in definitions] == [
+        "Initiate",
+        "Novice",
+        "Apprentice",
+        "Master",
+        "Legendary",
+    ]
+    assert get_xianxia_martial_art_rank_definition("Legendary") == {
+        "key": "legendary",
+        "rank_name": "Legendary",
+    }
+
+
 def test_xianxia_core_rule_seed_entries_cover_milestone_one_references():
     entries = build_xianxia_systems_seed_entries()
     rule_entries = [entry for entry in entries if entry["entry_type"] == "rule"]
@@ -381,10 +402,16 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
     )
     assert all(entry["metadata"]["xianxia_entry_facets"] == ["martial_art"] for entry in martial_art_entries)
     assert all(entry["metadata"]["catalog_role"] == "parent" for entry in martial_art_entries)
-    assert all(entry["metadata"]["rank_records_seeded"] is False for entry in martial_art_entries)
-    assert all(entry["metadata"]["rank_records_status"] == "deferred" for entry in martial_art_entries)
+    assert all(entry["metadata"]["rank_records_seeded"] is True for entry in martial_art_entries)
+    assert all(
+        entry["metadata"]["rank_records_status"] == "present_rank_names_seeded"
+        for entry in martial_art_entries
+    )
     assert all(entry["body"]["xianxia_martial_art"]["catalog_role"] == "parent" for entry in martial_art_entries)
-    assert all("Structured rank records and ability grants are deferred" in entry["rendered_html"] for entry in martial_art_entries)
+    assert all(
+        "Rank grant details and ability grants are deferred" in entry["rendered_html"]
+        for entry in martial_art_entries
+    )
 
     entry_map = {entry["slug"]: entry for entry in martial_art_entries}
     assert entry_map["demons-fist"]["metadata"]["martial_art_style"] == "Unarmed Martial Art"
@@ -394,6 +421,45 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
     )
     assert "Ji" not in entry_map["bing-ti"]["rendered_html"]
     assert "Qi Fist Technique" not in entry_map["demons-fist"]["rendered_html"]
+
+    complete_rank_keys = list(XIANXIA_MARTIAL_ART_RANK_KEYS)
+    incomplete_rank_keys = {
+        "ink-stained-historian": ["initiate", "novice", "apprentice"],
+        "manifesting-brush": ["initiate", "novice"],
+        "beastmaster": ["initiate", "novice", "apprentice"],
+        "beast-tamer": ["initiate", "novice"],
+        "courtiers-sting": ["initiate", "novice"],
+        "madams-piercing-blood": ["initiate", "novice"],
+        "blooming-curse": ["initiate", "novice"],
+        "rippling-melodies": ["initiate"],
+        "strategists-acumen": ["initiate", "novice"],
+        "broken-tigers-vessel": ["initiate", "novice", "apprentice"],
+        "the-four-winds": ["initiate", "novice", "apprentice"],
+        "flying-daggers": ["initiate", "novice"],
+    }
+    complete_slugs = {entry["slug"] for entry in martial_art_entries} - set(incomplete_rank_keys)
+    assert len(complete_slugs) == 18
+
+    for slug in complete_slugs:
+        records = entry_map[slug]["metadata"]["martial_art_rank_records"]
+        assert [record["rank_key"] for record in records] == complete_rank_keys
+
+    for slug, expected_rank_keys in incomplete_rank_keys.items():
+        records = entry_map[slug]["metadata"]["martial_art_rank_records"]
+        assert [record["rank_key"] for record in records] == expected_rank_keys
+
+    demons_fist_ranks = entry_map["demons-fist"]["body"]["xianxia_martial_art"]["rank_records"]
+    assert demons_fist_ranks[0] == {
+        "martial_art_key": "demons_fist",
+        "martial_art_slug": "demons-fist",
+        "rank_key": "initiate",
+        "rank_name": "Initiate",
+        "rank_ref": "xianxia:demons-fist:initiate",
+    }
+    assert demons_fist_ranks[-1]["rank_ref"] == "xianxia:demons-fist:legendary"
+    assert "rank_order" not in demons_fist_ranks[0]
+    assert "insight_cost" not in demons_fist_ranks[0]
+    assert "ability_grants" not in demons_fist_ranks[0]
 
 
 def test_xianxia_condition_and_status_seed_entries_are_forced_reference_only():
@@ -701,7 +767,8 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
     demons_fist_html = demons_fist_entry.get_data(as_text=True)
     assert "Demon&#39;s Fist" in demons_fist_html
     assert "Catalog Parent" in demons_fist_html
-    assert "Structured rank records and ability grants are deferred" in demons_fist_html
+    assert "Structured rank records are seeded for the ranks present" in demons_fist_html
+    assert "Rank grant details and ability grants are deferred" in demons_fist_html
     assert "Qi Fist Technique" not in demons_fist_html
 
     assert dnd_entry.status_code == 404

@@ -1,5 +1,5 @@
 {
-  "version": "2026-04-26.4",
+  "version": "2026-04-26.5",
   "source_id": "XIANXIA-HOMEBREW",
   "source_title": "Xianxia Homebrew",
   "storage_strategy": "curated_seed_data",
@@ -245,6 +245,45 @@
       "damage_expression": "1d12 + Ultimate"
     }
   ],
+  "martial_art_ranks": [
+    {
+      "key": "initiate",
+      "rank_name": "Initiate"
+    },
+    {
+      "key": "novice",
+      "rank_name": "Novice"
+    },
+    {
+      "key": "apprentice",
+      "rank_name": "Apprentice"
+    },
+    {
+      "key": "master",
+      "rank_name": "Master"
+    },
+    {
+      "key": "legendary",
+      "rank_name": "Legendary"
+    }
+  ],
+  "martial_art_rank_sets": {
+    "default": ["initiate", "novice", "apprentice", "master", "legendary"],
+    "by_martial_art_key": {
+      "ink_stained_historian": ["initiate", "novice", "apprentice"],
+      "manifesting_brush": ["initiate", "novice"],
+      "beastmaster": ["initiate", "novice", "apprentice"],
+      "beast_tamer": ["initiate", "novice"],
+      "courtiers_sting": ["initiate", "novice"],
+      "madams_piercing_blood": ["initiate", "novice"],
+      "blooming_curse": ["initiate", "novice"],
+      "rippling_melodies": ["initiate"],
+      "strategists_acumen": ["initiate", "novice"],
+      "broken_tigers_vessel": ["initiate", "novice", "apprentice"],
+      "the_four_winds": ["initiate", "novice", "apprentice"],
+      "flying_daggers": ["initiate", "novice"]
+    }
+  },
   "entries": [
     {
       "title": "Checks and Difficulty",
@@ -975,8 +1014,8 @@
         "martial_art_catalog_order": 1,
         "martial_art_style": "Unarmed Martial Art",
         "source_line_range": "86-96",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -984,15 +1023,15 @@
           "catalog_order": 1,
           "style": "Unarmed Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Demon's Fist Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Demon's Fist Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -1016,8 +1055,8 @@
         "martial_art_catalog_order": 2,
         "martial_art_style": "Unarmed Martial Art",
         "source_line_range": "98-108",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -1025,15 +1064,15 @@
           "catalog_order": 2,
           "style": "Unarmed Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Heavenly Palm Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Heavenly Palm Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -1057,8 +1096,8 @@
         "martial_art_catalog_order": 3,
         "martial_art_style": "Jian Sword Martial Art",
         "source_line_range": "110-120",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -1066,15 +1105,15 @@
           "catalog_order": 3,
           "style": "Jian Sword Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Taoist Blade Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Taoist Blade Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -1098,8 +1137,8 @@
         "martial_art_catalog_order": 4,
         "martial_art_style": "Unarmed Martial Art",
         "source_line_range": "122-132",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -1108,15 +1147,15 @@
           "style": "Unarmed Martial Art",
           "parent_note": "Intoxication no longer penalizes the user; using these techniques while not intoxicated is penalized.",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Drunken Fist Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Drunken Fist Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -1142,8 +1181,8 @@
         "martial_art_catalog_order": 5,
         "martial_art_style": "Bo and Spear Martial Art",
         "source_line_range": "134-144",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -1151,15 +1190,15 @@
           "catalog_order": 5,
           "style": "Bo and Spear Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Striking Adder Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Striking Adder Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -1183,8 +1222,8 @@
         "martial_art_catalog_order": 6,
         "martial_art_style": "Saber Sword Martial Art",
         "source_line_range": "146-156",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -1192,15 +1231,15 @@
           "catalog_order": 6,
           "style": "Saber Sword Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Bloody Saber Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Bloody Saber Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -1224,8 +1263,8 @@
         "martial_art_catalog_order": 7,
         "martial_art_style": "Spiritual Martial Art",
         "source_line_range": "158-168",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -1233,15 +1272,15 @@
           "catalog_order": 7,
           "style": "Spiritual Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Phoenix Descending Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Phoenix Descending Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -1265,8 +1304,8 @@
         "martial_art_catalog_order": 8,
         "martial_art_style": "Spiritual Martial Art",
         "source_line_range": "170-180",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -1274,15 +1313,15 @@
           "catalog_order": 8,
           "style": "Spiritual Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Dragon Ascending Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Dragon Ascending Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -1306,8 +1345,8 @@
         "martial_art_catalog_order": 9,
         "martial_art_style": "Universal Martial Art",
         "source_line_range": "182-192",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -1315,15 +1354,15 @@
           "catalog_order": 9,
           "style": "Universal Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Armored Elephant Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Armored Elephant Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -1347,8 +1386,8 @@
         "martial_art_catalog_order": 10,
         "martial_art_style": "Universal Martial Art",
         "source_line_range": "194-204",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -1356,15 +1395,15 @@
           "catalog_order": 10,
           "style": "Universal Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Swaying Willow Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Swaying Willow Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -1388,8 +1427,8 @@
         "martial_art_catalog_order": 11,
         "martial_art_style": "Instrument Martial Art",
         "source_line_range": "206-216",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -1397,15 +1436,15 @@
           "catalog_order": 11,
           "style": "Instrument Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Thundering Harmonics Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Thundering Harmonics Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -1429,8 +1468,8 @@
         "martial_art_catalog_order": 12,
         "martial_art_style": "Puppet Martial Art",
         "source_line_range": "218-228",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -1438,15 +1477,15 @@
           "catalog_order": 12,
           "style": "Puppet Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Shadow Puppet Theater Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Shadow Puppet Theater Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -1470,8 +1509,8 @@
         "martial_art_catalog_order": 13,
         "martial_art_style": "Unarmed Martial Art",
         "source_line_range": "230-240",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -1479,15 +1518,15 @@
           "catalog_order": 13,
           "style": "Unarmed Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Baihu Style Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Baihu Style Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -1511,8 +1550,8 @@
         "martial_art_catalog_order": 14,
         "martial_art_style": "Unarmed Martial Art",
         "source_line_range": "242-252",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -1520,15 +1559,15 @@
           "catalog_order": 14,
           "style": "Unarmed Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Shuai Jiao Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Shuai Jiao Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -1552,8 +1591,8 @@
         "martial_art_catalog_order": 15,
         "martial_art_style": "Ice Elemental Martial Art",
         "source_line_range": "254-264",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -1561,15 +1600,15 @@
           "catalog_order": 15,
           "style": "Ice Elemental Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Bing Ti Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Bing Ti Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -1593,8 +1632,8 @@
         "martial_art_catalog_order": 16,
         "martial_art_style": "Spiritual Martial Art",
         "source_line_range": "266-276",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -1603,15 +1642,15 @@
           "style": "Spiritual Martial Art",
           "parent_note": "Against Spirit and Divine targets, these Talismans also automatically deal Ultimate Effort damage.",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Spiritualists' Binding Seals Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Spiritualists' Binding Seals Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -1637,8 +1676,8 @@
         "martial_art_catalog_order": 17,
         "martial_art_style": "Unarmed Spiritual Martial Art",
         "source_line_range": "278-288",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -1647,15 +1686,15 @@
           "style": "Unarmed Spiritual Martial Art",
           "parent_note": "Able to damage incorporeal beings and Spirits.",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Formless Fist Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Formless Fist Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -1679,8 +1718,8 @@
         "martial_art_catalog_order": 18,
         "martial_art_style": "Sword Martial Art",
         "source_line_range": "290-300",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -1688,15 +1727,15 @@
           "catalog_order": 18,
           "style": "Sword Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Cherry Blossom Swallow Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Cherry Blossom Swallow Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -1720,8 +1759,8 @@
         "martial_art_catalog_order": 19,
         "martial_art_style": "Spiritual Martial Art",
         "source_line_range": "302-308",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -1729,15 +1768,15 @@
           "catalog_order": 19,
           "style": "Spiritual Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Ink-Stained Historian Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Ink-Stained Historian Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -1761,8 +1800,8 @@
         "martial_art_catalog_order": 20,
         "martial_art_style": "Spiritual Martial Art",
         "source_line_range": "310-314",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -1770,15 +1809,15 @@
           "catalog_order": 20,
           "style": "Spiritual Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Manifesting Brush Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Manifesting Brush Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -1802,8 +1841,8 @@
         "martial_art_catalog_order": 21,
         "martial_art_style": "Druidic Martial Art",
         "source_line_range": "316-322",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -1811,15 +1850,15 @@
           "catalog_order": 21,
           "style": "Druidic Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Beastmaster Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Beastmaster Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -1843,8 +1882,8 @@
         "martial_art_catalog_order": 22,
         "martial_art_style": "Instrument Martial Art",
         "source_line_range": "324-328",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -1852,15 +1891,15 @@
           "catalog_order": 22,
           "style": "Instrument Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Beast-Tamer Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Beast-Tamer Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -1884,8 +1923,8 @@
         "martial_art_catalog_order": 23,
         "martial_art_style": "Assassination Martial Art",
         "source_line_range": "330-334",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -1893,15 +1932,15 @@
           "catalog_order": 23,
           "style": "Assassination Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Courtier's Sting Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Courtier's Sting Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -1925,8 +1964,8 @@
         "martial_art_catalog_order": 24,
         "martial_art_style": "Blood Martial Arts",
         "source_line_range": "336-340",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -1934,15 +1973,15 @@
           "catalog_order": 24,
           "style": "Blood Martial Arts",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Madam's Piercing Blood Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Madam's Piercing Blood Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -1966,8 +2005,8 @@
         "martial_art_catalog_order": 25,
         "martial_art_style": "Spiritual Martial Art",
         "source_line_range": "342-346",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -1975,15 +2014,15 @@
           "catalog_order": 25,
           "style": "Spiritual Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Blooming Curse Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Blooming Curse Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -2007,8 +2046,8 @@
         "martial_art_catalog_order": 26,
         "martial_art_style": "Instrument Martial Art",
         "source_line_range": "348-350",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -2016,15 +2055,15 @@
           "catalog_order": 26,
           "style": "Instrument Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Rippling Melodies Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Rippling Melodies Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -2048,8 +2087,8 @@
         "martial_art_catalog_order": 27,
         "martial_art_style": "Spiritual Martial Art",
         "source_line_range": "352-356",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -2057,15 +2096,15 @@
           "catalog_order": 27,
           "style": "Spiritual Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Strategist's Acumen Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Strategist's Acumen Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -2089,8 +2128,8 @@
         "martial_art_catalog_order": 28,
         "martial_art_style": "Spiritual Martial Art",
         "source_line_range": "358-364",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -2098,15 +2137,15 @@
           "catalog_order": 28,
           "style": "Spiritual Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Broken Tiger's Vessel Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Broken Tiger's Vessel Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -2130,8 +2169,8 @@
         "martial_art_catalog_order": 29,
         "martial_art_style": "Wind Elemental Martial Art",
         "source_line_range": "366-372",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -2139,15 +2178,15 @@
           "catalog_order": 29,
           "style": "Wind Elemental Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for The Four Winds Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for The Four Winds Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
@@ -2171,8 +2210,8 @@
         "martial_art_catalog_order": 30,
         "martial_art_style": "Dagger Martial Art",
         "source_line_range": "374-382",
-        "rank_records_seeded": false,
-        "rank_records_status": "deferred"
+        "rank_records_seeded": true,
+        "rank_records_status": "present_rank_names_seeded"
       },
       "body": {
         "xianxia_martial_art": {
@@ -2180,15 +2219,15 @@
           "catalog_order": 30,
           "style": "Dagger Martial Art",
           "catalog_role": "parent",
-          "rank_records_seeded": false,
-          "rank_records_status": "deferred"
+          "rank_records_seeded": true,
+          "rank_records_status": "present_rank_names_seeded"
         }
       },
       "sections": [
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Flying Daggers Martial Art. Structured rank records and ability grants are deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Flying Daggers Martial Art. Structured rank records are seeded for the ranks present. Rank grant details and ability grants are deferred to later Martial Arts catalog slices."
           ]
         },
         {
