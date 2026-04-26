@@ -20,7 +20,10 @@ from player_wiki.xianxia_systems_seed import (
     XIANXIA_EFFORT_KEYS,
     XIANXIA_ENTRY_FACET_KEYS,
     XIANXIA_MAGIC_EFFORT_CANONICAL_LABEL,
+    XIANXIA_MARTIAL_ART_MISSING_RANK_REASON_INTENTIONAL_DRAFT,
     XIANXIA_MARTIAL_ART_RANK_KEYS,
+    XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_COMPLETE,
+    XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_INTENTIONAL_DRAFT,
     XIANXIA_SYSTEMS_SEED_DATA_RELATIVE_PATH,
     XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY,
     XIANXIA_SYSTEMS_SEED_VERSION,
@@ -407,6 +410,14 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
         entry["metadata"]["rank_records_status"] == "present_rank_names_seeded"
         for entry in martial_art_entries
     )
+    assert all(
+        entry["metadata"]["rank_completion_status"]
+        in {
+            XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_COMPLETE,
+            XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_INTENTIONAL_DRAFT,
+        }
+        for entry in martial_art_entries
+    )
     assert all(entry["body"]["xianxia_martial_art"]["catalog_role"] == "parent" for entry in martial_art_entries)
     assert all(
         "Rank grant details and ability grants are deferred" in entry["rendered_html"]
@@ -423,6 +434,10 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
     assert "Qi Fist Technique" not in entry_map["demons-fist"]["rendered_html"]
 
     complete_rank_keys = list(XIANXIA_MARTIAL_ART_RANK_KEYS)
+    rank_name_by_key = {
+        definition["key"]: definition["rank_name"]
+        for definition in build_xianxia_martial_art_rank_definitions()
+    }
     incomplete_rank_keys = {
         "ink-stained-historian": ["initiate", "novice", "apprentice"],
         "manifesting-brush": ["initiate", "novice"],
@@ -443,10 +458,52 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
     for slug in complete_slugs:
         records = entry_map[slug]["metadata"]["martial_art_rank_records"]
         assert [record["rank_key"] for record in records] == complete_rank_keys
+        assert (
+            entry_map[slug]["metadata"]["rank_completion_status"]
+            == XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_COMPLETE
+        )
+        assert (
+            entry_map[slug]["metadata"]["xianxia_rank_completion_status"]
+            == XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_COMPLETE
+        )
+        assert "missing_rank_keys" not in entry_map[slug]["metadata"]
+        assert "source_draft_status" not in entry_map[slug]["metadata"]
+        assert "Intentional Draft Content" not in entry_map[slug]["rendered_html"]
 
     for slug, expected_rank_keys in incomplete_rank_keys.items():
         records = entry_map[slug]["metadata"]["martial_art_rank_records"]
         assert [record["rank_key"] for record in records] == expected_rank_keys
+        missing_rank_keys = complete_rank_keys[len(expected_rank_keys) :]
+        missing_rank_names = [rank_name_by_key[rank_key] for rank_key in missing_rank_keys]
+        metadata = entry_map[slug]["metadata"]
+        martial_art_body = entry_map[slug]["body"]["xianxia_martial_art"]
+        assert metadata["rank_completion_status"] == (
+            XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_INTENTIONAL_DRAFT
+        )
+        assert metadata["xianxia_rank_completion_status"] == (
+            XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_INTENTIONAL_DRAFT
+        )
+        assert metadata["missing_rank_keys"] == missing_rank_keys
+        assert metadata["missing_rank_names"] == missing_rank_names
+        assert (
+            metadata["missing_rank_reason"]
+            == XIANXIA_MARTIAL_ART_MISSING_RANK_REASON_INTENTIONAL_DRAFT
+        )
+        assert (
+            metadata["source_draft_status"]
+            == XIANXIA_MARTIAL_ART_MISSING_RANK_REASON_INTENTIONAL_DRAFT
+        )
+        assert martial_art_body["rank_completion_status"] == (
+            XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_INTENTIONAL_DRAFT
+        )
+        assert martial_art_body["missing_rank_keys"] == missing_rank_keys
+        assert martial_art_body["missing_rank_names"] == missing_rank_names
+        assert "intentional draft content" in entry_map[slug]["search_text"]
+        assert "not an import failure" in entry_map[slug]["search_text"]
+        assert "Intentional Draft Content" in entry_map[slug]["rendered_html"]
+        assert "Missing higher ranks:" in entry_map[slug]["rendered_html"]
+        for missing_rank_name in missing_rank_names:
+            assert missing_rank_name in entry_map[slug]["rendered_html"]
 
     demons_fist_ranks = entry_map["demons-fist"]["body"]["xianxia_martial_art"]["rank_records"]
     assert demons_fist_ranks[0] == {

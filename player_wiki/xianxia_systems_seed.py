@@ -60,6 +60,9 @@ XIANXIA_MARTIAL_ART_RANK_KEYS = (
     "master",
     "legendary",
 )
+XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_COMPLETE = "complete"
+XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_INTENTIONAL_DRAFT = "intentional_incomplete_draft"
+XIANXIA_MARTIAL_ART_MISSING_RANK_REASON_INTENTIONAL_DRAFT = "intentional_draft_content"
 
 
 @lru_cache(maxsize=1)
@@ -224,11 +227,15 @@ def _build_seed_entry(raw_spec: dict[str, Any], *, index: int, source_path: str)
         *facets,
         str(raw_spec.get("search_text") or "").strip(),
     ]
+    if entry_type == "martial_art":
+        search_parts.extend(_martial_art_draft_search_parts(body))
     rendered_html = str(raw_spec.get("rendered_html") or "").strip() or _render_seed_entry_html(
         summary=summary,
         aliases=aliases,
         sections=sections,
     )
+    if entry_type == "martial_art":
+        rendered_html += _render_martial_art_draft_marker_html(body)
     return {
         "entry_key": entry_key,
         "entry_type": entry_type,
@@ -505,17 +512,41 @@ def _stamp_martial_art_rank_records(metadata: dict[str, Any], body: dict[str, An
     martial_art_key = _normalize_identifier(
         metadata.get("martial_art_key") or metadata.get("xianxia_martial_art_key") or slug
     )
+    rank_keys = _martial_art_rank_keys_for(martial_art_key)
     rank_records = _build_martial_art_rank_records(
         martial_art_key=martial_art_key,
         martial_art_slug=slug,
-        rank_keys=_martial_art_rank_keys_for(martial_art_key),
+        rank_keys=rank_keys,
+    )
+    missing_rank_keys = [
+        rank_key for rank_key in XIANXIA_MARTIAL_ART_RANK_KEYS if rank_key not in rank_keys
+    ]
+    missing_rank_names = [
+        str(_XIANXIA_MARTIAL_ART_RANK_LOOKUP[rank_key]["rank_name"])
+        for rank_key in missing_rank_keys
+    ]
+    rank_completion_status = (
+        XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_INTENTIONAL_DRAFT
+        if missing_rank_keys
+        else XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_COMPLETE
     )
     metadata_rank_records = [dict(record) for record in rank_records]
     body_rank_records = [dict(record) for record in rank_records]
     metadata["rank_records_seeded"] = True
     metadata["rank_records_status"] = "present_rank_names_seeded"
+    metadata["rank_completion_status"] = rank_completion_status
+    metadata["xianxia_rank_completion_status"] = rank_completion_status
     metadata["martial_art_rank_records"] = metadata_rank_records
     metadata["xianxia_martial_art_rank_records"] = [dict(record) for record in rank_records]
+    if missing_rank_keys:
+        rank_completion_note = _build_martial_art_draft_note(missing_rank_names)
+        metadata["missing_rank_keys"] = missing_rank_keys
+        metadata["missing_rank_names"] = missing_rank_names
+        metadata["missing_rank_reason"] = XIANXIA_MARTIAL_ART_MISSING_RANK_REASON_INTENTIONAL_DRAFT
+        metadata["rank_completion_note"] = rank_completion_note
+        metadata["source_draft_status"] = (
+            XIANXIA_MARTIAL_ART_MISSING_RANK_REASON_INTENTIONAL_DRAFT
+        )
 
     martial_art_body = body.get("xianxia_martial_art")
     if not isinstance(martial_art_body, dict):
@@ -523,8 +554,65 @@ def _stamp_martial_art_rank_records(metadata: dict[str, Any], body: dict[str, An
         body["xianxia_martial_art"] = martial_art_body
     martial_art_body["rank_records_seeded"] = True
     martial_art_body["rank_records_status"] = "present_rank_names_seeded"
+    martial_art_body["rank_completion_status"] = rank_completion_status
     martial_art_body["rank_records"] = body_rank_records
     martial_art_body["xianxia_martial_art_rank_records"] = [dict(record) for record in rank_records]
+    if missing_rank_keys:
+        martial_art_body["missing_rank_keys"] = missing_rank_keys
+        martial_art_body["missing_rank_names"] = missing_rank_names
+        martial_art_body["missing_rank_reason"] = (
+            XIANXIA_MARTIAL_ART_MISSING_RANK_REASON_INTENTIONAL_DRAFT
+        )
+        martial_art_body["rank_completion_note"] = rank_completion_note
+        martial_art_body["source_draft_status"] = (
+            XIANXIA_MARTIAL_ART_MISSING_RANK_REASON_INTENTIONAL_DRAFT
+        )
+
+
+def _build_martial_art_draft_note(missing_rank_names: list[str]) -> str:
+    missing_label = ", ".join(missing_rank_names)
+    return (
+        "The reviewed source intentionally stops before the following higher "
+        f"rank records: {missing_label}. These missing higher ranks are intentional draft content, "
+        "not an import failure."
+    )
+
+
+def _martial_art_draft_search_parts(body: dict[str, Any]) -> list[str]:
+    martial_art_body = body.get("xianxia_martial_art")
+    if not isinstance(martial_art_body, dict):
+        return []
+    return [
+        str(martial_art_body.get("rank_completion_status") or ""),
+        str(martial_art_body.get("missing_rank_reason") or ""),
+        str(martial_art_body.get("rank_completion_note") or ""),
+        " ".join(str(value) for value in martial_art_body.get("missing_rank_names") or []),
+    ]
+
+
+def _render_martial_art_draft_marker_html(body: dict[str, Any]) -> str:
+    martial_art_body = body.get("xianxia_martial_art")
+    if not isinstance(martial_art_body, dict):
+        return ""
+    if (
+        martial_art_body.get("rank_completion_status")
+        != XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_INTENTIONAL_DRAFT
+    ):
+        return ""
+    note = str(martial_art_body.get("rank_completion_note") or "").strip()
+    missing_rank_names = [
+        str(value).strip()
+        for value in martial_art_body.get("missing_rank_names") or []
+        if str(value).strip()
+    ]
+    missing_ranks = ", ".join(missing_rank_names)
+    parts = ["<section>", "<h2>Intentional Draft Content</h2>"]
+    if note:
+        parts.append(f"<p>{escape(note)}</p>")
+    if missing_ranks:
+        parts.append(f"<p><strong>Missing higher ranks:</strong> {escape(missing_ranks)}</p>")
+    parts.append("</section>")
+    return "".join(parts)
 
 
 def _build_martial_art_rank_records(
