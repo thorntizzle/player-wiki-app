@@ -229,6 +229,17 @@ def test_xianxia_read_presenter_context_collects_first_pass_sheet_facts(
         "kind": "Technique",
         "support_label": "Reference only",
     }
+    assert first_art["rank_progress"]["summary"] == "Rank progress: 1 / 5 ranks learned."
+    assert [
+        (rank["label"], rank["status_label"])
+        for rank in first_art["rank_progress"]["steps"]
+    ] == [
+        ("Initiate", "Current"),
+        ("Novice", "Unlearned"),
+        ("Apprentice", "Unlearned"),
+        ("Master", "Unlearned"),
+        ("Legendary", "Unlearned"),
+    ]
     assert xianxia_read["basic_actions"][0]["title"] == "Recoup"
     assert xianxia_read["basic_actions"][0]["href"] == (
         "/campaigns/linden-pass/systems/entries/recoup"
@@ -428,6 +439,58 @@ def test_xianxia_read_sheet_uses_system_specific_subpages(
     controls_html = unescape(controls_response.get_data(as_text=True))
     assert "Player controls" in controls_html
     assert "Current owner" in controls_html
+
+
+def test_xianxia_martial_arts_page_marks_incomplete_rank_progress(
+    client,
+    sign_in,
+    users,
+    app,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_data = _valid_xianxia_create_data("Incomplete Dagger Crane")
+    create_data.update(
+        {
+            "martial_art_1_slug": "flying-daggers",
+            "martial_art_1_rank": "initiate",
+            "martial_art_2_slug": "demons-fist",
+            "martial_art_2_rank": "initiate",
+            "martial_art_3_slug": "heavenly-palm",
+            "martial_art_3_rank": "initiate",
+        }
+    )
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=create_data,
+        follow_redirects=False,
+    )
+
+    assert create_response.status_code == 302
+
+    martial_arts_response = client.get(
+        "/campaigns/linden-pass/characters/incomplete-dagger-crane?page=martial_arts"
+    )
+    assert martial_arts_response.status_code == 200
+    martial_arts_html = unescape(martial_arts_response.get_data(as_text=True))
+
+    assert "Flying Daggers" in martial_arts_html
+    assert "Rank progress: 1 / 2 available ranks learned; 3 higher ranks incomplete." in martial_arts_html
+    assert "Intentional draft content" in martial_arts_html
+    assert "not an import failure" in martial_arts_html
+    assert "Initiate" in martial_arts_html
+    assert "Current" in martial_arts_html
+    assert "Novice" in martial_arts_html
+    assert "Unlearned" in martial_arts_html
+    assert "Apprentice" in martial_arts_html
+    assert "Master" in martial_arts_html
+    assert "Legendary" in martial_arts_html
+    assert "Incomplete draft" in martial_arts_html
+    assert (
+        "/campaigns/linden-pass/systems/entries/flying-daggers"
+        "#xianxia-flying-daggers-initiate"
+    ) in martial_arts_html
 
 
 def test_xianxia_quick_reference_presents_derived_defense(

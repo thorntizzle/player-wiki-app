@@ -36,7 +36,10 @@ from .character_spell_slots import normalize_spell_slot_lane_id, spell_slot_lane
 from .models import Campaign
 from .repository import build_alias_index, normalize_lookup, render_obsidian_links
 from .system_policy import is_xianxia_system
-from .xianxia_systems_seed import XIANXIA_HOMEBREW_SOURCE_ID
+from .xianxia_systems_seed import (
+    XIANXIA_HOMEBREW_SOURCE_ID,
+    XIANXIA_MARTIAL_ART_RANK_KEYS,
+)
 from .xianxia_character_model import (
     XIANXIA_ATTRIBUTE_KEYS,
     XIANXIA_ATTRIBUTE_LABELS,
@@ -115,6 +118,13 @@ XIANXIA_ENERGY_LABELS = {
     "jing": "Jing",
     "qi": "Qi",
     "shen": "Shen",
+}
+XIANXIA_MARTIAL_ART_RANK_LABELS = {
+    "initiate": "Initiate",
+    "novice": "Novice",
+    "apprentice": "Apprentice",
+    "master": "Master",
+    "legendary": "Legendary",
 }
 ATTACK_NAME_SUFFIX_PATTERN = re.compile(r"\s*\([^)]*\)\s*$")
 
@@ -1913,6 +1923,11 @@ def _present_xianxia_linked_records(
                 parent_href=href,
                 rank_records_by_ref=rank_records_by_ref,
             )
+            record["rank_progress"] = _present_xianxia_rank_progress(
+                payload,
+                parent_href=href,
+                rank_catalog=_xianxia_rank_catalog(entry),
+            )
         records.append(record)
     return records
 
@@ -1945,6 +1960,131 @@ def _present_xianxia_rank_refs(
             }
         )
     return rank_refs
+
+
+def _present_xianxia_rank_progress(
+    payload: dict[str, Any],
+    *,
+    parent_href: str,
+    rank_catalog: list[dict[str, Any]],
+) -> dict[str, Any]:
+    learned_refs = {
+        str(ref or "").strip()
+        for ref in list(payload.get("learned_rank_refs") or [])
+        if str(ref or "").strip()
+    }
+    learned_rank_keys = {
+        _normalize_xianxia_rank_key(str(ref).rsplit(":", 1)[-1])
+        for ref in learned_refs
+    }
+    current_rank_key = _normalize_xianxia_rank_key(payload.get("current_rank_key"))
+    if current_rank_key:
+        learned_rank_keys.add(current_rank_key)
+
+    if not rank_catalog:
+        fallback_steps = _present_xianxia_rank_refs(
+            list(payload.get("learned_rank_refs") or []),
+            parent_href=parent_href,
+        )
+        learned_count = len(fallback_steps)
+        return {
+            "summary": (
+                f"Rank progress: {learned_count} recorded rank"
+                f"{'' if learned_count == 1 else 's'}"
+            ),
+            "learned_count": learned_count,
+            "available_count": learned_count,
+            "total_count": learned_count,
+            "missing_count": 0,
+            "has_incomplete_ranks": False,
+            "missing_rank_names": [],
+            "incomplete_note": "",
+            "steps": [
+                {
+                    "label": str(step.get("label") or "Rank"),
+                    "href": str(step.get("href") or ""),
+                    "status_label": "Current" if index == learned_count - 1 else "Learned",
+                    "is_learned": True,
+                    "is_current": index == learned_count - 1,
+                    "is_incomplete": False,
+                }
+                for index, step in enumerate(fallback_steps)
+            ],
+        }
+
+    steps: list[dict[str, Any]] = []
+    missing_rank_names: list[str] = []
+    learned_available_count = 0
+    available_count = 0
+    missing_count = 0
+    incomplete_note = ""
+
+    for rank_record in rank_catalog:
+        rank_key = _normalize_xianxia_rank_key(rank_record.get("rank_key"))
+        rank_ref = str(rank_record.get("rank_ref") or "").strip()
+        label = (
+            str(rank_record.get("rank_name") or "").strip()
+            or XIANXIA_MARTIAL_ART_RANK_LABELS.get(rank_key)
+            or humanize_value(rank_key)
+            or "Rank"
+        )
+        is_incomplete = _xianxia_rank_record_is_incomplete(rank_record)
+        is_learned = bool(
+            (rank_ref and rank_ref in learned_refs)
+            or (rank_key and rank_key in learned_rank_keys)
+        )
+        is_current = bool(current_rank_key and rank_key == current_rank_key)
+        if is_incomplete:
+            missing_count += 1
+            missing_rank_names.append(label)
+            incomplete_note = str(rank_record.get("rank_completion_note") or "").strip()
+            status_label = "Incomplete draft"
+            href = ""
+        else:
+            available_count += 1
+            if is_learned:
+                learned_available_count += 1
+            status_label = "Current" if is_current else "Learned" if is_learned else "Unlearned"
+            href = f"{parent_href}#{_xianxia_anchor_id_for_ref(rank_ref)}" if parent_href and rank_ref else ""
+        steps.append(
+            {
+                "key": rank_key,
+                "label": label,
+                "href": href,
+                "status_label": status_label,
+                "is_learned": is_learned,
+                "is_current": is_current,
+                "is_incomplete": is_incomplete,
+            }
+        )
+
+    if not incomplete_note:
+        incomplete_note = _xianxia_rank_catalog_completion_note(rank_catalog)
+    if not incomplete_note and missing_rank_names:
+        missing_label = ", ".join(missing_rank_names)
+        incomplete_note = (
+            "The reviewed source intentionally stops before the following higher "
+            f"rank records: {missing_label}. These missing higher ranks are intentional draft content, "
+            "not an import failure."
+        )
+
+    summary = f"Rank progress: {learned_available_count} / {available_count} available ranks learned"
+    if not missing_count:
+        summary = f"Rank progress: {learned_available_count} / {available_count} ranks learned"
+    else:
+        summary += f"; {missing_count} higher ranks incomplete"
+
+    return {
+        "summary": summary + ".",
+        "learned_count": learned_available_count,
+        "available_count": available_count,
+        "total_count": len(steps),
+        "missing_count": missing_count,
+        "has_incomplete_ranks": bool(missing_count),
+        "missing_rank_names": missing_rank_names,
+        "incomplete_note": incomplete_note,
+        "steps": steps,
+    }
 
 
 def _xianxia_anchor_id_for_ref(value: str) -> str:
@@ -2061,6 +2201,84 @@ def _xianxia_rank_records_by_ref(entry: Any | None) -> dict[str, dict[str, Any]]
         if rank_ref:
             records[rank_ref] = record
     return records
+
+
+def _xianxia_rank_catalog(entry: Any | None) -> list[dict[str, Any]]:
+    if entry is None:
+        return []
+    metadata = dict(getattr(entry, "metadata", {}) or {})
+    body = dict(getattr(entry, "body", {}) or {})
+    martial_art_body = dict(body.get("xianxia_martial_art") or {})
+    present_records = _xianxia_rank_record_list(
+        metadata.get("martial_art_rank_records")
+        or metadata.get("xianxia_martial_art_rank_records")
+        or martial_art_body.get("rank_records")
+        or martial_art_body.get("xianxia_martial_art_rank_records")
+    )
+    missing_records = _xianxia_rank_record_list(
+        metadata.get("martial_art_missing_rank_records")
+        or metadata.get("xianxia_martial_art_missing_rank_records")
+        or martial_art_body.get("missing_rank_records")
+        or martial_art_body.get("xianxia_martial_art_missing_rank_records")
+    )
+    completion_note = str(
+        metadata.get("rank_completion_note")
+        or martial_art_body.get("rank_completion_note")
+        or ""
+    ).strip()
+    records_by_key: dict[str, dict[str, Any]] = {}
+    for record in present_records + missing_records:
+        rank_key = _normalize_xianxia_rank_key(record.get("rank_key"))
+        rank_ref = str(record.get("rank_ref") or "").strip()
+        key = rank_key or rank_ref
+        if not key:
+            continue
+        normalized = dict(record)
+        normalized["rank_key"] = rank_key
+        if completion_note and _xianxia_rank_record_is_incomplete(normalized):
+            normalized["rank_completion_note"] = completion_note
+        records_by_key[key] = normalized
+    return sorted(records_by_key.values(), key=_xianxia_rank_record_sort_key)
+
+
+def _xianxia_rank_record_list(values: Any) -> list[dict[str, Any]]:
+    return [dict(record) for record in list(values or []) if isinstance(record, dict)]
+
+
+def _xianxia_rank_record_sort_key(record: dict[str, Any]) -> tuple[int, str]:
+    rank_key = _normalize_xianxia_rank_key(record.get("rank_key"))
+    try:
+        rank_order = int(record.get("rank_order"))
+    except (TypeError, ValueError):
+        rank_order = (
+            list(XIANXIA_MARTIAL_ART_RANK_KEYS).index(rank_key)
+            if rank_key in XIANXIA_MARTIAL_ART_RANK_KEYS
+            else 10_000
+        )
+    return (rank_order, str(record.get("rank_name") or rank_key).casefold())
+
+
+def _xianxia_rank_record_is_incomplete(record: dict[str, Any]) -> bool:
+    return bool(
+        record.get("is_incomplete_rank")
+        or record.get("rank_available_in_seed") is False
+        or str(record.get("rank_completion_status") or "").strip()
+        == "missing_intentional_draft"
+        or str(record.get("incomplete_rank_reason") or "").strip()
+        == "intentional_draft_content"
+    )
+
+
+def _xianxia_rank_catalog_completion_note(rank_catalog: list[dict[str, Any]]) -> str:
+    for record in rank_catalog:
+        note = str(record.get("rank_completion_note") or "").strip()
+        if note:
+            return note
+    return ""
+
+
+def _normalize_xianxia_rank_key(value: Any) -> str:
+    return str(value if value is not None else "").strip().lower().replace("-", "_").replace(" ", "_")
 
 
 def _systems_ref_for_entry(entry: Any) -> dict[str, str]:

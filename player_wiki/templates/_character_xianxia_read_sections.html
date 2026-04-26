@@ -26,6 +26,31 @@
                     {% if art.rank_records_status %} | {{ art.rank_records_status | replace('_', ' ') }}{% endif %}
                   </p>
                 </div>
+                {% if art.rank_progress %}
+                  <div class="detail-cluster">
+                    <div>
+                      <h4>Rank progress</h4>
+                      <p class="meta">{{ art.rank_progress.summary }}</p>
+                      {% if art.rank_progress.incomplete_note %}
+                        <p class="meta"><strong>Intentional draft content:</strong> {{ art.rank_progress.incomplete_note }}</p>
+                      {% endif %}
+                      {% if art.rank_progress.steps %}
+                        <div class="skill-grid">
+                          {% for rank in art.rank_progress.steps %}
+                            <div class="skill-pill{% if rank.is_learned %} skill-pill--proficient{% endif %}">
+                              {% if rank.href %}
+                                <a href="{{ rank.href }}">{{ rank.label }}</a>
+                              {% else %}
+                                <span>{{ rank.label }}</span>
+                              {% endif %}
+                              <span class="meta">{{ rank.status_label }}</span>
+                            </div>
+                          {% endfor %}
+                        </div>
+                      {% endif %}
+                    </div>
+                  </div>
+                {% endif %}
                 {% if art.learned_rank_refs %}
                   <div class="detail-cluster">
                     <div>
