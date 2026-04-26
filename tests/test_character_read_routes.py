@@ -1299,6 +1299,111 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     assert "Prepare for level-up" not in html
 
 
+def test_xianxia_create_picker_allows_seeded_and_gm_custom_martial_arts(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+            }
+        ]
+
+    _write_campaign_config(app, _mutate)
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        service = app.extensions["systems_service"]
+        service.ensure_builtin_library_seeded(XIANXIA_SYSTEM_CODE)
+        service.create_custom_campaign_entry(
+            "linden-pass",
+            title="Jade Meteor Palm",
+            entry_type="martial_art",
+            slug_leaf="jade-meteor-palm",
+            provenance="GM table custom art",
+            visibility="dm",
+            search_metadata="starter option jade meteor",
+            body_markdown=(
+                "## Ranks\n"
+                "Initiate: Jade energy gathers in the palm.\n\n"
+                "Novice: The strike falls like a meteor."
+            ),
+            actor_user_id=users["dm"]["id"],
+            can_set_private=True,
+        )
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.get("/campaigns/linden-pass/characters/new")
+    assert create_response.status_code == 200
+    create_html = create_response.get_data(as_text=True)
+    assert 'value="demons-fist"' in create_html
+    assert 'value="custom-linden-pass-jade-meteor-palm"' in create_html
+    assert "Jade Meteor Palm (CUSTOM-LINDEN-PASS)" in create_html
+
+    submit_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            "name": "Jade Lotus",
+            "character_slug": "",
+            "attribute_str": "1",
+            "attribute_dex": "1",
+            "attribute_con": "1",
+            "attribute_int": "1",
+            "attribute_wis": "1",
+            "attribute_cha": "1",
+            "effort_basic": "1",
+            "effort_weapon": "1",
+            "effort_guns_explosive": "1",
+            "effort_magic": "1",
+            "effort_ultimate": "1",
+            "energy_jing": "1",
+            "energy_qi": "1",
+            "energy_shen": "1",
+            "trained_skill_1": "Fishing",
+            "trained_skill_2": "Court Etiquette",
+            "trained_skill_3": "Calligraphy",
+            "martial_art_1_slug": "demons-fist",
+            "martial_art_1_rank": "novice",
+            "martial_art_2_slug": "custom-linden-pass-jade-meteor-palm",
+            "martial_art_2_rank": "initiate",
+            "martial_art_3_slug": "",
+            "martial_art_3_rank": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert submit_response.status_code == 302
+    assert submit_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/jade-lotus"
+    )
+    definition_payload = _read_character_definition(app, "jade-lotus")
+    martial_arts = definition_payload["xianxia"]["martial_arts"]
+    assert [art["systems_ref"]["slug"] for art in martial_arts] == [
+        "demons-fist",
+        "custom-linden-pass-jade-meteor-palm",
+    ]
+    custom_art = martial_arts[1]
+    assert custom_art["systems_ref"] == {
+        "library_slug": XIANXIA_SYSTEM_CODE,
+        "source_id": "CUSTOM-LINDEN-PASS",
+        "entry_key": "xianxia|custom|linden-pass|jade-meteor-palm",
+        "slug": "custom-linden-pass-jade-meteor-palm",
+        "title": "Jade Meteor Palm",
+        "entry_type": "martial_art",
+    }
+    assert custom_art["current_rank"] == "Initiate"
+    assert custom_art["current_rank_key"] == "initiate"
+    assert custom_art["learned_rank_refs"] == [
+        "xianxia:custom-linden-pass-jade-meteor-palm:initiate"
+    ]
+    assert custom_art["rank_records_status"] == "gm_authored_custom_markdown"
+    assert custom_art["custom_martial_art"] is True
+    assert custom_art["xianxia_custom_martial_art"] is True
+
+
 def test_xianxia_hides_dnd_spellcasting_read_and_session_affordances(
     app, client, sign_in, users
 ):

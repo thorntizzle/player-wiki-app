@@ -873,7 +873,17 @@ def _list_xianxia_create_martial_art_options(
         for entry in list_entries(campaign_slug, entry_type="martial_art", limit=None)
         if str(getattr(entry, "entry_type", "") or "").strip().lower() == "martial_art"
     ]
-    options = [_build_xianxia_martial_art_option(entry) for entry in entries]
+    custom_source_id = ""
+    get_custom_source_id = getattr(systems_service, "get_campaign_custom_source_id", None)
+    if callable(get_custom_source_id):
+        custom_source_id = str(get_custom_source_id(campaign_slug) or "").strip()
+    options = [
+        _build_xianxia_martial_art_option(
+            entry,
+            campaign_custom_source_id=custom_source_id,
+        )
+        for entry in entries
+    ]
     return sorted(
         options,
         key=lambda option: (
@@ -884,9 +894,14 @@ def _list_xianxia_create_martial_art_options(
     )
 
 
-def _build_xianxia_martial_art_option(entry: Any) -> dict[str, Any]:
+def _build_xianxia_martial_art_option(
+    entry: Any,
+    *,
+    campaign_custom_source_id: str = "",
+) -> dict[str, Any]:
     metadata = dict(getattr(entry, "metadata", {}) or {})
     body = dict(getattr(entry, "body", {}) or {})
+    entry_source_id = str(getattr(entry, "source_id", "") or "").strip()
     rank_records = _xianxia_martial_art_rank_records(metadata, body)
     rank_refs = {
         str(record.get("rank_key") or "").strip(): str(record.get("rank_ref") or "").strip()
@@ -902,6 +917,10 @@ def _build_xianxia_martial_art_option(entry: Any) -> dict[str, Any]:
         metadata.get("xianxia_custom_martial_art")
         or metadata.get("custom_martial_art")
         or dict(body.get("xianxia_martial_art") or {}).get("xianxia_custom_martial_art")
+        or (
+            campaign_custom_source_id
+            and entry_source_id.casefold() == campaign_custom_source_id.casefold()
+        )
     )
     if is_custom_martial_art and not available_rank_keys:
         available_rank_keys = ("initiate", "novice")
@@ -919,7 +938,7 @@ def _build_xianxia_martial_art_option(entry: Any) -> dict[str, Any]:
         "title": str(getattr(entry, "title", "") or "").strip(),
         "entry_key": str(getattr(entry, "entry_key", "") or "").strip(),
         "entry_type": str(getattr(entry, "entry_type", "") or "").strip(),
-        "source_id": str(getattr(entry, "source_id", "") or "").strip(),
+        "source_id": entry_source_id,
         "library_slug": str(getattr(entry, "library_slug", "") or "").strip(),
         "available_starting_rank_keys": available_rank_keys,
         "rank_refs": rank_refs,
