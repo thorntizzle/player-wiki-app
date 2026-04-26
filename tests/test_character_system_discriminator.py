@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from player_wiki.character_builder import normalize_definition_to_native_model
 from player_wiki.character_models import CharacterDefinition
+from player_wiki.character_service import build_initial_state, validate_state
 from player_wiki.system_policy import DND_5E_SYSTEM_CODE, XIANXIA_SYSTEM_CODE
 from player_wiki.xianxia_character_model import (
     XIANXIA_CHARACTER_DEFINITION_SCHEMA_VERSION,
+    XIANXIA_CHARACTER_STATE_SCHEMA_VERSION,
     XIANXIA_DEFINITION_FIELD_KEYS,
+    XIANXIA_STATE_FIELD_KEYS,
 )
 
 
@@ -206,3 +209,125 @@ def test_dnd5e_definition_does_not_emit_xianxia_definition_payload():
 
     assert definition.system == DND_5E_SYSTEM_CODE
     assert "xianxia" not in definition.to_dict()
+
+
+def test_xianxia_initial_state_defines_mutable_session_state_shape():
+    definition = CharacterDefinition.from_dict(
+        _minimal_definition_payload(
+            system="xianxia",
+            xianxia={
+                "energy_maxima": {"jing": 2, "qi": 3, "shen": 1},
+                "yin_yang": {"yin_max": 2, "yang_max": 1},
+                "durability": {"hp_max": 18, "stance_max": 14},
+            },
+        )
+    )
+
+    state = build_initial_state(definition)
+    xianxia_state = state["xianxia"]
+
+    assert tuple(xianxia_state) == XIANXIA_STATE_FIELD_KEYS
+    assert xianxia_state["schema_version"] == XIANXIA_CHARACTER_STATE_SCHEMA_VERSION
+    assert state["vitals"] == {"current_hp": 18, "temp_hp": 0}
+    assert state["resources"] == []
+    assert state["spell_slots"] == []
+    assert xianxia_state["vitals"] == {
+        "current_hp": 18,
+        "temp_hp": 0,
+        "current_stance": 14,
+        "temp_stance": 0,
+    }
+    assert xianxia_state["energies"] == {
+        "jing": {"current": 2},
+        "qi": {"current": 3},
+        "shen": {"current": 1},
+    }
+    assert xianxia_state["yin_yang"] == {"yin_current": 2, "yang_current": 1}
+    assert xianxia_state["dao"] == {"current": 0}
+    assert xianxia_state["active_stance"] is None
+    assert xianxia_state["active_aura"] is None
+    assert xianxia_state["inventory"] == {"enabled": False, "quantities": []}
+    assert xianxia_state["notes"] == {"player_notes_markdown": ""}
+    assert "dying" not in xianxia_state
+
+
+def test_xianxia_state_normalizes_requirement_sketch_aliases_without_dying_rounds():
+    definition = CharacterDefinition.from_dict(
+        _minimal_definition_payload(
+            system="xianxia",
+            xianxia={
+                "energy_maxima": {"jing": 2, "qi": 3, "shen": 1},
+                "yin_yang": {"yin_max": 2, "yang_max": 2},
+                "durability": {"hp_max": 18, "stance_max": 14},
+            },
+        )
+    )
+
+    state = validate_state(
+        definition,
+        {
+            "status": "active",
+            "vitals": {"current_hp": "17", "temp_hp": "3"},
+            "inventory": [{"id": "spirit-rice", "name": "Spirit rice", "quantity": "2"}],
+            "currency": {},
+            "attunement": {},
+            "notes": {"player_notes_markdown": "Watch for the Azure Bell timer."},
+            "xianxia": {
+                "stance_current": "9",
+                "stance_temp": "2",
+                "energies_current": {"jing": "1", "qi": "2", "shen": "0"},
+                "yin_current": "1",
+                "yang_current": "2",
+                "dao_current": "3",
+                "active_stance": "Stone Root",
+                "active_aura": {"name": "Azure Bell", "systems_ref": {"slug": "azure-bell"}},
+                "dying": {"rounds_remaining": 4},
+            },
+        },
+    )
+
+    xianxia_state = state["xianxia"]
+
+    assert state["vitals"] == {"current_hp": 17, "temp_hp": 3}
+    assert state["resources"] == []
+    assert state["spell_slots"] == []
+    assert xianxia_state["vitals"] == {
+        "current_hp": 17,
+        "temp_hp": 3,
+        "current_stance": 9,
+        "temp_stance": 2,
+    }
+    assert xianxia_state["energies"] == {
+        "jing": {"current": 1},
+        "qi": {"current": 2},
+        "shen": {"current": 0},
+    }
+    assert xianxia_state["yin_yang"] == {"yin_current": 1, "yang_current": 2}
+    assert xianxia_state["dao"] == {"current": 3}
+    assert xianxia_state["active_stance"] == {"name": "Stone Root"}
+    assert xianxia_state["active_aura"] == {"name": "Azure Bell", "systems_ref": {"slug": "azure-bell"}}
+    assert xianxia_state["inventory"] == {
+        "enabled": True,
+        "quantities": [{"id": "spirit-rice", "name": "Spirit rice", "quantity": 2}],
+    }
+    assert xianxia_state["notes"] == {"player_notes_markdown": "Watch for the Azure Bell timer."}
+    assert "dying" not in xianxia_state
+
+
+def test_dnd5e_initial_state_does_not_emit_xianxia_mutable_state():
+    definition = CharacterDefinition.from_dict(
+        _minimal_definition_payload(
+            system="dnd5e",
+            stats={"max_hp": 12},
+            xianxia={"durability": {"hp_max": 18, "stance_max": 14}},
+        )
+    )
+
+    state = build_initial_state(definition)
+
+    assert state["vitals"] == {
+        "current_hp": 12,
+        "temp_hp": 0,
+        "death_saves": {"successes": 0, "failures": 0},
+    }
+    assert "xianxia" not in state

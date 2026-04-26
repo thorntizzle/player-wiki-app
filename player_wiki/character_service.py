@@ -10,6 +10,12 @@ from .character_spell_slots import (
     spell_slot_lanes_from_spellcasting,
     spell_slot_state_entries_from_spellcasting,
 )
+from .system_policy import is_xianxia_system
+from .xianxia_character_model import (
+    build_xianxia_initial_state_payload,
+    normalize_xianxia_state_payload,
+    xianxia_hp_max,
+)
 
 MANAGED_CUSTOM_TRACKER_PREFIX = "manual-feature-tracker:"
 
@@ -80,6 +86,9 @@ def _normalize_attunement_state(
 
 
 def build_initial_state(definition: CharacterDefinition) -> dict[str, Any]:
+    if is_xianxia_system(definition.system):
+        return _build_xianxia_initial_state(definition)
+
     max_hp = int(definition.stats.get("max_hp") or 0)
     spell_slots = spell_slot_state_entries_from_spellcasting(definition.spellcasting)
 
@@ -90,7 +99,9 @@ def build_initial_state(definition: CharacterDefinition) -> dict[str, Any]:
     for item in definition.equipment_catalog:
         item_currency = dict(item.get("currency") or {})
         for denomination in ("cp", "sp", "ep", "gp", "pp"):
-            currency[denomination] = int(currency.get(denomination) or 0) + int(item_currency.get(denomination) or 0)
+            currency[denomination] = int(currency.get(denomination) or 0) + int(
+                item_currency.get(denomination) or 0
+            )
         if bool(item.get("is_currency_only")):
             continue
         inventory.append(build_inventory_state(item))
@@ -116,6 +127,39 @@ def build_initial_state(definition: CharacterDefinition) -> dict[str, Any]:
     }
 
 
+def _build_xianxia_initial_state(definition: CharacterDefinition) -> dict[str, Any]:
+    xianxia_state = build_xianxia_initial_state_payload(definition)
+    inventory = []
+    currency = {"cp": 0, "sp": 0, "ep": 0, "gp": 0, "pp": 0, "other": []}
+    for item in definition.equipment_catalog:
+        item_currency = dict(item.get("currency") or {})
+        for denomination in ("cp", "sp", "ep", "gp", "pp"):
+            currency[denomination] = int(currency.get(denomination) or 0) + int(item_currency.get(denomination) or 0)
+        if bool(item.get("is_currency_only")):
+            continue
+        inventory.append(build_inventory_state(item))
+
+    return {
+        "status": definition.status,
+        "vitals": {
+            "current_hp": int(xianxia_state["vitals"]["current_hp"]),
+            "temp_hp": int(xianxia_state["vitals"]["temp_hp"]),
+        },
+        "resources": [],
+        "inventory": inventory,
+        "currency": currency,
+        "spell_slots": [],
+        "attunement": _normalize_attunement_state({"max_attuned_items": 3}, inventory),
+        "notes": {
+            "player_notes_markdown": "",
+            "physical_description_markdown": "",
+            "background_markdown": "",
+            "session_notes": [],
+        },
+        "xianxia": xianxia_state,
+    }
+
+
 def merge_state_with_definition(
     definition: CharacterDefinition,
     state: dict[str, Any],
@@ -125,6 +169,14 @@ def merge_state_with_definition(
     inventory_state_overrides: dict[str, dict[str, Any]] | None = None,
     removed_resource_ids: set[str] | None = None,
 ) -> dict[str, Any]:
+    if is_xianxia_system(definition.system):
+        return _merge_xianxia_state_with_definition(
+            definition,
+            state,
+            inventory_quantity_overrides=inventory_quantity_overrides,
+            inventory_state_overrides=inventory_state_overrides,
+        )
+
     payload = deepcopy(state)
     existing_resources = list(payload.get("resources") or [])
     removed_managed_resources = {
@@ -294,26 +346,95 @@ def merge_state_with_definition(
     return payload
 
 
+def _merge_xianxia_state_with_definition(
+    definition: CharacterDefinition,
+    state: dict[str, Any],
+    *,
+    inventory_quantity_overrides: dict[str, int] | None = None,
+    inventory_state_overrides: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    initial_state = _build_xianxia_initial_state(definition)
+    payload = deepcopy(state or {})
+
+    payload["status"] = str(payload.get("status") or definition.status)
+    payload["resources"] = []
+    payload["spell_slots"] = []
+
+    existing_inventory = list(payload.get("inventory") or initial_state.get("inventory") or [])
+    quantity_overrides = {
+        str(key).strip(): int(value)
+        for key, value in dict(inventory_quantity_overrides or {}).items()
+        if str(key).strip()
+    }
+    state_overrides = {
+        str(key).strip(): dict(value)
+        for key, value in dict(inventory_state_overrides or {}).items()
+        if str(key).strip()
+    }
+    merged_inventory: list[dict[str, Any]] = []
+    for item in existing_inventory:
+        merged_item = deepcopy(item)
+        item_ref = _inventory_item_ref(merged_item)
+        if item_ref in quantity_overrides:
+            merged_item["quantity"] = quantity_overrides[item_ref]
+        item_state_override = state_overrides.get(item_ref)
+        if item_state_override:
+            if "is_equipped" in item_state_override:
+                merged_item["is_equipped"] = bool(item_state_override.get("is_equipped"))
+            if "is_attuned" in item_state_override:
+                merged_item["is_attuned"] = bool(item_state_override.get("is_attuned"))
+            if "weapon_wield_mode" in item_state_override:
+                override_weapon_wield_mode = _normalize_weapon_wield_mode_value(
+                    item_state_override.get("weapon_wield_mode")
+                )
+                if override_weapon_wield_mode:
+                    merged_item["weapon_wield_mode"] = override_weapon_wield_mode
+                    merged_item["is_equipped"] = True
+                else:
+                    merged_item.pop("weapon_wield_mode", None)
+        merged_inventory.append(merged_item)
+    payload["inventory"] = merged_inventory
+    payload["currency"] = dict(payload.get("currency") or initial_state.get("currency") or {})
+    payload["attunement"] = _normalize_attunement_state(payload.get("attunement"), merged_inventory)
+    payload["notes"] = _normalize_notes_payload(payload.get("notes"))
+    payload["xianxia"] = _normalize_xianxia_state_from_shared_state(definition, payload)
+    payload["vitals"] = {
+        "current_hp": int(payload["xianxia"]["vitals"]["current_hp"]),
+        "temp_hp": int(payload["xianxia"]["vitals"]["temp_hp"]),
+    }
+    return payload
+
+
 def validate_state(definition: CharacterDefinition, state: dict[str, Any]) -> dict[str, Any]:
     payload = deepcopy(state)
+    is_xianxia = is_xianxia_system(definition.system)
+    raw_xianxia_state = dict(payload.get("xianxia") or {}) if is_xianxia else {}
+    if is_xianxia and not isinstance(payload.get("vitals"), dict) and isinstance(raw_xianxia_state.get("vitals"), dict):
+        payload["vitals"] = raw_xianxia_state.get("vitals")
+
     vitals = dict(payload.get("vitals") or {})
-    max_hp = int(definition.stats.get("max_hp") or 0)
+    max_hp = xianxia_hp_max(definition) if is_xianxia else int(definition.stats.get("max_hp") or 0)
     current_hp = int(vitals.get("current_hp") or 0)
     temp_hp = int(vitals.get("temp_hp") or 0)
-    if current_hp < 0 or current_hp > max_hp:
+    if current_hp < 0 or (not is_xianxia and current_hp > max_hp):
         raise CharacterStateValidationError(
             f"current_hp must be between 0 and {max_hp}, got {current_hp}"
         )
     if temp_hp < 0:
         raise CharacterStateValidationError("temp_hp cannot be negative")
-    payload["vitals"] = {
+    normalized_vitals = {
         "current_hp": current_hp,
         "temp_hp": temp_hp,
-        "death_saves": {
+    }
+    if not is_xianxia:
+        normalized_vitals["death_saves"] = {
             "successes": int((vitals.get("death_saves") or {}).get("successes") or 0),
             "failures": int((vitals.get("death_saves") or {}).get("failures") or 0),
-        },
-    }
+        }
+    payload["vitals"] = normalized_vitals
+    if is_xianxia:
+        payload["resources"] = []
+        payload["spell_slots"] = []
 
     normalized_resources = []
     for resource in payload.get("resources") or []:
@@ -411,13 +532,59 @@ def validate_state(definition: CharacterDefinition, state: dict[str, Any]) -> di
     payload["currency"] = normalized_currency
 
     payload["attunement"] = _normalize_attunement_state(payload.get("attunement"), normalized_inventory)
-    payload["notes"] = {
-        "player_notes_markdown": str((payload.get("notes") or {}).get("player_notes_markdown") or ""),
-        "physical_description_markdown": str(
-            (payload.get("notes") or {}).get("physical_description_markdown") or ""
-        ),
-        "background_markdown": str((payload.get("notes") or {}).get("background_markdown") or ""),
-        "session_notes": list((payload.get("notes") or {}).get("session_notes") or []),
-    }
+    payload["notes"] = _normalize_notes_payload(payload.get("notes"))
+    if is_xianxia:
+        payload["resources"] = []
+        payload["spell_slots"] = []
+        payload["xianxia"] = _normalize_xianxia_state_from_shared_state(definition, payload)
+        payload["vitals"] = {
+            "current_hp": int(payload["xianxia"]["vitals"]["current_hp"]),
+            "temp_hp": int(payload["xianxia"]["vitals"]["temp_hp"]),
+        }
+    else:
+        payload.pop("xianxia", None)
     payload["status"] = str(payload.get("status") or definition.status)
     return payload
+
+
+def _normalize_notes_payload(value: Any) -> dict[str, Any]:
+    notes = dict(value or {}) if isinstance(value, dict) else {}
+    return {
+        "player_notes_markdown": str(notes.get("player_notes_markdown") or ""),
+        "physical_description_markdown": str(notes.get("physical_description_markdown") or ""),
+        "background_markdown": str(notes.get("background_markdown") or ""),
+        "session_notes": list(notes.get("session_notes") or []),
+    }
+
+
+def _normalize_xianxia_state_from_shared_state(
+    definition: CharacterDefinition,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    raw_xianxia = dict(payload.get("xianxia") or {})
+    raw_vitals = dict(raw_xianxia.get("vitals") or {})
+    shared_vitals = dict(payload.get("vitals") or {})
+    if "current_hp" in shared_vitals:
+        raw_vitals["current_hp"] = int(shared_vitals.get("current_hp") or 0)
+    if "temp_hp" in shared_vitals:
+        raw_vitals["temp_hp"] = int(shared_vitals.get("temp_hp") or 0)
+    raw_xianxia["vitals"] = raw_vitals
+    raw_inventory = (
+        dict(raw_xianxia.get("inventory") or {})
+        if isinstance(raw_xianxia.get("inventory"), dict)
+        else {}
+    )
+    raw_xianxia["inventory"] = {
+        **raw_inventory,
+        "enabled": bool(raw_inventory.get("enabled")) or bool(payload.get("inventory")),
+        "quantities": list(payload.get("inventory") or raw_inventory.get("quantities") or []),
+    }
+    raw_xianxia["notes"] = {
+        **(
+            dict(raw_xianxia.get("notes") or {})
+            if isinstance(raw_xianxia.get("notes"), dict)
+            else {}
+        ),
+        "player_notes_markdown": str((payload.get("notes") or {}).get("player_notes_markdown") or ""),
+    }
+    return normalize_xianxia_state_payload(definition, raw_xianxia)

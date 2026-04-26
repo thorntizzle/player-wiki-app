@@ -6,6 +6,7 @@ from typing import Any
 from .system_policy import is_xianxia_system
 
 XIANXIA_CHARACTER_DEFINITION_SCHEMA_VERSION = 1
+XIANXIA_CHARACTER_STATE_SCHEMA_VERSION = 1
 
 XIANXIA_ATTRIBUTE_KEYS = ("str", "dex", "con", "int", "wis", "cha")
 XIANXIA_EFFORT_KEYS = ("basic", "weapon", "guns_explosive", "magic", "ultimate")
@@ -33,6 +34,18 @@ XIANXIA_DEFINITION_FIELD_KEYS = (
     "approval_requests",
     "companions",
     "advancement_history",
+)
+
+XIANXIA_STATE_FIELD_KEYS = (
+    "schema_version",
+    "vitals",
+    "energies",
+    "yin_yang",
+    "dao",
+    "active_stance",
+    "active_aura",
+    "inventory",
+    "notes",
 )
 
 _REALM_LABELS = {
@@ -193,6 +206,101 @@ def normalize_xianxia_definition_payload(payload: dict[str, Any]) -> dict[str, A
 
     normalized_payload["xianxia"] = xianxia_definition
     return normalized_payload
+
+
+def build_xianxia_initial_state_payload(definition: Any) -> dict[str, Any]:
+    return normalize_xianxia_state_payload(definition, {})
+
+
+def normalize_xianxia_state_payload(definition: Any, state_payload: dict[str, Any] | None) -> dict[str, Any]:
+    raw_state = dict(state_payload or {})
+    raw_vitals = _first_mapping(raw_state, key="vitals")
+    raw_energies = _first_mapping(raw_state, key="energies")
+    raw_energies_current = _first_mapping(raw_state, key="energies_current")
+    raw_yin_yang = _first_mapping(raw_state, key="yin_yang")
+    raw_dao = _first_mapping(raw_state, key="dao")
+
+    return {
+        "schema_version": XIANXIA_CHARACTER_STATE_SCHEMA_VERSION,
+        "vitals": {
+            "current_hp": _normalize_int(
+                raw_vitals.get("current_hp")
+                if "current_hp" in raw_vitals
+                else _first_present(raw_state, key="hp_current")
+                if _has_any(raw_state, key="hp_current")
+                else _first_present(raw_state, key="current_hp"),
+                default=xianxia_hp_max(definition),
+            ),
+            "temp_hp": _normalize_int(
+                raw_vitals.get("temp_hp")
+                if "temp_hp" in raw_vitals
+                else _first_present(raw_state, key="hp_temp")
+                if _has_any(raw_state, key="hp_temp")
+                else _first_present(raw_state, key="temp_hp"),
+                default=0,
+            ),
+            "current_stance": _normalize_int(
+                raw_vitals.get("current_stance")
+                if "current_stance" in raw_vitals
+                else raw_vitals.get("stance_current")
+                if "stance_current" in raw_vitals
+                else _first_present(raw_state, key="stance_current"),
+                default=xianxia_stance_max(definition),
+            ),
+            "temp_stance": _normalize_int(
+                raw_vitals.get("temp_stance")
+                if "temp_stance" in raw_vitals
+                else raw_vitals.get("stance_temp")
+                if "stance_temp" in raw_vitals
+                else _first_present(raw_state, key="stance_temp"),
+                default=0,
+            ),
+        },
+        "energies": _normalize_xianxia_energy_current(definition, raw_energies, raw_energies_current),
+        "yin_yang": {
+            "yin_current": _normalize_int(
+                raw_yin_yang.get("yin_current")
+                if "yin_current" in raw_yin_yang
+                else _first_present(raw_state, key="yin_current"),
+                default=xianxia_yin_max(definition),
+            ),
+            "yang_current": _normalize_int(
+                raw_yin_yang.get("yang_current")
+                if "yang_current" in raw_yin_yang
+                else _first_present(raw_state, key="yang_current"),
+                default=xianxia_yang_max(definition),
+            ),
+        },
+        "dao": {
+            "current": _normalize_int(
+                raw_dao.get("current") if "current" in raw_dao else _first_present(raw_state, key="dao_current"),
+                default=0,
+            )
+        },
+        "active_stance": _normalize_active_state_record(_first_present(raw_state, key="active_stance")),
+        "active_aura": _normalize_active_state_record(_first_present(raw_state, key="active_aura")),
+        "inventory": _normalize_xianxia_inventory_state(
+            _first_present(raw_state, key="inventory"),
+            definition=definition,
+        ),
+        "notes": _normalize_xianxia_notes_state(_first_present(raw_state, key="notes")),
+    }
+
+
+def xianxia_hp_max(definition: Any) -> int:
+    return _normalize_int(_definition_durability(definition).get("hp_max"), default=10)
+
+
+def xianxia_stance_max(definition: Any) -> int:
+    return _normalize_int(_definition_durability(definition).get("stance_max"), default=10)
+
+
+def xianxia_yin_max(definition: Any) -> int:
+    return _normalize_int(_definition_yin_yang(definition).get("yin_max"), default=1)
+
+
+def xianxia_yang_max(definition: Any) -> int:
+    return _normalize_int(_definition_yin_yang(definition).get("yang_max"), default=1)
 
 
 def _has_any(*mappings: dict[str, Any], key: str) -> bool:
@@ -356,3 +464,108 @@ def _normalize_dao_immolating_records(
             raw_records.get("use_history") if "use_history" in raw_records else raw_records.get("history")
         ),
     }
+
+
+def _definition_xianxia(definition: Any) -> dict[str, Any]:
+    if isinstance(definition, dict):
+        return dict(definition.get("xianxia") or {})
+    return dict(getattr(definition, "xianxia", {}) or {})
+
+
+def _definition_durability(definition: Any) -> dict[str, Any]:
+    return dict(_definition_xianxia(definition).get("durability") or {})
+
+
+def _definition_yin_yang(definition: Any) -> dict[str, Any]:
+    return dict(_definition_xianxia(definition).get("yin_yang") or {})
+
+
+def _definition_energies(definition: Any) -> dict[str, Any]:
+    return dict(_definition_xianxia(definition).get("energies") or {})
+
+
+def _normalize_xianxia_energy_current(
+    definition: Any,
+    raw_energies: dict[str, Any],
+    raw_energies_current: dict[str, Any],
+) -> dict[str, dict[str, int]]:
+    definition_energies = _definition_energies(definition)
+    normalized: dict[str, dict[str, int]] = {}
+    for key in XIANXIA_ENERGY_KEYS:
+        raw_value = raw_energies_current.get(key)
+        if raw_value is None or raw_value == "":
+            raw_energy = raw_energies.get(key)
+            raw_value = dict(raw_energy or {}).get("current") if isinstance(raw_energy, dict) else raw_energy
+        max_value = dict(definition_energies.get(key) or {}).get("max")
+        normalized[key] = {"current": _normalize_int(raw_value, default=_normalize_int(max_value, default=0))}
+    return normalized
+
+
+def _normalize_active_state_record(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        record = deepcopy(value)
+        name = _normalize_text(record.get("name") or record.get("label"))
+        if name:
+            record["name"] = name
+        systems_ref = record.get("systems_ref")
+        if systems_ref is not None and not isinstance(systems_ref, dict):
+            record.pop("systems_ref", None)
+        return record if record else None
+
+    name = _normalize_text(value)
+    return {"name": name} if name else None
+
+
+def _normalize_xianxia_inventory_state(value: Any, *, definition: Any) -> dict[str, Any]:
+    raw_inventory = dict(value or {}) if isinstance(value, dict) else {}
+    raw_quantities = (
+        raw_inventory.get("quantities")
+        if "quantities" in raw_inventory
+        else raw_inventory.get("item_quantities")
+        if "item_quantities" in raw_inventory
+        else raw_inventory.get("items")
+        if "items" in raw_inventory
+        else value
+    )
+    quantities = _normalize_xianxia_inventory_quantities(raw_quantities)
+    if not quantities:
+        equipment_catalog = list(getattr(definition, "equipment_catalog", []) or [])
+        quantities = _normalize_xianxia_inventory_quantities(equipment_catalog)
+    enabled = bool(raw_inventory.get("enabled", False)) or bool(quantities)
+    return {"enabled": enabled, "quantities": quantities if enabled else []}
+
+
+def _normalize_xianxia_inventory_quantities(values: Any) -> list[dict[str, Any]]:
+    if isinstance(values, dict):
+        values = [
+            {"id": str(key), "quantity": quantity}
+            for key, quantity in values.items()
+            if str(key).strip()
+        ]
+    if isinstance(values, str):
+        values = [{"name": values, "quantity": 1}]
+    records: list[dict[str, Any]] = []
+    for value in list(values or []):
+        if not isinstance(value, dict):
+            value = {"name": value, "quantity": 1}
+        item_id = _normalize_text(value.get("id"))
+        catalog_ref = _normalize_text(value.get("catalog_ref"))
+        name = _normalize_text(value.get("name") or value.get("label"))
+        if not item_id and not catalog_ref and not name:
+            continue
+        quantity = value.get("quantity") if "quantity" in value else value.get("default_quantity")
+        record: dict[str, Any] = {"quantity": _normalize_int(quantity, default=0)}
+        if item_id:
+            record["id"] = item_id
+        if catalog_ref:
+            record["catalog_ref"] = catalog_ref
+        if name:
+            record["name"] = name
+        records.append(record)
+    return records
+
+
+def _normalize_xianxia_notes_state(value: Any) -> dict[str, str]:
+    if isinstance(value, dict):
+        return {"player_notes_markdown": str(value.get("player_notes_markdown") or "")}
+    return {"player_notes_markdown": str(value or "")}
