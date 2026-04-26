@@ -131,6 +131,22 @@
       "summary": "Standalone purchasable Generic Techniques and Maneuvers learned with Insight after character creation."
     },
     {
+      "key": "condition",
+      "label": "Condition",
+      "group": "combat_reference",
+      "default_entry_type": "rule",
+      "support_state": "reference_only",
+      "summary": "Reference entries for condition concepts without automated condition timing, targeting, or combat-state effects in Milestone 1."
+    },
+    {
+      "key": "status",
+      "label": "Status",
+      "group": "combat_reference",
+      "default_entry_type": "rule",
+      "support_state": "reference_only",
+      "summary": "Reference entries for status-effect concepts while the Xianxia status taxonomy and status functionality remain deferred."
+    },
+    {
       "key": "range_rule",
       "label": "Range Rule",
       "group": "combat_reference",

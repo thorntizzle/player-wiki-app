@@ -21,6 +21,7 @@ from player_wiki.xianxia_systems_seed import (
     XIANXIA_SYSTEMS_SEED_DATA_RELATIVE_PATH,
     XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY,
     XIANXIA_SYSTEMS_SEED_VERSION,
+    _build_seed_entry,
     build_xianxia_entry_facet_definitions,
     build_xianxia_systems_seed_entries,
     get_xianxia_entry_facet_definition,
@@ -193,6 +194,8 @@ def test_xianxia_entry_facet_definitions_cover_milestone_one_concepts():
         "stance",
         "aura",
         "generic_technique",
+        "condition",
+        "status",
         "range_rule",
         "timing_rule",
         "critical_hit_rule",
@@ -208,8 +211,6 @@ def test_xianxia_entry_facet_definitions_cover_milestone_one_concepts():
 
     assert XIANXIA_ENTRY_FACET_KEYS == expected_facets
     assert keys == expected_facets
-    assert "condition" not in keys
-    assert "status" not in keys
     assert all(definition["label"] for definition in definitions)
     assert all(definition["group"] for definition in definitions)
     assert all(definition["default_entry_type"] for definition in definitions)
@@ -221,12 +222,50 @@ def test_xianxia_entry_facet_definitions_cover_milestone_one_concepts():
     assert facet_map["armor"]["default_entry_type"] == "armor"
     assert facet_map["martial_art"]["default_entry_type"] == "martial_art"
     assert facet_map["generic_technique"]["default_entry_type"] == "generic_technique"
+    assert facet_map["condition"]["default_entry_type"] == "rule"
+    assert facet_map["condition"]["support_state"] == "reference_only"
+    assert facet_map["status"]["default_entry_type"] == "rule"
+    assert facet_map["status"]["support_state"] == "reference_only"
     assert facet_map["dying_rule"]["default_entry_type"] == "rule"
 
     martial_art_facet = get_xianxia_entry_facet_definition("martial-art")
     assert martial_art_facet is not None
     assert martial_art_facet["key"] == "martial_art"
     assert martial_art_facet["label"] == "Martial Art"
+
+
+def test_xianxia_condition_and_status_seed_entries_are_forced_reference_only():
+    for facet in ("condition", "status"):
+        entry = _build_seed_entry(
+            {
+                "title": f"Reference {facet}",
+                "entry_type": "rule",
+                "facets": [facet],
+                "summary": f"Reference-only Xianxia {facet} reminder.",
+            },
+            index=1,
+            source_path="managed:test",
+        )
+
+        assert entry["entry_type"] == "rule"
+        assert entry["metadata"]["facets"] == [facet]
+        assert entry["metadata"]["support_state"] == "reference_only"
+        assert entry["metadata"]["xianxia_support_state"] == "reference_only"
+        assert entry["body"]["support_state"] == "reference_only"
+        assert entry["body"]["xianxia_support_state"] == "reference_only"
+
+    with pytest.raises(ValueError, match="reference-only facets condition"):
+        _build_seed_entry(
+            {
+                "title": "Modeled condition draft",
+                "entry_type": "rule",
+                "facets": ["condition"],
+                "summary": "This should stay reference-only in Milestone 1.",
+                "metadata": {"support_state": "modeled"},
+            },
+            index=1,
+            source_path="managed:test",
+        )
 
 
 def test_xianxia_empty_curated_seed_manifest_does_not_delete_existing_shared_rows(app):

@@ -32,6 +32,8 @@ XIANXIA_ENTRY_FACET_KEYS = (
     "stance",
     "aura",
     "generic_technique",
+    "condition",
+    "status",
     "range_rule",
     "timing_rule",
     "critical_hit_rule",
@@ -41,6 +43,8 @@ XIANXIA_ENTRY_FACET_KEYS = (
     "companion_rule",
     "gm_approval_rule",
 )
+XIANXIA_REFERENCE_ONLY_ENTRY_FACET_KEYS = frozenset({"condition", "status"})
+XIANXIA_FACET_SUPPORT_STATES = frozenset({"reference_only", "modeled"})
 
 
 @lru_cache(maxsize=1)
@@ -112,11 +116,33 @@ def _build_seed_entry(raw_spec: dict[str, Any], *, index: int, source_path: str)
     )
     aliases = _normalize_string_list(raw_spec.get("aliases"))
     facets = _normalize_entry_facets(raw_spec.get("facets"), entry_type=entry_type)
+    reference_only_facets = [
+        facet for facet in facets if facet in XIANXIA_REFERENCE_ONLY_ENTRY_FACET_KEYS
+    ]
     summary = str(raw_spec.get("summary") or "").strip()
     sections = _normalize_sections(raw_spec.get("sections"))
     raw_metadata = raw_spec.get("metadata")
     raw_body = raw_spec.get("body")
     metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
+    body = dict(raw_body) if isinstance(raw_body, dict) else {}
+    if reference_only_facets:
+        _reject_modeled_support_state(
+            metadata.get("support_state"),
+            facets=reference_only_facets,
+        )
+        _reject_modeled_support_state(
+            metadata.get("xianxia_support_state"),
+            facets=reference_only_facets,
+        )
+        _reject_modeled_support_state(body.get("support_state"), facets=reference_only_facets)
+        _reject_modeled_support_state(
+            body.get("xianxia_support_state"),
+            facets=reference_only_facets,
+        )
+        metadata["support_state"] = "reference_only"
+        metadata["xianxia_support_state"] = "reference_only"
+        body["support_state"] = "reference_only"
+        body["xianxia_support_state"] = "reference_only"
     metadata.update(
         {
             "aliases": aliases,
@@ -134,7 +160,6 @@ def _build_seed_entry(raw_spec: dict[str, Any], *, index: int, source_path: str)
             "content_migration_stage": "curated_seed_data_to_sqlite",
         }
     )
-    body = dict(raw_body) if isinstance(raw_body, dict) else {}
     body.setdefault("summary", summary)
     body.setdefault("aliases", aliases)
     body.setdefault("facets", facets)
@@ -202,6 +227,7 @@ def _normalize_facet_definitions(raw_facets: object) -> list[dict[str, Any]]:
         group = _normalize_identifier(raw_facet.get("group"))
         default_entry_type = _normalize_identifier(raw_facet.get("default_entry_type"))
         summary = str(raw_facet.get("summary") or "").strip()
+        support_state = _normalize_identifier(raw_facet.get("support_state"))
         if not label:
             raise ValueError(f"Xianxia entry facet {key!r} is missing label.")
         if not group:
@@ -210,15 +236,25 @@ def _normalize_facet_definitions(raw_facets: object) -> list[dict[str, Any]]:
             raise ValueError(f"Xianxia entry facet {key!r} is missing default_entry_type.")
         if not summary:
             raise ValueError(f"Xianxia entry facet {key!r} is missing summary.")
-        definitions.append(
-            {
-                "key": key,
-                "label": label,
-                "group": group,
-                "default_entry_type": default_entry_type,
-                "summary": summary,
-            }
-        )
+        if support_state and support_state not in XIANXIA_FACET_SUPPORT_STATES:
+            raise ValueError(
+                f"Xianxia entry facet {key!r} uses unsupported support_state "
+                f"{support_state!r}."
+            )
+        if key in XIANXIA_REFERENCE_ONLY_ENTRY_FACET_KEYS and support_state != "reference_only":
+            raise ValueError(
+                f"Xianxia entry facet {key!r} must remain reference_only in Milestone 1."
+            )
+        definition = {
+            "key": key,
+            "label": label,
+            "group": group,
+            "default_entry_type": default_entry_type,
+            "summary": summary,
+        }
+        if support_state:
+            definition["support_state"] = support_state
+        definitions.append(definition)
 
     expected = set(XIANXIA_ENTRY_FACET_KEYS)
     actual = {definition["key"] for definition in definitions}
@@ -251,6 +287,17 @@ def _normalize_entry_facets(raw_facets: object, *, entry_type: str) -> list[str]
         if facet not in normalized:
             normalized.append(facet)
     return normalized
+
+
+def _reject_modeled_support_state(value: object, *, facets: list[str]) -> None:
+    normalized = _normalize_identifier(value)
+    if not normalized or normalized == "reference_only":
+        return
+    raise ValueError(
+        "Xianxia Systems seed entries using reference-only facets "
+        + ", ".join(facets)
+        + " cannot declare modeled support in Milestone 1."
+    )
 
 
 _XIANXIA_SYSTEMS_SEED_PAYLOAD = _load_xianxia_systems_seed_payload()
