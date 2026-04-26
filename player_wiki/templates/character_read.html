@@ -265,6 +265,33 @@
         </section>
       {% endif %}
 
+      {% if show_quick_sections and character.xianxia_active_state_reminders %}
+        <section class="read-section" id="xianxia-active-state-reminders">
+          <div class="section-heading">
+            <h2>Active Stance and Aura</h2>
+          </div>
+          <div class="detail-grid">
+            {% for reminder in character.xianxia_active_state_reminders %}
+              <article class="detail-card">
+                <div class="section-heading">
+                  <h3>{{ reminder.title }}</h3>
+                  <span class="meta">{{ reminder.status_label }}</span>
+                </div>
+                {% if reminder.rule_href %}
+                  <p><a href="{{ reminder.rule_href }}">{{ reminder.title }} rule</a></p>
+                {% endif %}
+                {% if reminder.support_label %}
+                  <p class="meta">{{ reminder.support_label }}</p>
+                {% endif %}
+                {% for line in reminder.reference_lines %}
+                  <p>{{ line }}</p>
+                {% endfor %}
+              </article>
+            {% endfor %}
+          </div>
+        </section>
+      {% endif %}
+
       {% if show_quick_sections and character.xianxia_stance_break %}
         <section class="read-section" id="xianxia-stance-break">
           <div class="section-heading">

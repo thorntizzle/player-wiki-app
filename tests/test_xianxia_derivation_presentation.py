@@ -398,3 +398,63 @@ def test_xianxia_quick_reference_displays_stance_break_only_at_zero_stance(
     assert "/campaigns/linden-pass/systems/entries/stance" in broken_html
     assert "When current Stance reaches 0, the character's Stance breaks." in broken_html
     assert "Stance recovers with one day of rest unless another effect prevents recovery." in broken_html
+
+
+def test_xianxia_quick_reference_displays_active_stance_and_aura_reminders_without_state_automation(
+    app,
+    client,
+    sign_in,
+    users,
+    get_character,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Active Crane"),
+        follow_redirects=False,
+    )
+
+    assert create_response.status_code == 302
+
+    record = get_character("active-crane")
+    assert record is not None
+    active_state = deepcopy(record.state_record.state)
+    active_state["xianxia"]["active_stance"] = {"name": "Stone Root"}
+    active_state["xianxia"]["active_aura"] = {
+        "name": "Azure Bell",
+        "systems_ref": {"slug": "azure-bell"},
+    }
+    _replace_character_state(app, record, active_state)
+
+    active_record = get_character("active-crane")
+    assert active_record is not None
+    response = client.get("/campaigns/linden-pass/characters/active-crane?page=quick")
+
+    assert response.status_code == 200
+    html = unescape(response.get_data(as_text=True))
+    assert "Active Stance and Aura" in html
+    assert "Stance Activation Rules" in html
+    assert "Active Stance: Stone Root" in html
+    assert "/campaigns/linden-pass/systems/entries/stance-activation-rules" in html
+    assert "A character can have only one Stance active at a time." in html
+    assert "Entering a Stance costs an Action plus any Stance-specific costs." in html
+    assert "A Stance ends when the character switches Stances." in html
+    assert "Aura Activation Rules" in html
+    assert "Active Aura: Azure Bell" in html
+    assert "/campaigns/linden-pass/systems/entries/aura-activation-rules" in html
+    assert "A character can have only one Aura active at a time." in html
+    assert (
+        "Auras are assumed to remain active once activated unless the Aura says otherwise "
+        "or the GM overrules it."
+    ) in html
+    assert "Reference only" in html
+
+    after_read = get_character("active-crane")
+    assert after_read.state_record.revision == active_record.state_record.revision
+    assert after_read.state_record.state["xianxia"]["active_stance"] == {"name": "Stone Root"}
+    assert after_read.state_record.state["xianxia"]["active_aura"] == {
+        "name": "Azure Bell",
+        "systems_ref": {"slug": "azure-bell"},
+    }

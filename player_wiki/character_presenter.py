@@ -79,6 +79,12 @@ REDUNDANT_PASSIVE_FEATURE_NAMES = {
     "psi warrior",
 }
 XIANXIA_STANCE_RULE_ENTRY_KEY = f"xianxia|rule|{XIANXIA_HOMEBREW_SOURCE_ID.lower()}|stance"
+XIANXIA_STANCE_ACTIVATION_RULE_ENTRY_KEY = (
+    f"xianxia|rule|{XIANXIA_HOMEBREW_SOURCE_ID.lower()}|stance-activation-rules"
+)
+XIANXIA_AURA_ACTIVATION_RULE_ENTRY_KEY = (
+    f"xianxia|rule|{XIANXIA_HOMEBREW_SOURCE_ID.lower()}|aura-activation-rules"
+)
 ATTACK_NAME_SUFFIX_PATTERN = re.compile(r"\s*\([^)]*\)\s*$")
 
 
@@ -208,6 +214,15 @@ def present_character_detail(
         present_xianxia_difficulty_states()
         if is_xianxia_character
         else None
+    )
+    xianxia_active_state_reminders = (
+        present_xianxia_active_state_reminders(
+            campaign,
+            state,
+            systems_service=systems_service,
+        )
+        if is_xianxia_character
+        else []
     )
     xianxia_stance_break = (
         present_xianxia_stance_break_reference(
@@ -821,6 +836,7 @@ def present_character_detail(
         "xianxia_effort_damage": xianxia_effort_damage,
         "xianxia_check_formula": xianxia_check_formula,
         "xianxia_difficulty_states": xianxia_difficulty_states,
+        "xianxia_active_state_reminders": xianxia_active_state_reminders,
         "xianxia_stance_break": xianxia_stance_break,
         "attack_reminders": attack_reminders,
         "defensive_rules": defensive_rules,
@@ -1187,6 +1203,111 @@ def present_xianxia_check_formula() -> dict[str, str]:
 
 def present_xianxia_difficulty_states() -> dict[str, Any]:
     return derive_xianxia_difficulty_state_adjustments()
+
+
+def present_xianxia_active_state_reminders(
+    campaign: Campaign,
+    state: dict[str, Any],
+    *,
+    systems_service: Any | None = None,
+) -> list[dict[str, Any]]:
+    if systems_service is None:
+        return []
+
+    xianxia_state = dict(state.get("xianxia") or {})
+    specs = [
+        {
+            "label": "Stance",
+            "state_key": "active_stance",
+            "entry_key": XIANXIA_STANCE_ACTIVATION_RULE_ENTRY_KEY,
+            "slug": "stance-activation-rules",
+        },
+        {
+            "label": "Aura",
+            "state_key": "active_aura",
+            "entry_key": XIANXIA_AURA_ACTIVATION_RULE_ENTRY_KEY,
+            "slug": "aura-activation-rules",
+        },
+    ]
+    reminders: list[dict[str, Any]] = []
+    for spec in specs:
+        entry = systems_service.get_entry_for_campaign(campaign.slug, spec["entry_key"])
+        if entry is None:
+            entry = systems_service.get_entry_by_slug_for_campaign(campaign.slug, spec["slug"])
+        if entry is None:
+            continue
+
+        label = str(spec["label"])
+        active_record = _coerce_xianxia_active_state_record(
+            xianxia_state.get(str(spec["state_key"]))
+        )
+        active_name = str(active_record.get("name") or "").strip()
+        metadata = dict(getattr(entry, "metadata", {}) or {})
+        body = dict(getattr(entry, "body", {}) or {})
+        support_state = str(
+            metadata.get("support_state") or body.get("support_state") or ""
+        ).strip()
+
+        reminders.append(
+            {
+                "label": label,
+                "title": str(getattr(entry, "title", "") or f"{label} Activation Rules"),
+                "status_label": (
+                    f"Active {label}: {active_name}"
+                    if active_name
+                    else f"No active {label} recorded"
+                ),
+                "support_label": "Reference only"
+                if support_state == "reference_only"
+                else "",
+                "reference_lines": _extract_xianxia_rule_reference_lines(entry),
+                "rule_href": build_systems_entry_href(
+                    campaign.slug,
+                    {
+                        "slug": str(getattr(entry, "slug", "") or spec["slug"]),
+                        "title": str(getattr(entry, "title", "") or ""),
+                        "entry_type": "rule",
+                        "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                    },
+                ),
+            }
+        )
+
+    return reminders
+
+
+def _coerce_xianxia_active_state_record(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    return {}
+
+
+def _extract_xianxia_rule_reference_lines(entry: Any) -> list[str]:
+    body = dict(getattr(entry, "body", {}) or {})
+    raw_lines: list[str] = []
+    summary = str(body.get("summary") or "").strip()
+    if summary:
+        raw_lines.append(summary)
+    for section in list(body.get("sections") or []):
+        section_payload = dict(section or {})
+        raw_lines.extend(
+            str(paragraph or "").strip()
+            for paragraph in list(section_payload.get("paragraphs") or [])
+        )
+        raw_lines.extend(
+            str(bullet or "").strip()
+            for bullet in list(section_payload.get("bullets") or [])
+        )
+
+    lines: list[str] = []
+    seen: set[str] = set()
+    for line in raw_lines:
+        normalized = line.casefold()
+        if not line or normalized in seen:
+            continue
+        seen.add(normalized)
+        lines.append(line)
+    return lines
 
 
 def present_xianxia_stance_break_reference(
