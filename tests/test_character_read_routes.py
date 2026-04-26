@@ -12,10 +12,13 @@ from player_wiki.auth_store import AuthStore
 from player_wiki.character_builder import normalize_definition_to_native_model
 from player_wiki.character_models import CharacterDefinition
 from player_wiki.system_policy import (
+    DND_5E_SYSTEM_CODE,
+    XIANXIA_SYSTEM_CODE,
     XIANXIA_CHARACTER_ADVANCEMENT_UNSUPPORTED_MESSAGE,
     XIANXIA_NATIVE_CHARACTER_CREATE_UNSUPPORTED_MESSAGE,
 )
 from player_wiki.systems_models import SystemsEntryRecord
+from player_wiki.systems_service import XIANXIA_HOMEBREW_SOURCE_ID
 
 
 TEST_PNG_BYTES = (
@@ -594,6 +597,147 @@ def test_xianxia_read_sheet_keeps_shared_controls_without_dnd_authoring(
     assert "Level up" not in html
     assert "Prepare for level-up" not in html
     assert "?page=spellcasting" not in html
+
+
+def test_xianxia_character_sheet_renders_and_links_xianxia_systems_entries(
+    app, client, sign_in, users
+):
+    def _mutate_campaign(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+            }
+        ]
+
+    _write_campaign_config(app, _mutate_campaign)
+
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        service.ensure_builtin_library_seeded(XIANXIA_SYSTEM_CODE)
+        service.ensure_builtin_library_seeded(DND_5E_SYSTEM_CODE)
+        store.upsert_source(
+            DND_5E_SYSTEM_CODE,
+            XIANXIA_HOMEBREW_SOURCE_ID,
+            title="DND Impostor Xianxia Source",
+            license_class="open_license",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        store.replace_entries_for_source(
+            DND_5E_SYSTEM_CODE,
+            XIANXIA_HOMEBREW_SOURCE_ID,
+            entry_types=["martial_art"],
+            entries=[
+                {
+                    "entry_key": "dnd-5e|martial_art|xianxia-homebrew|heavenly-palm",
+                    "entry_type": "martial_art",
+                    "slug": "heavenly-palm",
+                    "title": "DND Heavenly Palm",
+                    "search_text": "heavenly palm dnd impostor",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"facet": "martial_art"},
+                    "body": {},
+                    "rendered_html": "<p>DND impostor palm body must not render.</p>",
+                }
+            ],
+        )
+        store.replace_entries_for_source(
+            XIANXIA_SYSTEM_CODE,
+            XIANXIA_HOMEBREW_SOURCE_ID,
+            entry_types=["martial_art", "rule"],
+            entries=[
+                {
+                    "entry_key": "xianxia|martial_art|xianxia-homebrew|heavenly-palm",
+                    "entry_type": "martial_art",
+                    "slug": "heavenly-palm",
+                    "title": "Heavenly Palm",
+                    "search_text": "heavenly palm xianxia martial art",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"facet": "martial_art"},
+                    "body": {},
+                    "rendered_html": "<p>Xianxia palm body renders on the character sheet.</p>",
+                },
+                {
+                    "entry_key": "xianxia|rule|xianxia-homebrew|dao-breathing",
+                    "entry_type": "rule",
+                    "slug": "dao-breathing",
+                    "title": "Dao Breathing",
+                    "search_text": "dao breathing xianxia rule",
+                    "player_safe_default": True,
+                    "dm_heavy": False,
+                    "metadata": {"rule_key": "dao_breathing"},
+                    "body": {},
+                    "rendered_html": "<p>Dao Breathing rule text renders on the character sheet.</p>",
+                },
+            ],
+        )
+        heavenly_palm = service.get_entry_by_slug_for_campaign("linden-pass", "heavenly-palm")
+        dao_breathing = service.get_entry_by_slug_for_campaign("linden-pass", "dao-breathing")
+        assert heavenly_palm is not None
+        assert heavenly_palm.library_slug == XIANXIA_SYSTEM_CODE
+        assert dao_breathing is not None
+        assert dao_breathing.library_slug == XIANXIA_SYSTEM_CODE
+
+    def _mutate_character(payload: dict) -> None:
+        profile = dict(payload.get("profile") or {})
+        profile["classes"] = [
+            {
+                "row_id": "xianxia-row-1",
+                "class_name": "Mortal Cultivator",
+                "level": 0,
+            }
+        ]
+        profile["class_level_text"] = "Mortal Cultivator"
+        profile["class_ref"] = {}
+        profile["subclass_ref"] = {}
+        profile["species"] = ""
+        profile["species_ref"] = {}
+        profile["background"] = ""
+        profile["background_ref"] = {}
+        payload["profile"] = profile
+        payload["spellcasting"] = {}
+        payload["features"] = [
+            {
+                "id": "xianxia-martial-art-heavenly-palm",
+                "name": "Heavenly Palm",
+                "category": "custom_feature",
+                "systems_ref": _systems_ref(heavenly_palm),
+            },
+            {
+                "id": "xianxia-rule-dao-breathing",
+                "name": "Dao Breathing",
+                "category": "custom_feature",
+                "systems_ref": _systems_ref(dao_breathing),
+            },
+        ]
+
+    _write_character_definition(app, "arden-march", _mutate_character)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    sheet_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=features")
+    entry_response = client.get("/campaigns/linden-pass/systems/entries/heavenly-palm")
+
+    assert sheet_response.status_code == 200
+    assert entry_response.status_code == 200
+    html = sheet_response.get_data(as_text=True)
+    entry_html = entry_response.get_data(as_text=True)
+
+    assert 'href="/campaigns/linden-pass/systems/entries/heavenly-palm"' in html
+    assert 'href="/campaigns/linden-pass/systems/entries/dao-breathing"' in html
+    assert "Xianxia palm body renders on the character sheet." in html
+    assert "Dao Breathing rule text renders on the character sheet." in html
+    assert "DND Heavenly Palm" not in html
+    assert "DND impostor palm body must not render." not in html
+    assert "Heavenly Palm" in entry_html
+    assert "Xianxia palm body renders on the character sheet." in entry_html
+    assert "DND impostor palm body must not render." not in entry_html
 
 
 def test_xianxia_blocks_dnd_spellcasting_management_routes(app, client, sign_in, users):
