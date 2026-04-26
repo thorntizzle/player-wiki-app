@@ -22,6 +22,12 @@ XIANXIA_ATTRIBUTE_CREATION_POINTS = 6
 XIANXIA_ATTRIBUTE_MAX_AT_CREATION = 3
 XIANXIA_EFFORT_CREATION_POINTS = 5
 XIANXIA_EFFORT_MAX_AT_CREATION = 3
+XIANXIA_ENERGY_CREATION_POINTS = 3
+XIANXIA_ENERGY_LABELS = {
+    "jing": "Jing",
+    "qi": "Qi",
+    "shen": "Shen",
+}
 
 
 def build_xianxia_character_create_context(
@@ -48,6 +54,16 @@ def build_xianxia_character_create_context(
         }
         for key in XIANXIA_EFFORT_KEYS
     ]
+    energy_fields = [
+        {
+            "key": key,
+            "label": XIANXIA_ENERGY_LABELS[key],
+            "input_name": _xianxia_energy_input_name(key),
+            "value": values["energies"][key],
+            "max": XIANXIA_ENERGY_CREATION_POINTS,
+        }
+        for key in XIANXIA_ENERGY_KEYS
+    ]
     return {
         "values": values,
         "defaults": {
@@ -67,7 +83,7 @@ def build_xianxia_character_create_context(
         },
         "attribute_fields": attribute_fields,
         "effort_fields": effort_fields,
-        "energy_keys": list(XIANXIA_ENERGY_KEYS),
+        "energy_fields": energy_fields,
     }
 
 
@@ -92,6 +108,7 @@ def build_xianxia_character_definition(
         raise CharacterBuildError("Character slug is required.")
     attribute_scores = _validate_xianxia_create_attributes(form_values or {})
     effort_scores = _validate_xianxia_create_efforts(form_values or {})
+    energy_scores = _validate_xianxia_create_energies(form_values or {})
 
     created_at = isoformat(utcnow())
     definition = CharacterDefinition.from_dict(
@@ -136,6 +153,7 @@ def build_xianxia_character_definition(
             "xianxia": {
                 "attributes": attribute_scores,
                 "efforts": effort_scores,
+                "energies": {key: {"max": energy_scores[key]} for key in XIANXIA_ENERGY_KEYS},
             },
         }
     )
@@ -165,6 +183,10 @@ def _normalize_xianxia_create_values(values: dict[str, Any]) -> dict[str, Any]:
         "efforts": {
             key: _normalize_xianxia_create_effort_value(values, key)
             for key in XIANXIA_EFFORT_KEYS
+        },
+        "energies": {
+            key: _normalize_xianxia_create_energy_value(values, key)
+            for key in XIANXIA_ENERGY_KEYS
         },
     }
 
@@ -293,6 +315,73 @@ def _validate_xianxia_create_efforts(values: dict[str, Any]) -> dict[str, int]:
     return {key: effort_scores[key] for key in XIANXIA_EFFORT_KEYS}
 
 
+def _validate_xianxia_create_energies(values: dict[str, Any]) -> dict[str, int]:
+    errors: list[str] = []
+    missing_labels: list[str] = []
+    energy_scores: dict[str, int] = {}
+    raw_energies = values.get("energies")
+    nested_energies = raw_energies if isinstance(raw_energies, dict) else {}
+    raw_energy_maxima = values.get("energy_maxima")
+    nested_energy_maxima = raw_energy_maxima if isinstance(raw_energy_maxima, dict) else {}
+
+    unknown_keys = sorted({
+        *(
+            raw_key.removeprefix("energy_")
+            for raw_key in values
+            if raw_key.startswith("energy_")
+            and raw_key.removeprefix("energy_") not in XIANXIA_ENERGY_KEYS
+        ),
+        *(key for key in nested_energies if key not in XIANXIA_ENERGY_KEYS),
+        *(key for key in nested_energy_maxima if key not in XIANXIA_ENERGY_KEYS),
+    })
+    if unknown_keys:
+        errors.append(f"Unsupported Xianxia energies: {', '.join(unknown_keys)}.")
+
+    for key in XIANXIA_ENERGY_KEYS:
+        label = XIANXIA_ENERGY_LABELS[key]
+        input_name = _xianxia_energy_input_name(key)
+        if input_name in values:
+            raw_value = _clean_form_value(values.get(input_name))
+        elif key in nested_energy_maxima:
+            raw_value = _clean_form_value(nested_energy_maxima.get(key))
+        elif key in nested_energies:
+            nested_energy = nested_energies.get(key)
+            if isinstance(nested_energy, dict):
+                raw_value = _clean_form_value(nested_energy.get("max"))
+            else:
+                raw_value = _clean_form_value(nested_energy)
+        else:
+            missing_labels.append(label)
+            continue
+        if raw_value == "":
+            missing_labels.append(label)
+            continue
+        try:
+            energy_score = int(raw_value)
+        except ValueError:
+            errors.append(f"{label} must be a whole number.")
+            continue
+        if energy_score < 0:
+            errors.append(f"{label} cannot be negative.")
+            continue
+        energy_scores[key] = energy_score
+
+    if missing_labels:
+        errors.append(f"Missing Xianxia energies: {_format_label_list(missing_labels)}.")
+    if len(energy_scores) == len(XIANXIA_ENERGY_KEYS):
+        energy_total = sum(energy_scores.values())
+        if energy_total != XIANXIA_ENERGY_CREATION_POINTS:
+            errors.append(
+                "Xianxia Energies must spend exactly "
+                f"{XIANXIA_ENERGY_CREATION_POINTS} creation points across Jing, Qi, and Shen; "
+                f"submitted total is {energy_total}."
+            )
+    if errors:
+        raise CharacterBuildError(" ".join(errors))
+
+    return {key: energy_scores[key] for key in XIANXIA_ENERGY_KEYS}
+
+
 def _normalize_xianxia_create_attribute_value(values: dict[str, Any], key: str) -> str:
     raw_attributes = values.get("attributes")
     if isinstance(raw_attributes, dict) and key in raw_attributes:
@@ -311,12 +400,35 @@ def _normalize_xianxia_create_effort_value(values: dict[str, Any], key: str) -> 
     return str(value if value is not None else "").strip()
 
 
+def _normalize_xianxia_create_energy_value(values: dict[str, Any], key: str) -> str:
+    raw_energy_maxima = values.get("energy_maxima")
+    if isinstance(raw_energy_maxima, dict) and key in raw_energy_maxima:
+        value = raw_energy_maxima.get(key)
+        return _clean_form_value(value)
+    raw_energies = values.get("energies")
+    if isinstance(raw_energies, dict) and key in raw_energies:
+        value = raw_energies.get(key)
+        if isinstance(value, dict):
+            value = value.get("max")
+    else:
+        value = values.get(_xianxia_energy_input_name(key), 0)
+    return _clean_form_value(value)
+
+
 def _xianxia_attribute_input_name(key: str) -> str:
     return f"attribute_{key}"
 
 
 def _xianxia_effort_input_name(key: str) -> str:
     return f"effort_{key}"
+
+
+def _xianxia_energy_input_name(key: str) -> str:
+    return f"energy_{key}"
+
+
+def _clean_form_value(value: Any) -> str:
+    return str(value if value is not None else "").strip()
 
 
 def _format_label_list(labels: list[str]) -> str:

@@ -511,6 +511,13 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
             "effort_ultimate": "1",
         }
 
+    def _energy_data() -> dict[str, str]:
+        return {
+            "energy_jing": "1",
+            "energy_qi": "1",
+            "energy_shen": "1",
+        }
+
     def _mutate(payload: dict) -> None:
         payload["system"] = "xianxia"
         payload["systems_library"] = "xianxia"
@@ -543,6 +550,8 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
         assert attribute_label in create_html
     for effort_label in ("Basic", "Weapon", "Guns/Explosive", "Magic", "Ultimate"):
         assert effort_label in create_html
+    for energy_label in ("Jing", "Qi", "Shen"):
+        assert energy_label in create_html
     assert "Native Level 1 Builder" not in create_html
     assert "Spell Preview" not in create_html
     assert XIANXIA_NATIVE_CHARACTER_CREATE_UNSUPPORTED_MESSAGE not in create_html
@@ -691,6 +700,91 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
         as_text=True
     )
 
+    missing_energies = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            "name": "Energy Gap",
+            "character_slug": "",
+            **_attribute_data(),
+            **_effort_data(),
+        },
+        follow_redirects=False,
+    )
+    assert missing_energies.status_code == 400
+    assert "Missing Xianxia energies: Jing, Qi, and Shen." in missing_energies.get_data(
+        as_text=True
+    )
+
+    invalid_energies = _energy_data()
+    invalid_energies["energy_qi"] = "flowing"
+    invalid_energy_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            "name": "Energy Typo",
+            "character_slug": "",
+            **_attribute_data(),
+            **_effort_data(),
+            **invalid_energies,
+        },
+        follow_redirects=False,
+    )
+    assert invalid_energy_response.status_code == 400
+    assert "Qi must be a whole number." in invalid_energy_response.get_data(as_text=True)
+
+    negative_energies = _energy_data()
+    negative_energies["energy_shen"] = "-1"
+    negative_energy_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            "name": "Energy Negative",
+            "character_slug": "",
+            **_attribute_data(),
+            **_effort_data(),
+            **negative_energies,
+        },
+        follow_redirects=False,
+    )
+    assert negative_energy_response.status_code == 400
+    assert "Shen cannot be negative." in negative_energy_response.get_data(as_text=True)
+
+    over_budget_energies = _energy_data()
+    over_budget_energies["energy_jing"] = "2"
+    over_budget_energy_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            "name": "Energy Overbudget",
+            "character_slug": "",
+            **_attribute_data(),
+            **_effort_data(),
+            **over_budget_energies,
+        },
+        follow_redirects=False,
+    )
+    assert over_budget_energy_response.status_code == 400
+    assert (
+        "Xianxia Energies must spend exactly 3 creation points across Jing, Qi, and Shen; "
+        "submitted total is 4."
+    ) in over_budget_energy_response.get_data(as_text=True)
+
+    under_budget_energies = _energy_data()
+    under_budget_energies["energy_shen"] = "0"
+    under_budget_energy_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            "name": "Energy Underbudget",
+            "character_slug": "",
+            **_attribute_data(),
+            **_effort_data(),
+            **under_budget_energies,
+        },
+        follow_redirects=False,
+    )
+    assert under_budget_energy_response.status_code == 400
+    assert (
+        "Xianxia Energies must spend exactly 3 creation points across Jing, Qi, and Shen; "
+        "submitted total is 2."
+    ) in under_budget_energy_response.get_data(as_text=True)
+
     submit_response = client.post(
         "/campaigns/linden-pass/characters/new",
         data={
@@ -698,6 +792,7 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
             "character_slug": "",
             **_attribute_data(),
             **_effort_data(),
+            **_energy_data(),
         },
         follow_redirects=False,
     )
@@ -725,6 +820,11 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
         "guns_explosive": 1,
         "magic": 1,
         "ultimate": 1,
+    }
+    assert definition_payload["xianxia"]["energies"] == {
+        "jing": {"max": 1},
+        "qi": {"max": 1},
+        "shen": {"max": 1},
     }
     assert definition_payload["xianxia"]["durability"] == {
         "hp_max": 10,
@@ -763,9 +863,9 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
         "temp_stance": 0,
     }
     assert state["xianxia"]["energies"] == {
-        "jing": {"current": 0},
-        "qi": {"current": 0},
-        "shen": {"current": 0},
+        "jing": {"current": 1},
+        "qi": {"current": 1},
+        "shen": {"current": 1},
     }
     assert state["xianxia"]["yin_yang"] == {"yin_current": 1, "yang_current": 1}
     assert state["xianxia"]["dao"] == {"current": 0}

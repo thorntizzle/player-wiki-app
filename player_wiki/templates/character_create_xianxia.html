@@ -92,6 +92,26 @@
             </div>
           </section>
 
+          <section class="builder-section">
+            <h3>Energies</h3>
+            <div class="builder-field-grid">
+              {% for energy in builder.energy_fields %}
+                <label class="field">
+                  <span>{{ energy.label }}</span>
+                  <input
+                    type="number"
+                    name="{{ energy.input_name }}"
+                    value="{{ energy.value }}"
+                    min="0"
+                    max="{{ energy.max }}"
+                    step="1"
+                    required
+                  >
+                </label>
+              {% endfor %}
+            </div>
+          </section>
+
           <div class="builder-actions">
             <button type="submit">Create character</button>
           </div>
