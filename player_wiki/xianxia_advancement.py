@@ -7,6 +7,7 @@ from .xianxia_character_model import XIANXIA_ENERGY_KEYS
 
 
 XIANXIA_CULTIVATION_ENERGY_INSIGHT_COST = 1
+XIANXIA_MEDITATION_INSIGHT_COST = 1
 XIANXIA_MARTIAL_ART_RANK_KEYS = (
     "initiate",
     "novice",
@@ -25,6 +26,11 @@ XIANXIA_ENERGY_LABELS = {
     "jing": "Jing",
     "qi": "Qi",
     "shen": "Shen",
+}
+XIANXIA_YIN_YANG_KEYS = ("yin", "yang")
+XIANXIA_YIN_YANG_LABELS = {
+    "yin": "Yin",
+    "yang": "Yang",
 }
 
 
@@ -46,6 +52,16 @@ class XianxiaCultivationEnergySpendResult:
     definition: Any
     energy_key: str
     energy_name: str
+    insight_cost: int
+    new_maximum: int
+    notes: str = ""
+
+
+@dataclass(frozen=True)
+class XianxiaMeditationSpendResult:
+    definition: Any
+    yin_yang_key: str
+    yin_yang_name: str
     insight_cost: int
     new_maximum: int
     notes: str = ""
@@ -111,6 +127,74 @@ def spend_xianxia_cultivation_energy_definition(
         definition=definition.__class__.from_dict(payload),
         energy_key=normalized_energy_key,
         energy_name=energy_name,
+        insight_cost=insight_cost,
+        new_maximum=new_maximum,
+        notes=clean_notes,
+    )
+
+
+def spend_xianxia_meditation_definition(
+    definition: Any,
+    *,
+    yin_yang_key: str,
+    notes: str = "",
+) -> XianxiaMeditationSpendResult:
+    normalized_yin_yang_key = normalize_xianxia_yin_yang_key(yin_yang_key)
+    if normalized_yin_yang_key not in XIANXIA_YIN_YANG_KEYS:
+        raise ValueError("Choose Yin or Yang for Meditation.")
+
+    payload = definition.to_dict()
+    xianxia = dict(payload.get("xianxia") or {})
+    insight = dict(xianxia.get("insight") or {})
+    available = _non_negative_int(insight.get("available"), default=0)
+    spent = _non_negative_int(insight.get("spent"), default=0)
+    insight_cost = XIANXIA_MEDITATION_INSIGHT_COST
+    yin_yang_name = yin_yang_label(normalized_yin_yang_key)
+    if available < insight_cost:
+        raise ValueError(
+            f"Meditation needs {insight_cost} Insight to increase {yin_yang_name}; "
+            f"only {available} available."
+        )
+
+    yin_yang = _apply_yin_yang_maximum_increase(
+        xianxia.get("yin_yang"),
+        normalized_yin_yang_key,
+        1,
+    )
+    new_maximum = _non_negative_int(
+        yin_yang.get(f"{normalized_yin_yang_key}_max"),
+        default=0,
+    )
+    xianxia["yin_yang"] = yin_yang
+    xianxia["insight"] = {
+        "available": available - insight_cost,
+        "spent": spent + insight_cost,
+    }
+
+    history = [
+        dict(record)
+        for record in list(xianxia.get("advancement_history") or [])
+        if isinstance(record, dict) and record
+    ]
+    clean_notes = _clean_note(notes)
+    event = {
+        "action": "meditation_yin_yang_increase",
+        "amount": insight_cost,
+        "target": yin_yang_name,
+        "yin_yang_key": normalized_yin_yang_key,
+        "yin_yang_maximum_increase": 1,
+        "new_yin_yang_maximum": new_maximum,
+    }
+    if clean_notes:
+        event["notes"] = clean_notes
+    history.append(event)
+    xianxia["advancement_history"] = history
+    payload["xianxia"] = xianxia
+
+    return XianxiaMeditationSpendResult(
+        definition=definition.__class__.from_dict(payload),
+        yin_yang_key=normalized_yin_yang_key,
+        yin_yang_name=yin_yang_name,
         insight_cost=insight_cost,
         new_maximum=new_maximum,
         notes=clean_notes,
@@ -326,11 +410,28 @@ def normalize_xianxia_energy_key(value: Any) -> str:
     )
 
 
+def normalize_xianxia_yin_yang_key(value: Any) -> str:
+    return (
+        str(value if value is not None else "")
+        .strip()
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+    )
+
+
 def energy_label(energy_key: str) -> str:
     normalized = normalize_xianxia_energy_key(energy_key)
     if normalized in XIANXIA_ENERGY_LABELS:
         return XIANXIA_ENERGY_LABELS[normalized]
     return normalized.replace("_", " ").title() if normalized else "Energy"
+
+
+def yin_yang_label(yin_yang_key: str) -> str:
+    normalized = normalize_xianxia_yin_yang_key(yin_yang_key)
+    if normalized in XIANXIA_YIN_YANG_LABELS:
+        return XIANXIA_YIN_YANG_LABELS[normalized]
+    return normalized.replace("_", " ").title() if normalized else "Yin/Yang"
 
 
 def rank_label(rank_key: str) -> str:
@@ -601,6 +702,21 @@ def _apply_energy_maximum_increases(
         updated[key] = {
             "max": current_max + _non_negative_int(increases.get(key), default=0)
         }
+    return updated
+
+
+def _apply_yin_yang_maximum_increase(
+    raw_yin_yang: Any,
+    yin_yang_key: str,
+    increase: int,
+) -> dict[str, int]:
+    yin_yang = dict(raw_yin_yang or {}) if isinstance(raw_yin_yang, dict) else {}
+    updated = {
+        "yin_max": _non_negative_int(yin_yang.get("yin_max"), default=1),
+        "yang_max": _non_negative_int(yin_yang.get("yang_max"), default=1),
+    }
+    max_key = f"{yin_yang_key}_max"
+    updated[max_key] = updated[max_key] + _non_negative_int(increase, default=0)
     return updated
 
 

@@ -1735,6 +1735,137 @@ def test_xianxia_cultivation_route_spends_insight_to_increase_energy(
     assert "Current 1 / Max 2" in resources_html
 
 
+def test_xianxia_cultivation_route_spends_insight_on_meditation_to_increase_yin_yang(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+                "default_visibility": "dm",
+            }
+        ]
+
+    _write_campaign_config(app, _mutate)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Meditation Adept"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+
+    cultivation_html = client.get(
+        "/campaigns/linden-pass/characters/meditation-adept/cultivation"
+    ).get_data(as_text=True)
+    assert 'name="cultivation_action" value="spend_meditation_yin_yang"' in cultivation_html
+    assert 'name="yin_yang_key" value="yin"' in cultivation_html
+    assert 'name="yin_yang_key" value="yang"' in cultivation_html
+    assert "Spend 1 Insight to increase Yin by 1." in cultivation_html
+    assert "Spend 1 Insight to increase Yang by 1." in cultivation_html
+    assert "Needs 1 more available Insight." in cultivation_html
+
+    starting_revision = _character_state_revision(app, "meditation-adept")
+    insufficient_response = client.post(
+        "/campaigns/linden-pass/characters/meditation-adept/cultivation",
+        data={
+            "expected_revision": str(starting_revision),
+            "cultivation_action": "spend_meditation_yin_yang",
+            "yin_yang_key": "yin",
+        },
+        follow_redirects=True,
+    )
+    assert insufficient_response.status_code == 200
+    assert (
+        "Meditation needs 1 Insight to increase Yin; only 0 available."
+        in insufficient_response.get_data(as_text=True)
+    )
+    definition_payload = _read_character_definition(app, "meditation-adept")
+    assert definition_payload["xianxia"]["insight"] == {"available": 0, "spent": 0}
+    assert definition_payload["xianxia"]["yin_yang"] == {
+        "yin_max": 1,
+        "yang_max": 1,
+    }
+    assert definition_payload["xianxia"]["advancement_history"] == []
+    assert _character_state_revision(app, "meditation-adept") == starting_revision
+
+    insight_response = client.post(
+        "/campaigns/linden-pass/characters/meditation-adept/cultivation",
+        data={
+            "expected_revision": str(starting_revision),
+            "cultivation_action": "save_insight",
+            "insight_available": "2",
+            "insight_spent": "0",
+        },
+        follow_redirects=False,
+    )
+    assert insight_response.status_code == 302
+
+    current_revision = _character_state_revision(app, "meditation-adept")
+    spend_response = client.post(
+        "/campaigns/linden-pass/characters/meditation-adept/cultivation",
+        data={
+            "expected_revision": str(current_revision),
+            "cultivation_action": "spend_meditation_yin_yang",
+            "yin_yang_key": "yang",
+            "meditation_notes": "Balanced breath at dawn.",
+        },
+        follow_redirects=False,
+    )
+    assert spend_response.status_code == 302
+    assert spend_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/meditation-adept/cultivation#xianxia-cultivation-meditation"
+    )
+
+    definition_payload = _read_character_definition(app, "meditation-adept")
+    xianxia = definition_payload["xianxia"]
+    assert xianxia["insight"] == {"available": 1, "spent": 1}
+    assert xianxia["yin_yang"] == {
+        "yin_max": 1,
+        "yang_max": 2,
+    }
+    assert xianxia["advancement_history"] == [
+        {
+            "action": "meditation_yin_yang_increase",
+            "amount": 1,
+            "target": "Yang",
+            "yin_yang_key": "yang",
+            "yin_yang_maximum_increase": 1,
+            "new_yin_yang_maximum": 2,
+            "notes": "Balanced breath at dawn.",
+        }
+    ]
+    with app.app_context():
+        repository = app.extensions["character_repository"]
+        record = repository.get_character("linden-pass", "meditation-adept")
+        assert record is not None
+        assert record.state_record.state["xianxia"]["yin_yang"] == {
+            "yin_current": 1,
+            "yang_current": 1,
+        }
+    assert _character_state_revision(app, "meditation-adept") == current_revision + 1
+
+    updated_html = client.get(
+        "/campaigns/linden-pass/characters/meditation-adept/cultivation"
+    ).get_data(as_text=True)
+    assert "Meditation Yin Yang Increase" in updated_html
+    assert "Target:" in updated_html
+    assert "Yang" in updated_html
+    assert "Yin/Yang maximum increase:" in updated_html
+    assert "New Yin/Yang maximum:" in updated_html
+    assert "Balanced breath at dawn." in updated_html
+
+    resources_html = client.get(
+        "/campaigns/linden-pass/characters/meditation-adept?page=resources"
+    ).get_data(as_text=True)
+    assert "<h3>Yang</h3>" in resources_html
+    assert "Current 1 / Max 2" in resources_html
+
+
 def test_xianxia_cultivation_route_spends_insight_to_advance_martial_art_rank(
     app, client, sign_in, users
 ):
