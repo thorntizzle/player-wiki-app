@@ -13,12 +13,12 @@ from .auth_store import AuthStore, isoformat, utcnow
 from .campaign_page_store import CampaignPageRecord, CampaignPageStore
 from .character_models import CharacterDefinition, CharacterImportMetadata
 from .character_repository import load_campaign_character_config
-from .character_service import build_initial_state
+from .character_service import build_initial_state, merge_state_with_definition
 from .character_store import CharacterStateStore
 from .db import get_db
 from .models import Campaign, Page, page_sort_key
 from .repository import slugify
-from .system_policy import default_systems_library_slug, normalize_system_code
+from .system_policy import default_systems_library_slug, is_xianxia_system, normalize_system_code
 
 
 class CampaignContentError(ValueError):
@@ -504,11 +504,23 @@ def write_campaign_character_file(
     definition_path.write_text(_dump_yaml(definition.to_dict()) + "\n", encoding="utf-8")
     import_path.write_text(_dump_yaml(import_metadata.to_dict()) + "\n", encoding="utf-8")
 
-    state_result = state_store.initialize_state_if_missing(definition, build_initial_state(definition))
+    state_created = False
+    existing_state = state_store.get_state(definition.campaign_slug, definition.character_slug)
+    if existing_state is None:
+        state_result = state_store.initialize_state_if_missing(definition, build_initial_state(definition))
+        state_created = state_result.created
+    elif is_xianxia_system(definition.system):
+        merged_state = merge_state_with_definition(definition, existing_state.state)
+        if merged_state != existing_state.state:
+            state_store.replace_state(
+                definition,
+                merged_state,
+                expected_revision=existing_state.revision,
+            )
     record = _load_character_file_record(campaigns_dir, campaign_slug, character_slug)
     if record is None:
         raise RuntimeError("Character files were not readable after writing.")
-    record.state_created = state_result.created
+    record.state_created = state_created
     return record
 
 

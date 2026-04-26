@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import base64
+from copy import deepcopy
 import json
 from datetime import timedelta
 from pathlib import Path
@@ -864,6 +865,116 @@ def test_api_content_character_management_can_upsert_and_delete_files(client, ap
         assert state_store.get_state("linden-pass", "api-scout") is None
 
     assert not (campaigns_dir / "linden-pass" / "characters" / "api-scout" / "definition.yaml").exists()
+
+
+def test_api_content_xianxia_definition_update_preserves_sqlite_mutable_state_split(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-xianxia-character-split-api")
+    campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])
+    config_path = campaigns_dir / "linden-pass" / "campaign.yaml"
+    config_payload = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    config_payload["system"] = "Xianxia"
+    config_payload["systems_library"] = "Xianxia"
+    config_path.write_text(yaml.safe_dump(config_payload, sort_keys=False), encoding="utf-8")
+
+    definition_payload = {
+        "name": "API Cultivator",
+        "status": "active",
+        "system": "xianxia",
+        "xianxia": {
+            "realm": "Mortal",
+            "energy_maxima": {"jing": 3, "qi": 2, "shen": 1},
+            "yin_yang": {"yin_max": 2, "yang_max": 1},
+            "dao_max": 3,
+            "durability": {
+                "hp_max": 18,
+                "stance_max": 12,
+                "manual_armor_bonus": 1,
+                "defense": 11,
+            },
+            "trained_skills": ["Tea Ceremony"],
+            "necessary_weapons": ["Jian"],
+            "martial_arts": [{"name": "Heavenly Palm", "current_rank": "Initiate"}],
+        },
+    }
+
+    create_response = client.put(
+        "/api/v1/campaigns/linden-pass/content/characters/api-cultivator",
+        headers=api_headers(dm_token),
+        json={"definition": definition_payload},
+    )
+
+    assert create_response.status_code == 200
+    assert create_response.get_json()["character_file"]["state_created"] is True
+
+    with app.app_context():
+        repository = app.extensions["character_repository"]
+        state_store = app.extensions["character_state_store"]
+        record = repository.get_character("linden-pass", "api-cultivator")
+        assert record is not None
+        mutable_state = deepcopy(record.state_record.state)
+        mutable_state["vitals"]["current_hp"] = 7
+        mutable_state["xianxia"]["vitals"]["current_hp"] = 7
+        mutable_state["xianxia"]["vitals"]["current_stance"] = 5
+        mutable_state["xianxia"]["energies"]["jing"]["current"] = 2
+        mutable_state["xianxia"]["yin_yang"]["yin_current"] = 1
+        mutable_state["xianxia"]["dao"]["current"] = 2
+        mutable_state["xianxia"]["active_stance"] = {"name": "Stone Root"}
+        mutable_state["notes"]["player_notes_markdown"] = "Keep the manual pool edits in SQLite."
+        updated_state = state_store.replace_state(
+            record.definition,
+            mutable_state,
+            expected_revision=record.state_record.revision,
+        )
+        edited_revision = updated_state.revision
+
+    updated_definition_payload = deepcopy(definition_payload)
+    updated_definition_payload["xianxia"]["energy_maxima"] = {"jing": 1, "qi": 2, "shen": 1}
+    updated_definition_payload["xianxia"]["yin_yang"] = {"yin_max": 1, "yang_max": 1}
+    updated_definition_payload["xianxia"]["durability"] = {
+        "hp_max": 6,
+        "stance_max": 4,
+        "manual_armor_bonus": 1,
+        "defense": 11,
+    }
+
+    update_response = client.put(
+        "/api/v1/campaigns/linden-pass/content/characters/api-cultivator",
+        headers=api_headers(dm_token),
+        json={"definition": updated_definition_payload},
+    )
+
+    assert update_response.status_code == 200
+    assert update_response.get_json()["character_file"]["state_created"] is False
+
+    definition_path = campaigns_dir / "linden-pass" / "characters" / "api-cultivator" / "definition.yaml"
+    saved_definition = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
+    saved_xianxia = saved_definition["xianxia"]
+    assert saved_xianxia["durability"]["hp_max"] == 6
+    assert saved_xianxia["durability"]["stance_max"] == 4
+    assert saved_xianxia["energies"]["jing"] == {"max": 1}
+    assert "vitals" not in saved_xianxia
+    assert "active_stance" not in saved_xianxia
+    assert "notes" not in saved_xianxia
+    assert "hp_current" not in saved_definition
+
+    with app.app_context():
+        refreshed_record = app.extensions["character_repository"].get_character("linden-pass", "api-cultivator")
+        assert refreshed_record is not None
+        refreshed_state = refreshed_record.state_record.state
+
+    assert refreshed_record.state_record.revision == edited_revision + 1
+    assert refreshed_state["vitals"] == {"current_hp": 6, "temp_hp": 0}
+    assert refreshed_state["xianxia"]["vitals"] == {
+        "current_hp": 6,
+        "temp_hp": 0,
+        "current_stance": 4,
+        "temp_stance": 0,
+    }
+    assert refreshed_state["xianxia"]["energies"]["jing"] == {"current": 1}
+    assert refreshed_state["xianxia"]["yin_yang"] == {"yin_current": 1, "yang_current": 1}
+    assert refreshed_state["xianxia"]["dao"] == {"current": 2}
+    assert refreshed_state["xianxia"]["active_stance"] == {"name": "Stone Root"}
+    assert refreshed_state["notes"]["player_notes_markdown"] == "Keep the manual pool edits in SQLite."
 
 
 def test_api_content_config_and_assets_refresh_repository_and_manage_files(client, app, users):
