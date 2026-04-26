@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import pytest
+
 from player_wiki.character_builder import normalize_definition_to_native_model
 from player_wiki.character_models import CharacterDefinition
-from player_wiki.character_service import build_initial_state, validate_state
+from player_wiki.character_service import (
+    CharacterStateValidationError,
+    build_initial_state,
+    merge_state_with_definition,
+    validate_state,
+)
 from player_wiki.system_policy import DND_5E_SYSTEM_CODE, XIANXIA_SYSTEM_CODE
 from player_wiki.xianxia_character_model import (
     XIANXIA_CHARACTER_DEFINITION_SCHEMA_VERSION,
@@ -398,6 +405,104 @@ def test_xianxia_state_normalizes_requirement_sketch_aliases_without_dying_round
     assert "dying" not in xianxia_state
 
 
+def test_xianxia_state_normalization_clamps_mutable_pools_to_current_maxima():
+    definition = CharacterDefinition.from_dict(
+        _minimal_definition_payload(
+            system="xianxia",
+            xianxia={
+                "energy_maxima": {"jing": 2, "qi": 1, "shen": 0},
+                "yin_yang": {"yin_max": 1, "yang_max": 3},
+                "dao_max": 3,
+                "durability": {"hp_max": 10, "stance_max": 8},
+            },
+        )
+    )
+
+    state = validate_state(
+        definition,
+        {
+            "status": "active",
+            "vitals": {"current_hp": "99", "temp_hp": "-4"},
+            "inventory": [],
+            "currency": {},
+            "attunement": {},
+            "notes": {},
+            "xianxia": {
+                "vitals": {"current_stance": "22", "temp_stance": "-3"},
+                "energies": {
+                    "jing": {"current": "9"},
+                    "qi": {"current": "-1"},
+                    "shen": {"current": "6"},
+                },
+                "yin_yang": {"yin_current": "7", "yang_current": "-2"},
+                "dao": {"current": "8"},
+            },
+        },
+    )
+
+    assert state["vitals"] == {"current_hp": 10, "temp_hp": 0}
+    assert state["xianxia"]["vitals"] == {
+        "current_hp": 10,
+        "temp_hp": 0,
+        "current_stance": 8,
+        "temp_stance": 0,
+    }
+    assert state["xianxia"]["energies"] == {
+        "jing": {"current": 2},
+        "qi": {"current": 0},
+        "shen": {"current": 0},
+    }
+    assert state["xianxia"]["yin_yang"] == {"yin_current": 1, "yang_current": 0}
+    assert state["xianxia"]["dao"] == {"current": 3}
+
+
+def test_merge_xianxia_state_with_definition_clamps_existing_pools_when_maxima_shrink():
+    original_definition = CharacterDefinition.from_dict(
+        _minimal_definition_payload(
+            system="xianxia",
+            xianxia={
+                "energy_maxima": {"jing": 5, "qi": 4, "shen": 3},
+                "yin_yang": {"yin_max": 4, "yang_max": 4},
+                "dao_max": 3,
+                "durability": {"hp_max": 20, "stance_max": 18},
+            },
+        )
+    )
+    smaller_definition = CharacterDefinition.from_dict(
+        _minimal_definition_payload(
+            system="xianxia",
+            xianxia={
+                "energy_maxima": {"jing": 2, "qi": 1, "shen": 1},
+                "yin_yang": {"yin_max": 1, "yang_max": 2},
+                "dao_max": 3,
+                "durability": {"hp_max": 12, "stance_max": 9},
+            },
+        )
+    )
+    state = build_initial_state(original_definition)
+    state["vitals"]["current_hp"] = 19
+    state["xianxia"]["vitals"]["current_hp"] = 19
+    state["xianxia"]["vitals"]["current_stance"] = 17
+    state["xianxia"]["energies"]["jing"]["current"] = 5
+    state["xianxia"]["energies"]["qi"]["current"] = 4
+    state["xianxia"]["energies"]["shen"]["current"] = 3
+    state["xianxia"]["yin_yang"] = {"yin_current": 4, "yang_current": 4}
+    state["xianxia"]["dao"] = {"current": 3}
+
+    merged_state = merge_state_with_definition(smaller_definition, state)
+
+    assert merged_state["vitals"]["current_hp"] == 12
+    assert merged_state["xianxia"]["vitals"]["current_hp"] == 12
+    assert merged_state["xianxia"]["vitals"]["current_stance"] == 9
+    assert merged_state["xianxia"]["energies"] == {
+        "jing": {"current": 2},
+        "qi": {"current": 1},
+        "shen": {"current": 1},
+    }
+    assert merged_state["xianxia"]["yin_yang"] == {"yin_current": 1, "yang_current": 2}
+    assert merged_state["xianxia"]["dao"] == {"current": 3}
+
+
 def test_dnd5e_initial_state_does_not_emit_xianxia_mutable_state():
     definition = CharacterDefinition.from_dict(
         _minimal_definition_payload(
@@ -415,3 +520,30 @@ def test_dnd5e_initial_state_does_not_emit_xianxia_mutable_state():
         "death_saves": {"successes": 0, "failures": 0},
     }
     assert "xianxia" not in state
+
+
+def test_dnd5e_state_validation_still_rejects_hp_above_maximum():
+    definition = CharacterDefinition.from_dict(
+        _minimal_definition_payload(
+            system="dnd5e",
+            stats={"max_hp": 12},
+        )
+    )
+
+    with pytest.raises(
+        CharacterStateValidationError,
+        match="current_hp must be between 0 and 12",
+    ):
+        validate_state(
+            definition,
+            {
+                "status": "active",
+                "vitals": {"current_hp": 13, "temp_hp": 0},
+                "resources": [],
+                "spell_slots": [],
+                "inventory": [],
+                "currency": {},
+                "attunement": {},
+                "notes": {},
+            },
+        )

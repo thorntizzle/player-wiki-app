@@ -416,11 +416,11 @@ def validate_state(definition: CharacterDefinition, state: dict[str, Any]) -> di
     max_hp = xianxia_hp_max(definition) if is_xianxia else int(definition.stats.get("max_hp") or 0)
     current_hp = int(vitals.get("current_hp") or 0)
     temp_hp = int(vitals.get("temp_hp") or 0)
-    if current_hp < 0 or (not is_xianxia and current_hp > max_hp):
+    if not is_xianxia and (current_hp < 0 or current_hp > max_hp):
         raise CharacterStateValidationError(
             f"current_hp must be between 0 and {max_hp}, got {current_hp}"
         )
-    if temp_hp < 0:
+    if not is_xianxia and temp_hp < 0:
         raise CharacterStateValidationError("temp_hp cannot be negative")
     normalized_vitals = {
         "current_hp": current_hp,

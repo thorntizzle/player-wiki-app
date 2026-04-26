@@ -304,7 +304,7 @@ def normalize_xianxia_state_payload(definition: Any, state_payload: dict[str, An
     raw_yin_yang = _first_mapping(raw_state, key="yin_yang")
     raw_dao = _first_mapping(raw_state, key="dao")
 
-    return {
+    normalized_state = {
         "schema_version": XIANXIA_CHARACTER_STATE_SCHEMA_VERSION,
         "vitals": {
             "current_hp": _normalize_int(
@@ -369,22 +369,94 @@ def normalize_xianxia_state_payload(definition: Any, state_payload: dict[str, An
         ),
         "notes": _normalize_xianxia_notes_state(_first_present(raw_state, key="notes")),
     }
+    return clamp_xianxia_mutable_pools(definition, normalized_state)
 
 
 def xianxia_hp_max(definition: Any) -> int:
-    return _normalize_int(_definition_durability(definition).get("hp_max"), default=10)
+    return _normalize_non_negative_int(_definition_durability(definition).get("hp_max"), default=10)
 
 
 def xianxia_stance_max(definition: Any) -> int:
-    return _normalize_int(_definition_durability(definition).get("stance_max"), default=10)
+    return _normalize_non_negative_int(_definition_durability(definition).get("stance_max"), default=10)
 
 
 def xianxia_yin_max(definition: Any) -> int:
-    return _normalize_int(_definition_yin_yang(definition).get("yin_max"), default=1)
+    return _normalize_non_negative_int(_definition_yin_yang(definition).get("yin_max"), default=1)
 
 
 def xianxia_yang_max(definition: Any) -> int:
-    return _normalize_int(_definition_yin_yang(definition).get("yang_max"), default=1)
+    return _normalize_non_negative_int(_definition_yin_yang(definition).get("yang_max"), default=1)
+
+
+def xianxia_energy_max(definition: Any, energy_key: str) -> int:
+    key = str(energy_key or "").strip().casefold()
+    if key not in XIANXIA_ENERGY_KEYS:
+        return 0
+    energy = dict(_definition_energies(definition).get(key) or {})
+    return _normalize_non_negative_int(energy.get("max"), default=0)
+
+
+def xianxia_dao_max(definition: Any) -> int:
+    dao = dict(_definition_xianxia(definition).get("dao") or {})
+    return _normalize_non_negative_int(dao.get("max"), default=3)
+
+
+def clamp_xianxia_mutable_pools(definition: Any, state_payload: dict[str, Any]) -> dict[str, Any]:
+    """Clamp current Xianxia mutable pools to the definition's current maxima."""
+
+    payload = deepcopy(state_payload or {})
+    vitals = dict(payload.get("vitals") or {})
+    vitals["current_hp"] = _clamp_int(
+        vitals.get("current_hp"),
+        default=xianxia_hp_max(definition),
+        maximum=xianxia_hp_max(definition),
+    )
+    vitals["temp_hp"] = _clamp_int(vitals.get("temp_hp"), default=0)
+    vitals["current_stance"] = _clamp_int(
+        vitals.get("current_stance"),
+        default=xianxia_stance_max(definition),
+        maximum=xianxia_stance_max(definition),
+    )
+    vitals["temp_stance"] = _clamp_int(vitals.get("temp_stance"), default=0)
+    payload["vitals"] = vitals
+
+    raw_energies = dict(payload.get("energies") or {})
+    energies: dict[str, dict[str, int]] = {}
+    for key in XIANXIA_ENERGY_KEYS:
+        energy = dict(raw_energies.get(key) or {})
+        max_value = xianxia_energy_max(definition, key)
+        energies[key] = {
+            "current": _clamp_int(
+                energy.get("current"),
+                default=max_value,
+                maximum=max_value,
+            )
+        }
+    payload["energies"] = energies
+
+    yin_yang = dict(payload.get("yin_yang") or {})
+    payload["yin_yang"] = {
+        "yin_current": _clamp_int(
+            yin_yang.get("yin_current"),
+            default=xianxia_yin_max(definition),
+            maximum=xianxia_yin_max(definition),
+        ),
+        "yang_current": _clamp_int(
+            yin_yang.get("yang_current"),
+            default=xianxia_yang_max(definition),
+            maximum=xianxia_yang_max(definition),
+        ),
+    }
+
+    dao = dict(payload.get("dao") or {})
+    payload["dao"] = {
+        "current": _clamp_int(
+            dao.get("current"),
+            default=0,
+            maximum=xianxia_dao_max(definition),
+        )
+    }
+    return payload
 
 
 def _normalized_definition_validation_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -596,6 +668,22 @@ def _normalize_int(value: Any, *, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return int(default)
+
+
+def _normalize_non_negative_int(value: Any, *, default: int = 0) -> int:
+    return max(0, _normalize_int(value, default=default))
+
+
+def _clamp_int(
+    value: Any,
+    *,
+    default: int = 0,
+    maximum: int | None = None,
+) -> int:
+    normalized = _normalize_non_negative_int(value, default=default)
+    if maximum is None:
+        return normalized
+    return min(normalized, max(0, int(maximum)))
 
 
 def _normalize_int_key_map(raw_values: dict[str, Any], keys: tuple[str, ...]) -> dict[str, int]:
