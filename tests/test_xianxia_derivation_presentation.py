@@ -860,10 +860,10 @@ def test_xianxia_session_resources_allow_stance_and_temp_stance_updates(
 
     assert resources_response.status_code == 200
     resources_html = unescape(resources_response.get_data(as_text=True))
-    assert "HP, Stance, Energy, and Yin/Yang" in resources_html
+    assert "HP, Stance, Energy, Yin/Yang, and Dao" in resources_html
     assert 'name="current_stance" value="10" min="0" max="10"' in resources_html
     assert 'name="temp_stance" value="0" min="0"' in resources_html
-    assert "Save HP, Stance, Energy, and Yin/Yang" in resources_html
+    assert "Save HP, Stance, Energy, Yin/Yang, and Dao" in resources_html
 
     record = get_character("session-stance-crane")
     assert record is not None
@@ -955,7 +955,7 @@ def test_xianxia_session_resources_allow_jing_qi_and_shen_updates(
     assert 'name="current_jing" value="2" min="0" max="2"' in resources_html
     assert 'name="current_qi" value="1" min="0" max="1"' in resources_html
     assert 'name="current_shen" value="0" min="0" max="0"' in resources_html
-    assert "Save HP, Stance, Energy, and Yin/Yang" in resources_html
+    assert "Save HP, Stance, Energy, Yin/Yang, and Dao" in resources_html
 
     record = get_character("session-energy-crane")
     assert record is not None
@@ -1045,7 +1045,7 @@ def test_xianxia_session_resources_allow_yin_and_yang_updates(
     resources_html = unescape(resources_response.get_data(as_text=True))
     assert 'name="current_yin" value="1" min="0" max="1"' in resources_html
     assert 'name="current_yang" value="1" min="0" max="1"' in resources_html
-    assert "Save HP, Stance, Energy, and Yin/Yang" in resources_html
+    assert "Save HP, Stance, Energy, Yin/Yang, and Dao" in resources_html
 
     record = get_character("session-yin-yang-crane")
     assert record is not None
@@ -1102,6 +1102,82 @@ def test_xianxia_session_resources_allow_yin_and_yang_updates(
         "yin_current": 1,
         "yang_current": 0,
     }
+
+
+def test_xianxia_session_resources_allow_dao_update_with_cap(
+    client,
+    sign_in,
+    users,
+    app,
+    get_character,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={**_valid_xianxia_create_data("Session Dao Crane"), "dao_current": "2"},
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    resources_response = client.get(
+        "/campaigns/linden-pass/session/character?character=session-dao-crane&page=resources"
+    )
+
+    assert resources_response.status_code == 200
+    resources_html = unescape(resources_response.get_data(as_text=True))
+    assert 'name="current_dao" value="2" min="0" max="3"' in resources_html
+    assert "Dao 2 / 3" in resources_html
+    assert "Save HP, Stance, Energy, Yin/Yang, and Dao" in resources_html
+
+    record = get_character("session-dao-crane")
+    assert record is not None
+    response = client.post(
+        "/campaigns/linden-pass/characters/session-dao-crane/session/vitals",
+        data={
+            "expected_revision": record.state_record.revision,
+            "current_dao": "1",
+            "mode": "session",
+            "page": "resources",
+            "return_view": "session-character",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert (
+        "/campaigns/linden-pass/session/character?character=session-dao-crane"
+        "&page=resources#session-vitals"
+    ) in response.headers["Location"]
+    updated = get_character("session-dao-crane")
+    assert updated is not None
+    assert updated.state_record.state["vitals"] == {"current_hp": 10, "temp_hp": 0}
+    assert updated.state_record.state["xianxia"]["dao"] == {"current": 1}
+
+    sheet_response = client.get(
+        "/campaigns/linden-pass/characters/session-dao-crane?mode=session&page=resources"
+    )
+    assert sheet_response.status_code == 200
+    sheet_html = unescape(sheet_response.get_data(as_text=True))
+    assert 'name="current_dao" value="1" min="0" max="3"' in sheet_html
+
+    response = client.post(
+        "/campaigns/linden-pass/characters/session-dao-crane/session/vitals",
+        data={
+            "expected_revision": updated.state_record.revision,
+            "current_dao": "99",
+            "mode": "session",
+            "page": "resources",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    updated = get_character("session-dao-crane")
+    assert updated is not None
+    assert updated.state_record.state["xianxia"]["dao"] == {"current": 3}
 
 
 def test_xianxia_martial_arts_page_marks_incomplete_rank_progress(

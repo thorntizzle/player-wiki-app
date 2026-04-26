@@ -251,10 +251,11 @@
         {% set xianxia_stance_resource = xianxia_sheet.resources.durability[1] %}
         <div class="section-heading">
           <div>
-            <h3>HP, Stance, Energy, and Yin/Yang</h3>
+            <h3>HP, Stance, Energy, Yin/Yang, and Dao</h3>
             <p class="meta">
               HP {{ character.current_hp }} / {{ character.max_hp }}{% if character.temp_hp %} | Temp HP {{ character.temp_hp }}{% endif %}
               | Stance {{ xianxia_stance_resource.current }} / {{ xianxia_stance_resource.max }}{% if xianxia_stance_resource.temp %} | Temp Stance {{ xianxia_stance_resource.temp }}{% endif %}
+              | Dao {{ xianxia_sheet.resources.dao.current }} / {{ xianxia_sheet.resources.dao.max }}
             </p>
           </div>
         </div>
@@ -298,7 +299,11 @@
               <input type="number" name="current_{{ resource.key }}" value="{{ resource.current }}" min="0" max="{{ resource.max }}">
             </label>
           {% endfor %}
-          <button class="button-link" type="submit">Save HP, Stance, Energy, and Yin/Yang</button>
+          <label class="session-field">
+            <span>Current Dao</span>
+            <input type="number" name="current_dao" value="{{ xianxia_sheet.resources.dao.current }}" min="0" max="{{ xianxia_sheet.resources.dao.max }}">
+          </label>
+          <button class="button-link" type="submit">Save HP, Stance, Energy, Yin/Yang, and Dao</button>
         </form>
       </article>
     {% endif %}

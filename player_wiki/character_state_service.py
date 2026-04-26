@@ -57,6 +57,7 @@ class CharacterStateService:
         current_shen: Any | None = None,
         current_yin: Any | None = None,
         current_yang: Any | None = None,
+        current_dao: Any | None = None,
         hp_delta: Any | None = None,
         temp_hp_delta: Any | None = None,
         clear_temp_hp: bool = False,
@@ -87,6 +88,10 @@ class CharacterStateService:
                 state,
                 current_yin=current_yin,
                 current_yang=current_yang,
+            )
+            self._apply_xianxia_dao_update(
+                state,
+                current_dao=current_dao,
             )
         return self._replace_state(
             record,
@@ -445,6 +450,21 @@ class CharacterStateService:
         if current_yang is not None and str(current_yang).strip() != "":
             yin_yang["yang_current"] = int(current_yang)
         xianxia_state["yin_yang"] = yin_yang
+        state["xianxia"] = xianxia_state
+
+    def _apply_xianxia_dao_update(
+        self,
+        state: dict[str, Any],
+        *,
+        current_dao: Any | None = None,
+    ) -> None:
+        if current_dao is None or str(current_dao).strip() == "":
+            return
+
+        xianxia_state = dict(state.get("xianxia") or {})
+        dao = dict(xianxia_state.get("dao") or {})
+        dao["current"] = int(current_dao)
+        xianxia_state["dao"] = dao
         state["xianxia"] = xianxia_state
 
     def _apply_resource_update(
