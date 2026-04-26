@@ -525,7 +525,14 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
         "Against Spirit and Divine targets"
     )
     assert "Ji, and Shen" not in entry_map["bing-ti"]["rendered_html"]
-    assert "Qi Fist Technique" not in entry_map["demons-fist"]["rendered_html"]
+    demons_fist_html = entry_map["demons-fist"]["rendered_html"]
+    assert "Rank Records" in demons_fist_html
+    assert "Energy Maximum Increases" in demons_fist_html
+    assert "xianxia:demons-fist:initiate" in demons_fist_html
+    assert "Qi Fist Technique" in demons_fist_html
+    assert "xianxia:demons-fist:initiate:qi-fist-technique" in demons_fist_html
+    assert 'id="xianxia-demons-fist-initiate-qi-fist-technique"' in demons_fist_html
+    assert 'href="#xianxia-demons-fist-initiate-qi-fist-technique"' in demons_fist_html
     assert set(rank_resource_grants) == {
         entry["metadata"]["martial_art_key"]
         for entry in martial_art_entries
@@ -852,6 +859,7 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
     assert qi_fist["kind_key"] == "technique"
     assert qi_fist["ability_ref"] == "xianxia:demons-fist:initiate:qi-fist-technique"
     assert "qi fist technique" in entry_map["demons-fist"]["search_text"]
+    assert qi_fist["ability_ref"] in demons_fist_html
 
 
 def test_xianxia_condition_and_status_seed_entries_are_forced_reference_only():
@@ -1163,9 +1171,69 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
     assert "include Jing, Qi, and Shen maximum increases" in demons_fist_html
     assert "rank-granted ability names and kind tags" in demons_fist_html
     assert "Detailed ability rules remain deferred" in demons_fist_html
-    assert "Qi Fist Technique" not in demons_fist_html
+    assert "Rank Records" in demons_fist_html
+    assert "Energy Maximum Increases" in demons_fist_html
+    assert "xianxia:demons-fist:initiate" in demons_fist_html
+    assert "Qi Fist Technique" in demons_fist_html
+    assert "xianxia:demons-fist:initiate:qi-fist-technique" in demons_fist_html
+    assert 'id="xianxia-demons-fist-initiate-qi-fist-technique"' in demons_fist_html
+    assert 'href="#xianxia-demons-fist-initiate-qi-fist-technique"' in demons_fist_html
 
     assert dnd_entry.status_code == 404
+
+
+def test_xianxia_martial_art_parent_entry_renders_rank_info_and_ability_ref_links(
+    app, client, sign_in, users
+):
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = "xianxia"
+    payload["systems_library"] = "xianxia"
+    payload["systems_sources"] = [
+        {
+            "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+            "enabled": True,
+        }
+    ]
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        service = app.extensions["systems_service"]
+        service.ensure_builtin_library_seeded(XIANXIA_SYSTEM_CODE)
+        entry = service.get_entry_by_slug_for_campaign("linden-pass", "demons-fist")
+
+        assert entry is not None
+        assert entry.entry_type == "martial_art"
+        assert entry.metadata["catalog_role"] == "parent"
+        assert entry.metadata["martial_art_rank_records"][0]["rank_ref"] == (
+            "xianxia:demons-fist:initiate"
+        )
+        assert entry.metadata["martial_art_rank_records"][0]["ability_grants"][0][
+            "ability_ref"
+        ] == "xianxia:demons-fist:initiate:qi-fist-technique"
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get("/campaigns/linden-pass/systems/entries/demons-fist")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "<h2>Rank Records</h2>" in html
+    assert "<h3>Initiate</h3>" in html
+    assert "Rank Ref:" in html
+    assert 'href="#xianxia-demons-fist-initiate"' in html
+    assert "xianxia:demons-fist:initiate" in html
+    assert "Ability Refs" in html
+    assert 'id="xianxia-demons-fist-initiate-qi-fist-technique"' in html
+    assert 'href="#xianxia-demons-fist-initiate-qi-fist-technique"' in html
+    assert "xianxia:demons-fist:initiate:qi-fist-technique" in html
+    assert "Qi Fist Technique" in html
+    assert "Technique" in html
+    assert "Costs: qi 1" in html
+    assert "Ranges: self" in html
+    assert "Damage/Effort: weapon effort damage" in html
+    assert "Duration: rest of combat" in html
+    assert "reference only" in html
 
 
 def test_xianxia_systems_source_and_category_labels_use_xianxia_vocabulary(

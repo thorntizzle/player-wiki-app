@@ -326,6 +326,7 @@ def _build_seed_entry(raw_spec: dict[str, Any], *, index: int, source_path: str)
         sections=sections,
     )
     if entry_type == "martial_art":
+        rendered_html += _render_martial_art_rank_records_html(body)
         rendered_html += _render_martial_art_draft_marker_html(body)
     return {
         "entry_key": entry_key,
@@ -1354,6 +1355,137 @@ def _render_martial_art_draft_marker_html(body: dict[str, Any]) -> str:
         parts.append(f"<p><strong>Missing higher ranks:</strong> {escape(missing_ranks)}</p>")
     parts.append("</section>")
     return "".join(parts)
+
+
+def _render_martial_art_rank_records_html(body: dict[str, Any]) -> str:
+    martial_art_body = body.get("xianxia_martial_art")
+    if not isinstance(martial_art_body, dict):
+        return ""
+    rank_records = [
+        record for record in martial_art_body.get("rank_records") or [] if isinstance(record, dict)
+    ]
+    if not rank_records:
+        return ""
+
+    parts = ["<section>", "<h2>Rank Records</h2>"]
+    for record in rank_records:
+        rank_name = str(record.get("rank_name") or "").strip()
+        rank_ref = str(record.get("rank_ref") or "").strip()
+        rank_anchor = _anchor_id_for_ref(rank_ref)
+        parts.append(f'<section id="{escape(rank_anchor)}">')
+        if rank_name:
+            parts.append(f"<h3>{escape(rank_name)}</h3>")
+        if rank_ref:
+            parts.append(
+                f'<p><strong>Rank Ref:</strong> <a href="#{escape(rank_anchor)}">{escape(rank_ref)}</a></p>'
+            )
+
+        energy_grants = _format_energy_maximum_increases(
+            record.get("energy_maximum_increases")
+        )
+        if energy_grants:
+            parts.append(f"<p><strong>Energy Maximum Increases:</strong> {energy_grants}</p>")
+
+        insight_cost = record.get("insight_cost")
+        prerequisite_rank = str(record.get("prerequisite_rank_name") or "None").strip()
+        if insight_cost is not None:
+            parts.append(
+                "<p><strong>Advancement:</strong> "
+                f"{escape(str(insight_cost))} Insight; prerequisite rank {escape(prerequisite_rank)}.</p>"
+            )
+
+        teacher_note = str(record.get("teacher_breakthrough_note") or "").strip()
+        if teacher_note:
+            parts.append(f"<p><strong>Teacher/Breakthrough:</strong> {escape(teacher_note)}</p>")
+        legendary_note = str(record.get("legendary_prerequisite_note") or "").strip()
+        if legendary_note:
+            parts.append(f"<p><strong>Legendary Requirement:</strong> {escape(legendary_note)}</p>")
+
+        ability_grants = [
+            grant for grant in record.get("ability_grants") or [] if isinstance(grant, dict)
+        ]
+        if ability_grants:
+            parts.append("<h4>Ability Refs</h4>")
+            parts.append("<ul>")
+            for grant in ability_grants:
+                ability_ref = str(grant.get("ability_ref") or "").strip()
+                ability_anchor = _anchor_id_for_ref(ability_ref)
+                ability_name = str(grant.get("name") or "").strip()
+                kind = str(grant.get("kind") or "").strip()
+                support_state = str(grant.get("support_state") or "").strip()
+                parts.append(f'<li id="{escape(ability_anchor)}">')
+                if ability_ref:
+                    parts.append(
+                        f'<a href="#{escape(ability_anchor)}">{escape(ability_ref)}</a>'
+                    )
+                if ability_name:
+                    parts.append(f" - {escape(ability_name)}")
+                if kind:
+                    parts.append(f" ({escape(kind)})")
+                ability_tags = _format_ability_metadata_tags(grant)
+                if ability_tags:
+                    parts.append(f" - {ability_tags}")
+                if support_state:
+                    parts.append(f" - {escape(support_state.replace('_', ' '))}")
+                parts.append("</li>")
+            parts.append("</ul>")
+        parts.append("</section>")
+    parts.append("</section>")
+    return "".join(parts)
+
+
+def _anchor_id_for_ref(value: str) -> str:
+    anchor = re.sub(r"[^A-Za-z0-9_-]+", "-", value.strip()).strip("-").lower()
+    return anchor or "xianxia-ref"
+
+
+def _format_energy_maximum_increases(value: object) -> str:
+    if not isinstance(value, dict):
+        return ""
+    parts: list[str] = []
+    for energy_key in XIANXIA_ENERGY_KEYS:
+        amount = value.get(energy_key)
+        if amount is None:
+            continue
+        label = energy_key.capitalize()
+        prefix = "+" if isinstance(amount, int) and amount >= 0 else ""
+        parts.append(f"{label} {prefix}{amount}")
+    return ", ".join(parts)
+
+
+def _format_ability_metadata_tags(grant: dict[str, Any]) -> str:
+    tag_groups = [
+        ("Costs", _format_resource_costs(grant.get("resource_costs"))),
+        ("Ranges", _format_string_tags(grant.get("range_tags"))),
+        ("Damage/Effort", _format_string_tags(grant.get("damage_effort_tags"))),
+        ("Duration", _format_string_tags(grant.get("duration_tags"))),
+    ]
+    return "; ".join(f"{label}: {value}" for label, value in tag_groups if value)
+
+
+def _format_resource_costs(value: object) -> str:
+    if not isinstance(value, list):
+        return ""
+    parts: list[str] = []
+    for cost in value:
+        if not isinstance(cost, dict):
+            continue
+        resource_key = str(cost.get("resource_key") or "").strip()
+        amount = cost.get("amount")
+        if not resource_key or amount is None:
+            continue
+        parts.append(f"{resource_key.replace('_', ' ')} {amount}")
+    return ", ".join(escape(part) for part in parts)
+
+
+def _format_string_tags(value: object) -> str:
+    if not isinstance(value, list):
+        return ""
+    return ", ".join(
+        escape(str(item).replace("_", " "))
+        for item in value
+        if str(item).strip()
+    )
 
 
 def _build_martial_art_rank_records(
