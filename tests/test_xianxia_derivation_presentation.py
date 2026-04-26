@@ -3,8 +3,10 @@ from __future__ import annotations
 from copy import deepcopy
 from html import unescape
 
+import pytest
 import yaml
 
+from player_wiki.auth_store import AuthStore
 from player_wiki.character_presenter import present_character_detail
 from player_wiki.character_models import CharacterDefinition
 from player_wiki.xianxia_character_model import (
@@ -116,6 +118,41 @@ def _replace_character_state(app, record, state: dict) -> None:
             state,
             expected_revision=record.state_record.revision,
         )
+
+
+def _create_assigned_xianxia_session_character(
+    app,
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    *,
+    character_slug: str,
+    name: str,
+) -> None:
+    _configure_xianxia_campaign(app)
+    set_campaign_visibility("linden-pass", characters="public", session="public")
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            **_valid_xianxia_create_data(name),
+            "character_slug": character_slug,
+        },
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+
+    with app.app_context():
+        AuthStore().upsert_character_assignment(
+            users["owner"]["id"],
+            "linden-pass",
+            character_slug,
+        )
+
+    session_response = client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+    assert session_response.status_code == 302
 
 
 def test_xianxia_read_presenter_context_collects_first_pass_sheet_facts(
@@ -1347,6 +1384,158 @@ def test_xianxia_session_notes_allow_editable_users_to_update_notes(
     assert 'id="session-notes"' in sheet_html
     assert 'data-character-sheet-edit-form="notes"' in sheet_html
     assert "Track the jade token between scenes." in sheet_html
+
+
+@pytest.mark.parametrize(
+    ("user_key", "current_hp"),
+    [
+        ("dm", 8),
+        ("admin", 7),
+        ("owner", 6),
+    ],
+)
+def test_xianxia_session_state_permissions_allow_editable_roles(
+    client,
+    sign_in,
+    users,
+    app,
+    get_character,
+    set_campaign_visibility,
+    user_key,
+    current_hp,
+):
+    character_slug = f"xianxia-permission-{user_key}"
+    _create_assigned_xianxia_session_character(
+        app,
+        client,
+        sign_in,
+        users,
+        set_campaign_visibility,
+        character_slug=character_slug,
+        name=f"Permission {user_key.title()} Crane",
+    )
+
+    sign_in(users[user_key]["email"], users[user_key]["password"])
+    session_response = client.get(
+        f"/campaigns/linden-pass/session/character?character={character_slug}&page=resources"
+    )
+
+    assert session_response.status_code == 200
+    session_html = unescape(session_response.get_data(as_text=True))
+    assert 'id="session-vitals"' in session_html
+    assert "Save HP, Stance, Energy, Yin/Yang, and Dao" in session_html
+
+    record = get_character(character_slug)
+    assert record is not None
+    response = client.post(
+        f"/campaigns/linden-pass/characters/{character_slug}/session/vitals",
+        data={
+            "expected_revision": record.state_record.revision,
+            "current_hp": str(current_hp),
+            "mode": "session",
+            "page": "resources",
+            "return_view": "session-character",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert (
+        f"/campaigns/linden-pass/session/character?character={character_slug}"
+        "&page=resources#session-vitals"
+    ) in response.headers["Location"]
+    updated = get_character(character_slug)
+    assert updated is not None
+    assert updated.state_record.state["vitals"]["current_hp"] == current_hp
+    assert updated.state_record.state["xianxia"]["vitals"]["current_hp"] == current_hp
+
+
+@pytest.mark.parametrize("user_key", ["observer", "party"])
+def test_xianxia_session_state_permissions_keep_read_only_roles_from_writing(
+    client,
+    sign_in,
+    users,
+    app,
+    get_character,
+    set_campaign_visibility,
+    user_key,
+):
+    character_slug = f"xianxia-readonly-{user_key}"
+    _create_assigned_xianxia_session_character(
+        app,
+        client,
+        sign_in,
+        users,
+        set_campaign_visibility,
+        character_slug=character_slug,
+        name=f"Readonly {user_key.title()} Crane",
+    )
+
+    sign_in(users[user_key]["email"], users[user_key]["password"])
+    read_response = client.get(
+        f"/campaigns/linden-pass/characters/{character_slug}?mode=session&page=resources"
+    )
+
+    assert read_response.status_code == 200
+    read_html = unescape(read_response.get_data(as_text=True))
+    assert "Resources" in read_html
+    assert 'id="session-vitals"' not in read_html
+    assert "Save HP, Stance, Energy, Yin/Yang, and Dao" not in read_html
+
+    session_response = client.get(
+        f"/campaigns/linden-pass/session/character?character={character_slug}&page=resources"
+    )
+    assert session_response.status_code == 403
+
+    record = get_character(character_slug)
+    assert record is not None
+    original_revision = record.state_record.revision
+    original_state = deepcopy(record.state_record.state)
+
+    blocked_vitals = client.post(
+        f"/campaigns/linden-pass/characters/{character_slug}/session/vitals",
+        data={
+            "expected_revision": original_revision,
+            "current_hp": "1",
+            "current_stance": "1",
+            "current_dao": "1",
+            "mode": "session",
+            "page": "resources",
+            "return_view": "session-character",
+        },
+        follow_redirects=False,
+    )
+    blocked_active_state = client.post(
+        f"/campaigns/linden-pass/characters/{character_slug}/session/xianxia-active-state",
+        data={
+            "expected_revision": original_revision,
+            "active_stance_name": "Forbidden Stance",
+            "active_aura_name": "Forbidden Aura",
+            "mode": "session",
+            "page": "resources",
+            "return_view": "session-character",
+        },
+        follow_redirects=False,
+    )
+    blocked_notes = client.post(
+        f"/campaigns/linden-pass/characters/{character_slug}/session/notes",
+        data={
+            "expected_revision": original_revision,
+            "player_notes_markdown": "Forbidden note.",
+            "mode": "session",
+            "page": "notes",
+            "return_view": "session-character",
+        },
+        follow_redirects=False,
+    )
+
+    assert blocked_vitals.status_code == 403
+    assert blocked_active_state.status_code == 403
+    assert blocked_notes.status_code == 403
+    updated = get_character(character_slug)
+    assert updated is not None
+    assert updated.state_record.revision == original_revision
+    assert updated.state_record.state == original_state
 
 
 def test_xianxia_session_resources_reject_stale_revision_conflicts(
