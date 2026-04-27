@@ -98,6 +98,8 @@ from .xianxia_advancement import (
     XIANXIA_TRAINING_STANCE_INCREASE,
     XIANXIA_TRAINING_STANCE_MAXIMUM,
     advance_xianxia_martial_art_rank_definition,
+    learn_xianxia_generic_technique_definition,
+    list_xianxia_generic_technique_learning_options,
     spend_xianxia_conditioning_definition,
     spend_xianxia_cultivation_energy_definition,
     spend_xianxia_meditation_definition,
@@ -1372,7 +1374,12 @@ def xianxia_read_subpage_context_for_redirect(definition) -> dict[str, object] |
     }
 
 
-def present_xianxia_cultivation_context(character: dict[str, object], xianxia: dict[str, object]) -> dict[str, object]:
+def present_xianxia_cultivation_context(
+    character: dict[str, object],
+    xianxia: dict[str, object],
+    *,
+    generic_technique_learning_options: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
     xianxia_read = dict(character.get("xianxia_read") or {})
     resources = dict(xianxia_read.get("resources") or {})
     insight = dict(resources.get("insight") or {"available": 0, "spent": 0})
@@ -1474,6 +1481,15 @@ def present_xianxia_cultivation_context(character: dict[str, object], xianxia: d
             insight_available=insight_available,
         )
         martial_arts.append(art)
+    generic_technique_options = []
+    for raw_option in list(generic_technique_learning_options or []):
+        if not isinstance(raw_option, dict):
+            continue
+        option = dict(raw_option)
+        insight_cost = int(option.get("insight_cost") or 0)
+        option["has_enough_insight"] = insight_cost > 0 and insight_available >= insight_cost
+        option["shortfall"] = max(0, insight_cost - insight_available)
+        generic_technique_options.append(option)
     history_records = []
     for index, raw_record in enumerate(list(xianxia.get("advancement_history") or []), start=1):
         if not isinstance(raw_record, dict):
@@ -1504,6 +1520,8 @@ def present_xianxia_cultivation_context(character: dict[str, object], xianxia: d
             ("new_attribute_score", "New Attribute score"),
             ("rank", "Rank"),
             ("systems_ref", "Systems ref"),
+            ("generic_technique_key", "Generic Technique key"),
+            ("insight_cost", "Insight cost"),
             ("teacher_breakthrough_note", "Teacher/breakthrough note"),
             ("legendary_prerequisite_note", "Legendary requirement"),
             ("legendary_quest_note", "Legendary quest/mythic-master note"),
@@ -1537,6 +1555,7 @@ def present_xianxia_cultivation_context(character: dict[str, object], xianxia: d
         },
         "martial_arts": martial_arts,
         "generic_techniques": list(xianxia_read.get("generic_techniques") or []),
+        "generic_technique_options": generic_technique_options,
         "history": history_records,
     }
 
@@ -11991,6 +12010,23 @@ def create_app() -> Flask:
                         f"Spent {rank_result.insight_cost} Insight to advance "
                         f"{rank_result.martial_art_name} to {rank_result.rank_name}."
                     )
+                elif cultivation_action == "learn_generic_technique":
+                    redirect_anchor = "xianxia-cultivation-techniques"
+                    technique_result = learn_xianxia_generic_technique_definition(
+                        record.definition,
+                        campaign_slug=campaign_slug,
+                        systems_service=get_systems_service(),
+                        generic_technique_entry_key=request.form.get(
+                            "generic_technique_entry_key",
+                            "",
+                        ),
+                        notes=request.form.get("generic_technique_notes", ""),
+                    )
+                    definition = technique_result.definition
+                    success_message = (
+                        f"Spent {technique_result.insight_cost} Insight to learn "
+                        f"{technique_result.technique_name}."
+                    )
                 else:
                     raise ValueError("Unsupported cultivation action. Refresh the page and try again.")
                 definition = finalize_character_definition_for_write(
@@ -12043,12 +12079,32 @@ def create_app() -> Flask:
         xianxia_read = character.get("xianxia_read")
         if not isinstance(xianxia_read, dict):
             abort(404)
+        generic_technique_options = []
+        for option in list_xianxia_generic_technique_learning_options(
+            record.definition,
+            campaign_slug=campaign_slug,
+            systems_service=get_systems_service(),
+        ):
+            systems_ref = dict(option.get("systems_ref") or {})
+            generic_technique_options.append(
+                {
+                    **option,
+                    "href": build_character_entry_href(
+                        campaign_slug,
+                        systems_ref=systems_ref,
+                    ),
+                }
+            )
 
         return render_template(
             "character_cultivation_xianxia.html",
             campaign=campaign,
             character=character,
-            cultivation=present_xianxia_cultivation_context(character, record.definition.xianxia),
+            cultivation=present_xianxia_cultivation_context(
+                character,
+                record.definition.xianxia,
+                generic_technique_learning_options=generic_technique_options,
+            ),
             active_nav="characters",
         )
 

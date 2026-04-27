@@ -484,6 +484,49 @@
         <p class="meta">No Generic Techniques are recorded on this sheet yet.</p>
       {% endif %}
     </article>
+    {% if cultivation.generic_technique_options %}
+      <div class="feature-stack">
+        {% for technique in cultivation.generic_technique_options %}
+          <article class="feature-row">
+            <div class="feature-row__header">
+              <h3>
+                {% if technique.href %}
+                  <a href="{{ technique.href }}">{{ technique.name }}</a>
+                {% else %}
+                  {{ technique.name }}
+                {% endif %}
+              </h3>
+              <p class="meta">
+                Insight {{ technique.insight_cost }}
+                {% if technique.support_state %} | {{ technique.support_state | replace('_', ' ') }}{% endif %}
+              </p>
+            </div>
+            <form
+              class="stack-form"
+              method="post"
+              action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+            >
+              <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+              <input type="hidden" name="cultivation_action" value="learn_generic_technique">
+              <input type="hidden" name="generic_technique_entry_key" value="{{ technique.entry_key }}">
+              <p class="meta">Spend {{ technique.insight_cost }} Insight to learn {{ technique.name }}.</p>
+              <label>
+                Notes
+                <textarea name="generic_technique_notes" rows="2"></textarea>
+              </label>
+              {% if not technique.has_enough_insight %}
+                <p class="meta">Needs {{ technique.shortfall }} more available Insight.</p>
+              {% endif %}
+              <div class="hero-actions">
+                <button type="submit" {% if not technique.has_enough_insight %}disabled{% endif %}>
+                  Learn {{ technique.name }}
+                </button>
+              </div>
+            </form>
+          </article>
+        {% endfor %}
+      </div>
+    {% endif %}
   </section>
 
   <section class="read-section" id="xianxia-cultivation-history">

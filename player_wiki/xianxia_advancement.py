@@ -22,6 +22,9 @@ XIANXIA_TRAINING_INSIGHT_COST = 1
 XIANXIA_TRAINING_STANCE_INCREASE = 10
 XIANXIA_TRAINING_STANCE_MAXIMUM = 50
 XIANXIA_TRAINING_ATTRIBUTE_INCREASE = 2
+XIANXIA_DIRECT_ADVANCEMENT_GENERIC_TECHNIQUE_KEYS = frozenset(
+    {"cultivation", "meditation", "conditioning", "training"}
+)
 XIANXIA_MARTIAL_ART_RANK_KEYS = (
     "initiate",
     "novice",
@@ -103,6 +106,147 @@ class XianxiaTrainingSpendResult:
     increase: int
     new_value: int
     notes: str = ""
+
+
+@dataclass(frozen=True)
+class XianxiaGenericTechniqueLearnResult:
+    definition: Any
+    technique_name: str
+    insight_cost: int
+    systems_ref: dict[str, str]
+    notes: str = ""
+
+
+def list_xianxia_generic_technique_learning_options(
+    definition: Any,
+    *,
+    campaign_slug: str,
+    systems_service: Any,
+) -> list[dict[str, Any]]:
+    if systems_service is None:
+        return []
+
+    payload = definition.to_dict()
+    xianxia = dict(payload.get("xianxia") or {})
+    known_markers = _known_generic_technique_markers(xianxia.get("generic_techniques"))
+    options: list[dict[str, Any]] = []
+    entries = systems_service.list_enabled_entries_for_campaign(
+        campaign_slug,
+        entry_type="generic_technique",
+        limit=None,
+    )
+    for entry in sorted(entries, key=_generic_technique_entry_sort_key):
+        option = _generic_technique_record_from_entry(entry)
+        if not option:
+            continue
+        generic_technique_key = normalize_xianxia_generic_technique_key(
+            option.get("generic_technique_key")
+        )
+        if generic_technique_key in XIANXIA_DIRECT_ADVANCEMENT_GENERIC_TECHNIQUE_KEYS:
+            continue
+        if _generic_technique_record_is_known(option, known_markers):
+            continue
+        if _non_negative_int(option.get("insight_cost"), default=0) <= 0:
+            continue
+        options.append(option)
+    return options
+
+
+def learn_xianxia_generic_technique_definition(
+    definition: Any,
+    *,
+    campaign_slug: str,
+    systems_service: Any,
+    generic_technique_entry_key: str,
+    notes: str = "",
+) -> XianxiaGenericTechniqueLearnResult:
+    entry_key = str(generic_technique_entry_key or "").strip()
+    if not entry_key:
+        raise ValueError("Choose a Generic Technique to learn.")
+    if systems_service is None:
+        raise ValueError("Generic Technique catalog is unavailable.")
+
+    entry = systems_service.get_entry_for_campaign(campaign_slug, entry_key)
+    option = _generic_technique_record_from_entry(entry)
+    if not option:
+        raise ValueError("Choose an available Generic Technique to learn.")
+    generic_technique_key = normalize_xianxia_generic_technique_key(
+        option.get("generic_technique_key")
+    )
+    if generic_technique_key in XIANXIA_DIRECT_ADVANCEMENT_GENERIC_TECHNIQUE_KEYS:
+        raise ValueError(
+            f"Use the dedicated {option['name']} spend form for this Insight spend."
+        )
+
+    insight_cost = _non_negative_int(option.get("insight_cost"), default=0)
+    if insight_cost <= 0:
+        raise ValueError(f"{option['name']} does not have a positive Insight cost.")
+
+    payload = definition.to_dict()
+    xianxia = dict(payload.get("xianxia") or {})
+    generic_techniques = [
+        dict(record)
+        for record in list(xianxia.get("generic_techniques") or [])
+        if isinstance(record, dict)
+    ]
+    known_markers = _known_generic_technique_markers(generic_techniques)
+    if _generic_technique_record_is_known(option, known_markers):
+        raise ValueError(f"{option['name']} is already learned.")
+
+    insight = dict(xianxia.get("insight") or {})
+    available = _non_negative_int(insight.get("available"), default=0)
+    spent = _non_negative_int(insight.get("spent"), default=0)
+    if available < insight_cost:
+        raise ValueError(
+            f"{option['name']} needs {insight_cost} Insight to learn; "
+            f"only {available} available."
+        )
+
+    clean_notes = _clean_note(notes)
+    learned_record = {
+        "name": option["name"],
+        "systems_ref": dict(option["systems_ref"]),
+        "generic_technique_key": generic_technique_key,
+        "insight_spent": insight_cost,
+        "support_state": str(option.get("support_state") or "").strip(),
+        "learnable_without_master": bool(option.get("learnable_without_master")),
+        "requires_master": bool(option.get("requires_master")),
+    }
+    if clean_notes:
+        learned_record["notes"] = clean_notes
+    generic_techniques.append(learned_record)
+
+    xianxia["generic_techniques"] = generic_techniques
+    xianxia["insight"] = {
+        "available": available - insight_cost,
+        "spent": spent + insight_cost,
+    }
+    history = [
+        dict(record)
+        for record in list(xianxia.get("advancement_history") or [])
+        if isinstance(record, dict) and record
+    ]
+    event = {
+        "action": "generic_technique_learned",
+        "amount": insight_cost,
+        "target": option["name"],
+        "generic_technique_key": generic_technique_key,
+        "systems_ref": dict(option["systems_ref"]),
+        "insight_cost": insight_cost,
+    }
+    if clean_notes:
+        event["notes"] = clean_notes
+    history.append(event)
+    xianxia["advancement_history"] = history
+    payload["xianxia"] = xianxia
+
+    return XianxiaGenericTechniqueLearnResult(
+        definition=definition.__class__.from_dict(payload),
+        technique_name=option["name"],
+        insight_cost=insight_cost,
+        systems_ref=dict(option["systems_ref"]),
+        notes=clean_notes,
+    )
 
 
 def spend_xianxia_cultivation_energy_definition(
@@ -698,6 +842,16 @@ def normalize_xianxia_attribute_key(value: Any) -> str:
     )
 
 
+def normalize_xianxia_generic_technique_key(value: Any) -> str:
+    return (
+        str(value if value is not None else "")
+        .strip()
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+    )
+
+
 def energy_label(energy_key: str) -> str:
     normalized = normalize_xianxia_energy_key(energy_key)
     if normalized in XIANXIA_ENERGY_LABELS:
@@ -750,6 +904,156 @@ def _xianxia_martial_art_entry_for_record(
     if slug:
         return systems_service.get_entry_by_slug_for_campaign(campaign_slug, slug)
     return None
+
+
+def _generic_technique_record_from_entry(entry: Any | None) -> dict[str, Any]:
+    if entry is None or str(getattr(entry, "entry_type", "") or "").strip() != "generic_technique":
+        return {}
+    metadata = dict(getattr(entry, "metadata", {}) or {})
+    body = dict(getattr(entry, "body", {}) or {})
+    technique_body = dict(body.get("xianxia_generic_technique") or {})
+    systems_ref = _systems_ref_for_entry(entry)
+    generic_technique_key = normalize_xianxia_generic_technique_key(
+        _first_present_value(
+            metadata.get("generic_technique_key"),
+            metadata.get("xianxia_generic_technique_key"),
+            technique_body.get("key"),
+        )
+    )
+    return {
+        "name": str(getattr(entry, "title", "") or "").strip() or "Generic Technique",
+        "entry_key": systems_ref.get("entry_key", ""),
+        "systems_ref": systems_ref,
+        "generic_technique_key": generic_technique_key,
+        "insight_cost": _non_negative_int(
+            _first_present_value(
+                metadata.get("insight_cost"),
+                technique_body.get("insight_cost"),
+            ),
+            default=0,
+        ),
+        "support_state": str(
+            _first_present_value(
+                metadata.get("support_state"),
+                metadata.get("xianxia_support_state"),
+                technique_body.get("support_state"),
+                technique_body.get("xianxia_support_state"),
+            )
+            or ""
+        ).strip(),
+        "prerequisites": _list_copy(
+            _first_present_value(
+                metadata.get("prerequisites"),
+                technique_body.get("prerequisites"),
+            )
+        ),
+        "resource_costs": _list_copy(
+            _first_present_value(
+                metadata.get("resource_costs"),
+                technique_body.get("resource_costs"),
+            )
+        ),
+        "range_tags": _list_copy(
+            _first_present_value(metadata.get("range_tags"), technique_body.get("range_tags"))
+        ),
+        "effort_tags": _list_copy(
+            _first_present_value(metadata.get("effort_tags"), technique_body.get("effort_tags"))
+        ),
+        "reset_cadence": str(
+            _first_present_value(metadata.get("reset_cadence"), technique_body.get("reset_cadence"))
+            or ""
+        ).strip(),
+        "learnable_without_master": _truthy(
+            _first_present_value(
+                metadata.get("learnable_without_master"),
+                technique_body.get("learnable_without_master"),
+            )
+        ),
+        "requires_master": _truthy(
+            _first_present_value(
+                metadata.get("requires_master"),
+                technique_body.get("requires_master"),
+            )
+        ),
+    }
+
+
+def _generic_technique_entry_sort_key(entry: Any) -> tuple[int, str]:
+    metadata = dict(getattr(entry, "metadata", {}) or {})
+    body = dict(getattr(entry, "body", {}) or {})
+    technique_body = dict(body.get("xianxia_generic_technique") or {})
+    raw_order = _first_present_value(
+        metadata.get("generic_technique_catalog_order"),
+        metadata.get("catalog_order"),
+        technique_body.get("catalog_order"),
+    )
+    try:
+        order = int(raw_order)
+    except (TypeError, ValueError):
+        order = 10_000
+    return (order, str(getattr(entry, "title", "") or "").casefold())
+
+
+def _systems_ref_for_entry(entry: Any) -> dict[str, str]:
+    return {
+        "library_slug": str(getattr(entry, "library_slug", "") or "").strip(),
+        "source_id": str(getattr(entry, "source_id", "") or "").strip(),
+        "entry_key": str(getattr(entry, "entry_key", "") or "").strip(),
+        "slug": str(getattr(entry, "slug", "") or "").strip(),
+        "title": str(getattr(entry, "title", "") or "").strip(),
+        "entry_type": str(getattr(entry, "entry_type", "") or "").strip(),
+    }
+
+
+def _known_generic_technique_markers(records: Any) -> dict[str, set[str]]:
+    markers = {
+        "entry_keys": set(),
+        "slugs": set(),
+        "keys": set(),
+        "names": set(),
+    }
+    for record in list(records or []):
+        payload = dict(record) if isinstance(record, dict) else {"name": record}
+        systems_ref = dict(payload.get("systems_ref") or {})
+        entry_key = str(systems_ref.get("entry_key") or payload.get("entry_key") or "").strip()
+        if entry_key:
+            markers["entry_keys"].add(entry_key.casefold())
+        slug = str(systems_ref.get("slug") or payload.get("slug") or "").strip()
+        if slug:
+            markers["slugs"].add(slug.casefold())
+        generic_technique_key = normalize_xianxia_generic_technique_key(
+            payload.get("generic_technique_key")
+            or payload.get("technique_key")
+            or systems_ref.get("slug")
+        )
+        if generic_technique_key:
+            markers["keys"].add(generic_technique_key)
+        name = str(payload.get("name") or payload.get("title") or systems_ref.get("title") or "").strip()
+        if name:
+            markers["names"].add(name.casefold())
+    return markers
+
+
+def _generic_technique_record_is_known(
+    option: dict[str, Any],
+    known_markers: dict[str, set[str]],
+) -> bool:
+    systems_ref = dict(option.get("systems_ref") or {})
+    entry_key = str(systems_ref.get("entry_key") or option.get("entry_key") or "").strip()
+    if entry_key and entry_key.casefold() in known_markers["entry_keys"]:
+        return True
+    slug = str(systems_ref.get("slug") or "").strip()
+    if slug and slug.casefold() in known_markers["slugs"]:
+        return True
+    generic_technique_key = normalize_xianxia_generic_technique_key(
+        option.get("generic_technique_key") or slug
+    )
+    if generic_technique_key and generic_technique_key in known_markers["keys"]:
+        return True
+    name = str(option.get("name") or "").strip()
+    if name and name.casefold() in known_markers["names"]:
+        return True
+    return False
 
 
 def _martial_art_name(record: dict[str, Any], entry: Any | None) -> str:
@@ -920,6 +1224,31 @@ def _legendary_prerequisite_note(rank_record: dict[str, Any]) -> str:
 
 def _clean_note(value: Any) -> str:
     return " ".join(str(value or "").split()).strip()
+
+
+def _first_present_value(*values: Any) -> Any:
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return value
+    return None
+
+
+def _list_copy(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return [dict(item) if isinstance(item, dict) else item for item in value]
+    if value is None or value == "":
+        return []
+    return [value]
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    normalized = str(value or "").strip().lower()
+    return normalized in {"1", "true", "yes", "on"}
 
 
 def _rank_teacher_breakthrough_notes(

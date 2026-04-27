@@ -2190,6 +2190,151 @@ def test_xianxia_cultivation_route_spends_insight_on_training_for_stance_or_attr
     assert "15" in equipment_html
 
 
+def test_xianxia_cultivation_route_spends_insight_to_learn_generic_technique(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+                "default_visibility": "dm",
+            }
+        ]
+
+    _write_campaign_config(app, _mutate)
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        systems_service = app.extensions["systems_service"]
+        systems_service.ensure_builtin_library_seeded(XIANXIA_SYSTEM_CODE)
+        qi_blast = systems_service.get_entry_by_slug_for_campaign("linden-pass", "qi-blast")
+        assert qi_blast is not None
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Technique Adept"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+
+    cultivation_html = client.get(
+        "/campaigns/linden-pass/characters/technique-adept/cultivation"
+    ).get_data(as_text=True)
+    assert 'name="cultivation_action" value="learn_generic_technique"' in cultivation_html
+    assert f'name="generic_technique_entry_key" value="{qi_blast.entry_key}"' in cultivation_html
+    assert "Spend 1 Insight to learn Qi Blast." in cultivation_html
+    assert "Needs 1 more available Insight." in cultivation_html
+
+    starting_revision = _character_state_revision(app, "technique-adept")
+    insufficient_response = client.post(
+        "/campaigns/linden-pass/characters/technique-adept/cultivation",
+        data={
+            "expected_revision": str(starting_revision),
+            "cultivation_action": "learn_generic_technique",
+            "generic_technique_entry_key": qi_blast.entry_key,
+        },
+        follow_redirects=True,
+    )
+    assert insufficient_response.status_code == 200
+    assert "Qi Blast needs 1 Insight to learn; only 0 available." in insufficient_response.get_data(
+        as_text=True
+    )
+    definition_payload = _read_character_definition(app, "technique-adept")
+    assert definition_payload["xianxia"]["insight"] == {"available": 0, "spent": 0}
+    assert definition_payload["xianxia"]["generic_techniques"] == []
+    assert definition_payload["xianxia"]["advancement_history"] == []
+    assert _character_state_revision(app, "technique-adept") == starting_revision
+
+    insight_response = client.post(
+        "/campaigns/linden-pass/characters/technique-adept/cultivation",
+        data={
+            "expected_revision": str(starting_revision),
+            "cultivation_action": "save_insight",
+            "insight_available": "2",
+            "insight_spent": "0",
+        },
+        follow_redirects=False,
+    )
+    assert insight_response.status_code == 302
+
+    current_revision = _character_state_revision(app, "technique-adept")
+    learn_response = client.post(
+        "/campaigns/linden-pass/characters/technique-adept/cultivation",
+        data={
+            "expected_revision": str(current_revision),
+            "cultivation_action": "learn_generic_technique",
+            "generic_technique_entry_key": qi_blast.entry_key,
+            "generic_technique_notes": "Focused breath into a visible strike.",
+        },
+        follow_redirects=False,
+    )
+    assert learn_response.status_code == 302
+    assert learn_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/technique-adept/cultivation#xianxia-cultivation-techniques"
+    )
+
+    definition_payload = _read_character_definition(app, "technique-adept")
+    xianxia = definition_payload["xianxia"]
+    assert xianxia["insight"] == {"available": 1, "spent": 1}
+    assert len(xianxia["generic_techniques"]) == 1
+    learned_technique = xianxia["generic_techniques"][0]
+    assert learned_technique["name"] == "Qi Blast"
+    assert learned_technique["systems_ref"]["entry_key"] == qi_blast.entry_key
+    assert learned_technique["systems_ref"]["slug"] == "qi-blast"
+    assert learned_technique["generic_technique_key"] == "qi_blast"
+    assert learned_technique["insight_spent"] == 1
+    assert learned_technique["support_state"] == "reference_only"
+    assert learned_technique["learnable_without_master"] is True
+    assert learned_technique["requires_master"] is False
+    assert learned_technique["notes"] == "Focused breath into a visible strike."
+    assert xianxia["advancement_history"] == [
+        {
+            "action": "generic_technique_learned",
+            "amount": 1,
+            "target": "Qi Blast",
+            "generic_technique_key": "qi_blast",
+            "systems_ref": learned_technique["systems_ref"],
+            "insight_cost": 1,
+            "notes": "Focused breath into a visible strike.",
+        }
+    ]
+    assert _character_state_revision(app, "technique-adept") == current_revision + 1
+
+    updated_html = client.get(
+        "/campaigns/linden-pass/characters/technique-adept/cultivation"
+    ).get_data(as_text=True)
+    assert "Generic Technique Learned" in updated_html
+    assert "Generic Technique key:" in updated_html
+    assert "qi_blast" in updated_html
+    assert "Focused breath into a visible strike." in updated_html
+
+    sheet_html = client.get(
+        "/campaigns/linden-pass/characters/technique-adept?page=techniques"
+    ).get_data(as_text=True)
+    assert "/campaigns/linden-pass/systems/entries/qi-blast" in sheet_html
+    assert "Qi Blast" in sheet_html
+    assert "Insight 1" in sheet_html
+    assert "Learnable without a Master" in sheet_html
+
+    duplicate_revision = _character_state_revision(app, "technique-adept")
+    duplicate_response = client.post(
+        "/campaigns/linden-pass/characters/technique-adept/cultivation",
+        data={
+            "expected_revision": str(duplicate_revision),
+            "cultivation_action": "learn_generic_technique",
+            "generic_technique_entry_key": qi_blast.entry_key,
+        },
+        follow_redirects=True,
+    )
+    assert duplicate_response.status_code == 200
+    assert "Qi Blast is already learned." in duplicate_response.get_data(as_text=True)
+    assert _character_state_revision(app, "technique-adept") == duplicate_revision
+
+
 def test_xianxia_cultivation_route_spends_insight_to_advance_martial_art_rank(
     app, client, sign_in, users
 ):
