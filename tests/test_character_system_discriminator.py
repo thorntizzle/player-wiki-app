@@ -230,6 +230,39 @@ def test_xianxia_definition_normalizes_ascendant_art_approval_fields():
     assert variants[1]["request_status"] == "Denied"
 
 
+def test_xianxia_definition_normalizes_dao_immolating_use_approval_fields():
+    definition = CharacterDefinition.from_dict(
+        _minimal_definition_payload(
+            system=XIANXIA_SYSTEM_CODE,
+            xianxia={
+                "dao_immolating_records": {
+                    "prepared": [{"name": "Ashen Bell"}],
+                    "history": [
+                        {"name": "River-Cleaving Spark"},
+                        {
+                            "name": "Sect-Burning Vow",
+                            "status": "Denied",
+                            "approval_required": False,
+                        },
+                    ],
+                }
+            },
+        )
+    )
+
+    dao_immolating = definition.to_dict()["xianxia"]["dao_immolating_techniques"]
+
+    assert dao_immolating["prepared"] == [{"name": "Ashen Bell"}]
+    assert dao_immolating["use_history"][0] == {
+        "name": "River-Cleaving Spark",
+        "approval_required": True,
+        "approval_status": "pending",
+    }
+    assert dao_immolating["use_history"][1]["approval_required"] is True
+    assert dao_immolating["use_history"][1]["approval_status"] == "rejected"
+    assert dao_immolating["use_history"][1]["status"] == "Denied"
+
+
 def test_xianxia_definition_accepts_requirements_sketch_top_level_aliases():
     definition = CharacterDefinition.from_dict(
         _minimal_definition_payload(

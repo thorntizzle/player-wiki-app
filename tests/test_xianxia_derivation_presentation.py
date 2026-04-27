@@ -341,6 +341,9 @@ def test_xianxia_techniques_page_shows_approval_status_records(
             "name": "River-Cleaving Spark",
             "approval_status": "approved",
             "approval_notes": "Spent after the duel began.",
+        },
+        {
+            "name": "Unspoken Furnace Vow",
         }
     ]
     _write_raw_xianxia_character_definition(app, "approval-crane", payload)
@@ -359,7 +362,7 @@ def test_xianxia_techniques_page_shows_approval_status_records(
     assert [(group["title"], [record["status_label"] for record in group["records"]]) for group in approval_groups] == [
         ("Karmic Constraints", ["Approved", "Pending"]),
         ("Ascendant Arts", ["Pending", "Pending", "Rejected"]),
-        ("Dao Immolating Technique Use Records", ["Approved"]),
+        ("Dao Immolating Technique Use Records", ["Approved", "Pending"]),
     ]
 
     response = client.get("/campaigns/linden-pass/characters/approval-crane?page=techniques")
@@ -380,6 +383,7 @@ def test_xianxia_techniques_page_shows_approval_status_records(
     assert "Rejected" in html
     assert "Dao Immolating Technique Use Records" in html
     assert "River-Cleaving Spark" in html
+    assert "Unspoken Furnace Vow" in html
     assert "Dao Immolating Technique Use" in html
     assert "Use record" in html
     assert "Prepared Dao Immolating Techniques" in html

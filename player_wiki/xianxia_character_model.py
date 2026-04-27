@@ -1026,10 +1026,27 @@ def _normalize_dao_immolating_records(
         raw_records = {}
     return {
         "prepared": _normalize_record_list(raw_records.get("prepared")),
-        "use_history": _normalize_record_list(
+        "use_history": _normalize_dao_immolating_use_records(
             raw_records.get("use_history") if "use_history" in raw_records else raw_records.get("history")
         ),
     }
+
+
+def _normalize_dao_immolating_use_records(values: Any) -> list[dict[str, Any]]:
+    records = _normalize_record_list(values)
+    return [_normalize_dao_immolating_use_record(record) for record in records]
+
+
+def _normalize_dao_immolating_use_record(record: dict[str, Any]) -> dict[str, Any]:
+    normalized = deepcopy(record)
+    normalized["approval_required"] = True
+    raw_status = normalized.get("approval_status")
+    if raw_status is None and "status" in normalized:
+        raw_status = normalized.get("status")
+    if raw_status is None and "request_status" in normalized:
+        raw_status = normalized.get("request_status")
+    normalized["approval_status"] = _normalize_approval_status(raw_status, default="pending")
+    return normalized
 
 
 def _definition_xianxia(definition: Any) -> dict[str, Any]:
