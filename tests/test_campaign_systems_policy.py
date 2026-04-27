@@ -15,7 +15,10 @@ from player_wiki.auth_store import AuthStore, utcnow
 from player_wiki.auth import get_campaign_scope_visibility, get_effective_campaign_visibility
 from player_wiki.campaign_visibility import VISIBILITY_DM, VISIBILITY_PLAYERS, VISIBILITY_PUBLIC
 from player_wiki.system_policy import DND_5E_SYSTEM_CODE, XIANXIA_SYSTEM_CODE
-from player_wiki.systems_service import XIANXIA_HOMEBREW_SOURCE_ID
+from player_wiki.systems_service import (
+    SystemsPolicyValidationError,
+    XIANXIA_HOMEBREW_SOURCE_ID,
+)
 from player_wiki.xianxia_systems_seed import (
     XIANXIA_ENERGY_KEYS,
     XIANXIA_EFFORT_KEYS,
@@ -1315,6 +1318,77 @@ def test_xianxia_homebrew_source_policy_defaults_dm_only_when_campaign_selects_l
         assert state.is_enabled is False
         assert state.default_visibility == VISIBILITY_DM
         assert state.is_configured is False
+
+
+def test_xianxia_homebrew_source_policy_unit_defaults_dm_and_rejects_public_visibility(
+    app, users
+):
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = "xianxia"
+    payload["systems_library"] = "xianxia"
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        service = app.extensions["systems_service"]
+        service.ensure_builtin_library_seeded(XIANXIA_SYSTEM_CODE)
+
+        state = service.get_campaign_source_state("linden-pass", XIANXIA_HOMEBREW_SOURCE_ID)
+
+        assert state is not None
+        assert state.source.library_slug == XIANXIA_SYSTEM_CODE
+        assert state.source.license_class == "open_license"
+        assert state.source.public_visibility_allowed is False
+        assert state.source.requires_unofficial_notice is False
+        assert state.is_enabled is False
+        assert state.default_visibility == VISIBILITY_DM
+        assert state.is_configured is False
+
+        with pytest.raises(SystemsPolicyValidationError, match="cannot be made public"):
+            service.update_campaign_sources(
+                "linden-pass",
+                updates=[
+                    {
+                        "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                        "is_enabled": True,
+                        "default_visibility": VISIBILITY_PUBLIC,
+                    }
+                ],
+                actor_user_id=users["dm"]["id"],
+                acknowledge_proprietary=False,
+                can_set_private=False,
+            )
+
+        unchanged_state = service.get_campaign_source_state(
+            "linden-pass",
+            XIANXIA_HOMEBREW_SOURCE_ID,
+        )
+        assert unchanged_state is not None
+        assert unchanged_state.is_enabled is False
+        assert unchanged_state.default_visibility == VISIBILITY_DM
+        assert unchanged_state.is_configured is False
+
+        changed_sources = service.update_campaign_sources(
+            "linden-pass",
+            updates=[
+                {
+                    "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                    "is_enabled": True,
+                    "default_visibility": VISIBILITY_PLAYERS,
+                }
+            ],
+            actor_user_id=users["dm"]["id"],
+            acknowledge_proprietary=False,
+            can_set_private=False,
+        )
+        updated_state = service.get_campaign_source_state("linden-pass", XIANXIA_HOMEBREW_SOURCE_ID)
+
+        assert [source.source_id for source in changed_sources] == [XIANXIA_HOMEBREW_SOURCE_ID]
+        assert updated_state is not None
+        assert updated_state.is_enabled is True
+        assert updated_state.default_visibility == VISIBILITY_PLAYERS
+        assert updated_state.is_configured is True
 
 
 def test_xianxia_campaign_systems_scope_defaults_dm_only_while_wiki_stays_visible(

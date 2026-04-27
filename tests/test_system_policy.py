@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from player_wiki.campaign_visibility import (
+    VISIBILITY_DM,
+    VISIBILITY_PLAYERS,
+    VISIBILITY_PUBLIC,
+    build_default_campaign_visibility_by_scope,
+)
 from player_wiki.system_policy import (
     CHARACTER_ADVANCEMENT_LANE_DND5E_LEVEL_UP,
     CHARACTER_ADVANCEMENT_LANE_XIANXIA_CULTIVATION,
@@ -92,6 +98,24 @@ def test_system_policy_recognizes_xianxia_without_enabling_dnd_only_tools() -> N
     assert not supports_dnd5e_character_pdf_import("xianxia")
     assert not supports_dnd5e_character_spellcasting_tools("xianxia")
     assert not supports_dnd5e_systems_import("xianxia")
+
+
+def test_xianxia_visibility_policy_overrides_only_systems_scope() -> None:
+    dnd_defaults = build_default_campaign_visibility_by_scope(DND_5E_SYSTEM_CODE)
+    xianxia_defaults = build_default_campaign_visibility_by_scope("xianxia")
+    unknown_defaults = build_default_campaign_visibility_by_scope("Pathfinder 2E")
+
+    assert system_policy_for_code("xianxia").default_campaign_visibility_by_scope == (
+        ("systems", VISIBILITY_DM),
+    )
+    assert xianxia_defaults["systems"] == VISIBILITY_DM
+    assert xianxia_defaults["wiki"] == VISIBILITY_PUBLIC
+    assert xianxia_defaults["campaign"] == VISIBILITY_PUBLIC
+    assert xianxia_defaults["session"] == VISIBILITY_PLAYERS
+    assert xianxia_defaults["combat"] == VISIBILITY_PLAYERS
+
+    assert dnd_defaults["systems"] == VISIBILITY_PLAYERS
+    assert unknown_defaults["systems"] == VISIBILITY_PLAYERS
 
 
 def test_unknown_systems_remain_unsupported_without_rewriting_the_code() -> None:
