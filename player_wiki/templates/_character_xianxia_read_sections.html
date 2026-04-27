@@ -196,9 +196,11 @@
           {% if group.records %}
             <ul class="plain-list slot-list">
               {% for record in group.records %}
-                <li>
+                <li class="approval-record__heading">
                   <span>{{ record.name }}</span>
-                  <strong>{{ record.status_label }}</strong>
+                  <span class="meta-badge approval-state-badge approval-state-badge--{{ record.status_key or 'unknown' }}">
+                    Approval state: {{ record.status_label }}
+                  </span>
                 </li>
                 <li class="meta">
                   {% if record.type_label %}{{ record.type_label }}{% endif %}

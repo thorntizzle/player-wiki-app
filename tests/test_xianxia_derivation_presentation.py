@@ -382,17 +382,20 @@ def test_xianxia_techniques_page_shows_approval_status_records(
     assert "Approved for the Heavenly Palm initiate technique." in html
     assert "Approval timestamp: 2026-04-25T19:30:00-04:00" in html
     assert "Mountain-Crossing Oath" in html
-    assert "Approved" in html
+    assert "Approval state: Approved" in html
+    assert "approval-state-badge--approved" in html
     assert "Karmic Constraint" in html
     assert "Variant" in html
     assert "Ascendant Arts" in html
     assert "Skyfire Crown" in html
     assert "Starfall Halo" in html
-    assert "Pending" in html
+    assert "Approval state: Pending" in html
+    assert "approval-state-badge--pending" in html
     assert "Cloud-Splitting Revision" in html
     assert "Too broad for this rank." in html
     assert "Approval timestamp: 2026-04-26 09:15" in html
-    assert "Rejected" in html
+    assert "Approval state: Rejected" in html
+    assert "approval-state-badge--rejected" in html
     assert "Dao Immolating Technique Use Records" in html
     assert "River-Cleaving Spark" in html
     assert "Spent after the duel began." in html

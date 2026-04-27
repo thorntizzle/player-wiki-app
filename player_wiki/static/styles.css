@@ -1659,6 +1659,42 @@ button {
   font-weight: 700;
 }
 
+.approval-record__heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.65rem;
+  align-items: center;
+}
+
+.approval-state-badge {
+  border: 1px solid var(--border);
+}
+
+.approval-state-badge--approved {
+  border-color: rgba(73, 118, 81, 0.36);
+  background: var(--success-bg);
+  color: var(--ink);
+}
+
+.approval-state-badge--pending {
+  border-color: var(--border-accent);
+  background: var(--surface-accent-soft);
+  color: var(--accent-deep);
+}
+
+.approval-state-badge--rejected,
+.approval-state-badge--denied {
+  border-color: var(--error-border);
+  background: var(--error-bg);
+  color: var(--danger);
+}
+
+.approval-state-badge--unknown,
+.approval-state-badge--not_approved,
+.approval-state-badge--unapproved {
+  background: var(--surface-soft-muted);
+}
+
 .admin-layout {
   grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
 }
