@@ -2714,6 +2714,197 @@ def test_xianxia_cultivation_rank_advance_requires_next_rank_and_insight(
     assert _character_state_revision(app, "rank-guard-crane") == starting_revision
 
 
+def test_xianxia_cultivation_spend_matrix_preserves_history_and_mutable_pools(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+                "default_visibility": "dm",
+            }
+        ]
+
+    _write_campaign_config(app, _mutate)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Spend Matrix Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+
+    def _lower_mutable_pools(payload: dict) -> None:
+        payload.setdefault("vitals", {})["current_hp"] = 6
+        xianxia = payload.setdefault("xianxia", {})
+        xianxia.setdefault("vitals", {})["current_hp"] = 6
+        xianxia.setdefault("vitals", {})["current_stance"] = 4
+        xianxia["energies"] = {
+            "jing": {"current": 0},
+            "qi": {"current": 1},
+            "shen": {"current": 1},
+        }
+        xianxia["yin_yang"] = {
+            "yin_current": 0,
+            "yang_current": 1,
+        }
+
+    _write_character_state(app, "spend-matrix-crane", _lower_mutable_pools)
+
+    starting_revision = _character_state_revision(app, "spend-matrix-crane")
+    insight_response = client.post(
+        "/campaigns/linden-pass/characters/spend-matrix-crane/cultivation",
+        data={
+            "expected_revision": str(starting_revision),
+            "cultivation_action": "save_insight",
+            "insight_available": "5",
+            "insight_spent": "0",
+        },
+        follow_redirects=False,
+    )
+    assert insight_response.status_code == 302
+
+    spend_actions = [
+        {
+            "cultivation_action": "spend_cultivation_energy",
+            "energy_key": "jing",
+            "cultivation_energy_notes": "Deepened the lower furnace.",
+        },
+        {
+            "cultivation_action": "spend_meditation_yin_yang",
+            "yin_yang_key": "yin",
+            "meditation_notes": "Settled the cold current.",
+        },
+        {
+            "cultivation_action": "spend_conditioning",
+            "conditioning_target": "hp",
+            "conditioning_notes": "Hardened breath and bone.",
+        },
+        {
+            "cultivation_action": "spend_training",
+            "training_target": "stance",
+            "training_notes": "Held the stance through the night.",
+        },
+    ]
+    for form_data in spend_actions:
+        current_revision = _character_state_revision(app, "spend-matrix-crane")
+        response = client.post(
+            "/campaigns/linden-pass/characters/spend-matrix-crane/cultivation",
+            data={"expected_revision": str(current_revision), **form_data},
+            follow_redirects=False,
+        )
+        assert response.status_code == 302
+
+    pre_invalid_payload = _read_character_definition(app, "spend-matrix-crane")
+    pre_invalid_revision = _character_state_revision(app, "spend-matrix-crane")
+    skip_rank_response = client.post(
+        "/campaigns/linden-pass/characters/spend-matrix-crane/cultivation",
+        data={
+            "expected_revision": str(pre_invalid_revision),
+            "cultivation_action": "advance_martial_art_rank",
+            "martial_art_index": "0",
+            "target_rank_key": "master",
+        },
+        follow_redirects=True,
+    )
+    assert skip_rank_response.status_code == 200
+    assert (
+        "Advance Demon&#39;s Fist to Novice before Master."
+        in skip_rank_response.get_data(as_text=True)
+    )
+    assert _read_character_definition(app, "spend-matrix-crane") == pre_invalid_payload
+    assert _character_state_revision(app, "spend-matrix-crane") == pre_invalid_revision
+
+    rank_response = client.post(
+        "/campaigns/linden-pass/characters/spend-matrix-crane/cultivation",
+        data={
+            "expected_revision": str(pre_invalid_revision),
+            "cultivation_action": "advance_martial_art_rank",
+            "martial_art_index": "0",
+            "target_rank_key": "novice",
+        },
+        follow_redirects=False,
+    )
+    assert rank_response.status_code == 302
+
+    final_payload = _read_character_definition(app, "spend-matrix-crane")
+    final_revision = _character_state_revision(app, "spend-matrix-crane")
+    no_insight_response = client.post(
+        "/campaigns/linden-pass/characters/spend-matrix-crane/cultivation",
+        data={
+            "expected_revision": str(final_revision),
+            "cultivation_action": "spend_meditation_yin_yang",
+            "yin_yang_key": "yang",
+        },
+        follow_redirects=True,
+    )
+    assert no_insight_response.status_code == 200
+    assert (
+        "Meditation needs 1 Insight to increase Yang; only 0 available."
+        in no_insight_response.get_data(as_text=True)
+    )
+    assert _read_character_definition(app, "spend-matrix-crane") == final_payload
+    assert _character_state_revision(app, "spend-matrix-crane") == final_revision
+
+    xianxia = final_payload["xianxia"]
+    assert xianxia["insight"] == {"available": 0, "spent": 5}
+    assert xianxia["energies"] == {
+        "jing": {"max": 3},
+        "qi": {"max": 2},
+        "shen": {"max": 1},
+    }
+    assert xianxia["yin_yang"] == {"yin_max": 2, "yang_max": 1}
+    assert xianxia["durability"]["hp_max"] == 20
+    assert xianxia["durability"]["stance_max"] == 20
+
+    first_art = xianxia["martial_arts"][0]
+    assert first_art["current_rank_key"] == "novice"
+    assert first_art["current_rank"] == "Novice"
+    assert first_art["rank_energy_maximum_increases"] == {
+        "novice": {"jing": 1, "qi": 1, "shen": 0}
+    }
+
+    history = xianxia["advancement_history"]
+    assert [event["action"] for event in history] == [
+        "insight_counter_adjustment",
+        "cultivation_energy_increase",
+        "meditation_yin_yang_increase",
+        "conditioning_hp_increase",
+        "training_stance_increase",
+        "martial_art_rank_advance",
+    ]
+    assert history[0]["insight_available_before"] == 0
+    assert history[0]["insight_available_after"] == 5
+    assert history[-1]["rank"] == "Novice"
+    assert history[-1]["energy_maximum_increases"] == {
+        "jing": 1,
+        "qi": 1,
+        "shen": 0,
+    }
+
+    with app.app_context():
+        repository = app.extensions["character_repository"]
+        record = repository.get_character("linden-pass", "spend-matrix-crane")
+        assert record is not None
+        state = record.state_record.state
+        assert state["vitals"]["current_hp"] == 6
+        assert state["xianxia"]["vitals"]["current_hp"] == 6
+        assert state["xianxia"]["vitals"]["current_stance"] == 4
+        assert state["xianxia"]["energies"] == {
+            "jing": {"current": 0},
+            "qi": {"current": 1},
+            "shen": {"current": 1},
+        }
+        assert state["xianxia"]["yin_yang"] == {
+            "yin_current": 0,
+            "yang_current": 1,
+        }
+
+
 def test_xianxia_create_picker_allows_seeded_and_gm_custom_martial_arts(
     app, client, sign_in, users
 ):
