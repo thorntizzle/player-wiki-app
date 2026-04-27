@@ -23092,6 +23092,186 @@ def test_progression_repair_route_saves_partial_repairs_and_redirects_back_when_
     assert definition_payload["source"]["native_progression"]["history"][-1]["kind"] == "repair"
 
 
+def test_xianxia_milestone1_dnd5e_native_create_level_up_and_repair_routes_remain_dnd5e(
+    app, client, sign_in, users, get_character, monkeypatch
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    route_calls = {"create": 0, "level_up": 0, "repair": 0}
+
+    monkeypatch.setattr(
+        app_module,
+        "build_level_one_builder_context",
+        lambda *args, **kwargs: _builder_context_fixture(),
+    )
+
+    def _build_dnd_character(*args, **kwargs):
+        route_calls["create"] += 1
+        return _minimal_character_definition("milestone-dnd-hero", "Milestone DND Hero"), _minimal_import_metadata(
+            "milestone-dnd-hero"
+        )
+
+    monkeypatch.setattr(app_module, "build_level_one_character_definition", _build_dnd_character)
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={"name": "Milestone DND Hero", "character_slug": "milestone-dnd-hero"},
+        follow_redirects=False,
+    )
+
+    assert create_response.status_code == 302
+    assert create_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/milestone-dnd-hero"
+    )
+    assert route_calls["create"] == 1
+    created_payload = yaml.safe_load(
+        (
+            app.config["TEST_CAMPAIGNS_DIR"]
+            / "linden-pass"
+            / "characters"
+            / "milestone-dnd-hero"
+            / "definition.yaml"
+        ).read_text(encoding="utf-8")
+    )
+    assert created_payload["system"] == "DND-5E"
+    assert "xianxia" not in created_payload
+    assert created_payload["source"]["source_type"] == "native_character_builder"
+    assert get_character("milestone-dnd-hero").state_record.state["vitals"]["current_hp"] == 12
+
+    leveler_dir = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "characters" / "milestone-leveler"
+    leveler_dir.mkdir(parents=True, exist_ok=True)
+    leveler_definition = _minimal_character_definition("milestone-leveler", "Milestone Leveler")
+    (leveler_dir / "definition.yaml").write_text(
+        yaml.safe_dump(leveler_definition.to_dict(), sort_keys=False),
+        encoding="utf-8",
+    )
+    (leveler_dir / "import.yaml").write_text(
+        yaml.safe_dump(_minimal_import_metadata("milestone-leveler").to_dict(), sort_keys=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        app_module,
+        "native_level_up_readiness",
+        lambda *args, **kwargs: {"status": "ready", "message": "", "reasons": []},
+    )
+    monkeypatch.setattr(
+        app_module,
+        "build_native_level_up_context",
+        lambda *args, **kwargs: _level_up_context_fixture(),
+    )
+    leveled_definition = _minimal_character_definition("milestone-leveler", "Milestone Leveler")
+    leveled_definition.profile["class_level_text"] = "Fighter 2"
+    leveled_definition.profile["classes"][0]["level"] = 2
+    leveled_definition.stats["max_hp"] = 20
+    leveled_import = _minimal_import_metadata("milestone-leveler")
+    leveled_import.source_path = "builder://native-level-2"
+
+    def _build_dnd_level_up(*args, **kwargs):
+        route_calls["level_up"] += 1
+        return leveled_definition, leveled_import, 8
+
+    monkeypatch.setattr(app_module, "build_native_level_up_character_definition", _build_dnd_level_up)
+
+    level_up_response = client.post(
+        "/campaigns/linden-pass/characters/milestone-leveler/level-up",
+        data={"expected_revision": "1", "hp_gain": "8"},
+        follow_redirects=False,
+    )
+
+    assert level_up_response.status_code == 302
+    assert level_up_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/milestone-leveler"
+    )
+    assert route_calls["level_up"] == 1
+    level_up_payload = yaml.safe_load((leveler_dir / "definition.yaml").read_text(encoding="utf-8"))
+    assert level_up_payload["system"] == "DND-5E"
+    assert "xianxia" not in level_up_payload
+    assert level_up_payload["profile"]["class_level_text"] == "Fighter 2"
+    assert yaml.safe_load((leveler_dir / "import.yaml").read_text(encoding="utf-8"))[
+        "source_path"
+    ] == "builder://native-level-2"
+    assert get_character("milestone-leveler").state_record.state["vitals"]["current_hp"] == 20
+
+    repairer_dir = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "characters" / "milestone-repairer"
+    repairer_dir.mkdir(parents=True, exist_ok=True)
+    repairer_definition = _minimal_imported_character_definition("milestone-repairer", "Milestone Repairer")
+    (repairer_dir / "definition.yaml").write_text(
+        yaml.safe_dump(repairer_definition.to_dict(), sort_keys=False),
+        encoding="utf-8",
+    )
+    (repairer_dir / "import.yaml").write_text(
+        yaml.safe_dump(_minimal_import_metadata("milestone-repairer").to_dict(), sort_keys=False),
+        encoding="utf-8",
+    )
+    readiness_states = iter(
+        [
+            {
+                "status": "repairable",
+                "message": "This imported character needs a quick progression repair before native level-up.",
+                "reasons": ["Choose a supported base class link for this character."],
+            },
+            {"status": "ready", "message": "", "reasons": []},
+        ]
+    )
+    monkeypatch.setattr(app_module, "native_level_up_readiness", lambda *args, **kwargs: next(readiness_states))
+    monkeypatch.setattr(
+        app_module,
+        "build_imported_progression_repair_context",
+        lambda *args, **kwargs: {
+            "values": {},
+            "character_name": "Milestone Repairer",
+            "current_level": 3,
+            "readiness": {"message": "repair"},
+            "class_options": [],
+            "species_options": [],
+            "background_options": [],
+            "subclass_options": [],
+            "feat_rows": [],
+            "optionalfeature_rows": [],
+            "spell_rows": [],
+            "class_entries": [],
+            "species_entries": [],
+            "background_entries": [],
+            "subclass_entries": [],
+            "feat_entries": [],
+            "optionalfeature_entries": [],
+        },
+    )
+    repaired_definition = _minimal_imported_character_definition("milestone-repairer", "Milestone Repairer")
+    repaired_definition.source["native_progression"] = {
+        "baseline_repaired_at": "2026-04-27T00:00:00Z",
+        "history": [{"kind": "repair", "at": "2026-04-27T00:00:00Z", "target_level": 3}],
+    }
+    repaired_import = _minimal_import_metadata("milestone-repairer")
+    repaired_import.source_path = "imports://milestone-repairer.md"
+    repaired_import.import_status = "managed"
+
+    def _repair_dnd_imported_progression(*args, **kwargs):
+        route_calls["repair"] += 1
+        return repaired_definition, repaired_import
+
+    monkeypatch.setattr(app_module, "apply_imported_progression_repairs", _repair_dnd_imported_progression)
+
+    repair_response = client.post(
+        "/campaigns/linden-pass/characters/milestone-repairer/progression-repair",
+        data={"expected_revision": "1"},
+        follow_redirects=False,
+    )
+
+    assert repair_response.status_code == 302
+    assert repair_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/milestone-repairer/level-up"
+    )
+    assert route_calls["repair"] == 1
+    repair_payload = yaml.safe_load((repairer_dir / "definition.yaml").read_text(encoding="utf-8"))
+    assert repair_payload["system"] == "DND-5E"
+    assert "xianxia" not in repair_payload
+    assert repair_payload["source"]["native_progression"]["history"][-1]["kind"] == "repair"
+    assert yaml.safe_load((repairer_dir / "import.yaml").read_text(encoding="utf-8"))[
+        "import_status"
+    ] == "managed"
+
+
 def test_level_up_live_preview_route_returns_fragment(app, client, sign_in, users, monkeypatch):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 

@@ -5376,6 +5376,50 @@ def test_dnd5e_spellcasting_and_session_slots_remain_enabled_with_xianxia_policy
     assert spell_slots[2]["used"] == 1
 
 
+def test_xianxia_milestone1_dnd5e_read_and_session_spellcasting_surfaces_remain_dnd5e(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "DND-5E"
+        payload["systems_library"] = "DND-5E"
+
+    _write_campaign_config(app, _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    quick_reference = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=quick")
+    spellcasting = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=spellcasting")
+    session_spellcasting = client.get(
+        "/campaigns/linden-pass/characters/arden-march?mode=session&page=spellcasting"
+    )
+
+    assert quick_reference.status_code == 200
+    quick_html = quick_reference.get_data(as_text=True)
+    assert "?page=spellcasting" in quick_html
+    assert "?page=martial_arts" not in quick_html
+    assert "?page=techniques" not in quick_html
+    assert "/cultivation" not in quick_html
+
+    assert spellcasting.status_code == 200
+    spellcasting_html = spellcasting.get_data(as_text=True)
+    assert "Spellcasting" in spellcasting_html
+    assert "Message" in spellcasting_html
+    assert "1 action" in spellcasting_html
+    assert "120 feet" in spellcasting_html
+    assert "Martial Arts" not in spellcasting_html
+    assert "Jing" not in spellcasting_html
+    assert "Dao" not in spellcasting_html
+
+    assert session_spellcasting.status_code == 200
+    session_html = session_spellcasting.get_data(as_text=True)
+    assert "Spellcasting" in session_html
+    assert "Spell slots" in session_html
+    assert "Message" in session_html
+    assert "Martial Arts" not in session_html
+    assert "Stance" not in session_html
+    assert "Dao" not in session_html
+
+
 def test_non_5e_read_sheet_hides_native_authoring_affordances_and_skips_readiness(
     app, client, sign_in, users, monkeypatch
 ):

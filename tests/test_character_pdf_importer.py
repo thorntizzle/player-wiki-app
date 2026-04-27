@@ -271,6 +271,35 @@ def test_xianxia_blocks_pdf_pilot_and_import_entrypoints_before_parsing(app, tmp
         import_pdf_character(tmp_path, "linden-pass", pdf_path)
 
 
+def test_xianxia_milestone1_dnd5e_pdf_import_still_reaches_parser_gate(
+    app, tmp_path, monkeypatch
+):
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = "DND-5E"
+    payload["systems_library"] = "DND-5E"
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+
+    monkeypatch.setattr(app_module, "create_app", lambda: app)
+
+    def _prove_dnd5e_reached_pdf_parser(*args, **kwargs):
+        raise RuntimeError("dnd5e_pdf_parser_reached")
+
+    monkeypatch.setattr(
+        pdf_importer_module,
+        "extract_pdf_annotation_fields",
+        _prove_dnd5e_reached_pdf_parser,
+    )
+    pdf_path = tmp_path / "dnd5e-character.pdf"
+    pdf_path.write_bytes(b"not a real pdf")
+
+    with pytest.raises(RuntimeError, match="dnd5e_pdf_parser_reached"):
+        build_pdf_character_artifacts("linden-pass", pdf_path)
+
+
 def _sample_system_entry(
     *,
     entry_key: str,
