@@ -2249,11 +2249,13 @@ def _present_xianxia_linked_records(
             rank_records_by_ref = _xianxia_rank_records_by_ref(entry)
             record["learned_rank_refs"] = _present_xianxia_rank_refs(
                 list(payload.get("learned_rank_refs") or []),
+                campaign_slug=campaign_slug,
                 parent_href=href,
                 rank_records_by_ref=rank_records_by_ref,
             )
             record["rank_progress"] = _present_xianxia_rank_progress(
                 payload,
+                campaign_slug=campaign_slug,
                 parent_href=href,
                 rank_catalog=_xianxia_rank_catalog(entry),
             )
@@ -2472,6 +2474,7 @@ def _xianxia_value_list(values: Any) -> list[Any]:
 def _present_xianxia_rank_refs(
     values: list[Any],
     *,
+    campaign_slug: str,
     parent_href: str,
     rank_records_by_ref: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
@@ -2481,8 +2484,15 @@ def _present_xianxia_rank_refs(
         ref = str(value or "").strip()
         if not ref:
             continue
-        href = f"{parent_href}#{_xianxia_anchor_id_for_ref(ref)}" if parent_href else ""
         rank_record = dict(rank_records.get(ref) or {})
+        rank_entry_slug = str(rank_record.get("rank_entry_slug") or "").strip()
+        if rank_entry_slug:
+            href = build_systems_entry_href(
+                campaign_slug,
+                {"slug": rank_entry_slug},
+            )
+        else:
+            href = f"{parent_href}#{_xianxia_anchor_id_for_ref(ref)}" if parent_href else ""
         rank_refs.append(
             {
                 "ref": ref,
@@ -2502,6 +2512,7 @@ def _present_xianxia_rank_refs(
 def _present_xianxia_rank_progress(
     payload: dict[str, Any],
     *,
+    campaign_slug: str,
     parent_href: str,
     rank_catalog: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -2521,6 +2532,7 @@ def _present_xianxia_rank_progress(
     if not rank_catalog:
         fallback_steps = _present_xianxia_rank_refs(
             list(payload.get("learned_rank_refs") or []),
+            campaign_slug=campaign_slug,
             parent_href=parent_href,
         )
         learned_count = len(fallback_steps)
@@ -2561,7 +2573,6 @@ def _present_xianxia_rank_progress(
         rank_ref = str(rank_record.get("rank_ref") or "").strip()
         label = (
             str(rank_record.get("rank_name") or "").strip()
-            or XIANXIA_MARTIAL_ART_RANK_LABELS.get(rank_key)
             or humanize_value(rank_key)
             or "Rank"
         )
@@ -2582,7 +2593,18 @@ def _present_xianxia_rank_progress(
             if is_learned:
                 learned_available_count += 1
             status_label = "Current" if is_current else "Learned" if is_learned else "Unlearned"
-            href = f"{parent_href}#{_xianxia_anchor_id_for_ref(rank_ref)}" if parent_href and rank_ref else ""
+            rank_entry_slug = str(rank_record.get("rank_entry_slug") or "").strip()
+            if rank_entry_slug:
+                href = build_systems_entry_href(
+                    campaign_slug,
+                    {"slug": rank_entry_slug},
+                )
+            else:
+                href = (
+                    f"{parent_href}#{_xianxia_anchor_id_for_ref(rank_ref)}"
+                    if parent_href and rank_ref
+                    else ""
+                )
         steps.append(
             {
                 "key": rank_key,

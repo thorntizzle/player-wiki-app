@@ -292,7 +292,10 @@ def build_xianxia_systems_seed_entries() -> list[dict[str, Any]]:
     for index, raw_spec in enumerate(payload["entries"], start=1):
         if not isinstance(raw_spec, dict):
             raise ValueError(f"Xianxia Systems seed entry {index} must be an object.")
-        entries.append(_build_seed_entry(raw_spec, index=index, source_path=source_path))
+        entry = _build_seed_entry(raw_spec, index=index, source_path=source_path)
+        entries.append(entry)
+        if entry.get("entry_type") == "martial_art":
+            entries.extend(_build_martial_art_rank_entries(entry))
     return entries
 
 
@@ -416,6 +419,265 @@ def _build_seed_entry(raw_spec: dict[str, Any], *, index: int, source_path: str)
         "body": body,
         "rendered_html": rendered_html,
     }
+
+
+def _build_martial_art_rank_entry_slug(martial_art_slug: str, rank_key: str) -> str:
+    return slugify(f"{martial_art_slug} {rank_key}")
+
+
+def _build_martial_art_rank_entry_key(rank_slug: str) -> str:
+    return f"xianxia|martial_art_rank|{XIANXIA_HOMEBREW_SOURCE_ID.lower()}|{rank_slug}"
+
+
+def _build_martial_art_rank_entries(parent_entry: dict[str, Any]) -> list[dict[str, Any]]:
+    metadata = dict(parent_entry.get("metadata") or {})
+    parent_entry_key = str(parent_entry.get("entry_key") or "").strip()
+    parent_entry_slug = str(parent_entry.get("slug") or "").strip()
+    parent_entry_title = str(parent_entry.get("title") or "").strip()
+    source_page = str(parent_entry.get("source_page") or "Xianxia curated seed").strip()
+    source_path = str(parent_entry.get("source_path") or "").strip()
+    source_kind = str(metadata.get("source_kind") or "app_reference").strip()
+    source_provenance = dict(metadata.get("source_provenance") or {})
+    source_origin = str(metadata.get("content_origin") or "managed_seed_file").strip()
+    source_stage = str(
+        metadata.get("content_migration_stage") or "curated_seed_data_to_sqlite"
+    ).strip()
+
+    if not parent_entry_slug:
+        return []
+
+    rank_records = [
+        dict(record)
+        for record in list(
+            metadata.get("martial_art_rank_records")
+            or metadata.get("xianxia_martial_art_rank_records")
+            or []
+        )
+        if isinstance(record, dict)
+    ]
+    rank_records.extend(
+        dict(record)
+        for record in list(
+            metadata.get("martial_art_missing_rank_records")
+            or metadata.get("xianxia_martial_art_missing_rank_records")
+            or []
+        )
+        if isinstance(record, dict)
+    )
+    if not rank_records:
+        return []
+
+    entries: list[dict[str, Any]] = []
+    for record in sorted(
+        rank_records,
+        key=lambda value: (
+            int(value.get("rank_order") or 0),
+            str(value.get("rank_key") or "").strip(),
+        ),
+    ):
+        rank_key = str(record.get("rank_key") or "").strip()
+        if not rank_key:
+            continue
+        rank_ref = str(record.get("rank_ref") or "").strip()
+        rank_name = str(
+            record.get("rank_name")
+            or _XIANXIA_MARTIAL_ART_RANK_LOOKUP.get(rank_key, {}).get("rank_name")
+            or rank_key
+        ).strip()
+        rank_entry_slug = str(
+            record.get("rank_entry_slug") or _build_martial_art_rank_entry_slug(
+                parent_entry_slug,
+                rank_key,
+            )
+        ).strip()
+        rank_entry_key = str(
+            record.get("rank_entry_key")
+            or _build_martial_art_rank_entry_key(rank_entry_slug)
+        ).strip()
+        record["rank_entry_slug"] = rank_entry_slug
+        record["rank_entry_key"] = rank_entry_key
+
+        ability_entries = [
+            dict(ability)
+            for ability in list(record.get("ability_grants") or [])
+            if isinstance(ability, dict)
+        ]
+        ability_search_terms = [
+            value
+            for value in (
+                *(str(value.get("name") or "").strip() for value in ability_entries),
+                *(str(value.get("ability_ref") or "").strip() for value in ability_entries),
+                *(str(value.get("ability_kind") or "").strip() for value in ability_entries),
+            )
+            if value
+        ]
+        rank_entry_title = f"{parent_entry_title} - {rank_name}"
+        entries.append(
+            {
+                "entry_key": rank_entry_key,
+                "entry_type": "martial_art_rank",
+                "slug": rank_entry_slug,
+                "title": rank_entry_title,
+                "source_page": source_page,
+                "source_path": source_path,
+                "search_text": " ".join(
+                    part
+                    for part in (
+                        rank_entry_title,
+                        source_page,
+                        parent_entry_title,
+                        parent_entry_slug,
+                        rank_ref,
+                        rank_name,
+                        rank_key,
+                        str(record.get("rank_completion_status") or ""),
+                        str(record.get("rank_completion_note") or ""),
+                        str(record.get("incomplete_rank_reason") or ""),
+                        *ability_search_terms,
+                    )
+                    if part
+                ).lower(),
+                "player_safe_default": bool(parent_entry.get("player_safe_default", True)),
+                "dm_heavy": bool(parent_entry.get("dm_heavy", False)),
+                "metadata": {
+                    "aliases": [parent_entry_title, f"{parent_entry_slug} {rank_key}"],
+                    "facets": ["martial_art_rank"],
+                    "xianxia_entry_facets": ["martial_art_rank"],
+                    "seed_version": XIANXIA_SYSTEMS_SEED_VERSION,
+                    "seed_storage_strategy": XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY,
+                    "source_kind": source_kind,
+                    "source_provenance": source_provenance,
+                    "content_origin": source_origin,
+                    "content_source_path": XIANXIA_SYSTEMS_SEED_DATA_RELATIVE_PATH,
+                    "content_migration_stage": source_stage,
+                    "parent_entry_key": parent_entry_key,
+                    "parent_entry_slug": parent_entry_slug,
+                    "parent_entry_title": parent_entry_title,
+                    "martial_art_key": str(
+                        metadata.get("martial_art_key")
+                        or metadata.get("xianxia_martial_art_key")
+                        or parent_entry_slug
+                    ),
+                    "martial_art_slug": parent_entry_slug,
+                    "rank_key": rank_key,
+                    "rank_ref": rank_ref,
+                    "rank_name": rank_name,
+                    "rank_entry_slug": rank_entry_slug,
+                    "rank_entry_key": rank_entry_key,
+                    "rank_order": int(record.get("rank_order") or 0),
+                    "rank_completion_status": str(record.get("rank_completion_status") or ""),
+                    "rank_completion_note": str(record.get("rank_completion_note") or ""),
+                    "missing_rank_reason": str(record.get("incomplete_rank_reason") or ""),
+                    "incomplete_rank_reason": str(record.get("incomplete_rank_reason") or ""),
+                    "is_incomplete_rank": bool(record.get("is_incomplete_rank") or False),
+                    "rank_records_status": str(record.get("rank_completion_status") or ""),
+                    "rank_records_status_label": str(record.get("rank_completion_status") or ""),
+                },
+                "body": {
+                    "xianxia_martial_art_rank": dict(record),
+                    "xianxia_martial_art": {
+                        "parent_entry_key": parent_entry_key,
+                        "parent_entry_slug": parent_entry_slug,
+                        "parent_entry_title": parent_entry_title,
+                        "martial_art_key": str(
+                            metadata.get("martial_art_key")
+                            or metadata.get("xianxia_martial_art_key")
+                            or parent_entry_slug
+                        ),
+                        "martial_art_slug": parent_entry_slug,
+                    },
+                },
+                "rendered_html": _render_martial_art_rank_record_html(
+                    record,
+                    heading=rank_entry_title,
+                    section_id=rank_entry_slug,
+                ),
+            }
+        )
+    return entries
+
+
+def _render_martial_art_rank_record_html(
+    record: dict[str, Any],
+    *,
+    heading: str = "",
+    section_id: str = "",
+) -> str:
+    rank_record = dict(record)
+    rank_ref = str(rank_record.get("rank_ref") or "").strip()
+    section_anchor = section_id or _anchor_id_for_ref(rank_ref)
+    rank_name = str(rank_record.get("rank_name") or heading or "Martial Art Rank").strip()
+    prerequisite_rank = str(rank_record.get("prerequisite_rank_name") or "None").strip()
+    completion_status = str(rank_record.get("rank_completion_status") or "").strip()
+    completion_note = str(rank_record.get("rank_completion_note") or "").strip()
+    completion_label = str(
+        rank_record.get("rank_records_status_label")
+        or rank_record.get("rank_records_status")
+        or completion_status
+        or ""
+    ).strip().replace("_", " ")
+
+    parts: list[str] = [f'<section id="{escape(section_anchor)}">']
+    display_heading = heading or rank_name
+    if display_heading:
+        parts.append(f"<h2>{escape(display_heading)}</h2>")
+    if rank_ref:
+        parts.append(f"<p><strong>Rank Ref:</strong> {escape(rank_ref)}</p>")
+    if completion_label:
+        parts.append(f"<p><strong>Status:</strong> {escape(completion_label)}</p>")
+    if completion_note:
+        parts.append(f"<p><strong>Note:</strong> {escape(completion_note)}</p>")
+
+    energy_grants = _format_energy_maximum_increases(
+        rank_record.get("energy_maximum_increases")
+    )
+    if energy_grants:
+        parts.append(f"<p><strong>Energy Maximum Increases:</strong> {energy_grants}</p>")
+
+    insight_cost = rank_record.get("insight_cost")
+    if insight_cost is not None:
+        parts.append(
+            "<p><strong>Advancement:</strong> "
+            f"{escape(str(insight_cost))} Insight; prerequisite rank {escape(prerequisite_rank)}.</p>"
+        )
+
+    teacher_note = str(rank_record.get("teacher_breakthrough_note") or "").strip()
+    if teacher_note:
+        parts.append(f"<p><strong>Teacher/Breakthrough:</strong> {escape(teacher_note)}</p>")
+
+    legendary_note = str(rank_record.get("legendary_prerequisite_note") or "").strip()
+    if legendary_note:
+        parts.append(f"<p><strong>Legendary Requirement:</strong> {escape(legendary_note)}</p>")
+
+    ability_grants = [
+        grant for grant in rank_record.get("ability_grants") or [] if isinstance(grant, dict)
+    ]
+    if ability_grants:
+        parts.append("<h3>Ability Refs</h3>")
+        parts.append("<ul>")
+        for grant in ability_grants:
+            ability_ref = str(grant.get("ability_ref") or "").strip()
+            ability_anchor = _anchor_id_for_ref(ability_ref)
+            ability_name = str(grant.get("name") or "").strip()
+            kind = str(grant.get("kind") or "").strip()
+            support_state = str(grant.get("support_state") or "").strip()
+            parts.append(f'<li id="{escape(ability_anchor)}">')
+            if ability_ref:
+                parts.append(f'<a href="#{escape(ability_anchor)}">{escape(ability_ref)}</a>')
+            if ability_name:
+                parts.append(f" - {escape(ability_name)}")
+            if kind:
+                parts.append(f" ({escape(kind)})")
+            ability_tags = _format_ability_metadata_tags(grant)
+            if ability_tags:
+                parts.append(f" - {ability_tags}")
+            if support_state:
+                parts.append(f" - {escape(support_state.replace('_', ' '))}")
+            parts.append("</li>")
+        parts.append("</ul>")
+
+    parts.append("</section>")
+    return "".join(parts)
 
 
 def _normalize_string_list(raw_values: object) -> list[str]:
@@ -2054,76 +2316,73 @@ def _render_martial_art_rank_records_html(body: dict[str, Any]) -> str:
     martial_art_body = body.get("xianxia_martial_art")
     if not isinstance(martial_art_body, dict):
         return ""
+    martial_art_slug = str(martial_art_body.get("martial_art_slug") or "").strip()
     rank_records = [
-        record for record in martial_art_body.get("rank_records") or [] if isinstance(record, dict)
+        dict(record)
+        for record in (
+            list(martial_art_body.get("rank_records") or [])
+            + list(martial_art_body.get("xianxia_martial_art_rank_records") or [])
+            + list(martial_art_body.get("missing_rank_records") or [])
+            + list(martial_art_body.get("xianxia_martial_art_missing_rank_records") or [])
+        )
+        if isinstance(record, dict)
     ]
     if not rank_records:
         return ""
-
-    parts = ["<section>", "<h2>Rank Records</h2>"]
-    for record in rank_records:
-        rank_name = str(record.get("rank_name") or "").strip()
-        rank_ref = str(record.get("rank_ref") or "").strip()
-        rank_anchor = _anchor_id_for_ref(rank_ref)
-        parts.append(f'<section id="{escape(rank_anchor)}">')
-        if rank_name:
-            parts.append(f"<h3>{escape(rank_name)}</h3>")
+    deduped_rank_records: dict[str, dict[str, Any]] = {}
+    for rank_record in rank_records:
+        dedupe_key = str(
+            rank_record.get("rank_key")
+            or rank_record.get("rank_ref")
+            or f"{_anchor_id_for_ref(str(rank_record.get('rank_name') or ''))}"
+        ).strip()
+        if not dedupe_key:
+            dedupe_key = str(rank_record.get("rank_order") or "")
+        if dedupe_key not in deduped_rank_records:
+            deduped_rank_records[dedupe_key] = dict(rank_record)
+    rank_records = list(deduped_rank_records.values())
+    parts = ["<section>", "<h2>Rank Records</h2>", "<ul>"]
+    for record in sorted(
+        rank_records,
+        key=lambda value: (
+            int(value.get("rank_order") or 0),
+            str(value.get("rank_key") or "").strip(),
+        ),
+    ):
+        rank_record = dict(record)
+        rank_key = str(rank_record.get("rank_key") or "").strip()
+        rank_name = str(rank_record.get("rank_name") or "").strip()
+        if not rank_name:
+            rank_name = (
+                _XIANXIA_MARTIAL_ART_RANK_LOOKUP.get(rank_key, {}).get("rank_name")
+                or rank_key
+                or "Rank"
+            )
+        rank_ref = str(rank_record.get("rank_ref") or "").strip()
+        rank_completion_status = str(rank_record.get("rank_completion_status") or "").strip()
+        rank_entry_slug = str(
+            rank_record.get("rank_entry_slug")
+            or (
+                _build_martial_art_rank_entry_slug(martial_art_slug, rank_key)
+                if rank_key and martial_art_slug
+                else ""
+            )
+        ).strip()
+        is_missing = rank_completion_status == XIANXIA_MARTIAL_ART_RANK_STATUS_MISSING_INTENTIONAL_DRAFT
+        parts.append("<li>")
+        if rank_entry_slug:
+            parts.append(f'<a href="{escape(rank_entry_slug)}">{escape(rank_name)}</a>')
+        elif rank_ref:
+            rank_anchor = _anchor_id_for_ref(rank_ref)
+            parts.append(f'<a href="#{escape(rank_anchor)}">{escape(rank_name)}</a>')
+        else:
+            parts.append(f"{escape(rank_name)}")
         if rank_ref:
-            parts.append(
-                f'<p><strong>Rank Ref:</strong> <a href="#{escape(rank_anchor)}">{escape(rank_ref)}</a></p>'
-            )
-
-        energy_grants = _format_energy_maximum_increases(
-            record.get("energy_maximum_increases")
-        )
-        if energy_grants:
-            parts.append(f"<p><strong>Energy Maximum Increases:</strong> {energy_grants}</p>")
-
-        insight_cost = record.get("insight_cost")
-        prerequisite_rank = str(record.get("prerequisite_rank_name") or "None").strip()
-        if insight_cost is not None:
-            parts.append(
-                "<p><strong>Advancement:</strong> "
-                f"{escape(str(insight_cost))} Insight; prerequisite rank {escape(prerequisite_rank)}.</p>"
-            )
-
-        teacher_note = str(record.get("teacher_breakthrough_note") or "").strip()
-        if teacher_note:
-            parts.append(f"<p><strong>Teacher/Breakthrough:</strong> {escape(teacher_note)}</p>")
-        legendary_note = str(record.get("legendary_prerequisite_note") or "").strip()
-        if legendary_note:
-            parts.append(f"<p><strong>Legendary Requirement:</strong> {escape(legendary_note)}</p>")
-
-        ability_grants = [
-            grant for grant in record.get("ability_grants") or [] if isinstance(grant, dict)
-        ]
-        if ability_grants:
-            parts.append("<h4>Ability Refs</h4>")
-            parts.append("<ul>")
-            for grant in ability_grants:
-                ability_ref = str(grant.get("ability_ref") or "").strip()
-                ability_anchor = _anchor_id_for_ref(ability_ref)
-                ability_name = str(grant.get("name") or "").strip()
-                kind = str(grant.get("kind") or "").strip()
-                support_state = str(grant.get("support_state") or "").strip()
-                parts.append(f'<li id="{escape(ability_anchor)}">')
-                if ability_ref:
-                    parts.append(
-                        f'<a href="#{escape(ability_anchor)}">{escape(ability_ref)}</a>'
-                    )
-                if ability_name:
-                    parts.append(f" - {escape(ability_name)}")
-                if kind:
-                    parts.append(f" ({escape(kind)})")
-                ability_tags = _format_ability_metadata_tags(grant)
-                if ability_tags:
-                    parts.append(f" - {ability_tags}")
-                if support_state:
-                    parts.append(f" - {escape(support_state.replace('_', ' '))}")
-                parts.append("</li>")
-            parts.append("</ul>")
-        parts.append("</section>")
-    parts.append("</section>")
+            parts.append(f' <span class="meta">{escape(rank_ref)}</span>')
+        if is_missing:
+            parts.append(' <span class="meta">incomplete draft</span>')
+        parts.append("</li>")
+    parts.append("</ul></section>")
     return "".join(parts)
 
 
@@ -2236,6 +2495,12 @@ def _build_martial_art_rank_records(
                 "martial_art_key": martial_art_key,
                 "martial_art_slug": martial_art_slug,
                 "rank_key": rank_key,
+                "rank_entry_slug": _build_martial_art_rank_entry_slug(
+                    martial_art_slug, rank_key
+                ),
+                "rank_entry_key": _build_martial_art_rank_entry_key(
+                    _build_martial_art_rank_entry_slug(martial_art_slug, rank_key)
+                ),
                 "rank_name": str(rank_definition["rank_name"]),
                 "rank_order": int(rank_definition["rank_order"]),
                 "rank_ref": f"xianxia:{martial_art_slug}:{rank_key}",
