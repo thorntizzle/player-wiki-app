@@ -104,6 +104,7 @@ from .xianxia_advancement import (
     confirm_xianxia_realm_ascension_definition,
     learn_xianxia_generic_technique_definition,
     list_xianxia_generic_technique_learning_options,
+    request_xianxia_dao_immolating_use_definition,
     reset_xianxia_realm_ascension_stats_definition,
     spend_xianxia_conditioning_definition,
     spend_xianxia_cultivation_energy_definition,
@@ -13309,6 +13310,34 @@ def create_app() -> Flask:
                 systems_service=get_systems_service(),
                 remove_item_id=item_id,
             ),
+        )
+
+    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/xianxia/dao-immolating-use-requests")
+    @campaign_scope_access_required("characters")
+    def character_xianxia_dao_immolating_use_request(campaign_slug: str, character_slug: str):
+        def _action(record):
+            if not is_xianxia_system(getattr(record.definition, "system", "")):
+                raise ValueError(
+                    "Dao Immolating use requests are only available for Xianxia character sheets."
+                )
+            request_result = request_xianxia_dao_immolating_use_definition(
+                record.definition,
+                request_name=request.form.get("dao_immolating_request_name", ""),
+                notes=request.form.get("dao_immolating_request_notes", ""),
+            )
+            import_metadata = build_managed_character_import_metadata(
+                campaign_slug,
+                record.definition.character_slug,
+                record.import_metadata,
+            )
+            return request_result.definition, import_metadata, {}
+
+        return run_character_definition_mutation(
+            campaign_slug,
+            character_slug,
+            anchor="xianxia-dao-immolating-use-request",
+            success_message="Dao Immolating use request recorded.",
+            action=_action,
         )
 
     @app.get("/campaigns/<campaign_slug>/characters/<character_slug>/portrait")

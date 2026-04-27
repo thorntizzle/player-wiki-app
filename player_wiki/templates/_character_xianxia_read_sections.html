@@ -237,6 +237,33 @@
           <p class="meta">No prepared Dao Immolating Technique notes yet.</p>
         {% endif %}
       </article>
+      {% if is_session_mode | default(false) %}
+        <article class="detail-card" id="xianxia-dao-immolating-use-request">
+          <h3>Ad Hoc Dao Immolating Use Request</h3>
+          <form
+            class="session-vitals-form"
+            data-character-sheet-edit-form="xianxia-dao-immolating-use-request"
+            method="post"
+            action="{{ url_for('character_xianxia_dao_immolating_use_request', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+          >
+            <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+            <input type="hidden" name="mode" value="session">
+            <input type="hidden" name="page" value="{{ character_subpage }}">
+            {% if session_return_view | default("") %}
+              <input type="hidden" name="return_view" value="{{ session_return_view }}">
+            {% endif %}
+            <label class="session-field">
+              <span>Request name</span>
+              <input type="text" name="dao_immolating_request_name" required>
+            </label>
+            <label class="session-field">
+              <span>Request notes</span>
+              <textarea name="dao_immolating_request_notes" rows="3"></textarea>
+            </label>
+            <button class="button-link" type="submit">Record Use Request</button>
+          </form>
+        </article>
+      {% endif %}
     </div>
   </section>
 {% endif %}

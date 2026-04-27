@@ -389,6 +389,75 @@ def test_xianxia_techniques_page_shows_approval_status_records(
     assert "Prepared Dao Immolating Techniques" in html
 
 
+def test_xianxia_techniques_page_records_ad_hoc_dao_immolating_use_request(
+    client,
+    sign_in,
+    users,
+    app,
+    get_character,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Request Crane"),
+        follow_redirects=False,
+    )
+
+    assert create_response.status_code == 302
+    record = get_character("request-crane")
+    assert record is not None
+    edit_response = client.get(
+        "/campaigns/linden-pass/characters/request-crane?mode=session&page=techniques"
+    )
+    edit_html = unescape(edit_response.get_data(as_text=True))
+    assert edit_response.status_code == 200
+    assert "Ad Hoc Dao Immolating Use Request" in edit_html
+    assert "dao_immolating_request_name" in edit_html
+
+    response = client.post(
+        "/campaigns/linden-pass/characters/request-crane/xianxia/dao-immolating-use-requests",
+        data={
+            "expected_revision": record.state_record.revision,
+            "mode": "session",
+            "page": "techniques",
+            "dao_immolating_request_name": "Lotus-Burning Last Word",
+            "dao_immolating_request_notes": "Invented at the duel's turning point.",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert "page=techniques" in response.headers["Location"]
+    assert "mode=session" in response.headers["Location"]
+    assert "xianxia-dao-immolating-use-request" in response.headers["Location"]
+    updated = get_character("request-crane")
+    assert updated is not None
+    xianxia = updated.definition.to_dict()["xianxia"]
+    assert xianxia["dao_immolating_techniques"]["use_history"] == [
+        {
+            "name": "Lotus-Burning Last Word",
+            "request_type": "dao_immolating_use",
+            "request_source": "ad_hoc",
+            "approval_required": True,
+            "approval_status": "pending",
+            "notes": "Invented at the duel's turning point.",
+        }
+    ]
+    assert xianxia["dao_immolating_techniques"]["prepared"] == []
+    assert xianxia["insight"] == {"available": 0, "spent": 0}
+    assert xianxia["advancement_history"] == []
+
+    sheet_response = client.get(
+        "/campaigns/linden-pass/characters/request-crane?mode=session&page=techniques"
+    )
+    html = unescape(sheet_response.get_data(as_text=True))
+    assert "Lotus-Burning Last Word" in html
+    assert "Pending" in html
+    assert "Dao Immolating Technique Use" in html
+    assert "Invented at the duel's turning point." in html
+
+
 def test_xianxia_read_sheet_uses_system_specific_subpages(
     client,
     sign_in,

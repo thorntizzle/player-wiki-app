@@ -196,6 +196,13 @@ class XianxiaGenericTechniqueLearnResult:
     notes: str = ""
 
 
+@dataclass(frozen=True)
+class XianxiaDaoImmolatingUseRequestResult:
+    definition: Any
+    request_name: str
+    notes: str = ""
+
+
 def build_xianxia_realm_ascension_context(xianxia: dict[str, Any]) -> dict[str, Any]:
     payload = dict(xianxia or {})
     history = payload.get("advancement_history")
@@ -923,6 +930,44 @@ def learn_xianxia_generic_technique_definition(
         technique_name=option["name"],
         insight_cost=insight_cost,
         systems_ref=dict(option["systems_ref"]),
+        notes=clean_notes,
+    )
+
+
+def request_xianxia_dao_immolating_use_definition(
+    definition: Any,
+    *,
+    request_name: str,
+    notes: str = "",
+) -> XianxiaDaoImmolatingUseRequestResult:
+    clean_name = _clean_note(request_name)
+    if not clean_name:
+        raise ValueError("Enter a Dao Immolating Technique request name.")
+    clean_notes = _clean_note(notes)
+
+    payload = definition.to_dict()
+    xianxia = dict(payload.get("xianxia") or {})
+    dao_immolating = dict(xianxia.get("dao_immolating_techniques") or {})
+    use_history = _copy_record_list(dao_immolating.get("use_history"))
+    use_history.append(
+        {
+            "name": clean_name,
+            "request_type": "dao_immolating_use",
+            "request_source": "ad_hoc",
+            "approval_required": True,
+            "approval_status": "pending",
+            **({"notes": clean_notes} if clean_notes else {}),
+        }
+    )
+    xianxia["dao_immolating_techniques"] = {
+        "prepared": _copy_record_list(dao_immolating.get("prepared")),
+        "use_history": use_history,
+    }
+    payload["xianxia"] = xianxia
+
+    return XianxiaDaoImmolatingUseRequestResult(
+        definition=definition.__class__.from_dict(payload),
+        request_name=clean_name,
         notes=clean_notes,
     )
 
