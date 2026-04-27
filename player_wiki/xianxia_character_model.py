@@ -129,6 +129,20 @@ _DEFERRED_XIANXIA_DEFINITION_KEYS = {
     "attacks": "Attacks and attack resolution belong to a future combat automation shape.",
 }
 
+_XIANXIA_KARMIC_CONSTRAINT_TYPE = "karmic_constraint"
+_XIANXIA_KARMIC_CONSTRAINT_TYPE_ALIASES = {
+    "karmic_constraint",
+    "karmic_constraints",
+}
+_XIANXIA_APPROVAL_STATUS_ALIASES = {
+    "approved": "approved",
+    "pending": "pending",
+    "rejected": "rejected",
+    "denied": "rejected",
+    "not_approved": "not_approved",
+    "unapproved": "not_approved",
+}
+
 
 class XianxiaDefinitionValidationError(ValueError):
     def __init__(self, errors: list[str]) -> None:
@@ -254,7 +268,7 @@ def normalize_xianxia_definition_payload(payload: dict[str, Any]) -> dict[str, A
         "generic_techniques": _normalize_record_list(
             _first_present(raw_xianxia, normalized_payload, key="generic_techniques")
         ),
-        "variants": _normalize_record_list(_first_present(raw_xianxia, normalized_payload, key="variants")),
+        "variants": _normalize_variant_records(_first_present(raw_xianxia, normalized_payload, key="variants")),
         "dao_immolating_techniques": _normalize_dao_immolating_records(raw_xianxia, normalized_payload),
         "approval_requests": _normalize_record_list(
             _first_present(raw_xianxia, normalized_payload, key="approval_requests")
@@ -955,6 +969,41 @@ def _normalize_record_list(values: Any) -> list[dict[str, Any]]:
     return records
 
 
+def _normalize_variant_records(values: Any) -> list[dict[str, Any]]:
+    records = _normalize_record_list(values)
+    return [_normalize_variant_record(record) for record in records]
+
+
+def _normalize_variant_record(record: dict[str, Any]) -> dict[str, Any]:
+    normalized = deepcopy(record)
+    if not _is_karmic_constraint_variant(normalized):
+        return normalized
+
+    normalized["variant_type"] = _XIANXIA_KARMIC_CONSTRAINT_TYPE
+    normalized["approval_required"] = True
+    raw_status = normalized.get("approval_status")
+    if raw_status is None and "status" in normalized:
+        raw_status = normalized.get("status")
+    if raw_status is None and "request_status" in normalized:
+        raw_status = normalized.get("request_status")
+    normalized["approval_status"] = _normalize_approval_status(raw_status, default="pending")
+    return normalized
+
+
+def _is_karmic_constraint_variant(record: dict[str, Any]) -> bool:
+    for key in ("variant_type", "type", "category", "kind"):
+        if _normalize_token(record.get(key)) in _XIANXIA_KARMIC_CONSTRAINT_TYPE_ALIASES:
+            return True
+    return False
+
+
+def _normalize_approval_status(value: Any, *, default: str) -> str:
+    normalized = _normalize_token(value)
+    if not normalized:
+        return default
+    return _XIANXIA_APPROVAL_STATUS_ALIASES.get(normalized, normalized)
+
+
 def _normalize_dao_immolating_records(
     raw_xianxia: dict[str, Any],
     payload: dict[str, Any],
@@ -978,6 +1027,16 @@ def _definition_xianxia(definition: Any) -> dict[str, Any]:
     if isinstance(definition, dict):
         return dict(definition.get("xianxia") or {})
     return dict(getattr(definition, "xianxia", {}) or {})
+
+
+def _normalize_token(value: Any) -> str:
+    normalized = "".join(
+        character if character.isalnum() else "_"
+        for character in str(value or "").strip().casefold()
+    ).strip("_")
+    while "__" in normalized:
+        normalized = normalized.replace("__", "_")
+    return normalized
 
 
 def _definition_durability(definition: Any) -> dict[str, Any]:

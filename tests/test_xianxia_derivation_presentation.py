@@ -314,6 +314,10 @@ def test_xianxia_techniques_page_shows_approval_status_records(
             "approval_notes": "Approved for the Heavenly Palm initiate technique.",
         },
         {
+            "type": "Karmic Constraint",
+            "name": "Mountain-Crossing Oath",
+        },
+        {
             "variant_type": "ascendant_art",
             "name": "Skyfire Crown",
             "status": "pending",
@@ -349,7 +353,7 @@ def test_xianxia_techniques_page_shows_approval_status_records(
 
     approval_groups = character["xianxia_read"]["approval"]["status_groups"]
     assert [(group["title"], [record["status_label"] for record in group["records"]]) for group in approval_groups] == [
-        ("Karmic Constraints", ["Approved"]),
+        ("Karmic Constraints", ["Approved", "Pending"]),
         ("Ascendant Arts", ["Pending", "Rejected"]),
         ("Dao Immolating Technique Use Records", ["Approved"]),
     ]
@@ -360,6 +364,7 @@ def test_xianxia_techniques_page_shows_approval_status_records(
     html = unescape(response.get_data(as_text=True))
     assert "Karmic Constraints" in html
     assert "Falling Palm Oath" in html
+    assert "Mountain-Crossing Oath" in html
     assert "Approved" in html
     assert "Karmic Constraint" in html
     assert "Variant" in html

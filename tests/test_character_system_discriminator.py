@@ -165,6 +165,41 @@ def test_xianxia_definition_normalizes_stable_definition_fields():
     assert "dying" not in xianxia
 
 
+def test_xianxia_definition_normalizes_karmic_constraint_approval_fields():
+    definition = CharacterDefinition.from_dict(
+        _minimal_definition_payload(
+            system=XIANXIA_SYSTEM_CODE,
+            xianxia={
+                "variants": [
+                    {"type": "Karmic Constraint", "name": "Falling Palm Oath"},
+                    {
+                        "variant_type": "karmic_constraints",
+                        "name": "Sect-Binding Revision",
+                        "status": "Denied",
+                        "approval_required": False,
+                    },
+                    {"variant_type": "ascendant_art", "name": "Skyfire Crown"},
+                ]
+            },
+        )
+    )
+
+    variants = definition.to_dict()["xianxia"]["variants"]
+
+    assert variants[0] == {
+        "type": "Karmic Constraint",
+        "name": "Falling Palm Oath",
+        "variant_type": "karmic_constraint",
+        "approval_required": True,
+        "approval_status": "pending",
+    }
+    assert variants[1]["variant_type"] == "karmic_constraint"
+    assert variants[1]["approval_required"] is True
+    assert variants[1]["approval_status"] == "rejected"
+    assert variants[1]["status"] == "Denied"
+    assert variants[2] == {"variant_type": "ascendant_art", "name": "Skyfire Crown"}
+
+
 def test_xianxia_definition_accepts_requirements_sketch_top_level_aliases():
     definition = CharacterDefinition.from_dict(
         _minimal_definition_payload(
