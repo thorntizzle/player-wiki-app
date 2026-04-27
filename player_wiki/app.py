@@ -98,6 +98,7 @@ from .xianxia_advancement import (
     XIANXIA_TRAINING_STANCE_INCREASE,
     XIANXIA_TRAINING_STANCE_MAXIMUM,
     advance_xianxia_martial_art_rank_definition,
+    apply_xianxia_divine_realm_rebuild_definition,
     apply_xianxia_immortal_realm_rebuild_definition,
     build_xianxia_realm_ascension_context,
     learn_xianxia_generic_technique_definition,
@@ -12133,6 +12134,27 @@ def create_app() -> Flask:
                     definition = rebuild_result.definition
                     success_message = (
                         f"Applied the Immortal rebuild budget for "
+                        f"{rebuild_result.total_rebuild_points} points and "
+                        f"{rebuild_result.actions_per_turn} actions."
+                    )
+                elif cultivation_action == "apply_divine_realm_rebuild":
+                    redirect_anchor = "xianxia-cultivation-realm-ascension"
+                    rebuild_result = apply_xianxia_divine_realm_rebuild_definition(
+                        record.definition,
+                        target_realm=request.form.get("target_realm", ""),
+                        attribute_scores={
+                            key: request.form.get(f"realm_rebuild_attribute_{key}", "")
+                            for key in XIANXIA_ATTRIBUTE_KEYS
+                        },
+                        effort_scores={
+                            key: request.form.get(f"realm_rebuild_effort_{key}", "")
+                            for key in XIANXIA_EFFORT_KEYS
+                        },
+                        notes=request.form.get("realm_ascension_rebuild_notes", ""),
+                    )
+                    definition = rebuild_result.definition
+                    success_message = (
+                        f"Applied the Divine rebuild budget for "
                         f"{rebuild_result.total_rebuild_points} points and "
                         f"{rebuild_result.actions_per_turn} actions."
                     )

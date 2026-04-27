@@ -68,6 +68,10 @@ XIANXIA_REALM_ASCENSION_TARGETS = {
         "stat_max_prerequisite": 15,
     },
 }
+XIANXIA_REALM_ASCENSION_REBUILD_ACTIONS = {
+    "Immortal": "realm_ascension_immortal_rebuild_applied",
+    "Divine": "realm_ascension_divine_rebuild_applied",
+}
 
 
 @dataclass(frozen=True)
@@ -177,12 +181,19 @@ class XianxiaGenericTechniqueLearnResult:
 
 def build_xianxia_realm_ascension_context(xianxia: dict[str, Any]) -> dict[str, Any]:
     payload = dict(xianxia or {})
+    history = payload.get("advancement_history")
     current_realm = normalize_xianxia_realm_label(payload.get("realm"))
     target = _realm_ascension_target_for_current(current_realm)
-    latest_review = _latest_realm_ascension_review(payload.get("advancement_history"))
-    latest_reset = _latest_realm_ascension_stat_reset(payload.get("advancement_history"))
-    latest_immortal_rebuild = _latest_realm_ascension_immortal_rebuild(
-        payload.get("advancement_history")
+    latest_review = _latest_realm_ascension_review(history)
+    latest_reset = _latest_realm_ascension_stat_reset(history)
+    latest_rebuild = _latest_realm_ascension_rebuild(history)
+    latest_immortal_rebuild = _latest_realm_ascension_rebuild(
+        history,
+        target_realm="Immortal",
+    )
+    latest_divine_rebuild = _latest_realm_ascension_rebuild(
+        history,
+        target_realm="Divine",
     )
     attributes = _stat_rows(
         payload.get("attributes"),
@@ -210,18 +221,31 @@ def build_xianxia_realm_ascension_context(xianxia: dict[str, Any]) -> dict[str, 
         "can_start_review": target is not None and bool(stat_prerequisite.get("is_met")),
         "latest_review": latest_review,
         "latest_reset": latest_reset,
+        "latest_rebuild": latest_rebuild,
         "latest_immortal_rebuild": latest_immortal_rebuild,
+        "latest_divine_rebuild": latest_divine_rebuild,
     }
     context["can_reset_stats"] = _can_reset_realm_ascension_stats(
         latest_review=latest_review,
         latest_reset=latest_reset,
         target=target,
     )
-    context["can_apply_immortal_rebuild"] = _can_apply_immortal_realm_rebuild(
+    context["can_apply_rebuild"] = _can_apply_realm_rebuild(
         latest_review=latest_review,
         latest_reset=latest_reset,
-        latest_immortal_rebuild=latest_immortal_rebuild,
+        latest_target_rebuild=_latest_realm_ascension_rebuild(
+            history,
+            target_realm=str((target or {}).get("target_realm") or ""),
+        ),
         target=target,
+    )
+    context["can_apply_immortal_rebuild"] = (
+        bool(context["can_apply_rebuild"])
+        and str((target or {}).get("target_realm") or "").strip() == "Immortal"
+    )
+    context["can_apply_divine_rebuild"] = (
+        bool(context["can_apply_rebuild"])
+        and str((target or {}).get("target_realm") or "").strip() == "Divine"
     )
     if target is None:
         context["message"] = "No further Realm ascension target is defined for this character."
@@ -418,20 +442,64 @@ def apply_xianxia_immortal_realm_rebuild_definition(
     effort_scores: dict[str, Any],
     notes: str = "",
 ) -> XianxiaRealmAscensionImmortalRebuildResult:
+    return _apply_xianxia_realm_rebuild_definition(
+        definition,
+        target_realm=target_realm,
+        attribute_scores=attribute_scores,
+        effort_scores=effort_scores,
+        notes=notes,
+        expected_current_realm="Mortal",
+        expected_target_realm="Immortal",
+    )
+
+
+def apply_xianxia_divine_realm_rebuild_definition(
+    definition: Any,
+    *,
+    target_realm: str,
+    attribute_scores: dict[str, Any],
+    effort_scores: dict[str, Any],
+    notes: str = "",
+) -> XianxiaRealmAscensionImmortalRebuildResult:
+    return _apply_xianxia_realm_rebuild_definition(
+        definition,
+        target_realm=target_realm,
+        attribute_scores=attribute_scores,
+        effort_scores=effort_scores,
+        notes=notes,
+        expected_current_realm="Immortal",
+        expected_target_realm="Divine",
+    )
+
+
+def _apply_xianxia_realm_rebuild_definition(
+    definition: Any,
+    *,
+    target_realm: str,
+    attribute_scores: dict[str, Any],
+    effort_scores: dict[str, Any],
+    notes: str = "",
+    expected_current_realm: str,
+    expected_target_realm: str,
+) -> XianxiaRealmAscensionImmortalRebuildResult:
     payload = definition.to_dict()
     xianxia = dict(payload.get("xianxia") or {})
     current_realm = normalize_xianxia_realm_label(xianxia.get("realm"))
     target = _realm_ascension_target_for_current(current_realm)
     if target is None:
         raise ValueError(
-            f"{current_realm} characters do not have an Immortal rebuild target."
+            f"{current_realm} characters do not have a Realm rebuild target."
         )
 
     normalized_target_realm = normalize_xianxia_realm_label(target_realm)
-    expected_target_realm = str(target["target_realm"])
-    if current_realm != "Mortal" or expected_target_realm != "Immortal":
+    target_realm_for_current = str(target["target_realm"])
+    if (
+        current_realm != expected_current_realm
+        or expected_target_realm != target_realm_for_current
+    ):
         raise ValueError(
-            "The Immortal rebuild budget applies only to Mortal to Immortal ascension."
+            f"The {expected_target_realm} rebuild budget applies only to "
+            f"{expected_current_realm} to {expected_target_realm} ascension."
         )
     if normalized_target_realm != expected_target_realm:
         raise ValueError(
@@ -450,7 +518,7 @@ def apply_xianxia_immortal_realm_rebuild_definition(
     )
     if review_index is None:
         raise ValueError(
-            "Start a pending Realm ascension review before applying the Immortal rebuild."
+            f"Start a pending Realm ascension review before applying the {expected_target_realm} rebuild."
         )
     reset_index = _latest_realm_ascension_stat_reset_index(
         history,
@@ -459,11 +527,15 @@ def apply_xianxia_immortal_realm_rebuild_definition(
     )
     if reset_index is None:
         raise ValueError(
-            "Reset Attributes and Efforts before applying the Immortal rebuild budget."
+            f"Reset Attributes and Efforts before applying the {expected_target_realm} rebuild budget."
         )
-    if _has_realm_ascension_immortal_rebuild_after(history, reset_index):
+    if _has_realm_ascension_rebuild_after(
+        history,
+        reset_index,
+        target_realm=expected_target_realm,
+    ):
         raise ValueError(
-            "The Immortal rebuild budget has already been applied for this Realm ascension review."
+            f"The {expected_target_realm} rebuild budget has already been applied for this Realm ascension review."
         )
 
     rebuild_budget = int(target["rebuild_budget"])
@@ -473,18 +545,20 @@ def apply_xianxia_immortal_realm_rebuild_definition(
         keys=XIANXIA_ATTRIBUTE_KEYS,
         labels=XIANXIA_ATTRIBUTE_LABELS,
         stat_cap=stat_cap,
+        rebuild_label=expected_target_realm,
     )
     efforts, effort_total, effort_errors = _validate_realm_rebuild_scores(
         effort_scores,
         keys=XIANXIA_EFFORT_KEYS,
         labels=XIANXIA_EFFORT_LABELS,
         stat_cap=stat_cap,
+        rebuild_label=expected_target_realm,
     )
     total_rebuild_points = attribute_total + effort_total
     errors = attribute_errors + effort_errors
     if total_rebuild_points != rebuild_budget:
         errors.append(
-            f"Immortal rebuild must spend exactly {rebuild_budget} Attribute/Effort "
+            f"{expected_target_realm} rebuild must spend exactly {rebuild_budget} Attribute/Effort "
             f"points; submitted {total_rebuild_points}."
         )
     if errors:
@@ -497,7 +571,7 @@ def apply_xianxia_immortal_realm_rebuild_definition(
 
     clean_notes = _clean_note(notes)
     event = {
-        "action": "realm_ascension_immortal_rebuild_applied",
+        "action": XIANXIA_REALM_ASCENSION_REBUILD_ACTIONS[expected_target_realm],
         "target": expected_target_realm,
         "current_realm": current_realm,
         "target_realm": expected_target_realm,
@@ -1733,18 +1807,26 @@ def _latest_realm_ascension_stat_reset(records: Any) -> dict[str, Any] | None:
     return None
 
 
-def _latest_realm_ascension_immortal_rebuild(records: Any) -> dict[str, Any] | None:
+def _latest_realm_ascension_rebuild(
+    records: Any,
+    *,
+    target_realm: str = "",
+) -> dict[str, Any] | None:
+    normalized_filter = normalize_xianxia_realm_label(target_realm) if target_realm else ""
+    rebuild_actions = set(XIANXIA_REALM_ASCENSION_REBUILD_ACTIONS.values())
     for record in reversed(list(records or [])):
         if not isinstance(record, dict):
             continue
-        if (
-            str(record.get("action") or "").strip()
-            != "realm_ascension_immortal_rebuild_applied"
-        ):
+        if str(record.get("action") or "").strip() not in rebuild_actions:
+            continue
+        record_target = normalize_xianxia_realm_label(
+            record.get("target_realm") or record.get("target")
+        )
+        if normalized_filter and record_target != normalized_filter:
             continue
         return {
             "current_realm": str(record.get("current_realm") or "").strip(),
-            "target_realm": str(record.get("target_realm") or record.get("target") or "").strip(),
+            "target_realm": record_target,
             "status": str(record.get("status") or "").strip(),
             "rebuild_budget": _non_negative_int(record.get("rebuild_budget"), default=0),
             "stat_cap": _non_negative_int(record.get("stat_cap"), default=0),
@@ -1784,28 +1866,25 @@ def _can_reset_realm_ascension_stats(
     return str(latest_reset.get("target_realm") or "").strip() != target_realm
 
 
-def _can_apply_immortal_realm_rebuild(
+def _can_apply_realm_rebuild(
     *,
     latest_review: dict[str, Any] | None,
     latest_reset: dict[str, Any] | None,
-    latest_immortal_rebuild: dict[str, Any] | None,
+    latest_target_rebuild: dict[str, Any] | None,
     target: dict[str, Any] | None,
 ) -> bool:
     if not latest_review or not latest_reset or not target:
         return False
-    if str(target.get("target_realm") or "").strip() != "Immortal":
-        return False
+    target_realm = str(target.get("target_realm") or "").strip()
     if str(latest_review.get("status") or "").strip() != "pending_gm_review":
         return False
-    if str(latest_review.get("target_realm") or "").strip() != "Immortal":
+    if str(latest_review.get("target_realm") or "").strip() != target_realm:
         return False
     if str(latest_reset.get("status") or "").strip() != "pending_rebuild":
         return False
-    if str(latest_reset.get("target_realm") or "").strip() != "Immortal":
+    if str(latest_reset.get("target_realm") or "").strip() != target_realm:
         return False
-    if not latest_immortal_rebuild:
-        return True
-    return str(latest_immortal_rebuild.get("target_realm") or "").strip() != "Immortal"
+    return latest_target_rebuild is None
 
 
 def _latest_realm_ascension_review_index(
@@ -1860,15 +1939,15 @@ def _has_realm_ascension_stat_reset_after(
     return False
 
 
-def _has_realm_ascension_immortal_rebuild_after(
+def _has_realm_ascension_rebuild_after(
     history: list[dict[str, Any]],
     reset_index: int,
+    *,
+    target_realm: str,
 ) -> bool:
+    expected_action = XIANXIA_REALM_ASCENSION_REBUILD_ACTIONS.get(target_realm)
     for record in history[reset_index + 1 :]:
-        if (
-            str(record.get("action") or "").strip()
-            == "realm_ascension_immortal_rebuild_applied"
-        ):
+        if str(record.get("action") or "").strip() == expected_action:
             return True
     return False
 
@@ -1945,6 +2024,7 @@ def _validate_realm_rebuild_scores(
     keys: tuple[str, ...],
     labels: dict[str, str],
     stat_cap: int,
+    rebuild_label: str,
 ) -> tuple[dict[str, int], int, list[str]]:
     raw_values = dict(values or {}) if isinstance(values, dict) else {}
     scores: dict[str, int] = {}
@@ -1953,7 +2033,7 @@ def _validate_realm_rebuild_scores(
         label = labels.get(key, key)
         raw_value = raw_values.get(key)
         if raw_value is None or str(raw_value).strip() == "":
-            errors.append(f"{label} is required for the Immortal rebuild.")
+            errors.append(f"{label} is required for the {rebuild_label} rebuild.")
             scores[key] = 0
             continue
         try:
@@ -1967,7 +2047,7 @@ def _validate_realm_rebuild_scores(
             scores[key] = 0
             continue
         if score > stat_cap:
-            errors.append(f"{label} cannot exceed {stat_cap} for the Immortal rebuild.")
+            errors.append(f"{label} cannot exceed {stat_cap} for the {rebuild_label} rebuild.")
         scores[key] = score
     return scores, sum(scores.values()), errors
 

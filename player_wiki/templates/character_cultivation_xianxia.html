@@ -698,9 +698,10 @@
         </ul>
       </article>
     {% endif %}
-    {% if ascension.can_apply_immortal_rebuild %}
+    {% if ascension.can_apply_rebuild %}
+      {% set realm_rebuild_action = 'apply_divine_realm_rebuild' if ascension.target.target_realm == 'Divine' else 'apply_immortal_realm_rebuild' %}
       <article class="detail-card session-card">
-        <h3>Apply Immortal Rebuild</h3>
+        <h3>Apply {{ ascension.target.target_realm }} Rebuild</h3>
         <p class="meta">
           Spend exactly {{ ascension.target.rebuild_budget }} total Attribute/Effort points,
           max {{ ascension.target.stat_cap }} in any one Stat; Actions become
@@ -712,7 +713,7 @@
           action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
         >
           <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
-          <input type="hidden" name="cultivation_action" value="apply_immortal_realm_rebuild">
+          <input type="hidden" name="cultivation_action" value="{{ realm_rebuild_action }}">
           <input type="hidden" name="target_realm" value="{{ ascension.target.target_realm }}">
           <div class="detail-grid">
             <div>
@@ -757,24 +758,24 @@
             <textarea name="realm_ascension_rebuild_notes" rows="2"></textarea>
           </label>
           <div class="hero-actions">
-            <button type="submit">Apply Immortal Rebuild</button>
+            <button type="submit">Apply {{ ascension.target.target_realm }} Rebuild</button>
           </div>
         </form>
       </article>
     {% endif %}
-    {% if ascension.latest_immortal_rebuild %}
+    {% if ascension.latest_rebuild %}
       <article class="detail-card">
-        <h3>Latest Immortal Rebuild</h3>
+        <h3>Latest {{ ascension.latest_rebuild.target_realm }} Rebuild</h3>
         <ul class="plain-list slot-list">
-          <li><strong>Target:</strong> {{ ascension.latest_immortal_rebuild.target_realm }}</li>
-          <li><strong>Status:</strong> {{ ascension.latest_immortal_rebuild.status | replace('_', ' ') }}</li>
-          <li><strong>Budget:</strong> {{ ascension.latest_immortal_rebuild.total_rebuild_points }} of {{ ascension.latest_immortal_rebuild.rebuild_budget }}</li>
-          <li><strong>Stat cap:</strong> {{ ascension.latest_immortal_rebuild.stat_cap }}</li>
-          <li><strong>Actions:</strong> {{ ascension.latest_immortal_rebuild.actions_per_turn }}</li>
-          <li><strong>Attributes:</strong> {{ ascension.latest_immortal_rebuild.attributes_after_total }}</li>
-          <li><strong>Efforts:</strong> {{ ascension.latest_immortal_rebuild.efforts_after_total }}</li>
-          {% if ascension.latest_immortal_rebuild.notes %}
-            <li><strong>Notes:</strong> {{ ascension.latest_immortal_rebuild.notes }}</li>
+          <li><strong>Target:</strong> {{ ascension.latest_rebuild.target_realm }}</li>
+          <li><strong>Status:</strong> {{ ascension.latest_rebuild.status | replace('_', ' ') }}</li>
+          <li><strong>Budget:</strong> {{ ascension.latest_rebuild.total_rebuild_points }} of {{ ascension.latest_rebuild.rebuild_budget }}</li>
+          <li><strong>Stat cap:</strong> {{ ascension.latest_rebuild.stat_cap }}</li>
+          <li><strong>Actions:</strong> {{ ascension.latest_rebuild.actions_per_turn }}</li>
+          <li><strong>Attributes:</strong> {{ ascension.latest_rebuild.attributes_after_total }}</li>
+          <li><strong>Efforts:</strong> {{ ascension.latest_rebuild.efforts_after_total }}</li>
+          {% if ascension.latest_rebuild.notes %}
+            <li><strong>Notes:</strong> {{ ascension.latest_rebuild.notes }}</li>
           {% endif %}
         </ul>
       </article>
