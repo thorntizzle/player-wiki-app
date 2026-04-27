@@ -26,6 +26,16 @@
                     {% if art.rank_records_status %} | {{ art.rank_records_status | replace('_', ' ') }}{% endif %}
                   </p>
                 </div>
+                {% if art.body_html %}
+                  <div class="detail-cluster">
+                    <details class="detail-card">
+                      <summary>Martial Art details</summary>
+                      <article>
+                        {{ art.body_html | safe }}
+                      </article>
+                    </details>
+                  </div>
+                {% endif %}
                 {% if art.rank_progress %}
                   <div class="detail-cluster">
                     <div>
@@ -130,6 +140,16 @@
                   <span class="meta">Insight {{ technique.insight_cost }}</span>
                 {% endif %}
               </li>
+              {% if technique.body_html %}
+                <li>
+                  <details class="detail-card">
+                    <summary>Technique details</summary>
+                    <article>
+                      {{ technique.body_html | safe }}
+                    </article>
+                  </details>
+                </li>
+              {% endif %}
               {% if technique.prerequisites %}
                 <li class="meta">Prerequisites: {{ technique.prerequisites }}</li>
               {% endif %}
@@ -163,7 +183,7 @@
       <article class="detail-card">
         <h3>Basic Actions</h3>
         {% if xianxia_sheet.basic_actions %}
-          <ul class="plain-list slot-list">
+            <ul class="plain-list slot-list">
             {% for action in xianxia_sheet.basic_actions %}
               <li>
                 {% if action.href %}
@@ -175,6 +195,16 @@
                   <strong>{{ action.support_label }}</strong>
                 {% endif %}
               </li>
+              {% if action.body_html %}
+                <li>
+                  <details class="detail-card">
+                    <summary>Action details</summary>
+                    <article>
+                      {{ action.body_html | safe }}
+                    </article>
+                  </details>
+                </li>
+              {% endif %}
               {% if action.range_tags or action.timing_tags %}
                 <li class="meta">
                   {% if action.range_tags %}Range: {{ action.range_tags }}{% endif %}

@@ -1843,6 +1843,7 @@ def present_xianxia_read_context(
             xianxia.get("martial_arts"),
             default_name="Martial Art",
             include_rank_refs=True,
+            include_body_html=True,
             systems_service=systems_service,
         ),
         "generic_techniques": _present_xianxia_generic_technique_records(
@@ -2199,6 +2200,7 @@ def _present_xianxia_linked_records(
     *,
     default_name: str,
     include_rank_refs: bool = False,
+    include_body_html: bool = False,
     systems_service: Any | None = None,
 ) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
@@ -2237,6 +2239,12 @@ def _present_xianxia_linked_records(
             "custom": bool(payload.get("custom_martial_art") or payload.get("xianxia_custom_martial_art")),
             "starting_package": bool(payload.get("starting_package")),
         }
+        if include_body_html:
+            record["body_html"] = _xianxia_entry_body_html(
+                campaign_slug=campaign_slug,
+                systems_service=systems_service,
+                entry=entry,
+            )
         if include_rank_refs:
             rank_records_by_ref = _xianxia_rank_records_by_ref(entry)
             record["learned_rank_refs"] = _present_xianxia_rank_refs(
@@ -2251,6 +2259,22 @@ def _present_xianxia_linked_records(
             )
         records.append(record)
     return records
+
+
+def _xianxia_entry_body_html(
+    *,
+    campaign_slug: str,
+    systems_service: Any | None,
+    entry: Any | None,
+) -> str:
+    if systems_service is None or entry is None:
+        return ""
+    try:
+        return str(
+            systems_service.build_character_sheet_entry_body_html(campaign_slug, entry) or ""
+        ).strip()
+    except (AttributeError, TypeError, ValueError):
+        return ""
 
 
 def _present_xianxia_generic_technique_records(
@@ -2307,6 +2331,11 @@ def _present_xianxia_generic_technique_records(
                 ),
                 "systems_ref": systems_ref,
                 "support_label": _xianxia_support_label(support_state),
+                "body_html": _xianxia_entry_body_html(
+                    campaign_slug=campaign_slug,
+                    systems_service=systems_service,
+                    entry=entry,
+                ),
                 "insight_cost": str(insight_cost).strip() if insight_cost is not None else "",
                 "prerequisites": _format_xianxia_prerequisites_for_sheet(
                     _first_present_xianxia_value(
@@ -2676,6 +2705,11 @@ def _present_xianxia_basic_action_links(
                 "title": str(getattr(entry, "title", "") or "Basic Action"),
                 "href": build_systems_entry_href(campaign_slug, _systems_ref_for_entry(entry)),
                 "support_label": _xianxia_support_label(support_state),
+                "body_html": _xianxia_entry_body_html(
+                    campaign_slug=campaign_slug,
+                    systems_service=systems_service,
+                    entry=entry,
+                ),
                 "range_tags": ", ".join(
                     humanize_value(tag) for tag in list(action_body.get("range_tags") or []) if str(tag).strip()
                 ),
