@@ -158,6 +158,70 @@ def test_xianxia_create_flow_accepts_valid_budgets_and_persists_inferred_gear(
     assert state["xianxia"]["inventory"] == {"enabled": False, "quantities": []}
 
 
+def test_xianxia_create_flow_allows_only_gm_granted_generic_techniques(
+    app, client, sign_in, users
+):
+    _configure_xianxia_campaign(app)
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        systems_service = app.extensions["systems_service"]
+        systems_service.ensure_builtin_library_seeded(XIANXIA_SYSTEM_CODE)
+        qi_blast = systems_service.get_entry_by_slug_for_campaign("linden-pass", "qi-blast")
+        assert qi_blast is not None
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_html = client.get("/campaigns/linden-pass/characters/new").get_data(as_text=True)
+    assert "GM-Granted Generic Techniques" in create_html
+    assert "Qi Blast (Insight 1)" in create_html
+    assert f'value="{qi_blast.entry_key}"' in create_html
+
+    blocked_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            **_valid_xianxia_create_data("No Free Technique"),
+            "generic_techniques": "Qi Blast",
+            "generic_technique_entry_key": qi_blast.entry_key,
+        },
+        follow_redirects=False,
+    )
+    assert blocked_response.status_code == 302
+    blocked_definition = _read_character_definition(app, "no-free-technique")
+    assert blocked_definition["xianxia"]["generic_techniques"] == []
+    assert blocked_definition["xianxia"]["insight"] == {"available": 0, "spent": 0}
+
+    granted_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            **_valid_xianxia_create_data("Granted Technique"),
+            "gm_granted_generic_technique_entry_keys": [qi_blast.entry_key],
+        },
+        follow_redirects=False,
+    )
+    assert granted_response.status_code == 302
+
+    definition = _read_character_definition(app, "granted-technique")
+    xianxia = definition["xianxia"]
+    assert xianxia["insight"] == {"available": 0, "spent": 0}
+    assert len(xianxia["generic_techniques"]) == 1
+    granted_technique = xianxia["generic_techniques"][0]
+    assert granted_technique["name"] == "Qi Blast"
+    assert granted_technique["systems_ref"]["entry_key"] == qi_blast.entry_key
+    assert granted_technique["systems_ref"]["slug"] == "qi-blast"
+    assert granted_technique["generic_technique_key"] == "qi_blast"
+    assert granted_technique["insight_spent"] == 0
+    assert granted_technique["character_creation_grant"] is True
+    assert granted_technique["grant_source"] == "gm_granted_character_creation"
+    assert granted_technique["learnable_without_master"] is True
+    assert granted_technique["requires_master"] is False
+
+    sheet_html = client.get(
+        "/campaigns/linden-pass/characters/granted-technique?page=techniques"
+    ).get_data(as_text=True)
+    assert "Qi Blast" in sheet_html
+    assert "/campaigns/linden-pass/systems/entries/qi-blast" in sheet_html
+
+
 @pytest.mark.parametrize(
     ("name", "overrides", "expected_message"),
     [

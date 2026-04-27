@@ -187,6 +187,22 @@
                   step="1"
                 >
               </label>
+              {% if builder.generic_technique_options %}
+                <label class="field">
+                  <span>GM-Granted Generic Techniques</span>
+                  <select
+                    name="{{ builder.gm_granted_generic_technique_input }}"
+                    multiple
+                    size="6"
+                  >
+                    {% for technique in builder.generic_technique_options %}
+                      <option value="{{ technique.entry_key }}" {% if technique.selected %}selected{% endif %}>
+                        {{ technique.name }} (Insight {{ technique.insight_cost }})
+                      </option>
+                    {% endfor %}
+                  </select>
+                </label>
+              {% endif %}
             </div>
           </section>
 

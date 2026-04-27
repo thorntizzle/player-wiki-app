@@ -108,6 +108,7 @@ from .xianxia_advancement import (
     rank_label as xianxia_martial_art_rank_label,
 )
 from .xianxia_character_builder import (
+    XIANXIA_GM_GRANTED_GENERIC_TECHNIQUE_INPUT,
     build_xianxia_character_create_context,
     build_xianxia_character_definition,
     build_xianxia_character_initial_state,
@@ -11658,7 +11659,12 @@ def create_app() -> Flask:
                 message=native_character_create_unsupported_message(campaign.system),
             )
         if create_lane == CHARACTER_ROUTE_LANE_XIANXIA:
-            form_values = dict(request.form if request.method == "POST" else request.args)
+            form_source = request.form if request.method == "POST" else request.args
+            form_values = dict(form_source)
+            if hasattr(form_source, "getlist"):
+                grant_values = form_source.getlist(XIANXIA_GM_GRANTED_GENERIC_TECHNIQUE_INPUT)
+                if grant_values:
+                    form_values[XIANXIA_GM_GRANTED_GENERIC_TECHNIQUE_INPUT] = grant_values
             create_context = build_xianxia_character_create_context(
                 form_values,
                 systems_service=get_systems_service(),

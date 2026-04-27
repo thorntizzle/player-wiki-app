@@ -41,6 +41,10 @@ XIANXIA_INSIGHT_DEFAULT_AVAILABLE = 0
 XIANXIA_INSIGHT_DEFAULT_SPENT = 0
 XIANXIA_TRAINED_SKILL_COUNT = 3
 XIANXIA_STARTING_MARTIAL_ART_SLOTS = 3
+XIANXIA_GM_GRANTED_GENERIC_TECHNIQUE_INPUT = "gm_granted_generic_technique_entry_keys"
+XIANXIA_DIRECT_ADVANCEMENT_GENERIC_TECHNIQUE_KEYS = frozenset(
+    {"cultivation", "meditation", "conditioning", "training"}
+)
 XIANXIA_STARTING_MARTIAL_ART_RANKS = (
     {"key": "initiate", "label": "Initiate"},
     {"key": "novice", "label": "Novice"},
@@ -68,6 +72,10 @@ def build_xianxia_character_create_context(
 ) -> dict[str, Any]:
     values = _normalize_xianxia_create_values(form_values or {})
     martial_art_options = _list_xianxia_create_martial_art_options(
+        systems_service,
+        campaign_slug,
+    )
+    generic_technique_options = _list_xianxia_create_generic_technique_options(
         systems_service,
         campaign_slug,
     )
@@ -135,6 +143,18 @@ def build_xianxia_character_create_context(
         }
         for index in range(1, XIANXIA_STARTING_MARTIAL_ART_SLOTS + 1)
     ]
+    selected_generic_technique_entry_keys = {
+        str(entry_key or "").strip().casefold()
+        for entry_key in values["gm_granted_generic_technique_entry_keys"]
+    }
+    generic_technique_options = [
+        {
+            **option,
+            "selected": str(option.get("entry_key") or "").strip().casefold()
+            in selected_generic_technique_entry_keys,
+        }
+        for option in generic_technique_options
+    ]
     return {
         "values": values,
         "defaults": {
@@ -172,6 +192,11 @@ def build_xianxia_character_create_context(
         "martial_art_option_map": _build_xianxia_martial_art_option_map(martial_art_options),
         "martial_art_fields": martial_art_fields,
         "martial_art_rank_choices": list(XIANXIA_STARTING_MARTIAL_ART_RANKS),
+        "generic_technique_options": generic_technique_options,
+        "generic_technique_option_map": _build_xianxia_generic_technique_option_map(
+            generic_technique_options
+        ),
+        "gm_granted_generic_technique_input": XIANXIA_GM_GRANTED_GENERIC_TECHNIQUE_INPUT,
     }
 
 
@@ -202,6 +227,10 @@ def build_xianxia_character_definition(
     martial_art_selection = _validate_xianxia_create_starting_martial_art_selection(
         form_values or {},
         create_context.get("martial_art_option_map"),
+    )
+    gm_granted_generic_techniques = _validate_xianxia_create_gm_granted_generic_techniques(
+        form_values or {},
+        create_context.get("generic_technique_option_map"),
     )
     martial_arts = martial_art_selection["records"]
     required_equipment = infer_xianxia_required_equipment(
@@ -281,7 +310,7 @@ def build_xianxia_character_definition(
                 },
                 "equipment": required_equipment,
                 "martial_arts": martial_arts,
-                "generic_techniques": [],
+                "generic_techniques": gm_granted_generic_techniques,
                 "variants": [],
                 "dao_immolating_techniques": {
                     "prepared": [],
@@ -340,6 +369,9 @@ def _normalize_xianxia_create_values(values: dict[str, Any]) -> dict[str, Any]:
         "dao_current": _normalize_xianxia_create_dao_current_value(values),
         "trained_skills": _normalize_xianxia_create_trained_skill_values(values),
         "martial_arts": _normalize_xianxia_create_martial_art_values(values),
+        "gm_granted_generic_technique_entry_keys": (
+            _normalize_xianxia_create_generic_technique_entry_keys(values)
+        ),
     }
 
 
@@ -665,6 +697,47 @@ def _validate_xianxia_create_starting_martial_art_selection(
     return {"records": selected_records, "options": selected_options}
 
 
+def _validate_xianxia_create_gm_granted_generic_techniques(
+    values: dict[str, Any],
+    option_map: Any,
+) -> list[dict[str, Any]]:
+    options_by_entry_key = dict(option_map or {}) if isinstance(option_map, dict) else {}
+    requested_entry_keys = _normalize_xianxia_create_generic_technique_entry_keys(values)
+    if not requested_entry_keys:
+        return []
+    if not options_by_entry_key:
+        raise CharacterBuildError(
+            "No enabled Xianxia Generic Technique Systems entries are available for GM grants."
+        )
+
+    records: list[dict[str, Any]] = []
+    errors: list[str] = []
+    seen_entry_keys: set[str] = set()
+    duplicate_titles: list[str] = []
+    for raw_entry_key in requested_entry_keys:
+        entry_key_marker = str(raw_entry_key or "").strip().casefold()
+        if not entry_key_marker:
+            continue
+        option = options_by_entry_key.get(entry_key_marker)
+        if option is None:
+            errors.append(f"Unsupported GM-granted Generic Technique: {raw_entry_key}.")
+            continue
+        if entry_key_marker in seen_entry_keys:
+            duplicate_titles.append(str(option["name"]))
+            continue
+        seen_entry_keys.add(entry_key_marker)
+        records.append(_build_xianxia_gm_granted_generic_technique_record(option))
+
+    if duplicate_titles:
+        errors.append(
+            "GM-granted Generic Techniques must be distinct; duplicates: "
+            f"{_format_label_list(duplicate_titles)}."
+        )
+    if errors:
+        raise CharacterBuildError(" ".join(errors))
+    return records
+
+
 def _validate_xianxia_create_manual_armor_bonus(values: dict[str, Any]) -> int:
     raw_value = _normalize_xianxia_create_manual_armor_bonus_value(values)
     if raw_value == "":
@@ -773,6 +846,33 @@ def _normalize_xianxia_create_martial_art_values(values: dict[str, Any]) -> list
             for _ in range(XIANXIA_STARTING_MARTIAL_ART_SLOTS - len(normalized))
         )
     return normalized[:XIANXIA_STARTING_MARTIAL_ART_SLOTS]
+
+
+def _normalize_xianxia_create_generic_technique_entry_keys(
+    values: dict[str, Any],
+) -> list[str]:
+    raw_values = values.get(XIANXIA_GM_GRANTED_GENERIC_TECHNIQUE_INPUT)
+    if raw_values is None:
+        raw_values = values.get("gm_granted_generic_techniques")
+    if raw_values is None:
+        return []
+    if isinstance(raw_values, dict):
+        raw_values = list(raw_values.values())
+    elif isinstance(raw_values, (list, tuple, set)):
+        raw_values = list(raw_values)
+    else:
+        raw_values = [raw_values]
+
+    entry_keys: list[str] = []
+    for raw_value in raw_values:
+        if isinstance(raw_value, dict):
+            raw_value = raw_value.get("entry_key") or raw_value.get("systems_ref")
+        if isinstance(raw_value, dict):
+            raw_value = raw_value.get("entry_key")
+        entry_key = str(raw_value if raw_value is not None else "").strip()
+        if entry_key:
+            entry_keys.append(entry_key)
+    return entry_keys
 
 
 def _extract_xianxia_martial_art_values(values: dict[str, Any]) -> list[dict[str, Any]]:
@@ -925,6 +1025,85 @@ def _list_xianxia_create_martial_art_options(
     )
 
 
+def _list_xianxia_create_generic_technique_options(
+    systems_service: Any | None,
+    campaign_slug: str,
+) -> list[dict[str, Any]]:
+    if systems_service is None or not str(campaign_slug or "").strip():
+        return []
+    list_entries = getattr(systems_service, "list_enabled_entries_for_campaign", None)
+    if not callable(list_entries):
+        return []
+    entries = [
+        entry
+        for entry in list_entries(campaign_slug, entry_type="generic_technique", limit=None)
+        if str(getattr(entry, "entry_type", "") or "").strip().lower() == "generic_technique"
+    ]
+    options = []
+    for entry in sorted(entries, key=_xianxia_generic_technique_entry_sort_key):
+        option = _build_xianxia_create_generic_technique_option(entry)
+        if not option:
+            continue
+        generic_technique_key = str(option.get("generic_technique_key") or "").strip()
+        if generic_technique_key in XIANXIA_DIRECT_ADVANCEMENT_GENERIC_TECHNIQUE_KEYS:
+            continue
+        if int(option.get("insight_cost") or 0) <= 0:
+            continue
+        options.append(option)
+    return options
+
+
+def _build_xianxia_create_generic_technique_option(entry: Any) -> dict[str, Any]:
+    metadata = dict(getattr(entry, "metadata", {}) or {})
+    body = dict(getattr(entry, "body", {}) or {})
+    technique_body = dict(body.get("xianxia_generic_technique") or {})
+    systems_ref = _systems_ref_for_xianxia_create_entry(entry)
+    generic_technique_key = _normalize_generic_technique_key(
+        _first_present_value(
+            metadata.get("generic_technique_key"),
+            metadata.get("xianxia_generic_technique_key"),
+            technique_body.get("key"),
+        )
+    )
+    if not systems_ref.get("entry_key") or not generic_technique_key:
+        return {}
+    return {
+        "name": str(getattr(entry, "title", "") or "").strip() or "Generic Technique",
+        "entry_key": systems_ref["entry_key"],
+        "systems_ref": systems_ref,
+        "generic_technique_key": generic_technique_key,
+        "insight_cost": _non_negative_int(
+            _first_present_value(
+                metadata.get("insight_cost"),
+                technique_body.get("insight_cost"),
+            ),
+            default=0,
+        ),
+        "support_state": str(
+            _first_present_value(
+                metadata.get("support_state"),
+                metadata.get("xianxia_support_state"),
+                technique_body.get("support_state"),
+                technique_body.get("xianxia_support_state"),
+            )
+            or ""
+        ).strip(),
+        "learnable_without_master": _truthy(
+            _first_present_value(
+                metadata.get("learnable_without_master"),
+                technique_body.get("learnable_without_master"),
+            )
+        ),
+        "requires_master": _truthy(
+            _first_present_value(
+                metadata.get("requires_master"),
+                technique_body.get("requires_master"),
+            )
+        ),
+        "sort_order": _xianxia_generic_technique_sort_order(metadata, technique_body),
+    }
+
+
 def _build_xianxia_martial_art_option(
     entry: Any,
     *,
@@ -1024,6 +1203,16 @@ def _build_xianxia_martial_art_option_map(
     }
 
 
+def _build_xianxia_generic_technique_option_map(
+    options: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    return {
+        str(option.get("entry_key") or "").strip().casefold(): option
+        for option in options
+        if str(option.get("entry_key") or "").strip()
+    }
+
+
 def _build_xianxia_starting_martial_art_record(
     option: dict[str, Any],
     rank_key: str,
@@ -1055,6 +1244,22 @@ def _build_xianxia_starting_martial_art_record(
     return record
 
 
+def _build_xianxia_gm_granted_generic_technique_record(
+    option: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "name": str(option.get("name") or "").strip() or "Generic Technique",
+        "systems_ref": dict(option.get("systems_ref") or {}),
+        "generic_technique_key": str(option.get("generic_technique_key") or "").strip(),
+        "insight_spent": 0,
+        "support_state": str(option.get("support_state") or "").strip(),
+        "learnable_without_master": bool(option.get("learnable_without_master")),
+        "requires_master": bool(option.get("requires_master")),
+        "character_creation_grant": True,
+        "grant_source": "gm_granted_character_creation",
+    }
+
+
 def _rank_ref_for_starting_martial_art(option: dict[str, Any], rank_key: str) -> str:
     rank_ref = str(dict(option.get("rank_refs") or {}).get(rank_key) or "").strip()
     if rank_ref:
@@ -1070,6 +1275,77 @@ def _normalize_xianxia_starting_martial_art_rank_key(value: Any) -> str:
     normalized = str(value if value is not None else "").strip().lower().replace(" ", "_")
     normalized = normalized.replace("-", "_")
     return normalized
+
+
+def _normalize_generic_technique_key(value: Any) -> str:
+    normalized = str(value if value is not None else "").strip().lower().replace(" ", "_")
+    normalized = normalized.replace("-", "_")
+    return normalized
+
+
+def _xianxia_generic_technique_entry_sort_key(entry: Any) -> tuple[int, str]:
+    metadata = dict(getattr(entry, "metadata", {}) or {})
+    body = dict(getattr(entry, "body", {}) or {})
+    technique_body = dict(body.get("xianxia_generic_technique") or {})
+    return (
+        _xianxia_generic_technique_sort_order(metadata, technique_body),
+        str(getattr(entry, "title", "") or "").casefold(),
+    )
+
+
+def _xianxia_generic_technique_sort_order(
+    metadata: dict[str, Any],
+    technique_body: dict[str, Any],
+) -> int:
+    raw_order = _first_present_value(
+        metadata.get("generic_technique_catalog_order"),
+        metadata.get("catalog_order"),
+        technique_body.get("catalog_order"),
+    )
+    try:
+        return int(raw_order)
+    except (TypeError, ValueError):
+        return 10_000
+
+
+def _systems_ref_for_xianxia_create_entry(entry: Any) -> dict[str, str]:
+    return {
+        "library_slug": str(getattr(entry, "library_slug", "") or "").strip(),
+        "source_id": str(getattr(entry, "source_id", "") or "").strip(),
+        "entry_key": str(getattr(entry, "entry_key", "") or "").strip(),
+        "slug": str(getattr(entry, "slug", "") or "").strip(),
+        "title": str(getattr(entry, "title", "") or "").strip(),
+        "entry_type": str(getattr(entry, "entry_type", "") or "").strip(),
+    }
+
+
+def _first_present_value(*values: Any) -> Any:
+    for value in values:
+        if value is not None and value != "":
+            return value
+    return None
+
+
+def _non_negative_int(value: Any, *, default: int = 0) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0, parsed)
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    return str(value if value is not None else "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+        "on",
+    }
 
 
 def _clean_form_value(value: Any) -> str:
