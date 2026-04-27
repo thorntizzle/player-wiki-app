@@ -98,12 +98,14 @@ from .xianxia_advancement import (
     XIANXIA_TRAINING_STANCE_INCREASE,
     XIANXIA_TRAINING_STANCE_MAXIMUM,
     advance_xianxia_martial_art_rank_definition,
+    build_xianxia_realm_ascension_context,
     learn_xianxia_generic_technique_definition,
     list_xianxia_generic_technique_learning_options,
     spend_xianxia_conditioning_definition,
     spend_xianxia_cultivation_energy_definition,
     spend_xianxia_meditation_definition,
     spend_xianxia_training_definition,
+    start_xianxia_realm_ascension_review_definition,
     normalize_xianxia_martial_art_rank_key,
     rank_label as xianxia_martial_art_rank_label,
 )
@@ -1532,6 +1534,16 @@ def present_xianxia_cultivation_context(
             ("teacher_breakthrough_note", "Teacher/breakthrough note"),
             ("legendary_prerequisite_note", "Legendary requirement"),
             ("legendary_quest_note", "Legendary quest/mythic-master note"),
+            ("current_realm", "Current Realm"),
+            ("target_realm", "Target Realm"),
+            ("status", "Status"),
+            ("seclusion_time", "Seclusion time"),
+            ("rebuild_budget", "Rebuild budget"),
+            ("stat_cap", "Stat cap"),
+            ("actions_per_turn", "Actions per turn"),
+            ("gm_review_note", "GM review note"),
+            ("seclusion_notes", "Seclusion notes"),
+            ("hp_stance_trade_notes", "HP/Stance trade notes"),
             ("notes", "Notes"),
         ):
             value = raw_record.get(key)
@@ -1563,6 +1575,7 @@ def present_xianxia_cultivation_context(
         "martial_arts": martial_arts,
         "generic_techniques": list(xianxia_read.get("generic_techniques") or []),
         "generic_technique_options": generic_technique_options,
+        "realm_ascension": build_xianxia_realm_ascension_context(xianxia),
         "history": history_records,
     }
 
@@ -12062,6 +12075,23 @@ def create_app() -> Flask:
                     success_message = (
                         f"Spent {technique_result.insight_cost} Insight to learn "
                         f"{technique_result.technique_name}."
+                    )
+                elif cultivation_action == "start_realm_ascension_review":
+                    redirect_anchor = "xianxia-cultivation-realm-ascension"
+                    realm_result = start_xianxia_realm_ascension_review_definition(
+                        record.definition,
+                        target_realm=request.form.get("target_realm", ""),
+                        gm_review_note=request.form.get("realm_ascension_gm_review_note", ""),
+                        seclusion_notes=request.form.get("realm_ascension_seclusion_notes", ""),
+                        hp_stance_trade_notes=request.form.get(
+                            "realm_ascension_hp_stance_trade_notes",
+                            "",
+                        ),
+                    )
+                    definition = realm_result.definition
+                    success_message = (
+                        f"Started Realm ascension review from {realm_result.current_realm} "
+                        f"to {realm_result.target_realm}."
                     )
                 else:
                     raise ValueError("Unsupported cultivation action. Refresh the page and try again.")

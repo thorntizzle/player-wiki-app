@@ -49,6 +49,37 @@ XIANXIA_YIN_YANG_LABELS = {
     "yin": "Yin",
     "yang": "Yang",
 }
+XIANXIA_REALM_ASCENSION_REALMS = ("Mortal", "Immortal", "Divine")
+XIANXIA_REALM_ASCENSION_TARGETS = {
+    "Mortal": {
+        "target_realm": "Immortal",
+        "seclusion_time": "1 year",
+        "rebuild_budget": 15,
+        "stat_cap": 6,
+        "actions_per_turn": 3,
+    },
+    "Immortal": {
+        "target_realm": "Divine",
+        "seclusion_time": "100 years",
+        "rebuild_budget": 25,
+        "stat_cap": 12,
+        "actions_per_turn": 4,
+    },
+}
+
+
+@dataclass(frozen=True)
+class XianxiaRealmAscensionReviewResult:
+    definition: Any
+    current_realm: str
+    target_realm: str
+    seclusion_time: str
+    rebuild_budget: int
+    stat_cap: int
+    actions_per_turn: int
+    gm_review_note: str
+    seclusion_notes: str = ""
+    hp_stance_trade_notes: str = ""
 
 
 @dataclass(frozen=True)
@@ -115,6 +146,101 @@ class XianxiaGenericTechniqueLearnResult:
     insight_cost: int
     systems_ref: dict[str, str]
     notes: str = ""
+
+
+def build_xianxia_realm_ascension_context(xianxia: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(xianxia or {})
+    current_realm = normalize_xianxia_realm_label(payload.get("realm"))
+    target = _realm_ascension_target_for_current(current_realm)
+    latest_review = _latest_realm_ascension_review(payload.get("advancement_history"))
+    context = {
+        "current_realm": current_realm,
+        "available": target is not None,
+        "target": dict(target or {}),
+        "attributes": _stat_rows(
+            payload.get("attributes"),
+            XIANXIA_ATTRIBUTE_KEYS,
+            XIANXIA_ATTRIBUTE_LABELS,
+        ),
+        "efforts": _stat_rows(
+            payload.get("efforts"),
+            XIANXIA_EFFORT_KEYS,
+            XIANXIA_EFFORT_LABELS,
+        ),
+        "latest_review": latest_review,
+    }
+    if target is None:
+        context["message"] = "No further Realm ascension target is defined for this character."
+    return context
+
+
+def start_xianxia_realm_ascension_review_definition(
+    definition: Any,
+    *,
+    target_realm: str,
+    gm_review_note: str,
+    seclusion_notes: str = "",
+    hp_stance_trade_notes: str = "",
+) -> XianxiaRealmAscensionReviewResult:
+    payload = definition.to_dict()
+    xianxia = dict(payload.get("xianxia") or {})
+    current_realm = normalize_xianxia_realm_label(xianxia.get("realm"))
+    target = _realm_ascension_target_for_current(current_realm)
+    if target is None:
+        raise ValueError(
+            f"{current_realm} characters do not have a further Realm ascension target."
+        )
+
+    normalized_target_realm = normalize_xianxia_realm_label(target_realm)
+    expected_target_realm = str(target["target_realm"])
+    if normalized_target_realm != expected_target_realm:
+        raise ValueError(
+            f"Realm ascension must move from {current_realm} to {expected_target_realm}."
+        )
+
+    clean_gm_review_note = _clean_note(gm_review_note)
+    if not clean_gm_review_note:
+        raise ValueError("Record a GM review note before starting Realm ascension review.")
+    clean_seclusion_notes = _clean_note(seclusion_notes)
+    clean_hp_stance_trade_notes = _clean_note(hp_stance_trade_notes)
+
+    history = [
+        dict(record)
+        for record in list(xianxia.get("advancement_history") or [])
+        if isinstance(record, dict) and record
+    ]
+    event = {
+        "action": "realm_ascension_review_started",
+        "target": expected_target_realm,
+        "current_realm": current_realm,
+        "target_realm": expected_target_realm,
+        "status": "pending_gm_review",
+        "seclusion_time": str(target["seclusion_time"]),
+        "rebuild_budget": int(target["rebuild_budget"]),
+        "stat_cap": int(target["stat_cap"]),
+        "actions_per_turn": int(target["actions_per_turn"]),
+        "gm_review_note": clean_gm_review_note,
+    }
+    if clean_seclusion_notes:
+        event["seclusion_notes"] = clean_seclusion_notes
+    if clean_hp_stance_trade_notes:
+        event["hp_stance_trade_notes"] = clean_hp_stance_trade_notes
+    history.append(event)
+    xianxia["advancement_history"] = history
+    payload["xianxia"] = xianxia
+
+    return XianxiaRealmAscensionReviewResult(
+        definition=definition.__class__.from_dict(payload),
+        current_realm=current_realm,
+        target_realm=expected_target_realm,
+        seclusion_time=str(target["seclusion_time"]),
+        rebuild_budget=int(target["rebuild_budget"]),
+        stat_cap=int(target["stat_cap"]),
+        actions_per_turn=int(target["actions_per_turn"]),
+        gm_review_note=clean_gm_review_note,
+        seclusion_notes=clean_seclusion_notes,
+        hp_stance_trade_notes=clean_hp_stance_trade_notes,
+    )
 
 
 def list_xianxia_generic_technique_learning_options(
@@ -852,6 +978,18 @@ def normalize_xianxia_generic_technique_key(value: Any) -> str:
     )
 
 
+def normalize_xianxia_realm_label(value: Any) -> str:
+    cleaned = " ".join(str(value if value is not None else "").split()).strip()
+    if not cleaned:
+        return "Mortal"
+    normalized = cleaned.lower().replace("-", "_").replace(" ", "_")
+    labels = {realm.casefold(): realm for realm in XIANXIA_REALM_ASCENSION_REALMS}
+    labels.update(
+        {realm.lower().replace(" ", "_"): realm for realm in XIANXIA_REALM_ASCENSION_REALMS}
+    )
+    return labels.get(normalized, cleaned)
+
+
 def energy_label(energy_key: str) -> str:
     normalized = normalize_xianxia_energy_key(energy_key)
     if normalized in XIANXIA_ENERGY_LABELS:
@@ -1224,6 +1362,58 @@ def _legendary_prerequisite_note(rank_record: dict[str, Any]) -> str:
 
 def _clean_note(value: Any) -> str:
     return " ".join(str(value or "").split()).strip()
+
+
+def _realm_ascension_target_for_current(current_realm: str) -> dict[str, Any] | None:
+    normalized_realm = normalize_xianxia_realm_label(current_realm)
+    target = XIANXIA_REALM_ASCENSION_TARGETS.get(normalized_realm)
+    if target is None:
+        return None
+    return {
+        "current_realm": normalized_realm,
+        **dict(target),
+    }
+
+
+def _latest_realm_ascension_review(records: Any) -> dict[str, Any] | None:
+    for record in reversed(list(records or [])):
+        if not isinstance(record, dict):
+            continue
+        if str(record.get("action") or "").strip() != "realm_ascension_review_started":
+            continue
+        return {
+            "current_realm": str(record.get("current_realm") or "").strip(),
+            "target_realm": str(record.get("target_realm") or record.get("target") or "").strip(),
+            "status": str(record.get("status") or "").strip(),
+            "seclusion_time": str(record.get("seclusion_time") or "").strip(),
+            "rebuild_budget": _non_negative_int(record.get("rebuild_budget"), default=0),
+            "stat_cap": _non_negative_int(record.get("stat_cap"), default=0),
+            "actions_per_turn": _non_negative_int(record.get("actions_per_turn"), default=0),
+            "gm_review_note": str(record.get("gm_review_note") or "").strip(),
+            "seclusion_notes": str(record.get("seclusion_notes") or "").strip(),
+            "hp_stance_trade_notes": str(record.get("hp_stance_trade_notes") or "").strip(),
+        }
+    return None
+
+
+def _stat_rows(
+    values: Any,
+    keys: tuple[str, ...],
+    labels: dict[str, str],
+) -> dict[str, Any]:
+    mapping = dict(values or {}) if isinstance(values, dict) else {}
+    rows = [
+        {
+            "key": key,
+            "label": labels.get(key, key.replace("_", " ").title()),
+            "score": _non_negative_int(mapping.get(key), default=0),
+        }
+        for key in keys
+    ]
+    return {
+        "rows": rows,
+        "total": sum(int(row["score"]) for row in rows),
+    }
 
 
 def _first_present_value(*values: Any) -> Any:

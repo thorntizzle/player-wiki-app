@@ -1422,6 +1422,135 @@ def test_xianxia_cultivation_route_is_separate_from_dnd_level_up(
     assert "/campaigns/linden-pass/characters/cultivation-crane/level-up" not in cultivation_html
 
 
+def test_xianxia_cultivation_route_records_realm_ascension_review_subflow(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+                "default_visibility": "dm",
+            }
+        ]
+
+    _write_campaign_config(app, _mutate)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Realm Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+
+    cultivation_response = client.get(
+        "/campaigns/linden-pass/characters/realm-crane/cultivation"
+    )
+    assert cultivation_response.status_code == 200
+    cultivation_html = cultivation_response.get_data(as_text=True)
+    assert "Realm Ascension" in cultivation_html
+    assert 'name="cultivation_action" value="start_realm_ascension_review"' in cultivation_html
+    assert 'name="target_realm" value="Immortal"' in cultivation_html
+    assert "Current Realm" in cultivation_html
+    assert "Mortal" in cultivation_html
+    assert "Target Realm" in cultivation_html
+    assert "Immortal" in cultivation_html
+    assert "1 year" in cultivation_html
+    assert "15 points" in cultivation_html
+    assert "Max 6 per Stat" in cultivation_html
+    assert "Start Realm Review" in cultivation_html
+
+    starting_revision = _character_state_revision(app, "realm-crane")
+    invalid_response = client.post(
+        "/campaigns/linden-pass/characters/realm-crane/cultivation",
+        data={
+            "expected_revision": str(starting_revision),
+            "cultivation_action": "start_realm_ascension_review",
+            "target_realm": "Immortal",
+            "realm_ascension_gm_review_note": " ",
+        },
+        follow_redirects=True,
+    )
+    assert invalid_response.status_code == 200
+    assert (
+        "Record a GM review note before starting Realm ascension review."
+        in invalid_response.get_data(as_text=True)
+    )
+    assert _character_state_revision(app, "realm-crane") == starting_revision
+
+    review_note = "GM approved the review after the Immortal threshold scene."
+    review_response = client.post(
+        "/campaigns/linden-pass/characters/realm-crane/cultivation",
+        data={
+            "expected_revision": str(starting_revision),
+            "cultivation_action": "start_realm_ascension_review",
+            "target_realm": "Immortal",
+            "realm_ascension_gm_review_note": review_note,
+            "realm_ascension_seclusion_notes": "One year in a sealed cave.",
+            "realm_ascension_hp_stance_trade_notes": "No trade chosen yet.",
+        },
+        follow_redirects=False,
+    )
+    assert review_response.status_code == 302
+    assert review_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/realm-crane/cultivation#xianxia-cultivation-realm-ascension"
+    )
+
+    definition_payload = _read_character_definition(app, "realm-crane")
+    xianxia = definition_payload["xianxia"]
+    assert xianxia["realm"] == "Mortal"
+    assert xianxia["actions_per_turn"] == 2
+    assert xianxia["attributes"] == {
+        "str": 3,
+        "dex": 0,
+        "con": 3,
+        "int": 0,
+        "wis": 0,
+        "cha": 0,
+    }
+    assert xianxia["efforts"] == {
+        "basic": 3,
+        "weapon": 1,
+        "guns_explosive": 0,
+        "magic": 1,
+        "ultimate": 0,
+    }
+    assert len(xianxia["martial_arts"]) == 3
+    assert xianxia["generic_techniques"] == []
+    assert xianxia["advancement_history"] == [
+        {
+            "action": "realm_ascension_review_started",
+            "target": "Immortal",
+            "current_realm": "Mortal",
+            "target_realm": "Immortal",
+            "status": "pending_gm_review",
+            "seclusion_time": "1 year",
+            "rebuild_budget": 15,
+            "stat_cap": 6,
+            "actions_per_turn": 3,
+            "gm_review_note": review_note,
+            "seclusion_notes": "One year in a sealed cave.",
+            "hp_stance_trade_notes": "No trade chosen yet.",
+        }
+    ]
+    assert _character_state_revision(app, "realm-crane") == starting_revision + 1
+
+    updated_html = client.get(
+        "/campaigns/linden-pass/characters/realm-crane/cultivation"
+    ).get_data(as_text=True)
+    assert "Latest Realm Review" in updated_html
+    assert "Realm Ascension Review Started" in updated_html
+    assert "GM review note:" in updated_html
+    assert review_note in updated_html
+    assert "Seclusion notes:" in updated_html
+    assert "One year in a sealed cave." in updated_html
+    assert "HP/Stance trade notes:" in updated_html
+    assert "No trade chosen yet." in updated_html
+
+
 def test_xianxia_cultivation_route_tracks_insight_available_and_spent(
     app, client, sign_in, users
 ):

@@ -12,6 +12,7 @@
       <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, page='martial_arts') }}">Martial Arts</a>
       <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, page='techniques') }}">Techniques</a>
       <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, page='resources') }}">Resources</a>
+      <a class="ghost-button" href="#xianxia-cultivation-realm-ascension">Realm Ascension</a>
     </div>
   </section>
 
@@ -526,6 +527,114 @@
           </article>
         {% endfor %}
       </div>
+    {% endif %}
+  </section>
+
+  <section class="read-section" id="xianxia-cultivation-realm-ascension">
+    <div class="section-heading">
+      <h2>Realm Ascension</h2>
+    </div>
+    {% set ascension = cultivation.realm_ascension %}
+    <div class="glance-grid">
+      <div class="glance-card">
+        <span class="meta">Current Realm</span>
+        <strong>{{ ascension.current_realm }}</strong>
+      </div>
+      {% if ascension.available %}
+        <div class="glance-card">
+          <span class="meta">Target Realm</span>
+          <strong>{{ ascension.target.target_realm }}</strong>
+        </div>
+        <div class="glance-card">
+          <span class="meta">Seclusion</span>
+          <strong>{{ ascension.target.seclusion_time }}</strong>
+        </div>
+        <div class="glance-card">
+          <span class="meta">Rebuild</span>
+          <strong>{{ ascension.target.rebuild_budget }} points</strong>
+          <span class="meta">Max {{ ascension.target.stat_cap }} per Stat</span>
+        </div>
+        <div class="glance-card">
+          <span class="meta">Actions</span>
+          <strong>{{ ascension.target.actions_per_turn }}</strong>
+        </div>
+      {% else %}
+        <div class="glance-card">
+          <span class="meta">Target Realm</span>
+          <strong>None</strong>
+        </div>
+      {% endif %}
+    </div>
+    <article class="detail-card">
+      <div class="detail-grid">
+        <div>
+          <h3>Attributes</h3>
+          <p class="meta">Current total {{ ascension.attributes.total }}</p>
+          <ul class="plain-list slot-list">
+            {% for stat in ascension.attributes.rows %}
+              <li><strong>{{ stat.label }}:</strong> {{ stat.score }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+        <div>
+          <h3>Efforts</h3>
+          <p class="meta">Current total {{ ascension.efforts.total }}</p>
+          <ul class="plain-list slot-list">
+            {% for stat in ascension.efforts.rows %}
+              <li><strong>{{ stat.label }}:</strong> {{ stat.score }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+    </article>
+    {% if ascension.available %}
+      <article class="detail-card session-card">
+        <form
+          class="stack-form"
+          method="post"
+          action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+        >
+          <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+          <input type="hidden" name="cultivation_action" value="start_realm_ascension_review">
+          <input type="hidden" name="target_realm" value="{{ ascension.target.target_realm }}">
+          <label>
+            GM review note
+            <textarea name="realm_ascension_gm_review_note" rows="3" required></textarea>
+          </label>
+          <label>
+            Seclusion notes
+            <textarea name="realm_ascension_seclusion_notes" rows="2"></textarea>
+          </label>
+          <label>
+            HP/Stance trade notes
+            <textarea name="realm_ascension_hp_stance_trade_notes" rows="2"></textarea>
+          </label>
+          <div class="hero-actions">
+            <button type="submit">Start Realm Review</button>
+          </div>
+        </form>
+      </article>
+    {% else %}
+      <article class="detail-card">
+        <p class="meta">{{ ascension.message }}</p>
+      </article>
+    {% endif %}
+    {% if ascension.latest_review %}
+      <article class="detail-card">
+        <h3>Latest Realm Review</h3>
+        <ul class="plain-list slot-list">
+          <li><strong>Target:</strong> {{ ascension.latest_review.target_realm }}</li>
+          <li><strong>Status:</strong> {{ ascension.latest_review.status | replace('_', ' ') }}</li>
+          <li><strong>Seclusion:</strong> {{ ascension.latest_review.seclusion_time }}</li>
+          <li><strong>GM review note:</strong> {{ ascension.latest_review.gm_review_note }}</li>
+          {% if ascension.latest_review.seclusion_notes %}
+            <li><strong>Seclusion notes:</strong> {{ ascension.latest_review.seclusion_notes }}</li>
+          {% endif %}
+          {% if ascension.latest_review.hp_stance_trade_notes %}
+            <li><strong>HP/Stance trade notes:</strong> {{ ascension.latest_review.hp_stance_trade_notes }}</li>
+          {% endif %}
+        </ul>
+      </article>
     {% endif %}
   </section>
 
