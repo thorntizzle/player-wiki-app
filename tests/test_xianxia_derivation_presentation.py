@@ -455,6 +455,8 @@ def test_xianxia_techniques_page_records_ad_hoc_dao_immolating_use_request(
             "request_source": "ad_hoc",
             "approval_required": True,
             "approval_status": "pending",
+            "insight_cost": 10,
+            "one_use": True,
             "notes": "Invented at the duel's turning point.",
         }
     ]
@@ -470,6 +472,125 @@ def test_xianxia_techniques_page_records_ad_hoc_dao_immolating_use_request(
     assert "Pending" in html
     assert "Dao Immolating Technique Use" in html
     assert "Invented at the duel's turning point." in html
+    assert "Insight cost: 10" in html
+    assert "One-use history: not recorded yet" in html
+
+
+def test_xianxia_techniques_page_records_dao_immolating_insight_cost_and_one_use_history(
+    client,
+    sign_in,
+    users,
+    app,
+    get_character,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Spend Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+    record = get_character("spend-crane")
+    assert record is not None
+    payload = record.definition.to_dict()
+    payload["xianxia"]["insight"] = {"available": 12, "spent": 3}
+    payload["xianxia"]["dao_immolating_techniques"]["prepared"] = [
+        {"name": "Dawn Ash Mercy", "notes": "Prepared but not required."}
+    ]
+    payload["xianxia"]["dao_immolating_techniques"]["use_history"] = [
+        {
+            "name": "Lotus-Burning Last Word",
+            "request_type": "dao_immolating_use",
+            "request_source": "ad_hoc",
+            "approval_status": "approved",
+            "approval_notes": "GM approved at the duel table.",
+        },
+        {
+            "name": "Unapproved Furnace Vow",
+            "request_type": "dao_immolating_use",
+            "approval_status": "pending",
+        },
+    ]
+    _write_raw_xianxia_character_definition(app, "spend-crane", payload)
+    record = get_character("spend-crane")
+    assert record is not None
+
+    sheet_response = client.get(
+        "/campaigns/linden-pass/characters/spend-crane?mode=session&page=techniques"
+    )
+    sheet_html = unescape(sheet_response.get_data(as_text=True))
+    assert sheet_response.status_code == 200
+    assert "Insight cost: 10" in sheet_html
+    assert "One-use history: not recorded yet" in sheet_html
+    assert "dao_immolating_use_index" in sheet_html
+    assert "Record One-Use Spend" in sheet_html
+
+    response = client.post(
+        "/campaigns/linden-pass/characters/spend-crane/xianxia/dao-immolating-use-records",
+        data={
+            "expected_revision": record.state_record.revision,
+            "mode": "session",
+            "page": "techniques",
+            "dao_immolating_use_index": "0",
+            "dao_immolating_use_notes": "Spent when the magistrate could not dodge.",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert "page=techniques" in response.headers["Location"]
+    assert "mode=session" in response.headers["Location"]
+    assert "xianxia-approval-dao-immolating-use-records" in response.headers["Location"]
+    updated = get_character("spend-crane")
+    assert updated is not None
+    xianxia = updated.definition.to_dict()["xianxia"]
+    assert xianxia["insight"] == {"available": 2, "spent": 13}
+    used_record = xianxia["dao_immolating_techniques"]["use_history"][0]
+    assert used_record["insight_cost"] == 10
+    assert used_record["insight_spent"] == 10
+    assert used_record["one_use"] is True
+    assert used_record["used"] is True
+    assert used_record["one_use_status"] == "used"
+    assert used_record["use_notes"] == "Spent when the magistrate could not dodge."
+    assert xianxia["dao_immolating_techniques"]["prepared"] == [
+        {"name": "Dawn Ash Mercy", "notes": "Prepared but not required."}
+    ]
+    assert xianxia["dao_immolating_techniques"]["use_history"][1]["approval_status"] == "pending"
+    assert xianxia["advancement_history"][-1] == {
+        "action": "dao_immolating_technique_used",
+        "amount": 10,
+        "target": "Lotus-Burning Last Word",
+        "use_history_index": 0,
+        "insight_cost": 10,
+        "one_use": True,
+        "one_use_status": "used",
+        "notes": "Spent when the magistrate could not dodge.",
+    }
+
+    updated_html = unescape(
+        client.get(
+            "/campaigns/linden-pass/characters/spend-crane?mode=session&page=techniques"
+        ).get_data(as_text=True)
+    )
+    assert "One-use history: used; Insight spent 10" in updated_html
+    assert "Spent when the magistrate could not dodge." in updated_html
+
+    duplicate_response = client.post(
+        "/campaigns/linden-pass/characters/spend-crane/xianxia/dao-immolating-use-records",
+        data={
+            "expected_revision": updated.state_record.revision,
+            "mode": "session",
+            "page": "techniques",
+            "dao_immolating_use_index": "0",
+        },
+        follow_redirects=False,
+    )
+    assert duplicate_response.status_code == 302
+    unchanged = get_character("spend-crane")
+    assert unchanged is not None
+    assert unchanged.state_record.revision == updated.state_record.revision
+    assert unchanged.definition.to_dict()["xianxia"]["insight"] == {"available": 2, "spent": 13}
 
 
 def test_xianxia_read_sheet_uses_system_specific_subpages(

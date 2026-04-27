@@ -7,6 +7,7 @@ from typing import Any
 from .xianxia_character_model import (
     XIANXIA_ATTRIBUTE_KEYS,
     XIANXIA_ATTRIBUTE_LABELS,
+    XIANXIA_DAO_IMMOLATING_INSIGHT_COST,
     XIANXIA_EFFORT_KEYS,
     XIANXIA_EFFORT_LABELS,
     XIANXIA_ENERGY_KEYS,
@@ -200,6 +201,14 @@ class XianxiaGenericTechniqueLearnResult:
 class XianxiaDaoImmolatingUseRequestResult:
     definition: Any
     request_name: str
+    notes: str = ""
+
+
+@dataclass(frozen=True)
+class XianxiaDaoImmolatingUseRecordResult:
+    definition: Any
+    request_name: str
+    insight_cost: int
     notes: str = ""
 
 
@@ -959,15 +968,92 @@ def request_xianxia_dao_immolating_use_definition(
             **({"notes": clean_notes} if clean_notes else {}),
         }
     )
-    xianxia["dao_immolating_techniques"] = {
-        "prepared": _copy_record_list(dao_immolating.get("prepared")),
-        "use_history": use_history,
-    }
+    dao_immolating["prepared"] = _copy_record_list(dao_immolating.get("prepared"))
+    dao_immolating["use_history"] = use_history
+    xianxia["dao_immolating_techniques"] = dao_immolating
     payload["xianxia"] = xianxia
 
     return XianxiaDaoImmolatingUseRequestResult(
         definition=definition.__class__.from_dict(payload),
         request_name=clean_name,
+        notes=clean_notes,
+    )
+
+
+def record_xianxia_dao_immolating_use_definition(
+    definition: Any,
+    *,
+    use_record_index: int,
+    notes: str = "",
+) -> XianxiaDaoImmolatingUseRecordResult:
+    payload = definition.to_dict()
+    xianxia = dict(payload.get("xianxia") or {})
+    dao_immolating = dict(xianxia.get("dao_immolating_techniques") or {})
+    use_history = _copy_record_list(dao_immolating.get("use_history"))
+    if use_record_index < 0 or use_record_index >= len(use_history):
+        raise ValueError("Choose a recorded Dao Immolating Technique use.")
+
+    target_record = dict(use_history[use_record_index])
+    request_name = _clean_note(
+        target_record.get("name") or target_record.get("title") or "Dao Immolating Technique"
+    )
+    if _approval_status_key(target_record.get("approval_status") or target_record.get("status")) != "approved":
+        raise ValueError("Only an approved Dao Immolating Technique use can spend Insight.")
+    if _dao_immolating_use_record_is_used(target_record):
+        raise ValueError(f"{request_name} has already been recorded as used.")
+
+    insight = dict(xianxia.get("insight") or {})
+    available = _non_negative_int(insight.get("available"), default=0)
+    spent = _non_negative_int(insight.get("spent"), default=0)
+    insight_cost = XIANXIA_DAO_IMMOLATING_INSIGHT_COST
+    if available < insight_cost:
+        raise ValueError(
+            f"Dao Immolating Technique use needs {insight_cost} Insight; "
+            f"only {available} available."
+        )
+
+    clean_notes = _clean_note(notes)
+    target_record["insight_cost"] = insight_cost
+    target_record["insight_spent"] = insight_cost
+    target_record["one_use"] = True
+    target_record["used"] = True
+    target_record["one_use_status"] = "used"
+    if clean_notes:
+        target_record["use_notes"] = clean_notes
+    use_history[use_record_index] = target_record
+
+    xianxia["insight"] = {
+        "available": available - insight_cost,
+        "spent": spent + insight_cost,
+    }
+    xianxia["dao_immolating_techniques"] = {
+        "prepared": _copy_record_list(dao_immolating.get("prepared")),
+        "use_history": use_history,
+    }
+    history = [
+        dict(record)
+        for record in list(xianxia.get("advancement_history") or [])
+        if isinstance(record, dict) and record
+    ]
+    event = {
+        "action": "dao_immolating_technique_used",
+        "amount": insight_cost,
+        "target": request_name,
+        "use_history_index": use_record_index,
+        "insight_cost": insight_cost,
+        "one_use": True,
+        "one_use_status": "used",
+    }
+    if clean_notes:
+        event["notes"] = clean_notes
+    history.append(event)
+    xianxia["advancement_history"] = history
+    payload["xianxia"] = xianxia
+
+    return XianxiaDaoImmolatingUseRecordResult(
+        definition=definition.__class__.from_dict(payload),
+        request_name=request_name,
+        insight_cost=insight_cost,
         notes=clean_notes,
     )
 
@@ -2702,6 +2788,33 @@ def _truthy(value: Any) -> bool:
         return value
     normalized = str(value or "").strip().lower()
     return normalized in {"1", "true", "yes", "on"}
+
+
+def _approval_status_key(value: Any) -> str:
+    normalized = (
+        str(value if value is not None else "")
+        .strip()
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+    )
+    if normalized == "denied":
+        return "rejected"
+    return normalized
+
+
+def _dao_immolating_use_record_is_used(record: dict[str, Any]) -> bool:
+    for key in ("used", "one_use_used", "use_recorded", "spent"):
+        if _truthy(record.get(key)):
+            return True
+    status = (
+        str(record.get("one_use_status") or record.get("use_status") or "")
+        .strip()
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+    )
+    return status in {"used", "spent", "recorded", "expended"}
 
 
 def _rank_teacher_breakthrough_notes(

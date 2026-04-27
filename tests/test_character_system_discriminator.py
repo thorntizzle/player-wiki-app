@@ -281,12 +281,48 @@ def test_xianxia_definition_normalizes_dao_immolating_use_approval_fields():
         "name": "River-Cleaving Spark",
         "approval_required": True,
         "approval_status": "pending",
+        "insight_cost": 10,
+        "one_use": True,
     }
     assert dao_immolating["use_history"][1]["approval_required"] is True
     assert dao_immolating["use_history"][1]["approval_status"] == "rejected"
+    assert dao_immolating["use_history"][1]["insight_cost"] == 10
+    assert dao_immolating["use_history"][1]["one_use"] is True
     assert dao_immolating["use_history"][1]["status"] == "Denied"
     assert dao_immolating["use_history"][1]["approval_notes"] == "Rejected because the use was too broad."
     assert dao_immolating["use_history"][1]["approval_timestamp"] == "2026-04-26T10:00:00-04:00"
+
+
+def test_xianxia_definition_normalizes_used_dao_immolating_history_fields():
+    definition = CharacterDefinition.from_dict(
+        _minimal_definition_payload(
+            system=XIANXIA_SYSTEM_CODE,
+            xianxia={
+                "dao_immolating_techniques": {
+                    "use_history": [
+                        {
+                            "name": "Ash-Bright Final Word",
+                            "approval_status": "approved",
+                            "use_status": "spent",
+                            "spent_insight": "10",
+                            "use_notes": "Used once against the jade magistrate.",
+                        }
+                    ],
+                }
+            },
+        )
+    )
+
+    used_record = definition.to_dict()["xianxia"]["dao_immolating_techniques"]["use_history"][0]
+
+    assert used_record["approval_required"] is True
+    assert used_record["approval_status"] == "approved"
+    assert used_record["insight_cost"] == 10
+    assert used_record["one_use"] is True
+    assert used_record["used"] is True
+    assert used_record["one_use_status"] == "used"
+    assert used_record["insight_spent"] == 10
+    assert used_record["use_notes"] == "Used once against the jade magistrate."
 
 
 def test_xianxia_definition_normalizes_optional_prepared_dao_immolating_notes():

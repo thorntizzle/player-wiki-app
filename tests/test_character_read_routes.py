@@ -1660,7 +1660,15 @@ def test_xianxia_cultivation_route_resets_only_realm_ascension_stats(
         xianxia["variants"] = [{"name": "Approved variant", "status": "approved"}]
         xianxia["dao_immolating_techniques"] = {
             "prepared": [{"name": "Last Dawn"}],
-            "use_history": [{"name": "Old Flame"}],
+            "use_history": [
+                {
+                    "name": "Old Flame",
+                    "approval_required": True,
+                    "approval_status": "pending",
+                    "insight_cost": 10,
+                    "one_use": True,
+                }
+            ],
         }
         xianxia["approval_requests"] = [{"name": "Constraint", "status": "pending"}]
         xianxia["companions"] = [{"name": "Paper Crane"}]
@@ -1776,7 +1784,15 @@ def test_xianxia_cultivation_route_resets_only_realm_ascension_stats(
     assert xianxia["variants"] == [{"name": "Approved variant", "status": "approved"}]
     assert xianxia["dao_immolating_techniques"] == {
         "prepared": [{"name": "Last Dawn"}],
-        "use_history": [{"name": "Old Flame"}],
+        "use_history": [
+            {
+                "name": "Old Flame",
+                "approval_required": True,
+                "approval_status": "pending",
+                "insight_cost": 10,
+                "one_use": True,
+            }
+        ],
     }
     assert xianxia["approval_requests"] == [{"name": "Constraint", "status": "pending"}]
     assert xianxia["companions"] == [{"name": "Paper Crane"}]
@@ -3064,7 +3080,15 @@ def test_xianxia_cultivation_route_covers_realm_ascension_matrix_and_preservatio
         xianxia["variants"] = [{"name": "Approved variant", "status": "approved"}]
         xianxia["dao_immolating_techniques"] = {
             "prepared": [{"name": "Last Dawn"}],
-            "use_history": [{"name": "Old Flame"}],
+            "use_history": [
+                {
+                    "name": "Old Flame",
+                    "approval_required": True,
+                    "approval_status": "pending",
+                    "insight_cost": 10,
+                    "one_use": True,
+                }
+            ],
         }
         xianxia["approval_requests"] = [{"name": "Constraint", "status": "pending"}]
         xianxia["companions"] = [{"name": "Paper Crane"}]

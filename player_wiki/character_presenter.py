@@ -43,6 +43,7 @@ from .xianxia_systems_seed import (
 from .xianxia_character_model import (
     XIANXIA_ATTRIBUTE_KEYS,
     XIANXIA_ATTRIBUTE_LABELS,
+    XIANXIA_DAO_IMMOLATING_INSIGHT_COST,
     XIANXIA_ENERGY_KEYS,
     XIANXIA_EFFORT_KEYS,
     XIANXIA_EFFORT_LABELS,
@@ -149,6 +150,11 @@ XIANXIA_APPROVAL_STATUS_LABELS = {
     "not_approved": "Not approved",
     "unapproved": "Not approved",
 }
+XIANXIA_DAO_IMMOLATING_USE_NOTE_FIELDS = (
+    "use_notes",
+    "usage_notes",
+    "one_use_notes",
+)
 XIANXIA_APPROVAL_NOTE_FIELDS = (
     "approval_notes",
     "gm_approval_notes",
@@ -1908,6 +1914,18 @@ def _present_xianxia_named_records(values: Any) -> list[dict[str, Any]]:
                     payload,
                     XIANXIA_APPROVAL_TIMESTAMP_FIELDS,
                 ),
+                "insight_cost": _coerce_int(
+                    payload.get("insight_cost"),
+                    default=0,
+                ),
+                "insight_spent": _coerce_int(payload.get("insight_spent"), default=0),
+                "one_use": bool(payload.get("one_use")),
+                "one_use_status": str(payload.get("one_use_status") or "").strip(),
+                "used": _xianxia_dao_immolating_record_is_used(payload),
+                "use_notes": _xianxia_first_present_text(
+                    payload,
+                    XIANXIA_DAO_IMMOLATING_USE_NOTE_FIELDS,
+                ),
             }
         )
     return records
@@ -1949,13 +1967,14 @@ def _present_xianxia_approval_status_groups(
             )
         )
 
-    for value in list(dao_immolating_use_history or []):
+    for use_record_index, value in enumerate(list(dao_immolating_use_history or [])):
         payload = dict(value or {}) if isinstance(value, dict) else {"name": value}
         grouped_records["dao_immolating_use_records"].append(
             _present_xianxia_approval_status_record(
                 payload,
                 source_label="Use record",
                 group_key="dao_immolating_use_records",
+                use_record_index=use_record_index,
             )
         )
 
@@ -1975,7 +1994,8 @@ def _present_xianxia_approval_status_record(
     *,
     source_label: str,
     group_key: str,
-) -> dict[str, str]:
+    use_record_index: int | None = None,
+) -> dict[str, Any]:
     status = str(
         payload.get("approval_status")
         or payload.get("status")
@@ -1988,10 +2008,21 @@ def _present_xianxia_approval_status_record(
         or payload.get("request_type")
         or ""
     ).strip()
-    return {
+    status_key = re.sub(r"[^a-z0-9]+", "_", status.lower()).strip("_")
+    used = _xianxia_dao_immolating_record_is_used(payload)
+    insight_cost = _coerce_int(
+        payload.get("insight_cost"),
+        default=(
+            XIANXIA_DAO_IMMOLATING_INSIGHT_COST
+            if group_key == "dao_immolating_use_records"
+            else 0
+        ),
+    )
+    record = {
         "name": str(payload.get("name") or payload.get("title") or "").strip()
         or "Unnamed record",
         "status": status,
+        "status_key": status_key,
         "status_label": _format_xianxia_approval_status_label(status),
         "type": record_type,
         "type_label": _format_xianxia_approval_type_label(record_type, group_key=group_key),
@@ -2001,7 +2032,22 @@ def _present_xianxia_approval_status_record(
             payload,
             XIANXIA_APPROVAL_TIMESTAMP_FIELDS,
         ),
+        "insight_cost": insight_cost,
+        "insight_spent": _coerce_int(payload.get("insight_spent"), default=0),
+        "one_use": bool(payload.get("one_use")),
+        "one_use_status": str(payload.get("one_use_status") or "").strip(),
+        "one_use_status_label": _format_xianxia_one_use_status_label(
+            payload.get("one_use_status")
+        ),
+        "used": used,
+        "use_notes": _xianxia_first_present_text(
+            payload,
+            XIANXIA_DAO_IMMOLATING_USE_NOTE_FIELDS,
+        ),
     }
+    if use_record_index is not None:
+        record["use_record_index"] = use_record_index
+    return record
 
 
 def _xianxia_first_present_text(payload: dict[str, Any], fields: tuple[str, ...]) -> str:
@@ -2049,6 +2095,15 @@ def _format_xianxia_approval_status_label(value: Any) -> str:
     return " ".join(part.capitalize() for part in normalized.split("_") if part)
 
 
+def _format_xianxia_one_use_status_label(value: Any) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
+    if normalized in {"used", "spent", "recorded", "expended"}:
+        return "Used"
+    if normalized:
+        return " ".join(part.capitalize() for part in normalized.split("_") if part)
+    return ""
+
+
 def _format_xianxia_approval_type_label(value: Any, *, group_key: str) -> str:
     group_label = XIANXIA_APPROVAL_KIND_LABELS.get(group_key, "")
     normalized_group = _normalize_xianxia_approval_group_key(value)
@@ -2058,6 +2113,22 @@ def _format_xianxia_approval_type_label(value: Any, *, group_key: str) -> str:
     if cleaned:
         return " ".join(part.capitalize() for part in cleaned.split("_") if part)
     return group_label
+
+
+def _xianxia_dao_immolating_record_is_used(payload: dict[str, Any]) -> bool:
+    for field_name in ("used", "one_use_used", "use_recorded", "spent"):
+        value = payload.get(field_name)
+        if isinstance(value, bool) and value:
+            return True
+        normalized = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
+        if normalized in {"1", "true", "yes", "used", "spent", "recorded"}:
+            return True
+    status = re.sub(
+        r"[^a-z0-9]+",
+        "_",
+        str(payload.get("one_use_status") or payload.get("use_status") or "").strip().lower(),
+    ).strip("_")
+    return status in {"used", "spent", "recorded", "expended"}
 
 
 def _present_xianxia_inventory_records(values: Any) -> list[dict[str, Any]]:

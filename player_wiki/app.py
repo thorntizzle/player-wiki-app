@@ -104,6 +104,7 @@ from .xianxia_advancement import (
     confirm_xianxia_realm_ascension_definition,
     learn_xianxia_generic_technique_definition,
     list_xianxia_generic_technique_learning_options,
+    record_xianxia_dao_immolating_use_definition,
     request_xianxia_dao_immolating_use_definition,
     reset_xianxia_realm_ascension_stats_definition,
     spend_xianxia_conditioning_definition,
@@ -13337,6 +13338,44 @@ def create_app() -> Flask:
             character_slug,
             anchor="xianxia-dao-immolating-use-request",
             success_message="Dao Immolating use request recorded.",
+            action=_action,
+        )
+
+    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/xianxia/dao-immolating-use-records")
+    @campaign_scope_access_required("characters")
+    def character_xianxia_dao_immolating_use_record(campaign_slug: str, character_slug: str):
+        if not can_manage_campaign_session(campaign_slug):
+            abort(403)
+
+        def _action(record):
+            if not is_xianxia_system(getattr(record.definition, "system", "")):
+                raise ValueError(
+                    "Dao Immolating use records are only available for Xianxia character sheets."
+                )
+            raw_use_record_index = request.form.get("dao_immolating_use_index", "")
+            if not str(raw_use_record_index or "").strip():
+                raise ValueError("Dao Immolating Technique use selection is required.")
+            use_record_index = normalize_dm_player_wiki_int(
+                raw_use_record_index,
+                field_label="Dao Immolating Technique use",
+            )
+            use_result = record_xianxia_dao_immolating_use_definition(
+                record.definition,
+                use_record_index=use_record_index,
+                notes=request.form.get("dao_immolating_use_notes", ""),
+            )
+            import_metadata = build_managed_character_import_metadata(
+                campaign_slug,
+                record.definition.character_slug,
+                record.import_metadata,
+            )
+            return use_result.definition, import_metadata, {}
+
+        return run_character_definition_mutation(
+            campaign_slug,
+            character_slug,
+            anchor="xianxia-approval-dao-immolating-use-records",
+            success_message="Dao Immolating one-use history recorded.",
             action=_action,
         )
 

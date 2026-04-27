@@ -37,6 +37,7 @@ XIANXIA_DEFENSE_BASE = 10
 XIANXIA_CHECK_FORMULA = "1d20 + Attribute + Realm modifier + situational modifiers"
 XIANXIA_CHECK_SPEND_BONUS = "+1d6"
 XIANXIA_CHECK_SPEND_BONUS_DETAIL = "per spent Energy/Yin/Yang point"
+XIANXIA_DAO_IMMOLATING_INSIGHT_COST = 10
 XIANXIA_DIFFICULTY_STATE_ADJUSTMENTS = (
     ("easy", "EASY", -3),
     ("normal", "Normal", 0),
@@ -1161,8 +1162,39 @@ def _normalize_dao_immolating_use_record(record: dict[str, Any]) -> dict[str, An
     if raw_status is None and "request_status" in normalized:
         raw_status = normalized.get("request_status")
     normalized["approval_status"] = _normalize_approval_status(raw_status, default="pending")
+    normalized["insight_cost"] = XIANXIA_DAO_IMMOLATING_INSIGHT_COST
+    normalized["one_use"] = True
+    if _dao_immolating_use_record_is_used(normalized):
+        normalized["used"] = True
+        normalized["one_use_status"] = "used"
+        raw_insight_spent = (
+            normalized.get("insight_spent")
+            if "insight_spent" in normalized
+            else normalized.get("spent_insight")
+        )
+        if raw_insight_spent is None:
+            raw_insight_spent = normalized.get("cost_paid")
+        normalized["insight_spent"] = _normalize_non_negative_int(
+            raw_insight_spent,
+            default=XIANXIA_DAO_IMMOLATING_INSIGHT_COST,
+        )
     _normalize_approval_record_metadata(normalized)
     return normalized
+
+
+def _dao_immolating_use_record_is_used(record: dict[str, Any]) -> bool:
+    for key in ("used", "one_use_used", "use_recorded", "spent"):
+        if _normalize_bool(record.get(key)):
+            return True
+    status = _normalize_token(record.get("one_use_status") or record.get("use_status"))
+    return status in {"used", "spent", "recorded", "expended"}
+
+
+def _normalize_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    normalized = _normalize_token(value)
+    return normalized in {"1", "true", "yes", "y", "used", "spent", "recorded"}
 
 
 def _definition_xianxia(definition: Any) -> dict[str, Any]:

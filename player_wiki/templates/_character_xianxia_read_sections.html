@@ -189,8 +189,9 @@
         {% endif %}
       </article>
 
+      {% set can_manage_dao_immolating_use = (can_use_xianxia_cultivation | default(false)) or (can_manage_session | default(false)) %}
       {% for group in xianxia_sheet.approval.status_groups %}
-        <article class="detail-card">
+        <article class="detail-card" id="xianxia-approval-{{ group.key | replace('_', '-') }}">
           <h3>{{ group.title }}</h3>
           {% if group.records %}
             <ul class="plain-list slot-list">
@@ -209,6 +210,45 @@
                 {% endif %}
                 {% if record.approval_timestamp %}
                   <li class="meta">Approval timestamp: {{ record.approval_timestamp }}</li>
+                {% endif %}
+                {% if group.key == 'dao_immolating_use_records' %}
+                  <li class="meta">Insight cost: {{ record.insight_cost }}</li>
+                  {% if record.used %}
+                    <li class="meta">One-use history: used; Insight spent {{ record.insight_spent }}</li>
+                    {% if record.use_notes %}
+                      <li class="meta">{{ record.use_notes }}</li>
+                    {% endif %}
+                  {% else %}
+                    <li class="meta">One-use history: not recorded yet</li>
+                  {% endif %}
+                  {% if is_session_mode | default(false) and can_manage_dao_immolating_use and record.status_key == 'approved' and not record.used %}
+                    <li class="meta">
+                      <form
+                        class="session-vitals-form"
+                        data-character-sheet-edit-form="xianxia-dao-immolating-use-record"
+                        method="post"
+                        action="{{ url_for('character_xianxia_dao_immolating_use_record', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+                      >
+                        <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                        <input type="hidden" name="mode" value="session">
+                        <input type="hidden" name="page" value="{{ character_subpage }}">
+                        <input type="hidden" name="dao_immolating_use_index" value="{{ record.use_record_index }}">
+                        {% if session_return_view | default("") %}
+                          <input type="hidden" name="return_view" value="{{ session_return_view }}">
+                        {% endif %}
+                        <label class="session-field">
+                          <span>Use notes</span>
+                          <textarea name="dao_immolating_use_notes" rows="2"></textarea>
+                        </label>
+                        {% if xianxia_sheet.resources.insight.available < record.insight_cost %}
+                          <p class="meta">Needs {{ record.insight_cost }} Insight; {{ xianxia_sheet.resources.insight.available }} available.</p>
+                        {% endif %}
+                        <button class="button-link" type="submit" {% if xianxia_sheet.resources.insight.available < record.insight_cost %}disabled{% endif %}>
+                          Record One-Use Spend
+                        </button>
+                      </form>
+                    </li>
+                  {% endif %}
                 {% endif %}
               {% endfor %}
             </ul>
