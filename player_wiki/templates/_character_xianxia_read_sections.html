@@ -207,6 +207,9 @@
                 {% if record.notes %}
                   <li class="meta">{{ record.notes }}</li>
                 {% endif %}
+                {% if record.approval_timestamp %}
+                  <li class="meta">Approval timestamp: {{ record.approval_timestamp }}</li>
+                {% endif %}
               {% endfor %}
             </ul>
           {% else %}

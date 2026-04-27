@@ -147,6 +147,31 @@ _XIANXIA_APPROVAL_STATUS_ALIASES = {
     "not_approved": "not_approved",
     "unapproved": "not_approved",
 }
+_XIANXIA_APPROVAL_NOTE_ALIASES = (
+    "approval_notes",
+    "approval_note",
+    "gm_approval_notes",
+    "gm_approval_note",
+    "gm_notes",
+    "gm_note",
+)
+_XIANXIA_APPROVAL_TIMESTAMP_ALIASES = (
+    "approval_timestamp",
+    "approval_time",
+    "approval_at",
+    "approved_at",
+    "approved_on",
+    "reviewed_at",
+    "reviewed_on",
+    "rejected_at",
+    "rejected_on",
+    "gm_approval_timestamp",
+    "gm_approval_time",
+    "gm_approved_at",
+    "gm_approved_on",
+    "gm_reviewed_at",
+    "gm_reviewed_on",
+)
 
 
 class XianxiaDefinitionValidationError(ValueError):
@@ -275,7 +300,7 @@ def normalize_xianxia_definition_payload(payload: dict[str, Any]) -> dict[str, A
         ),
         "variants": _normalize_variant_records(_first_present(raw_xianxia, normalized_payload, key="variants")),
         "dao_immolating_techniques": _normalize_dao_immolating_records(raw_xianxia, normalized_payload),
-        "approval_requests": _normalize_record_list(
+        "approval_requests": _normalize_approval_request_records(
             _first_present(raw_xianxia, normalized_payload, key="approval_requests")
         ),
         "companions": _normalize_record_list(_first_present(raw_xianxia, normalized_payload, key="companions")),
@@ -993,6 +1018,7 @@ def _normalize_variant_record(record: dict[str, Any]) -> dict[str, Any]:
     if raw_status is None and "request_status" in normalized:
         raw_status = normalized.get("request_status")
     normalized["approval_status"] = _normalize_approval_status(raw_status, default="pending")
+    _normalize_approval_record_metadata(normalized)
     return normalized
 
 
@@ -1011,6 +1037,36 @@ def _normalize_approval_status(value: Any, *, default: str) -> str:
     if not normalized:
         return default
     return _XIANXIA_APPROVAL_STATUS_ALIASES.get(normalized, normalized)
+
+
+def _normalize_approval_request_records(values: Any) -> list[dict[str, Any]]:
+    records = _normalize_record_list(values)
+    return [_normalize_approval_request_record(record) for record in records]
+
+
+def _normalize_approval_request_record(record: dict[str, Any]) -> dict[str, Any]:
+    normalized = deepcopy(record)
+    _normalize_approval_record_metadata(normalized)
+    return normalized
+
+
+def _normalize_approval_record_metadata(record: dict[str, Any]) -> None:
+    notes = _first_normalized_text(record, _XIANXIA_APPROVAL_NOTE_ALIASES)
+    if notes:
+        record["approval_notes"] = notes
+
+    timestamp = _first_normalized_text(record, _XIANXIA_APPROVAL_TIMESTAMP_ALIASES)
+    if timestamp:
+        record["approval_timestamp"] = timestamp
+
+
+def _first_normalized_text(record: dict[str, Any], aliases: tuple[str, ...]) -> str:
+    for alias in aliases:
+        if alias in record:
+            cleaned = _normalize_text(record.get(alias))
+            if cleaned:
+                return cleaned
+    return ""
 
 
 def _normalize_dao_immolating_records(
@@ -1105,6 +1161,7 @@ def _normalize_dao_immolating_use_record(record: dict[str, Any]) -> dict[str, An
     if raw_status is None and "request_status" in normalized:
         raw_status = normalized.get("request_status")
     normalized["approval_status"] = _normalize_approval_status(raw_status, default="pending")
+    _normalize_approval_record_metadata(normalized)
     return normalized
 
 

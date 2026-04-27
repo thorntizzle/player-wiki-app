@@ -171,12 +171,19 @@ def test_xianxia_definition_normalizes_karmic_constraint_approval_fields():
             system=XIANXIA_SYSTEM_CODE,
             xianxia={
                 "variants": [
-                    {"type": "Karmic Constraint", "name": "Falling Palm Oath"},
+                    {
+                        "type": "Karmic Constraint",
+                        "name": "Falling Palm Oath",
+                        "gm_approval_notes": "  Approved by the GM for the duel.  ",
+                        "approved_at": " 2026-04-25T19:30:00-04:00 ",
+                    },
                     {
                         "variant_type": "karmic_constraints",
                         "name": "Sect-Binding Revision",
                         "status": "Denied",
                         "approval_required": False,
+                        "approval_note": "Too binding for this rank.",
+                        "gm_reviewed_at": "2026-04-26 09:15",
                     },
                 ]
             },
@@ -188,14 +195,20 @@ def test_xianxia_definition_normalizes_karmic_constraint_approval_fields():
     assert variants[0] == {
         "type": "Karmic Constraint",
         "name": "Falling Palm Oath",
+        "gm_approval_notes": "  Approved by the GM for the duel.  ",
+        "approved_at": " 2026-04-25T19:30:00-04:00 ",
         "variant_type": "karmic_constraint",
         "approval_required": True,
         "approval_status": "pending",
+        "approval_notes": "Approved by the GM for the duel.",
+        "approval_timestamp": "2026-04-25T19:30:00-04:00",
     }
     assert variants[1]["variant_type"] == "karmic_constraint"
     assert variants[1]["approval_required"] is True
     assert variants[1]["approval_status"] == "rejected"
     assert variants[1]["status"] == "Denied"
+    assert variants[1]["approval_notes"] == "Too binding for this rank."
+    assert variants[1]["approval_timestamp"] == "2026-04-26 09:15"
 
 
 def test_xianxia_definition_normalizes_ascendant_art_approval_fields():
@@ -204,7 +217,12 @@ def test_xianxia_definition_normalizes_ascendant_art_approval_fields():
             system=XIANXIA_SYSTEM_CODE,
             xianxia={
                 "variants": [
-                    {"variant_type": "ascendant_art", "name": "Skyfire Crown"},
+                    {
+                        "variant_type": "ascendant_art",
+                        "name": "Skyfire Crown",
+                        "gm_note": "Approved as a temporary ascendant art.",
+                        "gm_approved_at": "2026-04-25T20:00:00-04:00",
+                    },
                     {
                         "type": "Ascendant Arts",
                         "name": "Moonlit Crown",
@@ -221,8 +239,12 @@ def test_xianxia_definition_normalizes_ascendant_art_approval_fields():
     assert variants[0] == {
         "variant_type": "ascendant_art",
         "name": "Skyfire Crown",
+        "gm_note": "Approved as a temporary ascendant art.",
+        "gm_approved_at": "2026-04-25T20:00:00-04:00",
         "approval_required": True,
         "approval_status": "pending",
+        "approval_notes": "Approved as a temporary ascendant art.",
+        "approval_timestamp": "2026-04-25T20:00:00-04:00",
     }
     assert variants[1]["variant_type"] == "ascendant_art"
     assert variants[1]["approval_required"] is True
@@ -243,6 +265,8 @@ def test_xianxia_definition_normalizes_dao_immolating_use_approval_fields():
                             "name": "Sect-Burning Vow",
                             "status": "Denied",
                             "approval_required": False,
+                            "approval_notes": "Rejected because the use was too broad.",
+                            "approved_at": "2026-04-26T10:00:00-04:00",
                         },
                     ],
                 }
@@ -261,6 +285,8 @@ def test_xianxia_definition_normalizes_dao_immolating_use_approval_fields():
     assert dao_immolating["use_history"][1]["approval_required"] is True
     assert dao_immolating["use_history"][1]["approval_status"] == "rejected"
     assert dao_immolating["use_history"][1]["status"] == "Denied"
+    assert dao_immolating["use_history"][1]["approval_notes"] == "Rejected because the use was too broad."
+    assert dao_immolating["use_history"][1]["approval_timestamp"] == "2026-04-26T10:00:00-04:00"
 
 
 def test_xianxia_definition_normalizes_optional_prepared_dao_immolating_notes():

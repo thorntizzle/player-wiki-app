@@ -312,6 +312,7 @@ def test_xianxia_techniques_page_shows_approval_status_records(
             "name": "Falling Palm Oath",
             "approval_status": "approved",
             "approval_notes": "Approved for the Heavenly Palm initiate technique.",
+            "approved_at": "2026-04-25T19:30:00-04:00",
         },
         {
             "type": "Karmic Constraint",
@@ -333,7 +334,8 @@ def test_xianxia_techniques_page_shows_approval_status_records(
             "request_type": "ascendant_art",
             "name": "Cloud-Splitting Revision",
             "status": "rejected",
-            "approval_notes": "Too broad for this rank.",
+            "gm_approval_notes": "Too broad for this rank.",
+            "gm_reviewed_at": "2026-04-26 09:15",
         }
     ]
     payload["xianxia"]["dao_immolating_techniques"]["use_history"] = [
@@ -341,6 +343,7 @@ def test_xianxia_techniques_page_shows_approval_status_records(
             "name": "River-Cleaving Spark",
             "approval_status": "approved",
             "approval_notes": "Spent after the duel began.",
+            "approval_timestamp": "2026-04-26T10:00:00-04:00",
         },
         {
             "name": "Unspoken Furnace Vow",
@@ -364,6 +367,11 @@ def test_xianxia_techniques_page_shows_approval_status_records(
         ("Ascendant Arts", ["Pending", "Pending", "Rejected"]),
         ("Dao Immolating Technique Use Records", ["Approved", "Pending"]),
     ]
+    assert approval_groups[0]["records"][0]["notes"] == "Approved for the Heavenly Palm initiate technique."
+    assert approval_groups[0]["records"][0]["approval_timestamp"] == "2026-04-25T19:30:00-04:00"
+    assert approval_groups[1]["records"][2]["notes"] == "Too broad for this rank."
+    assert approval_groups[1]["records"][2]["approval_timestamp"] == "2026-04-26 09:15"
+    assert approval_groups[2]["records"][0]["approval_timestamp"] == "2026-04-26T10:00:00-04:00"
 
     response = client.get("/campaigns/linden-pass/characters/approval-crane?page=techniques")
 
@@ -371,6 +379,8 @@ def test_xianxia_techniques_page_shows_approval_status_records(
     html = unescape(response.get_data(as_text=True))
     assert "Karmic Constraints" in html
     assert "Falling Palm Oath" in html
+    assert "Approved for the Heavenly Palm initiate technique." in html
+    assert "Approval timestamp: 2026-04-25T19:30:00-04:00" in html
     assert "Mountain-Crossing Oath" in html
     assert "Approved" in html
     assert "Karmic Constraint" in html
@@ -380,9 +390,13 @@ def test_xianxia_techniques_page_shows_approval_status_records(
     assert "Starfall Halo" in html
     assert "Pending" in html
     assert "Cloud-Splitting Revision" in html
+    assert "Too broad for this rank." in html
+    assert "Approval timestamp: 2026-04-26 09:15" in html
     assert "Rejected" in html
     assert "Dao Immolating Technique Use Records" in html
     assert "River-Cleaving Spark" in html
+    assert "Spent after the duel began." in html
+    assert "Approval timestamp: 2026-04-26T10:00:00-04:00" in html
     assert "Unspoken Furnace Vow" in html
     assert "Dao Immolating Technique Use" in html
     assert "Use record" in html

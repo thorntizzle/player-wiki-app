@@ -149,6 +149,29 @@ XIANXIA_APPROVAL_STATUS_LABELS = {
     "not_approved": "Not approved",
     "unapproved": "Not approved",
 }
+XIANXIA_APPROVAL_NOTE_FIELDS = (
+    "approval_notes",
+    "gm_approval_notes",
+    "gm_notes",
+    "notes",
+)
+XIANXIA_APPROVAL_TIMESTAMP_FIELDS = (
+    "approval_timestamp",
+    "approval_time",
+    "approval_at",
+    "approved_at",
+    "approved_on",
+    "reviewed_at",
+    "reviewed_on",
+    "rejected_at",
+    "rejected_on",
+    "gm_approval_timestamp",
+    "gm_approval_time",
+    "gm_approved_at",
+    "gm_approved_on",
+    "gm_reviewed_at",
+    "gm_reviewed_on",
+)
 XIANXIA_MARTIAL_ART_RANK_LABELS = {
     "initiate": "Initiate",
     "novice": "Novice",
@@ -1880,7 +1903,11 @@ def _present_xianxia_named_records(values: Any) -> list[dict[str, Any]]:
                     or payload.get("request_type")
                     or ""
                 ).strip(),
-                "notes": str(payload.get("notes") or payload.get("approval_notes") or "").strip(),
+                "notes": _xianxia_first_present_text(payload, XIANXIA_APPROVAL_NOTE_FIELDS),
+                "approval_timestamp": _xianxia_first_present_text(
+                    payload,
+                    XIANXIA_APPROVAL_TIMESTAMP_FIELDS,
+                ),
             }
         )
     return records
@@ -1969,8 +1996,22 @@ def _present_xianxia_approval_status_record(
         "type": record_type,
         "type_label": _format_xianxia_approval_type_label(record_type, group_key=group_key),
         "source_label": source_label,
-        "notes": str(payload.get("notes") or payload.get("approval_notes") or "").strip(),
+        "notes": _xianxia_first_present_text(payload, XIANXIA_APPROVAL_NOTE_FIELDS),
+        "approval_timestamp": _xianxia_first_present_text(
+            payload,
+            XIANXIA_APPROVAL_TIMESTAMP_FIELDS,
+        ),
     }
+
+
+def _xianxia_first_present_text(payload: dict[str, Any], fields: tuple[str, ...]) -> str:
+    for field_name in fields:
+        if field_name not in payload:
+            continue
+        value = str(payload.get(field_name) or "").strip()
+        if value:
+            return value
+    return ""
 
 
 def _xianxia_approval_group_key_from_payload(payload: dict[str, Any]) -> str:
