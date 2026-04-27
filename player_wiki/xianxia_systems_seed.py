@@ -2380,7 +2380,7 @@ def _render_martial_art_rank_records_html(body: dict[str, Any]) -> str:
         if rank_ref:
             parts.append(f' <span class="meta">{escape(rank_ref)}</span>')
         if is_missing:
-            parts.append(' <span class="meta">incomplete draft</span>')
+            parts.append(' <span class="meta-badge">Incomplete Draft</span>')
         parts.append("</li>")
     parts.append("</ul></section>")
     return "".join(parts)
