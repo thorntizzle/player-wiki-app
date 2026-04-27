@@ -98,6 +98,7 @@ from .xianxia_advancement import (
     XIANXIA_TRAINING_STANCE_INCREASE,
     XIANXIA_TRAINING_STANCE_MAXIMUM,
     advance_xianxia_martial_art_rank_definition,
+    apply_xianxia_immortal_realm_rebuild_definition,
     build_xianxia_realm_ascension_context,
     learn_xianxia_generic_technique_definition,
     list_xianxia_generic_technique_learning_options,
@@ -110,6 +111,7 @@ from .xianxia_advancement import (
     normalize_xianxia_martial_art_rank_key,
     rank_label as xianxia_martial_art_rank_label,
 )
+from .xianxia_character_model import XIANXIA_ATTRIBUTE_KEYS, XIANXIA_EFFORT_KEYS
 from .xianxia_character_builder import (
     XIANXIA_GM_GRANTED_GENERIC_TECHNIQUE_INPUT,
     build_xianxia_character_create_context,
@@ -1546,6 +1548,7 @@ def present_xianxia_cultivation_context(
             ("attributes_after_total", "Attributes after total"),
             ("efforts_before_total", "Efforts before total"),
             ("efforts_after_total", "Efforts after total"),
+            ("total_rebuild_points", "Total rebuild points"),
             ("reset_scope", "Reset scope"),
             ("preserved_scope", "Preserved scope"),
             ("gm_review_note", "GM review note"),
@@ -12111,6 +12114,27 @@ def create_app() -> Flask:
                     success_message = (
                         f"Reset Attributes and Efforts for {reset_result.current_realm} "
                         f"to {reset_result.target_realm} Realm ascension."
+                    )
+                elif cultivation_action == "apply_immortal_realm_rebuild":
+                    redirect_anchor = "xianxia-cultivation-realm-ascension"
+                    rebuild_result = apply_xianxia_immortal_realm_rebuild_definition(
+                        record.definition,
+                        target_realm=request.form.get("target_realm", ""),
+                        attribute_scores={
+                            key: request.form.get(f"realm_rebuild_attribute_{key}", "")
+                            for key in XIANXIA_ATTRIBUTE_KEYS
+                        },
+                        effort_scores={
+                            key: request.form.get(f"realm_rebuild_effort_{key}", "")
+                            for key in XIANXIA_EFFORT_KEYS
+                        },
+                        notes=request.form.get("realm_ascension_rebuild_notes", ""),
+                    )
+                    definition = rebuild_result.definition
+                    success_message = (
+                        f"Applied the Immortal rebuild budget for "
+                        f"{rebuild_result.total_rebuild_points} points and "
+                        f"{rebuild_result.actions_per_turn} actions."
                     )
                 else:
                     raise ValueError("Unsupported cultivation action. Refresh the page and try again.")

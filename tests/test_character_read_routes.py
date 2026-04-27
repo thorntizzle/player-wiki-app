@@ -1832,6 +1832,274 @@ def test_xianxia_cultivation_route_resets_only_realm_ascension_stats(
     assert "15 to 0" in updated_html
 
 
+def test_xianxia_cultivation_route_applies_immortal_rebuild_budget(
+    app, client, sign_in, users
+):
+    def _mutate_campaign(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+                "default_visibility": "dm",
+            }
+        ]
+
+    def _prepare_definition(payload: dict) -> None:
+        xianxia = payload["xianxia"]
+        xianxia["attributes"]["str"] = 10
+        xianxia["energies"] = {
+            "jing": {"max": 4},
+            "qi": {"max": 5},
+            "shen": {"max": 6},
+        }
+        xianxia["yin_yang"] = {"yin_max": 3, "yang_max": 4}
+        xianxia["insight"] = {"available": 7, "spent": 2}
+        xianxia["durability"] = {
+            "hp_max": 28,
+            "stance_max": 26,
+            "manual_armor_bonus": 2,
+            "defense": 16,
+        }
+        xianxia["generic_techniques"] = [
+            {
+                "name": "Cloud Step",
+                "generic_technique_key": "cloud_step",
+                "systems_ref": {"slug": "cloud-step"},
+            }
+        ]
+        xianxia["variants"] = [{"name": "Approved variant", "status": "approved"}]
+        xianxia["approval_requests"] = [{"name": "Constraint", "status": "pending"}]
+
+    def _prepare_state(payload: dict) -> None:
+        payload["vitals"]["current_hp"] = 17
+        payload["vitals"]["temp_hp"] = 3
+        xianxia_state = payload["xianxia"]
+        xianxia_state["vitals"] = {
+            "current_hp": 17,
+            "temp_hp": 3,
+            "current_stance": 14,
+            "temp_stance": 2,
+        }
+        xianxia_state["energies"] = {
+            "jing": {"current": 2},
+            "qi": {"current": 3},
+            "shen": {"current": 4},
+        }
+        xianxia_state["yin_yang"] = {"yin_current": 2, "yang_current": 3}
+        xianxia_state["dao"] = {"current": 2}
+
+    _write_campaign_config(app, _mutate_campaign)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Immortal Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+    _write_character_definition(app, "immortal-crane", _prepare_definition)
+    _write_character_state(app, "immortal-crane", _prepare_state)
+
+    review_revision = _character_state_revision(app, "immortal-crane")
+    review_response = client.post(
+        "/campaigns/linden-pass/characters/immortal-crane/cultivation",
+        data={
+            "expected_revision": str(review_revision),
+            "cultivation_action": "start_realm_ascension_review",
+            "target_realm": "Immortal",
+            "realm_ascension_gm_review_note": "GM review approved for rebuild math.",
+        },
+        follow_redirects=False,
+    )
+    assert review_response.status_code == 302
+
+    reset_revision = _character_state_revision(app, "immortal-crane")
+    reset_response = client.post(
+        "/campaigns/linden-pass/characters/immortal-crane/cultivation",
+        data={
+            "expected_revision": str(reset_revision),
+            "cultivation_action": "reset_realm_ascension_stats",
+            "target_realm": "Immortal",
+            "realm_ascension_reset_notes": "Ready for point assignment.",
+        },
+        follow_redirects=False,
+    )
+    assert reset_response.status_code == 302
+
+    rebuild_html = client.get(
+        "/campaigns/linden-pass/characters/immortal-crane/cultivation"
+    ).get_data(as_text=True)
+    assert "Apply Immortal Rebuild" in rebuild_html
+    assert 'name="cultivation_action" value="apply_immortal_realm_rebuild"' in rebuild_html
+    assert "Spend exactly 15 total Attribute/Effort points" in rebuild_html
+
+    rebuild_revision = _character_state_revision(app, "immortal-crane")
+    invalid_total_response = client.post(
+        "/campaigns/linden-pass/characters/immortal-crane/cultivation",
+        data={
+            "expected_revision": str(rebuild_revision),
+            "cultivation_action": "apply_immortal_realm_rebuild",
+            "target_realm": "Immortal",
+            "realm_rebuild_attribute_str": "6",
+            "realm_rebuild_attribute_dex": "3",
+            "realm_rebuild_attribute_con": "0",
+            "realm_rebuild_attribute_int": "0",
+            "realm_rebuild_attribute_wis": "0",
+            "realm_rebuild_attribute_cha": "0",
+            "realm_rebuild_effort_basic": "3",
+            "realm_rebuild_effort_weapon": "2",
+            "realm_rebuild_effort_guns_explosive": "0",
+            "realm_rebuild_effort_magic": "0",
+            "realm_rebuild_effort_ultimate": "0",
+        },
+        follow_redirects=True,
+    )
+    assert invalid_total_response.status_code == 200
+    assert (
+        "Immortal rebuild must spend exactly 15 Attribute/Effort points; submitted 14."
+        in invalid_total_response.get_data(as_text=True)
+    )
+    assert _character_state_revision(app, "immortal-crane") == rebuild_revision
+
+    invalid_cap_response = client.post(
+        "/campaigns/linden-pass/characters/immortal-crane/cultivation",
+        data={
+            "expected_revision": str(rebuild_revision),
+            "cultivation_action": "apply_immortal_realm_rebuild",
+            "target_realm": "Immortal",
+            "realm_rebuild_attribute_str": "7",
+            "realm_rebuild_attribute_dex": "0",
+            "realm_rebuild_attribute_con": "0",
+            "realm_rebuild_attribute_int": "0",
+            "realm_rebuild_attribute_wis": "0",
+            "realm_rebuild_attribute_cha": "0",
+            "realm_rebuild_effort_basic": "3",
+            "realm_rebuild_effort_weapon": "3",
+            "realm_rebuild_effort_guns_explosive": "0",
+            "realm_rebuild_effort_magic": "2",
+            "realm_rebuild_effort_ultimate": "0",
+        },
+        follow_redirects=True,
+    )
+    assert invalid_cap_response.status_code == 200
+    assert (
+        "Strength cannot exceed 6 for the Immortal rebuild."
+        in invalid_cap_response.get_data(as_text=True)
+    )
+    assert _character_state_revision(app, "immortal-crane") == rebuild_revision
+
+    valid_response = client.post(
+        "/campaigns/linden-pass/characters/immortal-crane/cultivation",
+        data={
+            "expected_revision": str(rebuild_revision),
+            "cultivation_action": "apply_immortal_realm_rebuild",
+            "target_realm": "Immortal",
+            "realm_rebuild_attribute_str": "6",
+            "realm_rebuild_attribute_dex": "2",
+            "realm_rebuild_attribute_con": "1",
+            "realm_rebuild_attribute_int": "0",
+            "realm_rebuild_attribute_wis": "0",
+            "realm_rebuild_attribute_cha": "0",
+            "realm_rebuild_effort_basic": "3",
+            "realm_rebuild_effort_weapon": "2",
+            "realm_rebuild_effort_guns_explosive": "0",
+            "realm_rebuild_effort_magic": "1",
+            "realm_rebuild_effort_ultimate": "0",
+            "realm_ascension_rebuild_notes": "GM approved the Immortal rebuild math.",
+        },
+        follow_redirects=False,
+    )
+    assert valid_response.status_code == 302
+    assert valid_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/immortal-crane/cultivation#xianxia-cultivation-realm-ascension"
+    )
+
+    definition_payload = _read_character_definition(app, "immortal-crane")
+    xianxia = definition_payload["xianxia"]
+    assert xianxia["realm"] == "Immortal"
+    assert xianxia["actions_per_turn"] == 3
+    assert xianxia["attributes"] == {
+        "str": 6,
+        "dex": 2,
+        "con": 1,
+        "int": 0,
+        "wis": 0,
+        "cha": 0,
+    }
+    assert xianxia["efforts"] == {
+        "basic": 3,
+        "weapon": 2,
+        "guns_explosive": 0,
+        "magic": 1,
+        "ultimate": 0,
+    }
+    assert xianxia["energies"] == {
+        "jing": {"max": 4},
+        "qi": {"max": 5},
+        "shen": {"max": 6},
+    }
+    assert xianxia["yin_yang"] == {"yin_max": 3, "yang_max": 4}
+    assert xianxia["insight"] == {"available": 7, "spent": 2}
+    assert xianxia["durability"]["hp_max"] == 28
+    assert xianxia["durability"]["stance_max"] == 26
+    assert xianxia["durability"]["manual_armor_bonus"] == 2
+    assert xianxia["durability"]["defense"] == 13
+    assert xianxia["generic_techniques"] == [
+        {
+            "name": "Cloud Step",
+            "systems_ref": {"slug": "cloud-step"},
+            "generic_technique_key": "cloud_step",
+        }
+    ]
+    assert xianxia["variants"] == [{"name": "Approved variant", "status": "approved"}]
+    assert xianxia["approval_requests"] == [{"name": "Constraint", "status": "pending"}]
+    assert xianxia["advancement_history"][-1] == {
+        "action": "realm_ascension_immortal_rebuild_applied",
+        "target": "Immortal",
+        "current_realm": "Mortal",
+        "target_realm": "Immortal",
+        "status": "applied_pending_final_confirmation",
+        "rebuild_budget": 15,
+        "stat_cap": 6,
+        "actions_per_turn": 3,
+        "attributes_after_total": 9,
+        "efforts_after_total": 6,
+        "total_rebuild_points": 15,
+        "notes": "GM approved the Immortal rebuild math.",
+    }
+
+    with app.app_context():
+        repository = app.extensions["character_repository"]
+        record = repository.get_character("linden-pass", "immortal-crane")
+        assert record is not None
+        state = record.state_record.state
+    assert state["vitals"] == {"current_hp": 17, "temp_hp": 3}
+    assert state["xianxia"]["vitals"] == {
+        "current_hp": 17,
+        "temp_hp": 3,
+        "current_stance": 14,
+        "temp_stance": 2,
+    }
+    assert state["xianxia"]["energies"] == {
+        "jing": {"current": 2},
+        "qi": {"current": 3},
+        "shen": {"current": 4},
+    }
+    assert state["xianxia"]["yin_yang"] == {"yin_current": 2, "yang_current": 3}
+    assert state["xianxia"]["dao"] == {"current": 2}
+    assert _character_state_revision(app, "immortal-crane") == rebuild_revision + 1
+
+    updated_html = client.get(
+        "/campaigns/linden-pass/characters/immortal-crane/cultivation"
+    ).get_data(as_text=True)
+    assert "Latest Immortal Rebuild" in updated_html
+    assert "Realm Ascension Immortal Rebuild Applied" in updated_html
+    assert "15 of 15" in updated_html
+    assert 'name="cultivation_action" value="apply_immortal_realm_rebuild"' not in updated_html
+
+
 def test_xianxia_cultivation_route_records_divine_ascension_seclusion_time(
     app, client, sign_in, users
 ):
