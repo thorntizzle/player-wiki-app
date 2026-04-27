@@ -3010,6 +3010,353 @@ def test_xianxia_cultivation_route_applies_divine_rebuild_budget(
     assert "apply_divine_realm_rebuild" not in updated_html
 
 
+def test_xianxia_cultivation_route_covers_realm_ascension_matrix_and_preservation(
+    app, client, sign_in, users
+):
+    def _mutate_campaign(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+                "default_visibility": "dm",
+            }
+        ]
+
+    def _prepare_definition(payload: dict) -> None:
+        xianxia = payload["xianxia"]
+        xianxia["attributes"] = {
+            "str": 10,
+            "dex": 2,
+            "con": 4,
+            "int": 1,
+            "wis": 3,
+            "cha": 2,
+        }
+        xianxia["efforts"] = {
+            "basic": 4,
+            "weapon": 3,
+            "guns_explosive": 2,
+            "magic": 5,
+            "ultimate": 1,
+        }
+        xianxia["energies"] = {
+            "jing": {"max": 4},
+            "qi": {"max": 5},
+            "shen": {"max": 6},
+        }
+        xianxia["yin_yang"] = {"yin_max": 3, "yang_max": 4}
+        xianxia["insight"] = {"available": 11, "spent": 7}
+        xianxia["durability"] = {
+            "hp_max": 32,
+            "stance_max": 34,
+            "manual_armor_bonus": 2,
+            "defense": 16,
+        }
+        xianxia["generic_techniques"] = [
+            {
+                "name": "Cloud Step",
+                "generic_technique_key": "cloud_step",
+                "systems_ref": {"slug": "cloud-step"},
+            }
+        ]
+        xianxia["variants"] = [{"name": "Approved variant", "status": "approved"}]
+        xianxia["dao_immolating_techniques"] = {
+            "prepared": [{"name": "Last Dawn"}],
+            "use_history": [{"name": "Old Flame"}],
+        }
+        xianxia["approval_requests"] = [{"name": "Constraint", "status": "pending"}]
+        xianxia["companions"] = [{"name": "Paper Crane"}]
+
+    def _prepare_state(payload: dict) -> None:
+        payload["vitals"]["current_hp"] = 21
+        payload["vitals"]["temp_hp"] = 4
+        payload["notes"]["player_notes_markdown"] = "Preserve this note."
+        xianxia_state = payload["xianxia"]
+        xianxia_state["vitals"] = {
+            "current_hp": 21,
+            "temp_hp": 4,
+            "current_stance": 18,
+            "temp_stance": 3,
+        }
+        xianxia_state["energies"] = {
+            "jing": {"current": 2},
+            "qi": {"current": 3},
+            "shen": {"current": 4},
+        }
+        xianxia_state["yin_yang"] = {"yin_current": 2, "yang_current": 3}
+        xianxia_state["dao"] = {"current": 2}
+        xianxia_state["active_stance"] = {"name": "Mountain Root"}
+        xianxia_state["active_aura"] = {"name": "Quiet Moon"}
+        xianxia_state["notes"] = {"player_notes_markdown": "Preserve this note."}
+
+    def _post_cultivation(
+        *,
+        action: str,
+        expected_revision: int,
+        data: dict[str, str],
+        follow_redirects: bool = False,
+    ):
+        return client.post(
+            "/campaigns/linden-pass/characters/ascension-matrix-crane/cultivation",
+            data={
+                "expected_revision": str(expected_revision),
+                "cultivation_action": action,
+                **data,
+            },
+            follow_redirects=follow_redirects,
+        )
+
+    def _assert_non_reset_data_preserved() -> None:
+        definition_payload = _read_character_definition(app, "ascension-matrix-crane")
+        xianxia = definition_payload["xianxia"]
+        assert xianxia["energies"] == expected_energies
+        assert xianxia["yin_yang"] == expected_yin_yang
+        assert xianxia["insight"] == expected_insight
+        assert xianxia["durability"]["hp_max"] == 32
+        assert xianxia["durability"]["stance_max"] == 34
+        assert xianxia["durability"]["manual_armor_bonus"] == 2
+        assert xianxia["martial_arts"] == expected_martial_arts
+        assert xianxia["generic_techniques"] == expected_generic_techniques
+        assert xianxia["variants"] == expected_variants
+        assert xianxia["dao_immolating_techniques"] == expected_dao_immolating
+        assert xianxia["approval_requests"] == expected_approval_requests
+        assert xianxia["companions"] == expected_companions
+
+        with app.app_context():
+            repository = app.extensions["character_repository"]
+            record = repository.get_character("linden-pass", "ascension-matrix-crane")
+            assert record is not None
+            state = record.state_record.state
+        assert state["vitals"] == {"current_hp": 21, "temp_hp": 4}
+        assert state["notes"]["player_notes_markdown"] == "Preserve this note."
+        assert state["xianxia"]["vitals"] == {
+            "current_hp": 21,
+            "temp_hp": 4,
+            "current_stance": 18,
+            "temp_stance": 3,
+        }
+        assert state["xianxia"]["energies"] == {
+            "jing": {"current": 2},
+            "qi": {"current": 3},
+            "shen": {"current": 4},
+        }
+        assert state["xianxia"]["yin_yang"] == {
+            "yin_current": 2,
+            "yang_current": 3,
+        }
+        assert state["xianxia"]["dao"] == {"current": 2}
+        assert state["xianxia"]["active_stance"] == {"name": "Mountain Root"}
+        assert state["xianxia"]["active_aura"] == {"name": "Quiet Moon"}
+        assert state["xianxia"]["notes"] == {
+            "player_notes_markdown": "Preserve this note."
+        }
+
+    _write_campaign_config(app, _mutate_campaign)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Ascension Matrix Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+    _write_character_definition(app, "ascension-matrix-crane", _prepare_definition)
+    _write_character_state(app, "ascension-matrix-crane", _prepare_state)
+
+    initial_definition = _read_character_definition(app, "ascension-matrix-crane")
+    initial_xianxia = initial_definition["xianxia"]
+    expected_energies = deepcopy(initial_xianxia["energies"])
+    expected_yin_yang = deepcopy(initial_xianxia["yin_yang"])
+    expected_insight = deepcopy(initial_xianxia["insight"])
+    expected_martial_arts = deepcopy(initial_xianxia["martial_arts"])
+    expected_generic_techniques = deepcopy(initial_xianxia["generic_techniques"])
+    expected_variants = deepcopy(initial_xianxia["variants"])
+    expected_dao_immolating = deepcopy(initial_xianxia["dao_immolating_techniques"])
+    expected_approval_requests = deepcopy(initial_xianxia["approval_requests"])
+    expected_companions = deepcopy(initial_xianxia["companions"])
+
+    starting_revision = _character_state_revision(app, "ascension-matrix-crane")
+    illegal_target_response = _post_cultivation(
+        action="start_realm_ascension_review",
+        expected_revision=starting_revision,
+        data={
+            "target_realm": "Divine",
+            "realm_ascension_gm_review_note": "Trying to skip Immortal.",
+        },
+        follow_redirects=True,
+    )
+    assert illegal_target_response.status_code == 200
+    assert (
+        "Realm ascension must move from Mortal to Immortal."
+        in illegal_target_response.get_data(as_text=True)
+    )
+    assert _character_state_revision(app, "ascension-matrix-crane") == starting_revision
+    assert _read_character_definition(app, "ascension-matrix-crane") == initial_definition
+
+    review_response = _post_cultivation(
+        action="start_realm_ascension_review",
+        expected_revision=starting_revision,
+        data={
+            "target_realm": "Immortal",
+            "realm_ascension_gm_review_note": "GM approved Mortal to Immortal review.",
+        },
+    )
+    assert review_response.status_code == 302
+
+    reset_revision = _character_state_revision(app, "ascension-matrix-crane")
+    reset_response = _post_cultivation(
+        action="reset_realm_ascension_stats",
+        expected_revision=reset_revision,
+        data={"target_realm": "Immortal"},
+    )
+    assert reset_response.status_code == 302
+
+    wrong_rebuild_revision = _character_state_revision(app, "ascension-matrix-crane")
+    wrong_rebuild_response = _post_cultivation(
+        action="apply_divine_realm_rebuild",
+        expected_revision=wrong_rebuild_revision,
+        data={"target_realm": "Divine"},
+        follow_redirects=True,
+    )
+    assert wrong_rebuild_response.status_code == 200
+    assert (
+        "The Divine rebuild budget applies only to Immortal to Divine ascension."
+        in wrong_rebuild_response.get_data(as_text=True)
+    )
+    assert (
+        _character_state_revision(app, "ascension-matrix-crane")
+        == wrong_rebuild_revision
+    )
+    _assert_non_reset_data_preserved()
+
+    immortal_rebuild_response = _post_cultivation(
+        action="apply_immortal_realm_rebuild",
+        expected_revision=wrong_rebuild_revision,
+        data={
+            "target_realm": "Immortal",
+            "realm_rebuild_attribute_str": "6",
+            "realm_rebuild_attribute_dex": "2",
+            "realm_rebuild_attribute_con": "1",
+            "realm_rebuild_attribute_int": "0",
+            "realm_rebuild_attribute_wis": "0",
+            "realm_rebuild_attribute_cha": "0",
+            "realm_rebuild_effort_basic": "3",
+            "realm_rebuild_effort_weapon": "2",
+            "realm_rebuild_effort_guns_explosive": "0",
+            "realm_rebuild_effort_magic": "1",
+            "realm_rebuild_effort_ultimate": "0",
+            "realm_ascension_rebuild_notes": "Mortal to Immortal matrix rebuild.",
+        },
+    )
+    assert immortal_rebuild_response.status_code == 302
+
+    xianxia = _read_character_definition(app, "ascension-matrix-crane")["xianxia"]
+    assert xianxia["realm"] == "Immortal"
+    assert xianxia["actions_per_turn"] == 3
+    assert xianxia["attributes"] == {
+        "str": 6,
+        "dex": 2,
+        "con": 1,
+        "int": 0,
+        "wis": 0,
+        "cha": 0,
+    }
+    assert xianxia["efforts"] == {
+        "basic": 3,
+        "weapon": 2,
+        "guns_explosive": 0,
+        "magic": 1,
+        "ultimate": 0,
+    }
+    assert xianxia["advancement_history"][-1]["action"] == (
+        "realm_ascension_immortal_rebuild_applied"
+    )
+    _assert_non_reset_data_preserved()
+
+    confirmation_revision = _character_state_revision(app, "ascension-matrix-crane")
+    confirmation_response = _post_cultivation(
+        action="confirm_realm_ascension",
+        expected_revision=confirmation_revision,
+        data={
+            "target_realm": "Immortal",
+            "realm_ascension_gm_confirmation_note": "GM confirmed Immortal rebuild.",
+        },
+    )
+    assert confirmation_response.status_code == 302
+
+    _write_character_definition(
+        app,
+        "ascension-matrix-crane",
+        lambda payload: payload["xianxia"]["attributes"].__setitem__("str", 15),
+    )
+
+    divine_review_revision = _character_state_revision(app, "ascension-matrix-crane")
+    divine_review_response = _post_cultivation(
+        action="start_realm_ascension_review",
+        expected_revision=divine_review_revision,
+        data={
+            "target_realm": "Divine",
+            "realm_ascension_gm_review_note": "GM approved Immortal to Divine review.",
+        },
+    )
+    assert divine_review_response.status_code == 302
+
+    divine_reset_revision = _character_state_revision(app, "ascension-matrix-crane")
+    divine_reset_response = _post_cultivation(
+        action="reset_realm_ascension_stats",
+        expected_revision=divine_reset_revision,
+        data={"target_realm": "Divine"},
+    )
+    assert divine_reset_response.status_code == 302
+
+    divine_rebuild_revision = _character_state_revision(app, "ascension-matrix-crane")
+    divine_rebuild_response = _post_cultivation(
+        action="apply_divine_realm_rebuild",
+        expected_revision=divine_rebuild_revision,
+        data={
+            "target_realm": "Divine",
+            "realm_rebuild_attribute_str": "12",
+            "realm_rebuild_attribute_dex": "2",
+            "realm_rebuild_attribute_con": "1",
+            "realm_rebuild_attribute_int": "0",
+            "realm_rebuild_attribute_wis": "0",
+            "realm_rebuild_attribute_cha": "0",
+            "realm_rebuild_effort_basic": "4",
+            "realm_rebuild_effort_weapon": "3",
+            "realm_rebuild_effort_guns_explosive": "2",
+            "realm_rebuild_effort_magic": "1",
+            "realm_rebuild_effort_ultimate": "0",
+            "realm_ascension_rebuild_notes": "Immortal to Divine matrix rebuild.",
+        },
+    )
+    assert divine_rebuild_response.status_code == 302
+
+    xianxia = _read_character_definition(app, "ascension-matrix-crane")["xianxia"]
+    assert xianxia["realm"] == "Divine"
+    assert xianxia["actions_per_turn"] == 4
+    assert xianxia["attributes"] == {
+        "str": 12,
+        "dex": 2,
+        "con": 1,
+        "int": 0,
+        "wis": 0,
+        "cha": 0,
+    }
+    assert xianxia["efforts"] == {
+        "basic": 4,
+        "weapon": 3,
+        "guns_explosive": 2,
+        "magic": 1,
+        "ultimate": 0,
+    }
+    assert xianxia["advancement_history"][-1]["action"] == (
+        "realm_ascension_divine_rebuild_applied"
+    )
+    _assert_non_reset_data_preserved()
+
+
 def test_xianxia_cultivation_route_tracks_insight_available_and_spent(
     app, client, sign_in, users
 ):
