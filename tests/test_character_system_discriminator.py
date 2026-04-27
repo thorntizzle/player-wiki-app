@@ -360,6 +360,43 @@ def test_xianxia_definition_normalizes_optional_prepared_dao_immolating_notes():
     assert "approval_status" not in prepared_records[1]
 
 
+def test_xianxia_definition_normalizes_optional_prepared_dao_immolating_use_reference():
+    definition = CharacterDefinition.from_dict(
+        _minimal_definition_payload(
+            system=XIANXIA_SYSTEM_CODE,
+            xianxia={
+                "dao_immolating_techniques": {
+                    "prepared": [{"name": "Dawn Ash Mercy"}],
+                    "use_history": [
+                        {
+                            "name": "Dawn Ash Mercy",
+                            "request_type": "dao_immolating_use",
+                            "request_source": "prepared",
+                            "prepared_index": "0",
+                            "prepared_name": "  Dawn Ash Mercy  ",
+                            "preparation_notes": "  Prepared before the duel.  ",
+                        }
+                    ],
+                }
+            },
+        )
+    )
+
+    use_record = definition.to_dict()["xianxia"]["dao_immolating_techniques"]["use_history"][0]
+
+    assert use_record["request_source"] == "prepared"
+    assert use_record["prepared_record_index"] == 0
+    assert use_record["prepared_record_name"] == "Dawn Ash Mercy"
+    assert use_record["prepared_record_notes"] == "Prepared before the duel."
+    assert use_record["approval_required"] is True
+    assert use_record["approval_status"] == "pending"
+    assert use_record["insight_cost"] == 10
+    assert use_record["one_use"] is True
+    assert "prepared_index" not in use_record
+    assert "prepared_name" not in use_record
+    assert "preparation_notes" not in use_record
+
+
 def test_xianxia_definition_accepts_requirements_sketch_top_level_aliases():
     definition = CharacterDefinition.from_dict(
         _minimal_definition_payload(

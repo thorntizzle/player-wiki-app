@@ -476,6 +476,98 @@ def test_xianxia_techniques_page_records_ad_hoc_dao_immolating_use_request(
     assert "One-use history: not recorded yet" in html
 
 
+def test_xianxia_techniques_page_uses_prepared_dao_immolating_reference_without_requiring_it(
+    client,
+    sign_in,
+    users,
+    app,
+    get_character,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Prepared Request Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+
+    record = get_character("prepared-request-crane")
+    assert record is not None
+    payload = record.definition.to_dict()
+    payload["xianxia"]["dao_immolating_techniques"]["prepared"] = [
+        {
+            "name": "Dawn Ash Mercy",
+            "notes": "Prepared review context for the GM.",
+        }
+    ]
+    _write_raw_xianxia_character_definition(app, "prepared-request-crane", payload)
+    record = get_character("prepared-request-crane")
+    assert record is not None
+
+    edit_response = client.get(
+        "/campaigns/linden-pass/characters/prepared-request-crane?mode=session&page=techniques"
+    )
+    assert edit_response.status_code == 200
+    edit_html = unescape(edit_response.get_data(as_text=True))
+    assert "Prepared note" in edit_html
+    assert 'name="dao_immolating_prepared_index"' in edit_html
+    assert '<option value="0">Dawn Ash Mercy</option>' in edit_html
+
+    response = client.post(
+        "/campaigns/linden-pass/characters/prepared-request-crane/xianxia/dao-immolating-use-requests",
+        data={
+            "expected_revision": record.state_record.revision,
+            "mode": "session",
+            "page": "techniques",
+            "dao_immolating_request_name": "",
+            "dao_immolating_prepared_index": "0",
+            "dao_immolating_request_notes": "Requesting the prepared vow at the table.",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    updated = get_character("prepared-request-crane")
+    assert updated is not None
+    xianxia = updated.definition.to_dict()["xianxia"]
+    assert xianxia["dao_immolating_techniques"]["prepared"] == [
+        {
+            "name": "Dawn Ash Mercy",
+            "notes": "Prepared review context for the GM.",
+        }
+    ]
+    assert xianxia["dao_immolating_techniques"]["use_history"] == [
+        {
+            "name": "Dawn Ash Mercy",
+            "request_type": "dao_immolating_use",
+            "request_source": "prepared_record",
+            "approval_required": True,
+            "approval_status": "pending",
+            "notes": "Requesting the prepared vow at the table.",
+            "prepared_record_index": 0,
+            "prepared_record_name": "Dawn Ash Mercy",
+            "prepared_record_notes": "Prepared review context for the GM.",
+            "insight_cost": 10,
+            "one_use": True,
+        }
+    ]
+    assert xianxia["insight"] == {"available": 0, "spent": 0}
+    assert xianxia["advancement_history"] == []
+
+    sheet_response = client.get(
+        "/campaigns/linden-pass/characters/prepared-request-crane?mode=session&page=techniques"
+    )
+    assert sheet_response.status_code == 200
+    html = unescape(sheet_response.get_data(as_text=True))
+    assert "Prepared note request" in html
+    assert "Prepared support:" in html
+    assert "Dawn Ash Mercy" in html
+    assert "Prepared review context for the GM." in html
+    assert "Requesting the prepared vow at the table." in html
+    assert "One-use history: not recorded yet" in html
+
+
 def test_xianxia_techniques_page_records_dao_immolating_insight_cost_and_one_use_history(
     client,
     sign_in,

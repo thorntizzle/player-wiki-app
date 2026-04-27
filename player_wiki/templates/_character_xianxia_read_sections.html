@@ -213,6 +213,15 @@
                 {% endif %}
                 {% if group.key == 'dao_immolating_use_records' %}
                   <li class="meta">Insight cost: {{ record.insight_cost }}</li>
+                  {% if record.prepared_record_name or record.prepared_record_notes %}
+                    <li class="meta">
+                      Prepared support:
+                      {{ record.prepared_record_name or ("Prepared note #" ~ ((record.prepared_record_index | default(0)) + 1)) }}
+                    </li>
+                    {% if record.prepared_record_notes %}
+                      <li class="meta">{{ record.prepared_record_notes }}</li>
+                    {% endif %}
+                  {% endif %}
                   {% if record.used %}
                     <li class="meta">One-use history: used; Insight spent {{ record.insight_spent }}</li>
                     {% if record.use_notes %}
@@ -297,8 +306,23 @@
             {% endif %}
             <label class="session-field">
               <span>Request name</span>
-              <input type="text" name="dao_immolating_request_name" required>
+              <input
+                type="text"
+                name="dao_immolating_request_name"
+                {% if not xianxia_sheet.approval.dao_immolating_prepared %}required{% endif %}
+              >
             </label>
+            {% if xianxia_sheet.approval.dao_immolating_prepared %}
+              <label class="session-field">
+                <span>Prepared note</span>
+                <select name="dao_immolating_prepared_index">
+                  <option value="">No prepared note</option>
+                  {% for record in xianxia_sheet.approval.dao_immolating_prepared %}
+                    <option value="{{ loop.index0 }}">{{ record.name }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+            {% endif %}
             <label class="session-field">
               <span>Request notes</span>
               <textarea name="dao_immolating_request_notes" rows="3"></textarea>

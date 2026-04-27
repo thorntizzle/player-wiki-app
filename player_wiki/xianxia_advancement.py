@@ -202,6 +202,7 @@ class XianxiaDaoImmolatingUseRequestResult:
     definition: Any
     request_name: str
     notes: str = ""
+    prepared_record_name: str = ""
 
 
 @dataclass(frozen=True)
@@ -948,27 +949,40 @@ def request_xianxia_dao_immolating_use_definition(
     *,
     request_name: str,
     notes: str = "",
+    prepared_record_index: int | None = None,
 ) -> XianxiaDaoImmolatingUseRequestResult:
-    clean_name = _clean_note(request_name)
-    if not clean_name:
-        raise ValueError("Enter a Dao Immolating Technique request name.")
     clean_notes = _clean_note(notes)
 
     payload = definition.to_dict()
     xianxia = dict(payload.get("xianxia") or {})
     dao_immolating = dict(xianxia.get("dao_immolating_techniques") or {})
-    use_history = _copy_record_list(dao_immolating.get("use_history"))
-    use_history.append(
-        {
-            "name": clean_name,
-            "request_type": "dao_immolating_use",
-            "request_source": "ad_hoc",
-            "approval_required": True,
-            "approval_status": "pending",
-            **({"notes": clean_notes} if clean_notes else {}),
-        }
+    prepared_records = _copy_record_list(dao_immolating.get("prepared"))
+    prepared_reference = _dao_immolating_prepared_reference(
+        prepared_records,
+        prepared_record_index=prepared_record_index,
     )
-    dao_immolating["prepared"] = _copy_record_list(dao_immolating.get("prepared"))
+    if prepared_record_index is not None and prepared_reference is None:
+        raise ValueError("Choose an existing prepared Dao Immolating Technique note.")
+
+    clean_name = _clean_note(request_name)
+    if not clean_name and prepared_reference:
+        clean_name = _clean_note(prepared_reference.get("prepared_record_name"))
+    if not clean_name:
+        raise ValueError("Enter a Dao Immolating Technique request name.")
+
+    use_history = _copy_record_list(dao_immolating.get("use_history"))
+    request_record = {
+        "name": clean_name,
+        "request_type": "dao_immolating_use",
+        "request_source": "prepared_record" if prepared_reference else "ad_hoc",
+        "approval_required": True,
+        "approval_status": "pending",
+        **({"notes": clean_notes} if clean_notes else {}),
+    }
+    if prepared_reference:
+        request_record.update(prepared_reference)
+    use_history.append(request_record)
+    dao_immolating["prepared"] = prepared_records
     dao_immolating["use_history"] = use_history
     xianxia["dao_immolating_techniques"] = dao_immolating
     payload["xianxia"] = xianxia
@@ -977,7 +991,45 @@ def request_xianxia_dao_immolating_use_definition(
         definition=definition.__class__.from_dict(payload),
         request_name=clean_name,
         notes=clean_notes,
+        prepared_record_name=(
+            _clean_note(prepared_reference.get("prepared_record_name"))
+            if prepared_reference
+            else ""
+        ),
     )
+
+
+def _dao_immolating_prepared_reference(
+    prepared_records: list[dict[str, Any]],
+    *,
+    prepared_record_index: int | None,
+) -> dict[str, Any] | None:
+    if prepared_record_index is None:
+        return None
+    if prepared_record_index < 0 or prepared_record_index >= len(prepared_records):
+        return None
+
+    prepared_record = dict(prepared_records[prepared_record_index])
+    prepared_name = _clean_note(
+        prepared_record.get("name")
+        or prepared_record.get("title")
+        or prepared_record.get("label")
+        or prepared_record.get("technique_name")
+    )
+    prepared_notes = _clean_note(
+        prepared_record.get("notes")
+        or prepared_record.get("prepared_notes")
+        or prepared_record.get("preparation_notes")
+        or prepared_record.get("description")
+        or prepared_record.get("description_markdown")
+        or prepared_record.get("text")
+    )
+    reference: dict[str, Any] = {"prepared_record_index": prepared_record_index}
+    if prepared_name:
+        reference["prepared_record_name"] = prepared_name
+    if prepared_notes:
+        reference["prepared_record_notes"] = prepared_notes
+    return reference
 
 
 def record_xianxia_dao_immolating_use_definition(

@@ -1178,8 +1178,53 @@ def _normalize_dao_immolating_use_record(record: dict[str, Any]) -> dict[str, An
             raw_insight_spent,
             default=XIANXIA_DAO_IMMOLATING_INSIGHT_COST,
         )
+    _normalize_dao_immolating_prepared_reference_metadata(normalized)
     _normalize_approval_record_metadata(normalized)
     return normalized
+
+
+def _normalize_dao_immolating_prepared_reference_metadata(record: dict[str, Any]) -> None:
+    raw_index = _first_present(record, key="prepared_record_index")
+    if raw_index is None:
+        raw_index = _first_present(record, key="prepared_index")
+    if raw_index is None:
+        raw_index = _first_present(record, key="prepared_note_index")
+    for alias in ("prepared_index", "prepared_note_index"):
+        record.pop(alias, None)
+    if raw_index is not None and str(raw_index).strip():
+        record["prepared_record_index"] = _normalize_non_negative_int(raw_index, default=0)
+    else:
+        record.pop("prepared_record_index", None)
+
+    raw_name = _first_present(record, key="prepared_record_name")
+    if raw_name is None:
+        raw_name = _first_present(record, key="prepared_name")
+    if raw_name is None:
+        raw_name = _first_present(record, key="prepared_note_name")
+    if raw_name is None:
+        raw_name = _first_present(record, key="prepared_technique_name")
+    for alias in ("prepared_name", "prepared_note_name", "prepared_technique_name"):
+        record.pop(alias, None)
+    prepared_name = _normalize_text(raw_name)
+    if prepared_name:
+        record["prepared_record_name"] = prepared_name
+    else:
+        record.pop("prepared_record_name", None)
+
+    raw_notes = _first_present(record, key="prepared_record_notes")
+    if raw_notes is None:
+        raw_notes = _first_present(record, key="prepared_notes")
+    if raw_notes is None:
+        raw_notes = _first_present(record, key="preparation_notes")
+    if raw_notes is None:
+        raw_notes = _first_present(record, key="prepared_description")
+    for alias in ("prepared_notes", "preparation_notes", "prepared_description"):
+        record.pop(alias, None)
+    prepared_notes = _normalize_text(raw_notes)
+    if prepared_notes:
+        record["prepared_record_notes"] = prepared_notes
+    else:
+        record.pop("prepared_record_notes", None)
 
 
 def _dao_immolating_use_record_is_used(record: dict[str, Any]) -> bool:

@@ -155,6 +155,18 @@ XIANXIA_DAO_IMMOLATING_USE_NOTE_FIELDS = (
     "usage_notes",
     "one_use_notes",
 )
+XIANXIA_DAO_IMMOLATING_PREPARED_NAME_FIELDS = (
+    "prepared_record_name",
+    "prepared_name",
+    "prepared_note_name",
+    "prepared_technique_name",
+)
+XIANXIA_DAO_IMMOLATING_PREPARED_NOTE_FIELDS = (
+    "prepared_record_notes",
+    "prepared_notes",
+    "preparation_notes",
+    "prepared_description",
+)
 XIANXIA_APPROVAL_NOTE_FIELDS = (
     "approval_notes",
     "gm_approval_notes",
@@ -1972,7 +1984,7 @@ def _present_xianxia_approval_status_groups(
         grouped_records["dao_immolating_use_records"].append(
             _present_xianxia_approval_status_record(
                 payload,
-                source_label="Use record",
+                source_label=_xianxia_dao_immolating_use_source_label(payload),
                 group_key="dao_immolating_use_records",
                 use_record_index=use_record_index,
             )
@@ -2044,10 +2056,35 @@ def _present_xianxia_approval_status_record(
             payload,
             XIANXIA_DAO_IMMOLATING_USE_NOTE_FIELDS,
         ),
+        "prepared_record_name": _xianxia_first_present_text(
+            payload,
+            XIANXIA_DAO_IMMOLATING_PREPARED_NAME_FIELDS,
+        ),
+        "prepared_record_notes": _xianxia_first_present_text(
+            payload,
+            XIANXIA_DAO_IMMOLATING_PREPARED_NOTE_FIELDS,
+        ),
+        "prepared_record_index": max(
+            0,
+            _coerce_int(payload.get("prepared_record_index"), default=0),
+        ),
     }
     if use_record_index is not None:
         record["use_record_index"] = use_record_index
     return record
+
+
+def _xianxia_dao_immolating_use_source_label(payload: dict[str, Any]) -> str:
+    request_source = re.sub(
+        r"[^a-z0-9]+",
+        "_",
+        str(payload.get("request_source") or "").strip().lower(),
+    ).strip("_")
+    if request_source in {"prepared", "prepared_record", "prepared_note"}:
+        return "Prepared note request"
+    if request_source in {"ad_hoc", "adhoc"}:
+        return "Ad hoc request"
+    return "Use record"
 
 
 def _xianxia_first_present_text(payload: dict[str, Any], fields: tuple[str, ...]) -> str:

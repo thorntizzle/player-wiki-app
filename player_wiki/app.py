@@ -13321,10 +13321,18 @@ def create_app() -> Flask:
                 raise ValueError(
                     "Dao Immolating use requests are only available for Xianxia character sheets."
                 )
+            raw_prepared_record_index = request.form.get("dao_immolating_prepared_index", "")
+            prepared_record_index = None
+            if str(raw_prepared_record_index or "").strip():
+                prepared_record_index = normalize_dm_player_wiki_int(
+                    raw_prepared_record_index,
+                    field_label="Prepared Dao Immolating Technique note",
+                )
             request_result = request_xianxia_dao_immolating_use_definition(
                 record.definition,
                 request_name=request.form.get("dao_immolating_request_name", ""),
                 notes=request.form.get("dao_immolating_request_notes", ""),
+                prepared_record_index=prepared_record_index,
             )
             import_metadata = build_managed_character_import_metadata(
                 campaign_slug,
