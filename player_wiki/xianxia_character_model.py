@@ -134,6 +134,11 @@ _XIANXIA_KARMIC_CONSTRAINT_TYPE_ALIASES = {
     "karmic_constraint",
     "karmic_constraints",
 }
+_XIANXIA_ASCENDANT_ART_TYPE = "ascendant_art"
+_XIANXIA_ASCENDANT_ART_TYPE_ALIASES = {
+    "ascendant_art",
+    "ascendant_arts",
+}
 _XIANXIA_APPROVAL_STATUS_ALIASES = {
     "approved": "approved",
     "pending": "pending",
@@ -976,10 +981,11 @@ def _normalize_variant_records(values: Any) -> list[dict[str, Any]]:
 
 def _normalize_variant_record(record: dict[str, Any]) -> dict[str, Any]:
     normalized = deepcopy(record)
-    if not _is_karmic_constraint_variant(normalized):
+    variant_type = _approval_variant_type(normalized)
+    if not variant_type:
         return normalized
 
-    normalized["variant_type"] = _XIANXIA_KARMIC_CONSTRAINT_TYPE
+    normalized["variant_type"] = variant_type
     normalized["approval_required"] = True
     raw_status = normalized.get("approval_status")
     if raw_status is None and "status" in normalized:
@@ -990,11 +996,14 @@ def _normalize_variant_record(record: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def _is_karmic_constraint_variant(record: dict[str, Any]) -> bool:
+def _approval_variant_type(record: dict[str, Any]) -> str:
     for key in ("variant_type", "type", "category", "kind"):
-        if _normalize_token(record.get(key)) in _XIANXIA_KARMIC_CONSTRAINT_TYPE_ALIASES:
-            return True
-    return False
+        normalized = _normalize_token(record.get(key))
+        if normalized in _XIANXIA_KARMIC_CONSTRAINT_TYPE_ALIASES:
+            return _XIANXIA_KARMIC_CONSTRAINT_TYPE
+        if normalized in _XIANXIA_ASCENDANT_ART_TYPE_ALIASES:
+            return _XIANXIA_ASCENDANT_ART_TYPE
+    return ""
 
 
 def _normalize_approval_status(value: Any, *, default: str) -> str:

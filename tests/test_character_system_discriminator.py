@@ -178,7 +178,6 @@ def test_xianxia_definition_normalizes_karmic_constraint_approval_fields():
                         "status": "Denied",
                         "approval_required": False,
                     },
-                    {"variant_type": "ascendant_art", "name": "Skyfire Crown"},
                 ]
             },
         )
@@ -197,7 +196,38 @@ def test_xianxia_definition_normalizes_karmic_constraint_approval_fields():
     assert variants[1]["approval_required"] is True
     assert variants[1]["approval_status"] == "rejected"
     assert variants[1]["status"] == "Denied"
-    assert variants[2] == {"variant_type": "ascendant_art", "name": "Skyfire Crown"}
+
+
+def test_xianxia_definition_normalizes_ascendant_art_approval_fields():
+    definition = CharacterDefinition.from_dict(
+        _minimal_definition_payload(
+            system=XIANXIA_SYSTEM_CODE,
+            xianxia={
+                "variants": [
+                    {"variant_type": "ascendant_art", "name": "Skyfire Crown"},
+                    {
+                        "type": "Ascendant Arts",
+                        "name": "Moonlit Crown",
+                        "request_status": "Denied",
+                        "approval_required": False,
+                    },
+                ]
+            },
+        )
+    )
+
+    variants = definition.to_dict()["xianxia"]["variants"]
+
+    assert variants[0] == {
+        "variant_type": "ascendant_art",
+        "name": "Skyfire Crown",
+        "approval_required": True,
+        "approval_status": "pending",
+    }
+    assert variants[1]["variant_type"] == "ascendant_art"
+    assert variants[1]["approval_required"] is True
+    assert variants[1]["approval_status"] == "rejected"
+    assert variants[1]["request_status"] == "Denied"
 
 
 def test_xianxia_definition_accepts_requirements_sketch_top_level_aliases():

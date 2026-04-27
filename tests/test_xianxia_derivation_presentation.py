@@ -323,6 +323,10 @@ def test_xianxia_techniques_page_shows_approval_status_records(
             "status": "pending",
             "notes": "Awaiting sect elder review.",
         },
+        {
+            "type": "Ascendant Art",
+            "name": "Starfall Halo",
+        },
     ]
     payload["xianxia"]["approval_requests"] = [
         {
@@ -354,7 +358,7 @@ def test_xianxia_techniques_page_shows_approval_status_records(
     approval_groups = character["xianxia_read"]["approval"]["status_groups"]
     assert [(group["title"], [record["status_label"] for record in group["records"]]) for group in approval_groups] == [
         ("Karmic Constraints", ["Approved", "Pending"]),
-        ("Ascendant Arts", ["Pending", "Rejected"]),
+        ("Ascendant Arts", ["Pending", "Pending", "Rejected"]),
         ("Dao Immolating Technique Use Records", ["Approved"]),
     ]
 
@@ -370,6 +374,7 @@ def test_xianxia_techniques_page_shows_approval_status_records(
     assert "Variant" in html
     assert "Ascendant Arts" in html
     assert "Skyfire Crown" in html
+    assert "Starfall Halo" in html
     assert "Pending" in html
     assert "Cloud-Splitting Revision" in html
     assert "Rejected" in html
