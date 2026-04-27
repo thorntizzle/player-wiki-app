@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
@@ -408,6 +409,10 @@ def reset_xianxia_realm_ascension_stats_definition(
         XIANXIA_EFFORT_KEYS,
         XIANXIA_EFFORT_LABELS,
     )
+    pre_ascension_state = _realm_ascension_history_snapshot(xianxia)
+    pre_ascension_summary = _realm_ascension_history_snapshot_summary(
+        pre_ascension_state
+    )
     xianxia["attributes"] = {key: 0 for key in XIANXIA_ATTRIBUTE_KEYS}
     xianxia["efforts"] = {key: 0 for key in XIANXIA_EFFORT_KEYS}
 
@@ -427,6 +432,8 @@ def reset_xianxia_realm_ascension_stats_definition(
             "Energies, Yin/Yang, HP, Stance, Insight, Martial Arts, "
             "Generic Techniques, variants, approval records, and notes"
         ),
+        "pre_ascension_summary": pre_ascension_summary,
+        "pre_ascension_state": pre_ascension_state,
     }
     if clean_notes:
         event["notes"] = clean_notes
@@ -557,6 +564,9 @@ def _apply_xianxia_realm_rebuild_definition(
         raise ValueError(
             f"The {expected_target_realm} rebuild budget has already been applied for this Realm ascension review."
         )
+    reset_event = dict(history[reset_index])
+    pre_ascension_state = _realm_ascension_snapshot_from_event(reset_event)
+    pre_ascension_summary = str(reset_event.get("pre_ascension_summary") or "").strip()
 
     rebuild_budget = int(target["rebuild_budget"])
     stat_cap = int(target["stat_cap"])
@@ -608,6 +618,10 @@ def _apply_xianxia_realm_rebuild_definition(
     xianxia["actions_per_turn"] = int(target["actions_per_turn"])
     xianxia["attributes"] = attributes
     xianxia["efforts"] = efforts
+    post_ascension_state = _realm_ascension_history_snapshot(xianxia)
+    post_ascension_summary = _realm_ascension_history_snapshot_summary(
+        post_ascension_state
+    )
 
     clean_notes = _clean_note(notes)
     event = {
@@ -622,7 +636,13 @@ def _apply_xianxia_realm_rebuild_definition(
         "attributes_after_total": attribute_total,
         "efforts_after_total": effort_total,
         "total_rebuild_points": total_rebuild_points,
+        "post_ascension_summary": post_ascension_summary,
+        "post_ascension_state": post_ascension_state,
     }
+    if pre_ascension_state:
+        event["pre_ascension_state"] = pre_ascension_state
+    if pre_ascension_summary:
+        event["pre_ascension_summary"] = pre_ascension_summary
     if trade_bonus_points:
         event.update(
             {
@@ -1862,6 +1882,9 @@ def _latest_realm_ascension_stat_reset(records: Any) -> dict[str, Any] | None:
                 record.get("efforts_after_total"),
                 default=0,
             ),
+            "pre_ascension_summary": str(
+                record.get("pre_ascension_summary") or ""
+            ).strip(),
             "notes": str(record.get("notes") or "").strip(),
         }
     return None
@@ -1935,6 +1958,12 @@ def _latest_realm_ascension_rebuild(
                 record.get("stance_maximum_after"),
                 default=0,
             ),
+            "pre_ascension_summary": str(
+                record.get("pre_ascension_summary") or ""
+            ).strip(),
+            "post_ascension_summary": str(
+                record.get("post_ascension_summary") or ""
+            ).strip(),
             "notes": str(record.get("notes") or "").strip(),
         }
     return None
@@ -2230,6 +2259,129 @@ def _realm_ascension_trade_context(durability: dict[str, int]) -> dict[str, int 
         "hp_maximum_trade": hp_maximum_trade,
         "stance_maximum_trade": stance_maximum_trade,
     }
+
+
+def _realm_ascension_history_snapshot(xianxia: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(xianxia or {})
+    attributes = {
+        key: _non_negative_int(dict(payload.get("attributes") or {}).get(key), default=0)
+        for key in XIANXIA_ATTRIBUTE_KEYS
+    }
+    efforts = {
+        key: _non_negative_int(dict(payload.get("efforts") or {}).get(key), default=0)
+        for key in XIANXIA_EFFORT_KEYS
+    }
+    raw_energies = dict(payload.get("energies") or {})
+    energies = {
+        key: {
+            "max": _non_negative_int(
+                dict(raw_energies.get(key) or {}).get("max"),
+                default=0,
+            )
+        }
+        for key in XIANXIA_ENERGY_KEYS
+    }
+    raw_yin_yang = dict(payload.get("yin_yang") or {})
+    raw_dao = dict(payload.get("dao") or {})
+    raw_insight = dict(payload.get("insight") or {})
+    raw_durability = dict(payload.get("durability") or {})
+    raw_skills = dict(payload.get("skills") or {})
+    raw_equipment = dict(payload.get("equipment") or {})
+    raw_dao_immolating = dict(payload.get("dao_immolating_techniques") or {})
+    return {
+        "realm": normalize_xianxia_realm_label(payload.get("realm")),
+        "actions_per_turn": _non_negative_int(
+            payload.get("actions_per_turn"),
+            default=0,
+        ),
+        "attributes": attributes,
+        "attributes_total": sum(attributes.values()),
+        "efforts": efforts,
+        "efforts_total": sum(efforts.values()),
+        "energies": energies,
+        "yin_yang": {
+            "yin_max": _non_negative_int(raw_yin_yang.get("yin_max"), default=1),
+            "yang_max": _non_negative_int(raw_yin_yang.get("yang_max"), default=1),
+        },
+        "dao": {"max": _non_negative_int(raw_dao.get("max"), default=3)},
+        "insight": {
+            "available": _non_negative_int(raw_insight.get("available"), default=0),
+            "spent": _non_negative_int(raw_insight.get("spent"), default=0),
+        },
+        "durability": {
+            "hp_max": _non_negative_int(raw_durability.get("hp_max"), default=10),
+            "stance_max": _non_negative_int(
+                raw_durability.get("stance_max"),
+                default=10,
+            ),
+            "manual_armor_bonus": _non_negative_int(
+                raw_durability.get("manual_armor_bonus"),
+                default=0,
+            ),
+            "defense": _non_negative_int(raw_durability.get("defense"), default=10),
+        },
+        "skills": {
+            "trained": _clean_string_list(raw_skills.get("trained")),
+        },
+        "equipment": {
+            "necessary_weapons": _copy_record_list(
+                raw_equipment.get("necessary_weapons")
+            ),
+            "necessary_tools": _copy_record_list(raw_equipment.get("necessary_tools")),
+        },
+        "martial_arts": _copy_record_list(payload.get("martial_arts")),
+        "generic_techniques": _copy_record_list(payload.get("generic_techniques")),
+        "variants": _copy_record_list(payload.get("variants")),
+        "dao_immolating_techniques": {
+            "prepared": _copy_record_list(raw_dao_immolating.get("prepared")),
+            "use_history": _copy_record_list(raw_dao_immolating.get("use_history")),
+        },
+        "approval_requests": _copy_record_list(payload.get("approval_requests")),
+        "companions": _copy_record_list(payload.get("companions")),
+    }
+
+
+def _realm_ascension_history_snapshot_summary(snapshot: dict[str, Any]) -> str:
+    durability = dict(snapshot.get("durability") or {})
+    insight = dict(snapshot.get("insight") or {})
+    return (
+        f"{snapshot.get('realm') or 'Unknown'} Realm, "
+        f"{_non_negative_int(snapshot.get('actions_per_turn'), default=0)} actions; "
+        f"Attributes {_non_negative_int(snapshot.get('attributes_total'), default=0)}, "
+        f"Efforts {_non_negative_int(snapshot.get('efforts_total'), default=0)}; "
+        f"HP max {_non_negative_int(durability.get('hp_max'), default=0)}, "
+        f"Stance max {_non_negative_int(durability.get('stance_max'), default=0)}; "
+        f"Insight {_non_negative_int(insight.get('available'), default=0)} available/"
+        f"{_non_negative_int(insight.get('spent'), default=0)} spent; "
+        f"Martial Arts {len(list(snapshot.get('martial_arts') or []))}; "
+        f"Generic Techniques {len(list(snapshot.get('generic_techniques') or []))}"
+    )
+
+
+def _realm_ascension_snapshot_from_event(record: dict[str, Any]) -> dict[str, Any]:
+    snapshot = record.get("pre_ascension_state")
+    return deepcopy(snapshot) if isinstance(snapshot, dict) else {}
+
+
+def _copy_record_list(values: Any) -> list[dict[str, Any]]:
+    if isinstance(values, dict):
+        values = [values]
+    records: list[dict[str, Any]] = []
+    for value in list(values or []):
+        if isinstance(value, dict) and value:
+            records.append(deepcopy(value))
+    return records
+
+
+def _clean_string_list(values: Any) -> list[str]:
+    if isinstance(values, str):
+        values = [values]
+    cleaned_values: list[str] = []
+    for value in list(values or []):
+        cleaned = _clean_note(value)
+        if cleaned:
+            cleaned_values.append(cleaned)
+    return cleaned_values
 
 
 def _stat_rows(

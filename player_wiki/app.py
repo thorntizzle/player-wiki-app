@@ -1560,6 +1560,8 @@ def present_xianxia_cultivation_context(
             ("stance_maximum_after", "Stance maximum after"),
             ("reset_scope", "Reset scope"),
             ("preserved_scope", "Preserved scope"),
+            ("pre_ascension_summary", "Pre-ascension state"),
+            ("post_ascension_summary", "Post-ascension state"),
             ("gm_review_note", "GM review note"),
             ("seclusion_notes", "Seclusion notes"),
             ("hp_stance_trade_notes", "HP/Stance trade notes"),

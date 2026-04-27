@@ -692,6 +692,9 @@
           <li><strong>Status:</strong> {{ ascension.latest_reset.status | replace('_', ' ') }}</li>
           <li><strong>Attributes:</strong> {{ ascension.latest_reset.attributes_before_total }} to {{ ascension.latest_reset.attributes_after_total }}</li>
           <li><strong>Efforts:</strong> {{ ascension.latest_reset.efforts_before_total }} to {{ ascension.latest_reset.efforts_after_total }}</li>
+          {% if ascension.latest_reset.pre_ascension_summary %}
+            <li><strong>Pre-ascension state:</strong> {{ ascension.latest_reset.pre_ascension_summary }}</li>
+          {% endif %}
           {% if ascension.latest_reset.notes %}
             <li><strong>Notes:</strong> {{ ascension.latest_reset.notes }}</li>
           {% endif %}
@@ -821,6 +824,12 @@
           <li><strong>Actions:</strong> {{ ascension.latest_rebuild.actions_per_turn }}</li>
           <li><strong>Attributes:</strong> {{ ascension.latest_rebuild.attributes_after_total }}</li>
           <li><strong>Efforts:</strong> {{ ascension.latest_rebuild.efforts_after_total }}</li>
+          {% if ascension.latest_rebuild.pre_ascension_summary %}
+            <li><strong>Pre-ascension state:</strong> {{ ascension.latest_rebuild.pre_ascension_summary }}</li>
+          {% endif %}
+          {% if ascension.latest_rebuild.post_ascension_summary %}
+            <li><strong>Post-ascension state:</strong> {{ ascension.latest_rebuild.post_ascension_summary }}</li>
+          {% endif %}
           {% if ascension.latest_rebuild.notes %}
             <li><strong>Notes:</strong> {{ ascension.latest_rebuild.notes }}</li>
           {% endif %}

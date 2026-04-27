@@ -124,6 +124,10 @@ def _character_state_revision(app, character_slug: str) -> int:
         return int(record.state_record.revision)
 
 
+def _assert_event_contains(event: dict, expected: dict) -> None:
+    assert {key: event.get(key) for key in expected} == expected
+
+
 def _seed_systems_item_entry(
     app,
     *,
@@ -1776,23 +1780,64 @@ def test_xianxia_cultivation_route_resets_only_realm_ascension_stats(
     }
     assert xianxia["approval_requests"] == [{"name": "Constraint", "status": "pending"}]
     assert xianxia["companions"] == [{"name": "Paper Crane"}]
-    assert xianxia["advancement_history"][-1] == {
-        "action": "realm_ascension_attributes_efforts_reset",
-        "target": "Immortal",
-        "current_realm": "Mortal",
-        "target_realm": "Immortal",
-        "status": "pending_rebuild",
-        "attributes_before_total": 22,
-        "attributes_after_total": 0,
-        "efforts_before_total": 15,
-        "efforts_after_total": 0,
-        "reset_scope": "Attributes and Efforts",
-        "preserved_scope": (
-            "Energies, Yin/Yang, HP, Stance, Insight, Martial Arts, "
-            "Generic Techniques, variants, approval records, and notes"
-        ),
-        "notes": "Ready for the Immortal rebuild budget.",
+    reset_event = xianxia["advancement_history"][-1]
+    _assert_event_contains(
+        reset_event,
+        {
+            "action": "realm_ascension_attributes_efforts_reset",
+            "target": "Immortal",
+            "current_realm": "Mortal",
+            "target_realm": "Immortal",
+            "status": "pending_rebuild",
+            "attributes_before_total": 22,
+            "attributes_after_total": 0,
+            "efforts_before_total": 15,
+            "efforts_after_total": 0,
+            "reset_scope": "Attributes and Efforts",
+            "preserved_scope": (
+                "Energies, Yin/Yang, HP, Stance, Insight, Martial Arts, "
+                "Generic Techniques, variants, approval records, and notes"
+            ),
+            "notes": "Ready for the Immortal rebuild budget.",
+        },
+    )
+    assert reset_event["pre_ascension_state"]["realm"] == "Mortal"
+    assert reset_event["pre_ascension_state"]["actions_per_turn"] == 2
+    assert reset_event["pre_ascension_state"]["attributes"] == {
+        "str": 10,
+        "dex": 2,
+        "con": 4,
+        "int": 1,
+        "wis": 3,
+        "cha": 2,
     }
+    assert reset_event["pre_ascension_state"]["efforts"] == {
+        "basic": 4,
+        "weapon": 3,
+        "guns_explosive": 2,
+        "magic": 5,
+        "ultimate": 1,
+    }
+    assert reset_event["pre_ascension_state"]["durability"]["hp_max"] == 28
+    assert reset_event["pre_ascension_state"]["durability"]["stance_max"] == 26
+    assert reset_event["pre_ascension_state"]["insight"] == {
+        "available": 7,
+        "spent": 2,
+    }
+    assert len(reset_event["pre_ascension_state"]["martial_arts"]) == 3
+    assert reset_event["pre_ascension_state"]["generic_techniques"] == [
+        {
+            "name": "Cloud Step",
+            "systems_ref": {"slug": "cloud-step"},
+            "generic_technique_key": "cloud_step",
+        }
+    ]
+    assert (
+        reset_event["pre_ascension_summary"]
+        == "Mortal Realm, 2 actions; Attributes 22, Efforts 15; HP max 28, "
+        "Stance max 26; Insight 7 available/2 spent; Martial Arts 3; "
+        "Generic Techniques 1"
+    )
 
     with app.app_context():
         repository = app.extensions["character_repository"]
@@ -1830,6 +1875,8 @@ def test_xianxia_cultivation_route_resets_only_realm_ascension_stats(
     assert 'name="cultivation_action" value="reset_realm_ascension_stats"' not in updated_html
     assert "22 to 0" in updated_html
     assert "15 to 0" in updated_html
+    assert "Pre-ascension state:" in updated_html
+    assert "Mortal Realm, 2 actions; Attributes 22, Efforts 15" in updated_html
 
 
 def test_xianxia_cultivation_route_applies_immortal_rebuild_budget(
@@ -2055,20 +2102,68 @@ def test_xianxia_cultivation_route_applies_immortal_rebuild_budget(
     ]
     assert xianxia["variants"] == [{"name": "Approved variant", "status": "approved"}]
     assert xianxia["approval_requests"] == [{"name": "Constraint", "status": "pending"}]
-    assert xianxia["advancement_history"][-1] == {
-        "action": "realm_ascension_immortal_rebuild_applied",
-        "target": "Immortal",
-        "current_realm": "Mortal",
-        "target_realm": "Immortal",
-        "status": "applied_pending_final_confirmation",
-        "rebuild_budget": 15,
-        "stat_cap": 6,
-        "actions_per_turn": 3,
-        "attributes_after_total": 9,
-        "efforts_after_total": 6,
-        "total_rebuild_points": 15,
-        "notes": "GM approved the Immortal rebuild math.",
+    rebuild_event = xianxia["advancement_history"][-1]
+    _assert_event_contains(
+        rebuild_event,
+        {
+            "action": "realm_ascension_immortal_rebuild_applied",
+            "target": "Immortal",
+            "current_realm": "Mortal",
+            "target_realm": "Immortal",
+            "status": "applied_pending_final_confirmation",
+            "rebuild_budget": 15,
+            "stat_cap": 6,
+            "actions_per_turn": 3,
+            "attributes_after_total": 9,
+            "efforts_after_total": 6,
+            "total_rebuild_points": 15,
+            "notes": "GM approved the Immortal rebuild math.",
+        },
+    )
+    assert rebuild_event["pre_ascension_state"]["realm"] == "Mortal"
+    assert rebuild_event["pre_ascension_state"]["attributes"]["str"] == 10
+    assert rebuild_event["pre_ascension_state"]["attributes_total"] == 13
+    assert rebuild_event["pre_ascension_state"]["efforts_total"] == 5
+    assert rebuild_event["post_ascension_state"]["realm"] == "Immortal"
+    assert rebuild_event["post_ascension_state"]["actions_per_turn"] == 3
+    assert rebuild_event["post_ascension_state"]["attributes"] == {
+        "str": 6,
+        "dex": 2,
+        "con": 1,
+        "int": 0,
+        "wis": 0,
+        "cha": 0,
     }
+    assert rebuild_event["post_ascension_state"]["efforts"] == {
+        "basic": 3,
+        "weapon": 2,
+        "guns_explosive": 0,
+        "magic": 1,
+        "ultimate": 0,
+    }
+    assert rebuild_event["post_ascension_state"]["energies"] == {
+        "jing": {"max": 4},
+        "qi": {"max": 5},
+        "shen": {"max": 6},
+    }
+    assert rebuild_event["post_ascension_state"]["yin_yang"] == {
+        "yin_max": 3,
+        "yang_max": 4,
+    }
+    assert rebuild_event["post_ascension_state"]["durability"]["hp_max"] == 28
+    assert rebuild_event["post_ascension_state"]["durability"]["stance_max"] == 26
+    assert (
+        rebuild_event["pre_ascension_summary"]
+        == "Mortal Realm, 2 actions; Attributes 13, Efforts 5; HP max 28, "
+        "Stance max 26; Insight 7 available/2 spent; Martial Arts 3; "
+        "Generic Techniques 1"
+    )
+    assert (
+        rebuild_event["post_ascension_summary"]
+        == "Immortal Realm, 3 actions; Attributes 9, Efforts 6; HP max 28, "
+        "Stance max 26; Insight 7 available/2 spent; Martial Arts 3; "
+        "Generic Techniques 1"
+    )
 
     with app.app_context():
         repository = app.extensions["character_repository"]
@@ -2097,6 +2192,9 @@ def test_xianxia_cultivation_route_applies_immortal_rebuild_budget(
     assert "Latest Immortal Rebuild" in updated_html
     assert "Realm Ascension Immortal Rebuild Applied" in updated_html
     assert "15 of 15" in updated_html
+    assert "Pre-ascension state:" in updated_html
+    assert "Post-ascension state:" in updated_html
+    assert "Immortal Realm, 3 actions; Attributes 9, Efforts 6" in updated_html
     assert 'name="cultivation_action" value="apply_immortal_realm_rebuild"' not in updated_html
 
 
@@ -2244,28 +2342,54 @@ def test_xianxia_cultivation_route_supports_legal_realm_hp_stance_trade(
     assert xianxia["durability"]["hp_max"] == 18
     assert xianxia["durability"]["stance_max"] == 16
     assert xianxia["durability"]["defense"] == 13
-    assert xianxia["advancement_history"][-1] == {
-        "action": "realm_ascension_immortal_rebuild_applied",
-        "target": "Immortal",
-        "current_realm": "Mortal",
-        "target_realm": "Immortal",
-        "status": "applied_pending_final_confirmation",
-        "rebuild_budget": 17,
-        "stat_cap": 6,
-        "actions_per_turn": 3,
-        "attributes_after_total": 9,
-        "efforts_after_total": 8,
-        "total_rebuild_points": 17,
-        "hp_stance_trade_points": 2,
-        "base_rebuild_budget": 15,
-        "hp_maximum_trade": 10,
-        "stance_maximum_trade": 10,
-        "hp_maximum_before": 28,
-        "hp_maximum_after": 18,
-        "stance_maximum_before": 26,
-        "stance_maximum_after": 16,
-        "notes": "Traded durability for a wider rebuild.",
-    }
+    rebuild_event = xianxia["advancement_history"][-1]
+    _assert_event_contains(
+        rebuild_event,
+        {
+            "action": "realm_ascension_immortal_rebuild_applied",
+            "target": "Immortal",
+            "current_realm": "Mortal",
+            "target_realm": "Immortal",
+            "status": "applied_pending_final_confirmation",
+            "rebuild_budget": 17,
+            "stat_cap": 6,
+            "actions_per_turn": 3,
+            "attributes_after_total": 9,
+            "efforts_after_total": 8,
+            "total_rebuild_points": 17,
+            "hp_stance_trade_points": 2,
+            "base_rebuild_budget": 15,
+            "hp_maximum_trade": 10,
+            "stance_maximum_trade": 10,
+            "hp_maximum_before": 28,
+            "hp_maximum_after": 18,
+            "stance_maximum_before": 26,
+            "stance_maximum_after": 16,
+            "notes": "Traded durability for a wider rebuild.",
+        },
+    )
+    assert rebuild_event["pre_ascension_state"]["realm"] == "Mortal"
+    assert rebuild_event["pre_ascension_state"]["attributes_total"] == 13
+    assert rebuild_event["pre_ascension_state"]["efforts_total"] == 5
+    assert rebuild_event["pre_ascension_state"]["durability"]["hp_max"] == 28
+    assert rebuild_event["pre_ascension_state"]["durability"]["stance_max"] == 26
+    assert rebuild_event["post_ascension_state"]["realm"] == "Immortal"
+    assert rebuild_event["post_ascension_state"]["attributes_total"] == 9
+    assert rebuild_event["post_ascension_state"]["efforts_total"] == 8
+    assert rebuild_event["post_ascension_state"]["durability"]["hp_max"] == 18
+    assert rebuild_event["post_ascension_state"]["durability"]["stance_max"] == 16
+    assert (
+        rebuild_event["pre_ascension_summary"]
+        == "Mortal Realm, 2 actions; Attributes 13, Efforts 5; HP max 28, "
+        "Stance max 26; Insight 0 available/0 spent; Martial Arts 3; "
+        "Generic Techniques 0"
+    )
+    assert (
+        rebuild_event["post_ascension_summary"]
+        == "Immortal Realm, 3 actions; Attributes 9, Efforts 8; HP max 18, "
+        "Stance max 16; Insight 0 available/0 spent; Martial Arts 3; "
+        "Generic Techniques 0"
+    )
 
     with app.app_context():
         repository = app.extensions["character_repository"]
@@ -2291,6 +2415,8 @@ def test_xianxia_cultivation_route_supports_legal_realm_hp_stance_trade(
     assert "28 to 18" in updated_html
     assert "Stance maximum:" in updated_html
     assert "26 to 16" in updated_html
+    assert "Post-ascension state:" in updated_html
+    assert "Immortal Realm, 3 actions; Attributes 9, Efforts 8" in updated_html
 
 
 def test_xianxia_cultivation_route_records_divine_ascension_seclusion_time(
@@ -2611,20 +2737,63 @@ def test_xianxia_cultivation_route_applies_divine_rebuild_budget(
     ]
     assert xianxia["variants"] == [{"name": "Approved variant", "status": "approved"}]
     assert xianxia["approval_requests"] == [{"name": "Constraint", "status": "pending"}]
-    assert xianxia["advancement_history"][-1] == {
-        "action": "realm_ascension_divine_rebuild_applied",
-        "target": "Divine",
-        "current_realm": "Immortal",
-        "target_realm": "Divine",
-        "status": "applied_pending_final_confirmation",
-        "rebuild_budget": 25,
-        "stat_cap": 12,
-        "actions_per_turn": 4,
-        "attributes_after_total": 15,
-        "efforts_after_total": 10,
-        "total_rebuild_points": 25,
-        "notes": "GM approved the Divine rebuild math.",
+    rebuild_event = xianxia["advancement_history"][-1]
+    _assert_event_contains(
+        rebuild_event,
+        {
+            "action": "realm_ascension_divine_rebuild_applied",
+            "target": "Divine",
+            "current_realm": "Immortal",
+            "target_realm": "Divine",
+            "status": "applied_pending_final_confirmation",
+            "rebuild_budget": 25,
+            "stat_cap": 12,
+            "actions_per_turn": 4,
+            "attributes_after_total": 15,
+            "efforts_after_total": 10,
+            "total_rebuild_points": 25,
+            "notes": "GM approved the Divine rebuild math.",
+        },
+    )
+    assert rebuild_event["pre_ascension_state"]["realm"] == "Immortal"
+    assert rebuild_event["pre_ascension_state"]["actions_per_turn"] == 3
+    assert rebuild_event["pre_ascension_state"]["attributes_total"] == 18
+    assert rebuild_event["pre_ascension_state"]["efforts_total"] == 5
+    assert rebuild_event["pre_ascension_state"]["insight"] == {
+        "available": 9,
+        "spent": 6,
     }
+    assert rebuild_event["post_ascension_state"]["realm"] == "Divine"
+    assert rebuild_event["post_ascension_state"]["actions_per_turn"] == 4
+    assert rebuild_event["post_ascension_state"]["attributes"] == {
+        "str": 12,
+        "dex": 2,
+        "con": 1,
+        "int": 0,
+        "wis": 0,
+        "cha": 0,
+    }
+    assert rebuild_event["post_ascension_state"]["efforts"] == {
+        "basic": 4,
+        "weapon": 3,
+        "guns_explosive": 2,
+        "magic": 1,
+        "ultimate": 0,
+    }
+    assert rebuild_event["post_ascension_state"]["durability"]["hp_max"] == 31
+    assert rebuild_event["post_ascension_state"]["durability"]["stance_max"] == 29
+    assert (
+        rebuild_event["pre_ascension_summary"]
+        == "Immortal Realm, 3 actions; Attributes 18, Efforts 5; HP max 31, "
+        "Stance max 29; Insight 9 available/6 spent; Martial Arts 3; "
+        "Generic Techniques 1"
+    )
+    assert (
+        rebuild_event["post_ascension_summary"]
+        == "Divine Realm, 4 actions; Attributes 15, Efforts 10; HP max 31, "
+        "Stance max 29; Insight 9 available/6 spent; Martial Arts 3; "
+        "Generic Techniques 1"
+    )
 
     with app.app_context():
         repository = app.extensions["character_repository"]
@@ -2653,6 +2822,8 @@ def test_xianxia_cultivation_route_applies_divine_rebuild_budget(
     assert "Latest Divine Rebuild" in updated_html
     assert "Realm Ascension Divine Rebuild Applied" in updated_html
     assert "25 of 25" in updated_html
+    assert "Post-ascension state:" in updated_html
+    assert "Divine Realm, 4 actions; Attributes 15, Efforts 10" in updated_html
     assert "apply_divine_realm_rebuild" not in updated_html
 
 
