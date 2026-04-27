@@ -136,6 +136,7 @@ The app now treats deployed functionality and live content as separate concerns:
 - campaign config, published assets, published wiki pages, and character definition/import files can also be managed through the JSON API
 - DMs/admins can create, edit, attach images to, promote staged/session articles into, unpublish/archive, and hard-delete published wiki page files from the browser under DM Content -> Player Wiki; hard delete is blocked when backlinks, character hooks, or session provenance make removal risky
 - shared DND 5E source ingest can now be driven through an admin-only JSON API upload plus import-run history endpoints
+- Xianxia is a first-class campaign system lane using the shared `Xianxia` Systems library and `XIANXIA-HOMEBREW` source; its Systems Wiki defaults to DM-only while Player Wiki access remains player-facing until changed through the existing visibility/source controls
 - systems source policy and combat tracker state now have API coverage in addition to the browser UI
 - the Systems UI now exposes an initial DM-default DMG book-backed browse slice (`Treasure`, `Running the Game`, and `Dungeon Master's Workshop`) through the normal source/category/detail path while keeping it hidden from players under source policy
 - the Systems UI now also exposes player-visible XGE and TCE `Book Chapters` slices through the normal source/category/detail flow; XGE includes the readable `Shared Campaigns` wrapper plus `Tool Proficiencies`, `Spellcasting`, `Encounter Building`, `Random Encounters: A World of Possibilities`, `Traps Revisited`, `Downtime Revisited`, and `Awarding Magic Items`, while the current TCE slice includes `Ten Rules to Remember`, `Customizing Your Origin`, `Changing a Skill`, and `Changing Your Subclass`
@@ -311,8 +312,12 @@ Each campaign defines its own metadata in `campaign.yaml`. The important fields 
 - `slug`
 - `summary`
 - `current_session`
+- `system`
+- `systems_library`
 - `player_content_dir`
 - `source_wiki_root`
+
+For the Xianxia system lane, set both `system` and `systems_library` to `Xianxia`. Existing DND-5E campaigns can leave those fields absent or set them to `DND-5E`; the app normalizes the value during repository load and API campaign-config writes.
 
 Only content in the player content directory is published by the app. This avoids accidentally exposing GM-only notes.
 
@@ -397,17 +402,18 @@ Imported characters now have dedicated player-facing routes:
 - `/campaigns/<campaign-slug>/characters`
 - `/campaigns/<campaign-slug>/characters/<character-slug>`
 
-The roster route is campaign-scoped and read-only. It includes a lightweight search over the imported character set.
+The roster route is campaign-scoped and read-only. It includes a lightweight search over the character set.
 
-Native in-app character authoring is currently DND-5E-only. The roster and sheet routes still work for other campaign systems, but the native builder, native edit flow, native level-up flow, and imported progression-repair flow stay hidden and redirect back to the roster or sheet with a friendly error if someone hits those URLs directly.
+Native in-app character authoring dispatches by campaign system. DND-5E keeps the level-1 builder, native edit, level-up, progression-repair, PDF import, and spellcasting management lanes. Xianxia has its own native create lane plus a Cultivation workflow for Insight counters, advancement spends, and Realm Ascension records; DND-5E-only edit, level-up, repair, PDF, and spellcasting routes stay hidden for Xianxia campaigns. Other non-5E systems keep roster, read-mode, session-mode, and controls access where permissions allow, with unsupported write routes redirecting back to the nearest implemented surface.
 
 The detail route renders the structured character definition plus live SQLite-backed state in read mode:
 
-- subpage navigation for `Quick Reference`, `Features`, `Equipment`, `Personal`, and `Notes`
+- system-aware subpage navigation: DND-5E sheets include lanes such as `Quick Reference`, `Spellcasting`, `Features`, `Equipment`, `Inventory`, `Personal`, `Notes`, and `Controls`; Xianxia sheets use `Quick Reference`, `Martial Arts`, `Techniques`, `Resources`, `Skills`, `Equipment`, `Inventory`, `Personal`, `Notes`, and `Controls`
 - a read-mode `Equipment` manager for editable users so they can add Systems-linked or custom supplemental gear without opening the advanced editor
 - a portrait slot on `Personal`, stored as a campaign asset and shown in both read mode and the Character-page `Sheet edit view`
 - a permissioned `Controls` subpage for editable users, with room for current admin/DM controls and future player-owned controls
 - current HP and temp HP
+- Xianxia current Stance, Jing/Qi/Shen, Yin/Yang, Dao, and manual active Stance/Aura state on the Resources session lane
 - resource trackers
 - spell slots
 - attacks
