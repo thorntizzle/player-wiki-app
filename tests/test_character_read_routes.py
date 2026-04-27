@@ -1461,9 +1461,48 @@ def test_xianxia_cultivation_route_records_realm_ascension_review_subflow(
     assert "1 year" in cultivation_html
     assert "15 points" in cultivation_html
     assert "Max 6 per Stat" in cultivation_html
+    assert "Stat prerequisite" in cultivation_html
+    assert "Not met" in cultivation_html
+    assert "Need one Stat at 10" in cultivation_html
+    assert "Current highest Stat is Strength at 3." in cultivation_html
     assert "Start Realm Review" in cultivation_html
 
     starting_revision = _character_state_revision(app, "realm-crane")
+    unmet_response = client.post(
+        "/campaigns/linden-pass/characters/realm-crane/cultivation",
+        data={
+            "expected_revision": str(starting_revision),
+            "cultivation_action": "start_realm_ascension_review",
+            "target_realm": "Immortal",
+            "realm_ascension_gm_review_note": (
+                "GM approved the review, but the stat threshold is still missing."
+            ),
+        },
+        follow_redirects=True,
+    )
+    assert unmet_response.status_code == 200
+    assert (
+        "Realm ascension prerequisite not met: raise at least one Attribute or "
+        "Effort to 10 before ascending from Mortal to Immortal."
+        in unmet_response.get_data(as_text=True)
+    )
+    assert _character_state_revision(app, "realm-crane") == starting_revision
+    assert _read_character_definition(app, "realm-crane")["xianxia"]["advancement_history"] == []
+
+    _write_character_definition(
+        app,
+        "realm-crane",
+        lambda payload: payload["xianxia"]["attributes"].__setitem__("str", 10),
+    )
+
+    ready_html = client.get(
+        "/campaigns/linden-pass/characters/realm-crane/cultivation"
+    ).get_data(as_text=True)
+    ready_text = " ".join(ready_html.split())
+    assert "Met" in ready_html
+    assert "Need one Stat at 10" in ready_html
+    assert "highest Strength 10" in ready_text
+
     invalid_response = client.post(
         "/campaigns/linden-pass/characters/realm-crane/cultivation",
         data={
@@ -1504,7 +1543,7 @@ def test_xianxia_cultivation_route_records_realm_ascension_review_subflow(
     assert xianxia["realm"] == "Mortal"
     assert xianxia["actions_per_turn"] == 2
     assert xianxia["attributes"] == {
-        "str": 3,
+        "str": 10,
         "dex": 0,
         "con": 3,
         "int": 0,
@@ -1531,6 +1570,14 @@ def test_xianxia_cultivation_route_records_realm_ascension_review_subflow(
             "rebuild_budget": 15,
             "stat_cap": 6,
             "actions_per_turn": 3,
+            "stat_max_prerequisite": {
+                "required_score": 10,
+                "met": True,
+                "stat_kind": "Attribute",
+                "stat_key": "str",
+                "stat_label": "Strength",
+                "stat_score": 10,
+            },
             "gm_review_note": review_note,
             "seclusion_notes": "One year in a sealed cave.",
             "hp_stance_trade_notes": "No trade chosen yet.",
@@ -1543,6 +1590,9 @@ def test_xianxia_cultivation_route_records_realm_ascension_review_subflow(
     ).get_data(as_text=True)
     assert "Latest Realm Review" in updated_html
     assert "Realm Ascension Review Started" in updated_html
+    assert "Stat prerequisite:" in updated_html
+    assert "Strength" in updated_html
+    assert "met required" in updated_html
     assert "GM review note:" in updated_html
     assert review_note in updated_html
     assert "Seclusion notes:" in updated_html

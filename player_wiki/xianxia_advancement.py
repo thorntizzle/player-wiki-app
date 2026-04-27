@@ -57,6 +57,7 @@ XIANXIA_REALM_ASCENSION_TARGETS = {
         "rebuild_budget": 15,
         "stat_cap": 6,
         "actions_per_turn": 3,
+        "stat_max_prerequisite": 10,
     },
     "Immortal": {
         "target_realm": "Divine",
@@ -64,6 +65,7 @@ XIANXIA_REALM_ASCENSION_TARGETS = {
         "rebuild_budget": 25,
         "stat_cap": 12,
         "actions_per_turn": 4,
+        "stat_max_prerequisite": 15,
     },
 }
 
@@ -77,6 +79,7 @@ class XianxiaRealmAscensionReviewResult:
     rebuild_budget: int
     stat_cap: int
     actions_per_turn: int
+    stat_max_prerequisite: dict[str, Any]
     gm_review_note: str
     seclusion_notes: str = ""
     hp_stance_trade_notes: str = ""
@@ -153,20 +156,30 @@ def build_xianxia_realm_ascension_context(xianxia: dict[str, Any]) -> dict[str, 
     current_realm = normalize_xianxia_realm_label(payload.get("realm"))
     target = _realm_ascension_target_for_current(current_realm)
     latest_review = _latest_realm_ascension_review(payload.get("advancement_history"))
+    attributes = _stat_rows(
+        payload.get("attributes"),
+        XIANXIA_ATTRIBUTE_KEYS,
+        XIANXIA_ATTRIBUTE_LABELS,
+    )
+    efforts = _stat_rows(
+        payload.get("efforts"),
+        XIANXIA_EFFORT_KEYS,
+        XIANXIA_EFFORT_LABELS,
+    )
+    stat_prerequisite = _realm_ascension_stat_prerequisite(
+        current_realm=current_realm,
+        target=target,
+        attribute_rows=attributes["rows"],
+        effort_rows=efforts["rows"],
+    )
     context = {
         "current_realm": current_realm,
         "available": target is not None,
         "target": dict(target or {}),
-        "attributes": _stat_rows(
-            payload.get("attributes"),
-            XIANXIA_ATTRIBUTE_KEYS,
-            XIANXIA_ATTRIBUTE_LABELS,
-        ),
-        "efforts": _stat_rows(
-            payload.get("efforts"),
-            XIANXIA_EFFORT_KEYS,
-            XIANXIA_EFFORT_LABELS,
-        ),
+        "attributes": attributes,
+        "efforts": efforts,
+        "stat_prerequisite": stat_prerequisite,
+        "can_start_review": target is not None and bool(stat_prerequisite.get("is_met")),
         "latest_review": latest_review,
     }
     if target is None:
@@ -198,6 +211,23 @@ def start_xianxia_realm_ascension_review_definition(
             f"Realm ascension must move from {current_realm} to {expected_target_realm}."
         )
 
+    stat_prerequisite = _realm_ascension_stat_prerequisite(
+        current_realm=current_realm,
+        target=target,
+        attribute_rows=_stat_rows(
+            xianxia.get("attributes"),
+            XIANXIA_ATTRIBUTE_KEYS,
+            XIANXIA_ATTRIBUTE_LABELS,
+        )["rows"],
+        effort_rows=_stat_rows(
+            xianxia.get("efforts"),
+            XIANXIA_EFFORT_KEYS,
+            XIANXIA_EFFORT_LABELS,
+        )["rows"],
+    )
+    if not bool(stat_prerequisite.get("is_met")):
+        raise ValueError(str(stat_prerequisite["failure_message"]))
+
     clean_gm_review_note = _clean_note(gm_review_note)
     if not clean_gm_review_note:
         raise ValueError("Record a GM review note before starting Realm ascension review.")
@@ -219,6 +249,14 @@ def start_xianxia_realm_ascension_review_definition(
         "rebuild_budget": int(target["rebuild_budget"]),
         "stat_cap": int(target["stat_cap"]),
         "actions_per_turn": int(target["actions_per_turn"]),
+        "stat_max_prerequisite": {
+            "required_score": int(stat_prerequisite["required_score"]),
+            "met": True,
+            "stat_kind": str(stat_prerequisite["met_by"]["kind"]),
+            "stat_key": str(stat_prerequisite["met_by"]["key"]),
+            "stat_label": str(stat_prerequisite["met_by"]["label"]),
+            "stat_score": int(stat_prerequisite["met_by"]["score"]),
+        },
         "gm_review_note": clean_gm_review_note,
     }
     if clean_seclusion_notes:
@@ -237,6 +275,7 @@ def start_xianxia_realm_ascension_review_definition(
         rebuild_budget=int(target["rebuild_budget"]),
         stat_cap=int(target["stat_cap"]),
         actions_per_turn=int(target["actions_per_turn"]),
+        stat_max_prerequisite=dict(event["stat_max_prerequisite"]),
         gm_review_note=clean_gm_review_note,
         seclusion_notes=clean_seclusion_notes,
         hp_stance_trade_notes=clean_hp_stance_trade_notes,
@@ -1381,6 +1420,12 @@ def _latest_realm_ascension_review(records: Any) -> dict[str, Any] | None:
             continue
         if str(record.get("action") or "").strip() != "realm_ascension_review_started":
             continue
+        raw_stat_prerequisite = record.get("stat_max_prerequisite")
+        stat_prerequisite = (
+            dict(raw_stat_prerequisite)
+            if isinstance(raw_stat_prerequisite, dict)
+            else {}
+        )
         return {
             "current_realm": str(record.get("current_realm") or "").strip(),
             "target_realm": str(record.get("target_realm") or record.get("target") or "").strip(),
@@ -1389,11 +1434,91 @@ def _latest_realm_ascension_review(records: Any) -> dict[str, Any] | None:
             "rebuild_budget": _non_negative_int(record.get("rebuild_budget"), default=0),
             "stat_cap": _non_negative_int(record.get("stat_cap"), default=0),
             "actions_per_turn": _non_negative_int(record.get("actions_per_turn"), default=0),
+            "stat_max_prerequisite": {
+                "required_score": _non_negative_int(
+                    stat_prerequisite.get("required_score"),
+                    default=0,
+                ),
+                "met": bool(stat_prerequisite.get("met")),
+                "stat_kind": str(stat_prerequisite.get("stat_kind") or "").strip(),
+                "stat_key": str(stat_prerequisite.get("stat_key") or "").strip(),
+                "stat_label": str(stat_prerequisite.get("stat_label") or "").strip(),
+                "stat_score": _non_negative_int(
+                    stat_prerequisite.get("stat_score"),
+                    default=0,
+                ),
+            },
             "gm_review_note": str(record.get("gm_review_note") or "").strip(),
             "seclusion_notes": str(record.get("seclusion_notes") or "").strip(),
             "hp_stance_trade_notes": str(record.get("hp_stance_trade_notes") or "").strip(),
         }
     return None
+
+
+def _realm_ascension_stat_prerequisite(
+    *,
+    current_realm: str,
+    target: dict[str, Any] | None,
+    attribute_rows: list[dict[str, Any]],
+    effort_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    normalized_realm = normalize_xianxia_realm_label(current_realm)
+    target_realm = str((target or {}).get("target_realm") or "").strip()
+    required_score = _non_negative_int(
+        (target or {}).get("stat_max_prerequisite"),
+        default=0,
+    )
+    records = [
+        {
+            "kind": "Attribute",
+            "key": str(row.get("key") or "").strip(),
+            "label": str(row.get("label") or "").strip(),
+            "score": _non_negative_int(row.get("score"), default=0),
+        }
+        for row in list(attribute_rows or [])
+    ] + [
+        {
+            "kind": "Effort",
+            "key": str(row.get("key") or "").strip(),
+            "label": str(row.get("label") or "").strip(),
+            "score": _non_negative_int(row.get("score"), default=0),
+        }
+        for row in list(effort_rows or [])
+    ]
+    records = [record for record in records if record["key"]]
+    highest = max(records, key=lambda record: int(record["score"]), default=None)
+    eligible_records = [
+        record for record in records if int(record["score"]) >= required_score
+    ]
+    met_by = max(eligible_records, key=lambda record: int(record["score"]), default=None)
+    is_met = required_score <= 0 or met_by is not None
+    if met_by is None and required_score <= 0 and highest is not None:
+        met_by = highest
+
+    highest_label = str(highest["label"]) if highest else "None"
+    highest_score = int(highest["score"]) if highest else 0
+    target_label = target_realm or "the next Realm"
+    requirement_text = (
+        f"Requires at least one Attribute or Effort at {required_score} "
+        f"before ascending from {normalized_realm} to {target_label}."
+    )
+    failure_message = (
+        f"Realm ascension prerequisite not met: raise at least one Attribute or "
+        f"Effort to {required_score} before ascending from {normalized_realm} "
+        f"to {target_label}. Current highest Stat is {highest_label} at "
+        f"{highest_score}."
+    )
+
+    return {
+        "required_score": required_score,
+        "is_met": is_met,
+        "met_by": dict(met_by or {}),
+        "highest": dict(highest or {}),
+        "highest_label": highest_label,
+        "highest_score": highest_score,
+        "requirement_text": requirement_text,
+        "failure_message": failure_message,
+    }
 
 
 def _stat_rows(

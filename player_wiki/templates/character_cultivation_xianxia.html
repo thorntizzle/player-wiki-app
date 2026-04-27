@@ -558,6 +558,15 @@
           <span class="meta">Actions</span>
           <strong>{{ ascension.target.actions_per_turn }}</strong>
         </div>
+        <div class="glance-card">
+          <span class="meta">Stat prerequisite</span>
+          <strong>{% if ascension.stat_prerequisite.is_met %}Met{% else %}Not met{% endif %}</strong>
+          <span class="meta">
+            Need one Stat at {{ ascension.stat_prerequisite.required_score }};
+            highest {{ ascension.stat_prerequisite.highest_label }}
+            {{ ascension.stat_prerequisite.highest_score }}
+          </span>
+        </div>
       {% else %}
         <div class="glance-card">
           <span class="meta">Target Realm</span>
@@ -586,9 +595,15 @@
           </ul>
         </div>
       </div>
+      {% if ascension.available %}
+        <p class="meta">{{ ascension.stat_prerequisite.requirement_text }}</p>
+      {% endif %}
     </article>
     {% if ascension.available %}
       <article class="detail-card session-card">
+        {% if not ascension.can_start_review %}
+          <p class="meta">{{ ascension.stat_prerequisite.failure_message }}</p>
+        {% endif %}
         <form
           class="stack-form"
           method="post"
@@ -610,7 +625,9 @@
             <textarea name="realm_ascension_hp_stance_trade_notes" rows="2"></textarea>
           </label>
           <div class="hero-actions">
-            <button type="submit">Start Realm Review</button>
+            <button type="submit" {% if not ascension.can_start_review %}disabled{% endif %}>
+              Start Realm Review
+            </button>
           </div>
         </form>
       </article>
@@ -626,6 +643,15 @@
           <li><strong>Target:</strong> {{ ascension.latest_review.target_realm }}</li>
           <li><strong>Status:</strong> {{ ascension.latest_review.status | replace('_', ' ') }}</li>
           <li><strong>Seclusion:</strong> {{ ascension.latest_review.seclusion_time }}</li>
+          {% if ascension.latest_review.stat_max_prerequisite.met %}
+            <li>
+              <strong>Stat prerequisite:</strong>
+              {{ ascension.latest_review.stat_max_prerequisite.stat_label }}
+              {{ ascension.latest_review.stat_max_prerequisite.stat_score }}
+              met required
+              {{ ascension.latest_review.stat_max_prerequisite.required_score }}
+            </li>
+          {% endif %}
           <li><strong>GM review note:</strong> {{ ascension.latest_review.gm_review_note }}</li>
           {% if ascension.latest_review.seclusion_notes %}
             <li><strong>Seclusion notes:</strong> {{ ascension.latest_review.seclusion_notes }}</li>
