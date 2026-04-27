@@ -120,6 +120,12 @@ def _replace_character_state(app, record, state: dict) -> None:
         )
 
 
+def _html_section(html: str, heading: str) -> str:
+    start = html.index(heading)
+    end = html.index("</article>", start)
+    return html[start:end]
+
+
 def _create_assigned_xianxia_session_character(
     app,
     client,
@@ -404,6 +410,118 @@ def test_xianxia_techniques_page_shows_approval_status_records(
     assert "Dao Immolating Technique Use" in html
     assert "Use record" in html
     assert "Prepared Dao Immolating Techniques" in html
+
+
+def test_xianxia_unapproved_variants_remain_approval_records_not_usable_modeled_abilities(
+    app,
+    client,
+    sign_in,
+    users,
+    get_character,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Unapproved Variant Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+
+    with app.app_context():
+        qi_blast = app.extensions["systems_service"].get_entry_by_slug_for_campaign(
+            "linden-pass",
+            "qi-blast",
+        )
+        assert qi_blast is not None
+
+    record = get_character("unapproved-variant-crane")
+    assert record is not None
+    payload = record.definition.to_dict()
+    payload["xianxia"]["generic_techniques"] = []
+    payload["xianxia"]["variants"] = [
+        {
+            "variant_type": "karmic_constraint",
+            "name": "Unapproved Falling Palm Variant",
+            "approval_status": "pending",
+            "systems_ref": _systems_ref(qi_blast),
+            "ability_ref": "xianxia:demons-fist:initiate:qi-fist-technique",
+            "support_state": "modeled",
+            "modeled_effects": ["extra-damage"],
+        },
+        {
+            "variant_type": "ascendant_art",
+            "name": "Rejected Skyfire Crown",
+            "approval_status": "rejected",
+            "systems_ref": _systems_ref(qi_blast),
+            "support_state": "modeled",
+            "modeled_effects": ["range-extension"],
+        },
+    ]
+    _write_raw_xianxia_character_definition(app, "unapproved-variant-crane", payload)
+    record = get_character("unapproved-variant-crane")
+    assert record is not None
+
+    with app.app_context():
+        campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
+        character = present_character_detail(
+            campaign,
+            record,
+            systems_service=app.extensions["systems_service"],
+        )
+
+    xianxia_read = character["xianxia_read"]
+    variant_names = {"Unapproved Falling Palm Variant", "Rejected Skyfire Crown"}
+    assert xianxia_read["generic_techniques"] == []
+    rank_ability_names = {
+        ability["name"]
+        for martial_art in xianxia_read["martial_arts"]
+        for rank_ref in martial_art["learned_rank_refs"]
+        for ability in rank_ref["abilities"]
+    }
+    assert "Qi Fist Technique" in rank_ability_names
+    assert rank_ability_names.isdisjoint(variant_names)
+    approval_names = {
+        approval_record["name"]
+        for group in xianxia_read["approval"]["status_groups"]
+        for approval_record in group["records"]
+    }
+    assert variant_names <= approval_names
+
+    techniques_response = client.get(
+        "/campaigns/linden-pass/characters/unapproved-variant-crane?page=techniques"
+    )
+    assert techniques_response.status_code == 200
+    techniques_html = unescape(techniques_response.get_data(as_text=True))
+    known_generic_section = _html_section(techniques_html, "Known Generic Techniques")
+    assert "No Generic Techniques are recorded on this sheet yet." in known_generic_section
+    assert "Qi Blast" not in known_generic_section
+    for variant_name in variant_names:
+        assert variant_name not in known_generic_section
+        assert variant_name in techniques_html
+    assert "Approval state: Pending" in techniques_html
+    assert "Approval state: Rejected" in techniques_html
+
+    martial_arts_response = client.get(
+        "/campaigns/linden-pass/characters/unapproved-variant-crane?page=martial_arts"
+    )
+    assert martial_arts_response.status_code == 200
+    martial_arts_html = unescape(martial_arts_response.get_data(as_text=True))
+    assert "Qi Fist Technique" in martial_arts_html
+    for variant_name in variant_names:
+        assert variant_name not in martial_arts_html
+
+    session_response = client.get(
+        "/campaigns/linden-pass/session/character?character=unapproved-variant-crane&page=techniques"
+    )
+    assert session_response.status_code == 200
+    session_html = unescape(session_response.get_data(as_text=True))
+    session_generic_section = _html_section(session_html, "Known Generic Techniques")
+    assert "No Generic Techniques are recorded on this sheet yet." in session_generic_section
+    for variant_name in variant_names:
+        assert variant_name not in session_generic_section
+        assert variant_name in session_html
 
 
 def test_xianxia_techniques_page_records_ad_hoc_dao_immolating_use_request(
