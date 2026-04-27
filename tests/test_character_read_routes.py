@@ -1601,6 +1601,99 @@ def test_xianxia_cultivation_route_records_realm_ascension_review_subflow(
     assert "No trade chosen yet." in updated_html
 
 
+def test_xianxia_cultivation_route_records_divine_ascension_seclusion_time(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+                "default_visibility": "dm",
+            }
+        ]
+
+    def _make_immortal(payload: dict) -> None:
+        xianxia = payload["xianxia"]
+        xianxia["realm"] = "Immortal"
+        xianxia["actions_per_turn"] = 3
+        xianxia["attributes"]["str"] = 15
+
+    _write_campaign_config(app, _mutate)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Divine Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+    _write_character_definition(app, "divine-crane", _make_immortal)
+
+    cultivation_html = client.get(
+        "/campaigns/linden-pass/characters/divine-crane/cultivation"
+    ).get_data(as_text=True)
+    assert 'name="target_realm" value="Divine"' in cultivation_html
+    assert "Immortal" in cultivation_html
+    assert "Divine" in cultivation_html
+    assert "100 years" in cultivation_html
+    assert "25 points" in cultivation_html
+    assert "Max 12 per Stat" in cultivation_html
+    assert "Need one Stat at 15" in cultivation_html
+
+    starting_revision = _character_state_revision(app, "divine-crane")
+    review_note = "GM approved the review after the Divine threshold scene."
+    review_response = client.post(
+        "/campaigns/linden-pass/characters/divine-crane/cultivation",
+        data={
+            "expected_revision": str(starting_revision),
+            "cultivation_action": "start_realm_ascension_review",
+            "target_realm": "Divine",
+            "realm_ascension_gm_review_note": review_note,
+            "realm_ascension_seclusion_notes": "One hundred years beyond the gate.",
+        },
+        follow_redirects=False,
+    )
+    assert review_response.status_code == 302
+
+    xianxia = _read_character_definition(app, "divine-crane")["xianxia"]
+    assert xianxia["realm"] == "Immortal"
+    assert xianxia["actions_per_turn"] == 3
+    assert xianxia["advancement_history"] == [
+        {
+            "action": "realm_ascension_review_started",
+            "target": "Divine",
+            "current_realm": "Immortal",
+            "target_realm": "Divine",
+            "status": "pending_gm_review",
+            "seclusion_time": "100 years",
+            "rebuild_budget": 25,
+            "stat_cap": 12,
+            "actions_per_turn": 4,
+            "stat_max_prerequisite": {
+                "required_score": 15,
+                "met": True,
+                "stat_kind": "Attribute",
+                "stat_key": "str",
+                "stat_label": "Strength",
+                "stat_score": 15,
+            },
+            "gm_review_note": review_note,
+            "seclusion_notes": "One hundred years beyond the gate.",
+        }
+    ]
+    assert _character_state_revision(app, "divine-crane") == starting_revision + 1
+
+    updated_html = client.get(
+        "/campaigns/linden-pass/characters/divine-crane/cultivation"
+    ).get_data(as_text=True)
+    assert "Latest Realm Review" in updated_html
+    assert "Seclusion:" in updated_html
+    assert "100 years" in updated_html
+
+
 def test_xianxia_cultivation_route_tracks_insight_available_and_spent(
     app, client, sign_in, users
 ):
