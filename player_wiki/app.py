@@ -101,6 +101,7 @@ from .xianxia_advancement import (
     build_xianxia_realm_ascension_context,
     learn_xianxia_generic_technique_definition,
     list_xianxia_generic_technique_learning_options,
+    reset_xianxia_realm_ascension_stats_definition,
     spend_xianxia_conditioning_definition,
     spend_xianxia_cultivation_energy_definition,
     spend_xianxia_meditation_definition,
@@ -1541,6 +1542,12 @@ def present_xianxia_cultivation_context(
             ("rebuild_budget", "Rebuild budget"),
             ("stat_cap", "Stat cap"),
             ("actions_per_turn", "Actions per turn"),
+            ("attributes_before_total", "Attributes before total"),
+            ("attributes_after_total", "Attributes after total"),
+            ("efforts_before_total", "Efforts before total"),
+            ("efforts_after_total", "Efforts after total"),
+            ("reset_scope", "Reset scope"),
+            ("preserved_scope", "Preserved scope"),
             ("gm_review_note", "GM review note"),
             ("seclusion_notes", "Seclusion notes"),
             ("hp_stance_trade_notes", "HP/Stance trade notes"),
@@ -12092,6 +12099,18 @@ def create_app() -> Flask:
                     success_message = (
                         f"Started Realm ascension review from {realm_result.current_realm} "
                         f"to {realm_result.target_realm}."
+                    )
+                elif cultivation_action == "reset_realm_ascension_stats":
+                    redirect_anchor = "xianxia-cultivation-realm-ascension"
+                    reset_result = reset_xianxia_realm_ascension_stats_definition(
+                        record.definition,
+                        target_realm=request.form.get("target_realm", ""),
+                        notes=request.form.get("realm_ascension_reset_notes", ""),
+                    )
+                    definition = reset_result.definition
+                    success_message = (
+                        f"Reset Attributes and Efforts for {reset_result.current_realm} "
+                        f"to {reset_result.target_realm} Realm ascension."
                     )
                 else:
                     raise ValueError("Unsupported cultivation action. Refresh the page and try again.")

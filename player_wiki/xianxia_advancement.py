@@ -86,6 +86,16 @@ class XianxiaRealmAscensionReviewResult:
 
 
 @dataclass(frozen=True)
+class XianxiaRealmAscensionStatResetResult:
+    definition: Any
+    current_realm: str
+    target_realm: str
+    attributes_before_total: int
+    efforts_before_total: int
+    notes: str = ""
+
+
+@dataclass(frozen=True)
 class XianxiaMartialArtAdvanceResult:
     definition: Any
     martial_art_name: str
@@ -156,6 +166,7 @@ def build_xianxia_realm_ascension_context(xianxia: dict[str, Any]) -> dict[str, 
     current_realm = normalize_xianxia_realm_label(payload.get("realm"))
     target = _realm_ascension_target_for_current(current_realm)
     latest_review = _latest_realm_ascension_review(payload.get("advancement_history"))
+    latest_reset = _latest_realm_ascension_stat_reset(payload.get("advancement_history"))
     attributes = _stat_rows(
         payload.get("attributes"),
         XIANXIA_ATTRIBUTE_KEYS,
@@ -181,7 +192,13 @@ def build_xianxia_realm_ascension_context(xianxia: dict[str, Any]) -> dict[str, 
         "stat_prerequisite": stat_prerequisite,
         "can_start_review": target is not None and bool(stat_prerequisite.get("is_met")),
         "latest_review": latest_review,
+        "latest_reset": latest_reset,
     }
+    context["can_reset_stats"] = _can_reset_realm_ascension_stats(
+        latest_review=latest_review,
+        latest_reset=latest_reset,
+        target=target,
+    )
     if target is None:
         context["message"] = "No further Realm ascension target is defined for this character."
     return context
@@ -279,6 +296,93 @@ def start_xianxia_realm_ascension_review_definition(
         gm_review_note=clean_gm_review_note,
         seclusion_notes=clean_seclusion_notes,
         hp_stance_trade_notes=clean_hp_stance_trade_notes,
+    )
+
+
+def reset_xianxia_realm_ascension_stats_definition(
+    definition: Any,
+    *,
+    target_realm: str,
+    notes: str = "",
+) -> XianxiaRealmAscensionStatResetResult:
+    payload = definition.to_dict()
+    xianxia = dict(payload.get("xianxia") or {})
+    current_realm = normalize_xianxia_realm_label(xianxia.get("realm"))
+    target = _realm_ascension_target_for_current(current_realm)
+    if target is None:
+        raise ValueError(
+            f"{current_realm} characters do not have a further Realm ascension target."
+        )
+
+    normalized_target_realm = normalize_xianxia_realm_label(target_realm)
+    expected_target_realm = str(target["target_realm"])
+    if normalized_target_realm != expected_target_realm:
+        raise ValueError(
+            f"Realm ascension must move from {current_realm} to {expected_target_realm}."
+        )
+
+    history = [
+        dict(record)
+        for record in list(xianxia.get("advancement_history") or [])
+        if isinstance(record, dict) and record
+    ]
+    review_index = _latest_realm_ascension_review_index(
+        history,
+        current_realm=current_realm,
+        target_realm=expected_target_realm,
+    )
+    if review_index is None:
+        raise ValueError(
+            "Start a pending Realm ascension review before resetting Attributes and Efforts."
+        )
+    if _has_realm_ascension_stat_reset_after(history, review_index):
+        raise ValueError(
+            "Attributes and Efforts have already been reset for this Realm ascension review."
+        )
+
+    attributes_before = _stat_rows(
+        xianxia.get("attributes"),
+        XIANXIA_ATTRIBUTE_KEYS,
+        XIANXIA_ATTRIBUTE_LABELS,
+    )
+    efforts_before = _stat_rows(
+        xianxia.get("efforts"),
+        XIANXIA_EFFORT_KEYS,
+        XIANXIA_EFFORT_LABELS,
+    )
+    xianxia["attributes"] = {key: 0 for key in XIANXIA_ATTRIBUTE_KEYS}
+    xianxia["efforts"] = {key: 0 for key in XIANXIA_EFFORT_KEYS}
+
+    clean_notes = _clean_note(notes)
+    event = {
+        "action": "realm_ascension_attributes_efforts_reset",
+        "target": expected_target_realm,
+        "current_realm": current_realm,
+        "target_realm": expected_target_realm,
+        "status": "pending_rebuild",
+        "attributes_before_total": int(attributes_before["total"]),
+        "attributes_after_total": 0,
+        "efforts_before_total": int(efforts_before["total"]),
+        "efforts_after_total": 0,
+        "reset_scope": "Attributes and Efforts",
+        "preserved_scope": (
+            "Energies, Yin/Yang, HP, Stance, Insight, Martial Arts, "
+            "Generic Techniques, variants, approval records, and notes"
+        ),
+    }
+    if clean_notes:
+        event["notes"] = clean_notes
+    history.append(event)
+    xianxia["advancement_history"] = history
+    payload["xianxia"] = xianxia
+
+    return XianxiaRealmAscensionStatResetResult(
+        definition=definition.__class__.from_dict(payload),
+        current_realm=current_realm,
+        target_realm=expected_target_realm,
+        attributes_before_total=int(attributes_before["total"]),
+        efforts_before_total=int(efforts_before["total"]),
+        notes=clean_notes,
     )
 
 
@@ -1453,6 +1557,87 @@ def _latest_realm_ascension_review(records: Any) -> dict[str, Any] | None:
             "hp_stance_trade_notes": str(record.get("hp_stance_trade_notes") or "").strip(),
         }
     return None
+
+
+def _latest_realm_ascension_stat_reset(records: Any) -> dict[str, Any] | None:
+    for record in reversed(list(records or [])):
+        if not isinstance(record, dict):
+            continue
+        if str(record.get("action") or "").strip() != "realm_ascension_attributes_efforts_reset":
+            continue
+        return {
+            "current_realm": str(record.get("current_realm") or "").strip(),
+            "target_realm": str(record.get("target_realm") or record.get("target") or "").strip(),
+            "status": str(record.get("status") or "").strip(),
+            "attributes_before_total": _non_negative_int(
+                record.get("attributes_before_total"),
+                default=0,
+            ),
+            "attributes_after_total": _non_negative_int(
+                record.get("attributes_after_total"),
+                default=0,
+            ),
+            "efforts_before_total": _non_negative_int(
+                record.get("efforts_before_total"),
+                default=0,
+            ),
+            "efforts_after_total": _non_negative_int(
+                record.get("efforts_after_total"),
+                default=0,
+            ),
+            "notes": str(record.get("notes") or "").strip(),
+        }
+    return None
+
+
+def _can_reset_realm_ascension_stats(
+    *,
+    latest_review: dict[str, Any] | None,
+    latest_reset: dict[str, Any] | None,
+    target: dict[str, Any] | None,
+) -> bool:
+    if not latest_review or not target:
+        return False
+    if str(latest_review.get("status") or "").strip() != "pending_gm_review":
+        return False
+    target_realm = str(target.get("target_realm") or "").strip()
+    if str(latest_review.get("target_realm") or "").strip() != target_realm:
+        return False
+    if not latest_reset:
+        return True
+    return str(latest_reset.get("target_realm") or "").strip() != target_realm
+
+
+def _latest_realm_ascension_review_index(
+    history: list[dict[str, Any]],
+    *,
+    current_realm: str,
+    target_realm: str,
+) -> int | None:
+    for index in range(len(history) - 1, -1, -1):
+        record = history[index]
+        if str(record.get("action") or "").strip() != "realm_ascension_review_started":
+            continue
+        if str(record.get("status") or "").strip() != "pending_gm_review":
+            continue
+        if normalize_xianxia_realm_label(record.get("current_realm")) != current_realm:
+            continue
+        if normalize_xianxia_realm_label(
+            record.get("target_realm") or record.get("target")
+        ) != target_realm:
+            continue
+        return index
+    return None
+
+
+def _has_realm_ascension_stat_reset_after(
+    history: list[dict[str, Any]],
+    review_index: int,
+) -> bool:
+    for record in history[review_index + 1 :]:
+        if str(record.get("action") or "").strip() == "realm_ascension_attributes_efforts_reset":
+            return True
+    return False
 
 
 def _realm_ascension_stat_prerequisite(

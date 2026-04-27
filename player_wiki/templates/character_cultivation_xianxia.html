@@ -662,6 +662,42 @@
         </ul>
       </article>
     {% endif %}
+    {% if ascension.can_reset_stats %}
+      <article class="detail-card session-card">
+        <h3>Reset Rebuild Stats</h3>
+        <p class="meta">Clears only Attributes and Efforts for the pending Realm rebuild.</p>
+        <form
+          class="stack-form"
+          method="post"
+          action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+        >
+          <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+          <input type="hidden" name="cultivation_action" value="reset_realm_ascension_stats">
+          <input type="hidden" name="target_realm" value="{{ ascension.target.target_realm }}">
+          <label>
+            Reset notes
+            <textarea name="realm_ascension_reset_notes" rows="2"></textarea>
+          </label>
+          <div class="hero-actions">
+            <button type="submit">Reset Attributes and Efforts</button>
+          </div>
+        </form>
+      </article>
+    {% endif %}
+    {% if ascension.latest_reset %}
+      <article class="detail-card">
+        <h3>Latest Attribute/Effort Reset</h3>
+        <ul class="plain-list slot-list">
+          <li><strong>Target:</strong> {{ ascension.latest_reset.target_realm }}</li>
+          <li><strong>Status:</strong> {{ ascension.latest_reset.status | replace('_', ' ') }}</li>
+          <li><strong>Attributes:</strong> {{ ascension.latest_reset.attributes_before_total }} to {{ ascension.latest_reset.attributes_after_total }}</li>
+          <li><strong>Efforts:</strong> {{ ascension.latest_reset.efforts_before_total }} to {{ ascension.latest_reset.efforts_after_total }}</li>
+          {% if ascension.latest_reset.notes %}
+            <li><strong>Notes:</strong> {{ ascension.latest_reset.notes }}</li>
+          {% endif %}
+        </ul>
+      </article>
+    {% endif %}
   </section>
 
   <section class="read-section" id="xianxia-cultivation-history">

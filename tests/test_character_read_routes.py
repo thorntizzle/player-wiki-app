@@ -1601,6 +1601,237 @@ def test_xianxia_cultivation_route_records_realm_ascension_review_subflow(
     assert "No trade chosen yet." in updated_html
 
 
+def test_xianxia_cultivation_route_resets_only_realm_ascension_stats(
+    app, client, sign_in, users
+):
+    def _mutate_campaign(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+                "default_visibility": "dm",
+            }
+        ]
+
+    def _prepare_definition(payload: dict) -> None:
+        xianxia = payload["xianxia"]
+        xianxia["attributes"] = {
+            "str": 10,
+            "dex": 2,
+            "con": 4,
+            "int": 1,
+            "wis": 3,
+            "cha": 2,
+        }
+        xianxia["efforts"] = {
+            "basic": 4,
+            "weapon": 3,
+            "guns_explosive": 2,
+            "magic": 5,
+            "ultimate": 1,
+        }
+        xianxia["energies"] = {
+            "jing": {"max": 4},
+            "qi": {"max": 5},
+            "shen": {"max": 6},
+        }
+        xianxia["yin_yang"] = {"yin_max": 3, "yang_max": 4}
+        xianxia["dao"] = {"max": 3}
+        xianxia["insight"] = {"available": 7, "spent": 2}
+        xianxia["durability"] = {
+            "hp_max": 28,
+            "stance_max": 26,
+            "manual_armor_bonus": 2,
+            "defense": 16,
+        }
+        xianxia["generic_techniques"] = [
+            {
+                "name": "Cloud Step",
+                "generic_technique_key": "cloud_step",
+                "systems_ref": {"slug": "cloud-step"},
+            }
+        ]
+        xianxia["variants"] = [{"name": "Approved variant", "status": "approved"}]
+        xianxia["dao_immolating_techniques"] = {
+            "prepared": [{"name": "Last Dawn"}],
+            "use_history": [{"name": "Old Flame"}],
+        }
+        xianxia["approval_requests"] = [{"name": "Constraint", "status": "pending"}]
+        xianxia["companions"] = [{"name": "Paper Crane"}]
+
+    def _prepare_state(payload: dict) -> None:
+        payload["vitals"]["current_hp"] = 17
+        payload["vitals"]["temp_hp"] = 3
+        payload["notes"]["player_notes_markdown"] = "Keep this player note."
+        xianxia_state = payload["xianxia"]
+        xianxia_state["vitals"] = {
+            "current_hp": 17,
+            "temp_hp": 3,
+            "current_stance": 14,
+            "temp_stance": 2,
+        }
+        xianxia_state["energies"] = {
+            "jing": {"current": 2},
+            "qi": {"current": 3},
+            "shen": {"current": 4},
+        }
+        xianxia_state["yin_yang"] = {"yin_current": 2, "yang_current": 3}
+        xianxia_state["dao"] = {"current": 2}
+        xianxia_state["active_stance"] = {"name": "Mountain Root"}
+        xianxia_state["active_aura"] = {"name": "Quiet Moon"}
+        xianxia_state["notes"] = {"player_notes_markdown": "Keep this player note."}
+
+    _write_campaign_config(app, _mutate_campaign)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Reset Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+    _write_character_definition(app, "reset-crane", _prepare_definition)
+    _write_character_state(app, "reset-crane", _prepare_state)
+
+    review_revision = _character_state_revision(app, "reset-crane")
+    review_response = client.post(
+        "/campaigns/linden-pass/characters/reset-crane/cultivation",
+        data={
+            "expected_revision": str(review_revision),
+            "cultivation_action": "start_realm_ascension_review",
+            "target_realm": "Immortal",
+            "realm_ascension_gm_review_note": "GM review is approved for the reset step.",
+        },
+        follow_redirects=False,
+    )
+    assert review_response.status_code == 302
+
+    review_html = client.get(
+        "/campaigns/linden-pass/characters/reset-crane/cultivation"
+    ).get_data(as_text=True)
+    assert "Reset Rebuild Stats" in review_html
+    assert 'name="cultivation_action" value="reset_realm_ascension_stats"' in review_html
+
+    reset_revision = _character_state_revision(app, "reset-crane")
+    reset_response = client.post(
+        "/campaigns/linden-pass/characters/reset-crane/cultivation",
+        data={
+            "expected_revision": str(reset_revision),
+            "cultivation_action": "reset_realm_ascension_stats",
+            "target_realm": "Immortal",
+            "realm_ascension_reset_notes": "Ready for the Immortal rebuild budget.",
+        },
+        follow_redirects=False,
+    )
+    assert reset_response.status_code == 302
+    assert reset_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/reset-crane/cultivation#xianxia-cultivation-realm-ascension"
+    )
+
+    definition_payload = _read_character_definition(app, "reset-crane")
+    xianxia = definition_payload["xianxia"]
+    assert xianxia["attributes"] == {
+        "str": 0,
+        "dex": 0,
+        "con": 0,
+        "int": 0,
+        "wis": 0,
+        "cha": 0,
+    }
+    assert xianxia["efforts"] == {
+        "basic": 0,
+        "weapon": 0,
+        "guns_explosive": 0,
+        "magic": 0,
+        "ultimate": 0,
+    }
+    assert xianxia["realm"] == "Mortal"
+    assert xianxia["actions_per_turn"] == 2
+    assert xianxia["energies"] == {
+        "jing": {"max": 4},
+        "qi": {"max": 5},
+        "shen": {"max": 6},
+    }
+    assert xianxia["yin_yang"] == {"yin_max": 3, "yang_max": 4}
+    assert xianxia["dao"] == {"max": 3}
+    assert xianxia["insight"] == {"available": 7, "spent": 2}
+    assert xianxia["durability"]["hp_max"] == 28
+    assert xianxia["durability"]["stance_max"] == 26
+    assert xianxia["durability"]["manual_armor_bonus"] == 2
+    assert xianxia["durability"]["defense"] == 12
+    assert len(xianxia["martial_arts"]) == 3
+    assert xianxia["generic_techniques"] == [
+        {
+            "name": "Cloud Step",
+            "systems_ref": {"slug": "cloud-step"},
+            "generic_technique_key": "cloud_step",
+        }
+    ]
+    assert xianxia["variants"] == [{"name": "Approved variant", "status": "approved"}]
+    assert xianxia["dao_immolating_techniques"] == {
+        "prepared": [{"name": "Last Dawn"}],
+        "use_history": [{"name": "Old Flame"}],
+    }
+    assert xianxia["approval_requests"] == [{"name": "Constraint", "status": "pending"}]
+    assert xianxia["companions"] == [{"name": "Paper Crane"}]
+    assert xianxia["advancement_history"][-1] == {
+        "action": "realm_ascension_attributes_efforts_reset",
+        "target": "Immortal",
+        "current_realm": "Mortal",
+        "target_realm": "Immortal",
+        "status": "pending_rebuild",
+        "attributes_before_total": 22,
+        "attributes_after_total": 0,
+        "efforts_before_total": 15,
+        "efforts_after_total": 0,
+        "reset_scope": "Attributes and Efforts",
+        "preserved_scope": (
+            "Energies, Yin/Yang, HP, Stance, Insight, Martial Arts, "
+            "Generic Techniques, variants, approval records, and notes"
+        ),
+        "notes": "Ready for the Immortal rebuild budget.",
+    }
+
+    with app.app_context():
+        repository = app.extensions["character_repository"]
+        record = repository.get_character("linden-pass", "reset-crane")
+        assert record is not None
+        state = record.state_record.state
+    assert state["vitals"] == {"current_hp": 17, "temp_hp": 3}
+    assert state["notes"]["player_notes_markdown"] == "Keep this player note."
+    assert state["xianxia"] == {
+        "schema_version": 1,
+        "vitals": {
+            "current_hp": 17,
+            "temp_hp": 3,
+            "current_stance": 14,
+            "temp_stance": 2,
+        },
+        "energies": {
+            "jing": {"current": 2},
+            "qi": {"current": 3},
+            "shen": {"current": 4},
+        },
+        "yin_yang": {"yin_current": 2, "yang_current": 3},
+        "dao": {"current": 2},
+        "active_stance": {"name": "Mountain Root"},
+        "active_aura": {"name": "Quiet Moon"},
+        "inventory": {"enabled": False, "quantities": []},
+        "notes": {"player_notes_markdown": "Keep this player note."},
+    }
+    assert _character_state_revision(app, "reset-crane") == reset_revision + 1
+
+    updated_html = client.get(
+        "/campaigns/linden-pass/characters/reset-crane/cultivation"
+    ).get_data(as_text=True)
+    assert "Latest Attribute/Effort Reset" in updated_html
+    assert 'name="cultivation_action" value="reset_realm_ascension_stats"' not in updated_html
+    assert "22 to 0" in updated_html
+    assert "15 to 0" in updated_html
+
+
 def test_xianxia_cultivation_route_records_divine_ascension_seclusion_time(
     app, client, sign_in, users
 ):
