@@ -1499,6 +1499,12 @@ def present_xianxia_cultivation_context(
         details = []
         for key, label in (
             ("amount", "Amount"),
+            ("insight_available_before", "Available Insight before"),
+            ("insight_available_after", "Available Insight after"),
+            ("insight_available_delta", "Available Insight change"),
+            ("insight_spent_before", "Spent Insight before"),
+            ("insight_spent_after", "Spent Insight after"),
+            ("insight_spent_delta", "Spent Insight change"),
             ("downtime", "Downtime"),
             ("target", "Target"),
             ("energy_key", "Energy key"),
@@ -1531,7 +1537,7 @@ def present_xianxia_cultivation_context(
             value = raw_record.get(key)
             if isinstance(value, dict):
                 value = value.get("title") or value.get("slug") or value.get("entry_key")
-            cleaned = str(value or "").strip()
+            cleaned = "" if value is None else str(value).strip()
             if cleaned:
                 details.append({"label": label, "value": cleaned})
         history_records.append(
@@ -1618,10 +1624,34 @@ def _xianxia_martial_art_advancement_context(
 def update_xianxia_insight_definition(definition, *, available: int, spent: int):
     payload = definition.to_dict()
     xianxia = dict(payload.get("xianxia") or {})
+    previous_insight = dict(xianxia.get("insight") or {})
+    previous_available = int(previous_insight.get("available") or 0)
+    previous_spent = int(previous_insight.get("spent") or 0)
+    new_available = int(available)
+    new_spent = int(spent)
     xianxia["insight"] = {
-        "available": int(available),
-        "spent": int(spent),
+        "available": new_available,
+        "spent": new_spent,
     }
+    if new_available != previous_available or new_spent != previous_spent:
+        history = [
+            dict(record)
+            for record in list(xianxia.get("advancement_history") or [])
+            if isinstance(record, dict) and record
+        ]
+        history.append(
+            {
+                "action": "insight_counter_adjustment",
+                "target": "Insight",
+                "insight_available_before": previous_available,
+                "insight_available_after": new_available,
+                "insight_available_delta": new_available - previous_available,
+                "insight_spent_before": previous_spent,
+                "insight_spent_after": new_spent,
+                "insight_spent_delta": new_spent - previous_spent,
+            }
+        )
+        xianxia["advancement_history"] = history
     payload["xianxia"] = xianxia
     return definition.__class__.from_dict(payload)
 

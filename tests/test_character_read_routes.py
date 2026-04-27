@@ -1471,7 +1471,18 @@ def test_xianxia_cultivation_route_tracks_insight_available_and_spent(
 
     definition_payload = _read_character_definition(app, "insight-crane")
     assert definition_payload["xianxia"]["insight"] == {"available": 7, "spent": 3}
-    assert definition_payload["xianxia"]["advancement_history"] == []
+    assert definition_payload["xianxia"]["advancement_history"] == [
+        {
+            "action": "insight_counter_adjustment",
+            "target": "Insight",
+            "insight_available_before": 0,
+            "insight_available_after": 7,
+            "insight_available_delta": 7,
+            "insight_spent_before": 0,
+            "insight_spent_after": 3,
+            "insight_spent_delta": 3,
+        }
+    ]
     assert _character_state_revision(app, "insight-crane") == starting_revision + 1
 
     updated_html = client.get(
@@ -1481,7 +1492,13 @@ def test_xianxia_cultivation_route_tracks_insight_available_and_spent(
     assert 'value="7"' in updated_html
     assert 'name="insight_spent"' in updated_html
     assert 'value="3"' in updated_html
-    assert "No advancement history is recorded on this sheet yet." in updated_html
+    assert "Insight Counter Adjustment" in updated_html
+    assert "Available Insight before:" in updated_html
+    assert "Available Insight after:" in updated_html
+    assert "Available Insight change:" in updated_html
+    assert "Spent Insight before:" in updated_html
+    assert "Spent Insight after:" in updated_html
+    assert "Spent Insight change:" in updated_html
 
     resources_html = client.get(
         "/campaigns/linden-pass/characters/insight-crane?page=resources"
@@ -1505,6 +1522,9 @@ def test_xianxia_cultivation_route_tracks_insight_available_and_spent(
         "available": 7,
         "spent": 3,
     }
+    assert len(
+        _read_character_definition(app, "insight-crane")["xianxia"]["advancement_history"]
+    ) == 1
     assert _character_state_revision(app, "insight-crane") == current_revision
 
 
@@ -1695,17 +1715,15 @@ def test_xianxia_cultivation_route_spends_insight_to_increase_energy(
         "qi": {"max": 2},
         "shen": {"max": 1},
     }
-    assert xianxia["advancement_history"] == [
-        {
-            "action": "cultivation_energy_increase",
-            "amount": 1,
-            "target": "Qi",
-            "energy_key": "qi",
-            "energy_maximum_increase": 1,
-            "new_energy_maximum": 2,
-            "notes": "Cultivated a moonlit reservoir.",
-        }
-    ]
+    assert xianxia["advancement_history"][-1] == {
+        "action": "cultivation_energy_increase",
+        "amount": 1,
+        "target": "Qi",
+        "energy_key": "qi",
+        "energy_maximum_increase": 1,
+        "new_energy_maximum": 2,
+        "notes": "Cultivated a moonlit reservoir.",
+    }
     with app.app_context():
         repository = app.extensions["character_repository"]
         record = repository.get_character("linden-pass", "energy-cultivator")
@@ -1828,17 +1846,15 @@ def test_xianxia_cultivation_route_spends_insight_on_meditation_to_increase_yin_
         "yin_max": 1,
         "yang_max": 2,
     }
-    assert xianxia["advancement_history"] == [
-        {
-            "action": "meditation_yin_yang_increase",
-            "amount": 1,
-            "target": "Yang",
-            "yin_yang_key": "yang",
-            "yin_yang_maximum_increase": 1,
-            "new_yin_yang_maximum": 2,
-            "notes": "Balanced breath at dawn.",
-        }
-    ]
+    assert xianxia["advancement_history"][-1] == {
+        "action": "meditation_yin_yang_increase",
+        "amount": 1,
+        "target": "Yang",
+        "yin_yang_key": "yang",
+        "yin_yang_maximum_increase": 1,
+        "new_yin_yang_maximum": 2,
+        "notes": "Balanced breath at dawn.",
+    }
     with app.app_context():
         repository = app.extensions["character_repository"]
         record = repository.get_character("linden-pass", "meditation-adept")
@@ -1956,17 +1972,15 @@ def test_xianxia_cultivation_route_spends_insight_on_conditioning_for_hp_or_effo
     assert xianxia["insight"] == {"available": 1, "spent": 1}
     assert xianxia["durability"]["hp_max"] == 20
     assert xianxia["efforts"]["magic"] == 1
-    assert xianxia["advancement_history"] == [
-        {
-            "action": "conditioning_hp_increase",
-            "amount": 1,
-            "target": "HP",
-            "hp_maximum_increase": 10,
-            "new_hp_maximum": 20,
-            "hp_maximum_cap": 50,
-            "notes": "Stone-body breathing.",
-        }
-    ]
+    assert xianxia["advancement_history"][-1] == {
+        "action": "conditioning_hp_increase",
+        "amount": 1,
+        "target": "HP",
+        "hp_maximum_increase": 10,
+        "new_hp_maximum": 20,
+        "hp_maximum_cap": 50,
+        "notes": "Stone-body breathing.",
+    }
     with app.app_context():
         repository = app.extensions["character_repository"]
         record = repository.get_character("linden-pass", "conditioning-adept")
@@ -2114,17 +2128,15 @@ def test_xianxia_cultivation_route_spends_insight_on_training_for_stance_or_attr
     assert xianxia["insight"] == {"available": 1, "spent": 1}
     assert xianxia["durability"]["stance_max"] == 20
     assert xianxia["attributes"]["con"] == 3
-    assert xianxia["advancement_history"] == [
-        {
-            "action": "training_stance_increase",
-            "amount": 1,
-            "target": "Stance",
-            "stance_maximum_increase": 10,
-            "new_stance_maximum": 20,
-            "stance_maximum_cap": 50,
-            "notes": "Holding horse stance beneath the waterfall.",
-        }
-    ]
+    assert xianxia["advancement_history"][-1] == {
+        "action": "training_stance_increase",
+        "amount": 1,
+        "target": "Stance",
+        "stance_maximum_increase": 10,
+        "new_stance_maximum": 20,
+        "stance_maximum_cap": 50,
+        "notes": "Holding horse stance beneath the waterfall.",
+    }
     with app.app_context():
         repository = app.extensions["character_repository"]
         record = repository.get_character("linden-pass", "training-adept")
@@ -2291,17 +2303,15 @@ def test_xianxia_cultivation_route_spends_insight_to_learn_generic_technique(
     assert learned_technique["learnable_without_master"] is True
     assert learned_technique["requires_master"] is False
     assert learned_technique["notes"] == "Focused breath into a visible strike."
-    assert xianxia["advancement_history"] == [
-        {
-            "action": "generic_technique_learned",
-            "amount": 1,
-            "target": "Qi Blast",
-            "generic_technique_key": "qi_blast",
-            "systems_ref": learned_technique["systems_ref"],
-            "insight_cost": 1,
-            "notes": "Focused breath into a visible strike.",
-        }
-    ]
+    assert xianxia["advancement_history"][-1] == {
+        "action": "generic_technique_learned",
+        "amount": 1,
+        "target": "Qi Blast",
+        "generic_technique_key": "qi_blast",
+        "systems_ref": learned_technique["systems_ref"],
+        "insight_cost": 1,
+        "notes": "Focused breath into a visible strike.",
+    }
     assert _character_state_revision(app, "technique-adept") == current_revision + 1
 
     updated_html = client.get(
@@ -2414,17 +2424,15 @@ def test_xianxia_cultivation_route_spends_insight_to_advance_martial_art_rank(
         "novice": {"jing": 1, "qi": 1, "shen": 0}
     }
     assert first_art["insight_spent"] == 1
-    assert xianxia["advancement_history"] == [
-        {
-            "action": "martial_art_rank_advance",
-            "amount": 1,
-            "target": "Demon's Fist",
-            "rank": "Novice",
-            "rank_ref": "xianxia:demons-fist:novice",
-            "systems_ref": first_art["systems_ref"],
-            "energy_maximum_increases": {"jing": 1, "qi": 1, "shen": 0},
-        }
-    ]
+    assert xianxia["advancement_history"][-1] == {
+        "action": "martial_art_rank_advance",
+        "amount": 1,
+        "target": "Demon's Fist",
+        "rank": "Novice",
+        "rank_ref": "xianxia:demons-fist:novice",
+        "systems_ref": first_art["systems_ref"],
+        "energy_maximum_increases": {"jing": 1, "qi": 1, "shen": 0},
+    }
     with app.app_context():
         repository = app.extensions["character_repository"]
         record = repository.get_character("linden-pass", "rank-crane")
