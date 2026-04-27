@@ -4993,7 +4993,8 @@ def test_xianxia_hides_dnd_spellcasting_read_and_session_affordances(
 
     assert session_response.status_code == 200
     session_html = session_response.get_data(as_text=True)
-    assert "Overview" in session_html
+    assert "Quick Reference" in session_html
+    assert "Martial Arts" in session_html
     assert "Spell slots" not in session_html
     assert "page=spells" not in session_html
     assert "/spellcasting/" not in session_html
@@ -5057,110 +5058,54 @@ def test_xianxia_character_sheet_renders_and_links_xianxia_systems_entries(
             entry_types=["martial_art"],
             entries=[
                 {
-                    "entry_key": "dnd-5e|martial_art|xianxia-homebrew|heavenly-palm",
+                    "entry_key": "dnd-5e|martial_art|xianxia-homebrew|demons-fist",
                     "entry_type": "martial_art",
-                    "slug": "heavenly-palm",
-                    "title": "DND Heavenly Palm",
-                    "search_text": "heavenly palm dnd impostor",
+                    "slug": "demons-fist",
+                    "title": "DND Demon's Fist",
+                    "search_text": "demon fist dnd impostor",
                     "player_safe_default": True,
                     "dm_heavy": False,
                     "metadata": {"facet": "martial_art"},
                     "body": {},
-                    "rendered_html": "<p>DND impostor palm body must not render.</p>",
+                    "rendered_html": "<p>DND impostor fist body must not render.</p>",
                 }
             ],
         )
-        store.replace_entries_for_source(
-            XIANXIA_SYSTEM_CODE,
-            XIANXIA_HOMEBREW_SOURCE_ID,
-            entry_types=["martial_art", "rule"],
-            entries=[
-                {
-                    "entry_key": "xianxia|martial_art|xianxia-homebrew|heavenly-palm",
-                    "entry_type": "martial_art",
-                    "slug": "heavenly-palm",
-                    "title": "Heavenly Palm",
-                    "search_text": "heavenly palm xianxia martial art",
-                    "player_safe_default": True,
-                    "dm_heavy": False,
-                    "metadata": {"facet": "martial_art"},
-                    "body": {},
-                    "rendered_html": "<p>Xianxia palm body renders on the character sheet.</p>",
-                },
-                {
-                    "entry_key": "xianxia|rule|xianxia-homebrew|dao-breathing",
-                    "entry_type": "rule",
-                    "slug": "dao-breathing",
-                    "title": "Dao Breathing",
-                    "search_text": "dao breathing xianxia rule",
-                    "player_safe_default": True,
-                    "dm_heavy": False,
-                    "metadata": {"rule_key": "dao_breathing"},
-                    "body": {},
-                    "rendered_html": "<p>Dao Breathing rule text renders on the character sheet.</p>",
-                },
-            ],
-        )
-        heavenly_palm = service.get_entry_by_slug_for_campaign("linden-pass", "heavenly-palm")
-        dao_breathing = service.get_entry_by_slug_for_campaign("linden-pass", "dao-breathing")
-        assert heavenly_palm is not None
-        assert heavenly_palm.library_slug == XIANXIA_SYSTEM_CODE
-        assert dao_breathing is not None
-        assert dao_breathing.library_slug == XIANXIA_SYSTEM_CODE
-
-    def _mutate_character(payload: dict) -> None:
-        profile = dict(payload.get("profile") or {})
-        profile["classes"] = [
-            {
-                "row_id": "xianxia-row-1",
-                "class_name": "Mortal Cultivator",
-                "level": 0,
-            }
-        ]
-        profile["class_level_text"] = "Mortal Cultivator"
-        profile["class_ref"] = {}
-        profile["subclass_ref"] = {}
-        profile["species"] = ""
-        profile["species_ref"] = {}
-        profile["background"] = ""
-        profile["background_ref"] = {}
-        payload["profile"] = profile
-        payload["spellcasting"] = {}
-        payload["features"] = [
-            {
-                "id": "xianxia-martial-art-heavenly-palm",
-                "name": "Heavenly Palm",
-                "category": "custom_feature",
-                "systems_ref": _systems_ref(heavenly_palm),
-            },
-            {
-                "id": "xianxia-rule-dao-breathing",
-                "name": "Dao Breathing",
-                "category": "custom_feature",
-                "systems_ref": _systems_ref(dao_breathing),
-            },
-        ]
-
-    _write_character_definition(app, "arden-march", _mutate_character)
+        demons_fist = service.get_entry_by_slug_for_campaign("linden-pass", "demons-fist")
+        assert demons_fist is not None
+        assert demons_fist.library_slug == XIANXIA_SYSTEM_CODE
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
-    sheet_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=features")
-    entry_response = client.get("/campaigns/linden-pass/systems/entries/heavenly-palm")
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Systems Link Crane"),
+        follow_redirects=False,
+    )
+    martial_arts_response = client.get(
+        "/campaigns/linden-pass/characters/systems-link-crane?mode=read&page=martial_arts"
+    )
+    techniques_response = client.get(
+        "/campaigns/linden-pass/characters/systems-link-crane?mode=read&page=techniques"
+    )
+    entry_response = client.get("/campaigns/linden-pass/systems/entries/demons-fist")
 
-    assert sheet_response.status_code == 200
+    assert create_response.status_code == 302
+    assert martial_arts_response.status_code == 200
+    assert techniques_response.status_code == 200
     assert entry_response.status_code == 200
-    html = sheet_response.get_data(as_text=True)
+    martial_arts_html = martial_arts_response.get_data(as_text=True)
+    techniques_html = techniques_response.get_data(as_text=True)
     entry_html = entry_response.get_data(as_text=True)
 
-    assert 'href="/campaigns/linden-pass/systems/entries/heavenly-palm"' in html
-    assert 'href="/campaigns/linden-pass/systems/entries/dao-breathing"' in html
-    assert "Xianxia palm body renders on the character sheet." in html
-    assert "Dao Breathing rule text renders on the character sheet." in html
-    assert "DND Heavenly Palm" not in html
-    assert "DND impostor palm body must not render." not in html
-    assert "Heavenly Palm" in entry_html
-    assert "Xianxia palm body renders on the character sheet." in entry_html
-    assert "DND impostor palm body must not render." not in entry_html
+    assert 'href="/campaigns/linden-pass/systems/entries/demons-fist"' in martial_arts_html
+    assert "#xianxia-demons-fist-initiate" in martial_arts_html
+    assert 'href="/campaigns/linden-pass/systems/entries/recoup"' in techniques_html
+    assert "DND Demon" not in martial_arts_html
+    assert "DND Demon" not in techniques_html
+    assert "Demon" in entry_html
+    assert "Qi Fist Technique" in entry_html
+    assert "DND Demon" not in entry_html
+    assert "DND impostor fist body must not render." not in entry_html
 
 
 def test_xianxia_generic_techniques_and_basic_actions_browse_search_and_link_from_sheet(

@@ -245,13 +245,17 @@ def test_xianxia_read_presenter_context_collects_first_pass_sheet_facts(
     ]
     assert xianxia_read["equipment"]["manual_armor_bonus"] == 2
     assert xianxia_read["equipment"]["defense"] == 15
-    assert {
+    expected_tool = {
         "name": "Fishing rod, spear, or net",
         "reason": "Required for Fishing",
         "status": "",
         "type": "",
         "notes": "",
-    } in xianxia_read["equipment"]["necessary_tools"]
+    }
+    assert any(
+        all(tool.get(key) == value for key, value in expected_tool.items())
+        for tool in xianxia_read["equipment"]["necessary_tools"]
+    )
 
     first_art = xianxia_read["martial_arts"][0]
     assert first_art["name"] == "Demon's Fist"
