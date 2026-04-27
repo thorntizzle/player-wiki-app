@@ -602,7 +602,13 @@
     {% if ascension.available %}
       <article class="detail-card session-card">
         {% if not ascension.can_start_review %}
-          <p class="meta">{{ ascension.stat_prerequisite.failure_message }}</p>
+          <p class="meta">
+            {% if ascension.pending_confirmation_rebuild %}
+              {{ ascension.confirmation_blocking_message }}
+            {% else %}
+              {{ ascension.stat_prerequisite.failure_message }}
+            {% endif %}
+          </p>
         {% endif %}
         <form
           class="stack-form"
@@ -833,6 +839,47 @@
           {% if ascension.latest_rebuild.notes %}
             <li><strong>Notes:</strong> {{ ascension.latest_rebuild.notes }}</li>
           {% endif %}
+        </ul>
+      </article>
+    {% endif %}
+    {% if ascension.can_confirm_rebuild and ascension.pending_confirmation_rebuild %}
+      <article class="detail-card session-card">
+        <h3>Confirm {{ ascension.pending_confirmation_rebuild.target_realm }} Ascension</h3>
+        <p class="meta">
+          Records the final GM confirmation for the completed rebuild without changing
+          Realm math or mutable session pools.
+        </p>
+        <form
+          class="stack-form"
+          method="post"
+          action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+        >
+          <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+          <input type="hidden" name="cultivation_action" value="confirm_realm_ascension">
+          <input type="hidden" name="target_realm" value="{{ ascension.pending_confirmation_rebuild.target_realm }}">
+          <label>
+            GM confirmation note
+            <textarea name="realm_ascension_gm_confirmation_note" rows="3" required></textarea>
+          </label>
+          <div class="hero-actions">
+            <button type="submit">Confirm Realm Ascension</button>
+          </div>
+        </form>
+      </article>
+    {% endif %}
+    {% if ascension.latest_confirmation %}
+      <article class="detail-card">
+        <h3>Latest GM Confirmation</h3>
+        <ul class="plain-list slot-list">
+          <li><strong>Target:</strong> {{ ascension.latest_confirmation.target_realm }}</li>
+          <li><strong>Status:</strong> {{ ascension.latest_confirmation.status | replace('_', ' ') }}</li>
+          <li><strong>Actions:</strong> {{ ascension.latest_confirmation.actions_per_turn }}</li>
+          <li><strong>Attributes:</strong> {{ ascension.latest_confirmation.attributes_after_total }}</li>
+          <li><strong>Efforts:</strong> {{ ascension.latest_confirmation.efforts_after_total }}</li>
+          {% if ascension.latest_confirmation.post_ascension_summary %}
+            <li><strong>Confirmed state:</strong> {{ ascension.latest_confirmation.post_ascension_summary }}</li>
+          {% endif %}
+          <li><strong>GM confirmation note:</strong> {{ ascension.latest_confirmation.gm_confirmation_note }}</li>
         </ul>
       </article>
     {% endif %}

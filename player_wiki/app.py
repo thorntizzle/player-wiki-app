@@ -101,6 +101,7 @@ from .xianxia_advancement import (
     apply_xianxia_divine_realm_rebuild_definition,
     apply_xianxia_immortal_realm_rebuild_definition,
     build_xianxia_realm_ascension_context,
+    confirm_xianxia_realm_ascension_definition,
     learn_xianxia_generic_technique_definition,
     list_xianxia_generic_technique_learning_options,
     reset_xianxia_realm_ascension_stats_definition,
@@ -1563,8 +1564,11 @@ def present_xianxia_cultivation_context(
             ("pre_ascension_summary", "Pre-ascension state"),
             ("post_ascension_summary", "Post-ascension state"),
             ("gm_review_note", "GM review note"),
+            ("gm_confirmation_note", "GM confirmation note"),
             ("seclusion_notes", "Seclusion notes"),
             ("hp_stance_trade_notes", "HP/Stance trade notes"),
+            ("confirmed_realm", "Confirmed Realm"),
+            ("confirmed_rebuild_action", "Confirmed rebuild action"),
             ("notes", "Notes"),
         ):
             value = raw_record.get(key)
@@ -12177,6 +12181,21 @@ def create_app() -> Flask:
                         f"Applied the Divine rebuild budget for "
                         f"{rebuild_result.total_rebuild_points} points and "
                         f"{rebuild_result.actions_per_turn} actions."
+                    )
+                elif cultivation_action == "confirm_realm_ascension":
+                    redirect_anchor = "xianxia-cultivation-realm-ascension"
+                    confirmation_result = confirm_xianxia_realm_ascension_definition(
+                        record.definition,
+                        target_realm=request.form.get("target_realm", ""),
+                        gm_confirmation_note=request.form.get(
+                            "realm_ascension_gm_confirmation_note",
+                            "",
+                        ),
+                    )
+                    definition = confirmation_result.definition
+                    success_message = (
+                        f"Recorded GM confirmation for the "
+                        f"{confirmation_result.target_realm} Realm ascension."
                     )
                 else:
                     raise ValueError("Unsupported cultivation action. Refresh the page and try again.")

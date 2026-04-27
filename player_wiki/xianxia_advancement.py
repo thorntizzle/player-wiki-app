@@ -123,6 +123,14 @@ class XianxiaRealmAscensionImmortalRebuildResult:
 
 
 @dataclass(frozen=True)
+class XianxiaRealmAscensionConfirmationResult:
+    definition: Any
+    current_realm: str
+    target_realm: str
+    gm_confirmation_note: str
+
+
+@dataclass(frozen=True)
 class XianxiaMartialArtAdvanceResult:
     definition: Any
     martial_art_name: str
@@ -196,6 +204,10 @@ def build_xianxia_realm_ascension_context(xianxia: dict[str, Any]) -> dict[str, 
     latest_review = _latest_realm_ascension_review(history)
     latest_reset = _latest_realm_ascension_stat_reset(history)
     latest_rebuild = _latest_realm_ascension_rebuild(history)
+    pending_confirmation_rebuild = _latest_unconfirmed_realm_ascension_rebuild(
+        history
+    )
+    latest_confirmation = _latest_realm_ascension_confirmation(history)
     latest_immortal_rebuild = _latest_realm_ascension_rebuild(
         history,
         target_realm="Immortal",
@@ -228,14 +240,25 @@ def build_xianxia_realm_ascension_context(xianxia: dict[str, Any]) -> dict[str, 
         "attributes": attributes,
         "efforts": efforts,
         "stat_prerequisite": stat_prerequisite,
-        "can_start_review": target is not None and bool(stat_prerequisite.get("is_met")),
+        "can_start_review": (
+            target is not None
+            and bool(stat_prerequisite.get("is_met"))
+            and pending_confirmation_rebuild is None
+        ),
         "latest_review": latest_review,
         "latest_reset": latest_reset,
         "latest_rebuild": latest_rebuild,
+        "pending_confirmation_rebuild": pending_confirmation_rebuild,
+        "latest_confirmation": latest_confirmation,
         "latest_immortal_rebuild": latest_immortal_rebuild,
         "latest_divine_rebuild": latest_divine_rebuild,
         "hp_stance_trade": _realm_ascension_trade_context(durability),
     }
+    context["can_confirm_rebuild"] = pending_confirmation_rebuild is not None
+    if pending_confirmation_rebuild is not None:
+        context["confirmation_blocking_message"] = (
+            "Confirm the latest Realm rebuild before starting another Realm review."
+        )
     context["can_reset_stats"] = _can_reset_realm_ascension_stats(
         latest_review=latest_review,
         latest_reset=latest_reset,
@@ -315,6 +338,10 @@ def start_xianxia_realm_ascension_review_definition(
         for record in list(xianxia.get("advancement_history") or [])
         if isinstance(record, dict) and record
     ]
+    if _latest_unconfirmed_realm_ascension_rebuild(history) is not None:
+        raise ValueError(
+            "Confirm the latest Realm rebuild before starting another Realm review."
+        )
     event = {
         "action": "realm_ascension_review_started",
         "target": expected_target_realm,
@@ -355,6 +382,91 @@ def start_xianxia_realm_ascension_review_definition(
         gm_review_note=clean_gm_review_note,
         seclusion_notes=clean_seclusion_notes,
         hp_stance_trade_notes=clean_hp_stance_trade_notes,
+    )
+
+
+def confirm_xianxia_realm_ascension_definition(
+    definition: Any,
+    *,
+    target_realm: str,
+    gm_confirmation_note: str,
+) -> XianxiaRealmAscensionConfirmationResult:
+    payload = definition.to_dict()
+    xianxia = dict(payload.get("xianxia") or {})
+    current_realm = normalize_xianxia_realm_label(xianxia.get("realm"))
+    normalized_target_realm = normalize_xianxia_realm_label(target_realm)
+    clean_gm_confirmation_note = _clean_note(gm_confirmation_note)
+    if not clean_gm_confirmation_note:
+        raise ValueError(
+            "Record a GM confirmation note before confirming Realm ascension."
+        )
+
+    history = [
+        dict(record)
+        for record in list(xianxia.get("advancement_history") or [])
+        if isinstance(record, dict) and record
+    ]
+    rebuild_index = _latest_unconfirmed_realm_ascension_rebuild_index(
+        history,
+        target_realm=normalized_target_realm,
+    )
+    if rebuild_index is None:
+        raise ValueError(
+            "Apply a pending Realm rebuild before recording GM confirmation."
+        )
+    rebuild_event = dict(history[rebuild_index])
+    confirmed_target_realm = normalize_xianxia_realm_label(
+        rebuild_event.get("target_realm") or rebuild_event.get("target")
+    )
+    if normalized_target_realm and normalized_target_realm != confirmed_target_realm:
+        raise ValueError(
+            f"GM confirmation target must match the pending {confirmed_target_realm} rebuild."
+        )
+    if current_realm != confirmed_target_realm:
+        raise ValueError(
+            f"GM confirmation for {confirmed_target_realm} requires the character "
+            f"to already be in the {confirmed_target_realm} Realm."
+        )
+
+    rebuild_event["status"] = "confirmed"
+    history[rebuild_index] = rebuild_event
+    event = {
+        "action": "realm_ascension_gm_confirmation_recorded",
+        "target": confirmed_target_realm,
+        "current_realm": str(rebuild_event.get("current_realm") or "").strip(),
+        "target_realm": confirmed_target_realm,
+        "confirmed_realm": confirmed_target_realm,
+        "status": "confirmed",
+        "confirmed_rebuild_action": str(rebuild_event.get("action") or "").strip(),
+        "confirmed_rebuild_index": rebuild_index,
+        "actions_per_turn": _non_negative_int(
+            rebuild_event.get("actions_per_turn"),
+            default=0,
+        ),
+        "attributes_after_total": _non_negative_int(
+            rebuild_event.get("attributes_after_total"),
+            default=0,
+        ),
+        "efforts_after_total": _non_negative_int(
+            rebuild_event.get("efforts_after_total"),
+            default=0,
+        ),
+        "gm_confirmation_note": clean_gm_confirmation_note,
+    }
+    post_ascension_summary = str(
+        rebuild_event.get("post_ascension_summary") or ""
+    ).strip()
+    if post_ascension_summary:
+        event["post_ascension_summary"] = post_ascension_summary
+    history.append(event)
+    xianxia["advancement_history"] = history
+    payload["xianxia"] = xianxia
+
+    return XianxiaRealmAscensionConfirmationResult(
+        definition=definition.__class__.from_dict(payload),
+        current_realm=str(rebuild_event.get("current_realm") or "").strip(),
+        target_realm=confirmed_target_realm,
+        gm_confirmation_note=clean_gm_confirmation_note,
     )
 
 
@@ -1969,6 +2081,79 @@ def _latest_realm_ascension_rebuild(
     return None
 
 
+def _latest_unconfirmed_realm_ascension_rebuild(
+    records: Any,
+    *,
+    target_realm: str = "",
+) -> dict[str, Any] | None:
+    history = [
+        dict(record)
+        for record in list(records or [])
+        if isinstance(record, dict) and record
+    ]
+    index = _latest_unconfirmed_realm_ascension_rebuild_index(
+        history,
+        target_realm=target_realm,
+    )
+    if index is None:
+        return None
+    record = _latest_realm_ascension_rebuild(
+        [history[index]],
+        target_realm=target_realm,
+    )
+    if record is not None:
+        record["history_index"] = index
+    return record
+
+
+def _latest_realm_ascension_confirmation(
+    records: Any,
+    *,
+    target_realm: str = "",
+) -> dict[str, Any] | None:
+    normalized_filter = normalize_xianxia_realm_label(target_realm) if target_realm else ""
+    for record in reversed(list(records or [])):
+        if not isinstance(record, dict):
+            continue
+        if str(record.get("action") or "").strip() != "realm_ascension_gm_confirmation_recorded":
+            continue
+        record_target = normalize_xianxia_realm_label(
+            record.get("target_realm") or record.get("target")
+        )
+        if normalized_filter and record_target != normalized_filter:
+            continue
+        return {
+            "current_realm": str(record.get("current_realm") or "").strip(),
+            "target_realm": record_target,
+            "confirmed_realm": normalize_xianxia_realm_label(
+                record.get("confirmed_realm") or record_target
+            ),
+            "status": str(record.get("status") or "").strip(),
+            "confirmed_rebuild_action": str(
+                record.get("confirmed_rebuild_action") or ""
+            ).strip(),
+            "actions_per_turn": _non_negative_int(
+                record.get("actions_per_turn"),
+                default=0,
+            ),
+            "attributes_after_total": _non_negative_int(
+                record.get("attributes_after_total"),
+                default=0,
+            ),
+            "efforts_after_total": _non_negative_int(
+                record.get("efforts_after_total"),
+                default=0,
+            ),
+            "post_ascension_summary": str(
+                record.get("post_ascension_summary") or ""
+            ).strip(),
+            "gm_confirmation_note": str(
+                record.get("gm_confirmation_note") or ""
+            ).strip(),
+        }
+    return None
+
+
 def _can_reset_realm_ascension_stats(
     *,
     latest_review: dict[str, Any] | None,
@@ -2028,6 +2213,51 @@ def _latest_realm_ascension_review_index(
             continue
         return index
     return None
+
+
+def _latest_unconfirmed_realm_ascension_rebuild_index(
+    history: list[dict[str, Any]],
+    *,
+    target_realm: str = "",
+) -> int | None:
+    normalized_filter = normalize_xianxia_realm_label(target_realm) if target_realm else ""
+    rebuild_actions = set(XIANXIA_REALM_ASCENSION_REBUILD_ACTIONS.values())
+    for index in range(len(history) - 1, -1, -1):
+        record = history[index]
+        if str(record.get("action") or "").strip() not in rebuild_actions:
+            continue
+        if str(record.get("status") or "").strip() != "applied_pending_final_confirmation":
+            continue
+        record_target = normalize_xianxia_realm_label(
+            record.get("target_realm") or record.get("target")
+        )
+        if normalized_filter and record_target != normalized_filter:
+            continue
+        if _has_realm_ascension_confirmation_after(
+            history,
+            index,
+            target_realm=record_target,
+        ):
+            continue
+        return index
+    return None
+
+
+def _has_realm_ascension_confirmation_after(
+    history: list[dict[str, Any]],
+    rebuild_index: int,
+    *,
+    target_realm: str,
+) -> bool:
+    normalized_target = normalize_xianxia_realm_label(target_realm)
+    for record in history[rebuild_index + 1 :]:
+        if str(record.get("action") or "").strip() != "realm_ascension_gm_confirmation_recorded":
+            continue
+        if normalize_xianxia_realm_label(
+            record.get("target_realm") or record.get("target")
+        ) == normalized_target:
+            return True
+    return False
 
 
 def _latest_realm_ascension_stat_reset_index(

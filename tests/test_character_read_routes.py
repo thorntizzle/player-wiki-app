@@ -2198,6 +2198,189 @@ def test_xianxia_cultivation_route_applies_immortal_rebuild_budget(
     assert 'name="cultivation_action" value="apply_immortal_realm_rebuild"' not in updated_html
 
 
+def test_xianxia_cultivation_route_records_realm_ascension_gm_confirmation(
+    app, client, sign_in, users
+):
+    def _mutate_campaign(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+                "default_visibility": "dm",
+            }
+        ]
+
+    def _prepare_definition(payload: dict) -> None:
+        xianxia = payload["xianxia"]
+        xianxia["attributes"]["str"] = 10
+        xianxia["durability"] = {
+            "hp_max": 28,
+            "stance_max": 26,
+            "manual_armor_bonus": 2,
+            "defense": 16,
+        }
+
+    _write_campaign_config(app, _mutate_campaign)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Confirm Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+    _write_character_definition(app, "confirm-crane", _prepare_definition)
+
+    review_revision = _character_state_revision(app, "confirm-crane")
+    review_response = client.post(
+        "/campaigns/linden-pass/characters/confirm-crane/cultivation",
+        data={
+            "expected_revision": str(review_revision),
+            "cultivation_action": "start_realm_ascension_review",
+            "target_realm": "Immortal",
+            "realm_ascension_gm_review_note": "GM approves the ascension review.",
+        },
+        follow_redirects=False,
+    )
+    assert review_response.status_code == 302
+
+    reset_revision = _character_state_revision(app, "confirm-crane")
+    reset_response = client.post(
+        "/campaigns/linden-pass/characters/confirm-crane/cultivation",
+        data={
+            "expected_revision": str(reset_revision),
+            "cultivation_action": "reset_realm_ascension_stats",
+            "target_realm": "Immortal",
+        },
+        follow_redirects=False,
+    )
+    assert reset_response.status_code == 302
+
+    rebuild_revision = _character_state_revision(app, "confirm-crane")
+    rebuild_response = client.post(
+        "/campaigns/linden-pass/characters/confirm-crane/cultivation",
+        data={
+            "expected_revision": str(rebuild_revision),
+            "cultivation_action": "apply_immortal_realm_rebuild",
+            "target_realm": "Immortal",
+            "realm_rebuild_attribute_str": "6",
+            "realm_rebuild_attribute_dex": "2",
+            "realm_rebuild_attribute_con": "1",
+            "realm_rebuild_attribute_int": "0",
+            "realm_rebuild_attribute_wis": "0",
+            "realm_rebuild_attribute_cha": "0",
+            "realm_rebuild_effort_basic": "3",
+            "realm_rebuild_effort_weapon": "2",
+            "realm_rebuild_effort_guns_explosive": "0",
+            "realm_rebuild_effort_magic": "1",
+            "realm_rebuild_effort_ultimate": "0",
+            "realm_ascension_rebuild_notes": "Rebuild math is ready for final review.",
+        },
+        follow_redirects=False,
+    )
+    assert rebuild_response.status_code == 302
+
+    confirm_html = client.get(
+        "/campaigns/linden-pass/characters/confirm-crane/cultivation"
+    ).get_data(as_text=True)
+    assert "Confirm Immortal Ascension" in confirm_html
+    assert 'name="cultivation_action" value="confirm_realm_ascension"' in confirm_html
+    assert 'name="realm_ascension_gm_confirmation_note"' in confirm_html
+
+    confirmation_revision = _character_state_revision(app, "confirm-crane")
+    invalid_response = client.post(
+        "/campaigns/linden-pass/characters/confirm-crane/cultivation",
+        data={
+            "expected_revision": str(confirmation_revision),
+            "cultivation_action": "confirm_realm_ascension",
+            "target_realm": "Immortal",
+            "realm_ascension_gm_confirmation_note": " ",
+        },
+        follow_redirects=True,
+    )
+    assert invalid_response.status_code == 200
+    assert (
+        "Record a GM confirmation note before confirming Realm ascension."
+        in invalid_response.get_data(as_text=True)
+    )
+    assert _character_state_revision(app, "confirm-crane") == confirmation_revision
+
+    confirmation_note = "GM confirms the final Immortal ascension scene."
+    valid_response = client.post(
+        "/campaigns/linden-pass/characters/confirm-crane/cultivation",
+        data={
+            "expected_revision": str(confirmation_revision),
+            "cultivation_action": "confirm_realm_ascension",
+            "target_realm": "Immortal",
+            "realm_ascension_gm_confirmation_note": confirmation_note,
+        },
+        follow_redirects=False,
+    )
+    assert valid_response.status_code == 302
+    assert valid_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/confirm-crane/cultivation#xianxia-cultivation-realm-ascension"
+    )
+
+    definition_payload = _read_character_definition(app, "confirm-crane")
+    xianxia = definition_payload["xianxia"]
+    assert xianxia["realm"] == "Immortal"
+    assert xianxia["actions_per_turn"] == 3
+    assert xianxia["attributes"] == {
+        "str": 6,
+        "dex": 2,
+        "con": 1,
+        "int": 0,
+        "wis": 0,
+        "cha": 0,
+    }
+    assert xianxia["efforts"] == {
+        "basic": 3,
+        "weapon": 2,
+        "guns_explosive": 0,
+        "magic": 1,
+        "ultimate": 0,
+    }
+    rebuild_event = xianxia["advancement_history"][-2]
+    confirmation_event = xianxia["advancement_history"][-1]
+    assert rebuild_event["action"] == "realm_ascension_immortal_rebuild_applied"
+    assert rebuild_event["status"] == "confirmed"
+    _assert_event_contains(
+        confirmation_event,
+        {
+            "action": "realm_ascension_gm_confirmation_recorded",
+            "target": "Immortal",
+            "current_realm": "Mortal",
+            "target_realm": "Immortal",
+            "confirmed_realm": "Immortal",
+            "status": "confirmed",
+            "confirmed_rebuild_action": "realm_ascension_immortal_rebuild_applied",
+            "confirmed_rebuild_index": 2,
+            "actions_per_turn": 3,
+            "attributes_after_total": 9,
+            "efforts_after_total": 6,
+            "gm_confirmation_note": confirmation_note,
+        },
+    )
+    assert (
+        confirmation_event["post_ascension_summary"]
+        == "Immortal Realm, 3 actions; Attributes 9, Efforts 6; HP max 28, "
+        "Stance max 26; Insight 0 available/0 spent; Martial Arts 3; "
+        "Generic Techniques 0"
+    )
+    assert _character_state_revision(app, "confirm-crane") == confirmation_revision + 1
+
+    updated_html = client.get(
+        "/campaigns/linden-pass/characters/confirm-crane/cultivation"
+    ).get_data(as_text=True)
+    assert "Latest GM Confirmation" in updated_html
+    assert "GM confirmation note:" in updated_html
+    assert confirmation_note in updated_html
+    assert "Confirmed state:" in updated_html
+    assert 'name="cultivation_action" value="confirm_realm_ascension"' not in updated_html
+
+
 def test_xianxia_cultivation_route_supports_legal_realm_hp_stance_trade(
     app, client, sign_in, users
 ):
