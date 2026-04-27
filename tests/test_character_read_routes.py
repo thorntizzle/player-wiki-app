@@ -2100,6 +2100,199 @@ def test_xianxia_cultivation_route_applies_immortal_rebuild_budget(
     assert 'name="cultivation_action" value="apply_immortal_realm_rebuild"' not in updated_html
 
 
+def test_xianxia_cultivation_route_supports_legal_realm_hp_stance_trade(
+    app, client, sign_in, users
+):
+    def _mutate_campaign(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+                "default_visibility": "dm",
+            }
+        ]
+
+    def _prepare_definition(payload: dict) -> None:
+        xianxia = payload["xianxia"]
+        xianxia["attributes"]["str"] = 10
+        xianxia["durability"] = {
+            "hp_max": 28,
+            "stance_max": 26,
+            "manual_armor_bonus": 2,
+            "defense": 16,
+        }
+
+    def _prepare_state(payload: dict) -> None:
+        payload["vitals"]["current_hp"] = 17
+        payload["vitals"]["temp_hp"] = 3
+        payload["xianxia"]["vitals"] = {
+            "current_hp": 17,
+            "temp_hp": 3,
+            "current_stance": 14,
+            "temp_stance": 2,
+        }
+
+    _write_campaign_config(app, _mutate_campaign)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Trade Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+    _write_character_definition(app, "trade-crane", _prepare_definition)
+    _write_character_state(app, "trade-crane", _prepare_state)
+
+    review_revision = _character_state_revision(app, "trade-crane")
+    review_response = client.post(
+        "/campaigns/linden-pass/characters/trade-crane/cultivation",
+        data={
+            "expected_revision": str(review_revision),
+            "cultivation_action": "start_realm_ascension_review",
+            "target_realm": "Immortal",
+            "realm_ascension_gm_review_note": "GM review approved the trade option.",
+        },
+        follow_redirects=False,
+    )
+    assert review_response.status_code == 302
+
+    reset_revision = _character_state_revision(app, "trade-crane")
+    reset_response = client.post(
+        "/campaigns/linden-pass/characters/trade-crane/cultivation",
+        data={
+            "expected_revision": str(reset_revision),
+            "cultivation_action": "reset_realm_ascension_stats",
+            "target_realm": "Immortal",
+        },
+        follow_redirects=False,
+    )
+    assert reset_response.status_code == 302
+
+    rebuild_html = client.get(
+        "/campaigns/linden-pass/characters/trade-crane/cultivation"
+    ).get_data(as_text=True)
+    assert "Optional HP/Stance trade" in rebuild_html
+    assert 'name="realm_ascension_trade_hp"' in rebuild_html
+    assert 'name="realm_ascension_trade_stance"' in rebuild_html
+    assert "Current max 28" in rebuild_html
+    assert "Current max 26" in rebuild_html
+
+    rebuild_revision = _character_state_revision(app, "trade-crane")
+    invalid_trade_response = client.post(
+        "/campaigns/linden-pass/characters/trade-crane/cultivation",
+        data={
+            "expected_revision": str(rebuild_revision),
+            "cultivation_action": "apply_immortal_realm_rebuild",
+            "target_realm": "Immortal",
+            "realm_rebuild_attribute_str": "6",
+            "realm_rebuild_attribute_dex": "2",
+            "realm_rebuild_attribute_con": "1",
+            "realm_rebuild_attribute_int": "0",
+            "realm_rebuild_attribute_wis": "0",
+            "realm_rebuild_attribute_cha": "0",
+            "realm_rebuild_effort_basic": "3",
+            "realm_rebuild_effort_weapon": "2",
+            "realm_rebuild_effort_guns_explosive": "0",
+            "realm_rebuild_effort_magic": "1",
+            "realm_rebuild_effort_ultimate": "0",
+            "realm_ascension_trade_hp": "5",
+            "realm_ascension_trade_stance": "0",
+        },
+        follow_redirects=True,
+    )
+    assert invalid_trade_response.status_code == 200
+    assert (
+        "HP maximum trade must be 0 or a multiple of 10."
+        in invalid_trade_response.get_data(as_text=True)
+    )
+    assert _character_state_revision(app, "trade-crane") == rebuild_revision
+
+    valid_trade_response = client.post(
+        "/campaigns/linden-pass/characters/trade-crane/cultivation",
+        data={
+            "expected_revision": str(rebuild_revision),
+            "cultivation_action": "apply_immortal_realm_rebuild",
+            "target_realm": "Immortal",
+            "realm_rebuild_attribute_str": "6",
+            "realm_rebuild_attribute_dex": "2",
+            "realm_rebuild_attribute_con": "1",
+            "realm_rebuild_attribute_int": "0",
+            "realm_rebuild_attribute_wis": "0",
+            "realm_rebuild_attribute_cha": "0",
+            "realm_rebuild_effort_basic": "3",
+            "realm_rebuild_effort_weapon": "2",
+            "realm_rebuild_effort_guns_explosive": "1",
+            "realm_rebuild_effort_magic": "1",
+            "realm_rebuild_effort_ultimate": "1",
+            "realm_ascension_trade_hp": "10",
+            "realm_ascension_trade_stance": "10",
+            "realm_ascension_rebuild_notes": "Traded durability for a wider rebuild.",
+        },
+        follow_redirects=False,
+    )
+    assert valid_trade_response.status_code == 302
+    assert valid_trade_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/trade-crane/cultivation#xianxia-cultivation-realm-ascension"
+    )
+
+    definition_payload = _read_character_definition(app, "trade-crane")
+    xianxia = definition_payload["xianxia"]
+    assert xianxia["realm"] == "Immortal"
+    assert xianxia["durability"]["hp_max"] == 18
+    assert xianxia["durability"]["stance_max"] == 16
+    assert xianxia["durability"]["defense"] == 13
+    assert xianxia["advancement_history"][-1] == {
+        "action": "realm_ascension_immortal_rebuild_applied",
+        "target": "Immortal",
+        "current_realm": "Mortal",
+        "target_realm": "Immortal",
+        "status": "applied_pending_final_confirmation",
+        "rebuild_budget": 17,
+        "stat_cap": 6,
+        "actions_per_turn": 3,
+        "attributes_after_total": 9,
+        "efforts_after_total": 8,
+        "total_rebuild_points": 17,
+        "hp_stance_trade_points": 2,
+        "base_rebuild_budget": 15,
+        "hp_maximum_trade": 10,
+        "stance_maximum_trade": 10,
+        "hp_maximum_before": 28,
+        "hp_maximum_after": 18,
+        "stance_maximum_before": 26,
+        "stance_maximum_after": 16,
+        "notes": "Traded durability for a wider rebuild.",
+    }
+
+    with app.app_context():
+        repository = app.extensions["character_repository"]
+        record = repository.get_character("linden-pass", "trade-crane")
+        assert record is not None
+        state = record.state_record.state
+    assert state["vitals"] == {"current_hp": 17, "temp_hp": 3}
+    assert state["xianxia"]["vitals"] == {
+        "current_hp": 17,
+        "temp_hp": 3,
+        "current_stance": 14,
+        "temp_stance": 2,
+    }
+    assert _character_state_revision(app, "trade-crane") == rebuild_revision + 1
+
+    updated_html = client.get(
+        "/campaigns/linden-pass/characters/trade-crane/cultivation"
+    ).get_data(as_text=True)
+    assert "17 of 17" in updated_html
+    assert "Base budget:" in updated_html
+    assert "HP/Stance trade points:" in updated_html
+    assert "HP maximum:" in updated_html
+    assert "28 to 18" in updated_html
+    assert "Stance maximum:" in updated_html
+    assert "26 to 16" in updated_html
+
+
 def test_xianxia_cultivation_route_records_divine_ascension_seclusion_time(
     app, client, sign_in, users
 ):

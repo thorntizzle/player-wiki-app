@@ -1543,6 +1543,7 @@ def present_xianxia_cultivation_context(
             ("status", "Status"),
             ("seclusion_time", "Seclusion time"),
             ("rebuild_budget", "Rebuild budget"),
+            ("base_rebuild_budget", "Base rebuild budget"),
             ("stat_cap", "Stat cap"),
             ("actions_per_turn", "Actions per turn"),
             ("attributes_before_total", "Attributes before total"),
@@ -1550,6 +1551,13 @@ def present_xianxia_cultivation_context(
             ("efforts_before_total", "Efforts before total"),
             ("efforts_after_total", "Efforts after total"),
             ("total_rebuild_points", "Total rebuild points"),
+            ("hp_stance_trade_points", "HP/Stance trade points"),
+            ("hp_maximum_trade", "HP maximum traded"),
+            ("stance_maximum_trade", "Stance maximum traded"),
+            ("hp_maximum_before", "HP maximum before"),
+            ("hp_maximum_after", "HP maximum after"),
+            ("stance_maximum_before", "Stance maximum before"),
+            ("stance_maximum_after", "Stance maximum after"),
             ("reset_scope", "Reset scope"),
             ("preserved_scope", "Preserved scope"),
             ("gm_review_note", "GM review note"),
@@ -12129,6 +12137,11 @@ def create_app() -> Flask:
                             key: request.form.get(f"realm_rebuild_effort_{key}", "")
                             for key in XIANXIA_EFFORT_KEYS
                         },
+                        hp_maximum_trade=request.form.get("realm_ascension_trade_hp", ""),
+                        stance_maximum_trade=request.form.get(
+                            "realm_ascension_trade_stance",
+                            "",
+                        ),
                         notes=request.form.get("realm_ascension_rebuild_notes", ""),
                     )
                     definition = rebuild_result.definition
@@ -12150,6 +12163,11 @@ def create_app() -> Flask:
                             key: request.form.get(f"realm_rebuild_effort_{key}", "")
                             for key in XIANXIA_EFFORT_KEYS
                         },
+                        hp_maximum_trade=request.form.get("realm_ascension_trade_hp", ""),
+                        stance_maximum_trade=request.form.get(
+                            "realm_ascension_trade_stance",
+                            "",
+                        ),
                         notes=request.form.get("realm_ascension_rebuild_notes", ""),
                     )
                     definition = rebuild_result.definition

@@ -707,6 +707,11 @@
           max {{ ascension.target.stat_cap }} in any one Stat; Actions become
           {{ ascension.target.actions_per_turn }}.
         </p>
+        {% set trade = ascension.hp_stance_trade %}
+        <p class="meta">
+          Optional HP/Stance trade: every {{ trade.unit }} maximum HP or Stance traded adds
+          1 rebuild point.
+        </p>
         <form
           class="stack-form"
           method="post"
@@ -753,6 +758,38 @@
               </div>
             </div>
           </div>
+          <div class="detail-grid">
+            <div>
+              <label>
+                HP maximum traded
+                <input
+                  type="number"
+                  min="0"
+                  max="{{ trade.hp_maximum_trade }}"
+                  step="{{ trade.unit }}"
+                  name="realm_ascension_trade_hp"
+                  value="0"
+                  {% if not trade.hp_maximum_trade %}disabled{% endif %}
+                >
+              </label>
+              <p class="meta">Current max {{ trade.hp_max }}</p>
+            </div>
+            <div>
+              <label>
+                Stance maximum traded
+                <input
+                  type="number"
+                  min="0"
+                  max="{{ trade.stance_maximum_trade }}"
+                  step="{{ trade.unit }}"
+                  name="realm_ascension_trade_stance"
+                  value="0"
+                  {% if not trade.stance_maximum_trade %}disabled{% endif %}
+                >
+              </label>
+              <p class="meta">Current max {{ trade.stance_max }}</p>
+            </div>
+          </div>
           <label>
             Rebuild notes
             <textarea name="realm_ascension_rebuild_notes" rows="2"></textarea>
@@ -770,6 +807,16 @@
           <li><strong>Target:</strong> {{ ascension.latest_rebuild.target_realm }}</li>
           <li><strong>Status:</strong> {{ ascension.latest_rebuild.status | replace('_', ' ') }}</li>
           <li><strong>Budget:</strong> {{ ascension.latest_rebuild.total_rebuild_points }} of {{ ascension.latest_rebuild.rebuild_budget }}</li>
+          {% if ascension.latest_rebuild.hp_stance_trade_points %}
+            <li><strong>Base budget:</strong> {{ ascension.latest_rebuild.base_rebuild_budget }}</li>
+            <li><strong>HP/Stance trade points:</strong> {{ ascension.latest_rebuild.hp_stance_trade_points }}</li>
+            {% if ascension.latest_rebuild.hp_maximum_trade %}
+              <li><strong>HP maximum:</strong> {{ ascension.latest_rebuild.hp_maximum_before }} to {{ ascension.latest_rebuild.hp_maximum_after }}</li>
+            {% endif %}
+            {% if ascension.latest_rebuild.stance_maximum_trade %}
+              <li><strong>Stance maximum:</strong> {{ ascension.latest_rebuild.stance_maximum_before }} to {{ ascension.latest_rebuild.stance_maximum_after }}</li>
+            {% endif %}
+          {% endif %}
           <li><strong>Stat cap:</strong> {{ ascension.latest_rebuild.stat_cap }}</li>
           <li><strong>Actions:</strong> {{ ascension.latest_rebuild.actions_per_turn }}</li>
           <li><strong>Attributes:</strong> {{ ascension.latest_rebuild.attributes_after_total }}</li>

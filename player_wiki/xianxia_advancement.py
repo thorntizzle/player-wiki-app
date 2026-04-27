@@ -72,6 +72,7 @@ XIANXIA_REALM_ASCENSION_REBUILD_ACTIONS = {
     "Immortal": "realm_ascension_immortal_rebuild_applied",
     "Divine": "realm_ascension_divine_rebuild_applied",
 }
+XIANXIA_REALM_ASCENSION_TRADE_UNIT = 10
 
 
 @dataclass(frozen=True)
@@ -111,6 +112,13 @@ class XianxiaRealmAscensionImmortalRebuildResult:
     effort_total: int
     total_rebuild_points: int
     notes: str = ""
+    hp_maximum_trade: int = 0
+    stance_maximum_trade: int = 0
+    hp_stance_trade_points: int = 0
+    hp_maximum_before: int = 0
+    hp_maximum_after: int = 0
+    stance_maximum_before: int = 0
+    stance_maximum_after: int = 0
 
 
 @dataclass(frozen=True)
@@ -205,6 +213,7 @@ def build_xianxia_realm_ascension_context(xianxia: dict[str, Any]) -> dict[str, 
         XIANXIA_EFFORT_KEYS,
         XIANXIA_EFFORT_LABELS,
     )
+    durability = _durability_maxima(payload.get("durability"))
     stat_prerequisite = _realm_ascension_stat_prerequisite(
         current_realm=current_realm,
         target=target,
@@ -224,6 +233,7 @@ def build_xianxia_realm_ascension_context(xianxia: dict[str, Any]) -> dict[str, 
         "latest_rebuild": latest_rebuild,
         "latest_immortal_rebuild": latest_immortal_rebuild,
         "latest_divine_rebuild": latest_divine_rebuild,
+        "hp_stance_trade": _realm_ascension_trade_context(durability),
     }
     context["can_reset_stats"] = _can_reset_realm_ascension_stats(
         latest_review=latest_review,
@@ -440,6 +450,8 @@ def apply_xianxia_immortal_realm_rebuild_definition(
     target_realm: str,
     attribute_scores: dict[str, Any],
     effort_scores: dict[str, Any],
+    hp_maximum_trade: Any = 0,
+    stance_maximum_trade: Any = 0,
     notes: str = "",
 ) -> XianxiaRealmAscensionImmortalRebuildResult:
     return _apply_xianxia_realm_rebuild_definition(
@@ -447,6 +459,8 @@ def apply_xianxia_immortal_realm_rebuild_definition(
         target_realm=target_realm,
         attribute_scores=attribute_scores,
         effort_scores=effort_scores,
+        hp_maximum_trade=hp_maximum_trade,
+        stance_maximum_trade=stance_maximum_trade,
         notes=notes,
         expected_current_realm="Mortal",
         expected_target_realm="Immortal",
@@ -459,6 +473,8 @@ def apply_xianxia_divine_realm_rebuild_definition(
     target_realm: str,
     attribute_scores: dict[str, Any],
     effort_scores: dict[str, Any],
+    hp_maximum_trade: Any = 0,
+    stance_maximum_trade: Any = 0,
     notes: str = "",
 ) -> XianxiaRealmAscensionImmortalRebuildResult:
     return _apply_xianxia_realm_rebuild_definition(
@@ -466,6 +482,8 @@ def apply_xianxia_divine_realm_rebuild_definition(
         target_realm=target_realm,
         attribute_scores=attribute_scores,
         effort_scores=effort_scores,
+        hp_maximum_trade=hp_maximum_trade,
+        stance_maximum_trade=stance_maximum_trade,
         notes=notes,
         expected_current_realm="Immortal",
         expected_target_realm="Divine",
@@ -478,6 +496,8 @@ def _apply_xianxia_realm_rebuild_definition(
     target_realm: str,
     attribute_scores: dict[str, Any],
     effort_scores: dict[str, Any],
+    hp_maximum_trade: Any = 0,
+    stance_maximum_trade: Any = 0,
     notes: str = "",
     expected_current_realm: str,
     expected_target_realm: str,
@@ -540,6 +560,16 @@ def _apply_xianxia_realm_rebuild_definition(
 
     rebuild_budget = int(target["rebuild_budget"])
     stat_cap = int(target["stat_cap"])
+    durability = _durability_maxima(xianxia.get("durability"))
+    (
+        trade,
+        trade_errors,
+    ) = _validate_realm_ascension_hp_stance_trade(
+        hp_maximum_trade=hp_maximum_trade,
+        stance_maximum_trade=stance_maximum_trade,
+        hp_maximum_before=durability["hp_max"],
+        stance_maximum_before=durability["stance_max"],
+    )
     attributes, attribute_total, attribute_errors = _validate_realm_rebuild_scores(
         attribute_scores,
         keys=XIANXIA_ATTRIBUTE_KEYS,
@@ -555,15 +585,25 @@ def _apply_xianxia_realm_rebuild_definition(
         rebuild_label=expected_target_realm,
     )
     total_rebuild_points = attribute_total + effort_total
-    errors = attribute_errors + effort_errors
-    if total_rebuild_points != rebuild_budget:
+    trade_bonus_points = int(trade["hp_stance_trade_points"])
+    required_rebuild_points = rebuild_budget + trade_bonus_points
+    errors = trade_errors + attribute_errors + effort_errors
+    if total_rebuild_points != required_rebuild_points:
         errors.append(
-            f"{expected_target_realm} rebuild must spend exactly {rebuild_budget} Attribute/Effort "
+            f"{expected_target_realm} rebuild must spend exactly {required_rebuild_points} Attribute/Effort "
             f"points; submitted {total_rebuild_points}."
         )
     if errors:
         raise ValueError("; ".join(errors))
 
+    durability_payload = (
+        dict(xianxia.get("durability") or {}) if isinstance(xianxia.get("durability"), dict) else {}
+    )
+    hp_maximum_after = int(trade["hp_maximum_after"])
+    stance_maximum_after = int(trade["stance_maximum_after"])
+    durability_payload["hp_max"] = hp_maximum_after
+    durability_payload["stance_max"] = stance_maximum_after
+    xianxia["durability"] = durability_payload
     xianxia["realm"] = expected_target_realm
     xianxia["actions_per_turn"] = int(target["actions_per_turn"])
     xianxia["attributes"] = attributes
@@ -576,13 +616,26 @@ def _apply_xianxia_realm_rebuild_definition(
         "current_realm": current_realm,
         "target_realm": expected_target_realm,
         "status": "applied_pending_final_confirmation",
-        "rebuild_budget": rebuild_budget,
+        "rebuild_budget": required_rebuild_points,
         "stat_cap": stat_cap,
         "actions_per_turn": int(target["actions_per_turn"]),
         "attributes_after_total": attribute_total,
         "efforts_after_total": effort_total,
         "total_rebuild_points": total_rebuild_points,
     }
+    if trade_bonus_points:
+        event.update(
+            {
+                "hp_stance_trade_points": trade_bonus_points,
+                "base_rebuild_budget": rebuild_budget,
+                "hp_maximum_trade": int(trade["hp_maximum_trade"]),
+                "stance_maximum_trade": int(trade["stance_maximum_trade"]),
+                "hp_maximum_before": int(trade["hp_maximum_before"]),
+                "hp_maximum_after": hp_maximum_after,
+                "stance_maximum_before": int(trade["stance_maximum_before"]),
+                "stance_maximum_after": stance_maximum_after,
+            }
+        )
     if clean_notes:
         event["notes"] = clean_notes
     history.append(event)
@@ -593,13 +646,20 @@ def _apply_xianxia_realm_rebuild_definition(
         definition=definition.__class__.from_dict(payload),
         current_realm=current_realm,
         target_realm=expected_target_realm,
-        rebuild_budget=rebuild_budget,
+        rebuild_budget=required_rebuild_points,
         stat_cap=stat_cap,
         actions_per_turn=int(target["actions_per_turn"]),
         attribute_total=attribute_total,
         effort_total=effort_total,
         total_rebuild_points=total_rebuild_points,
         notes=clean_notes,
+        hp_maximum_trade=int(trade["hp_maximum_trade"]),
+        stance_maximum_trade=int(trade["stance_maximum_trade"]),
+        hp_stance_trade_points=trade_bonus_points,
+        hp_maximum_before=int(trade["hp_maximum_before"]),
+        hp_maximum_after=hp_maximum_after,
+        stance_maximum_before=int(trade["stance_maximum_before"]),
+        stance_maximum_after=stance_maximum_after,
     )
 
 
@@ -1829,6 +1889,10 @@ def _latest_realm_ascension_rebuild(
             "target_realm": record_target,
             "status": str(record.get("status") or "").strip(),
             "rebuild_budget": _non_negative_int(record.get("rebuild_budget"), default=0),
+            "base_rebuild_budget": _non_negative_int(
+                record.get("base_rebuild_budget"),
+                default=_non_negative_int(record.get("rebuild_budget"), default=0),
+            ),
             "stat_cap": _non_negative_int(record.get("stat_cap"), default=0),
             "actions_per_turn": _non_negative_int(record.get("actions_per_turn"), default=0),
             "attributes_after_total": _non_negative_int(
@@ -1841,6 +1905,34 @@ def _latest_realm_ascension_rebuild(
             ),
             "total_rebuild_points": _non_negative_int(
                 record.get("total_rebuild_points"),
+                default=0,
+            ),
+            "hp_stance_trade_points": _non_negative_int(
+                record.get("hp_stance_trade_points"),
+                default=0,
+            ),
+            "hp_maximum_trade": _non_negative_int(
+                record.get("hp_maximum_trade"),
+                default=0,
+            ),
+            "stance_maximum_trade": _non_negative_int(
+                record.get("stance_maximum_trade"),
+                default=0,
+            ),
+            "hp_maximum_before": _non_negative_int(
+                record.get("hp_maximum_before"),
+                default=0,
+            ),
+            "hp_maximum_after": _non_negative_int(
+                record.get("hp_maximum_after"),
+                default=0,
+            ),
+            "stance_maximum_before": _non_negative_int(
+                record.get("stance_maximum_before"),
+                default=0,
+            ),
+            "stance_maximum_after": _non_negative_int(
+                record.get("stance_maximum_after"),
                 default=0,
             ),
             "notes": str(record.get("notes") or "").strip(),
@@ -2050,6 +2142,94 @@ def _validate_realm_rebuild_scores(
             errors.append(f"{label} cannot exceed {stat_cap} for the {rebuild_label} rebuild.")
         scores[key] = score
     return scores, sum(scores.values()), errors
+
+
+def _validate_realm_ascension_hp_stance_trade(
+    *,
+    hp_maximum_trade: Any,
+    stance_maximum_trade: Any,
+    hp_maximum_before: int,
+    stance_maximum_before: int,
+) -> tuple[dict[str, int], list[str]]:
+    errors: list[str] = []
+    hp_trade = _validate_realm_trade_amount(
+        hp_maximum_trade,
+        label="HP maximum trade",
+        current_maximum=hp_maximum_before,
+        errors=errors,
+    )
+    stance_trade = _validate_realm_trade_amount(
+        stance_maximum_trade,
+        label="Stance maximum trade",
+        current_maximum=stance_maximum_before,
+        errors=errors,
+    )
+    trade_points = (hp_trade + stance_trade) // XIANXIA_REALM_ASCENSION_TRADE_UNIT
+    return (
+        {
+            "hp_maximum_trade": hp_trade,
+            "stance_maximum_trade": stance_trade,
+            "hp_stance_trade_points": trade_points,
+            "hp_maximum_before": hp_maximum_before,
+            "hp_maximum_after": max(0, hp_maximum_before - hp_trade),
+            "stance_maximum_before": stance_maximum_before,
+            "stance_maximum_after": max(0, stance_maximum_before - stance_trade),
+        },
+        errors,
+    )
+
+
+def _validate_realm_trade_amount(
+    value: Any,
+    *,
+    label: str,
+    current_maximum: int,
+    errors: list[str],
+) -> int:
+    if value is None or str(value).strip() == "":
+        return 0
+    try:
+        amount = int(str(value).strip())
+    except ValueError:
+        errors.append(f"{label} must be a whole number.")
+        return 0
+    if amount < 0:
+        errors.append(f"{label} cannot be negative.")
+        return 0
+    if amount % XIANXIA_REALM_ASCENSION_TRADE_UNIT != 0:
+        errors.append(
+            f"{label} must be 0 or a multiple of {XIANXIA_REALM_ASCENSION_TRADE_UNIT}."
+        )
+    if amount > current_maximum:
+        errors.append(f"{label} cannot exceed the current maximum of {current_maximum}.")
+    return amount
+
+
+def _durability_maxima(value: Any) -> dict[str, int]:
+    durability = dict(value or {}) if isinstance(value, dict) else {}
+    return {
+        "hp_max": _non_negative_int(durability.get("hp_max"), default=10),
+        "stance_max": _non_negative_int(durability.get("stance_max"), default=10),
+    }
+
+
+def _realm_ascension_trade_context(durability: dict[str, int]) -> dict[str, int | bool]:
+    hp_max = _non_negative_int(durability.get("hp_max"), default=0)
+    stance_max = _non_negative_int(durability.get("stance_max"), default=0)
+    hp_maximum_trade = (
+        hp_max // XIANXIA_REALM_ASCENSION_TRADE_UNIT
+    ) * XIANXIA_REALM_ASCENSION_TRADE_UNIT
+    stance_maximum_trade = (
+        stance_max // XIANXIA_REALM_ASCENSION_TRADE_UNIT
+    ) * XIANXIA_REALM_ASCENSION_TRADE_UNIT
+    return {
+        "unit": XIANXIA_REALM_ASCENSION_TRADE_UNIT,
+        "available": hp_maximum_trade > 0 or stance_maximum_trade > 0,
+        "hp_max": hp_max,
+        "stance_max": stance_max,
+        "hp_maximum_trade": hp_maximum_trade,
+        "stance_maximum_trade": stance_maximum_trade,
+    }
 
 
 def _stat_rows(
