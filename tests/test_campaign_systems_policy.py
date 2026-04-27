@@ -1673,6 +1673,169 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
     assert dnd_entry.status_code == 404
 
 
+def test_xianxia_systems_browser_routes_cover_dm_browse_search_and_access(
+    app, client, sign_in, users
+):
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = "xianxia"
+    payload["systems_library"] = "xianxia"
+    payload["systems_sources"] = [
+        {
+            "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+            "enabled": True,
+        }
+    ]
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        app.extensions["systems_service"].ensure_builtin_library_seeded(XIANXIA_SYSTEM_CODE)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    systems_index = client.get("/campaigns/linden-pass/systems")
+    title_search = client.get("/campaigns/linden-pass/systems/search?q=Qi+Blast")
+    rules_search = client.get("/campaigns/linden-pass/systems/search?reference_q=dao")
+    source = client.get(f"/campaigns/linden-pass/systems/sources/{XIANXIA_HOMEBREW_SOURCE_ID}")
+    source_rules_search = client.get(
+        f"/campaigns/linden-pass/systems/sources/{XIANXIA_HOMEBREW_SOURCE_ID}"
+        "?reference_q=dao"
+    )
+    martial_art_category = client.get(
+        f"/campaigns/linden-pass/systems/sources/{XIANXIA_HOMEBREW_SOURCE_ID}/types/martial_art"
+    )
+    filtered_generic_category = client.get(
+        f"/campaigns/linden-pass/systems/sources/{XIANXIA_HOMEBREW_SOURCE_ID}"
+        "/types/generic_technique?q=Qi+Blast"
+    )
+    entry = client.get("/campaigns/linden-pass/systems/entries/qi-blast")
+
+    assert systems_index.status_code == 200
+    index_html = systems_index.get_data(as_text=True)
+    assert "Xianxia Homebrew" in index_html
+    assert f"/campaigns/linden-pass/systems/sources/{XIANXIA_HOMEBREW_SOURCE_ID}" in index_html
+
+    assert title_search.status_code == 200
+    title_search_html = title_search.get_data(as_text=True)
+    assert 'href="/campaigns/linden-pass/systems/entries/qi-blast"' in title_search_html
+    assert "Generic Technique" in title_search_html
+
+    assert rules_search.status_code == 200
+    rules_search_html = rules_search.get_data(as_text=True)
+    assert 'href="/campaigns/linden-pass/systems/entries/dao"' in rules_search_html
+
+    assert source.status_code == 200
+    source_html = source.get_data(as_text=True)
+    assert "Choose a Xianxia content category" in source_html
+    assert "Martial Arts" in source_html
+    assert "Generic Techniques" in source_html
+    assert "Basic Actions" in source_html
+
+    assert source_rules_search.status_code == 200
+    source_rules_search_html = source_rules_search.get_data(as_text=True)
+    assert 'href="/campaigns/linden-pass/systems/entries/dao"' in source_rules_search_html
+
+    assert martial_art_category.status_code == 200
+    martial_art_html = martial_art_category.get_data(as_text=True)
+    assert 'href="/campaigns/linden-pass/systems/entries/demons-fist"' in martial_art_html
+    assert "Showing all 30 martial arts in this source." in martial_art_html
+
+    assert filtered_generic_category.status_code == 200
+    filtered_generic_html = filtered_generic_category.get_data(as_text=True)
+    assert 'href="/campaigns/linden-pass/systems/entries/qi-blast"' in filtered_generic_html
+    assert "Enhanced Flowing Dao" not in filtered_generic_html
+
+    assert entry.status_code == 200
+    entry_html = entry.get_data(as_text=True)
+    assert "Qi Blast" in entry_html
+    assert "Technique Details" in entry_html
+    assert "reference only" in entry_html
+
+
+def test_xianxia_systems_player_routes_filter_dm_only_entry_after_source_is_enabled(
+    app, client, sign_in, users
+):
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = "xianxia"
+    payload["systems_library"] = "xianxia"
+    payload["systems_sources"] = [
+        {
+            "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+            "enabled": True,
+            "visibility": VISIBILITY_PLAYERS,
+        }
+    ]
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        service.ensure_builtin_library_seeded(XIANXIA_SYSTEM_CODE)
+        app.extensions["auth_store"].upsert_campaign_visibility_setting(
+            "linden-pass",
+            "systems",
+            visibility=VISIBILITY_PLAYERS,
+            updated_by_user_id=users["dm"]["id"],
+        )
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug=XIANXIA_SYSTEM_CODE,
+            source_id=XIANXIA_HOMEBREW_SOURCE_ID,
+            is_enabled=True,
+            default_visibility=VISIBILITY_PLAYERS,
+        )
+        qi_blast = service.get_entry_by_slug_for_campaign("linden-pass", "qi-blast")
+        assert qi_blast is not None
+        store.upsert_campaign_entry_override(
+            "linden-pass",
+            library_slug=XIANXIA_SYSTEM_CODE,
+            entry_key=qi_blast.entry_key,
+            visibility_override=VISIBILITY_DM,
+            is_enabled_override=None,
+        )
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    systems_index = client.get("/campaigns/linden-pass/systems")
+    source = client.get(f"/campaigns/linden-pass/systems/sources/{XIANXIA_HOMEBREW_SOURCE_ID}")
+    title_search = client.get("/campaigns/linden-pass/systems/search?q=Qi+Blast")
+    generic_category = client.get(
+        f"/campaigns/linden-pass/systems/sources/{XIANXIA_HOMEBREW_SOURCE_ID}"
+        "/types/generic_technique?q=Qi+Blast"
+    )
+    hidden_entry = client.get("/campaigns/linden-pass/systems/entries/qi-blast")
+    visible_entry = client.get("/campaigns/linden-pass/systems/entries/dao")
+
+    assert systems_index.status_code == 200
+    assert "Xianxia Homebrew" in systems_index.get_data(as_text=True)
+
+    assert source.status_code == 200
+    source_html = source.get_data(as_text=True)
+    assert "Generic Techniques" in source_html
+    assert 'href="/campaigns/linden-pass/systems/entries/qi-blast"' not in source_html
+
+    assert title_search.status_code == 200
+    title_search_html = title_search.get_data(as_text=True)
+    assert 'href="/campaigns/linden-pass/systems/entries/qi-blast"' not in title_search_html
+    assert "No imported systems entries matched that search yet." in title_search_html
+
+    assert generic_category.status_code == 200
+    generic_category_html = generic_category.get_data(as_text=True)
+    assert 'href="/campaigns/linden-pass/systems/entries/qi-blast"' not in generic_category_html
+    assert "No generic techniques matched that title/type search." in generic_category_html
+
+    assert hidden_entry.status_code == 404
+    assert visible_entry.status_code == 200
+    assert "Dao is a capped narrative and combat resource" in visible_entry.get_data(as_text=True)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    dm_entry = client.get("/campaigns/linden-pass/systems/entries/qi-blast")
+
+    assert dm_entry.status_code == 200
+    assert "Qi Blast" in dm_entry.get_data(as_text=True)
+
+
 def test_xianxia_martial_art_parent_entry_renders_rank_info_and_ability_ref_links(
     app, client, sign_in, users
 ):
