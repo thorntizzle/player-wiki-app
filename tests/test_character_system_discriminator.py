@@ -263,6 +263,41 @@ def test_xianxia_definition_normalizes_dao_immolating_use_approval_fields():
     assert dao_immolating["use_history"][1]["status"] == "Denied"
 
 
+def test_xianxia_definition_normalizes_optional_prepared_dao_immolating_notes():
+    definition = CharacterDefinition.from_dict(
+        _minimal_definition_payload(
+            system=XIANXIA_SYSTEM_CODE,
+            xianxia={
+                "dao_immolating_techniques": {
+                    "prepared": [
+                        "Ashen Bell",
+                        {
+                            "title": "Star-Severing Promise",
+                            "prepared_notes": "  Prepared for later GM approval.  ",
+                            "approval_required": False,
+                        },
+                        {"notes": "A nameless one-use vow to finish at the table."},
+                    ],
+                    "use_history": [],
+                }
+            },
+        )
+    )
+
+    prepared_records = definition.to_dict()["xianxia"]["dao_immolating_techniques"]["prepared"]
+
+    assert prepared_records == [
+        {"name": "Ashen Bell"},
+        {
+            "name": "Star-Severing Promise",
+            "approval_required": False,
+            "notes": "Prepared for later GM approval.",
+        },
+        {"notes": "A nameless one-use vow to finish at the table."},
+    ]
+    assert "approval_status" not in prepared_records[1]
+
+
 def test_xianxia_definition_accepts_requirements_sketch_top_level_aliases():
     definition = CharacterDefinition.from_dict(
         _minimal_definition_payload(

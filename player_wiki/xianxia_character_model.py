@@ -1025,11 +1025,70 @@ def _normalize_dao_immolating_records(
     if not isinstance(raw_records, dict):
         raw_records = {}
     return {
-        "prepared": _normalize_record_list(raw_records.get("prepared")),
+        "prepared": _normalize_dao_immolating_prepared_records(raw_records.get("prepared")),
         "use_history": _normalize_dao_immolating_use_records(
             raw_records.get("use_history") if "use_history" in raw_records else raw_records.get("history")
         ),
     }
+
+
+def _normalize_dao_immolating_prepared_records(values: Any) -> list[dict[str, Any]]:
+    records = _normalize_record_list(values)
+    normalized_records: list[dict[str, Any]] = []
+    for record in records:
+        normalized = _normalize_dao_immolating_prepared_record(record)
+        if normalized:
+            normalized_records.append(normalized)
+    return normalized_records
+
+
+def _normalize_dao_immolating_prepared_record(record: dict[str, Any]) -> dict[str, Any]:
+    normalized = deepcopy(record)
+
+    raw_name = _first_present(
+        normalized,
+        key="name",
+    )
+    if raw_name is None:
+        raw_name = _first_present(normalized, key="title")
+    if raw_name is None:
+        raw_name = _first_present(normalized, key="label")
+    if raw_name is None:
+        raw_name = _first_present(normalized, key="technique_name")
+    name = _normalize_text(raw_name)
+    for alias in ("title", "label", "technique_name"):
+        normalized.pop(alias, None)
+    if name:
+        normalized["name"] = name
+    else:
+        normalized.pop("name", None)
+
+    raw_notes = _first_present(normalized, key="notes")
+    if raw_notes is None:
+        raw_notes = _first_present(normalized, key="prepared_notes")
+    if raw_notes is None:
+        raw_notes = _first_present(normalized, key="preparation_notes")
+    if raw_notes is None:
+        raw_notes = _first_present(normalized, key="description")
+    if raw_notes is None:
+        raw_notes = _first_present(normalized, key="description_markdown")
+    if raw_notes is None:
+        raw_notes = _first_present(normalized, key="text")
+    notes = _normalize_text(raw_notes)
+    for alias in (
+        "prepared_notes",
+        "preparation_notes",
+        "description",
+        "description_markdown",
+        "text",
+    ):
+        normalized.pop(alias, None)
+    if notes:
+        normalized["notes"] = notes
+    else:
+        normalized.pop("notes", None)
+
+    return normalized
 
 
 def _normalize_dao_immolating_use_records(values: Any) -> list[dict[str, Any]]:

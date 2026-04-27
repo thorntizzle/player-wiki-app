@@ -631,7 +631,7 @@ def test_xianxia_read_sheet_renders_all_first_pass_subpages_and_systems_links(
         {
             "name": "Star-Severing Promise",
             "status": "pending",
-            "notes": "Prepared for later GM approval.",
+            "prepared_notes": "Prepared for later GM approval.",
         }
     ]
     _write_raw_xianxia_character_definition(app, "rendering-link-crane", payload)
@@ -686,6 +686,7 @@ def test_xianxia_read_sheet_renders_all_first_pass_subpages_and_systems_links(
             "/campaigns/linden-pass/systems/entries/throat-jab",
             "Prepared Dao Immolating Techniques",
             "Star-Severing Promise",
+            "Prepared for later GM approval.",
         ],
         "resources": [
             "Resources",
