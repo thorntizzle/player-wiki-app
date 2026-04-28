@@ -5568,6 +5568,9 @@ def test_character_sheet_subpages_show_requested_sections(app, client, sign_in, 
     assert "?page=personal" in html
     assert "?page=notes" in html
     assert "Features and traits" in html
+    assert '<section class="feature-group">' in html
+    assert '<article class="feature-row">' in html
+    assert "feature-row__header" in html
     assert "At a glance" not in html
     assert "Inventory and currency" not in html
     assert "Keep an eye on the harbor." not in html

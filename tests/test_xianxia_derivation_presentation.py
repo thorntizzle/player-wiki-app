@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 from html import unescape
 
 import pytest
@@ -266,20 +267,22 @@ def test_xianxia_read_presenter_context_collects_first_pass_sheet_facts(
     assert first_rank["href"] == (
         "/campaigns/linden-pass/systems/entries/demons-fist#xianxia-demons-fist-initiate"
     )
-    assert first_rank["abilities"][0] == {
-        "name": "Qi Fist Technique",
-        "href": (
-            "/campaigns/linden-pass/systems/entries/demons-fist"
-            "#xianxia-demons-fist-initiate-qi-fist-technique"
-        ),
-        "ref": "xianxia:demons-fist:initiate:qi-fist-technique",
-        "kind": "Technique",
-        "support_label": "Reference only",
-        "text": (
-            "Costs: qi 1; Ranges: self; "
-            "Damage/Effort: weapon effort damage; Duration: rest of combat"
-        ),
-    }
+    first_ability = first_rank["abilities"][0]
+    assert first_ability["name"] == "Qi Fist Technique"
+    assert (
+        first_ability["href"]
+        == "/campaigns/linden-pass/systems/entries/demons-fist"
+           "#xianxia-demons-fist-initiate-qi-fist-technique"
+    )
+    assert first_ability["ref"] == "xianxia:demons-fist:initiate:qi-fist-technique"
+    assert first_ability["source_ref"] == first_ability["ref"]
+    assert first_ability["kind"] == "Technique"
+    assert first_ability["support_label"] == "Reference only"
+    assert first_ability["rank_label"] == "Initiate"
+    assert first_ability["resource_cost_text"] == "qi 1"
+    assert first_ability["range_text"] == "self"
+    assert first_ability["damage_effort_text"] == "weapon effort damage"
+    assert first_ability["duration_text"] == "rest of combat"
     assert first_art["rank_progress"]["summary"] == "Rank progress: 1 / 5 ranks learned."
     assert [
         (rank["label"], rank["status_label"])
@@ -911,12 +914,23 @@ def test_xianxia_read_sheet_uses_system_specific_subpages(
     assert "Martial Arts" in martial_arts_html
     assert "Demon's Fist" in martial_arts_html
     assert "Current rank: Initiate" in martial_arts_html
+    assert "Source:" in martial_arts_html
+    assert "Current rank key:" in martial_arts_html
     assert "/campaigns/linden-pass/systems/entries/demons-fist#xianxia-demons-fist-initiate" in martial_arts_html
+    assert "<summary>" in martial_arts_html
+    assert "Learned ranks" in martial_arts_html
     assert "Qi Fist Technique" in martial_arts_html
-    assert "Costs: qi 1" in martial_arts_html
-    assert "Ranges: self" in martial_arts_html
-    assert "Damage/Effort: weapon effort damage" in martial_arts_html
-    assert "Duration: rest of combat" in martial_arts_html
+    assert "Rank: Initiate" in martial_arts_html
+    assert "Kind: Technique" in martial_arts_html
+    assert "Support: Reference only" in martial_arts_html
+    assert re.search(
+        r"<strong>Source/ref:</strong>\s*xianxia:demons-fist:initiate:qi-fist-technique",
+        martial_arts_html,
+    )
+    assert "Costs:" in martial_arts_html
+    assert "Range:" in martial_arts_html
+    assert "Damage/Effort:" in martial_arts_html
+    assert "Duration:" in martial_arts_html
     assert (
         "/campaigns/linden-pass/systems/entries/demons-fist"
         "#xianxia-demons-fist-initiate-qi-fist-technique"
@@ -1216,6 +1230,13 @@ def test_xianxia_session_character_uses_read_sheet_subpage_chrome(
     assert ">Abilities and Skills<" not in html
     assert "Demon's Fist" in html
     assert "Current rank: Initiate" in html
+    assert "Rank: Initiate" in html
+    assert "Qi Fist Technique" in html
+    assert "Learned ranks" in html
+    assert re.search(
+        r"<strong>Source/ref:</strong>\s*xianxia:demons-fist:initiate:qi-fist-technique",
+        html,
+    )
     assert "/campaigns/linden-pass/characters/session-crane?page=martial_arts" in html
 
     legacy_response = client.get(

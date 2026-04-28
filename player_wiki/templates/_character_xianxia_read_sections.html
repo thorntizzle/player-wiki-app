@@ -20,10 +20,13 @@
                     {% endif %}
                   </h3>
                   <p class="meta">
-                    {% if art.current_rank %}Current rank: {{ art.current_rank }}{% else %}Rank not recorded{% endif %}
+                    {% if art.systems_slug %}Source: {{ art.systems_slug }}{% endif %}
+                    {% if art.systems_source_id %} ({{ art.systems_source_id }}){% endif %}
+                    {% if art.current_rank %} | Current rank: {{ art.current_rank }}{% else %} | Rank not recorded{% endif %}
+                    {% if art.current_rank_key %} | Current rank key: {{ art.current_rank_key }}{% endif %}
+                    {% if art.rank_records_status %} | {{ art.rank_records_status | replace('_', ' ') }}{% endif %}
                     {% if art.starting_package %} | Starting package{% endif %}
                     {% if art.custom %} | Custom Martial Art{% endif %}
-                    {% if art.rank_records_status %} | {{ art.rank_records_status | replace('_', ' ') }}{% endif %}
                   </p>
                 </div>
                 {% if art.body_html %}
@@ -63,47 +66,80 @@
                 {% endif %}
                 {% if art.learned_rank_refs %}
                   <div class="detail-cluster">
-                    <div>
-                      <h4>Learned ranks</h4>
-                      <div class="skill-grid">
-                        {% for rank in art.learned_rank_refs %}
-                          <div class="skill-pill skill-pill--proficient">
-                            {% if rank.href %}
-                              <a href="{{ rank.href }}">{{ rank.label }}</a>
-                            {% else %}
-                              <span>{{ rank.label }}</span>
-                            {% endif %}
+                    <details class="detail-card">
+                      <summary>Learned rank abilities</summary>
+                      <div class="feature-stack">
+                        <div class="detail-cluster">
+                          <p><strong>Learned ranks</strong></p>
+                          <div class="skill-grid">
+                            {% for rank in art.learned_rank_refs %}
+                              <div class="skill-pill{% if not rank.is_incomplete %} skill-pill--proficient{% endif %}">
+                                {% if rank.href %}
+                                  <a href="{{ rank.href }}">{{ rank.label }}</a>
+                                {% else %}
+                                  <span>{{ rank.label }}</span>
+                                {% endif %}
+                                <span class="meta">{{ rank.status_label }}</span>
+                              </div>
+                            {% endfor %}
                           </div>
+                        </div>
+                        {% for rank in art.learned_rank_refs %}
+                          {% if rank.abilities %}
+                            <div class="detail-cluster">
+                              <p><strong>{{ rank.label }} abilities</strong></p>
+                              {% for ability in rank.abilities %}
+                                <details class="feature-detail">
+                                  <summary>
+                                    <div class="feature-row__header">
+                                      <h4>
+                                        {% if ability.href %}
+                                          <a href="{{ ability.href }}">{{ ability.name }}</a>
+                                        {% else %}
+                                          {{ ability.name }}
+                                        {% endif %}
+                                      </h4>
+                                      <p class="meta">
+                                        {% if ability.rank_label %}Rank: {{ ability.rank_label }}{% endif %}
+                                        {% if ability.kind %} | Kind: {{ ability.kind }}{% endif %}
+                                        {% if ability.support_label %} | Support: {{ ability.support_label }}{% endif %}
+                                      </p>
+                                    </div>
+                                  </summary>
+                                  <article>
+                                    {% if ability.source_ref %}
+                                      <p class="meta">
+                                        <strong>Source/ref:</strong> {{ ability.source_ref }}
+                                      </p>
+                                    {% endif %}
+                                    {% if ability.resource_cost_text %}
+                                      <p class="meta"><strong>Costs:</strong> {{ ability.resource_cost_text }}</p>
+                                    {% endif %}
+                                    {% if ability.range_text %}
+                                      <p class="meta"><strong>Range:</strong> {{ ability.range_text }}</p>
+                                    {% endif %}
+                                    {% if ability.damage_effort_text %}
+                                      <p class="meta"><strong>Damage/Effort:</strong> {{ ability.damage_effort_text }}</p>
+                                    {% endif %}
+                                    {% if ability.duration_text %}
+                                      <p class="meta"><strong>Duration:</strong> {{ ability.duration_text }}</p>
+                                    {% endif %}
+                                    {% if ability.is_incomplete_rank %}
+                                      <p class="meta">
+                                        <strong>Incomplete draft:</strong>
+                                        {% if ability.incomplete_rank_status %}{{ ability.incomplete_rank_status }}{% endif %}
+                                        {% if ability.incomplete_rank_status and ability.incomplete_rank_note %} - {% endif %}
+                                        {% if ability.incomplete_rank_note %}{{ ability.incomplete_rank_note }}{% endif %}
+                                      </p>
+                                    {% endif %}
+                                  </article>
+                                </details>
+                              {% endfor %}
+                            </div>
+                          {% endif %}
                         {% endfor %}
                       </div>
-                    </div>
-                    {% for rank in art.learned_rank_refs %}
-                      {% if rank.abilities %}
-                        <div>
-                          <h4>{{ rank.label }} abilities</h4>
-                          <ul class="plain-list slot-list">
-                            {% for ability in rank.abilities %}
-                              <li>
-                                {% if ability.href %}
-                                  <a href="{{ ability.href }}">{{ ability.name }}</a>
-                                {% else %}
-                                  <span>{{ ability.name }}</span>
-                                {% endif %}
-                                {% if ability.kind %}
-                                  <strong>{{ ability.kind }}</strong>
-                                {% endif %}
-                                {% if ability.support_label %}
-                                  <span class="meta">{{ ability.support_label }}</span>
-                                {% endif %}
-                                {% if ability.text %}
-                                  <p class="meta">{{ ability.text }}</p>
-                                {% endif %}
-                              </li>
-                            {% endfor %}
-                          </ul>
-                        </div>
-                      {% endif %}
-                    {% endfor %}
+                    </details>
                   </div>
                 {% endif %}
               </article>
@@ -116,9 +152,8 @@
         <p class="meta">No Martial Arts are recorded on this sheet yet.</p>
       </article>
     {% endif %}
-  </section>
+</section>
 {% endif %}
-
 {% if xianxia_sheet and character_subpage == 'techniques' %}
   <section class="read-section" id="xianxia-techniques">
     <div class="section-heading">

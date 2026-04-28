@@ -2229,6 +2229,8 @@ def _present_xianxia_linked_records(
             "name": name or default_name,
             "href": href,
             "systems_ref": systems_ref,
+            "systems_source_id": str(systems_ref.get("source_id") or "").strip(),
+            "systems_slug": str(systems_ref.get("slug") or "").strip(),
             "current_rank": str(
                 payload.get("current_rank")
                 or humanize_value(payload.get("current_rank_key"))
@@ -2498,16 +2500,48 @@ def _present_xianxia_rank_refs(
                 href = f"{href}#{anchor}"
         else:
             href = f"{parent_href}#{anchor}" if parent_href and anchor else ""
+        rank_key = _normalize_xianxia_rank_key(ref.rsplit(":", 1)[-1] if ":" in ref else ref)
+        rank_label = (
+            str(rank_record.get("rank_name") or "").strip()
+            or humanize_value(ref.rsplit(":", 1)[-1] if ":" in ref else ref)
+            or ref
+        )
+        is_incomplete_rank = _xianxia_rank_record_is_incomplete(rank_record)
         rank_refs.append(
             {
                 "ref": ref,
-                "label": str(rank_record.get("rank_name") or "").strip()
-                or humanize_value(ref.rsplit(":", 1)[-1])
-                or ref,
+                "label": rank_label,
                 "href": href,
+                "key": rank_key,
+                "is_incomplete": is_incomplete_rank,
+                "status_label": (
+                    "Incomplete draft"
+                    if is_incomplete_rank
+                    else "Learned"
+                ),
+                "incomplete_rank_status": str(
+                    rank_record.get("rank_completion_status") or ""
+                ).strip(),
+                "incomplete_rank_reason": str(
+                    rank_record.get("rank_completion_note")
+                    or rank_record.get("incomplete_rank_reason")
+                    or ""
+                ).strip(),
                 "abilities": _present_xianxia_rank_abilities(
                     rank_record.get("ability_grants"),
                     parent_href=parent_href,
+                    rank_label=rank_label,
+                    rank_ref=ref,
+                    rank_key=rank_key,
+                    is_incomplete_rank=is_incomplete_rank,
+                    rank_completion_note=str(
+                        rank_record.get("rank_completion_note")
+                        or rank_record.get("incomplete_rank_reason")
+                        or ""
+                    ).strip(),
+                    rank_completion_status=str(
+                        rank_record.get("rank_completion_status") or ""
+                    ).strip(),
                 ),
             }
         )
@@ -2677,8 +2711,15 @@ def _present_xianxia_rank_abilities(
     values: Any,
     *,
     parent_href: str,
-) -> list[dict[str, str]]:
-    abilities: list[dict[str, str]] = []
+    rank_label: str = "",
+    rank_ref: str = "",
+    rank_key: str = "",
+    is_incomplete_rank: bool = False,
+    rank_completion_note: str = "",
+    rank_completion_status: str = "",
+    source_artifact: str = "",
+) -> list[dict[str, Any]]:
+    abilities: list[dict[str, Any]] = []
     for value in list(values or []):
         payload = dict(value or {}) if isinstance(value, dict) else {}
         ability_ref = str(payload.get("ability_ref") or "").strip()
@@ -2688,15 +2729,45 @@ def _present_xianxia_rank_abilities(
         if not name:
             name = humanize_value(payload.get("ability_key")) or "Rank ability"
         href = f"{parent_href}#{_xianxia_anchor_id_for_ref(ability_ref)}" if parent_href and ability_ref else ""
+        resource_cost_text = _format_xianxia_rank_ability_resource_costs(
+            payload.get("resource_costs")
+            or payload.get("costs")
+            or payload.get("cost")
+        )
+        range_text = _format_xianxia_rank_ability_tags(
+            payload.get("range_tags") or payload.get("ranges")
+        )
+        damage_text = _format_xianxia_rank_ability_tags(
+            payload.get("damage_effort_tags") or payload.get("damage")
+        )
+        duration_text = _format_xianxia_rank_ability_tags(
+            payload.get("duration_tags") or payload.get("durations")
+        )
         abilities.append(
             {
                 "name": name,
                 "href": href,
                 "ref": ability_ref,
+                "source_ref": ability_ref,
+                "source_artifact": str(source_artifact).strip(),
                 "kind": str(payload.get("kind") or humanize_value(payload.get("kind_key"))).strip(),
+                "kind_key": str(payload.get("kind_key") or "").strip(),
                 "support_label": _xianxia_support_label(
                     payload.get("support_state") or payload.get("xianxia_support_state")
                 ),
+                "support_state": str(
+                    payload.get("support_state") or payload.get("xianxia_support_state") or ""
+                ).strip(),
+                "rank_label": str(rank_label).strip(),
+                "rank_ref": str(rank_ref).strip(),
+                "rank_key": str(rank_key).strip(),
+                "is_incomplete_rank": bool(is_incomplete_rank),
+                "incomplete_rank_note": str(rank_completion_note).strip(),
+                "incomplete_rank_status": str(rank_completion_status).strip(),
+                "resource_cost_text": resource_cost_text,
+                "range_text": range_text,
+                "damage_effort_text": damage_text,
+                "duration_text": duration_text,
                 "text": _format_xianxia_rank_ability_text(payload),
             }
         )
