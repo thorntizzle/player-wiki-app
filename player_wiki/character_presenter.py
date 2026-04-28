@@ -2486,13 +2486,18 @@ def _present_xianxia_rank_refs(
             continue
         rank_record = dict(rank_records.get(ref) or {})
         rank_entry_slug = str(rank_record.get("rank_entry_slug") or "").strip()
-        if rank_entry_slug:
+        anchor = _xianxia_anchor_id_for_ref(ref)
+        if parent_href:
+            href = f"{parent_href}#{anchor}" if anchor else parent_href
+        elif rank_entry_slug:
             href = build_systems_entry_href(
                 campaign_slug,
                 {"slug": rank_entry_slug},
             )
+            if anchor:
+                href = f"{href}#{anchor}"
         else:
-            href = f"{parent_href}#{_xianxia_anchor_id_for_ref(ref)}" if parent_href else ""
+            href = f"{parent_href}#{anchor}" if parent_href and anchor else ""
         rank_refs.append(
             {
                 "ref": ref,
@@ -2692,9 +2697,90 @@ def _present_xianxia_rank_abilities(
                 "support_label": _xianxia_support_label(
                     payload.get("support_state") or payload.get("xianxia_support_state")
                 ),
+                "text": _format_xianxia_rank_ability_text(payload),
             }
         )
     return abilities
+
+
+def _format_xianxia_rank_ability_text(payload: dict[str, Any]) -> str:
+    parts: list[str] = []
+    resource_costs = (
+        payload.get("resource_costs")
+        or payload.get("costs")
+        or payload.get("cost")
+    )
+    range_tags = payload.get("range_tags") or payload.get("ranges")
+    damage_tags = payload.get("damage_effort_tags") or payload.get("damage")
+    duration_tags = payload.get("duration_tags") or payload.get("durations")
+
+    cost_text = _format_xianxia_rank_ability_resource_costs(resource_costs)
+    if cost_text:
+        parts.append(f"Costs: {cost_text}")
+
+    range_text = _format_xianxia_rank_ability_tags(range_tags)
+    if range_text:
+        parts.append(f"Ranges: {range_text}")
+
+    damage_text = _format_xianxia_rank_ability_tags(damage_tags)
+    if damage_text:
+        parts.append(f"Damage/Effort: {damage_text}")
+
+    duration_text = _format_xianxia_rank_ability_tags(duration_tags)
+    if duration_text:
+        parts.append(f"Duration: {duration_text}")
+
+    return "; ".join(parts)
+
+
+def _format_xianxia_rank_ability_tags(values: Any) -> str:
+    parts: list[str] = []
+    for value in _xianxia_value_list(values):
+        if isinstance(value, dict):
+            continue
+        text = str(value).strip()
+        if not text:
+            continue
+        parts.append(text.replace("_", " "))
+    return ", ".join(parts)
+
+
+def _format_xianxia_rank_ability_resource_costs(value: Any) -> str:
+    costs = _xianxia_value_list(value)
+    if not costs:
+        return ""
+
+    parts: list[str] = []
+    for cost in costs:
+        if isinstance(cost, str):
+            if ":" in cost:
+                resource_key, amount = cost.split(":", 1)
+                resource = resource_key.strip()
+                value_text = amount.strip()
+            else:
+                resource = ""
+                value_text = cost.strip()
+        elif isinstance(cost, dict):
+            resource = str(
+                cost.get("resource_key")
+                or cost.get("resource")
+                or cost.get("resource_name")
+                or cost.get("type")
+                or ""
+            ).strip()
+            value_text = str(cost.get("amount") or "").strip()
+        else:
+            resource = str(cost or "").strip()
+            value_text = ""
+
+        if resource and value_text:
+            parts.append(f"{resource.replace('_', ' ')} {value_text}")
+        elif resource:
+            parts.append(resource.replace("_", " "))
+        elif value_text:
+            parts.append(value_text)
+
+    return "; ".join(parts)
 
 
 def _present_xianxia_basic_action_links(

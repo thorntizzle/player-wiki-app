@@ -275,6 +275,10 @@ def test_xianxia_read_presenter_context_collects_first_pass_sheet_facts(
         "ref": "xianxia:demons-fist:initiate:qi-fist-technique",
         "kind": "Technique",
         "support_label": "Reference only",
+        "text": (
+            "Costs: qi 1; Ranges: self; "
+            "Damage/Effort: weapon effort damage; Duration: rest of combat"
+        ),
     }
     assert first_art["rank_progress"]["summary"] == "Rank progress: 1 / 5 ranks learned."
     assert [
@@ -909,6 +913,10 @@ def test_xianxia_read_sheet_uses_system_specific_subpages(
     assert "Current rank: Initiate" in martial_arts_html
     assert "/campaigns/linden-pass/systems/entries/demons-fist#xianxia-demons-fist-initiate" in martial_arts_html
     assert "Qi Fist Technique" in martial_arts_html
+    assert "Costs: qi 1" in martial_arts_html
+    assert "Ranges: self" in martial_arts_html
+    assert "Damage/Effort: weapon effort damage" in martial_arts_html
+    assert "Duration: rest of combat" in martial_arts_html
     assert (
         "/campaigns/linden-pass/systems/entries/demons-fist"
         "#xianxia-demons-fist-initiate-qi-fist-technique"

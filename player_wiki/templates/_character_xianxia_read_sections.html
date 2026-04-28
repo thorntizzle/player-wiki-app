@@ -95,6 +95,9 @@
                                 {% if ability.support_label %}
                                   <span class="meta">{{ ability.support_label }}</span>
                                 {% endif %}
+                                {% if ability.text %}
+                                  <p class="meta">{{ ability.text }}</p>
+                                {% endif %}
                               </li>
                             {% endfor %}
                           </ul>
