@@ -2768,7 +2768,8 @@ def _present_xianxia_rank_abilities(
                 "range_text": range_text,
                 "damage_effort_text": damage_text,
                 "duration_text": duration_text,
-                "text": _format_xianxia_rank_ability_text(payload),
+                "text": str(payload.get("text") or "").strip()
+                or _format_xianxia_rank_ability_text(payload),
             }
         )
     return abilities

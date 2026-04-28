@@ -283,6 +283,10 @@ def test_xianxia_read_presenter_context_collects_first_pass_sheet_facts(
     assert first_ability["range_text"] == "self"
     assert first_ability["damage_effort_text"] == "weapon effort damage"
     assert first_ability["duration_text"] == "rest of combat"
+    assert (
+        "You imbue your punches with an aura of raging Qi."
+        in first_ability["text"]
+    )
     assert first_art["rank_progress"]["summary"] == "Rank progress: 1 / 5 ranks learned."
     assert [
         (rank["label"], rank["status_label"])
@@ -931,6 +935,7 @@ def test_xianxia_read_sheet_uses_system_specific_subpages(
     assert "Range:" in martial_arts_html
     assert "Damage/Effort:" in martial_arts_html
     assert "Duration:" in martial_arts_html
+    assert "You imbue your punches with an aura of raging Qi." in martial_arts_html
     assert (
         "/campaigns/linden-pass/systems/entries/demons-fist"
         "#xianxia-demons-fist-initiate-qi-fist-technique"
@@ -1237,6 +1242,7 @@ def test_xianxia_session_character_uses_read_sheet_subpage_chrome(
         r"<strong>Source/ref:</strong>\s*xianxia:demons-fist:initiate:qi-fist-technique",
         html,
     )
+    assert "You imbue your punches with an aura of raging Qi." in html
     assert "/campaigns/linden-pass/characters/session-crane?page=martial_arts" in html
 
     legacy_response = client.get(

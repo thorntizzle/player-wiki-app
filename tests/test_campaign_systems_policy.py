@@ -226,6 +226,12 @@ def test_xianxia_builtin_systems_library_identity_seeds_initial_homebrew_source(
         assert source_catalog_entry["seed_version"] == XIANXIA_SYSTEMS_SEED_VERSION
 
 
+def test_xianxia_seed_version_constant_loads():
+    assert XIANXIA_SYSTEMS_SEED_VERSION
+    assert isinstance(XIANXIA_SYSTEMS_SEED_VERSION, str)
+    assert "." in XIANXIA_SYSTEMS_SEED_VERSION
+
+
 def test_xianxia_entry_facet_definitions_cover_milestone_one_concepts():
     expected_facets = (
         "rule",
@@ -1874,10 +1880,14 @@ def test_xianxia_martial_art_parent_entry_renders_rank_info_and_ability_ref_link
     html = response.get_data(as_text=True)
     assert "<h2>Rank Records</h2>" in html
     assert "<h3>Initiate</h3>" in html
+    assert '<section id="xianxia-demons-fist-initiate">' in html
     assert "Rank Ref:" in html
-    assert 'href="#xianxia-demons-fist-initiate"' in html
-    assert "xianxia:demons-fist:initiate" in html
+    assert "Status:" in html
+    assert "Advancement:" in html
+    assert "Energy Maximum Increases:" in html
     assert "Ability Refs" in html
+    assert "You imbue your punches with an aura of raging Qi." in html
+    assert "xianxia:demons-fist:initiate" in html
     assert 'id="xianxia-demons-fist-initiate-qi-fist-technique"' in html
     assert 'href="#xianxia-demons-fist-initiate-qi-fist-technique"' in html
     assert "xianxia:demons-fist:initiate:qi-fist-technique" in html
@@ -1953,6 +1963,10 @@ def test_xianxia_incomplete_martial_arts_stay_visible_with_draft_markers(
     assert "<h2>Rank Records</h2>" in incomplete_html
     assert "<h3>Initiate</h3>" in incomplete_html
     assert "<h3>Novice</h3>" in incomplete_html
+    assert '<section id="xianxia-flying-daggers-apprentice">' in incomplete_html
+    assert '<section id="xianxia-flying-daggers-master">' in incomplete_html
+    assert '<section id="xianxia-flying-daggers-legendary">' in incomplete_html
+    assert "id=\"xianxia-flying-daggers-apprentice-" not in incomplete_html
 
     assert complete_response.status_code == 200
     complete_html = complete_response.get_data(as_text=True)

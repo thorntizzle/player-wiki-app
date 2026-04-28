@@ -124,6 +124,11 @@
                                     {% if ability.duration_text %}
                                       <p class="meta"><strong>Duration:</strong> {{ ability.duration_text }}</p>
                                     {% endif %}
+                                    {% if ability.text %}
+                                      <div class="article-body article-body--compact">
+                                        <p>{{ ability.text }}</p>
+                                      </div>
+                                    {% endif %}
                                     {% if ability.is_incomplete_rank %}
                                       <p class="meta">
                                         <strong>Incomplete draft:</strong>

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from html import escape
+from hashlib import sha256
 from pathlib import Path
 import re
 from typing import Any
@@ -13,6 +14,18 @@ XIANXIA_HOMEBREW_SOURCE_ID = "XIANXIA-HOMEBREW"
 XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY = "curated_seed_data"
 XIANXIA_SYSTEMS_SEED_DATA_RELATIVE_PATH = "player_wiki/data/xianxia_systems_seed.json"
 _XIANXIA_SYSTEMS_SEED_DATA_PATH = Path(__file__).resolve().parent / "data" / "xianxia_systems_seed.json"
+_XIANXIA_SYSTEMS_SEED_RENDERER_VERSION = "rank-records-embedded-v2"
+
+
+def _build_seed_version(base_version: str) -> str:
+    normalized_version = str(base_version or "").strip()
+    if not normalized_version:
+        raise ValueError("Xianxia Systems seed payload is missing version.")
+    payload_bytes = _XIANXIA_SYSTEMS_SEED_DATA_PATH.read_bytes()
+    payload_hash = sha256(payload_bytes).hexdigest()[:12]
+    return f"{normalized_version}.{payload_hash}.{_XIANXIA_SYSTEMS_SEED_RENDERER_VERSION}"
+
+
 XIANXIA_ENTRY_FACET_KEYS = (
     "rule",
     "attribute",
@@ -149,8 +162,8 @@ def _load_xianxia_systems_seed_payload() -> dict[str, Any]:
         )
     if not source_title:
         raise ValueError("Xianxia Systems seed payload is missing source_title.")
-    if not version:
-        raise ValueError("Xianxia Systems seed payload is missing version.")
+    version = _build_seed_version(version)
+    payload["version"] = version
     if storage_strategy != XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY:
         raise ValueError(
             "Xianxia Systems seed payload must use the curated_seed_data storage strategy."
@@ -602,6 +615,7 @@ def _render_martial_art_rank_record_html(
     *,
     heading: str = "",
     section_id: str = "",
+    heading_level: int = 2,
 ) -> str:
     rank_record = dict(record)
     rank_ref = str(rank_record.get("rank_ref") or "").strip()
@@ -617,10 +631,14 @@ def _render_martial_art_rank_record_html(
         or ""
     ).strip().replace("_", " ")
 
+    if heading_level not in range(2, 7):
+        heading_level = 2
+    heading_tag = f"h{heading_level}"
+
     parts: list[str] = [f'<section id="{escape(section_anchor)}">']
     display_heading = heading or rank_name
     if display_heading:
-        parts.append(f"<h2>{escape(display_heading)}</h2>")
+        parts.append(f"<{heading_tag}>{escape(display_heading)}</{heading_tag}>")
     if rank_ref:
         parts.append(f"<p><strong>Rank Ref:</strong> {escape(rank_ref)}</p>")
     if completion_label:
@@ -673,6 +691,10 @@ def _render_martial_art_rank_record_html(
                 parts.append(f" - {ability_tags}")
             if support_state:
                 parts.append(f" - {escape(support_state.replace('_', ' '))}")
+            ability_text = str(grant.get("text") or "").strip()
+            rendered_text = _render_text_block(ability_text)
+            if rendered_text:
+                parts.append(f"<div class=\"ability-text\">{rendered_text}</div>")
             parts.append("</li>")
         parts.append("</ul>")
 
@@ -1134,6 +1156,11 @@ def _normalize_rank_ability_effect(
             raw_effect.get("resource_costs", raw_effect.get("costs")),
             context=f"{context} resource_costs",
         ),
+        "text": str(
+            raw_effect.get("text")
+            or raw_effect.get("description")
+            or ""
+        ).strip(),
         "range_tags": _normalize_ability_tag_list(
             raw_effect.get("range_tags", raw_effect.get("ranges")),
             context=f"{context} range_tags",
@@ -1292,6 +1319,7 @@ def _normalize_generic_technique_details(raw_details: object) -> dict[str, dict[
             )
         normalized[generic_technique_key] = {
             "insight_cost": insight_cost,
+            "text": str(raw_detail.get("text") or raw_detail.get("description") or "").strip(),
             "prerequisites": _normalize_generic_technique_prerequisites(
                 raw_detail.get("prerequisites"),
                 context=f"Xianxia Generic Technique {generic_technique_key!r} prerequisites",
@@ -1946,6 +1974,7 @@ def _stamp_generic_technique_details(
     metadata["master_requirement_reason"] = str(details["master_requirement_reason"])
     metadata["master_requirement_note"] = str(details["master_requirement_note"])
     metadata["master_requirement_status"] = str(details["master_requirement_status"])
+    metadata["text"] = str(details["text"] or "")
 
     generic_technique_body = body.get("xianxia_generic_technique")
     if not isinstance(generic_technique_body, dict):
@@ -1955,6 +1984,7 @@ def _stamp_generic_technique_details(
     generic_technique_body["details_status"] = (
         XIANXIA_GENERIC_TECHNIQUE_DETAILS_STATUS_COST_PREREQ_RESOURCE_RANGE_EFFORT_RESET_SUPPORT_SEEDED
     )
+    generic_technique_body["text"] = str(details["text"] or "")
     generic_technique_body["insight_cost"] = int(details["insight_cost"])
     generic_technique_body["prerequisites"] = [
         dict(prerequisite) for prerequisite in details["prerequisites"]
@@ -2086,6 +2116,7 @@ def _martial_art_ability_search_parts(body: dict[str, Any]) -> list[str]:
                     str(grant.get("kind") or ""),
                     str(grant.get("kind_key") or ""),
                     str(grant.get("ability_ref") or ""),
+                    str(grant.get("text") or ""),
                     str(grant.get("support_state") or ""),
                 ]
             )
@@ -2110,6 +2141,7 @@ def _generic_technique_details_search_parts(body: dict[str, Any]) -> list[str]:
         return []
 
     parts = [
+        str(generic_technique_body.get("text") or ""),
         str(generic_technique_body.get("insight_cost") or ""),
         str(generic_technique_body.get("reset_cadence") or ""),
         str(generic_technique_body.get("support_state") or ""),
@@ -2263,6 +2295,9 @@ def _render_generic_technique_details_html(body: dict[str, Any]) -> str:
         parts.append(
             f"<p><strong>Support State:</strong> {escape(support_state.replace('_', ' '))}</p>"
         )
+    description = str(generic_technique_body.get("text") or "").strip()
+    if description:
+        parts.append(f"<p><strong>Description:</strong> {escape(description)}</p>")
     parts.append("</section>")
     return "".join(parts)
 
@@ -2331,17 +2366,18 @@ def _render_martial_art_rank_records_html(body: dict[str, Any]) -> str:
         return ""
     deduped_rank_records: dict[str, dict[str, Any]] = {}
     for rank_record in rank_records:
-        dedupe_key = str(
-            rank_record.get("rank_key")
-            or rank_record.get("rank_ref")
-            or f"{_anchor_id_for_ref(str(rank_record.get('rank_name') or ''))}"
-        ).strip()
+        rank_key = str(rank_record.get("rank_key") or "").strip()
+        rank_entry_slug = str(rank_record.get("rank_entry_slug") or "").strip()
+        rank_ref = str(rank_record.get("rank_ref") or "").strip()
+        dedupe_key = rank_key or rank_entry_slug or rank_ref
         if not dedupe_key:
-            dedupe_key = str(rank_record.get("rank_order") or "")
+            dedupe_key = f"{_anchor_id_for_ref(str(rank_record.get('rank_name') or ''))}"
+            if not dedupe_key:
+                dedupe_key = str(rank_record.get("rank_order") or "")
         if dedupe_key not in deduped_rank_records:
             deduped_rank_records[dedupe_key] = dict(rank_record)
     rank_records = list(deduped_rank_records.values())
-    parts = ["<section>", "<h2>Rank Records</h2>", "<ul>"]
+    parts = ["<section>", "<h2>Rank Records</h2>"]
     for record in sorted(
         rank_records,
         key=lambda value: (
@@ -2358,8 +2394,6 @@ def _render_martial_art_rank_records_html(body: dict[str, Any]) -> str:
                 or rank_key
                 or "Rank"
             )
-        rank_ref = str(rank_record.get("rank_ref") or "").strip()
-        rank_completion_status = str(rank_record.get("rank_completion_status") or "").strip()
         rank_entry_slug = str(
             rank_record.get("rank_entry_slug")
             or (
@@ -2368,21 +2402,18 @@ def _render_martial_art_rank_records_html(body: dict[str, Any]) -> str:
                 else ""
             )
         ).strip()
-        is_missing = rank_completion_status == XIANXIA_MARTIAL_ART_RANK_STATUS_MISSING_INTENTIONAL_DRAFT
-        parts.append("<li>")
-        if rank_entry_slug:
-            parts.append(f'<a href="{escape(rank_entry_slug)}">{escape(rank_name)}</a>')
-        elif rank_ref:
-            rank_anchor = _anchor_id_for_ref(rank_ref)
-            parts.append(f'<a href="#{escape(rank_anchor)}">{escape(rank_name)}</a>')
-        else:
-            parts.append(f"{escape(rank_name)}")
-        if rank_ref:
-            parts.append(f' <span class="meta">{escape(rank_ref)}</span>')
-        if is_missing:
-            parts.append(' <span class="meta-badge">Incomplete Draft</span>')
-        parts.append("</li>")
-    parts.append("</ul></section>")
+        section_anchor = _anchor_id_for_ref(str(rank_record.get("rank_ref") or rank_entry_slug))
+
+        parts.append(
+            _render_martial_art_rank_record_html(
+                rank_record,
+                heading=rank_name,
+                section_id=section_anchor,
+                heading_level=3,
+            )
+        )
+
+    parts.append("</section>")
     return "".join(parts)
 
 
@@ -2413,6 +2444,23 @@ def _format_ability_metadata_tags(grant: dict[str, Any]) -> str:
         ("Duration", _format_string_tags(grant.get("duration_tags"))),
     ]
     return "; ".join(f"{label}: {value}" for label, value in tag_groups if value)
+
+
+def _render_text_block(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    text = value.strip()
+    if not text:
+        return ""
+    paragraphs: list[str] = []
+    for paragraph in text.split("\n\n"):
+        paragraph = paragraph.strip()
+        if not paragraph:
+            continue
+        paragraphs.append(
+            f"<p>{escape(paragraph).replace(chr(10), '<br/>')}</p>"
+        )
+    return "".join(paragraphs)
 
 
 def _format_resource_costs(value: object) -> str:
@@ -2583,6 +2631,7 @@ def _build_rank_ability_grants(
                 "ability_kind": str(grant["ability_kind"]),
                 "ability_kind_key": str(grant["ability_kind_key"]),
                 "resource_costs": effect_metadata["resource_costs"],
+                "text": effect_metadata["text"],
                 "range_tags": effect_metadata["range_tags"],
                 "damage_effort_tags": effect_metadata["damage_effort_tags"],
                 "duration_tags": effect_metadata["duration_tags"],
@@ -2596,6 +2645,7 @@ def _build_rank_ability_grants(
 def _default_rank_ability_effect() -> dict[str, Any]:
     return {
         "resource_costs": [],
+        "text": "",
         "range_tags": [],
         "damage_effort_tags": [],
         "duration_tags": [],
@@ -2605,12 +2655,15 @@ def _default_rank_ability_effect() -> dict[str, Any]:
 
 
 def _copy_rank_ability_effect(effect: dict[str, Any]) -> dict[str, Any]:
+    raw_text = str(effect.get("text") or "").strip()
+    normalized_text = raw_text if raw_text else _format_rank_ability_effect_text(effect)
     return {
         "resource_costs": [
             dict(cost)
             for cost in effect.get("resource_costs", [])
             if isinstance(cost, dict)
         ],
+        "text": normalized_text,
         "range_tags": list(effect.get("range_tags", [])),
         "damage_effort_tags": list(effect.get("damage_effort_tags", [])),
         "duration_tags": list(effect.get("duration_tags", [])),
@@ -2625,9 +2678,77 @@ def _copy_rank_ability_effect(effect: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _format_rank_ability_effect_field(values: object, *, label: str) -> str:
+    normalized_values = _normalize_rank_ability_effect_field_list(values)
+    if not normalized_values:
+        return ""
+    return f"{label}: {', '.join(normalized_values)}"
+
+
+def _normalize_rank_ability_effect_field_list(values: object) -> list[str]:
+    if not isinstance(values, list):
+        return []
+
+    labels: list[str] = []
+    for value in values:
+        labels.extend(_split_rank_ability_tag_values(value))
+    return [label for label in labels if label]
+
+
+def _split_rank_ability_tag_values(value: object) -> list[str]:
+    if isinstance(value, str):
+        normalized = value.strip()
+        return [normalized.replace("_", " ") if normalized else ""]
+    if not isinstance(value, dict):
+        text = str(value).strip()
+        return [text.replace("_", " ")] if text else []
+
+    values: list[str] = []
+    resource_key = str(
+        value.get("resource_key")
+        or value.get("resource")
+        or value.get("resource_name")
+        or value.get("label")
+        or value.get("name")
+        or ""
+    ).strip()
+    amount = value.get("amount")
+    normalized_amount = str(amount).strip() if amount not in (None, "") else ""
+
+    if resource_key:
+        value_text = resource_key.replace("_", " ").strip()
+        if normalized_amount:
+            values.append(f"{value_text} {normalized_amount}")
+        else:
+            values.append(value_text)
+        return [item for item in values if item]
+
+    value_text = str(value.get("text") or value.get("value") or "").strip()
+    if not value_text and "cost" in value and isinstance(value["cost"], str):
+        value_text = str(value["cost"]).strip()
+    if value_text:
+        values.append(value_text.replace("_", " "))
+    return [item for item in values if item]
+
+
+def _format_rank_ability_effect_text(effect: dict[str, Any]) -> str:
+    segments: list[str] = []
+    for label, key in (
+        ("Costs", "resource_costs"),
+        ("Ranges", "range_tags"),
+        ("Damage", "damage_effort_tags"),
+        ("Duration", "duration_tags"),
+    ):
+        field_text = _format_rank_ability_effect_field(effect.get(key, []), label=label)
+        if field_text:
+            segments.append(field_text)
+    return "; ".join(segments)
+
+
 def _copy_generic_technique_detail(detail: dict[str, Any]) -> dict[str, Any]:
     return {
         "insight_cost": int(detail["insight_cost"]),
+        "text": str(detail.get("text") or "").strip(),
         "prerequisites": [
             dict(prerequisite)
             for prerequisite in detail.get("prerequisites", [])
