@@ -87,6 +87,7 @@ class CampaignSystemsPolicyRecord:
     campaign_slug: str
     library_slug: str
     status: str
+    allow_dm_shared_core_entry_edits: bool
     proprietary_acknowledged_at: datetime | None
     proprietary_acknowledged_by_user_id: int | None
     created_at: datetime

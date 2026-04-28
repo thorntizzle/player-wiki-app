@@ -415,6 +415,7 @@ CREATE TABLE IF NOT EXISTS campaign_system_policies (
     campaign_slug TEXT PRIMARY KEY,
     library_slug TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('active', 'disabled')),
+    allow_dm_shared_core_entry_edits INTEGER NOT NULL DEFAULT 0,
     proprietary_acknowledged_at TEXT,
     proprietary_acknowledged_by_user_id INTEGER,
     created_at TEXT NOT NULL,
@@ -620,7 +621,24 @@ def init_database() -> None:
     _migrate_campaign_combatants_for_revision(connection)
     _migrate_campaign_combatants_for_source_identity(connection)
     _migrate_campaign_dm_statblocks_for_subsections(connection)
+    _migrate_campaign_system_policies_for_dm_shared_core_edits(connection)
     connection.commit()
+
+
+def _migrate_campaign_system_policies_for_dm_shared_core_edits(connection: sqlite3.Connection) -> None:
+    columns = {
+        str(row["name"] or "")
+        for row in connection.execute("PRAGMA table_info(campaign_system_policies)").fetchall()
+    }
+    if "allow_dm_shared_core_entry_edits" in columns:
+        return
+
+    connection.execute(
+        """
+        ALTER TABLE campaign_system_policies
+        ADD COLUMN allow_dm_shared_core_entry_edits INTEGER NOT NULL DEFAULT 0
+        """
+    )
 
 
 def _migrate_user_preferences_for_session_chat_order(connection: sqlite3.Connection) -> None:

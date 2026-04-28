@@ -56,6 +56,38 @@
   </form>
 </section>
 
+<section class="card" id="systems-shared-core-permission">
+  <div class="section-heading">
+    <div>
+      <h2>Shared/Core Editing</h2>
+      <p class="meta">
+        Campaign DM editing is
+        {% if allow_dm_shared_core_entry_edits %}enabled{% else %}disabled{% endif %}
+        for shared-library Systems entries.
+      </p>
+    </div>
+  </div>
+  <p class="meta">
+    When enabled by an app admin, DMs for this campaign can use the same shared/core editor as app admins.
+    This changes the shared library row itself, not only this campaign's override.
+  </p>
+  {% if can_manage_shared_core_entry_edit_permission %}
+    <form method="post" action="{{ url_for('campaign_systems_control_panel_update_shared_core_permission', campaign_slug=campaign.slug) }}" class="stack-form">
+      {% if systems_management_return_to %}
+        <input type="hidden" name="return_to" value="{{ systems_management_return_to }}">
+      {% endif %}
+      <label class="checkbox-label">
+        <input type="checkbox" name="allow_dm_shared_core_entry_edits" value="1" {% if allow_dm_shared_core_entry_edits %}checked{% endif %}>
+        Allow campaign DMs to edit shared/core Systems entries for this campaign.
+      </label>
+      <p class="meta">Use this for trusted homebrew campaigns where the campaign DM owns the core rules text.</p>
+      <button type="submit">Save shared/core editing permission</button>
+    </form>
+  {% else %}
+    <p class="meta">Only app admins can change whether campaign DMs may edit shared/core Systems entries.</p>
+  {% endif %}
+</section>
+
 <section class="card" id="systems-entry-overrides">
   <div class="section-heading">
     <div>

@@ -711,9 +711,18 @@ def can_manage_campaign_systems(campaign_slug: str) -> bool:
 
 def can_edit_shared_systems_entries(campaign_slug: str) -> bool:
     user = get_current_user()
-    if user is None or not user.is_admin:
+    if user is None:
         return False
-    return get_repository().get_campaign(campaign_slug) is not None
+    if get_repository().get_campaign(campaign_slug) is None:
+        return False
+    if user.is_admin:
+        return True
+    if get_campaign_role(campaign_slug) != "dm":
+        return False
+    if not can_manage_campaign_systems(campaign_slug):
+        return False
+    policy = get_systems_service().get_campaign_policy(campaign_slug)
+    return bool(policy and policy.allow_dm_shared_core_entry_edits)
 
 
 def can_manage_campaign_content(campaign_slug: str) -> bool:

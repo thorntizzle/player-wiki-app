@@ -7531,6 +7531,8 @@ def create_app() -> Flask:
             "source_rows": source_rows,
             "has_proprietary_sources": any(row["license_class"] == "proprietary_private" for row in source_rows),
             "proprietary_acknowledged": bool(policy and policy.proprietary_acknowledged_at is not None),
+            "allow_dm_shared_core_entry_edits": bool(policy and policy.allow_dm_shared_core_entry_edits),
+            "can_manage_shared_core_entry_edit_permission": bool(user and user.is_admin),
             "can_set_private_visibility": include_private,
             "systems_management_return_to": return_to,
             "entry_override_form_entry_key": entry_override_form_entry_key,
@@ -8923,6 +8925,66 @@ def create_app() -> Flask:
                 anchor="systems-source-enablement",
             )
         return redirect(url_for("campaign_systems_control_panel_view", campaign_slug=campaign_slug))
+
+    @app.post("/campaigns/<campaign_slug>/systems/control-panel/shared-core-permission")
+    @login_required
+    def campaign_systems_control_panel_update_shared_core_permission(campaign_slug: str):
+        load_campaign_context(campaign_slug)
+        user = get_current_user()
+        if user is None or not user.is_admin:
+            abort(403)
+
+        return_to_dm_content_systems = request.form.get("return_to") == "dm-content-systems"
+        allow_dm_edits = request.form.get("allow_dm_shared_core_entry_edits") == "1"
+        try:
+            policy = get_systems_service().update_campaign_shared_core_entry_edit_permission(
+                campaign_slug,
+                allow_dm_shared_core_entry_edits=allow_dm_edits,
+                actor_user_id=user.id,
+            )
+        except SystemsPolicyValidationError as exc:
+            flash(str(exc), "error")
+            if return_to_dm_content_systems:
+                return render_template(
+                    "dm_content.html",
+                    **build_campaign_dm_content_page_context(campaign_slug, dm_content_subpage="systems"),
+                ), 400
+            return render_template(
+                "campaign_systems_control_panel.html",
+                **build_campaign_systems_control_context(campaign_slug),
+            ), 400
+
+        get_auth_store().write_audit_event(
+            event_type="campaign_systems_shared_core_edit_permission_updated",
+            actor_user_id=user.id,
+            campaign_slug=campaign_slug,
+            metadata={
+                "library_slug": policy.library_slug,
+                "allow_dm_shared_core_entry_edits": policy.allow_dm_shared_core_entry_edits,
+                "source": "campaign_systems_control_panel",
+            },
+        )
+        flash(
+            (
+                "Campaign DMs can now edit shared/core Systems entries."
+                if policy.allow_dm_shared_core_entry_edits
+                else "Campaign DMs can no longer edit shared/core Systems entries."
+            ),
+            "success",
+        )
+        if return_to_dm_content_systems:
+            return redirect_to_campaign_dm_content(
+                campaign_slug,
+                subpage="systems",
+                anchor="systems-shared-core-permission",
+            )
+        return redirect(
+            url_for(
+                "campaign_systems_control_panel_view",
+                campaign_slug=campaign_slug,
+                _anchor="systems-shared-core-permission",
+            )
+        )
 
     @app.post("/campaigns/<campaign_slug>/systems/control-panel/overrides")
     @login_required

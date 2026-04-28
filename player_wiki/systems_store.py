@@ -193,6 +193,7 @@ class SystemsStore:
         *,
         library_slug: str,
         status: str = "active",
+        allow_dm_shared_core_entry_edits: bool | None = None,
         proprietary_acknowledged_at: str | None = None,
         proprietary_acknowledged_by_user_id: int | None = None,
         updated_by_user_id: int | None = None,
@@ -206,16 +207,18 @@ class SystemsStore:
                 campaign_slug,
                 library_slug,
                 status,
+                allow_dm_shared_core_entry_edits,
                 proprietary_acknowledged_at,
                 proprietary_acknowledged_by_user_id,
                 created_at,
                 updated_at,
                 updated_by_user_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(campaign_slug) DO UPDATE SET
                 library_slug = excluded.library_slug,
                 status = excluded.status,
+                allow_dm_shared_core_entry_edits = excluded.allow_dm_shared_core_entry_edits,
                 proprietary_acknowledged_at = excluded.proprietary_acknowledged_at,
                 proprietary_acknowledged_by_user_id = excluded.proprietary_acknowledged_by_user_id,
                 updated_at = excluded.updated_at,
@@ -225,6 +228,9 @@ class SystemsStore:
                 campaign_slug,
                 library_slug,
                 status,
+                int(allow_dm_shared_core_entry_edits) if allow_dm_shared_core_entry_edits is not None else (
+                    int(existing.allow_dm_shared_core_entry_edits) if existing else 0
+                ),
                 proprietary_acknowledged_at if proprietary_acknowledged_at is not None else (
                     isoformat(existing.proprietary_acknowledged_at) if existing and existing.proprietary_acknowledged_at else None
                 ),
@@ -1264,6 +1270,7 @@ class SystemsStore:
             campaign_slug=str(row["campaign_slug"]),
             library_slug=str(row["library_slug"]),
             status=str(row["status"]),
+            allow_dm_shared_core_entry_edits=bool(row["allow_dm_shared_core_entry_edits"]),
             proprietary_acknowledged_at=parse_timestamp(row["proprietary_acknowledged_at"]),
             proprietary_acknowledged_by_user_id=(
                 int(row["proprietary_acknowledged_by_user_id"])

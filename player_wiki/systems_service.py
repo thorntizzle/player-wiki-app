@@ -1491,11 +1491,30 @@ class SystemsService:
             campaign_slug=campaign_slug,
             library_slug=library.library_slug,
             status="active",
+            allow_dm_shared_core_entry_edits=False,
             proprietary_acknowledged_at=None,
             proprietary_acknowledged_by_user_id=None,
             created_at=now,
             updated_at=now,
             updated_by_user_id=None,
+        )
+
+    def update_campaign_shared_core_entry_edit_permission(
+        self,
+        campaign_slug: str,
+        *,
+        allow_dm_shared_core_entry_edits: bool,
+        actor_user_id: int | None,
+    ) -> CampaignSystemsPolicyRecord:
+        library = self.get_campaign_library(campaign_slug)
+        if library is None:
+            raise SystemsPolicyValidationError("That campaign does not have a systems library configured.")
+        return self.store.upsert_campaign_policy(
+            campaign_slug,
+            library_slug=library.library_slug,
+            status="active",
+            allow_dm_shared_core_entry_edits=allow_dm_shared_core_entry_edits,
+            updated_by_user_id=actor_user_id,
         )
 
     def list_campaign_source_states(self, campaign_slug: str) -> list[CampaignSourceState]:
