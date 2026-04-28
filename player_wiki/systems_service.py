@@ -1823,7 +1823,7 @@ class SystemsService:
                 ),
                 [],
             )
-            and self._subclass_entry_matches_feature(entry, candidate)
+            if self._subclass_entry_matches_feature(entry, candidate)
         ]
 
         progression_rows = entry.body.get("feature_progression")
