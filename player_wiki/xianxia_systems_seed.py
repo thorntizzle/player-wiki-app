@@ -14,7 +14,7 @@ XIANXIA_HOMEBREW_SOURCE_ID = "XIANXIA-HOMEBREW"
 XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY = "curated_seed_data"
 XIANXIA_SYSTEMS_SEED_DATA_RELATIVE_PATH = "player_wiki/data/xianxia_systems_seed.json"
 _XIANXIA_SYSTEMS_SEED_DATA_PATH = Path(__file__).resolve().parent / "data" / "xianxia_systems_seed.json"
-_XIANXIA_SYSTEMS_SEED_RENDERER_VERSION = "rank-ability-entry-embed-v4"
+_XIANXIA_SYSTEMS_SEED_RENDERER_VERSION = "martial-art-presentation-polish-v5"
 
 
 def _build_seed_version(base_version: str) -> str:
@@ -411,6 +411,9 @@ def _build_seed_entry(raw_spec: dict[str, Any], *, index: int, source_path: str)
         summary=summary,
         aliases=aliases,
         sections=sections,
+        render_aliases=entry_type != "martial_art",
+        render_summary=entry_type != "martial_art",
+        excluded_section_titles={"Catalog Parent"} if entry_type == "martial_art" else None,
     )
     if entry_type == "martial_art":
         rendered_html += _render_martial_art_rank_records_html(body)
@@ -491,6 +494,10 @@ def _build_martial_art_rank_entries(parent_entry: dict[str, Any]) -> list[dict[s
     ):
         rank_key = str(record.get("rank_key") or "").strip()
         if not rank_key:
+            continue
+        if not bool(record.get("rank_available_in_seed", True)):
+            continue
+        if bool(record.get("is_incomplete_rank", False)):
             continue
         rank_ref = str(record.get("rank_ref") or "").strip()
         rank_name = str(
@@ -623,21 +630,12 @@ def _render_martial_art_rank_record_html(
     section_anchor = section_id or _anchor_id_for_ref(rank_ref)
     rank_name = str(rank_record.get("rank_name") or heading or "Martial Art Rank").strip()
     prerequisite_rank = str(rank_record.get("prerequisite_rank_name") or "None").strip()
-    completion_status = str(rank_record.get("rank_completion_status") or "").strip()
     completion_note = str(rank_record.get("rank_completion_note") or "").strip()
-    completion_label = str(
-        rank_record.get("rank_records_status_label")
-        or rank_record.get("rank_records_status")
-        or completion_status
-        or ""
-    ).strip().replace("_", " ")
 
     if heading_level not in range(2, 7):
         heading_level = 2
     heading_tag = f"h{heading_level}"
-    ability_heading_level = min(6, heading_level + 1)
-    ability_heading_tag = f"h{ability_heading_level}"
-    ability_entry_heading_tag = f"h{min(6, ability_heading_level + 1)}"
+    ability_entry_heading_tag = f"h{min(6, heading_level + 1)}"
 
     parts: list[str] = [
         f'<section id="{escape(section_anchor)}" class="xianxia-embedded-rank-entry">'
@@ -645,11 +643,6 @@ def _render_martial_art_rank_record_html(
     display_heading = heading or rank_name
     if display_heading:
         parts.append(f"<{heading_tag}>{escape(display_heading)}</{heading_tag}>")
-    parts.append("<p><strong>Entry Type:</strong> Martial Art Rank</p>")
-    if rank_ref:
-        parts.append(f"<p><strong>Rank Ref:</strong> {escape(rank_ref)}</p>")
-    if completion_label:
-        parts.append(f"<p><strong>Status:</strong> {escape(completion_label)}</p>")
     if completion_note:
         parts.append(f"<p><strong>Note:</strong> {escape(completion_note)}</p>")
 
@@ -661,10 +654,9 @@ def _render_martial_art_rank_record_html(
 
     insight_cost = rank_record.get("insight_cost")
     if insight_cost is not None:
-        parts.append(
-            "<p><strong>Advancement:</strong> "
-            f"{escape(str(insight_cost))} Insight; prerequisite rank {escape(prerequisite_rank)}.</p>"
-        )
+        parts.append(f"<p><strong>Insight Cost:</strong> {escape(str(insight_cost))}</p>")
+    if prerequisite_rank and prerequisite_rank.lower() != "none":
+        parts.append(f"<p><strong>Prerequisite:</strong> {escape(prerequisite_rank)}</p>")
 
     teacher_note = str(rank_record.get("teacher_breakthrough_note") or "").strip()
     if teacher_note:
@@ -678,14 +670,12 @@ def _render_martial_art_rank_record_html(
         grant for grant in rank_record.get("ability_grants") or [] if isinstance(grant, dict)
     ]
     if ability_grants:
-        parts.append(f"<{ability_heading_tag}>Embedded Ability Entries</{ability_heading_tag}>")
         parts.append('<div class="xianxia-embedded-ability-entries">')
         for grant in ability_grants:
             ability_ref = str(grant.get("ability_ref") or "").strip()
             ability_anchor = _anchor_id_for_ref(ability_ref)
             ability_name = str(grant.get("name") or "").strip()
             kind = str(grant.get("kind") or "").strip()
-            support_state = str(grant.get("support_state") or "").strip()
             ability_heading = ability_name or ability_ref or "Ability"
             parts.append(
                 f'<article class="xianxia-embedded-ability-entry" id="{escape(ability_anchor)}">'
@@ -695,22 +685,20 @@ def _render_martial_art_rank_record_html(
                 f"{escape(ability_heading)}"
                 f"</{ability_entry_heading_tag}>"
             )
-            parts.append("<p><strong>Entry Type:</strong> Ability</p>")
-            if ability_ref:
-                parts.append(
-                    "<p><strong>Ability Ref:</strong> "
-                    f'<a href="#{escape(ability_anchor)}">{escape(ability_ref)}</a></p>'
-                )
             if kind:
                 parts.append(f"<p><strong>Ability Kind:</strong> {escape(kind)}</p>")
-            ability_tags = _format_ability_metadata_tags(grant)
-            if ability_tags:
-                parts.append(f"<p><strong>Ability Metadata:</strong> {ability_tags}</p>")
-            if support_state:
-                parts.append(
-                    "<p><strong>Support State:</strong> "
-                    f"{escape(support_state.replace('_', ' '))}</p>"
-                )
+            ability_costs = _format_ability_costs(grant.get("resource_costs"))
+            if ability_costs:
+                parts.append(f"<p><strong>Costs:</strong> {ability_costs}</p>")
+            ranges = _format_string_tags(grant.get("range_tags"))
+            if ranges:
+                parts.append(f"<p><strong>Ranges:</strong> {ranges}</p>")
+            duration = _format_string_tags(grant.get("duration_tags"))
+            if duration:
+                parts.append(f"<p><strong>Duration:</strong> {duration}</p>")
+            damage_effort = _format_string_tags(grant.get("damage_effort_tags"))
+            if damage_effort:
+                parts.append(f"<p><strong>Damage/Effort:</strong> {damage_effort}</p>")
             ability_text = str(grant.get("text") or "").strip()
             rendered_text = _render_text_block(ability_text)
             if rendered_text:
@@ -2239,18 +2227,8 @@ def _render_martial_art_draft_marker_html(body: dict[str, Any]) -> str:
         != XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_INTENTIONAL_DRAFT
     ):
         return ""
-    note = str(martial_art_body.get("rank_completion_note") or "").strip()
-    missing_rank_names = [
-        str(value).strip()
-        for value in martial_art_body.get("missing_rank_names") or []
-        if str(value).strip()
-    ]
-    missing_ranks = ", ".join(missing_rank_names)
     parts = ["<section>", "<h2>Intentional Draft Content</h2>"]
-    if note:
-        parts.append(f"<p>{escape(note)}</p>")
-    if missing_ranks:
-        parts.append(f"<p><strong>Missing higher ranks:</strong> {escape(missing_ranks)}</p>")
+    parts.append("<p>This Martial Art currently includes only the ranks shown.</p>")
     parts.append("</section>")
     return "".join(parts)
 
@@ -2390,8 +2368,6 @@ def _render_martial_art_rank_records_html(body: dict[str, Any]) -> str:
         for record in (
             list(martial_art_body.get("rank_records") or [])
             + list(martial_art_body.get("xianxia_martial_art_rank_records") or [])
-            + list(martial_art_body.get("missing_rank_records") or [])
-            + list(martial_art_body.get("xianxia_martial_art_missing_rank_records") or [])
         )
         if isinstance(record, dict)
     ]
@@ -2410,14 +2386,7 @@ def _render_martial_art_rank_records_html(body: dict[str, Any]) -> str:
         if dedupe_key not in deduped_rank_records:
             deduped_rank_records[dedupe_key] = dict(rank_record)
     rank_records = list(deduped_rank_records.values())
-    parts = [
-        "<section>",
-        "<h2>Embedded Rank Entries</h2>",
-        (
-            "<p class=\"meta\">Each rank is embedded as its own Martial Art Rank entry "
-            "with nested Ability entries.</p>"
-        ),
-    ]
+    parts = ['<section class="xianxia-martial-art-ranks">']
     for record in sorted(
         rank_records,
         key=lambda value: (
@@ -2470,10 +2439,44 @@ def _format_energy_maximum_increases(value: object) -> str:
         amount = value.get(energy_key)
         if amount is None:
             continue
+        if amount == 0:
+            continue
         label = energy_key.capitalize()
         prefix = "+" if isinstance(amount, int) and amount >= 0 else ""
         parts.append(f"{label} {prefix}{amount}")
     return ", ".join(parts)
+
+
+def _format_ability_costs(value: object) -> str:
+    if not isinstance(value, list):
+        return ""
+    action_costs: list[str] = []
+    energy_costs: list[str] = []
+    other_costs: list[str] = []
+    for cost in value:
+        if not isinstance(cost, dict):
+            continue
+        resource_key = _normalize_identifier(cost.get("resource_key") or cost.get("resource"))
+        amount = cost.get("amount")
+        if not resource_key or amount is None:
+            continue
+        amount_text = str(amount).strip()
+        resource_label = resource_key.replace("_", " ").title()
+        if resource_key in {"action", "actions"}:
+            action_costs.append(amount_text)
+        elif resource_key in XIANXIA_ENERGY_KEYS:
+            energy_costs.append(f"{resource_label} {amount_text}")
+        else:
+            other_costs.append(f"{resource_label} {amount_text}")
+
+    parts: list[str] = []
+    if action_costs:
+        parts.append("Number of Actions: " + ", ".join(escape(value) for value in action_costs))
+    if energy_costs:
+        parts.append("Energy Cost: " + ", ".join(escape(value) for value in energy_costs))
+    if other_costs:
+        parts.append("Resource Cost: " + ", ".join(escape(value) for value in other_costs))
+    return "; ".join(parts)
 
 
 def _format_ability_metadata_tags(grant: dict[str, Any]) -> str:
@@ -3100,16 +3103,30 @@ def _render_seed_entry_html(
     summary: str,
     aliases: list[str],
     sections: list[dict[str, Any]],
+    render_aliases: bool = True,
+    render_summary: bool = True,
+    excluded_section_titles: set[str] | None = None,
 ) -> str:
-    parts: list[str] = ['<section class="systems-entry-summary">']
-    if aliases:
-        parts.append(f"<p><strong>Also covers:</strong> {escape(', '.join(aliases))}</p>")
-    if summary:
-        parts.append(f"<p>{escape(summary)}</p>")
-    parts.append("</section>")
+    parts: list[str] = []
+    summary_parts: list[str] = []
+    if render_aliases and aliases:
+        summary_parts.append(f"<p><strong>Also covers:</strong> {escape(', '.join(aliases))}</p>")
+    if render_summary and summary:
+        summary_parts.append(f"<p>{escape(summary)}</p>")
+    if summary_parts:
+        parts.append('<section class="systems-entry-summary">')
+        parts.extend(summary_parts)
+        parts.append("</section>")
 
+    excluded_titles = {
+        str(value).strip().lower()
+        for value in (excluded_section_titles or set())
+        if str(value).strip()
+    }
     for section in sections:
         title = str(section.get("title") or "").strip()
+        if title.lower() in excluded_titles:
+            continue
         paragraphs = [str(value).strip() for value in list(section.get("paragraphs") or []) if str(value).strip()]
         bullets = [str(value).strip() for value in list(section.get("bullets") or []) if str(value).strip()]
         if not title and not paragraphs and not bullets:

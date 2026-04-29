@@ -534,16 +534,6 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
         for entry in martial_art_entries
     )
     assert all(entry["body"]["xianxia_martial_art"]["catalog_role"] == "parent" for entry in martial_art_entries)
-    assert all(
-        "rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases"
-        in entry["rendered_html"]
-        for entry in martial_art_entries
-    )
-    assert all(
-        "nested Ability entries with names, kind tags, and seeded rules text" in entry["rendered_html"]
-        for entry in martial_art_entries
-    )
-
     entry_map = {entry["slug"]: entry for entry in martial_art_entries}
     assert entry_map["demons-fist"]["metadata"]["martial_art_style"] == "Unarmed Martial Art"
     assert "unarmed martial art" in entry_map["demons-fist"]["search_text"]
@@ -552,17 +542,27 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
     )
     assert "Ji, and Shen" not in entry_map["bing-ti"]["rendered_html"]
     demons_fist_html = entry_map["demons-fist"]["rendered_html"]
-    assert "Embedded Rank Entries" in demons_fist_html
-    assert "Entry Type:</strong> Martial Art Rank" in demons_fist_html
+    assert "Also covers:" not in demons_fist_html
+    assert "Shared Systems parent entry" not in demons_fist_html
+    assert "Catalog Parent" not in demons_fist_html
+    assert "Embedded Rank Entries" not in demons_fist_html
+    assert "Entry Type:</strong> Martial Art Rank" not in demons_fist_html
     assert "Energy Maximum Increases" in demons_fist_html
-    assert "xianxia:demons-fist:initiate" in demons_fist_html
+    assert "Jing +1" in demons_fist_html
+    assert "Qi +0" not in demons_fist_html
+    assert "Shen +0" not in demons_fist_html
     assert "Qi Fist Technique" in demons_fist_html
-    assert "Embedded Ability Entries" in demons_fist_html
-    assert "Entry Type:</strong> Ability" in demons_fist_html
-    assert "Ability Ref:" in demons_fist_html
-    assert "xianxia:demons-fist:initiate:qi-fist-technique" in demons_fist_html
+    assert "Embedded Ability Entries" not in demons_fist_html
+    assert "Entry Type:</strong> Ability" not in demons_fist_html
+    assert "Ability Ref:" not in demons_fist_html
+    assert "xianxia:demons-fist:initiate:qi-fist-technique" not in demons_fist_html
     assert 'class="xianxia-embedded-ability-entry" id="xianxia-demons-fist-initiate-qi-fist-technique"' in demons_fist_html
-    assert 'href="#xianxia-demons-fist-initiate-qi-fist-technique"' in demons_fist_html
+    assert 'href="#xianxia-demons-fist-initiate-qi-fist-technique"' not in demons_fist_html
+    assert "Costs:</strong> Energy Cost: Qi 1" in demons_fist_html
+    assert "Ranges:</strong> self" in demons_fist_html
+    assert "Duration:</strong> rest of combat" in demons_fist_html
+    assert "Damage/Effort:</strong> weapon effort damage" in demons_fist_html
+    assert "Support State:" not in demons_fist_html
     assert set(rank_resource_grants) == {
         entry["metadata"]["martial_art_key"]
         for entry in martial_art_entries
@@ -867,9 +867,13 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
         assert "intentional draft content" in entry_map[slug]["search_text"]
         assert "not an import failure" in entry_map[slug]["search_text"]
         assert "Intentional Draft Content" in entry_map[slug]["rendered_html"]
-        assert "Missing higher ranks:" in entry_map[slug]["rendered_html"]
-        for missing_rank_name in missing_rank_names:
-            assert missing_rank_name in entry_map[slug]["rendered_html"]
+        assert "currently includes only the ranks shown" in entry_map[slug]["rendered_html"]
+        assert "Missing higher ranks:" not in entry_map[slug]["rendered_html"]
+        for missing_rank_key in missing_rank_keys:
+            section_id = f'xianxia-{slug}-{missing_rank_key}'
+            assert f'<section id="{section_id}" class="xianxia-embedded-rank-entry">' not in (
+                entry_map[slug]["rendered_html"]
+            )
 
     demons_fist_ranks = entry_map["demons-fist"]["body"]["xianxia_martial_art"]["rank_records"]
     assert demons_fist_ranks[0]["martial_art_key"] == "demons_fist"
@@ -906,7 +910,8 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
         entry_map["demons-fist"]["metadata"]["martial_art_ability_records"]
     )
     assert "qi fist technique" in entry_map["demons-fist"]["search_text"]
-    assert qi_fist["ability_ref"] in demons_fist_html
+    assert qi_fist["ability_ref"] not in demons_fist_html
+    assert 'id="xianxia-demons-fist-initiate-qi-fist-technique"' in demons_fist_html
 
 
 def test_xianxia_generic_technique_seed_entries_cover_requirements_catalog():
@@ -1658,17 +1663,18 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
     assert demons_fist_entry.status_code == 200
     demons_fist_html = demons_fist_entry.get_data(as_text=True)
     assert "Demon&#39;s Fist" in demons_fist_html
-    assert "Catalog Parent" in demons_fist_html
-    assert "Structured rank entries are seeded for the ranks present" in demons_fist_html
-    assert "include Jing, Qi, and Shen maximum increases" in demons_fist_html
-    assert "nested Ability entries with names, kind tags, and seeded rules text" in demons_fist_html
-    assert "Embedded Rank Entries" in demons_fist_html
+    assert "Catalog Parent" not in demons_fist_html
+    assert "Shared Systems parent entry" not in demons_fist_html
+    assert "Structured rank entries are seeded for the ranks present" not in demons_fist_html
+    assert "nested Ability entries with names, kind tags, and seeded rules text" not in demons_fist_html
+    assert "Embedded Rank Entries" not in demons_fist_html
     assert "Energy Maximum Increases" in demons_fist_html
-    assert "xianxia:demons-fist:initiate" in demons_fist_html
     assert "Qi Fist Technique" in demons_fist_html
-    assert "xianxia:demons-fist:initiate:qi-fist-technique" in demons_fist_html
+    assert "Costs:</strong> Energy Cost: Qi 1" in demons_fist_html
+    assert "Qi +0" not in demons_fist_html
+    assert "xianxia:demons-fist:initiate:qi-fist-technique" not in demons_fist_html
     assert 'id="xianxia-demons-fist-initiate-qi-fist-technique"' in demons_fist_html
-    assert 'href="#xianxia-demons-fist-initiate-qi-fist-technique"' in demons_fist_html
+    assert 'href="#xianxia-demons-fist-initiate-qi-fist-technique"' not in demons_fist_html
 
     assert qi_blast_entry.status_code == 200
     qi_blast_html = qi_blast_entry.get_data(as_text=True)
@@ -1895,29 +1901,39 @@ def test_xianxia_martial_art_parent_entry_renders_rank_info_and_ability_ref_link
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "<h2>Embedded Rank Entries</h2>" in html
-    assert "Each rank is embedded as its own Martial Art Rank entry" in html
+    assert "<h2>Embedded Rank Entries</h2>" not in html
+    assert "Each rank is embedded as its own Martial Art Rank entry" not in html
+    assert "Also covers:" not in html
+    assert "Shared Systems parent entry" not in html
+    assert "Catalog Parent" not in html
     assert "<h3>Initiate</h3>" in html
     assert '<section id="xianxia-demons-fist-initiate" class="xianxia-embedded-rank-entry">' in html
-    assert "Entry Type:</strong> Martial Art Rank" in html
-    assert "Rank Ref:" in html
-    assert "Status:" in html
-    assert "Advancement:" in html
+    assert "Entry Type:</strong> Martial Art Rank" not in html
+    assert "Rank Ref:" not in html
+    assert "Status:" not in html
+    assert "Advancement:" not in html
     assert "Energy Maximum Increases:" in html
-    assert "Embedded Ability Entries" in html
-    assert "Entry Type:</strong> Ability" in html
-    assert "Ability Ref:" in html
+    assert "Jing +1" in html
+    assert "Qi +0" not in html
+    assert "Shen +0" not in html
+    assert "Insight Cost:</strong> 1" in html
+    assert "prerequisite rank None" not in html
+    assert "Embedded Ability Entries" not in html
+    assert "Entry Type:</strong> Ability" not in html
+    assert "Ability Ref:" not in html
     assert "You imbue your punches with an aura of raging Qi." in html
-    assert "xianxia:demons-fist:initiate" in html
+    assert "xianxia:demons-fist:initiate" not in html
     assert 'class="xianxia-embedded-ability-entry" id="xianxia-demons-fist-initiate-qi-fist-technique"' in html
-    assert 'href="#xianxia-demons-fist-initiate-qi-fist-technique"' in html
-    assert "xianxia:demons-fist:initiate:qi-fist-technique" in html
+    assert 'href="#xianxia-demons-fist-initiate-qi-fist-technique"' not in html
+    assert "xianxia:demons-fist:initiate:qi-fist-technique" not in html
     assert "Qi Fist Technique" in html
     assert "Technique" in html
-    assert "Ability Metadata:</strong> Costs: qi 1; Ranges: self" in html
-    assert "Damage/Effort: weapon effort damage" in html
-    assert "Duration: rest of combat" in html
-    assert "reference only" in html
+    assert "Ability Metadata:" not in html
+    assert "Costs:</strong> Energy Cost: Qi 1" in html
+    assert "Ranges:</strong> self" in html
+    assert "Duration:</strong> rest of combat" in html
+    assert "Damage/Effort:</strong> weapon effort damage" in html
+    assert "reference only" not in html
 
 
 def test_xianxia_incomplete_martial_arts_stay_visible_with_draft_markers(
@@ -1977,15 +1993,16 @@ def test_xianxia_incomplete_martial_arts_stay_visible_with_draft_markers(
     incomplete_html = incomplete_response.get_data(as_text=True)
     assert "Flying Daggers" in incomplete_html
     assert "Intentional Draft Content" in incomplete_html
-    assert "not an import failure" in incomplete_html
-    assert "Missing higher ranks:" in incomplete_html
-    assert "Apprentice, Master, Legendary" in incomplete_html
-    assert "<h2>Embedded Rank Entries</h2>" in incomplete_html
+    assert "currently includes only the ranks shown" in incomplete_html
+    assert "not an import failure" not in incomplete_html
+    assert "Missing higher ranks:" not in incomplete_html
+    assert "Apprentice, Master, Legendary" not in incomplete_html
+    assert "<h2>Embedded Rank Entries</h2>" not in incomplete_html
     assert "<h3>Initiate</h3>" in incomplete_html
     assert "<h3>Novice</h3>" in incomplete_html
-    assert '<section id="xianxia-flying-daggers-apprentice" class="xianxia-embedded-rank-entry">' in incomplete_html
-    assert '<section id="xianxia-flying-daggers-master" class="xianxia-embedded-rank-entry">' in incomplete_html
-    assert '<section id="xianxia-flying-daggers-legendary" class="xianxia-embedded-rank-entry">' in incomplete_html
+    assert '<section id="xianxia-flying-daggers-apprentice" class="xianxia-embedded-rank-entry">' not in incomplete_html
+    assert '<section id="xianxia-flying-daggers-master" class="xianxia-embedded-rank-entry">' not in incomplete_html
+    assert '<section id="xianxia-flying-daggers-legendary" class="xianxia-embedded-rank-entry">' not in incomplete_html
     assert "id=\"xianxia-flying-daggers-apprentice-" not in incomplete_html
 
     assert complete_response.status_code == 200
