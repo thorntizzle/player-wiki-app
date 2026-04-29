@@ -14,7 +14,7 @@ XIANXIA_HOMEBREW_SOURCE_ID = "XIANXIA-HOMEBREW"
 XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY = "curated_seed_data"
 XIANXIA_SYSTEMS_SEED_DATA_RELATIVE_PATH = "player_wiki/data/xianxia_systems_seed.json"
 _XIANXIA_SYSTEMS_SEED_DATA_PATH = Path(__file__).resolve().parent / "data" / "xianxia_systems_seed.json"
-_XIANXIA_SYSTEMS_SEED_RENDERER_VERSION = "rank-records-embedded-v3"
+_XIANXIA_SYSTEMS_SEED_RENDERER_VERSION = "rank-ability-entry-embed-v4"
 
 
 def _build_seed_version(base_version: str) -> str:
@@ -635,11 +635,17 @@ def _render_martial_art_rank_record_html(
     if heading_level not in range(2, 7):
         heading_level = 2
     heading_tag = f"h{heading_level}"
+    ability_heading_level = min(6, heading_level + 1)
+    ability_heading_tag = f"h{ability_heading_level}"
+    ability_entry_heading_tag = f"h{min(6, ability_heading_level + 1)}"
 
-    parts: list[str] = [f'<section id="{escape(section_anchor)}">']
+    parts: list[str] = [
+        f'<section id="{escape(section_anchor)}" class="xianxia-embedded-rank-entry">'
+    ]
     display_heading = heading or rank_name
     if display_heading:
         parts.append(f"<{heading_tag}>{escape(display_heading)}</{heading_tag}>")
+    parts.append("<p><strong>Entry Type:</strong> Martial Art Rank</p>")
     if rank_ref:
         parts.append(f"<p><strong>Rank Ref:</strong> {escape(rank_ref)}</p>")
     if completion_label:
@@ -672,32 +678,45 @@ def _render_martial_art_rank_record_html(
         grant for grant in rank_record.get("ability_grants") or [] if isinstance(grant, dict)
     ]
     if ability_grants:
-        parts.append("<h3>Ability Refs</h3>")
-        parts.append("<ul>")
+        parts.append(f"<{ability_heading_tag}>Embedded Ability Entries</{ability_heading_tag}>")
+        parts.append('<div class="xianxia-embedded-ability-entries">')
         for grant in ability_grants:
             ability_ref = str(grant.get("ability_ref") or "").strip()
             ability_anchor = _anchor_id_for_ref(ability_ref)
             ability_name = str(grant.get("name") or "").strip()
             kind = str(grant.get("kind") or "").strip()
             support_state = str(grant.get("support_state") or "").strip()
-            parts.append(f'<li id="{escape(ability_anchor)}">')
+            ability_heading = ability_name or ability_ref or "Ability"
+            parts.append(
+                f'<article class="xianxia-embedded-ability-entry" id="{escape(ability_anchor)}">'
+            )
+            parts.append(
+                f"<{ability_entry_heading_tag}>"
+                f"{escape(ability_heading)}"
+                f"</{ability_entry_heading_tag}>"
+            )
+            parts.append("<p><strong>Entry Type:</strong> Ability</p>")
             if ability_ref:
-                parts.append(f'<a href="#{escape(ability_anchor)}">{escape(ability_ref)}</a>')
-            if ability_name:
-                parts.append(f" - {escape(ability_name)}")
+                parts.append(
+                    "<p><strong>Ability Ref:</strong> "
+                    f'<a href="#{escape(ability_anchor)}">{escape(ability_ref)}</a></p>'
+                )
             if kind:
-                parts.append(f" ({escape(kind)})")
+                parts.append(f"<p><strong>Ability Kind:</strong> {escape(kind)}</p>")
             ability_tags = _format_ability_metadata_tags(grant)
             if ability_tags:
-                parts.append(f" - {ability_tags}")
+                parts.append(f"<p><strong>Ability Metadata:</strong> {ability_tags}</p>")
             if support_state:
-                parts.append(f" - {escape(support_state.replace('_', ' '))}")
+                parts.append(
+                    "<p><strong>Support State:</strong> "
+                    f"{escape(support_state.replace('_', ' '))}</p>"
+                )
             ability_text = str(grant.get("text") or "").strip()
             rendered_text = _render_text_block(ability_text)
             if rendered_text:
                 parts.append(f"<div class=\"ability-text\">{rendered_text}</div>")
-            parts.append("</li>")
-        parts.append("</ul>")
+            parts.append("</article>")
+        parts.append("</div>")
 
     parts.append("</section>")
     return "".join(parts)
@@ -2092,7 +2111,7 @@ def _build_martial_art_draft_note(missing_rank_names: list[str]) -> str:
     missing_label = ", ".join(missing_rank_names)
     return (
         "The reviewed source intentionally stops before the following higher "
-        f"rank records: {missing_label}. These missing higher ranks are intentional draft content, "
+        f"rank entries: {missing_label}. These missing higher ranks are intentional draft content, "
         "not an import failure."
     )
 
@@ -2391,7 +2410,14 @@ def _render_martial_art_rank_records_html(body: dict[str, Any]) -> str:
         if dedupe_key not in deduped_rank_records:
             deduped_rank_records[dedupe_key] = dict(rank_record)
     rank_records = list(deduped_rank_records.values())
-    parts = ["<section>", "<h2>Rank Records</h2>"]
+    parts = [
+        "<section>",
+        "<h2>Embedded Rank Entries</h2>",
+        (
+            "<p class=\"meta\">Each rank is embedded as its own Martial Art Rank entry "
+            "with nested Ability entries.</p>"
+        ),
+    ]
     for record in sorted(
         rank_records,
         key=lambda value: (

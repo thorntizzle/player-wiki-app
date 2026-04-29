@@ -93,7 +93,7 @@
       "label": "Martial Art Rank",
       "group": "martial_art",
       "default_entry_type": "martial_art_rank",
-      "summary": "Structured rank entries or embedded rank records for Initiate, Novice, Apprentice, Master, and Legendary progress."
+      "summary": "Structured and embedded Martial Art Rank entries for Initiate, Novice, Apprentice, Master, and Legendary progress."
     },
     {
       "key": "technique",
@@ -4859,7 +4859,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Demon's Fist Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Demon's Fist Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -4906,7 +4906,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Heavenly Palm Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Heavenly Palm Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -4953,7 +4953,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Taoist Blade Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Taoist Blade Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -5002,7 +5002,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Drunken Fist Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Drunken Fist Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -5049,7 +5049,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Striking Adder Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Striking Adder Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -5096,7 +5096,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Bloody Saber Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Bloody Saber Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -5143,7 +5143,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Phoenix Descending Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Phoenix Descending Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -5190,7 +5190,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Dragon Ascending Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Dragon Ascending Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -5237,7 +5237,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Armored Elephant Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Armored Elephant Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -5284,7 +5284,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Swaying Willow Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Swaying Willow Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -5331,7 +5331,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Thundering Harmonics Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Thundering Harmonics Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -5378,7 +5378,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Shadow Puppet Theater Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Shadow Puppet Theater Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -5425,7 +5425,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Baihu Style Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Baihu Style Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -5472,7 +5472,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Shuai Jiao Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Shuai Jiao Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -5519,7 +5519,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Bing Ti Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Bing Ti Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -5569,7 +5569,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Spiritualists' Binding Seals Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Spiritualists' Binding Seals Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -5619,7 +5619,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Formless Fist Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Formless Fist Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -5666,7 +5666,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Cherry Blossom Swallow Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Cherry Blossom Swallow Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -5713,7 +5713,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Ink-Stained Historian Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Ink-Stained Historian Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -5760,7 +5760,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Manifesting Brush Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Manifesting Brush Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -5807,7 +5807,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Beastmaster Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Beastmaster Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -5854,7 +5854,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Beast-Tamer Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Beast-Tamer Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -5901,7 +5901,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Courtier's Sting Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Courtier's Sting Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -5948,7 +5948,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Madam's Piercing Blood Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Madam's Piercing Blood Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -5995,7 +5995,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Blooming Curse Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Blooming Curse Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -6042,7 +6042,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Rippling Melodies Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Rippling Melodies Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -6089,7 +6089,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Strategist's Acumen Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Strategist's Acumen Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -6136,7 +6136,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Broken Tiger's Vessel Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Broken Tiger's Vessel Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -6183,7 +6183,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for The Four Winds Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for The Four Winds Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {
@@ -6230,7 +6230,7 @@
         {
           "title": "Catalog Parent",
           "paragraphs": [
-            "This is the shared Systems parent entry for the Flying Daggers Martial Art. Structured rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus rank-granted ability names and kind tags. Detailed ability rules remain deferred to later Martial Arts catalog slices."
+            "This is the shared Systems parent entry for the Flying Daggers Martial Art. Structured rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases plus nested Ability entries with names, kind tags, and seeded rules text."
           ]
         },
         {

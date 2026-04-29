@@ -535,16 +535,12 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
     )
     assert all(entry["body"]["xianxia_martial_art"]["catalog_role"] == "parent" for entry in martial_art_entries)
     assert all(
-        "rank records are seeded for the ranks present and include Jing, Qi, and Shen maximum increases"
+        "rank entries are seeded for the ranks present and include Jing, Qi, and Shen maximum increases"
         in entry["rendered_html"]
         for entry in martial_art_entries
     )
     assert all(
-        "rank-granted ability names and kind tags" in entry["rendered_html"]
-        for entry in martial_art_entries
-    )
-    assert all(
-        "Detailed ability rules remain deferred" in entry["rendered_html"]
+        "nested Ability entries with names, kind tags, and seeded rules text" in entry["rendered_html"]
         for entry in martial_art_entries
     )
 
@@ -556,12 +552,16 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
     )
     assert "Ji, and Shen" not in entry_map["bing-ti"]["rendered_html"]
     demons_fist_html = entry_map["demons-fist"]["rendered_html"]
-    assert "Rank Records" in demons_fist_html
+    assert "Embedded Rank Entries" in demons_fist_html
+    assert "Entry Type:</strong> Martial Art Rank" in demons_fist_html
     assert "Energy Maximum Increases" in demons_fist_html
     assert "xianxia:demons-fist:initiate" in demons_fist_html
     assert "Qi Fist Technique" in demons_fist_html
+    assert "Embedded Ability Entries" in demons_fist_html
+    assert "Entry Type:</strong> Ability" in demons_fist_html
+    assert "Ability Ref:" in demons_fist_html
     assert "xianxia:demons-fist:initiate:qi-fist-technique" in demons_fist_html
-    assert 'id="xianxia-demons-fist-initiate-qi-fist-technique"' in demons_fist_html
+    assert 'class="xianxia-embedded-ability-entry" id="xianxia-demons-fist-initiate-qi-fist-technique"' in demons_fist_html
     assert 'href="#xianxia-demons-fist-initiate-qi-fist-technique"' in demons_fist_html
     assert set(rank_resource_grants) == {
         entry["metadata"]["martial_art_key"]
@@ -1659,11 +1659,10 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
     demons_fist_html = demons_fist_entry.get_data(as_text=True)
     assert "Demon&#39;s Fist" in demons_fist_html
     assert "Catalog Parent" in demons_fist_html
-    assert "Structured rank records are seeded for the ranks present" in demons_fist_html
+    assert "Structured rank entries are seeded for the ranks present" in demons_fist_html
     assert "include Jing, Qi, and Shen maximum increases" in demons_fist_html
-    assert "rank-granted ability names and kind tags" in demons_fist_html
-    assert "Detailed ability rules remain deferred" in demons_fist_html
-    assert "Rank Records" in demons_fist_html
+    assert "nested Ability entries with names, kind tags, and seeded rules text" in demons_fist_html
+    assert "Embedded Rank Entries" in demons_fist_html
     assert "Energy Maximum Increases" in demons_fist_html
     assert "xianxia:demons-fist:initiate" in demons_fist_html
     assert "Qi Fist Technique" in demons_fist_html
@@ -1896,23 +1895,26 @@ def test_xianxia_martial_art_parent_entry_renders_rank_info_and_ability_ref_link
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "<h2>Rank Records</h2>" in html
+    assert "<h2>Embedded Rank Entries</h2>" in html
+    assert "Each rank is embedded as its own Martial Art Rank entry" in html
     assert "<h3>Initiate</h3>" in html
-    assert '<section id="xianxia-demons-fist-initiate">' in html
+    assert '<section id="xianxia-demons-fist-initiate" class="xianxia-embedded-rank-entry">' in html
+    assert "Entry Type:</strong> Martial Art Rank" in html
     assert "Rank Ref:" in html
     assert "Status:" in html
     assert "Advancement:" in html
     assert "Energy Maximum Increases:" in html
-    assert "Ability Refs" in html
+    assert "Embedded Ability Entries" in html
+    assert "Entry Type:</strong> Ability" in html
+    assert "Ability Ref:" in html
     assert "You imbue your punches with an aura of raging Qi." in html
     assert "xianxia:demons-fist:initiate" in html
-    assert 'id="xianxia-demons-fist-initiate-qi-fist-technique"' in html
+    assert 'class="xianxia-embedded-ability-entry" id="xianxia-demons-fist-initiate-qi-fist-technique"' in html
     assert 'href="#xianxia-demons-fist-initiate-qi-fist-technique"' in html
     assert "xianxia:demons-fist:initiate:qi-fist-technique" in html
     assert "Qi Fist Technique" in html
     assert "Technique" in html
-    assert "Costs: qi 1" in html
-    assert "Ranges: self" in html
+    assert "Ability Metadata:</strong> Costs: qi 1; Ranges: self" in html
     assert "Damage/Effort: weapon effort damage" in html
     assert "Duration: rest of combat" in html
     assert "reference only" in html
@@ -1978,12 +1980,12 @@ def test_xianxia_incomplete_martial_arts_stay_visible_with_draft_markers(
     assert "not an import failure" in incomplete_html
     assert "Missing higher ranks:" in incomplete_html
     assert "Apprentice, Master, Legendary" in incomplete_html
-    assert "<h2>Rank Records</h2>" in incomplete_html
+    assert "<h2>Embedded Rank Entries</h2>" in incomplete_html
     assert "<h3>Initiate</h3>" in incomplete_html
     assert "<h3>Novice</h3>" in incomplete_html
-    assert '<section id="xianxia-flying-daggers-apprentice">' in incomplete_html
-    assert '<section id="xianxia-flying-daggers-master">' in incomplete_html
-    assert '<section id="xianxia-flying-daggers-legendary">' in incomplete_html
+    assert '<section id="xianxia-flying-daggers-apprentice" class="xianxia-embedded-rank-entry">' in incomplete_html
+    assert '<section id="xianxia-flying-daggers-master" class="xianxia-embedded-rank-entry">' in incomplete_html
+    assert '<section id="xianxia-flying-daggers-legendary" class="xianxia-embedded-rank-entry">' in incomplete_html
     assert "id=\"xianxia-flying-daggers-apprentice-" not in incomplete_html
 
     assert complete_response.status_code == 200
