@@ -190,6 +190,21 @@ XIANXIA_APPROVAL_TIMESTAMP_FIELDS = (
     "gm_reviewed_at",
     "gm_reviewed_on",
 )
+XIANXIA_VARIANT_BASE_ABILITY_REF_FIELDS = (
+    "base_ability_ref",
+    "ability_ref",
+    "base_technique_ref",
+    "technique_ref",
+    "parent_ability_ref",
+)
+XIANXIA_VARIANT_BASE_ABILITY_KIND_FIELDS = (
+    "base_ability_kind",
+    "base_ability_kind_key",
+    "ability_kind",
+    "ability_kind_key",
+    "ability_type",
+    "base_ability_type",
+)
 XIANXIA_MARTIAL_ART_RANK_LABELS = {
     "initiate": "Initiate",
     "novice": "Novice",
@@ -2070,9 +2085,41 @@ def _present_xianxia_approval_status_record(
             _coerce_int(payload.get("prepared_record_index"), default=0),
         ),
     }
+    if group_key in {"karmic_constraints", "ascendant_arts"}:
+        record.update(_present_xianxia_variant_technique_anchor(payload))
     if use_record_index is not None:
         record["use_record_index"] = use_record_index
     return record
+
+
+def _present_xianxia_variant_technique_anchor(payload: dict[str, Any]) -> dict[str, Any]:
+    status = str(payload.get("technique_anchor_status") or "").strip()
+    return {
+        "base_ability_ref": _xianxia_first_present_text(
+            payload,
+            XIANXIA_VARIANT_BASE_ABILITY_REF_FIELDS,
+        ),
+        "base_ability_kind": _xianxia_first_present_text(
+            payload,
+            XIANXIA_VARIANT_BASE_ABILITY_KIND_FIELDS,
+        ),
+        "base_ability_kind_key": str(payload.get("base_ability_kind_key") or "").strip(),
+        "technique_anchor_required": bool(payload.get("technique_anchor_required")),
+        "technique_anchor_status": status,
+        "technique_anchor_label": _format_xianxia_technique_anchor_status(status),
+        "technique_anchor_warning": str(payload.get("technique_anchor_warning") or "").strip(),
+    }
+
+
+def _format_xianxia_technique_anchor_status(value: Any) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
+    if normalized == "technique":
+        return "Technique anchor"
+    if normalized == "invalid_non_technique":
+        return "Invalid non-Technique anchor"
+    if normalized == "unverified":
+        return "Technique anchor unverified"
+    return ""
 
 
 def _xianxia_dao_immolating_use_source_label(payload: dict[str, Any]) -> str:
@@ -2527,6 +2574,20 @@ def _present_xianxia_rank_refs(
                     or rank_record.get("incomplete_rank_reason")
                     or ""
                 ).strip(),
+                "concept_type": "martial_art_rank",
+                "rank_ref": ref,
+                "insight_cost": _coerce_int(rank_record.get("insight_cost"), default=0),
+                "energy_bonus_text": _format_xianxia_rank_energy_grants(
+                    rank_record.get("energy_maximum_increases")
+                    or rank_record.get("xianxia_energy_maximum_increases")
+                ),
+                "prerequisite_text": _format_xianxia_rank_prerequisite(rank_record),
+                "teacher_breakthrough_note": str(
+                    rank_record.get("teacher_breakthrough_note") or ""
+                ).strip(),
+                "legendary_prerequisite_note": str(
+                    rank_record.get("legendary_prerequisite_note") or ""
+                ).strip(),
                 "abilities": _present_xianxia_rank_abilities(
                     rank_record.get("ability_grants"),
                     parent_href=parent_href,
@@ -2707,6 +2768,30 @@ def _xianxia_anchor_id_for_ref(value: str) -> str:
     return anchor or "xianxia-ref"
 
 
+def _format_xianxia_rank_energy_grants(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    parts: list[str] = []
+    for key in XIANXIA_ENERGY_KEYS:
+        if key not in value:
+            continue
+        amount = _coerce_int(value.get(key), default=0)
+        if amount == 0:
+            continue
+        parts.append(f"{XIANXIA_ENERGY_LABELS[key]} {amount:+d}")
+    return ", ".join(parts)
+
+
+def _format_xianxia_rank_prerequisite(rank_record: dict[str, Any]) -> str:
+    prerequisite = str(rank_record.get("prerequisite_rank_name") or "").strip()
+    if prerequisite:
+        return prerequisite
+    prerequisite_key = _normalize_xianxia_rank_key(rank_record.get("prerequisite_rank_key"))
+    if prerequisite_key:
+        return XIANXIA_MARTIAL_ART_RANK_LABELS.get(prerequisite_key, humanize_value(prerequisite_key))
+    return "None"
+
+
 def _present_xianxia_rank_abilities(
     values: Any,
     *,
@@ -2748,6 +2833,7 @@ def _present_xianxia_rank_abilities(
                 "name": name,
                 "href": href,
                 "ref": ability_ref,
+                "concept_type": "ability",
                 "source_ref": ability_ref,
                 "source_artifact": str(source_artifact).strip(),
                 "kind": str(payload.get("kind") or humanize_value(payload.get("kind_key"))).strip(),
@@ -2772,6 +2858,13 @@ def _present_xianxia_rank_abilities(
                 or _format_xianxia_rank_ability_text(payload),
             }
         )
+        abilities[-1]["ability"] = {
+            "name": abilities[-1]["name"],
+            "ref": abilities[-1]["ref"],
+            "kind": abilities[-1]["kind"],
+            "kind_key": abilities[-1]["kind_key"],
+            "text": abilities[-1]["text"],
+        }
     return abilities
 
 

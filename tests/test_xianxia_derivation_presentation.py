@@ -263,11 +263,17 @@ def test_xianxia_read_presenter_context_collects_first_pass_sheet_facts(
     assert first_art["href"] == "/campaigns/linden-pass/systems/entries/demons-fist"
     first_rank = first_art["learned_rank_refs"][0]
     assert first_rank["ref"] == "xianxia:demons-fist:initiate"
+    assert first_rank["concept_type"] == "martial_art_rank"
+    assert first_rank["rank_ref"] == first_rank["ref"]
     assert first_rank["label"] == "Initiate"
+    assert first_rank["energy_bonus_text"] == "Jing +1"
+    assert first_rank["insight_cost"] == 1
+    assert first_rank["prerequisite_text"] == "None"
     assert first_rank["href"] == (
         "/campaigns/linden-pass/systems/entries/demons-fist#xianxia-demons-fist-initiate"
     )
     first_ability = first_rank["abilities"][0]
+    assert first_ability["concept_type"] == "ability"
     assert first_ability["name"] == "Qi Fist Technique"
     assert (
         first_ability["href"]
@@ -277,6 +283,13 @@ def test_xianxia_read_presenter_context_collects_first_pass_sheet_facts(
     assert first_ability["ref"] == "xianxia:demons-fist:initiate:qi-fist-technique"
     assert first_ability["source_ref"] == first_ability["ref"]
     assert first_ability["kind"] == "Technique"
+    assert first_ability["ability"] == {
+        "name": "Qi Fist Technique",
+        "ref": "xianxia:demons-fist:initiate:qi-fist-technique",
+        "kind": "Technique",
+        "kind_key": "technique",
+        "text": first_ability["text"],
+    }
     assert first_ability["support_label"] == "Reference only"
     assert first_ability["rank_label"] == "Initiate"
     assert first_ability["resource_cost_text"] == "qi 1"
@@ -334,6 +347,8 @@ def test_xianxia_techniques_page_shows_approval_status_records(
             "approval_status": "approved",
             "approval_notes": "Approved for the Heavenly Palm initiate technique.",
             "approved_at": "2026-04-25T19:30:00-04:00",
+            "ability_ref": "xianxia:heavenly-palm:initiate:directing-palm-technique",
+            "ability_kind": "Technique",
         },
         {
             "type": "Karmic Constraint",
@@ -344,6 +359,8 @@ def test_xianxia_techniques_page_shows_approval_status_records(
             "name": "Skyfire Crown",
             "status": "pending",
             "notes": "Awaiting sect elder review.",
+            "base_ability_ref": "xianxia:cherry-blossom-swallow:novice:fading-petal-stance",
+            "base_ability_kind": "Stance",
         },
         {
             "type": "Ascendant Art",
@@ -390,6 +407,15 @@ def test_xianxia_techniques_page_shows_approval_status_records(
     ]
     assert approval_groups[0]["records"][0]["notes"] == "Approved for the Heavenly Palm initiate technique."
     assert approval_groups[0]["records"][0]["approval_timestamp"] == "2026-04-25T19:30:00-04:00"
+    assert approval_groups[0]["records"][0]["base_ability_ref"] == (
+        "xianxia:heavenly-palm:initiate:directing-palm-technique"
+    )
+    assert approval_groups[0]["records"][0]["base_ability_kind"] == "Technique"
+    assert approval_groups[0]["records"][0]["technique_anchor_label"] == "Technique anchor"
+    assert approval_groups[1]["records"][0]["technique_anchor_label"] == (
+        "Invalid non-Technique anchor"
+    )
+    assert "must be attached to Technique abilities" in approval_groups[1]["records"][0]["technique_anchor_warning"]
     assert approval_groups[1]["records"][2]["notes"] == "Too broad for this rank."
     assert approval_groups[1]["records"][2]["approval_timestamp"] == "2026-04-26 09:15"
     assert approval_groups[2]["records"][0]["approval_timestamp"] == "2026-04-26T10:00:00-04:00"
@@ -402,6 +428,9 @@ def test_xianxia_techniques_page_shows_approval_status_records(
     assert "Falling Palm Oath" in html
     assert "Approved for the Heavenly Palm initiate technique." in html
     assert "Approval timestamp: 2026-04-25T19:30:00-04:00" in html
+    assert "Base ability ref: xianxia:heavenly-palm:initiate:directing-palm-technique" in html
+    assert "Base ability kind: Technique" in html
+    assert "Technique anchor: Technique anchor" in html
     assert "Mountain-Crossing Oath" in html
     assert "Approval state: Approved" in html
     assert "approval-state-badge--approved" in html
@@ -409,6 +438,10 @@ def test_xianxia_techniques_page_shows_approval_status_records(
     assert "Variant" in html
     assert "Ascendant Arts" in html
     assert "Skyfire Crown" in html
+    assert "Base ability ref: xianxia:cherry-blossom-swallow:novice:fading-petal-stance" in html
+    assert "Base ability kind: Stance" in html
+    assert "Technique anchor: Invalid non-Technique anchor" in html
+    assert "Karmic Constraints and Ascendant Arts must be attached to Technique abilities." in html
     assert "Starfall Halo" in html
     assert "Approval state: Pending" in html
     assert "approval-state-badge--pending" in html
@@ -524,6 +557,9 @@ def test_xianxia_unapproved_variants_remain_approval_records_not_usable_modeled_
     assert martial_arts_response.status_code == 200
     martial_arts_html = unescape(martial_arts_response.get_data(as_text=True))
     assert "Qi Fist Technique" in martial_arts_html
+    assert "Rank ref: xianxia:demons-fist:initiate" in martial_arts_html
+    assert "Energy bonuses: Jing +1" in martial_arts_html
+    assert "Insight cost: 1" in martial_arts_html
     for variant_name in variant_names:
         assert variant_name not in martial_arts_html
 
@@ -928,7 +964,7 @@ def test_xianxia_read_sheet_uses_system_specific_subpages(
     assert "Kind: Technique" in martial_arts_html
     assert "Support: Reference only" in martial_arts_html
     assert re.search(
-        r"<strong>Source/ref:</strong>\s*xianxia:demons-fist:initiate:qi-fist-technique",
+        r"<strong>Ability ref:</strong>\s*xianxia:demons-fist:initiate:qi-fist-technique",
         martial_arts_html,
     )
     assert "Costs:" in martial_arts_html
@@ -1239,7 +1275,7 @@ def test_xianxia_session_character_uses_read_sheet_subpage_chrome(
     assert "Qi Fist Technique" in html
     assert "Learned ranks" in html
     assert re.search(
-        r"<strong>Source/ref:</strong>\s*xianxia:demons-fist:initiate:qi-fist-technique",
+        r"<strong>Ability ref:</strong>\s*xianxia:demons-fist:initiate:qi-fist-technique",
         html,
     )
     assert "You imbue your punches with an aura of raging Qi." in html

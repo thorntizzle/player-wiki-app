@@ -185,6 +185,12 @@ def test_xianxia_definition_normalizes_karmic_constraint_approval_fields():
                         "approval_note": "Too binding for this rank.",
                         "gm_reviewed_at": "2026-04-26 09:15",
                     },
+                    {
+                        "variant_type": "karmic_constraint",
+                        "name": "Technique-Anchored Oath",
+                        "ability_ref": "xianxia:demons-fist:initiate:qi-fist-technique",
+                        "ability_kind": "Technique",
+                    },
                 ]
             },
         )
@@ -209,6 +215,12 @@ def test_xianxia_definition_normalizes_karmic_constraint_approval_fields():
     assert variants[1]["status"] == "Denied"
     assert variants[1]["approval_notes"] == "Too binding for this rank."
     assert variants[1]["approval_timestamp"] == "2026-04-26 09:15"
+    assert variants[2]["base_ability_ref"] == "xianxia:demons-fist:initiate:qi-fist-technique"
+    assert variants[2]["base_ability_kind"] == "Technique"
+    assert variants[2]["base_ability_kind_key"] == "technique"
+    assert variants[2]["technique_anchor_required"] is True
+    assert variants[2]["technique_anchor_status"] == "technique"
+    assert variants[2]["technique_anchor_valid"] is True
 
 
 def test_xianxia_definition_normalizes_ascendant_art_approval_fields():
@@ -228,6 +240,8 @@ def test_xianxia_definition_normalizes_ascendant_art_approval_fields():
                         "name": "Moonlit Crown",
                         "request_status": "Denied",
                         "approval_required": False,
+                        "base_ability_ref": "xianxia:cherry-blossom-swallow:novice:fading-petal-stance",
+                        "base_ability_kind": "Stance",
                     },
                 ]
             },
@@ -250,6 +264,13 @@ def test_xianxia_definition_normalizes_ascendant_art_approval_fields():
     assert variants[1]["approval_required"] is True
     assert variants[1]["approval_status"] == "rejected"
     assert variants[1]["request_status"] == "Denied"
+    assert variants[1]["base_ability_ref"] == "xianxia:cherry-blossom-swallow:novice:fading-petal-stance"
+    assert variants[1]["base_ability_kind"] == "Stance"
+    assert variants[1]["base_ability_kind_key"] == "stance"
+    assert variants[1]["technique_anchor_required"] is True
+    assert variants[1]["technique_anchor_status"] == "invalid_non_technique"
+    assert variants[1]["technique_anchor_valid"] is False
+    assert "must be attached to Technique abilities" in variants[1]["technique_anchor_warning"]
 
 
 def test_xianxia_definition_normalizes_dao_immolating_use_approval_fields():

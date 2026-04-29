@@ -173,6 +173,28 @@ _XIANXIA_APPROVAL_TIMESTAMP_ALIASES = (
     "gm_reviewed_at",
     "gm_reviewed_on",
 )
+_XIANXIA_VARIANT_BASE_ABILITY_REF_ALIASES = (
+    "base_ability_ref",
+    "ability_ref",
+    "base_technique_ref",
+    "technique_ref",
+    "parent_ability_ref",
+)
+_XIANXIA_VARIANT_BASE_ABILITY_KIND_ALIASES = (
+    "base_ability_kind",
+    "base_ability_kind_key",
+    "ability_kind",
+    "ability_kind_key",
+    "ability_type",
+    "base_ability_type",
+)
+_XIANXIA_MARTIAL_ART_ABILITY_KIND_LABELS = {
+    "technique": "Technique",
+    "maneuver": "Maneuver",
+    "stance": "Stance",
+    "aura": "Aura",
+    "other": "Other",
+}
 
 
 class XianxiaDefinitionValidationError(ValueError):
@@ -1020,6 +1042,7 @@ def _normalize_variant_record(record: dict[str, Any]) -> dict[str, Any]:
         raw_status = normalized.get("request_status")
     normalized["approval_status"] = _normalize_approval_status(raw_status, default="pending")
     _normalize_approval_record_metadata(normalized)
+    _normalize_variant_technique_anchor(normalized)
     return normalized
 
 
@@ -1038,6 +1061,65 @@ def _normalize_approval_status(value: Any, *, default: str) -> str:
     if not normalized:
         return default
     return _XIANXIA_APPROVAL_STATUS_ALIASES.get(normalized, normalized)
+
+
+def _normalize_variant_technique_anchor(record: dict[str, Any]) -> None:
+    base_ability_ref = _first_normalized_text(
+        record,
+        _XIANXIA_VARIANT_BASE_ABILITY_REF_ALIASES,
+    )
+    if base_ability_ref:
+        record["base_ability_ref"] = base_ability_ref
+
+    base_kind_key = ""
+    for alias in _XIANXIA_VARIANT_BASE_ABILITY_KIND_ALIASES:
+        if alias not in record:
+            continue
+        base_kind_key = _normalize_ability_kind_key(record.get(alias))
+        if base_kind_key:
+            break
+    if not base_kind_key and _first_normalized_text(record, ("base_technique_ref", "technique_ref")):
+        base_kind_key = "technique"
+
+    if base_kind_key:
+        record["base_ability_kind_key"] = base_kind_key
+        record["base_ability_kind"] = _XIANXIA_MARTIAL_ART_ABILITY_KIND_LABELS[base_kind_key]
+
+    if not base_ability_ref and not base_kind_key:
+        return
+
+    record["technique_anchor_required"] = True
+    if base_kind_key == "technique":
+        record["technique_anchor_status"] = "technique"
+        record["technique_anchor_valid"] = True
+        record.pop("technique_anchor_warning", None)
+        return
+
+    if base_kind_key:
+        record["technique_anchor_status"] = "invalid_non_technique"
+        record["technique_anchor_valid"] = False
+        record["technique_anchor_warning"] = (
+            "Karmic Constraints and Ascendant Arts must be attached to Technique abilities."
+        )
+        return
+
+    record["technique_anchor_status"] = "unverified"
+    record["technique_anchor_valid"] = False
+
+
+def _normalize_ability_kind_key(value: Any) -> str:
+    normalized = _normalize_token(value)
+    aliases = {
+        "techniques": "technique",
+        "martial_art_technique": "technique",
+        "maneuvers": "maneuver",
+        "stances": "stance",
+        "auras": "aura",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized in _XIANXIA_MARTIAL_ART_ABILITY_KIND_LABELS:
+        return normalized
+    return ""
 
 
 def _normalize_approval_request_records(values: Any) -> list[dict[str, Any]]:

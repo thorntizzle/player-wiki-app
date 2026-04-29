@@ -87,6 +87,27 @@
                         {% for rank in art.learned_rank_refs %}
                           {% if rank.abilities %}
                             <div class="detail-cluster">
+                              <p><strong>{{ rank.label }} Rank</strong></p>
+                              <ul class="plain-list">
+                                {% if rank.rank_ref %}
+                                  <li class="meta">Rank ref: {{ rank.rank_ref }}</li>
+                                {% endif %}
+                                {% if rank.energy_bonus_text %}
+                                  <li class="meta">Energy bonuses: {{ rank.energy_bonus_text }}</li>
+                                {% endif %}
+                                {% if rank.insight_cost %}
+                                  <li class="meta">Insight cost: {{ rank.insight_cost }}</li>
+                                {% endif %}
+                                {% if rank.prerequisite_text %}
+                                  <li class="meta">Prerequisite: {{ rank.prerequisite_text }}</li>
+                                {% endif %}
+                                {% if rank.teacher_breakthrough_note %}
+                                  <li class="meta">Teacher/breakthrough: {{ rank.teacher_breakthrough_note }}</li>
+                                {% endif %}
+                                {% if rank.legendary_prerequisite_note %}
+                                  <li class="meta">Legendary prerequisite: {{ rank.legendary_prerequisite_note }}</li>
+                                {% endif %}
+                              </ul>
                               <p><strong>{{ rank.label }} abilities</strong></p>
                               {% for ability in rank.abilities %}
                                 <details class="feature-detail">
@@ -109,7 +130,7 @@
                                   <article>
                                     {% if ability.source_ref %}
                                       <p class="meta">
-                                        <strong>Source/ref:</strong> {{ ability.source_ref }}
+                                        <strong>Ability ref:</strong> {{ ability.source_ref }}
                                       </p>
                                     {% endif %}
                                     {% if ability.resource_cost_text %}
@@ -285,6 +306,20 @@
                 {% endif %}
                 {% if record.approval_timestamp %}
                   <li class="meta">Approval timestamp: {{ record.approval_timestamp }}</li>
+                {% endif %}
+                {% if group.key in ['karmic_constraints', 'ascendant_arts'] %}
+                  {% if record.base_ability_ref %}
+                    <li class="meta">Base ability ref: {{ record.base_ability_ref }}</li>
+                  {% endif %}
+                  {% if record.base_ability_kind %}
+                    <li class="meta">Base ability kind: {{ record.base_ability_kind }}</li>
+                  {% endif %}
+                  {% if record.technique_anchor_label %}
+                    <li class="meta">Technique anchor: {{ record.technique_anchor_label }}</li>
+                  {% endif %}
+                  {% if record.technique_anchor_warning %}
+                    <li class="meta">{{ record.technique_anchor_warning }}</li>
+                  {% endif %}
                 {% endif %}
                 {% if group.key == 'dao_immolating_use_records' %}
                   <li class="meta">Insight cost: {{ record.insight_cost }}</li>

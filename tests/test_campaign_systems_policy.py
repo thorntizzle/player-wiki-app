@@ -622,6 +622,11 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
         "duration_tags": ["rest_of_combat"],
         "support_state": XIANXIA_MARTIAL_ART_ABILITY_DEFAULT_SUPPORT_STATE,
         "xianxia_support_state": XIANXIA_MARTIAL_ART_ABILITY_DEFAULT_SUPPORT_STATE,
+        "text": (
+            "You imbue your punches with an aura of raging Qi. Spend a point of "
+            "Qi, for the rest of Combat your Unarmed Attacks do Weapon Effort "
+            "Damage. Can harm incorporeal beings."
+        ),
     }
     assert rank_ability_effects["taoist_blade"]["initiate"]["wudang_sword_wave"][
         "range_tags"
@@ -869,6 +874,8 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
     demons_fist_ranks = entry_map["demons-fist"]["body"]["xianxia_martial_art"]["rank_records"]
     assert demons_fist_ranks[0]["martial_art_key"] == "demons_fist"
     assert demons_fist_ranks[0]["martial_art_slug"] == "demons-fist"
+    assert demons_fist_ranks[0]["concept_type"] == "martial_art_rank"
+    assert demons_fist_ranks[0]["parent_martial_art_ref"] == "xianxia:demons-fist"
     assert demons_fist_ranks[0]["rank_key"] == "initiate"
     assert demons_fist_ranks[0]["rank_name"] == "Initiate"
     assert demons_fist_ranks[0]["rank_order"] == 1
@@ -885,9 +892,19 @@ def test_xianxia_martial_art_parent_seed_entries_cover_requirements_catalog():
     assert demons_fist_ranks[-1]["teacher_breakthrough_requirement"] == "ascension_breakthrough"
     assert "quest or mythic-level master" in demons_fist_ranks[-1]["legendary_prerequisite_note"]
     qi_fist = demons_fist_ranks[0]["ability_grants"][0]
+    assert qi_fist["concept_type"] == "ability"
+    assert qi_fist["parent_rank_ref"] == "xianxia:demons-fist:initiate"
     assert qi_fist["ability_key"] == "qi_fist_technique"
     assert qi_fist["kind_key"] == "technique"
     assert qi_fist["ability_ref"] == "xianxia:demons-fist:initiate:qi-fist-technique"
+    assert qi_fist["ability_text"] == qi_fist["text"]
+    ability_records = entry_map["demons-fist"]["metadata"]["martial_art_ability_records"]
+    assert ability_records[0]["concept_type"] == "ability"
+    assert ability_records[0]["rank_ref"] == "xianxia:demons-fist:initiate"
+    assert ability_records[0]["ability_ref"] == qi_fist["ability_ref"]
+    assert entry_map["demons-fist"]["body"]["xianxia_martial_art"]["ability_records"] == (
+        entry_map["demons-fist"]["metadata"]["martial_art_ability_records"]
+    )
     assert "qi fist technique" in entry_map["demons-fist"]["search_text"]
     assert qi_fist["ability_ref"] in demons_fist_html
 
@@ -1605,7 +1622,8 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
     seed_basic_action_count = sum(
         1 for entry in seed_entries if entry["entry_type"] == "basic_action"
     )
-    assert f"{seed_count} browsable entries across 4" in source_html
+    assert f"{seed_count} browsable entries" in source_html
+    assert "Martial Art Ranks" in source_html
     assert "Generic Techniques" in source_html
     assert "Basic Actions" in source_html
 

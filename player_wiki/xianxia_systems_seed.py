@@ -14,7 +14,7 @@ XIANXIA_HOMEBREW_SOURCE_ID = "XIANXIA-HOMEBREW"
 XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY = "curated_seed_data"
 XIANXIA_SYSTEMS_SEED_DATA_RELATIVE_PATH = "player_wiki/data/xianxia_systems_seed.json"
 _XIANXIA_SYSTEMS_SEED_DATA_PATH = Path(__file__).resolve().parent / "data" / "xianxia_systems_seed.json"
-_XIANXIA_SYSTEMS_SEED_RENDERER_VERSION = "rank-records-embedded-v2"
+_XIANXIA_SYSTEMS_SEED_RENDERER_VERSION = "rank-records-embedded-v3"
 
 
 def _build_seed_version(base_version: str) -> str:
@@ -89,6 +89,7 @@ XIANXIA_MARTIAL_ART_RANK_ABILITY_GRANTS_STATUS_KIND_TAGS_SEEDED = (
 XIANXIA_MARTIAL_ART_RANK_ABILITY_EFFECTS_STATUS_COST_RANGE_DAMAGE_DURATION_SUPPORT_SEEDED = (
     "cost_range_damage_duration_support_seeded"
 )
+XIANXIA_MARTIAL_ART_ABILITY_RECORDS_STATUS_RANK_LINKED = "rank_linked_ability_records_seeded"
 XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_COMPLETE = "complete"
 XIANXIA_MARTIAL_ART_RANK_COMPLETION_STATUS_INTENTIONAL_DRAFT = "intentional_incomplete_draft"
 XIANXIA_MARTIAL_ART_MISSING_RANK_REASON_INTENTIONAL_DRAFT = "intentional_draft_content"
@@ -1818,6 +1819,7 @@ def _stamp_martial_art_rank_records(metadata: dict[str, Any], body: dict[str, An
     body_rank_records = [dict(record) for record in rank_records]
     metadata_missing_rank_records = [dict(record) for record in missing_rank_records]
     body_missing_rank_records = [dict(record) for record in missing_rank_records]
+    ability_records = _build_martial_art_ability_records(rank_records)
     metadata["rank_records_seeded"] = True
     metadata["rank_records_status"] = (
         XIANXIA_MARTIAL_ART_RANK_RECORDS_STATUS_ADVANCEMENT_METADATA_SEEDED
@@ -1856,6 +1858,12 @@ def _stamp_martial_art_rank_records(metadata: dict[str, Any], body: dict[str, An
         rank_key: [dict(grant) for grant in grants]
         for rank_key, grants in metadata["martial_art_rank_ability_grants"].items()
     }
+    metadata["ability_records_seeded"] = True
+    metadata["ability_records_status"] = XIANXIA_MARTIAL_ART_ABILITY_RECORDS_STATUS_RANK_LINKED
+    metadata["martial_art_ability_records"] = [dict(record) for record in ability_records]
+    metadata["xianxia_martial_art_ability_records"] = [
+        dict(record) for record in ability_records
+    ]
     metadata["martial_art_missing_rank_records"] = metadata_missing_rank_records
     metadata["xianxia_martial_art_missing_rank_records"] = [
         dict(record) for record in missing_rank_records
@@ -1911,6 +1919,12 @@ def _stamp_martial_art_rank_records(metadata: dict[str, Any], body: dict[str, An
         rank_key: [dict(grant) for grant in grants]
         for rank_key, grants in martial_art_body["rank_ability_grants"].items()
     }
+    martial_art_body["ability_records_seeded"] = True
+    martial_art_body["ability_records_status"] = XIANXIA_MARTIAL_ART_ABILITY_RECORDS_STATUS_RANK_LINKED
+    martial_art_body["ability_records"] = [dict(record) for record in ability_records]
+    martial_art_body["xianxia_martial_art_ability_records"] = [
+        dict(record) for record in ability_records
+    ]
     martial_art_body["missing_rank_records"] = body_missing_rank_records
     martial_art_body["xianxia_martial_art_missing_rank_records"] = [
         dict(record) for record in missing_rank_records
@@ -2542,6 +2556,9 @@ def _build_martial_art_rank_records(
             {
                 "martial_art_key": martial_art_key,
                 "martial_art_slug": martial_art_slug,
+                "concept_type": "martial_art_rank",
+                "xianxia_concept_type": "martial_art_rank",
+                "parent_martial_art_ref": f"xianxia:{martial_art_slug}",
                 "rank_key": rank_key,
                 "rank_entry_slug": _build_martial_art_rank_entry_slug(
                     martial_art_slug, rank_key
@@ -2574,6 +2591,11 @@ def _build_martial_art_rank_records(
                 ),
                 "ability_grants": ability_grants,
                 "xianxia_ability_grants": [dict(grant) for grant in ability_grants],
+                "granted_ability_refs": [
+                    str(grant.get("ability_ref") or "").strip()
+                    for grant in ability_grants
+                    if str(grant.get("ability_ref") or "").strip()
+                ],
                 "rank_ability_grants_status": (
                     XIANXIA_MARTIAL_ART_RANK_ABILITY_GRANTS_STATUS_KIND_TAGS_SEEDED
                     if rank_available
@@ -2614,24 +2636,33 @@ def _build_rank_ability_grants(
         ability_key = str(grant["ability_key"])
         ability_slug = ability_key.replace("_", "-")
         ability_ref = f"xianxia:{martial_art_slug}:{rank_key}:{ability_slug}"
+        rank_ref = f"xianxia:{martial_art_slug}:{rank_key}"
         effect_metadata = _copy_rank_ability_effect(
             ability_effects.get(ability_key) or _default_rank_ability_effect()
         )
+        ability_name = str(grant["name"])
         records.append(
             {
                 "martial_art_key": martial_art_key,
                 "martial_art_slug": martial_art_slug,
+                "concept_type": "ability",
+                "xianxia_concept_type": "ability",
+                "parent_martial_art_ref": f"xianxia:{martial_art_slug}",
+                "parent_rank_ref": rank_ref,
                 "rank_key": rank_key,
                 "ability_key": ability_key,
                 "ability_slug": ability_slug,
                 "ability_ref": ability_ref,
-                "name": str(grant["name"]),
+                "name": ability_name,
+                "title": ability_name,
+                "ability_name": ability_name,
                 "kind": str(grant["kind"]),
                 "kind_key": str(grant["kind_key"]),
                 "ability_kind": str(grant["ability_kind"]),
                 "ability_kind_key": str(grant["ability_kind_key"]),
                 "resource_costs": effect_metadata["resource_costs"],
                 "text": effect_metadata["text"],
+                "ability_text": effect_metadata["text"],
                 "range_tags": effect_metadata["range_tags"],
                 "damage_effort_tags": effect_metadata["damage_effort_tags"],
                 "duration_tags": effect_metadata["duration_tags"],
@@ -2639,6 +2670,33 @@ def _build_rank_ability_grants(
                 "xianxia_support_state": str(effect_metadata["xianxia_support_state"]),
             }
         )
+    return records
+
+
+def _build_martial_art_ability_records(rank_records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for rank_record in rank_records:
+        rank_ref = str(rank_record.get("rank_ref") or "").strip()
+        rank_key = str(rank_record.get("rank_key") or "").strip()
+        rank_name = str(rank_record.get("rank_name") or "").strip()
+        for grant in rank_record.get("ability_grants") or []:
+            if not isinstance(grant, dict):
+                continue
+            ability_ref = str(grant.get("ability_ref") or "").strip()
+            if not ability_ref:
+                continue
+            records.append(
+                {
+                    **dict(grant),
+                    "concept_type": "ability",
+                    "xianxia_concept_type": "ability",
+                    "rank_key": rank_key,
+                    "rank_name": rank_name,
+                    "rank_ref": rank_ref,
+                    "parent_rank_ref": rank_ref,
+                    "ability_ref": ability_ref,
+                }
+            )
     return records
 
 
