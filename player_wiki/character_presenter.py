@@ -2236,6 +2236,11 @@ def _present_xianxia_inventory_records(values: Any) -> list[dict[str, Any]]:
                 "id": str(payload.get("id") or "").strip(),
                 "catalog_ref": str(payload.get("catalog_ref") or "").strip(),
                 "notes": str(payload.get("notes") or "").strip(),
+                "tags": [
+                    str(tag or "").strip()
+                    for tag in list(payload.get("tags") or [])
+                    if str(tag or "").strip()
+                ],
             }
         )
     return records

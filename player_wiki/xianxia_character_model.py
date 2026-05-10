@@ -1421,6 +1421,13 @@ def _normalize_xianxia_inventory_quantities(values: Any) -> list[dict[str, Any]]
         name = _normalize_text(value.get("name") or value.get("label"))
         if not item_id and not catalog_ref and not name:
             continue
+        notes = _normalize_text(value.get("notes"))
+        raw_tags = value.get("tags")
+        tags = [
+            _normalize_text(tag)
+            for tag in (raw_tags if isinstance(raw_tags, list) else ([] if raw_tags is None else [raw_tags]))
+            if _normalize_text(tag)
+        ]
         quantity = value.get("quantity") if "quantity" in value else value.get("default_quantity")
         record: dict[str, Any] = {"quantity": _normalize_int(quantity, default=0)}
         if item_id:
@@ -1429,6 +1436,10 @@ def _normalize_xianxia_inventory_quantities(values: Any) -> list[dict[str, Any]]
             record["catalog_ref"] = catalog_ref
         if name:
             record["name"] = name
+        if notes:
+            record["notes"] = notes
+        if tags:
+            record["tags"] = tags
         records.append(record)
     return records
 

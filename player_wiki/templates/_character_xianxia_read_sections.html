@@ -701,6 +701,9 @@
                 {% if item.catalog_ref %}{{ item.catalog_ref }}{% else %}{{ item.id }}{% endif %}
               </p>
             {% endif %}
+            {% if item.tags %}
+              <p class="meta">{{ item.tags | join(', ') }}</p>
+            {% endif %}
             {% if item.notes %}
               <p>{{ item.notes }}</p>
             {% endif %}

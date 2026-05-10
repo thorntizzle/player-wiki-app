@@ -115,13 +115,20 @@ from .xianxia_advancement import (
     normalize_xianxia_martial_art_rank_key,
     rank_label as xianxia_martial_art_rank_label,
 )
-from .xianxia_character_model import XIANXIA_ATTRIBUTE_KEYS, XIANXIA_EFFORT_KEYS
+from .xianxia_character_model import (
+    XIANXIA_ATTRIBUTE_KEYS,
+    XIANXIA_ATTRIBUTE_LABELS,
+    XIANXIA_EFFORT_KEYS,
+    XIANXIA_EFFORT_LABELS,
+    XIANXIA_ENERGY_KEYS,
+)
 from .xianxia_character_builder import (
     XIANXIA_GM_GRANTED_GENERIC_TECHNIQUE_INPUT,
     build_xianxia_character_create_context,
     build_xianxia_character_definition,
     build_xianxia_character_initial_state,
 )
+from .xianxia_character_importer import build_xianxia_manual_import_character
 from .combat_presenter import DND_5E_CONDITION_OPTIONS, present_combat_tracker
 from .character_presenter import (
     XIANXIA_READ_SUBPAGE_LABELS,
@@ -4873,6 +4880,128 @@ def create_app() -> Flask:
                 "character_create_xianxia.html",
                 campaign=campaign,
                 builder=create_context,
+                active_nav="characters",
+            ),
+            status_code,
+        )
+
+    def build_xianxia_manual_import_context(
+        campaign_slug: str,
+        form_values: dict[str, object] | None = None,
+        *,
+        preview: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        values = {key: str(value or "") for key, value in dict(form_values or {}).items()}
+        martial_art_options = build_xianxia_character_create_context(
+            {},
+            systems_service=get_systems_service(),
+            campaign_slug=campaign_slug,
+        ).get("martial_art_options", [])
+        return {
+            "values": values,
+            "realm_choices": ("Mortal", "Immortal", "Divine"),
+            "honor_choices": ("Venerable", "Majestic", "Honorable", "Disgraced", "Demonic"),
+            "attribute_fields": [
+                {
+                    "key": key,
+                    "label": XIANXIA_ATTRIBUTE_LABELS[key],
+                    "input_name": f"attribute_{key}",
+                    "value": values.get(f"attribute_{key}", "0"),
+                }
+                for key in XIANXIA_ATTRIBUTE_KEYS
+            ],
+            "effort_fields": [
+                {
+                    "key": key,
+                    "label": XIANXIA_EFFORT_LABELS[key],
+                    "input_name": f"effort_{key}",
+                    "value": values.get(f"effort_{key}", "0"),
+                }
+                for key in XIANXIA_EFFORT_KEYS
+            ],
+            "energy_fields": [
+                {
+                    "key": key,
+                    "label": key.title(),
+                    "max_input_name": f"energy_{key}_max",
+                    "current_input_name": f"current_{key}",
+                    "max_value": values.get(f"energy_{key}_max", "0"),
+                    "current_value": values.get(f"current_{key}", ""),
+                }
+                for key in XIANXIA_ENERGY_KEYS
+            ],
+            "martial_art_options": list(martial_art_options or []),
+            "preview": preview,
+        }
+
+    def build_xianxia_manual_import_payload(form_values: dict[str, object]) -> dict[str, object]:
+        values = {key: str(value or "") for key, value in dict(form_values or {}).items()}
+        payload: dict[str, object] = dict(values)
+        payload["energy_maxima"] = {
+            key: values.get(f"energy_{key}_max", "")
+            for key in XIANXIA_ENERGY_KEYS
+        }
+        payload["state"] = {
+            "vitals": {
+                "current_hp": values.get("current_hp", ""),
+                "temp_hp": values.get("temp_hp", ""),
+                "current_stance": values.get("current_stance", ""),
+                "temp_stance": values.get("temp_stance", ""),
+            },
+            "energies_current": {
+                key: values.get(f"current_{key}", "")
+                for key in XIANXIA_ENERGY_KEYS
+            },
+            "yin_yang": {
+                "yin_current": values.get("current_yin", ""),
+                "yang_current": values.get("current_yang", ""),
+            },
+            "dao": {
+                "current": values.get("current_dao", ""),
+            },
+            "xianxia": {
+                "active_stance": values.get("active_stance", ""),
+                "active_aura": values.get("active_aura", ""),
+                "notes": {
+                    "player_notes_markdown": values.get("player_notes_markdown", ""),
+                },
+            },
+        }
+        return payload
+
+    def build_xianxia_manual_import_preview(
+        definition,
+        initial_state: dict[str, object],
+    ) -> dict[str, object]:
+        xianxia = dict(getattr(definition, "xianxia", {}) or {})
+        state_xianxia = dict(initial_state.get("xianxia") or {})
+        inventory = dict(state_xianxia.get("inventory") or {})
+        return {
+            "name": definition.name,
+            "slug": definition.character_slug,
+            "realm": xianxia.get("realm"),
+            "actions_per_turn": xianxia.get("actions_per_turn"),
+            "trained_skill_count": len(list(dict(xianxia.get("skills") or {}).get("trained") or [])),
+            "martial_art_count": len(list(xianxia.get("martial_arts") or [])),
+            "inventory_count": len(list(inventory.get("quantities") or [])),
+            "hp": dict(state_xianxia.get("vitals") or {}).get("current_hp"),
+            "hp_max": dict(xianxia.get("durability") or {}).get("hp_max"),
+            "stance": dict(state_xianxia.get("vitals") or {}).get("current_stance"),
+            "stance_max": dict(xianxia.get("durability") or {}).get("stance_max"),
+        }
+
+    def render_xianxia_manual_import_page(
+        campaign_slug: str,
+        import_context: dict[str, object],
+        *,
+        status_code: int = 200,
+    ):
+        campaign = load_campaign_context(campaign_slug)
+        return (
+            render_template(
+                "character_import_xianxia_manual.html",
+                campaign=campaign,
+                import_context=import_context,
                 active_nav="characters",
             ),
             status_code,
@@ -11771,6 +11900,10 @@ def create_app() -> Flask:
             can_create_characters=(
                 can_manage_campaign_session(campaign_slug) and native_character_create_supported
             ),
+            can_import_xianxia_characters=(
+                can_manage_campaign_session(campaign_slug)
+                and character_create_lane == CHARACTER_ROUTE_LANE_XIANXIA
+            ),
             native_character_tools_supported=native_character_tools_supported,
             native_character_create_supported=native_character_create_supported,
             character_create_lane=character_create_lane,
@@ -11896,6 +12029,66 @@ def create_app() -> Flask:
         write_yaml(import_path, import_metadata.to_dict())
         character_state_store.initialize_state_if_missing(definition, build_initial_state(definition))
         flash(f"{definition.name} created.", "success")
+        return redirect(
+            url_for(
+                "character_read_view",
+                campaign_slug=campaign_slug,
+                character_slug=definition.character_slug,
+            )
+        )
+
+    @app.route("/campaigns/<campaign_slug>/characters/import/xianxia-manual", methods=["GET", "POST"])
+    @campaign_scope_access_required("characters")
+    def character_import_xianxia_manual_view(campaign_slug: str):
+        if not can_manage_campaign_session(campaign_slug):
+            abort(403)
+
+        campaign = load_campaign_context(campaign_slug)
+        if native_character_create_lane(getattr(campaign, "system", "")) != CHARACTER_ROUTE_LANE_XIANXIA:
+            flash("Manual Xianxia character import is only available for Xianxia campaigns.", "error")
+            return redirect(url_for("character_roster_view", campaign_slug=campaign_slug))
+
+        form_values = dict(request.form if request.method == "POST" else request.args)
+        import_context = build_xianxia_manual_import_context(campaign_slug, form_values)
+        if request.method != "POST":
+            return render_xianxia_manual_import_page(campaign_slug, import_context)
+
+        payload = build_xianxia_manual_import_payload(form_values)
+        try:
+            definition, import_metadata, initial_state = build_xianxia_manual_import_character(
+                payload,
+                campaign_slug=campaign_slug,
+                martial_art_options=list(import_context.get("martial_art_options") or []),
+            )
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return render_xianxia_manual_import_page(campaign_slug, import_context, status_code=400)
+
+        preview = build_xianxia_manual_import_preview(definition, initial_state)
+        import_context = build_xianxia_manual_import_context(
+            campaign_slug,
+            form_values,
+            preview=preview,
+        )
+        if not request.form.get("confirm_import"):
+            flash("Review the imported sheet summary, then confirm to create the character.", "info")
+            return render_xianxia_manual_import_page(campaign_slug, import_context)
+
+        config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
+        character_dir = config.characters_dir / definition.character_slug
+        definition_path = character_dir / "definition.yaml"
+        import_path = character_dir / "import.yaml"
+        if definition_path.exists() or import_path.exists():
+            flash(
+                f"A character with slug '{definition.character_slug}' already exists in this campaign.",
+                "error",
+            )
+            return render_xianxia_manual_import_page(campaign_slug, import_context, status_code=409)
+
+        write_yaml(definition_path, definition.to_dict())
+        write_yaml(import_path, import_metadata.to_dict())
+        character_state_store.initialize_state_if_missing(definition, initial_state)
+        flash(f"{definition.name} imported.", "success")
         return redirect(
             url_for(
                 "character_read_view",
