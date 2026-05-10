@@ -120,10 +120,16 @@ def _manual_import_form_data() -> dict[str, str]:
             "Sky Calling\n"
             "Blade Focus"
         ),
-        "martial_arts_text": (
-            "heavenly-palm | Novice | Elder Qing | Cloud breakthrough | Linked branch\n"
-            "Unlisted Fist | Apprentice | Wandering monk | Wind step | Manual record"
-        ),
+        "martial_art_1_slug": "heavenly-palm",
+        "martial_art_1_rank": "Novice",
+        "martial_art_1_teacher": "Elder Qing",
+        "martial_art_1_breakthrough": "Cloud breakthrough",
+        "martial_art_1_notes": "Linked branch",
+        "martial_art_2_name": "Unlisted Fist",
+        "martial_art_2_rank": "Apprentice",
+        "martial_art_2_teacher": "Wandering monk",
+        "martial_art_2_breakthrough": "Wind step",
+        "martial_art_2_notes": "Manual record",
         "inventory_text": (
             "Spirit rice | 3 | consumable, treasure | Emergency cache\n"
             "Travel cloak | 1 | tool | Weathered"
@@ -275,6 +281,53 @@ def test_manual_importer_preserves_linked_and_unlinked_martial_arts():
     assert unlinked["breakthrough"] == "Wind Step"
 
 
+def test_manual_importer_links_selected_stored_martial_art_without_manual_name():
+    payload = _base_payload()
+    payload.update(
+        {
+            "martial_art_1_slug": "heavenly-palm",
+            "martial_art_1_rank": "Master",
+            "martial_art_1_teacher": "Elder Qing",
+            "martial_art_1_breakthrough": "Storm crown",
+        }
+    )
+    martial_art_options = [
+        {
+            "slug": "heavenly-palm",
+            "title": "Heavenly Palm",
+            "entry_key": "xianxia-homebrew:martial-art:heavenly-palm",
+            "entry_type": "martial_art",
+            "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+            "library_slug": "xianxia",
+            "rank_refs": {
+                "initiate": "xianxia:heavenly-palm:initiate",
+                "novice": "xianxia:heavenly-palm:novice",
+                "apprentice": "xianxia:heavenly-palm:apprentice",
+                "master": "xianxia:heavenly-palm:master",
+            },
+        }
+    ]
+
+    definition, _, _ = build_xianxia_manual_import_character(
+        payload,
+        martial_art_options=martial_art_options,
+    )
+
+    linked_art = definition.xianxia["martial_arts"][0]
+    assert linked_art["name"] == "Heavenly Palm"
+    assert linked_art["systems_ref"]["slug"] == "heavenly-palm"
+    assert linked_art["current_rank_key"] == "master"
+    assert linked_art["current_rank"] == "Master"
+    assert linked_art["learned_rank_refs"] == [
+        "xianxia:heavenly-palm:initiate",
+        "xianxia:heavenly-palm:novice",
+        "xianxia:heavenly-palm:apprentice",
+        "xianxia:heavenly-palm:master",
+    ]
+    assert linked_art["teacher"] == "Elder Qing"
+    assert linked_art["breakthrough"] == "Storm crown"
+
+
 def test_manual_importer_preserves_inventory_rows_with_notes_and_tags():
     payload = _base_payload()
     payload["state"] = {
@@ -326,7 +379,11 @@ def test_xianxia_manual_import_route_previews_then_creates_native_sheet(
 
     import_page = client.get("/campaigns/linden-pass/characters/import/xianxia-manual")
     assert import_page.status_code == 200
-    assert "Import Existing Xianxia Character" in import_page.get_data(as_text=True)
+    import_page_html = import_page.get_data(as_text=True)
+    assert "Import Existing Xianxia Character" in import_page_html
+    assert "Stored Martial Art" in import_page_html
+    assert "Heavenly Palm" in import_page_html
+    assert "Add Martial Art" in import_page_html
 
     preview = client.post(
         "/campaigns/linden-pass/characters/import/xianxia-manual",

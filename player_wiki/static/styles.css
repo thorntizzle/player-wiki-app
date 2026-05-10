@@ -1422,6 +1422,31 @@ button {
   gap: 0.85rem;
 }
 
+.manual-import-rows,
+.manual-import-row {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.manual-import-row {
+  padding: 1rem;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+
+.manual-import-row__heading {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.manual-import-row__heading h4 {
+  margin: 0;
+}
+
 .builder-preview-list div {
   display: grid;
   gap: 0.2rem;

@@ -62,6 +62,17 @@ XIANXIA_MARTIAL_ART_RANK_LABELS = {
     "initiate": "Initiate",
     "novice": "Novice",
 }
+XIANXIA_MARTIAL_ART_IMPORT_RANKS = (
+    {"key": "initiate", "label": "Initiate"},
+    {"key": "novice", "label": "Novice"},
+    {"key": "apprentice", "label": "Apprentice"},
+    {"key": "master", "label": "Master"},
+    {"key": "legendary", "label": "Legendary"},
+)
+XIANXIA_MARTIAL_ART_IMPORT_RANK_LABELS = {
+    str(record["key"]): str(record["label"])
+    for record in XIANXIA_MARTIAL_ART_IMPORT_RANKS
+}
 
 
 def build_xianxia_character_create_context(
@@ -347,6 +358,17 @@ def build_xianxia_character_initial_state(
     xianxia_state["dao"] = {"current": dao_current}
     initial_state["xianxia"] = normalize_xianxia_state_payload(definition, xianxia_state)
     return initial_state
+
+
+def list_xianxia_manual_import_martial_art_options(
+    systems_service: Any | None,
+    campaign_slug: str,
+) -> list[dict[str, Any]]:
+    return _list_xianxia_create_martial_art_options(
+        systems_service,
+        campaign_slug,
+        rank_labels=XIANXIA_MARTIAL_ART_IMPORT_RANK_LABELS,
+    )
 
 
 def _normalize_xianxia_create_values(values: dict[str, Any]) -> dict[str, Any]:
@@ -993,6 +1015,8 @@ def _xianxia_martial_art_rank_input_name(index: int) -> str:
 def _list_xianxia_create_martial_art_options(
     systems_service: Any | None,
     campaign_slug: str,
+    *,
+    rank_labels: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     if systems_service is None or not str(campaign_slug or "").strip():
         return []
@@ -1012,6 +1036,7 @@ def _list_xianxia_create_martial_art_options(
         _build_xianxia_martial_art_option(
             entry,
             campaign_custom_source_id=custom_source_id,
+            rank_labels=rank_labels or XIANXIA_MARTIAL_ART_RANK_LABELS,
         )
         for entry in entries
     ]
@@ -1108,11 +1133,17 @@ def _build_xianxia_martial_art_option(
     entry: Any,
     *,
     campaign_custom_source_id: str = "",
+    rank_labels: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     metadata = dict(getattr(entry, "metadata", {}) or {})
     body = dict(getattr(entry, "body", {}) or {})
     entry_source_id = str(getattr(entry, "source_id", "") or "").strip()
-    rank_records = _xianxia_martial_art_rank_records(metadata, body)
+    allowed_rank_labels = dict(rank_labels or XIANXIA_MARTIAL_ART_RANK_LABELS)
+    rank_records = _xianxia_martial_art_rank_records(
+        metadata,
+        body,
+        rank_labels=allowed_rank_labels,
+    )
     rank_refs = {
         str(record.get("rank_key") or "").strip(): str(record.get("rank_ref") or "").strip()
         for record in rank_records
@@ -1120,7 +1151,7 @@ def _build_xianxia_martial_art_option(
     }
     available_rank_keys = tuple(
         rank_key
-        for rank_key in ("initiate", "novice")
+        for rank_key in allowed_rank_labels
         if rank_key in rank_refs
     )
     is_custom_martial_art = bool(
@@ -1133,11 +1164,16 @@ def _build_xianxia_martial_art_option(
         )
     )
     if is_custom_martial_art and not available_rank_keys:
-        available_rank_keys = ("initiate", "novice")
+        available_rank_keys = tuple(allowed_rank_labels) or ("initiate", "novice")
         rank_refs = {
             rank_key: f"xianxia:{getattr(entry, 'slug', '')}:{rank_key}"
             for rank_key in available_rank_keys
         }
+    available_starting_rank_keys = tuple(
+        rank_key
+        for rank_key in ("initiate", "novice")
+        if rank_key in rank_refs
+    )
     martial_art_body = dict(body.get("xianxia_martial_art") or {})
     martial_art_style = str(
         metadata.get("xianxia_martial_art_style")
@@ -1159,7 +1195,13 @@ def _build_xianxia_martial_art_option(
         "source_id": entry_source_id,
         "library_slug": str(getattr(entry, "library_slug", "") or "").strip(),
         "martial_art_style": martial_art_style,
-        "available_starting_rank_keys": available_rank_keys,
+        "available_rank_keys": available_rank_keys,
+        "available_rank_labels": [
+            allowed_rank_labels[rank_key]
+            for rank_key in available_rank_keys
+            if rank_key in allowed_rank_labels
+        ],
+        "available_starting_rank_keys": available_starting_rank_keys,
         "rank_refs": rank_refs,
         "rank_records_status": str(metadata.get("rank_records_status") or "").strip(),
         "custom_martial_art": is_custom_martial_art,
@@ -1170,6 +1212,8 @@ def _build_xianxia_martial_art_option(
 def _xianxia_martial_art_rank_records(
     metadata: dict[str, Any],
     body: dict[str, Any],
+    *,
+    rank_labels: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     raw_records = metadata.get("xianxia_martial_art_rank_records")
     if raw_records is None:
@@ -1181,13 +1225,14 @@ def _xianxia_martial_art_rank_records(
             or martial_art_body.get("rank_records")
         )
     records: list[dict[str, Any]] = []
+    allowed_rank_labels = dict(rank_labels or XIANXIA_MARTIAL_ART_RANK_LABELS)
     for record in list(raw_records or []):
         if not isinstance(record, dict):
             continue
         if record.get("rank_available_in_seed") is False:
             continue
         rank_key = _normalize_xianxia_starting_martial_art_rank_key(record.get("rank_key"))
-        if rank_key not in XIANXIA_MARTIAL_ART_RANK_LABELS:
+        if rank_key not in allowed_rank_labels:
             continue
         records.append({**record, "rank_key": rank_key})
     return records

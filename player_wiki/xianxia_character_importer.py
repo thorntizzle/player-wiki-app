@@ -570,15 +570,17 @@ def _coerce_martial_arts_payload(
         if not isinstance(row, dict):
             continue
         source_row = deepcopy(row)
+        selected_option = _match_martial_art_option(source_row, option_map)
         name = _coerce_text(
             source_row.get("name") or source_row.get("label") or source_row.get("title")
         )
+        if selected_option and not name:
+            name = _coerce_text(selected_option.get("title"))
         if not name:
             continue
         source_row["name"] = name
 
         systems_ref = source_row.get("systems_ref")
-        selected_option = _match_martial_art_option(source_row, option_map)
         if selected_option:
             name = _coerce_text(selected_option.get("title")) or name
             source_row["name"] = name

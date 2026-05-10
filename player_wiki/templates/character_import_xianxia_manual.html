@@ -223,10 +223,59 @@
 
           <section class="builder-section">
             <h3>Martial Arts</h3>
-            <label class="field">
-              <span>Martial Art Ranks</span>
-              <textarea name="martial_arts_text" rows="8" placeholder="Heavenly Palm | Novice | Elder Qing | Cloud breakthrough | Linked training branch&#10;Unlisted Fist | Apprentice | Wandering monk | Wind step | Manual record">{{ values.get('martial_arts_text', '') }}</textarea>
-            </label>
+            <datalist id="xianxia-martial-art-rank-options">
+              {% for rank in import_context.martial_art_rank_choices %}
+                <option value="{{ rank.label }}"></option>
+              {% endfor %}
+            </datalist>
+            <div
+              class="manual-import-rows"
+              data-martial-art-rows
+              data-next-index="{{ (import_context.martial_art_rows | length) + 1 }}"
+            >
+              {% for row in import_context.martial_art_rows %}
+                <article class="manual-import-row" data-martial-art-row>
+                  <div class="manual-import-row__heading">
+                    <h4>Martial Art {{ row.index }}</h4>
+                    <button class="ghost-button" type="button" data-remove-martial-art-row>Remove</button>
+                  </div>
+                  <div class="builder-field-grid">
+                    <label class="field">
+                      <span>Stored Martial Art</span>
+                      <select name="{{ row.slug_input_name }}">
+                        <option value="">Unlinked/manual</option>
+                        {% for option in import_context.martial_art_options %}
+                          <option value="{{ option.slug }}" {% if row.selected_slug == option.slug %}selected{% endif %}>
+                            {{ option.title }}{% if option.source_id %} ({{ option.source_id }}){% endif %}
+                          </option>
+                        {% endfor %}
+                      </select>
+                    </label>
+                    <label class="field">
+                      <span>Manual Name</span>
+                      <input type="text" name="{{ row.name_input_name }}" value="{{ row.name }}" placeholder="Only needed for unlisted arts">
+                    </label>
+                    <label class="field">
+                      <span>Current Rank</span>
+                      <input type="text" list="xianxia-martial-art-rank-options" name="{{ row.rank_input_name }}" value="{{ row.rank }}" placeholder="Novice">
+                    </label>
+                    <label class="field">
+                      <span>Teacher</span>
+                      <input type="text" name="{{ row.teacher_input_name }}" value="{{ row.teacher }}">
+                    </label>
+                    <label class="field">
+                      <span>Breakthrough</span>
+                      <input type="text" name="{{ row.breakthrough_input_name }}" value="{{ row.breakthrough }}">
+                    </label>
+                    <label class="field">
+                      <span>Notes</span>
+                      <input type="text" name="{{ row.notes_input_name }}" value="{{ row.notes }}">
+                    </label>
+                  </div>
+                </article>
+              {% endfor %}
+            </div>
+            <button class="ghost-button" type="button" data-add-martial-art-row>Add Martial Art</button>
           </section>
 
           <section class="builder-section">
@@ -276,8 +325,19 @@
           <ul class="plain-list resource-preview-list">
             {% for option in import_context.martial_art_options %}
               <li>
-                <span>{{ option.title }}</span>
-                <strong>{{ option.slug }}</strong>
+                <span>
+                  {{ option.title }}
+                  {% if option.martial_art_style %}
+                    <span class="meta">{{ option.martial_art_style }}</span>
+                  {% endif %}
+                </span>
+                <strong>
+                  {% if option.available_rank_labels %}
+                    {{ option.available_rank_labels | join(', ') }}
+                  {% else %}
+                    {{ option.slug }}
+                  {% endif %}
+                </strong>
               </li>
             {% endfor %}
           </ul>
@@ -287,4 +347,83 @@
       </section>
     </aside>
   </div>
+{% endblock %}
+
+{% block scripts %}
+  <template id="xianxia-martial-art-row-template">
+    <article class="manual-import-row" data-martial-art-row>
+      <div class="manual-import-row__heading">
+        <h4>Martial Art ROW_INDEX</h4>
+        <button class="ghost-button" type="button" data-remove-martial-art-row>Remove</button>
+      </div>
+      <div class="builder-field-grid">
+        <label class="field">
+          <span>Stored Martial Art</span>
+          <select name="martial_art_ROW_INDEX_slug">
+            <option value="">Unlinked/manual</option>
+            {% for option in import_context.martial_art_options %}
+              <option value="{{ option.slug }}">
+                {{ option.title }}{% if option.source_id %} ({{ option.source_id }}){% endif %}
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span>Manual Name</span>
+          <input type="text" name="martial_art_ROW_INDEX_name" placeholder="Only needed for unlisted arts">
+        </label>
+        <label class="field">
+          <span>Current Rank</span>
+          <input type="text" list="xianxia-martial-art-rank-options" name="martial_art_ROW_INDEX_rank" placeholder="Novice">
+        </label>
+        <label class="field">
+          <span>Teacher</span>
+          <input type="text" name="martial_art_ROW_INDEX_teacher">
+        </label>
+        <label class="field">
+          <span>Breakthrough</span>
+          <input type="text" name="martial_art_ROW_INDEX_breakthrough">
+        </label>
+        <label class="field">
+          <span>Notes</span>
+          <input type="text" name="martial_art_ROW_INDEX_notes">
+        </label>
+      </div>
+    </article>
+  </template>
+  <script>
+    (() => {
+      const rows = document.querySelector("[data-martial-art-rows]");
+      const template = document.getElementById("xianxia-martial-art-row-template");
+      const addButton = document.querySelector("[data-add-martial-art-row]");
+      if (!rows || !template || !addButton) {
+        return;
+      }
+
+      const bindRemove = (row) => {
+        const removeButton = row.querySelector("[data-remove-martial-art-row]");
+        if (!removeButton) {
+          return;
+        }
+        removeButton.addEventListener("click", () => {
+          row.remove();
+        });
+      };
+
+      rows.querySelectorAll("[data-martial-art-row]").forEach(bindRemove);
+      addButton.addEventListener("click", () => {
+        const nextIndex = Number.parseInt(rows.dataset.nextIndex || "1", 10);
+        const rowHtml = template.innerHTML.replace(/ROW_INDEX/g, String(nextIndex));
+        const wrapper = document.createElement("div");
+        wrapper.innerHTML = rowHtml.trim();
+        const row = wrapper.firstElementChild;
+        if (!row) {
+          return;
+        }
+        rows.appendChild(row);
+        rows.dataset.nextIndex = String(nextIndex + 1);
+        bindRemove(row);
+      });
+    })();
+  </script>
 {% endblock %}

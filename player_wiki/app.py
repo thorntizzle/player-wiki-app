@@ -124,9 +124,11 @@ from .xianxia_character_model import (
 )
 from .xianxia_character_builder import (
     XIANXIA_GM_GRANTED_GENERIC_TECHNIQUE_INPUT,
+    XIANXIA_MARTIAL_ART_IMPORT_RANKS,
     build_xianxia_character_create_context,
     build_xianxia_character_definition,
     build_xianxia_character_initial_state,
+    list_xianxia_manual_import_martial_art_options,
 )
 from .xianxia_character_importer import build_xianxia_manual_import_character
 from .combat_presenter import DND_5E_CONDITION_OPTIONS, present_combat_tracker
@@ -4885,6 +4887,40 @@ def create_app() -> Flask:
             status_code,
         )
 
+    def build_xianxia_manual_import_martial_art_rows(
+        values: dict[str, str],
+    ) -> list[dict[str, object]]:
+        row_numbers: set[int] = set()
+        row_pattern = re.compile(
+            r"^martial_art_(\d+)_(slug|name|rank|teacher|breakthrough|notes)$"
+        )
+        for key in values:
+            match = row_pattern.match(str(key))
+            if not match:
+                continue
+            row_number = int(match.group(1))
+            if row_number > 0:
+                row_numbers.add(row_number)
+        row_count = max(max(row_numbers, default=0), 3)
+        return [
+            {
+                "index": index,
+                "slug_input_name": f"martial_art_{index}_slug",
+                "name_input_name": f"martial_art_{index}_name",
+                "rank_input_name": f"martial_art_{index}_rank",
+                "teacher_input_name": f"martial_art_{index}_teacher",
+                "breakthrough_input_name": f"martial_art_{index}_breakthrough",
+                "notes_input_name": f"martial_art_{index}_notes",
+                "selected_slug": values.get(f"martial_art_{index}_slug", ""),
+                "name": values.get(f"martial_art_{index}_name", ""),
+                "rank": values.get(f"martial_art_{index}_rank", ""),
+                "teacher": values.get(f"martial_art_{index}_teacher", ""),
+                "breakthrough": values.get(f"martial_art_{index}_breakthrough", ""),
+                "notes": values.get(f"martial_art_{index}_notes", ""),
+            }
+            for index in range(1, row_count + 1)
+        ]
+
     def build_xianxia_manual_import_context(
         campaign_slug: str,
         form_values: dict[str, object] | None = None,
@@ -4892,15 +4928,16 @@ def create_app() -> Flask:
         preview: dict[str, object] | None = None,
     ) -> dict[str, object]:
         values = {key: str(value or "") for key, value in dict(form_values or {}).items()}
-        martial_art_options = build_xianxia_character_create_context(
-            {},
+        martial_art_options = list_xianxia_manual_import_martial_art_options(
             systems_service=get_systems_service(),
             campaign_slug=campaign_slug,
-        ).get("martial_art_options", [])
+        )
         return {
             "values": values,
             "realm_choices": ("Mortal", "Immortal", "Divine"),
             "honor_choices": ("Venerable", "Majestic", "Honorable", "Disgraced", "Demonic"),
+            "martial_art_rank_choices": list(XIANXIA_MARTIAL_ART_IMPORT_RANKS),
+            "martial_art_rows": build_xianxia_manual_import_martial_art_rows(values),
             "attribute_fields": [
                 {
                     "key": key,
