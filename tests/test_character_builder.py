@@ -10173,10 +10173,13 @@ def test_normalize_definition_to_native_model_preserves_imported_expertise_and_u
     definition.profile["classes"][0]["class_name"] = "Rogue"
     definition.profile["classes"][0]["level"] = 5
     definition.stats["proficiency_bonus"] = 2
+    definition.stats["ability_scores"]["dex"] = {"score": 18, "modifier": 4, "save_bonus": 7}
     definition.stats["ability_scores"]["wis"] = {"score": 16, "modifier": 3, "save_bonus": 3}
     definition.skills = [
         {"name": "Perception", "bonus": 9, "proficiency_level": "expertise"},
         {"name": "Insight", "bonus": 6, "proficiency_level": "proficient"},
+        {"name": "Animal Handling", "bonus": 6, "proficiency_level": "proficient"},
+        {"name": "Sleight of Hand", "bonus": 10, "proficiency_level": "expertise"},
         {"name": "Investigation", "bonus": 0, "proficiency_level": "none"},
     ]
 
@@ -10188,6 +10191,10 @@ def test_normalize_definition_to_native_model_preserves_imported_expertise_and_u
     assert skills_by_name["Perception"]["bonus"] == 9
     assert skills_by_name["Insight"]["proficiency_level"] == "proficient"
     assert skills_by_name["Insight"]["bonus"] == 6
+    assert skills_by_name["Animal Handling"]["proficiency_level"] == "proficient"
+    assert skills_by_name["Animal Handling"]["bonus"] == 6
+    assert skills_by_name["Sleight of Hand"]["proficiency_level"] == "expertise"
+    assert skills_by_name["Sleight of Hand"]["bonus"] == 10
     assert normalized.stats["passive_perception"] == 19
     assert normalized.stats["passive_insight"] == 16
 

@@ -405,7 +405,7 @@ SUPPORTED_FREE_CAST_FEAT_SPELLS = {
 }
 SKILL_LABELS = {
     "acrobatics": "Acrobatics",
-    "animal handling": "Animal Handling",
+    "animalhandling": "Animal Handling",
     "arcana": "Arcana",
     "athletics": "Athletics",
     "deception": "Deception",
@@ -419,13 +419,13 @@ SKILL_LABELS = {
     "performance": "Performance",
     "persuasion": "Persuasion",
     "religion": "Religion",
-    "sleight of hand": "Sleight of Hand",
+    "sleightofhand": "Sleight of Hand",
     "stealth": "Stealth",
     "survival": "Survival",
 }
 SKILL_ABILITY_KEYS = {
     "acrobatics": "dex",
-    "animal handling": "wis",
+    "animalhandling": "wis",
     "arcana": "int",
     "athletics": "str",
     "deception": "cha",
@@ -439,7 +439,7 @@ SKILL_ABILITY_KEYS = {
     "performance": "cha",
     "persuasion": "cha",
     "religion": "int",
-    "sleight of hand": "dex",
+    "sleightofhand": "dex",
     "stealth": "dex",
     "survival": "wis",
 }
