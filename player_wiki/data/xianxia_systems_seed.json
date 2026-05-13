@@ -4193,6 +4193,44 @@
       ]
     },
     {
+      "title": "Currency",
+      "entry_type": "rule",
+      "slug": "currency",
+      "facets": [
+        "rule",
+        "equipment"
+      ],
+      "aliases": [
+        "Coin",
+        "Supply",
+        "Spirit Stones",
+        "currencies",
+        "supplies"
+      ],
+      "summary": "Xianxia tracks Coin, Supply, and Spirit Stones as the character's currency and consumable supplies.",
+      "metadata": {
+        "rule_key": "currency",
+        "rule_facets": [
+          "currency",
+          "coin",
+          "supply",
+          "spirit_stones",
+          "consumable"
+        ],
+        "xianxia_rule_key": "currency"
+      },
+      "sections": [
+        {
+          "title": "Currency Types",
+          "bullets": [
+            "Coin is standardized currency.",
+            "Supply is a catch-all for general supplies a character would have, such as rations, ammo, oil, thread, torches, and similar consumables.",
+            "Spirit Stones are consumables. Out of battle, a Spirit Stone may be used to gain +1 Insight. In battle, a Spirit Stone may be used to restore ALL Energy."
+          ]
+        }
+      ]
+    },
+    {
       "title": "Realm and Actions",
       "entry_type": "rule",
       "slug": "realm-and-actions",

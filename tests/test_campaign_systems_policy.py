@@ -368,6 +368,7 @@ def test_xianxia_core_rule_seed_entries_cover_milestone_one_references():
         "stance",
         "defense",
         "insight",
+        "currency",
         "realm-and-actions",
         "honor",
         "reputation",
@@ -408,6 +409,21 @@ def test_xianxia_core_rule_seed_entries_cover_milestone_one_references():
         entry_map["efforts-and-damage"]["metadata"]["xianxia_efforts"][3]["canonical_label"]
         == "Magic Effort"
     )
+    currency = entry_map["currency"]
+    assert currency["metadata"]["rule_key"] == "currency"
+    assert currency["metadata"]["xianxia_entry_facets"] == ["rule", "equipment"]
+    assert currency["metadata"]["rule_facets"] == [
+        "currency",
+        "coin",
+        "supply",
+        "spirit_stones",
+        "consumable",
+    ]
+    assert "coin" in currency["search_text"]
+    assert "supply" in currency["search_text"]
+    assert "spirit stones" in currency["search_text"]
+    assert "Coin is standardized currency" in currency["rendered_html"]
+    assert "restore ALL Energy" in currency["rendered_html"]
     assert entry_map["dying-and-unconsciousness"]["metadata"]["support_state"] == "reference_only"
     assert entry_map["minions"]["metadata"]["support_state"] == "reference_only"
     bing_ti_errata = entry_map["bing-ti-legendary-errata"]
@@ -1504,13 +1520,20 @@ def test_xianxia_source_policy_defaults_entries_dm_only_while_player_wiki_stays_
     sign_in(users["dm"]["email"], users["dm"]["password"])
     dm_systems = client.get("/campaigns/linden-pass/systems")
     dm_search = client.get("/campaigns/linden-pass/systems/search?q=Dao")
+    dm_currency_search = client.get("/campaigns/linden-pass/systems/search?q=Currency")
     dm_entry = client.get(f"/campaigns/linden-pass/systems/entries/{entry_slug}")
+    dm_currency_entry = client.get("/campaigns/linden-pass/systems/entries/currency")
 
     assert dm_systems.status_code == 200
     assert dm_search.status_code == 200
     assert "Dao" in dm_search.get_data(as_text=True)
+    assert dm_currency_search.status_code == 200
+    assert "Currency" in dm_currency_search.get_data(as_text=True)
     assert dm_entry.status_code == 200
     assert "Dao is a capped narrative and combat resource" in dm_entry.get_data(as_text=True)
+    assert dm_currency_entry.status_code == 200
+    assert "Coin is standardized currency" in dm_currency_entry.get_data(as_text=True)
+    assert "restore ALL Energy" in dm_currency_entry.get_data(as_text=True)
 
 
 def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
