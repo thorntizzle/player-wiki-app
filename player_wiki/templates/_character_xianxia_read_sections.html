@@ -688,6 +688,50 @@
     <div class="section-heading">
       <h2>Inventory</h2>
     </div>
+    <div class="detail-grid" id="session-currency">
+      {% if is_session_mode | default(false) %}
+        <article class="detail-card session-card">
+          <h3>Currency</h3>
+          <form
+            class="currency-form"
+            data-character-sheet-edit-form="currency"
+            method="post"
+            action="{{ url_for('character_session_currency', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+          >
+            <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+            <input type="hidden" name="mode" value="session">
+            <input type="hidden" name="page" value="{{ character_subpage }}">
+            {% if session_return_view | default("") %}
+              <input type="hidden" name="return_view" value="{{ session_return_view }}">
+            {% endif %}
+            {% for currency in xianxia_sheet.inventory.currency %}
+              <article class="currency-form__coin">
+                <label class="session-field">
+                  <span>{{ currency.label }}</span>
+                  <input type="number" name="{{ currency.key }}" value="{{ currency.amount }}" min="0">
+                </label>
+                {% if currency.description %}
+                  <p class="meta">{{ currency.description }}</p>
+                {% endif %}
+              </article>
+            {% endfor %}
+            {% if not (character_sheet_batch_save_enabled | default(false)) %}
+              <button type="submit">Save currency</button>
+            {% endif %}
+          </form>
+        </article>
+      {% else %}
+        {% for currency in xianxia_sheet.inventory.currency %}
+          <article class="detail-card">
+            <h3>{{ currency.label }}</h3>
+            <p><strong>{{ currency.amount }}</strong></p>
+            {% if currency.description %}
+              <p class="meta">{{ currency.description }}</p>
+            {% endif %}
+          </article>
+        {% endfor %}
+      {% endif %}
+    </div>
     {% if xianxia_sheet.inventory.quantities %}
       <div class="inventory-list">
         {% for item in xianxia_sheet.inventory.quantities %}

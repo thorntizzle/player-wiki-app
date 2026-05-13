@@ -1546,9 +1546,9 @@
 
           const currencyForm = document.querySelector(formSelectors.currency);
           if (currencyForm instanceof HTMLFormElement && payload.currency && typeof payload.currency === "object") {
-            for (const coin of ["cp", "sp", "ep", "gp", "pp"]) {
+            for (const [coin, amount] of Object.entries(payload.currency)) {
               if (Object.prototype.hasOwnProperty.call(payload.currency, coin)) {
-                setFieldValue(currencyForm, coin, payload.currency[coin]);
+                setFieldValue(currencyForm, coin, amount);
               }
             }
           }

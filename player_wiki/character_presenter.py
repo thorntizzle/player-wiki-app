@@ -45,6 +45,9 @@ from .xianxia_character_model import (
     XIANXIA_ATTRIBUTE_LABELS,
     XIANXIA_DAO_IMMOLATING_INSIGHT_COST,
     XIANXIA_ENERGY_KEYS,
+    XIANXIA_CURRENCY_DESCRIPTIONS,
+    XIANXIA_CURRENCY_KEYS,
+    XIANXIA_CURRENCY_LABELS,
     XIANXIA_EFFORT_KEYS,
     XIANXIA_EFFORT_LABELS,
     XIANXIA_DEFENSE_BASE,
@@ -1746,6 +1749,7 @@ def present_xianxia_read_context(
     active_stance = _coerce_xianxia_active_state_record(xianxia_state.get("active_stance"))
     active_aura = _coerce_xianxia_active_state_record(xianxia_state.get("active_aura"))
     dao_immolating = dict(xianxia.get("dao_immolating_techniques") or {})
+    currency_state = dict(xianxia_state.get("currency") or {})
 
     return {
         "system_label": "Xianxia",
@@ -1872,6 +1876,15 @@ def present_xianxia_read_context(
         ),
         "inventory": {
             "enabled": bool(dict(xianxia_state.get("inventory") or {}).get("enabled")),
+            "currency": [
+                {
+                    "key": key,
+                    "label": XIANXIA_CURRENCY_LABELS[key],
+                    "amount": _coerce_int(currency_state.get(key), default=0),
+                    "description": XIANXIA_CURRENCY_DESCRIPTIONS[key],
+                }
+                for key in XIANXIA_CURRENCY_KEYS
+            ],
             "quantities": _present_xianxia_inventory_records(
                 dict(xianxia_state.get("inventory") or {}).get("quantities")
             ),

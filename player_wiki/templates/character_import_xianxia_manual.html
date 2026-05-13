@@ -248,6 +248,20 @@
 
           <section class="builder-section">
             <h3>Inventory</h3>
+            <div class="builder-field-grid">
+              <label class="field">
+                <span>Coin</span>
+                <input type="number" name="coin" value="{{ values.get('coin', '0') }}" min="0" step="1">
+              </label>
+              <label class="field">
+                <span>Supply</span>
+                <input type="number" name="supply" value="{{ values.get('supply', '0') }}" min="0" step="1">
+              </label>
+              <label class="field">
+                <span>Spirit Stones</span>
+                <input type="number" name="spirit_stones" value="{{ values.get('spirit_stones', '0') }}" min="0" step="1">
+              </label>
+            </div>
             <label class="field">
               <span>Manual Inventory</span>
               <textarea name="inventory_text" rows="8" placeholder="Spirit rice | 3 | consumable, treasure | Emergency cache&#10;Travel cloak | 1 | tool | Weathered but serviceable">{{ values.get('inventory_text', '') }}</textarea>

@@ -228,6 +228,26 @@ def test_xianxia_read_presenter_context_collects_first_pass_sheet_facts(
     ]
     assert xianxia_read["resources"]["dao"] == {"current": 2, "max": 3}
     assert xianxia_read["resources"]["insight"] == {"available": 0, "spent": 0}
+    assert xianxia_read["inventory"]["currency"] == [
+        {
+            "key": "coin",
+            "label": "Coin",
+            "amount": 0,
+            "description": "Standardized currency.",
+        },
+        {
+            "key": "supply",
+            "label": "Supply",
+            "amount": 0,
+            "description": "Catch-all for general supplies such as rations, ammo, oil, thread, and torches.",
+        },
+        {
+            "key": "spirit_stones",
+            "label": "Spirit Stones",
+            "amount": 0,
+            "description": "Consumable. Out of battle: gain +1 Insight. In battle: restore ALL Energy.",
+        },
+    ]
     assert xianxia_read["attributes"][2] == {
         "key": "con",
         "label": "Constitution",
@@ -1823,6 +1843,115 @@ def test_xianxia_session_resources_allow_dao_update_with_cap(
     updated = get_character("session-dao-crane")
     assert updated is not None
     assert updated.state_record.state["xianxia"]["dao"] == {"current": 3}
+
+
+def test_xianxia_inventory_currency_renders_and_updates(
+    client,
+    sign_in,
+    users,
+    app,
+    get_character,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Currency Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    record = get_character("currency-crane")
+    assert record is not None
+    assert record.state_record.state["currency"] == {
+        "cp": 0,
+        "sp": 0,
+        "ep": 0,
+        "gp": 0,
+        "pp": 0,
+        "other": [],
+    }
+    assert record.state_record.state["xianxia"]["currency"] == {
+        "coin": 0,
+        "supply": 0,
+        "spirit_stones": 0,
+    }
+
+    session_response = client.get(
+        "/campaigns/linden-pass/characters/currency-crane?mode=session&page=inventory"
+    )
+    assert session_response.status_code == 200
+    session_html = unescape(session_response.get_data(as_text=True))
+    assert 'id="session-currency"' in session_html
+    assert 'name="coin" value="0" min="0"' in session_html
+    assert 'name="supply" value="0" min="0"' in session_html
+    assert 'name="spirit_stones" value="0" min="0"' in session_html
+    assert "Out of battle: gain +1 Insight. In battle: restore ALL Energy." in session_html
+
+    response = client.post(
+        "/campaigns/linden-pass/characters/currency-crane/session/currency",
+        data={
+            "expected_revision": record.state_record.revision,
+            "coin": "12",
+            "supply": "3",
+            "spirit_stones": "2",
+            "mode": "session",
+            "page": "inventory",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert "/campaigns/linden-pass/characters/currency-crane?" in response.headers["Location"]
+    assert "mode=session" in response.headers["Location"]
+    assert "page=inventory" in response.headers["Location"]
+    assert response.headers["Location"].endswith("#session-currency")
+
+    updated = get_character("currency-crane")
+    assert updated is not None
+    assert updated.state_record.state["xianxia"]["currency"] == {
+        "coin": 12,
+        "supply": 3,
+        "spirit_stones": 2,
+    }
+    assert updated.state_record.state["currency"] == {
+        "cp": 0,
+        "sp": 0,
+        "ep": 0,
+        "gp": 0,
+        "pp": 0,
+        "other": [],
+    }
+
+    read_response = client.get("/campaigns/linden-pass/characters/currency-crane?page=inventory")
+    assert read_response.status_code == 200
+    read_html = unescape(read_response.get_data(as_text=True))
+    assert "Coin" in read_html
+    assert "12" in read_html
+    assert "Supply" in read_html
+    assert "3" in read_html
+    assert "Spirit Stones" in read_html
+    assert "2" in read_html
+    assert "Out of battle: gain +1 Insight. In battle: restore ALL Energy." in read_html
+
+    negative_response = client.post(
+        "/campaigns/linden-pass/characters/currency-crane/session/currency",
+        data={
+            "expected_revision": updated.state_record.revision,
+            "coin": "-5",
+            "supply": "3",
+            "spirit_stones": "2",
+            "mode": "session",
+            "page": "inventory",
+        },
+        follow_redirects=False,
+    )
+    assert negative_response.status_code == 302
+    clamped = get_character("currency-crane")
+    assert clamped is not None
+    assert clamped.state_record.state["xianxia"]["currency"]["coin"] == 0
 
 
 def test_xianxia_session_notes_allow_editable_users_to_update_notes(

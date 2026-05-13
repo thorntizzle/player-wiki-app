@@ -9,6 +9,7 @@ from .character_spell_slots import normalize_spell_slot_lane_id, spell_slot_lane
 from .character_store import CharacterStateStore
 from .system_policy import is_xianxia_system
 from .xianxia_character_model import (
+    XIANXIA_CURRENCY_KEYS,
     XIANXIA_ENERGY_KEYS,
     xianxia_energy_max,
     xianxia_hp_max,
@@ -201,7 +202,10 @@ class CharacterStateService:
         updated_by_user_id: int | None = None,
     ) -> CharacterStateRecord:
         state = deepcopy(record.state_record.state)
-        self._apply_currency_update(state, values=values, delta=delta)
+        if is_xianxia_system(record.definition.system):
+            self._apply_xianxia_currency_update(state, values=values, delta=delta)
+        else:
+            self._apply_currency_update(state, values=values, delta=delta)
         return self._replace_state(
             record,
             state,
@@ -340,7 +344,12 @@ class CharacterStateService:
                 raise TypeError("Sheet edit currency must be an object.")
             if "delta" in currency:
                 raise ValueError("Sheet edit currency must use absolute coin values, not delta actions.")
-            if any(key in currency for key in ("cp", "sp", "ep", "gp", "pp")):
+            if is_xianxia_system(record.definition.system) and any(
+                key in currency for key in XIANXIA_CURRENCY_KEYS
+            ):
+                self._apply_xianxia_currency_update(state, values=currency)
+                applied_changes = True
+            elif any(key in currency for key in ("cp", "sp", "ep", "gp", "pp")):
                 self._apply_currency_update(state, values=currency)
                 applied_changes = True
 
@@ -610,6 +619,38 @@ class CharacterStateService:
                 next_value = max(0, next_value + delta_amount)
             currency[key] = next_value
         state["currency"] = currency
+
+    def _apply_xianxia_currency_update(
+        self,
+        state: dict[str, Any],
+        *,
+        values: dict[str, Any],
+        delta: Any | None = None,
+    ) -> None:
+        xianxia_state = dict(state.get("xianxia") or {})
+        currency = dict(xianxia_state.get("currency") or {})
+        delta_key = ""
+        delta_amount = 0
+        raw_delta = str(delta or "").strip()
+        if raw_delta:
+            try:
+                delta_key, raw_delta_amount = raw_delta.split(":", 1)
+            except ValueError as exc:
+                raise ValueError("Invalid currency adjustment.") from exc
+            delta_key = delta_key.strip().lower()
+            if delta_key not in XIANXIA_CURRENCY_KEYS:
+                raise ValueError("Invalid currency adjustment.")
+            delta_amount = int(raw_delta_amount)
+        for key in XIANXIA_CURRENCY_KEYS:
+            next_value = int(currency.get(key) or 0)
+            raw_value = values.get(key)
+            if raw_value is not None and str(raw_value).strip() != "":
+                next_value = int(raw_value)
+            if delta_key == key:
+                next_value += delta_amount
+            currency[key] = max(0, next_value)
+        xianxia_state["currency"] = currency
+        state["xianxia"] = xianxia_state
 
     def _apply_player_notes_update(
         self,

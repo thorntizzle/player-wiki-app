@@ -11,6 +11,7 @@ from .repository import slugify
 from .system_policy import XIANXIA_SYSTEM_CODE
 from .xianxia_character_model import (
     XIANXIA_ATTRIBUTE_KEYS,
+    XIANXIA_CURRENCY_KEYS,
     XIANXIA_EFFORT_KEYS,
     XIANXIA_ENERGY_KEYS,
     normalize_xianxia_state_payload,
@@ -19,7 +20,7 @@ from .xianxia_character_model import (
 
 XIANXIA_MANUAL_IMPORTER_SOURCE_PATH = "importer://xianxia-manual"
 XIANXIA_MANUAL_IMPORTER_SOURCE_TYPE = "xianxia_manual_importer"
-XIANXIA_MANUAL_IMPORTER_VERSION = "2026-05-10.2"
+XIANXIA_MANUAL_IMPORTER_VERSION = "2026-05-13.0"
 XIANXIA_MANUAL_IMPORTER_IMPORTED_FROM = "Manual Xianxia character importer"
 
 _REALM_ACTIONS = {"Mortal": 2, "Immortal": 3, "Divine": 4}
@@ -379,6 +380,14 @@ def _coerce_xianxia_state_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if not raw_dao:
         raw_dao = _coerce_mapping(raw_state.get("dao"))
 
+    raw_currency = _coerce_mapping(raw_state_xianxia.get("currency"))
+    if not raw_currency:
+        raw_state_currency = _coerce_mapping(raw_state.get("currency"))
+        if _looks_like_xianxia_currency(raw_state_currency):
+            raw_currency = raw_state_currency
+    if not raw_currency:
+        raw_currency = _coerce_mapping(payload.get("currency"))
+
     raw_inventory = _coerce_mapping(raw_state_xianxia.get("inventory"))
     if not raw_inventory:
         raw_inventory = _coerce_mapping(raw_state.get("inventory"))
@@ -460,6 +469,11 @@ def _coerce_xianxia_state_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 default=0,
             )
         },
+        "currency": _coerce_xianxia_currency_payload(
+            payload,
+            raw_currency=raw_currency,
+            raw_state_xianxia=raw_state_xianxia,
+        ),
         "inventory": {
             "enabled": False,
             "quantities": [],
@@ -505,6 +519,46 @@ def _coerce_xianxia_state_payload(payload: dict[str, Any]) -> dict[str, Any]:
         }
 
     return state_payload
+
+
+def _coerce_xianxia_currency_payload(
+    payload: dict[str, Any],
+    *,
+    raw_currency: dict[str, Any],
+    raw_state_xianxia: dict[str, Any],
+) -> dict[str, int]:
+    mappings = [raw_currency, raw_state_xianxia, payload]
+    aliases = {
+        "coin": ("coin", "coins"),
+        "supply": ("supply", "supplies"),
+        "spirit_stones": ("spirit_stones", "spirit_stone", "spiritStones", "spirit stones"),
+    }
+    currency: dict[str, int] = {}
+    for key in XIANXIA_CURRENCY_KEYS:
+        currency[key] = _coerce_int(
+            _first_present_value(mappings, aliases.get(key, (key,))),
+            default=0,
+        )
+    return currency
+
+
+def _looks_like_xianxia_currency(value: dict[str, Any]) -> bool:
+    aliases = {
+        "coin",
+        "coins",
+        "supply",
+        "supplies",
+        "spirit_stone",
+        "spiritstones",
+        "spirit_stones",
+        "spirit stones",
+        "spiritstones",
+    }
+    normalized_keys = {
+        str(key or "").strip().casefold().replace(" ", "_")
+        for key in dict(value or {})
+    }
+    return bool(normalized_keys & {alias.replace(" ", "_") for alias in aliases})
 
 
 def _coerce_freeform_trained_skills(payload: dict[str, Any]) -> tuple[list[str], list[str]]:

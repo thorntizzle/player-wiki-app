@@ -1281,6 +1281,11 @@ def test_xianxia_native_character_create_route_uses_xianxia_context_and_submit_p
     }
     assert state["xianxia"]["yin_yang"] == {"yin_current": 1, "yang_current": 1}
     assert state["xianxia"]["dao"] == {"current": 0}
+    assert state["xianxia"]["currency"] == {
+        "coin": 0,
+        "supply": 0,
+        "spirit_stones": 0,
+    }
     assert state["xianxia"]["inventory"] == {"enabled": False, "quantities": []}
 
     armored_response = client.post(
@@ -1879,6 +1884,7 @@ def test_xianxia_cultivation_route_resets_only_realm_ascension_stats(
         "dao": {"current": 2},
         "active_stance": {"name": "Mountain Root"},
         "active_aura": {"name": "Quiet Moon"},
+        "currency": {"coin": 0, "supply": 0, "spirit_stones": 0},
         "inventory": {"enabled": False, "quantities": []},
         "notes": {"player_notes_markdown": "Keep this player note."},
     }

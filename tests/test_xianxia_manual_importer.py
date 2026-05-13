@@ -104,6 +104,9 @@ def _manual_import_form_data() -> dict[str, str]:
         "yin_max": "9",
         "yang_max": "10",
         "dao_max": "3",
+        "coin": "12",
+        "supply": "3",
+        "spirit_stones": "2",
         "trained_skills_text": (
             "Tea Ceremony\n"
             "Qi Sense | Raised by a wandering hermit\n"
@@ -163,6 +166,28 @@ def test_manual_importer_accepts_relaxed_high_values():
     assert definition.source["source_type"] == XIANXIA_MANUAL_IMPORTER_SOURCE_TYPE
     assert import_metadata.import_status == "clean"
     assert initial_state["xianxia"]["yin_yang"]["yang_current"] == 120
+    assert initial_state["xianxia"]["currency"] == {
+        "coin": 0,
+        "supply": 0,
+        "spirit_stones": 0,
+    }
+
+
+def test_manual_importer_defaults_blank_currency_to_zero():
+    payload = {
+        **_base_payload(),
+        "coin": "",
+        "supply": "",
+        "spirit_stones": "",
+    }
+
+    _, _, initial_state = build_xianxia_manual_import_character(payload)
+
+    assert initial_state["xianxia"]["currency"] == {
+        "coin": 0,
+        "supply": 0,
+        "spirit_stones": 0,
+    }
 
 
 def test_manual_importer_preserves_current_values_when_current_exceeds_maxima():
@@ -454,6 +479,11 @@ def test_xianxia_manual_import_route_previews_then_creates_native_sheet(
     assert state["xianxia"]["energies"]["shen"] == {"current": 7}
     assert state["xianxia"]["yin_yang"] == {"yin_current": 9, "yang_current": 10}
     assert state["xianxia"]["dao"] == {"current": 0}
+    assert state["xianxia"]["currency"] == {
+        "coin": 12,
+        "supply": 3,
+        "spirit_stones": 2,
+    }
     assert state["xianxia"]["notes"] == {
         "player_notes_markdown": "Keep an eye on the spirit rice."
     }
@@ -484,6 +514,10 @@ def test_xianxia_manual_import_route_previews_then_creates_native_sheet(
     assert "Spirit rice" in inventory_html
     assert "consumable, treasure" in inventory_html
     assert "Emergency cache" in inventory_html
+    assert "Coin" in inventory_html
+    assert "Supply" in inventory_html
+    assert "Spirit Stones" in inventory_html
+    assert "Out of battle: gain +1 Insight. In battle: restore ALL Energy." in inventory_html
 
     session_html = client.get(
         "/campaigns/linden-pass/characters/imported-lotus?mode=session&page=resources"
@@ -557,6 +591,11 @@ def test_xianxia_manual_import_route_ignores_stale_mutable_inputs(
     }
     assert state["xianxia"]["yin_yang"] == {"yin_current": 9, "yang_current": 10}
     assert state["xianxia"]["dao"] == {"current": 0}
+    assert state["xianxia"]["currency"] == {
+        "coin": 12,
+        "supply": 3,
+        "spirit_stones": 2,
+    }
     assert state["xianxia"].get("active_stance") is None
     assert state["xianxia"].get("active_aura") is None
 

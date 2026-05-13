@@ -33,6 +33,19 @@ XIANXIA_EFFORT_DAMAGE_DICE = {
     "ultimate": "1d12",
 }
 XIANXIA_ENERGY_KEYS = ("jing", "qi", "shen")
+XIANXIA_CURRENCY_KEYS = ("coin", "supply", "spirit_stones")
+XIANXIA_CURRENCY_LABELS = {
+    "coin": "Coin",
+    "supply": "Supply",
+    "spirit_stones": "Spirit Stones",
+}
+XIANXIA_CURRENCY_DESCRIPTIONS = {
+    "coin": "Standardized currency.",
+    "supply": "Catch-all for general supplies such as rations, ammo, oil, thread, and torches.",
+    "spirit_stones": (
+        "Consumable. Out of battle: gain +1 Insight. In battle: restore ALL Energy."
+    ),
+}
 XIANXIA_DEFENSE_BASE = 10
 XIANXIA_CHECK_FORMULA = "1d20 + Attribute + Realm modifier + situational modifiers"
 XIANXIA_CHECK_SPEND_BONUS = "+1d6"
@@ -81,9 +94,43 @@ XIANXIA_STATE_FIELD_KEYS = (
     "dao",
     "active_stance",
     "active_aura",
+    "currency",
     "inventory",
     "notes",
 )
+
+_XIANXIA_CURRENCY_KEY_ALIASES = {
+    "coin": "coin",
+    "coins": "coin",
+    "supply": "supply",
+    "supplies": "supply",
+    "spirit_stone": "spirit_stones",
+    "spiritstones": "spirit_stones",
+    "spirit_stones": "spirit_stones",
+    "spirit stones": "spirit_stones",
+}
+
+
+def _normalize_xianxia_currency_payload(
+    *mappings: dict[str, Any],
+) -> dict[str, int]:
+    normalized_currency: dict[str, int] = {}
+    for mapping in mappings:
+        for raw_key, raw_value in dict(mapping or {}).items():
+            normalized_key = str(raw_key or "").strip().casefold().replace(" ", "_")
+            canonical_key = _XIANXIA_CURRENCY_KEY_ALIASES.get(normalized_key)
+            if not canonical_key:
+                canonical_key = _XIANXIA_CURRENCY_KEY_ALIASES.get(
+                    str(raw_key or "").strip().casefold()
+                )
+            if not canonical_key:
+                continue
+            normalized_currency[canonical_key] = _normalize_int(raw_value, default=0)
+
+    return {
+        key: _normalize_non_negative_int(normalized_currency.get(key), default=0)
+        for key in XIANXIA_CURRENCY_KEYS
+    }
 
 _REALM_LABELS = {
     "mortal": "Mortal",
@@ -513,11 +560,15 @@ def build_xianxia_initial_state_payload(definition: Any) -> dict[str, Any]:
 
 def normalize_xianxia_state_payload(definition: Any, state_payload: dict[str, Any] | None) -> dict[str, Any]:
     raw_state = dict(state_payload or {})
+    raw_state_xianxia = _first_mapping(raw_state, key="xianxia")
     raw_vitals = _first_mapping(raw_state, key="vitals")
     raw_energies = _first_mapping(raw_state, key="energies")
     raw_energies_current = _first_mapping(raw_state, key="energies_current")
     raw_yin_yang = _first_mapping(raw_state, key="yin_yang")
     raw_dao = _first_mapping(raw_state, key="dao")
+    raw_currency = _first_mapping(raw_state_xianxia, key="currency")
+    if not raw_currency and not raw_state_xianxia:
+        raw_currency = _first_mapping(raw_state, key="currency")
 
     normalized_state = {
         "schema_version": XIANXIA_CHARACTER_STATE_SCHEMA_VERSION,
@@ -578,6 +629,9 @@ def normalize_xianxia_state_payload(definition: Any, state_payload: dict[str, An
         },
         "active_stance": _normalize_active_state_record(_first_present(raw_state, key="active_stance")),
         "active_aura": _normalize_active_state_record(_first_present(raw_state, key="active_aura")),
+        "currency": _normalize_xianxia_currency_payload(
+            raw_currency,
+        ),
         "inventory": _normalize_xianxia_inventory_state(
             _first_present(raw_state, key="inventory"),
             definition=definition,
@@ -670,6 +724,14 @@ def clamp_xianxia_mutable_pools(definition: Any, state_payload: dict[str, Any]) 
             default=0,
             maximum=xianxia_dao_max(definition),
         )
+    }
+    currency = dict(payload.get("currency") or {})
+    payload["currency"] = {
+        key: _clamp_int(
+            currency.get(key),
+            default=0,
+        )
+        for key in XIANXIA_CURRENCY_KEYS
     }
     return payload
 

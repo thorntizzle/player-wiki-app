@@ -4983,6 +4983,11 @@ def create_app() -> Flask:
         }
         payload["state"] = {
             "xianxia": {
+                "currency": {
+                    "coin": values.get("coin", ""),
+                    "supply": values.get("supply", ""),
+                    "spirit_stones": values.get("spirit_stones", ""),
+                },
                 "notes": {
                     "player_notes_markdown": values.get("player_notes_markdown", ""),
                 },
@@ -13932,7 +13937,19 @@ def create_app() -> Flask:
             action=lambda record, expected_revision, user_id: get_character_state_service().update_currency(
                 record,
                 expected_revision=expected_revision,
-                values={key: request.form.get(key) for key in ("cp", "sp", "ep", "gp", "pp")},
+                values={
+                    key: request.form.get(key)
+                    for key in (
+                        "cp",
+                        "sp",
+                        "ep",
+                        "gp",
+                        "pp",
+                        "coin",
+                        "supply",
+                        "spirit_stones",
+                    )
+                },
                 delta=request.form.get("delta"),
                 updated_by_user_id=user_id,
             ),

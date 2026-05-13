@@ -766,6 +766,7 @@ def test_xianxia_initial_state_defines_mutable_session_state_shape():
     assert xianxia_state["dao"] == {"current": 0}
     assert xianxia_state["active_stance"] is None
     assert xianxia_state["active_aura"] is None
+    assert xianxia_state["currency"] == {"coin": 0, "supply": 0, "spirit_stones": 0}
     assert xianxia_state["inventory"] == {"enabled": False, "quantities": []}
     assert xianxia_state["notes"] == {"player_notes_markdown": ""}
     assert "dying" not in xianxia_state
@@ -833,6 +834,7 @@ def test_xianxia_state_normalizes_requirement_sketch_aliases_without_deferred_co
     assert xianxia_state["dao"] == {"current": 3}
     assert xianxia_state["active_stance"] == {"name": "Stone Root"}
     assert xianxia_state["active_aura"] == {"name": "Azure Bell", "systems_ref": {"slug": "azure-bell"}}
+    assert xianxia_state["currency"] == {"coin": 0, "supply": 0, "spirit_stones": 0}
     assert xianxia_state["inventory"] == {
         "enabled": True,
         "quantities": [{"id": "spirit-rice", "name": "Spirit rice", "quantity": 2}],
@@ -900,6 +902,7 @@ def test_xianxia_state_normalization_clamps_mutable_pools_to_current_maxima():
     }
     assert state["xianxia"]["yin_yang"] == {"yin_current": 1, "yang_current": 0}
     assert state["xianxia"]["dao"] == {"current": 3}
+    assert state["xianxia"]["currency"] == {"coin": 0, "supply": 0, "spirit_stones": 0}
 
 
 def test_merge_xianxia_state_with_definition_clamps_existing_pools_when_maxima_shrink():
@@ -947,6 +950,11 @@ def test_merge_xianxia_state_with_definition_clamps_existing_pools_when_maxima_s
     }
     assert merged_state["xianxia"]["yin_yang"] == {"yin_current": 1, "yang_current": 2}
     assert merged_state["xianxia"]["dao"] == {"current": 3}
+    assert merged_state["xianxia"]["currency"] == {
+        "coin": 0,
+        "supply": 0,
+        "spirit_stones": 0,
+    }
 
 
 def test_dnd5e_initial_state_does_not_emit_xianxia_mutable_state():

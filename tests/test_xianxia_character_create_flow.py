@@ -155,6 +155,7 @@ def test_xianxia_create_flow_accepts_valid_budgets_and_persists_inferred_gear(
     assert state["resources"] == []
     assert state["inventory"] == []
     assert state["currency"] == {"cp": 0, "sp": 0, "ep": 0, "gp": 0, "pp": 0, "other": []}
+    assert state["xianxia"]["currency"] == {"coin": 0, "supply": 0, "spirit_stones": 0}
     assert state["xianxia"]["inventory"] == {"enabled": False, "quantities": []}
 
 

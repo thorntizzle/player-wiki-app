@@ -2993,7 +2993,19 @@ def register_api(app) -> None:
             lambda record, payload, user_id: get_character_state_service().update_currency(
                 record,
                 expected_revision=int(payload.get("expected_revision")),
-                values={key: payload.get(key) for key in ("cp", "sp", "ep", "gp", "pp")},
+                values={
+                    key: payload.get(key)
+                    for key in (
+                        "cp",
+                        "sp",
+                        "ep",
+                        "gp",
+                        "pp",
+                        "coin",
+                        "supply",
+                        "spirit_stones",
+                    )
+                },
                 updated_by_user_id=user_id,
             ),
         )
