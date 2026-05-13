@@ -93,27 +93,17 @@ def _manual_import_form_data() -> dict[str, str]:
         "effort_guns_explosive": "5",
         "effort_magic": "6",
         "effort_ultimate": "7",
-        "hp_max": "12",
-        "current_hp": "19",
-        "temp_hp": "2",
-        "stance_max": "11",
-        "current_stance": "17",
-        "temp_stance": "3",
+        "hp_max": "19",
+        "stance_max": "17",
         "manual_armor_bonus": "4",
         "insight_available": "12",
         "insight_spent": "8",
-        "energy_jing_max": "2",
-        "current_jing": "5",
-        "energy_qi_max": "3",
-        "current_qi": "6",
-        "energy_shen_max": "4",
-        "current_shen": "7",
-        "yin_max": "1",
-        "current_yin": "9",
-        "yang_max": "2",
-        "current_yang": "10",
+        "energy_jing_max": "5",
+        "energy_qi_max": "6",
+        "energy_shen_max": "7",
+        "yin_max": "9",
+        "yang_max": "10",
         "dao_max": "3",
-        "current_dao": "3",
         "trained_skills_text": (
             "Tea Ceremony\n"
             "Qi Sense | Raised by a wandering hermit\n"
@@ -394,6 +384,15 @@ def test_xianxia_manual_import_route_previews_then_creates_native_sheet(
     assert "Review Import" in preview_html
     assert "Imported Lotus" in preview_html
     assert "Confirm import" in preview_html
+    assert 'name="current_hp"' not in preview_html
+    assert 'name="temp_hp"' not in preview_html
+    assert 'name="current_stance"' not in preview_html
+    assert 'name="temp_stance"' not in preview_html
+    assert 'name="current_yin"' not in preview_html
+    assert 'name="current_yang"' not in preview_html
+    assert 'name="current_dao"' not in preview_html
+    for energy in ("jing", "qi", "shen"):
+        assert f'name="current_{energy}"' not in preview_html
 
     create_response = client.post(
         "/campaigns/linden-pass/characters/import/xianxia-manual",
@@ -443,16 +442,16 @@ def test_xianxia_manual_import_route_previews_then_creates_native_sheet(
 
     record = _get_character_record(app, "imported-lotus")
     state = record.state_record.state
-    assert state["vitals"] == {"current_hp": 19, "temp_hp": 2}
+    assert state["vitals"] == {"current_hp": 19, "temp_hp": 0}
     assert state["xianxia"]["vitals"] == {
         "current_hp": 19,
-        "temp_hp": 2,
+        "temp_hp": 0,
         "current_stance": 17,
-        "temp_stance": 3,
+        "temp_stance": 0,
     }
     assert state["xianxia"]["energies"]["shen"] == {"current": 7}
     assert state["xianxia"]["yin_yang"] == {"yin_current": 9, "yang_current": 10}
-    assert state["xianxia"]["dao"] == {"current": 3}
+    assert state["xianxia"]["dao"] == {"current": 0}
     assert state["xianxia"]["active_stance"] == {"name": "Stone Root"}
     assert state["xianxia"]["active_aura"] == {"name": "Crane Halo"}
     assert state["xianxia"]["notes"] == {
@@ -489,6 +488,72 @@ def test_xianxia_manual_import_route_previews_then_creates_native_sheet(
     ).get_data(as_text=True)
     assert "Current 19 / Max 19" in session_html
     assert "Stone Root" in session_html
+
+
+def test_xianxia_manual_import_route_ignores_stale_mutable_inputs(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    base_payload = _manual_import_form_data()
+    stale_payload = {
+        **base_payload,
+        "character_slug": "imported-lotus-stale",
+        "current_hp": "99",
+        "temp_hp": "11",
+        "current_stance": "88",
+        "temp_stance": "9",
+        "current_yin": "111",
+        "current_yang": "111",
+        "current_jing": "111",
+        "current_qi": "111",
+        "current_shen": "111",
+        "current_dao": "111",
+        "energy_jing_max": "5",
+        "energy_qi_max": "6",
+        "energy_shen_max": "7",
+    }
+    response = client.post(
+        "/campaigns/linden-pass/characters/import/xianxia-manual",
+        data={**stale_payload, "confirm_import": "1"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/imported-lotus-stale"
+    )
+
+    record = _get_character_record(app, "imported-lotus-stale")
+    state = record.state_record.state
+    definition = _read_character_definition(app, "imported-lotus-stale")
+
+    assert definition["xianxia"]["durability"]["hp_max"] == 19
+    assert definition["xianxia"]["durability"]["stance_max"] == 17
+    assert definition["xianxia"]["energies"]["jing"]["max"] == 5
+    assert definition["xianxia"]["energies"]["qi"]["max"] == 6
+    assert definition["xianxia"]["energies"]["shen"]["max"] == 7
+    assert definition["xianxia"]["yin_yang"]["yin_max"] == 9
+    assert definition["xianxia"]["yin_yang"]["yang_max"] == 10
+
+    assert state["vitals"] == {"current_hp": 19, "temp_hp": 0}
+    assert state["xianxia"]["vitals"] == {
+        "current_hp": 19,
+        "temp_hp": 0,
+        "current_stance": 17,
+        "temp_stance": 0,
+    }
+    assert state["xianxia"]["energies"] == {
+        "jing": {"current": 5},
+        "qi": {"current": 6},
+        "shen": {"current": 7},
+    }
+    assert state["xianxia"]["yin_yang"] == {"yin_current": 9, "yang_current": 10}
+    assert state["xianxia"]["dao"] == {"current": 0}
 
 
 def test_xianxia_manual_import_route_requires_character_management_access(

@@ -4961,9 +4961,7 @@ def create_app() -> Flask:
                     "key": key,
                     "label": key.title(),
                     "max_input_name": f"energy_{key}_max",
-                    "current_input_name": f"current_{key}",
                     "max_value": values.get(f"energy_{key}_max", "0"),
-                    "current_value": values.get(f"current_{key}", ""),
                 }
                 for key in XIANXIA_ENERGY_KEYS
             ],
@@ -4979,23 +4977,6 @@ def create_app() -> Flask:
             for key in XIANXIA_ENERGY_KEYS
         }
         payload["state"] = {
-            "vitals": {
-                "current_hp": values.get("current_hp", ""),
-                "temp_hp": values.get("temp_hp", ""),
-                "current_stance": values.get("current_stance", ""),
-                "temp_stance": values.get("temp_stance", ""),
-            },
-            "energies_current": {
-                key: values.get(f"current_{key}", "")
-                for key in XIANXIA_ENERGY_KEYS
-            },
-            "yin_yang": {
-                "yin_current": values.get("current_yin", ""),
-                "yang_current": values.get("current_yang", ""),
-            },
-            "dao": {
-                "current": values.get("current_dao", ""),
-            },
             "xianxia": {
                 "active_stance": values.get("active_stance", ""),
                 "active_aura": values.get("active_aura", ""),

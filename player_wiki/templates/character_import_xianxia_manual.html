@@ -8,7 +8,7 @@
     <p class="eyebrow">Character importer</p>
     <h1>Import Existing Xianxia Character</h1>
     <p class="lede">
-      Create a native Xianxia sheet from an existing character record while preserving current tracked values.
+      Create a native Xianxia sheet from an existing character record while preserving fixed maxima.
     </p>
   </section>
 
@@ -143,24 +143,8 @@
                 <input type="number" name="hp_max" value="{{ values.get('hp_max', '10') }}" step="1">
               </label>
               <label class="field">
-                <span>Current HP</span>
-                <input type="number" name="current_hp" value="{{ values.get('current_hp', '') }}" step="1">
-              </label>
-              <label class="field">
-                <span>Temp HP</span>
-                <input type="number" name="temp_hp" value="{{ values.get('temp_hp', '0') }}" step="1">
-              </label>
-              <label class="field">
                 <span>Stance Max</span>
                 <input type="number" name="stance_max" value="{{ values.get('stance_max', '10') }}" step="1">
-              </label>
-              <label class="field">
-                <span>Current Stance</span>
-                <input type="number" name="current_stance" value="{{ values.get('current_stance', '') }}" step="1">
-              </label>
-              <label class="field">
-                <span>Temp Stance</span>
-                <input type="number" name="temp_stance" value="{{ values.get('temp_stance', '0') }}" step="1">
               </label>
               <label class="field">
                 <span>Manual Armor Bonus</span>
@@ -179,24 +163,12 @@
                 <input type="number" name="yin_max" value="{{ values.get('yin_max', '1') }}" step="1">
               </label>
               <label class="field">
-                <span>Current Yin</span>
-                <input type="number" name="current_yin" value="{{ values.get('current_yin', '') }}" step="1">
-              </label>
-              <label class="field">
                 <span>Yang Max</span>
                 <input type="number" name="yang_max" value="{{ values.get('yang_max', '1') }}" step="1">
               </label>
               <label class="field">
-                <span>Current Yang</span>
-                <input type="number" name="current_yang" value="{{ values.get('current_yang', '') }}" step="1">
-              </label>
-              <label class="field">
                 <span>Dao Max</span>
                 <input type="number" name="dao_max" value="{{ values.get('dao_max', '3') }}" step="1">
-              </label>
-              <label class="field">
-                <span>Current Dao</span>
-                <input type="number" name="current_dao" value="{{ values.get('current_dao', '0') }}" step="1">
               </label>
             </div>
             <div class="builder-field-grid">
@@ -204,10 +176,6 @@
                 <label class="field">
                   <span>{{ energy.label }} Max</span>
                   <input type="number" name="{{ energy.max_input_name }}" value="{{ energy.max_value }}" step="1">
-                </label>
-                <label class="field">
-                  <span>Current {{ energy.label }}</span>
-                  <input type="number" name="{{ energy.current_input_name }}" value="{{ energy.current_value }}" step="1">
                 </label>
               {% endfor %}
             </div>
