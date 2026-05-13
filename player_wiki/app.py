@@ -4970,7 +4970,12 @@ def create_app() -> Flask:
         }
 
     def build_xianxia_manual_import_payload(form_values: dict[str, object]) -> dict[str, object]:
-        values = {key: str(value or "") for key, value in dict(form_values or {}).items()}
+        ignored_inputs = {"active_stance", "active_aura"}
+        values = {
+            key: str(value or "")
+            for key, value in dict(form_values or {}).items()
+            if key not in ignored_inputs
+        }
         payload: dict[str, object] = dict(values)
         payload["energy_maxima"] = {
             key: values.get(f"energy_{key}_max", "")
@@ -4978,8 +4983,6 @@ def create_app() -> Flask:
         }
         payload["state"] = {
             "xianxia": {
-                "active_stance": values.get("active_stance", ""),
-                "active_aura": values.get("active_aura", ""),
                 "notes": {
                     "player_notes_markdown": values.get("player_notes_markdown", ""),
                 },

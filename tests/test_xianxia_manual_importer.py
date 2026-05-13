@@ -124,8 +124,6 @@ def _manual_import_form_data() -> dict[str, str]:
             "Spirit rice | 3 | consumable, treasure | Emergency cache\n"
             "Travel cloak | 1 | tool | Weathered"
         ),
-        "active_stance": "Stone Root",
-        "active_aura": "Crane Halo",
         "additional_notes_markdown": "Imported from the table sheet.",
         "player_notes_markdown": "Keep an eye on the spirit rice.",
     }
@@ -374,6 +372,8 @@ def test_xianxia_manual_import_route_previews_then_creates_native_sheet(
     assert "Stored Martial Art" in import_page_html
     assert "Heavenly Palm" in import_page_html
     assert "Add Martial Art" in import_page_html
+    assert 'name="active_stance"' not in import_page_html
+    assert 'name="active_aura"' not in import_page_html
 
     preview = client.post(
         "/campaigns/linden-pass/characters/import/xianxia-manual",
@@ -391,6 +391,8 @@ def test_xianxia_manual_import_route_previews_then_creates_native_sheet(
     assert 'name="current_yin"' not in preview_html
     assert 'name="current_yang"' not in preview_html
     assert 'name="current_dao"' not in preview_html
+    assert 'name="active_stance"' not in preview_html
+    assert 'name="active_aura"' not in preview_html
     for energy in ("jing", "qi", "shen"):
         assert f'name="current_{energy}"' not in preview_html
 
@@ -452,11 +454,11 @@ def test_xianxia_manual_import_route_previews_then_creates_native_sheet(
     assert state["xianxia"]["energies"]["shen"] == {"current": 7}
     assert state["xianxia"]["yin_yang"] == {"yin_current": 9, "yang_current": 10}
     assert state["xianxia"]["dao"] == {"current": 0}
-    assert state["xianxia"]["active_stance"] == {"name": "Stone Root"}
-    assert state["xianxia"]["active_aura"] == {"name": "Crane Halo"}
     assert state["xianxia"]["notes"] == {
         "player_notes_markdown": "Keep an eye on the spirit rice."
     }
+    assert state["xianxia"].get("active_stance") is None
+    assert state["xianxia"].get("active_aura") is None
     assert state["xianxia"]["inventory"]["quantities"][0] == {
         "name": "Spirit rice",
         "quantity": 3,
@@ -487,7 +489,6 @@ def test_xianxia_manual_import_route_previews_then_creates_native_sheet(
         "/campaigns/linden-pass/characters/imported-lotus?mode=session&page=resources"
     ).get_data(as_text=True)
     assert "Current 19 / Max 19" in session_html
-    assert "Stone Root" in session_html
 
 
 def test_xianxia_manual_import_route_ignores_stale_mutable_inputs(
@@ -513,6 +514,8 @@ def test_xianxia_manual_import_route_ignores_stale_mutable_inputs(
         "current_qi": "111",
         "current_shen": "111",
         "current_dao": "111",
+        "active_stance": "Stone Root",
+        "active_aura": "Crane Halo",
         "energy_jing_max": "5",
         "energy_qi_max": "6",
         "energy_shen_max": "7",
@@ -554,6 +557,8 @@ def test_xianxia_manual_import_route_ignores_stale_mutable_inputs(
     }
     assert state["xianxia"]["yin_yang"] == {"yin_current": 9, "yang_current": 10}
     assert state["xianxia"]["dao"] == {"current": 0}
+    assert state["xianxia"].get("active_stance") is None
+    assert state["xianxia"].get("active_aura") is None
 
 
 def test_xianxia_manual_import_route_requires_character_management_access(
