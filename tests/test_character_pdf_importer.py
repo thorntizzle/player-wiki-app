@@ -615,6 +615,105 @@ def test_parse_character_sheet_text_merges_split_action_cost_lines_into_features
     assert "second-wind" in resource_ids
 
 
+def test_parse_character_sheet_text_merges_standalone_counted_action_cost_lines_into_features():
+    markdown = """
+## Sheet Summary
+| Field | Value |
+| --- | --- |
+| Sheet Name | Rasputin |
+| Class & Level | Rogue 5 |
+| Species | Human |
+| Background | Spy |
+
+## Defenses And Core Stats
+| Metric | Value |
+| --- | --- |
+| Armor Class | 15 |
+| Initiative | +4 |
+| Speed | 30 ft. |
+| Max HP | 38 |
+| Proficiency Bonus | +3 |
+
+## Ability Scores
+| Ability | Score | Modifier | Save |
+| --- | --- | --- | --- |
+| Strength | 10 | +0 | +0 |
+| Dexterity | 18 | +4 | +7 |
+| Constitution | 12 | +1 | +1 |
+| Intelligence | 16 | +3 | +6 |
+| Wisdom | 12 | +1 | +1 |
+| Charisma | 13 | +1 | +1 |
+
+## Skills
+| Skill | Bonus | Proficiency |
+| --- | --- | --- |
+| Sleight of Hand | +10 | Expertise |
+
+## Proficiencies And Languages
+- Armor: Light Armor
+- Weapons: Simple Weapons
+- Tools: Thieves' Tools
+- Languages: Common
+
+## Attacks And Cantrips
+| Attack | Hit | Damage | Notes |
+| --- | --- | --- | --- |
+
+## Features And Traits
+### Rogue Features
+
+- Cunning Action - PHB 96
+You can take a bonus action on each of your turns to take the Dash, Disengage, or Hide action.
+
+- 1 Bonus Action
+
+- Uncanny Dodge - PHB 96
+When an attacker that you can see hits you with an attack, you can use your reaction to halve the attack's damage against you.
+
+- 1 Reaction
+
+### Mastermind Features
+
+- Master of Tactics - XGE 46
+You can use the Help action as a bonus action.
+
+- 1 Bonus Action
+
+## Actions
+
+## Personality And Story
+
+## Spellcasting
+| Field | Value |
+| --- | --- |
+| Spellcasting Class |  |
+| Spellcasting Ability |  |
+| Spell Save DC |  |
+| Spell Attack Bonus |  |
+
+## Equipment
+| Item | Qty | Weight |
+| --- | --- | --- |
+""".strip()
+
+    definition, _ = parse_character_sheet_text(
+        "linden-pass",
+        markdown,
+        source_path="Rasputin.pdf",
+        source_type="pdf_character_sheet_annotations",
+        imported_from="Rasputin.pdf",
+        parser_version="test",
+    )
+
+    features_by_name = {feature["name"]: feature for feature in definition.features}
+
+    assert "1 Bonus Action" not in features_by_name
+    assert "1 Reaction" not in features_by_name
+    assert features_by_name["Cunning Action"]["activation_type"] == "bonus_action"
+    assert features_by_name["Master of Tactics"]["activation_type"] == "bonus_action"
+    assert features_by_name["Uncanny Dodge"]["activation_type"] == "reaction"
+
+
 def test_parse_character_sheet_text_normalizes_modeled_feat_trackers_through_native_helpers():
     markdown = """
 ## Sheet Summary

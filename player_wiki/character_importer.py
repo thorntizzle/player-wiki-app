@@ -59,7 +59,8 @@ GENERIC_ACTION_BLOCK_TITLES = {"standard actions"}
 GENERIC_FOLLOWUP_SUFFIXES = {"attack", "action", "bonus action", "reaction", "special"}
 STANDALONE_METADATA_TITLES = {"action", "bonus action", "reaction", "special"}
 DETACHED_METADATA_VALUE_PATTERN = re.compile(
-    r"^(?:bonus action|reaction|special|\d+\s+(?:action|actions|minute|minutes|hour|hours|day|days))$",
+    r"^(?:(?:\d+\s+)?(?:bonus action|bonus actions|reaction|reactions|special)|"
+    r"\d+\s+(?:action|actions|minute|minutes|hour|hours|day|days))$",
     re.IGNORECASE,
 )
 ABILITY_CHOICE_FEATURE_NAMES = {
@@ -562,7 +563,7 @@ def build_activation_type(value: str) -> str:
         return "bonus_action"
     if "reaction" in normalized:
         return "reaction"
-    if re.search(r"\b\d+\s+action\b", normalized) or normalized.endswith(" action"):
+    if re.search(r"\b\d+\s+action\b", normalized):
         return "action"
     if "special" in normalized or re.search(r"\b\d+\s+(hour|minute)s?\b", normalized):
         return "special"
