@@ -833,6 +833,129 @@ def test_combat_live_state_short_circuits_when_revision_and_view_token_match(app
     _assert_live_diagnostics_headers(refreshed_live_state)
 
 
+def test_dm_status_live_state_short_circuits_when_revision_and_view_token_match(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    combatant = _find_combatant(app, character_slug="arden-march")
+    assert combatant is not None
+
+    initial_live_state = client.get(
+        f"/campaigns/linden-pass/combat/dm/live-state?combatant={combatant.id}",
+        headers=_async_headers(),
+    )
+
+    assert initial_live_state.status_code == 200
+    initial_payload = initial_live_state.get_json()
+    assert initial_payload["changed"] is True
+    assert initial_live_state.headers["X-Live-State-Changed"] == "true"
+    assert initial_live_state.headers["X-Live-Revision"] == str(initial_payload["live_revision"])
+    assert initial_live_state.headers["X-Live-Payload-Bytes"]
+    _assert_live_diagnostics_headers(initial_live_state)
+
+    unchanged_live_state = client.get(
+        f"/campaigns/linden-pass/combat/dm/live-state?combatant={combatant.id}",
+        headers=_live_poll_headers(initial_payload["live_revision"], initial_payload["live_view_token"]),
+    )
+
+    assert unchanged_live_state.status_code == 200
+    assert unchanged_live_state.get_json() == {
+        "changed": False,
+        "live_revision": initial_payload["live_revision"],
+        "live_view_token": initial_payload["live_view_token"],
+    }
+    assert unchanged_live_state.headers["X-Live-State-Changed"] == "false"
+    _assert_live_diagnostics_headers(unchanged_live_state)
+
+
+def test_dm_controls_live_state_short_circuits_when_revision_and_view_token_match(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    combatant = _find_combatant(app, character_slug="arden-march")
+    assert combatant is not None
+
+    initial_live_state = client.get(
+        f"/campaigns/linden-pass/combat/dm/live-state?combatant={combatant.id}&view=controls",
+        headers=_async_headers(),
+    )
+
+    assert initial_live_state.status_code == 200
+    initial_payload = initial_live_state.get_json()
+    assert initial_payload["changed"] is True
+    assert initial_live_state.headers["X-Live-State-Changed"] == "true"
+    assert initial_live_state.headers["X-Live-Revision"] == str(initial_payload["live_revision"])
+    assert initial_live_state.headers["X-Live-Payload-Bytes"]
+    _assert_live_diagnostics_headers(initial_live_state)
+
+    unchanged_live_state = client.get(
+        f"/campaigns/linden-pass/combat/dm/live-state?combatant={combatant.id}&view=controls",
+        headers=_live_poll_headers(initial_payload["live_revision"], initial_payload["live_view_token"]),
+    )
+
+    assert unchanged_live_state.status_code == 200
+    assert unchanged_live_state.get_json() == {
+        "changed": False,
+        "live_revision": initial_payload["live_revision"],
+        "live_view_token": initial_payload["live_view_token"],
+    }
+    assert unchanged_live_state.headers["X-Live-State-Changed"] == "false"
+    _assert_live_diagnostics_headers(unchanged_live_state)
+
+
+def test_combat_character_live_state_short_circuits_when_revision_and_view_token_match(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    combatant = _find_combatant(app, character_slug="arden-march")
+    assert combatant is not None
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    initial_live_state = client.get(
+        f"/campaigns/linden-pass/combat/character/live-state?combatant={combatant.id}",
+        headers=_async_headers(),
+    )
+
+    assert initial_live_state.status_code == 200
+    initial_payload = initial_live_state.get_json()
+    assert initial_payload["changed"] is True
+    assert initial_live_state.headers["X-Live-State-Changed"] == "true"
+    assert initial_live_state.headers["X-Live-Revision"] == str(initial_payload["live_revision"])
+    assert initial_live_state.headers["X-Live-Payload-Bytes"]
+    _assert_live_diagnostics_headers(initial_live_state)
+
+    unchanged_live_state = client.get(
+        f"/campaigns/linden-pass/combat/character/live-state?combatant={combatant.id}",
+        headers=_live_poll_headers(initial_payload["live_revision"], initial_payload["live_view_token"]),
+    )
+
+    assert unchanged_live_state.status_code == 200
+    assert unchanged_live_state.get_json() == {
+        "changed": False,
+        "live_revision": initial_payload["live_revision"],
+        "live_view_token": initial_payload["live_view_token"],
+    }
+    assert unchanged_live_state.headers["X-Live-State-Changed"] == "false"
+    _assert_live_diagnostics_headers(unchanged_live_state)
+
+
 def test_dm_can_add_systems_monster_to_combat_tracker(app, client, sign_in, users, tmp_path):
     goblin_entry_key = _import_systems_goblin(app, tmp_path)
     sign_in(users["dm"]["email"], users["dm"]["password"])
