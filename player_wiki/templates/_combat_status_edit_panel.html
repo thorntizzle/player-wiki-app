@@ -1,4 +1,17 @@
 {% if selected_combatant and can_manage_combat %}
+  {% set combat_status_return_view = (
+    "dm" if combat_return_view == "dm" else "combat" if combat_subpage == "combat" else "status"
+  ) %}
+  {% macro combat_status_return_fields() %}
+    {% if combat_status_return_view == "dm" %}
+      <input type="hidden" name="combat_view" value="dm">
+      <input type="hidden" name="view" value="status">
+    {% elif combat_status_return_view == "combat" %}
+      <input type="hidden" name="combat_view" value="combat">
+    {% else %}
+      <input type="hidden" name="combat_view" value="status">
+    {% endif %}
+  {% endmacro %}
   <section class="card combat-status-edit-card">
     <div class="section-heading">
       <div>
@@ -12,7 +25,7 @@
             action="{{ url_for('campaign_combat_set_current_turn', campaign_slug=campaign.slug, combatant_id=selected_combatant.id) }}"
             data-combat-async
           >
-            <input type="hidden" name="combat_view" value="status">
+            {{ combat_status_return_fields() }}
             <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
             <button type="submit">Set current turn</button>
           </form>
@@ -30,7 +43,7 @@
           class="combat-stat combat-stat--editable"
           data-combat-async
         >
-          <input type="hidden" name="combat_view" value="status">
+          {{ combat_status_return_fields() }}
           <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
           {% if selected_combatant.state_revision is not none %}
             <input type="hidden" name="expected_revision" value="{{ selected_combatant.state_revision }}">
@@ -63,7 +76,7 @@
           class="combat-stat combat-stat--editable"
           data-combat-async
         >
-          <input type="hidden" name="combat_view" value="status">
+          {{ combat_status_return_fields() }}
           <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
           {% if selected_combatant.state_revision is not none %}
             <input type="hidden" name="expected_revision" value="{{ selected_combatant.state_revision }}">
@@ -104,7 +117,7 @@
           class="combat-stat combat-stat--editable"
           data-combat-async
         >
-          <input type="hidden" name="combat_view" value="status">
+          {{ combat_status_return_fields() }}
           <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
           <input type="hidden" name="expected_combatant_revision" value="{{ selected_combatant.combatant_revision }}">
           <input type="hidden" name="has_action" value="{{ '1' if selected_combatant.has_action else '0' }}">
@@ -146,7 +159,7 @@
         class="combat-resource-strip combat-inline-resource-form"
         data-combat-async
       >
-        <input type="hidden" name="combat_view" value="status">
+        {{ combat_status_return_fields() }}
         <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
         <input type="hidden" name="expected_combatant_revision" value="{{ selected_combatant.combatant_revision }}">
         <input type="hidden" name="movement_remaining" value="{{ selected_combatant.movement_remaining or 0 }}">
@@ -188,7 +201,7 @@
                 action="{{ url_for('campaign_combat_delete_condition', campaign_slug=campaign.slug, condition_id=condition.id) }}"
                 data-combat-async
               >
-                <input type="hidden" name="combat_view" value="status">
+                {{ combat_status_return_fields() }}
                 <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
                 <button class="ghost-button" type="submit">Remove</button>
               </form>
@@ -205,7 +218,7 @@
         class="stack-form combat-form"
         data-combat-async
       >
-        <input type="hidden" name="combat_view" value="status">
+        {{ combat_status_return_fields() }}
         <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
         <div class="combat-form-grid">
           <label class="field">

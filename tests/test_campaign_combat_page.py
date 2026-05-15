@@ -980,7 +980,7 @@ def test_dm_status_async_advance_turn_preserves_selected_focus(app, client, sign
     assert payload["selected_combatant_id"] == arden.id
     assert payload["page_url"] == f"/campaigns/linden-pass/combat/dm?combatant={arden.id}"
     assert payload["live_url"] == f"/campaigns/linden-pass/combat/dm/live-state?combatant={arden.id}"
-    assert f'id="combatant-{arden.id}"' in payload["tracker_html"]
+    assert f'data-combatant-id="{arden.id}"' in payload["tracker_html"]
     assert f'data-combatant-id="{hound.id}"' in payload["tracker_html"]
     assert "Current turn" in payload["tracker_html"]
 
@@ -1139,12 +1139,17 @@ def test_dm_pages_split_tactical_status_edits_from_control_authority_actions(
     assert hound is not None
 
     status_response = client.get(f"/campaigns/linden-pass/combat/status?combatant={hound.id}")
-    controls_response = client.get(f"/campaigns/linden-pass/combat/dm?combatant={hound.id}")
+    status_dm_response = client.get(f"/campaigns/linden-pass/combat/dm?combatant={hound.id}")
+    controls_response = client.get(
+        f"/campaigns/linden-pass/combat/dm?combatant={hound.id}&view=controls"
+    )
 
     assert status_response.status_code == 200
+    assert status_dm_response.status_code == 200
     assert controls_response.status_code == 200
 
     status_body = status_response.get_data(as_text=True)
+    status_dm_body = status_dm_response.get_data(as_text=True)
     controls_body = controls_response.get_data(as_text=True)
 
     assert "Status edits" in status_body
@@ -1158,13 +1163,13 @@ def test_dm_pages_split_tactical_status_edits_from_control_authority_actions(
     assert "hasFocusedFormControl" in status_body
     _assert_expected_combatant_revision_field(status_body, hound.revision, at_least=4)
 
-    assert "Selected combatant authority" in controls_body
+    assert "Selected combatant authority" in status_dm_body
     assert "Open Encounter status" in controls_body
-    assert "Save turn value" in controls_body
-    assert "Show NPC detail to players" in controls_body
-    assert "Save NPC structure" in controls_body
-    _assert_expected_combatant_revision_field(controls_body, hound.revision, at_least=3)
-    assert "Remove combatant" in controls_body
+    assert "Save turn value" in status_dm_body
+    assert "Show NPC detail to players" in status_dm_body
+    assert "Save NPC structure" in status_dm_body
+    _assert_expected_combatant_revision_field(status_dm_body, hound.revision, at_least=3)
+    assert "Remove combatant" in status_dm_body
     assert "Save HP" not in controls_body
     assert "Save temp HP" not in controls_body
     assert "Save movement" not in controls_body
@@ -1216,6 +1221,52 @@ def test_status_page_async_mutations_return_status_partials_and_keep_selected_ta
     refreshed = _find_combatant(app, name="Clockwork Hound")
     assert refreshed is not None
     _assert_expected_combatant_revision_field(payload["detail_html"], refreshed.revision, at_least=4)
+
+
+def test_dm_status_async_resource_update_returns_dm_status_live_payload(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+    hound = _find_combatant(app, name="Clockwork Hound")
+    assert hound is not None
+
+    response = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{hound.id}/resources",
+        data={
+            "combat_view": "dm",
+            "view": "status",
+            "combatant": hound.id,
+            "expected_combatant_revision": hound.revision,
+            "has_action": "1",
+            "movement_remaining": 10,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["selected_combatant_id"] == hound.id
+    assert payload["page_url"] == f"/campaigns/linden-pass/combat/dm?combatant={hound.id}"
+    assert payload["live_url"] == f"/campaigns/linden-pass/combat/dm/live-state?combatant={hound.id}"
+    assert "Status edits" in payload["tracker_html"]
+    assert f'data-combatant-id="{hound.id}"' in payload["tracker_html"]
 
 
 def test_dm_can_add_player_character_and_npc_combatants_and_turn_order_sorts_high_to_low(
@@ -2254,9 +2305,9 @@ def test_combat_page_renders_context_panel_and_dm_page_focuses_selected_combatan
     assert "Clockwork Hound" in dm_html
     assert "Arden March" in dm_html
     assert "Current turn" in dm_html
-    assert f'id="combatant-{hound.id}"' in dm_html
-    assert f'id="combatant-{arden.id}"' not in dm_html
-    assert dm_html.count('class="card combatant-card') == 1
+    assert f'data-combatant-id="{hound.id}"' in dm_html
+    assert f'data-combatant-id="{arden.id}"' in dm_html
+    assert dm_html.count('id="combat-status-snapshot"') == 1
     assert "Advance turn" in dm_html
     assert "Clear tracker" not in dm_html
     assert "Save turn value" in dm_html
@@ -2300,8 +2351,9 @@ def test_dm_live_state_renders_only_selected_combatant_card(app, client, sign_in
     payload = response.get_json()
     assert payload["selected_combatant_id"] == hound.id
     assert 'combat-summary-card--compact' in payload["summary_html"]
-    assert f'id="combatant-{hound.id}"' in payload["tracker_html"]
-    assert f'id="combatant-{arden.id}"' not in payload["tracker_html"]
+    assert f'data-combatant-id="{hound.id}"' in payload["tracker_html"]
+    assert f'data-combatant-id="{arden.id}"' in payload["tracker_html"]
+    assert 'data-combatant-selected="true"' in payload["tracker_html"]
 
 
 def test_dm_live_state_does_not_short_circuit_when_focus_changes(app, client, sign_in, users):
@@ -2349,8 +2401,8 @@ def test_dm_live_state_does_not_short_circuit_when_focus_changes(app, client, si
     assert changed_focus_payload["changed"] is True
     assert changed_focus_payload["selected_combatant_id"] == hound.id
     assert changed_focus_payload["live_view_token"] != initial_payload["live_view_token"]
-    assert f'id="combatant-{hound.id}"' in changed_focus_payload["tracker_html"]
-    assert f'id="combatant-{arden.id}"' not in changed_focus_payload["tracker_html"]
+    assert f'data-combatant-id="{hound.id}"' in changed_focus_payload["tracker_html"]
+    assert f'data-combatant-id="{arden.id}"' in changed_focus_payload["tracker_html"]
 
 
 def test_non_async_combat_mutations_preserve_explicit_combatant_focus_in_redirects(
@@ -2492,6 +2544,101 @@ def test_dm_status_page_renders_only_selected_pc_detail(app, client, sign_in, us
     assert "Arden March" in body
     assert "Resources" in body
     assert "Scimitar" not in body
+
+
+def test_dm_status_page_in_default_status_mode_includes_player_workspace_sections(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    assert arden is not None
+
+    response = client.get(f"/campaigns/linden-pass/combat/dm?combatant={arden.id}")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "DM status" in body
+    assert 'name="combat_view" value="dm"' in body
+    assert 'name="view" value="status"' in body
+    assert "Character sections" in body
+    assert 'data-combat-section-group' in body
+    assert 'data-combat-section-toggle="actions"' in body
+    assert 'data-combat-section-toggle="resources"' in body
+    assert f'data-combatant-id="{arden.id}"' in body
+
+
+def test_dm_status_page_with_selected_systems_monster_includes_npc_workspace_sections(
+    app,
+    client,
+    sign_in,
+    users,
+    tmp_path,
+):
+    goblin_entry_key = _import_systems_goblin(app, tmp_path)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/systems-monsters",
+        data={"entry_key": goblin_entry_key},
+        follow_redirects=False,
+    )
+
+    goblin = _find_combatant(app, name="Goblin")
+    assert goblin is not None
+
+    response = client.get(f"/campaigns/linden-pass/combat/dm?combatant={goblin.id}")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "DM status" in body
+    assert "NPC sections" in body
+    assert "Systems monster detail" in body
+    assert 'name="combat_view" value="dm"' in body
+    assert 'name="view" value="status"' in body
+    assert 'data-combat-section-group' in body
+    assert 'data-combat-section-toggle="actions"' in body
+    assert 'data-combat-section-toggle="abilities_skills"' in body
+    assert "Scimitar" in body
+
+
+def test_dm_status_page_with_selected_dm_content_monster_includes_npc_workspace_sections(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    statblock = _create_dm_statblock(app, created_by_user_id=users["dm"]["id"])
+    client.post(
+        "/campaigns/linden-pass/combat/statblock-combatants",
+        data={"statblock_id": statblock.id},
+        follow_redirects=False,
+    )
+
+    brass_hound = _find_combatant(app, name="Brass Hound")
+    assert brass_hound is not None
+
+    response = client.get(f"/campaigns/linden-pass/combat/dm?combatant={brass_hound.id}")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "DM status" in body
+    assert "NPC sections" in body
+    assert "DM Content statblock detail" in body
+    assert 'name="combat_view" value="dm"' in body
+    assert 'name="view" value="status"' in body
+    assert 'data-combat-section-group' in body
+    assert 'data-combat-section-toggle="actions"' in body
+    assert "Source file: brass-hound.md" in body
+    assert "Bite" in body
 
 
 def test_status_live_state_renders_player_workspace_sections_for_selected_pc(

@@ -65,7 +65,7 @@
           {% if combat_dm_view == 'status' %}
             {% set combatant_navigation_mode = "carousel" %}
             {% include "_combat_combatant_navigation.html" %}
-            {% include "_combat_dm_focus_card.html" %}
+            {% include "_combat_status_detail.html" %}
             {% include "_combat_dm_selected_authority.html" %}
           {% else %}
             {% include "_combat_dm_focus_card.html" %}
@@ -87,5 +87,6 @@
 {% block scripts %}
   {% include "_live_diagnostics_helper.html" %}
   {% include "_live_ui_helper.html" %}
+  {% include "_combat_workspace_scripts.html" %}
   {% include "_combat_live_scripts.html" %}
 {% endblock %}

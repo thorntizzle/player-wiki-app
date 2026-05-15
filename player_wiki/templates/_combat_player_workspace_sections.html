@@ -1,4 +1,18 @@
 {% if selected_combat_character and combat_workspace_sections %}
+  {% set combat_workspace_return_view = (
+    "dm" if combat_return_view == "dm" else "combat" if combat_subpage == "combat" else "status"
+  ) %}
+  {% macro combat_workspace_return_fields() %}
+    {% if combat_workspace_return_view == "dm" %}
+      <input type="hidden" name="combat_view" value="dm">
+      <input type="hidden" name="view" value="status">
+    {% elif combat_workspace_return_view == "combat" %}
+      <input type="hidden" name="combat_view" value="combat">
+    {% else %}
+      <input type="hidden" name="combat_view" value="status">
+    {% endif %}
+  {% endmacro %}
+
   {% set workspace_title = combat_workspace_title | default("Combat sections", true) %}
   {% set workspace_meta = combat_workspace_meta | default("Keep the main combat page open and swap between the parts of the sheet you need most in play.", true) %}
   <div data-combat-workspace-root>
@@ -175,19 +189,17 @@
                     <div class="spell-slot-editor-list">
                       {% for slot in slot_pool.slots %}
                         <article class="detail-card">
-                          <form
-                            class="session-inline-form"
-                            method="post"
-                            action="{{ url_for('campaign_combat_character_spell_slots', campaign_slug=campaign.slug, combatant_id=selected_combatant_id, level=slot.level) }}"
-                          >
-                            <input type="hidden" name="expected_revision" value="{{ selected_combat_character.state_revision }}">
-                            <input type="hidden" name="slot_lane_id" value="{{ slot.slot_lane_id }}">
-                            {% if combat_subpage == 'combat' %}
-                              <input type="hidden" name="combat_view" value="combat">
-                            {% endif %}
-                            <div class="section-heading">
-                              <h3>{{ slot.label }}</h3>
-                              <span class="meta">{{ slot.available }} available / {{ slot.max }}</span>
+                            <form
+                              class="session-inline-form"
+                              method="post"
+                              action="{{ url_for('campaign_combat_character_spell_slots', campaign_slug=campaign.slug, combatant_id=selected_combatant_id, level=slot.level) }}"
+                            >
+                              {{ combat_workspace_return_fields() }}
+                              <input type="hidden" name="expected_revision" value="{{ selected_combat_character.state_revision }}">
+                              <input type="hidden" name="slot_lane_id" value="{{ slot.slot_lane_id }}">
+                              <div class="section-heading">
+                                <h3>{{ slot.label }}</h3>
+                                <span class="meta">{{ slot.available }} available / {{ slot.max }}</span>
                             </div>
                             <label class="session-field">
                               <span>Used</span>
@@ -294,10 +306,8 @@
                     method="post"
                     action="{{ url_for('campaign_combat_character_resource', campaign_slug=campaign.slug, combatant_id=selected_combatant_id, resource_id=resource.id) }}"
                   >
+                    {{ combat_workspace_return_fields() }}
                     <input type="hidden" name="expected_revision" value="{{ selected_combat_character.state_revision }}">
-                    {% if combat_subpage == 'combat' %}
-                      <input type="hidden" name="combat_view" value="combat">
-                    {% endif %}
                     <div class="section-heading">
                       <h3>{{ resource.label }}</h3>
                       <span class="meta">{{ resource.reset_label }}</span>
