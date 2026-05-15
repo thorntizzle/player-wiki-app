@@ -906,7 +906,7 @@ def test_dm_async_advance_turn_defaults_focus_to_new_current_turn(app, client, s
 
     async_advance_response = client.post(
         "/campaigns/linden-pass/combat/advance-turn",
-        data={"combat_view": "dm"},
+        data={"combat_view": "dm", "combatant": arden.id},
         headers=_async_headers(),
         follow_redirects=False,
     )
@@ -928,6 +928,56 @@ def test_dm_async_advance_turn_defaults_focus_to_new_current_turn(app, client, s
     assert f'id="combatant-{hound.id}"' in payload["tracker_html"]
     assert f'id="combatant-{arden.id}"' not in payload["tracker_html"]
     assert "Current turn" in payload["tracker_html"]
+
+
+def test_dm_advance_turn_with_stale_combatant_still_redirects_to_new_current_turn(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    hound = _find_combatant(app, name="Clockwork Hound")
+    assert arden is not None
+    assert hound is not None
+
+    client.post(f"/campaigns/linden-pass/combat/combatants/{arden.id}/set-current", follow_redirects=False)
+
+    response = client.post(
+        "/campaigns/linden-pass/combat/advance-turn",
+        data={"combat_view": "dm", "combatant": arden.id},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert "/campaigns/linden-pass/combat/dm" in response.headers["Location"]
+    assert f"combatant={arden.id}" not in response.headers["Location"]
+
+    dm_page = client.get("/campaigns/linden-pass/combat/dm")
+    dm_page_html = dm_page.get_data(as_text=True)
+    assert re.search(
+        rf'<option[^>]*value="{hound.id}"[^>]*selected[^>]*>',
+        dm_page_html,
+    )
+    assert not re.search(
+        rf'<option[^>]*value="{arden.id}"[^>]*selected[^>]*>',
+        dm_page_html,
+    )
 
 
 def test_async_combat_resource_update_rejects_stale_combatant_revision(app, client, sign_in, users):

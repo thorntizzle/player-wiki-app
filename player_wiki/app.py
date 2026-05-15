@@ -8592,9 +8592,14 @@ def create_app() -> Flask:
         *,
         mutation_succeeded: bool,
         anchor: str | None = None,
+        ignore_requested_combatant_for_dm: bool = False,
     ):
-        selected_combatant_id = get_requested_combatant_id_from_values()
         combat_return_view = normalize_combat_return_view(request.values.get("combat_view", ""))
+        selected_combatant_id = (
+            None
+            if ignore_requested_combatant_for_dm and combat_return_view == "dm"
+            else get_requested_combatant_id_from_values()
+        )
         if is_async_request():
             if combat_return_view == "dm":
                 return jsonify(
@@ -10986,6 +10991,7 @@ def create_app() -> Flask:
             campaign_slug,
             mutation_succeeded=mutation_succeeded,
             anchor="combat-summary",
+            ignore_requested_combatant_for_dm=True,
         )
 
     @app.post("/campaigns/<campaign_slug>/combat/clear")
