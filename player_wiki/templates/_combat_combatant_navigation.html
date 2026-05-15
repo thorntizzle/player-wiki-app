@@ -1,0 +1,148 @@
+{% set combatant_navigation_mode = combatant_navigation_mode | default("list", true) %}
+{% set combatant_navigation_title = combatant_navigation_title | default("Turn order", true) %}
+{% set combatant_navigation_meta = combatant_navigation_meta | default("Initiative stays pinned here while the main panel stays focused on your tracked character.", true) %}
+{% set combatant_navigation_empty_message = combatant_navigation_empty_message | default(
+  "Once the DM seeds the tracker, initiative order will appear here.",
+  true,
+) %}
+{% set combatant_navigation_list_class = "combat-turn-order-list"
+  if combatant_navigation_mode == "list"
+  else "combat-turn-order-list combat-turn-order-list--" + combatant_navigation_mode %}
+{% set combatant_navigation_is_carousel = combatant_navigation_mode == "carousel" %}
+{% set jump_selected_combatant_id = selected_combatant_id %}
+{% if combatant_navigation_is_carousel and jump_selected_combatant_id is none %}
+  {% set jump_selected_combatant_id = ((combat_tracker.combatants | selectattr('is_current_turn') | map(attribute='id') | first) or combat_tracker.combatants[0].id) %}
+{% endif %}
+
+<section class="card sidebar-card">
+  <div class="section-heading">
+    <div>
+      <h2>{{ combatant_navigation_title }}</h2>
+      <p class="meta">{{ combatant_navigation_meta }}</p>
+    </div>
+  </div>
+  {% if combat_tracker.combatants %}
+    {% if combatant_navigation_is_carousel %}
+      <div
+        class="combat-turn-order-carousel"
+        data-combatant-carousel
+        aria-label="Combatant turn order"
+        role="group"
+      >
+        <button
+          type="button"
+          class="combat-turn-order-control combat-turn-order-control--prev"
+          aria-label="Previous combatants"
+          data-combatant-carousel-prev
+          disabled
+        >
+          &lsaquo;
+        </button>
+        <div
+          class="{{ combatant_navigation_list_class }}"
+          data-combatant-carousel-track
+          data-combat-navigation-mode="carousel"
+        >
+          {% for combatant in combat_tracker.combatants %}
+            {% set is_selected_combatant = combatant.id == selected_combatant_id %}
+            {% set combatant_context = combatant.type_label %}
+            {% if combatant.source_label %}
+              {% set combatant_context = combatant_context ~ " &middot; " ~ combatant.source_label %}
+            {% elif combatant.subtitle %}
+              {% set combatant_context = combatant_context ~ " &middot; " ~ combatant.subtitle %}
+            {% endif %}
+            <article
+              class="combat-turn-order-row{% if combatant.id == selected_combatant_id %} combat-turn-order-row--selected{% endif %}{% if combatant.is_current_turn %} combat-turn-order-row--current{% endif %}"
+              data-combatant-carousel-card
+              tabindex="0"
+              aria-label="{{ combatant.name }} - {{ combatant_context }} - Turn {{ combatant.turn_value }}{% if combatant.is_current_turn %} - Current turn{% endif %}{% if is_selected_combatant %} - Selected{% endif %}"
+              aria-current="{{ 'true' if is_selected_combatant else 'false' }}"
+              data-combatant-selected="{{ 'true' if is_selected_combatant else 'false' }}"
+              data-combatant-current-turn="{{ 'true' if combatant.is_current_turn else 'false' }}"
+              data-combatant-id="{{ combatant.id }}"
+            >
+              <div class="combat-turn-order-row__header">
+                <div>
+                  <p class="card-kicker">{{ combatant_context }}</p>
+                  <h3>{{ combatant.name }}</h3>
+                  {% if combatant.subtitle %}
+                    <p class="meta">{{ combatant.subtitle }}</p>
+                  {% endif %}
+                </div>
+                <div class="badge-list">
+                  <span class="meta-badge">Turn {{ combatant.turn_value }}</span>
+                  {% if combatant.is_current_turn %}
+                    <span class="meta-badge">Current turn</span>
+                  {% endif %}
+                  <span class="meta-badge" data-combatant-selected-badge {% if not is_selected_combatant %}hidden{% endif %}>Selected (inspected)</span>
+                </div>
+              </div>
+              <div class="combat-turn-order-row__meta">
+                <span>Conditions {{ combatant.conditions | length }}</span>
+                <span data-combatant-selected-summary {% if not is_selected_combatant %}hidden{% endif %}>Selected / inspected</span>
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+        <button
+          type="button"
+          class="combat-turn-order-control combat-turn-order-control--next"
+          aria-label="Next combatants"
+          data-combatant-carousel-next
+          disabled
+        >
+          &rsaquo;
+        </button>
+      </div>
+      <div
+        class="combat-turn-order-jump"
+        data-combatant-carousel-jump
+      >
+        <label class="combat-turn-order-jump__label">Jump to combatant</label>
+        <select class="combat-turn-order-jump__select" data-combatant-carousel-jump-select>
+          {% for combatant in combat_tracker.combatants %}
+            <option
+              value="{{ combatant.id }}"
+              {% if combatant.id == jump_selected_combatant_id %}selected="selected"{% endif %}
+            >
+              {{ combatant.name }} - Turn {{ combatant.turn_value }}{% if combatant.is_current_turn %} (Current turn){% endif %}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+    {% else %}
+      <div class="{{ combatant_navigation_list_class }}">
+        {% for combatant in combat_tracker.combatants %}
+          <article
+            class="combat-turn-order-row{% if combatant.id == selected_combatant_id %} combat-turn-order-row--selected{% endif %}{% if combatant.is_current_turn %} combat-turn-order-row--current{% endif %}"
+          >
+            <div class="combat-turn-order-row__header">
+              <div>
+                <p class="card-kicker">{{ combatant.type_label }}</p>
+                <h3>{{ combatant.name }}</h3>
+                {% if combatant.subtitle %}
+                  <p class="meta">{{ combatant.subtitle }}</p>
+                {% endif %}
+              </div>
+              <div class="badge-list">
+                <span class="meta-badge">Turn {{ combatant.turn_value }}</span>
+                {% if combatant.is_current_turn %}
+                  <span class="meta-badge">Current turn</span>
+                {% endif %}
+              </div>
+            </div>
+            <div class="combat-turn-order-row__meta">
+              <span>Conditions {{ combatant.conditions | length }}</span>
+              {% if combatant.id == selected_combatant_id %}
+                <span>Your workspace</span>
+              {% endif %}
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% else %}
+    <p class="meta">{{ combatant_navigation_empty_message }}</p>
+  {% endif %}
+</section>
+

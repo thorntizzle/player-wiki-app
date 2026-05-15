@@ -8,7 +8,7 @@
     <h1>{{ campaign.title }} Combat</h1>
     <p class="lede">
       {% if show_player_combat_workspace %}
-        Keep your tracked character open as your in-combat workspace while turn order stays pinned in the sidebar.
+        Keep your tracked character open as your in-combat workspace while live updates stay focused on your sheet.
       {% else %}
         Track turn order, HP, action economy, and conditions for live DND-5E encounters without leaving the campaign space.
       {% endif %}
@@ -43,7 +43,12 @@
       <section class="section-list combat-workspace-stack">
         <div data-combat-summary-root>
           {% if show_player_combat_workspace %}
+            {% set combat_summary_compact = true %}
+            {% include "_combat_summary_card.html" %}
+            {% set combatant_navigation_mode = "carousel" %}
+            {% include "_combat_combatant_navigation.html" %}
             {% include "_combat_character_snapshot.html" %}
+            {% include "_combat_session_relationship_card.html" %}
           {% else %}
             {% include "_combat_summary_card.html" %}
           {% endif %}
@@ -58,18 +63,16 @@
         </div>
       </section>
 
-      <aside class="sidebar {% if show_player_combat_workspace %}combat-workspace-sidebar{% else %}combat-sidebar-stack{% endif %}">
-        <div data-combat-context-root>
-          {% if show_player_combat_workspace %}
-            {% include "_combat_player_workspace_sidebar.html" %}
-          {% else %}
+      {% if show_player_combat_workspace %}
+        <div data-combat-context-root hidden></div>
+      {% else %}
+        <aside class="sidebar combat-sidebar-stack">
+          <div data-combat-context-root>
             {% include "_combat_context_panel.html" %}
-          {% endif %}
-        </div>
-        {% if not show_player_combat_workspace %}
+          </div>
           {% include "_combat_main_sidebar.html" %}
-        {% endif %}
-      </aside>
+        </aside>
+      {% endif %}
     </div>
   {% endif %}
 {% endblock %}

@@ -8392,11 +8392,7 @@ def create_app() -> Flask:
             live_revision = int(context["combat_live_revision"] or 0)
         if live_view_token is None:
             live_view_token = str(context["combat_live_view_token"] or "")
-        summary_template = (
-            "_combat_character_snapshot.html"
-            if context.get("show_player_combat_workspace")
-            else "_combat_summary_card.html"
-        )
+        summary_template = "_combat_summary_card.html"
         tracker_template = (
             "_combat_player_workspace_sections.html"
             if context.get("show_player_combat_workspace")
@@ -8412,7 +8408,23 @@ def create_app() -> Flask:
             "live_revision": live_revision,
             "live_view_token": live_view_token,
             "combat_state_token": context["combat_live_state_token"],
-            "summary_html": render_template(summary_template, **context),
+            "summary_html": (
+                render_template(
+                    summary_template,
+                    combat_summary_compact=bool(context.get("show_player_combat_workspace")),
+                    **context,
+                )
+                + (
+                    render_template(
+                        "_combat_combatant_navigation.html",
+                        combatant_navigation_mode="carousel",
+                        **context,
+                    )
+                    + render_template("_combat_character_snapshot.html", **context)
+                    if context.get("show_player_combat_workspace")
+                    else ""
+                )
+            ),
             "tracker_html": render_template(tracker_template, **context),
             "context_html": render_template(sidebar_template, **context),
             "selected_combatant_id": context["selected_combatant_id"],

@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import sqlite3
 from pathlib import Path
 
@@ -181,6 +182,332 @@ def test_campaign_member_can_open_combat_page_and_campaign_links_to_it(client, s
     assert "Add custom NPC combatant" not in combat_html
     assert 'data-live-active-interval-ms="500"' in combat_html
     assert 'data-live-idle-interval-ms="3000"' in combat_html
+
+
+def test_combat_page_initializes_carousel_default_position_behavior(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    add_player = client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    assert add_player.status_code == 200
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    assert arden is not None
+
+    response = client.get(f"/campaigns/linden-pass/combat?combatant={arden.id}")
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert 'type="button"' in body
+    assert "combat-turn-order-control--prev" in body
+    assert "aria-label=\"Previous combatants\"" in body
+    assert "data-combatant-carousel-prev" in body
+    assert "combat-turn-order-control--next" in body
+    assert "aria-label=\"Next combatants\"" in body
+    assert "data-combatant-carousel-next" in body
+    assert 'data-combatant-carousel-track' in body
+    assert 'data-combatant-carousel-prev' in body
+    assert 'data-combatant-carousel-next' in body
+    assert 'const getDefaultCombatantCarouselCard' in body
+    assert "const scrollCombatantCarouselByCard = (track, direction) => {" in body
+    assert "scrollBy({" in body
+    assert 'behavior: "smooth"' in body
+    assert 'const scrollToDefaultCombatantCarouselCard' in body
+    assert 'data-combatant-current-turn="' in body
+    assert 'data-combatant-selected="' in body
+    current_turn_precedence = body.find('card.dataset.combatantCurrentTurn === "true"')
+    selected_precedence = body.find('card.dataset.combatantSelected === "true"')
+    first_card_fallback = body.find("return cards[0];")
+    assert current_turn_precedence != -1
+    assert selected_precedence != -1
+    assert first_card_fallback != -1
+    assert current_turn_precedence < selected_precedence < first_card_fallback
+    assert 'data-combatant-initial-default' in body
+
+
+def test_combat_page_player_workspace_carousel_renders_jump_dropdown_options(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    assert arden is not None
+
+    response = client.get(f"/campaigns/linden-pass/combat?combatant={arden.id}")
+    assert response.status_code == 200
+
+    body = response.get_data(as_text=True)
+    assert "data-combatant-carousel-jump" in body
+    assert "data-combatant-carousel-jump-select" in body
+    assert "Jump to combatant" in body
+    assert "Arden March - Turn 18" in body
+    assert "Clockwork Hound - Turn 12" in body
+    assert body.find("data-combatant-carousel-jump") > body.find("combat-turn-order-control--next")
+    selected_option_match = re.search(r'<option[^>]*value="(\d+)"[^>]*selected="selected"', body)
+    assert selected_option_match is not None
+
+    selected_option_id = selected_option_match.group(1)
+    selected_card_match = re.search(r'<article[^>]*aria-current="true"[^>]*data-combatant-id="(\d+)"', body)
+    assert selected_card_match is not None
+    assert selected_option_id == selected_card_match.group(1)
+
+
+def test_combat_status_page_does_not_render_carousel_jump_dropdown(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    assert arden is not None
+
+    response = client.get(f"/campaigns/linden-pass/combat/status?combatant={arden.id}")
+    assert response.status_code == 200
+
+    body = response.get_data(as_text=True)
+    assert "data-combatant-carousel-jump" not in body
+    assert "data-combatant-carousel-jump-select" not in body
+
+
+def test_combat_page_tracks_carousel_intent_for_live_rerender_autoscroll(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+
+    response = client.get("/campaigns/linden-pass/combat")
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "let combatantCarouselUserIntentObserved = false;" in body
+    assert "const markCombatantCarouselUserIntent = () => {" in body
+    assert "const scrollToCurrentTurnCombatantCarouselCard = (scope = liveRoot) => {" in body
+    assert "if (combatantCarouselUserIntentObserved) {" in body
+    assert "scrollToCurrentTurnCombatantCarouselCard(liveRoot);" in body
+    assert "markCombatantCarouselUserIntent();" in body
+    assert "if (event.isTrusted) {" in body
+
+
+def test_combat_page_render_payload_restores_carousel_state_on_user_intent(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+
+    response = client.get("/campaigns/linden-pass/combat")
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "const captureCombatantCarouselState = (scope = liveRoot) => {" in body
+    assert "const restoreCombatantCarouselState = (scope = liveRoot, carouselStates = []) => {" in body
+
+    render_payload_anchor = body.find(
+        'const renderPayload = (payload, { force = false, forceFlash = false } = {}) => {'
+    )
+    refresh_payload_anchor = body.find("const refreshLiveState = async ({", render_payload_anchor)
+    assert render_payload_anchor != -1
+    assert refresh_payload_anchor != -1
+    assert render_payload_anchor < refresh_payload_anchor
+    render_payload_block = body[render_payload_anchor:refresh_payload_anchor]
+    assert "const carouselState = captureCombatantCarouselState(liveRoot);" in render_payload_block
+    assert "restoreCombatantCarouselState(liveRoot, carouselState);" in render_payload_block
+    assert "if (combatantCarouselUserIntentObserved) {" in render_payload_block
+    assert "scrollToCurrentTurnCombatantCarouselCard(liveRoot);" in render_payload_block
+
+    capture_helper_anchor = body.find("const captureCombatantCarouselState = (scope = liveRoot) => {")
+    restore_helper_anchor = body.find(
+        "const restoreCombatantCarouselState = (scope = liveRoot, carouselStates = []) => {",
+        capture_helper_anchor,
+    )
+    next_function_anchor = body.find("const scrollToAnchor = (anchor) => {", restore_helper_anchor)
+    assert capture_helper_anchor != -1
+    assert restore_helper_anchor != -1
+    assert next_function_anchor != -1
+    assert capture_helper_anchor < restore_helper_anchor < next_function_anchor
+
+    capture_helper_block = body[capture_helper_anchor:restore_helper_anchor]
+    restore_helper_block = body[restore_helper_anchor:next_function_anchor]
+    assert "setCombatantCarouselSelectedById" in restore_helper_block
+    assert "getCombatantCarouselTrack(carousel)" in restore_helper_block
+    assert "track.scrollLeft = Math.min(maxScrollLeft, trackScrollLeft);" in restore_helper_block
+    assert "fetch(" not in capture_helper_block
+    assert "fetch(" not in restore_helper_block
+
+
+def test_combat_page_carousel_jump_select_updates_local_inspected_state_without_mutation(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    add_player = client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    assert add_player.status_code == 200
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+
+    response = client.get("/campaigns/linden-pass/combat")
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "data-combatant-carousel-jump-select" in body
+    assert "data-combatant-selected-badge" in body
+    assert "data-combatant-selected-summary" in body
+    assert 'const setCombatantCarouselCardSelectedState = (card, isSelected) => {' in body
+    assert 'const setCombatantCarouselSelectedById = (carousel, combatantId) => {' in body
+    assert 'setCombatantCarouselCardSelectedState(card, card === selectedCard);' in body
+    assert 'card.setAttribute("aria-current", isSelected ? "true" : "false");' in body
+    assert "combat-turn-order-row--selected" in body
+
+    change_handler_anchor = body.find('liveRoot.addEventListener("change", async (event) => {')
+    jump_select_anchor = body.find('if (target.matches("[data-combatant-carousel-jump-select]")) {', change_handler_anchor)
+    navigation_select_anchor = body.find('if (target.matches("[data-combat-navigation-select]")) {', jump_select_anchor)
+    assert change_handler_anchor != -1
+    assert jump_select_anchor != -1
+    assert navigation_select_anchor != -1
+    assert change_handler_anchor < jump_select_anchor < navigation_select_anchor
+
+    jump_block = body[jump_select_anchor:navigation_select_anchor]
+    assert "const selectedCombatantId = target.value;" in jump_block
+    assert "setCombatantCarouselSelectedById(carousel, selectedCombatantId);" in jump_block
+    assert "markCombatantCarouselUserIntent();" in jump_block
+    assert "focusCombatantCarouselCard(selectedCard);" in jump_block
+    assert "fetch(" not in jump_block
+    assert "window.history.replaceState" not in jump_block
+    assert "syncViewUrls(" not in jump_block
+    assert "buildUrl" not in jump_block
+    assert "liveRoot.dataset.combatLiveUrl" not in jump_block
+
+
+def test_combat_page_carousel_controls_scroll_without_state_mutation(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    add_player = client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    assert add_player.status_code == 200
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+
+    response = client.get("/campaigns/linden-pass/combat")
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+
+    click_handler_anchor = body.find('liveRoot.addEventListener("click", (event) => {')
+    focus_handler_anchor = body.find('liveRoot.addEventListener("focusin", (event) => {')
+    assert click_handler_anchor != -1
+    assert focus_handler_anchor > click_handler_anchor
+    carousel_click_block = body[click_handler_anchor:focus_handler_anchor]
+
+    assert "data-combatant-carousel-prev" in carousel_click_block
+    assert "data-combatant-carousel-next" in carousel_click_block
+    assert "scrollCombatantCarouselByCard(track, direction);" in carousel_click_block
+    assert "event.preventDefault();" in carousel_click_block
+    assert "markCombatantCarouselUserIntent();" in carousel_click_block
+    assert "fetch(" not in carousel_click_block
+    assert "campaign_combat_advance_turn" not in carousel_click_block
+    assert "/set-current" not in carousel_click_block
 
 
 def test_xianxia_combat_routes_show_friendly_unsupported_system_fallback(
@@ -916,9 +1243,103 @@ def test_owner_player_combat_page_uses_character_workspace_layout(app, client, s
     assert "Bonus Actions" in body
     assert "Reactions" in body
     assert "Abilities and Skills" in body
-    assert "Your workspace" in body
+    assert "Selected / inspected" in body
     assert "Current limits" not in body
     assert "Encounter context" not in body
+
+
+def test_owner_player_combat_page_uses_full_width_workspace_layout_and_preserves_live_rerender_state(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+    arden = _find_combatant(app, character_slug="arden-march")
+    assert arden is not None
+    client.post(
+        f"/campaigns/linden-pass/combat/combatants/{arden.id}/set-current",
+        follow_redirects=False,
+    )
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get(f"/campaigns/linden-pass/combat?combatant={arden.id}")
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+
+    assert 'class="page-layout combat-layout combat-layout--workspace"' in body
+    assert "data-combat-live-root" in body
+    assert 'data-combat-context-root hidden' in body
+    assert 'class="sidebar combat-sidebar-stack"' not in body
+
+    summary_root = body.find('data-combat-summary-root')
+    carousel = body.find('data-combatant-carousel')
+    jump = body.find('data-combatant-carousel-jump')
+    tracker_root = body.find('data-combat-tracker-root')
+    snapshot = body.find('id="combat-character-snapshot"')
+    assert summary_root != -1
+    assert carousel != -1
+    assert jump != -1
+    assert tracker_root != -1
+    assert snapshot != -1
+    assert summary_root < carousel < jump < snapshot < tracker_root
+
+    assert 'data-combatant-current-turn="' in body
+    assert "combat-turn-order-row--current" in body
+    assert "combat-turn-order-row--selected" in body
+    selected_option_match = re.search(r'<option[^>]*value="(\d+)"[^>]*selected="selected"', body)
+    assert selected_option_match is not None
+
+    selected_option_id = selected_option_match.group(1)
+    selected_card_match = re.search(
+        r'<article[^>]*aria-current="true"[^>]*data-combatant-id="(\d+)"',
+        body,
+    )
+    assert selected_card_match is not None
+    assert selected_option_id == selected_card_match.group(1)
+
+    jump_select_anchor = body.find('if (target.matches("[data-combatant-carousel-jump-select]"))')
+    change_handler_anchor = body.find('liveRoot.addEventListener("change", async (event) => {')
+    assert change_handler_anchor != -1
+    assert jump_select_anchor != -1
+    assert change_handler_anchor < jump_select_anchor
+
+    assert "const getDefaultCombatantCarouselCard" in body
+    assert "const scrollToDefaultCombatantCarouselCard" in body
+    assert "const captureCombatantCarouselState = (scope = liveRoot) => {" in body
+    assert "const restoreCombatantCarouselState = (scope = liveRoot, carouselStates = []) => {" in body
+    assert "const workspaceSectionState = combatWorkspaceTools ? combatWorkspaceTools.capture(liveRoot) : \"\";" in body
+    assert "combatWorkspaceTools.restore(liveRoot, workspaceSectionState);" in body
+
+    render_payload_anchor = body.find(
+        'const renderPayload = (payload, { force = false, forceFlash = false } = {}) => {'
+    )
+    assert render_payload_anchor != -1
+    refresh_payload_anchor = body.find("const refreshLiveState = async ({", render_payload_anchor)
+    assert refresh_payload_anchor != -1
+    render_payload_block = body[render_payload_anchor:refresh_payload_anchor]
+    assert "const carouselState = captureCombatantCarouselState(liveRoot);" in render_payload_block
+    assert "restoreCombatantCarouselState(liveRoot, carouselState);" in render_payload_block
+    assert "if (combatantCarouselUserIntentObserved) {" in render_payload_block
 
 
 def test_owner_player_combat_workspace_links_back_to_session_character_when_session_is_active(
@@ -2295,6 +2716,26 @@ def test_combat_loading_styles_do_not_dim_live_combat_surfaces():
     assert "combat-live-root][data-loading" not in css
     assert "combat-status-live-root][data-loading" not in css
     assert "combat-character-live-root][data-loading" not in css
+
+
+def test_combat_styles_include_mobile_tablet_carousel_responsive_hooks():
+    css = Path("player_wiki/static/styles.css").read_text(encoding="utf-8")
+
+    assert ".combat-layout--workspace .combat-turn-order-carousel" in css
+    assert ".combat-layout--workspace .combat-turn-order-list--carousel .combat-turn-order-row" in css
+    assert ".combat-layout--workspace .combat-turn-order-control" in css
+    assert ".combat-layout--workspace .combat-turn-order-jump" in css
+    assert "@media (max-width: 1100px)" in css
+    assert re.search(
+        r"@media\s*\(\s*max-width:\s*1100px\s*\)\s*\{[\s\S]*combat-turn-order-carousel",
+        css,
+        re.M | re.S,
+    )
+    assert re.search(
+        r"@media\s*\(\s*max-width:\s*820px\s*\)\s*\{[\s\S]*combat-layout--workspace",
+        css,
+        re.M | re.S,
+    )
 
 
 def test_live_state_logs_slow_response_warning_without_live_diagnostics(

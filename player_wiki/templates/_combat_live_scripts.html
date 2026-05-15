@@ -236,6 +236,256 @@
       return activeElement.matches("input, textarea, select");
     };
 
+    const combatantCarouselsInitialized = new WeakSet();
+    let combatantCarouselInitialDefaultsApplied = false;
+    let combatantCarouselUserIntentObserved = false;
+
+    const getCombatantCarouselFromTarget = (target) => {
+      if (!(target instanceof HTMLElement)) {
+        return null;
+      }
+      return target.closest("[data-combatant-carousel]");
+    };
+
+    const getCombatantCarouselTrack = (carousel) => {
+      if (!(carousel instanceof HTMLElement)) {
+        return null;
+      }
+      const track = carousel.querySelector("[data-combatant-carousel-track]");
+      return track instanceof HTMLElement ? track : null;
+    };
+
+    const updateCombatantCarouselControls = (carousel) => {
+      if (!(carousel instanceof HTMLElement)) {
+        return;
+      }
+      const track = getCombatantCarouselTrack(carousel);
+      if (!track) {
+        return;
+      }
+      const prevButton = carousel.querySelector("[data-combatant-carousel-prev]");
+      const nextButton = carousel.querySelector("[data-combatant-carousel-next]");
+      if (!(prevButton instanceof HTMLButtonElement) || !(nextButton instanceof HTMLButtonElement)) {
+        return;
+      }
+
+      const maxScrollLeft = Math.max(0, track.scrollWidth - track.clientWidth);
+      if (maxScrollLeft <= 1) {
+        prevButton.disabled = true;
+        nextButton.disabled = true;
+        return;
+      }
+
+      prevButton.disabled = track.scrollLeft <= 0;
+      nextButton.disabled = track.scrollLeft >= maxScrollLeft - 1;
+    };
+
+    const initializeCombatantCarousel = (carousel) => {
+      if (!(carousel instanceof HTMLElement) || combatantCarouselsInitialized.has(carousel)) {
+        return;
+      }
+      const track = getCombatantCarouselTrack(carousel);
+      if (!track) {
+        return;
+      }
+      const onScroll = () => updateCombatantCarouselControls(carousel);
+      track.addEventListener("scroll", onScroll, { passive: true });
+      updateCombatantCarouselControls(carousel);
+      combatantCarouselsInitialized.add(carousel);
+    };
+
+    const initializeCombatantCarousels = (scope = liveRoot) => {
+      if (!(scope instanceof Document) && !(scope instanceof HTMLElement)) {
+        return;
+      }
+      Array.from(scope.querySelectorAll("[data-combatant-carousel]")).forEach((carousel) => {
+        initializeCombatantCarousel(carousel);
+      });
+    };
+
+    const scrollCombatantCarouselByCard = (track, direction) => {
+      if (!(track instanceof HTMLElement)) {
+        return;
+      }
+      const cardWidth = Math.max(200, Math.min(280, track.clientWidth / 2));
+      track.scrollBy({
+        left: cardWidth * direction,
+        behavior: "smooth",
+      });
+    };
+
+    const focusCombatantCarouselCard = (card) => {
+      if (!(card instanceof HTMLElement) || !card.matches("[data-combatant-carousel-card]")) {
+        return;
+      }
+      card.scrollIntoView({ block: "nearest", inline: "nearest" });
+    };
+
+    const setCombatantCarouselCardSelectedState = (card, isSelected) => {
+      if (!(card instanceof HTMLElement) || !card.matches("[data-combatant-carousel-card]")) {
+        return;
+      }
+      card.dataset.combatantSelected = isSelected ? "true" : "false";
+      card.setAttribute("aria-current", isSelected ? "true" : "false");
+      card.classList.toggle("combat-turn-order-row--selected", isSelected);
+      const selectedBadge = card.querySelector("[data-combatant-selected-badge]");
+      if (selectedBadge instanceof HTMLElement) {
+        selectedBadge.hidden = !isSelected;
+      }
+      const selectedSummary = card.querySelector("[data-combatant-selected-summary]");
+      if (selectedSummary instanceof HTMLElement) {
+        selectedSummary.hidden = !isSelected;
+      }
+    };
+
+    const setCombatantCarouselSelectedById = (carousel, combatantId) => {
+      if (!(carousel instanceof HTMLElement)) {
+        return null;
+      }
+      const targetId = String(combatantId || "").trim();
+      if (!targetId) {
+        return null;
+      }
+      const cards = Array.from(carousel.querySelectorAll("[data-combatant-carousel-card]"));
+      const selectedCard = cards.find((card) =>
+        card instanceof HTMLElement && card.dataset.combatantId === targetId
+      ) || null;
+      if (!(selectedCard instanceof HTMLElement)) {
+        return null;
+      }
+      cards.forEach((card) => {
+        if (!(card instanceof HTMLElement)) {
+          return;
+        }
+        setCombatantCarouselCardSelectedState(card, card === selectedCard);
+      });
+      return selectedCard;
+    };
+
+    const markCombatantCarouselUserIntent = () => {
+      combatantCarouselUserIntentObserved = true;
+    };
+
+    const getDefaultCombatantCarouselCard = (carousel) => {
+      if (!(carousel instanceof HTMLElement)) {
+        return null;
+      }
+      const cards = Array.from(carousel.querySelectorAll("[data-combatant-carousel-card]"));
+      if (!cards.length) {
+        return null;
+      }
+      const currentTurnCard = cards.find((card) => card.dataset.combatantCurrentTurn === "true");
+      if (currentTurnCard instanceof HTMLElement) {
+        return currentTurnCard;
+      }
+      const selectedCard = cards.find((card) => card.dataset.combatantSelected === "true");
+      if (selectedCard instanceof HTMLElement) {
+        return selectedCard;
+      }
+      return cards[0];
+    };
+
+    const scrollToDefaultCombatantCarouselCard = (carousel) => {
+      if (!(carousel instanceof HTMLElement)) {
+        return;
+      }
+      const defaultCard = getDefaultCombatantCarouselCard(carousel);
+      if (!(defaultCard instanceof HTMLElement)) {
+        return;
+      }
+      defaultCard.scrollIntoView({ block: "nearest", inline: "nearest" });
+      defaultCard.setAttribute("data-combatant-initial-default", "1");
+    };
+
+    const scrollToCurrentTurnCombatantCarouselCard = (scope = liveRoot) => {
+      if (combatantCarouselUserIntentObserved) {
+        return;
+      }
+      if (!(scope instanceof Document) && !(scope instanceof HTMLElement)) {
+        return;
+      }
+      Array.from(scope.querySelectorAll("[data-combatant-carousel]"))
+        .forEach((carousel) => {
+          if (!(carousel instanceof HTMLElement)) {
+            return;
+          }
+          scrollToDefaultCombatantCarouselCard(carousel);
+        });
+    };
+
+    const initializeCombatantCarouselDefaults = (scope = liveRoot) => {
+      if (combatantCarouselInitialDefaultsApplied) {
+        return;
+      }
+      if (!(scope instanceof Document) && !(scope instanceof HTMLElement)) {
+        return;
+      }
+      Array.from(scope.querySelectorAll("[data-combatant-carousel]"))
+        .forEach((carousel) => {
+          if (!(carousel instanceof HTMLElement)) {
+            return;
+          }
+          scrollToDefaultCombatantCarouselCard(carousel);
+        });
+      combatantCarouselInitialDefaultsApplied = true;
+    };
+
+    const captureCombatantCarouselState = (scope = liveRoot) => {
+      if (!(scope instanceof Document) && !(scope instanceof HTMLElement)) {
+        return [];
+      }
+      return Array.from(scope.querySelectorAll("[data-combatant-carousel]"))
+        .map((carousel) => {
+          if (!(carousel instanceof HTMLElement)) {
+            return null;
+          }
+          const track = getCombatantCarouselTrack(carousel);
+          const cards = Array.from(carousel.querySelectorAll("[data-combatant-carousel-card]"));
+          const inspectedCard = cards.find((card) =>
+            card instanceof HTMLElement && card.dataset.combatantSelected === "true"
+          );
+          return {
+            scrollLeft: track instanceof HTMLElement ? track.scrollLeft : 0,
+            inspectedCombatantId: inspectedCard instanceof HTMLElement
+              ? String(inspectedCard.dataset.combatantId || "")
+              : "",
+          };
+        })
+        .filter((state) => state && Object.keys(state).length > 0);
+    };
+
+    const restoreCombatantCarouselState = (scope = liveRoot, carouselStates = []) => {
+      if (!Array.isArray(carouselStates) || !(scope instanceof Document) && !(scope instanceof HTMLElement)) {
+        return;
+      }
+      const carousels = Array.from(scope.querySelectorAll("[data-combatant-carousel]"));
+      if (!carousels.length) {
+        return;
+      }
+      carousels.forEach((carousel, index) => {
+        if (!(carousel instanceof HTMLElement) || index >= carouselStates.length) {
+          return;
+        }
+        const state = carouselStates[index];
+        if (!state || typeof state !== "object") {
+          return;
+        }
+        const track = getCombatantCarouselTrack(carousel);
+        const targetCombatantId = typeof state.inspectedCombatantId === "string" ? state.inspectedCombatantId.trim() : "";
+        if (targetCombatantId && track instanceof HTMLElement) {
+          setCombatantCarouselSelectedById(carousel, targetCombatantId);
+        }
+        if (track instanceof HTMLElement) {
+          const trackScrollLeft = Number(state.scrollLeft);
+          if (Number.isFinite(trackScrollLeft) && trackScrollLeft >= 0) {
+            const maxScrollLeft = Math.max(0, track.scrollWidth - track.clientWidth);
+            track.scrollLeft = Math.min(maxScrollLeft, trackScrollLeft);
+          }
+          updateCombatantCarouselControls(carousel);
+        }
+      });
+    };
+
     const scrollToAnchor = (anchor) => {
       if (!anchor) {
         return;
@@ -467,6 +717,7 @@
       const focusState = uiStateTools ? uiStateTools.captureFocus(liveRoot) : null;
       const viewportAnchor = uiStateTools ? uiStateTools.captureViewportAnchor(liveRoot) : null;
       const workspaceSectionState = combatWorkspaceTools ? combatWorkspaceTools.capture(liveRoot) : "";
+      const carouselState = captureCombatantCarouselState(liveRoot);
       const controlsFormState = captureControlsFormState();
       const systemsMonsterSearchState = captureSystemsMonsterSearchState();
       if (!force && nextToken === combatStateToken) {
@@ -507,9 +758,16 @@
       combatStateToken = nextToken;
       liveRoot.dataset.combatStateToken = combatStateToken;
       syncViewUrls(payload);
+      initializeCombatantCarousels(liveRoot);
+      // Initial defaulting for carousel position is intentionally one-time and handled during page boot.
       if (uiStateTools) {
         uiStateTools.restoreFocus(liveRoot, focusState);
         uiStateTools.restoreViewportAnchor(liveRoot, viewportAnchor);
+      }
+      if (combatantCarouselUserIntentObserved) {
+        restoreCombatantCarouselState(liveRoot, carouselState);
+      } else {
+        scrollToCurrentTurnCombatantCarouselCard(liveRoot);
       }
       scrollToAnchor(payload.anchor || "");
     };
@@ -636,9 +894,114 @@
       true,
     );
 
+    liveRoot.addEventListener("click", (event) => {
+      // Carousel prev/next controls are client-side navigation only; do not post mutations.
+      const button = event.target instanceof HTMLElement
+        ? event.target.closest("[data-combatant-carousel-prev], [data-combatant-carousel-next]")
+        : null;
+      if (!(button instanceof HTMLButtonElement)) {
+        const card = event.target instanceof HTMLElement ? event.target.closest("[data-combatant-carousel-card]") : null;
+        if (card instanceof HTMLElement && event.isTrusted) {
+          markCombatantCarouselUserIntent();
+        }
+        return;
+      }
+      if (event.isTrusted) {
+        markCombatantCarouselUserIntent();
+      }
+      const carousel = getCombatantCarouselFromTarget(button);
+      if (!(carousel instanceof HTMLElement)) {
+        return;
+      }
+      const track = getCombatantCarouselTrack(carousel);
+      if (!track) {
+        return;
+      }
+      const direction = button.matches("[data-combatant-carousel-prev]") ? -1 : 1;
+      const previousFocusTarget = document.activeElement;
+      event.preventDefault();
+      scrollCombatantCarouselByCard(track, direction);
+      if (previousFocusTarget instanceof HTMLElement && previousFocusTarget.closest("[data-combatant-carousel]")) {
+        window.setTimeout(() => focusCombatantCarouselCard(previousFocusTarget), 150);
+      }
+      window.setTimeout(() => {
+        updateCombatantCarouselControls(carousel);
+      }, 200);
+    });
+
+    liveRoot.addEventListener("focusin", (event) => {
+      const card = event.target instanceof HTMLElement ? event.target.closest("[data-combatant-carousel-card]") : null;
+      if (!(card instanceof HTMLElement)) {
+        return;
+      }
+      if (event.isTrusted) {
+        markCombatantCarouselUserIntent();
+      }
+      focusCombatantCarouselCard(card);
+    });
+
+    liveRoot.addEventListener("keydown", (event) => {
+      if (!(event instanceof KeyboardEvent) || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+        return;
+      }
+      const activeCard = document.activeElement instanceof HTMLElement
+        ? document.activeElement.closest("[data-combatant-carousel-card]")
+        : null;
+      if (!(activeCard instanceof HTMLElement) || !liveRoot.contains(activeCard)) {
+        return;
+      }
+      const carousel = getCombatantCarouselFromTarget(activeCard);
+      if (!(carousel instanceof HTMLElement)) {
+        return;
+      }
+      const cards = Array.from(carousel.querySelectorAll("[data-combatant-carousel-card]"));
+      const activeIndex = cards.indexOf(activeCard);
+      if (!cards.length || activeIndex === -1) {
+        return;
+      }
+      if (event.isTrusted) {
+        markCombatantCarouselUserIntent();
+      }
+      event.preventDefault();
+      if (event.key === "Home") {
+        cards[0].focus();
+        return;
+      }
+      if (event.key === "End") {
+        cards[cards.length - 1].focus();
+        return;
+      }
+      const nextIndex = event.key === "ArrowLeft"
+        ? activeIndex - 1
+        : activeIndex + 1;
+      const clampedIndex = Math.max(0, Math.min(nextIndex, cards.length - 1));
+      cards[clampedIndex].focus();
+      if (clampedIndex !== activeIndex) {
+        focusCombatantCarouselCard(cards[clampedIndex]);
+      }
+    });
+
     liveRoot.addEventListener("change", async (event) => {
       const target = event.target;
       if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      if (target.matches("[data-combatant-carousel-jump-select]")) {
+        const jumpSection = target.closest("section");
+        const carousel = jumpSection instanceof HTMLElement
+          ? jumpSection.querySelector("[data-combatant-carousel]")
+          : null;
+        // Inspection via jump-select is local to this Combat page interaction in this pass:
+        // update visual inspected state only; do not mutate deep links or URL history.
+        const selectedCombatantId = target.value;
+        const selectedCard = setCombatantCarouselSelectedById(carousel, selectedCombatantId);
+        if (event.isTrusted) {
+          markCombatantCarouselUserIntent();
+        }
+        if (selectedCard instanceof HTMLElement) {
+          selectedCard.focus({ preventScroll: true });
+          focusCombatantCarouselCard(selectedCard);
+        }
         return;
       }
       if (target.matches("[data-combat-navigation-select]")) {
@@ -731,6 +1094,8 @@
     });
 
     initializeSystemsMonsterSearch();
+    initializeCombatantCarousels(liveRoot);
+    initializeCombatantCarouselDefaults(liveRoot);
     if (combatWorkspaceTools) {
       combatWorkspaceTools.restore(liveRoot);
     }

@@ -1,6 +1,7 @@
-<article class="card combat-summary-card" id="combat-summary">
+{% set _summary_compact = combat_summary_compact | default(false) %}
+<article class="card combat-summary-card{% if _summary_compact %} combat-summary-card--compact{% endif %}" id="combat-summary">
   {% set return_to_dm = combat_return_view == 'dm' %}
-  <div class="combat-summary-grid">
+  <div class="combat-summary-grid{% if _summary_compact %} combat-summary-grid--compact{% endif %}">
     <div>
       <p class="card-kicker">Round</p>
       <h2>{{ combat_tracker.round_number }}</h2>
