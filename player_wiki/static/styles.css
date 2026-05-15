@@ -2505,6 +2505,11 @@ button {
   scroll-snap-align: start;
 }
 
+.combat-turn-order-list--carousel [data-combatant-selected-badge][hidden],
+.combat-turn-order-list--carousel [data-combatant-selected-summary][hidden] {
+  display: none !important;
+}
+
 .combat-turn-order-jump {
   margin-top: 0.5rem;
   display: grid;

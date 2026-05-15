@@ -296,6 +296,72 @@ def test_combat_page_player_workspace_carousel_renders_jump_dropdown_options(
     assert selected_option_id == selected_card_match.group(1)
 
 
+def test_combat_page_carousel_selected_badges_use_hidden_for_non_selected_cards(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    assert arden is not None
+
+    response = client.get(f"/campaigns/linden-pass/combat?combatant={arden.id}")
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "combatant" in body
+
+    cards = re.findall(
+        r'<article[^>]*class="combat-turn-order-row[^"]*"[^>]*>.*?</article>',
+        body,
+        flags=re.S,
+    )
+    assert len(cards) >= 2
+
+    non_selected_cards = 0
+    selected_cards = 0
+    for card in cards:
+        is_selected = 'data-combatant-selected="true"' in card
+        has_selected_badge = "data-combatant-selected-badge" in card
+        has_selected_summary = "data-combatant-selected-summary" in card
+        assert has_selected_badge
+        assert has_selected_summary
+
+        badge_hidden = "data-combatant-selected-badge hidden" in card
+        summary_hidden = "data-combatant-selected-summary hidden" in card
+        if is_selected:
+            selected_cards += 1
+            assert not badge_hidden
+            assert not summary_hidden
+        else:
+            non_selected_cards += 1
+            assert badge_hidden
+            assert summary_hidden
+
+    assert selected_cards == 1
+    assert non_selected_cards >= 1
+
+
 def test_combat_status_page_does_not_render_carousel_jump_dropdown(
     app,
     client,
@@ -2739,6 +2805,23 @@ def test_combat_styles_include_mobile_tablet_carousel_responsive_hooks():
         r"@media\s*\(\s*max-width:\s*820px\s*\)\s*\{[\s\S]*combat-layout--workspace",
         css,
         re.M | re.S,
+    )
+
+
+def test_combat_styles_hide_hidden_selected_carousel_indicators():
+    css = Path("player_wiki/static/styles.css").read_text(encoding="utf-8")
+
+    assert ".combat-turn-order-list--carousel [data-combatant-selected-badge][hidden]" in css
+    assert ".combat-turn-order-list--carousel [data-combatant-selected-summary][hidden]" in css
+    assert re.search(
+        r"\.combat-turn-order-list--carousel\s+\[data-combatant-selected-badge\]\[hidden\][^{]*\{[^}]*display:\s*none\s*!important",
+        css,
+        re.S,
+    )
+    assert re.search(
+        r"\.combat-turn-order-list--carousel\s+\[data-combatant-selected-summary\]\[hidden\][^{]*\{[^}]*display:\s*none\s*!important",
+        css,
+        re.S,
     )
 
 
