@@ -7,6 +7,7 @@ import sqlite3
 from pathlib import Path
 
 import yaml
+import player_wiki.app as app_module
 
 import player_wiki.campaign_combat_service as campaign_combat_service_module
 from player_wiki.app import create_app
@@ -3259,6 +3260,154 @@ def test_status_live_state_reuses_selected_detail_html_only_when_state_changes(
     tactical_payload = tactical_change_payload.get_json()
     assert tactical_payload["combatant_detail_state_token"] != focus_detail_token
     assert "detail_html" in tactical_payload
+
+
+def test_status_live_state_detail_cache_reuses_rendered_selected_detail_html(
+    app, client, sign_in, users, monkeypatch
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    hound = _find_combatant(app, name="Clockwork Hound")
+    assert arden is not None
+    assert hound is not None
+
+    app_module._clear_combat_status_detail_html_cache()
+    render_calls = {"combat_status_detail": 0}
+    original_render_template = app_module.render_template
+
+    def _count_status_detail_render(template_name, **context):
+        if template_name == "_combat_status_detail.html":
+            render_calls["combat_status_detail"] += 1
+        return original_render_template(template_name, **context)
+
+    monkeypatch.setattr(app_module, "render_template", _count_status_detail_render)
+    initial_response = client.get(
+        f"/campaigns/linden-pass/combat/status/live-state?combatant={hound.id}",
+        headers=_async_headers(),
+    )
+    assert initial_response.status_code == 200
+    initial_payload = initial_response.get_json()
+    initial_detail_html = initial_payload["detail_html"]
+    initial_detail_token = initial_payload["combatant_detail_state_token"]
+    assert "detail_html" in initial_payload
+    assert initial_detail_token
+    assert render_calls["combat_status_detail"] == 1
+
+    client.post(
+        f"/campaigns/linden-pass/combat/combatants/{arden.id}/resources",
+        data={
+            "combat_view": "status",
+            "combatant": arden.id,
+            "has_action": "1",
+            "expected_combatant_revision": arden.revision,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    render_calls_before_reuse_check = render_calls["combat_status_detail"]
+
+    reused_detail_response = client.get(
+        f"/campaigns/linden-pass/combat/status/live-state?combatant={hound.id}",
+        headers=_async_headers(),
+    )
+    assert reused_detail_response.status_code == 200
+    reused_payload = reused_detail_response.get_json()
+    assert reused_payload["detail_html"] == initial_detail_html
+    assert reused_payload["combatant_detail_state_token"] == initial_detail_token
+    assert "board_html" in reused_payload
+    assert render_calls["combat_status_detail"] == render_calls_before_reuse_check
+
+
+def test_dm_status_live_state_detail_cache_reuses_rendered_selected_detail_html(
+    app, client, sign_in, users, monkeypatch
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    hound = _find_combatant(app, name="Clockwork Hound")
+    assert arden is not None
+    assert hound is not None
+
+    app_module._clear_combat_status_detail_html_cache()
+    render_calls = {"combat_status_detail": 0}
+    original_render_template = app_module.render_template
+
+    def _count_status_detail_render(template_name, **context):
+        if template_name == "_combat_status_detail.html":
+            render_calls["combat_status_detail"] += 1
+        return original_render_template(template_name, **context)
+
+    monkeypatch.setattr(app_module, "render_template", _count_status_detail_render)
+    initial_response = client.get(
+        f"/campaigns/linden-pass/combat/dm/live-state?combatant={hound.id}",
+        headers=_async_headers(),
+    )
+    assert initial_response.status_code == 200
+    initial_payload = initial_response.get_json()
+    initial_detail_html = initial_payload["tracker_detail_html"]
+    initial_detail_token = initial_payload["combatant_detail_state_token"]
+    assert "tracker_detail_html" in initial_payload
+    assert render_calls["combat_status_detail"] == 1
+
+    client.post(
+        f"/campaigns/linden-pass/combat/combatants/{arden.id}/resources",
+        data={
+            "combat_view": "dm",
+            "view": "status",
+            "combatant": arden.id,
+            "has_action": "1",
+            "expected_combatant_revision": arden.revision,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    render_calls_before_reuse_check = render_calls["combat_status_detail"]
+
+    reused_response = client.get(
+        f"/campaigns/linden-pass/combat/dm/live-state?combatant={hound.id}",
+        headers=_async_headers(),
+    )
+    assert reused_response.status_code == 200
+    reused_payload = reused_response.get_json()
+    assert reused_payload["tracker_detail_html"] == initial_detail_html
+    assert reused_payload["combatant_detail_state_token"] == initial_detail_token
+    assert "tracker_html" in reused_payload
+    assert render_calls["combat_status_detail"] == render_calls_before_reuse_check
 
 
 def test_combat_surface_live_payloads_report_canonical_focus_urls(app, client, sign_in, users):

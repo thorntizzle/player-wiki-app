@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from html import unescape
 import hashlib
 from io import BytesIO
@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import secrets
 import time
+from threading import Lock
 
 from flask import Flask, abort, flash, g, jsonify, make_response, redirect, render_template, request, send_file, send_from_directory, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -1760,6 +1761,87 @@ def normalize_combat_return_view(value: str) -> str:
 def normalize_combat_dm_view(value: str) -> str:
     normalized = (value or "").strip().lower()
     return "controls" if normalized == "controls" else "status"
+
+
+_COMBAT_STATUS_DETAIL_HTML_CACHE_MAX_ENTRIES = 48
+_COMBAT_STATUS_DETAIL_HTML_CACHE_TTL_SECONDS = 2.0
+_COMBAT_STATUS_DETAIL_HTML_CACHE: OrderedDict[str, tuple[float, str]] = OrderedDict()
+_COMBAT_STATUS_DETAIL_HTML_CACHE_LOCK = Lock()
+
+
+def _build_combat_status_detail_cache_key(*, campaign_slug: str, detail_view: str, token: str) -> str:
+    return f"{campaign_slug}|{detail_view}|{token}"
+
+
+def _get_cached_combat_status_detail_html(*, campaign_slug: str, detail_view: str, token: str) -> str | None:
+    if not token:
+        return None
+    key = _build_combat_status_detail_cache_key(
+        campaign_slug=campaign_slug,
+        detail_view=detail_view,
+        token=token,
+    )
+    now = time.monotonic()
+    with _COMBAT_STATUS_DETAIL_HTML_CACHE_LOCK:
+        cached = _COMBAT_STATUS_DETAIL_HTML_CACHE.get(key)
+        if cached is None:
+            return None
+        expires_at, html = cached
+        if expires_at <= now:
+            _COMBAT_STATUS_DETAIL_HTML_CACHE.pop(key, None)
+            return None
+        _COMBAT_STATUS_DETAIL_HTML_CACHE.move_to_end(key)
+        return html
+
+
+def _set_cached_combat_status_detail_html(*, campaign_slug: str, detail_view: str, token: str, html: str) -> None:
+    if not token:
+        return
+    key = _build_combat_status_detail_cache_key(
+        campaign_slug=campaign_slug,
+        detail_view=detail_view,
+        token=token,
+    )
+    expires_at = time.monotonic() + _COMBAT_STATUS_DETAIL_HTML_CACHE_TTL_SECONDS
+    with _COMBAT_STATUS_DETAIL_HTML_CACHE_LOCK:
+        _COMBAT_STATUS_DETAIL_HTML_CACHE[key] = (expires_at, html)
+        _COMBAT_STATUS_DETAIL_HTML_CACHE.move_to_end(key)
+        while len(_COMBAT_STATUS_DETAIL_HTML_CACHE) > _COMBAT_STATUS_DETAIL_HTML_CACHE_MAX_ENTRIES:
+            _COMBAT_STATUS_DETAIL_HTML_CACHE.popitem(last=False)
+
+
+def _clear_combat_status_detail_html_cache() -> None:
+    with _COMBAT_STATUS_DETAIL_HTML_CACHE_LOCK:
+        _COMBAT_STATUS_DETAIL_HTML_CACHE.clear()
+
+
+def _build_cached_combat_status_detail_html(
+    *,
+    campaign_slug: str,
+    detail_view: str,
+    selected_combatant_state_token: str,
+    context: dict[str, object],
+) -> str:
+    if not selected_combatant_state_token:
+        return render_template("_combat_status_detail.html", **context)
+
+    cached_html = _get_cached_combat_status_detail_html(
+        campaign_slug=campaign_slug,
+        detail_view=detail_view,
+        token=selected_combatant_state_token,
+    )
+    if cached_html is not None:
+        return cached_html
+
+    rendered_html = render_template("_combat_status_detail.html", **context)
+    _set_cached_combat_status_detail_html(
+        campaign_slug=campaign_slug,
+        detail_view=detail_view,
+        token=selected_combatant_state_token,
+        html=rendered_html,
+    )
+    return rendered_html
+
 
 
 def create_app() -> Flask:
@@ -8637,7 +8719,16 @@ def create_app() -> Flask:
                 combatant_navigation_mode="carousel",
                 **context,
             )
-            detail_template = render_template("_combat_status_detail.html", **context) if include_selected_detail else None
+            detail_template = (
+                _build_cached_combat_status_detail_html(
+                    campaign_slug=campaign_slug,
+                    detail_view="combat-dm-status",
+                    selected_combatant_state_token=str(context.get("combat_status_state_token") or ""),
+                    context=context,
+                )
+                if include_selected_detail
+                else None
+            )
             authority_template = render_template("_combat_dm_selected_authority.html", **context)
         else:
             tracker_template = render_template("_combat_dm_focus_card.html", **context)
@@ -8737,7 +8828,12 @@ def create_app() -> Flask:
             "selected_combatant_id": context["selected_combatant_id"],
         }
         if include_selected_detail:
-            payload["detail_html"] = render_template("_combat_status_detail.html", **context)
+            payload["detail_html"] = _build_cached_combat_status_detail_html(
+                campaign_slug=campaign_slug,
+                detail_view="combat-status",
+                selected_combatant_state_token=selected_combatant_state_token,
+                context=context,
+            )
         payload.update(
             build_combat_surface_urls(
                 campaign_slug,
