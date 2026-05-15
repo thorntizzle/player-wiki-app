@@ -539,19 +539,37 @@ class CampaignCombatService:
         except CampaignCombatConflictError as exc:
             raise CampaignCombatValidationError("The turn order could not be advanced.") from exc
 
-    def sync_player_character_snapshots(self, campaign_slug: str) -> None:
+    def sync_player_character_snapshots(
+        self,
+        campaign_slug: str,
+        *,
+        blocking: bool = True,
+    ) -> None:
         sync_interval_seconds = self.player_snapshot_sync_interval_seconds
         if sync_interval_seconds <= 0:
             self._sync_player_character_snapshots_now(campaign_slug)
             return
 
-        with self._player_snapshot_sync_lock:
+        now = time.monotonic()
+        last_synced_at = self._player_snapshot_sync_completed_at.get(campaign_slug)
+        if last_synced_at is not None and (now - last_synced_at) < sync_interval_seconds:
+            return
+
+        if not blocking:
+            if not self._player_snapshot_sync_lock.acquire(blocking=False):
+                return
+        else:
+            self._player_snapshot_sync_lock.acquire()
+
+        try:
             last_synced_at = self._player_snapshot_sync_completed_at.get(campaign_slug)
             now = time.monotonic()
             if last_synced_at is not None and (now - last_synced_at) < sync_interval_seconds:
                 return
             self._sync_player_character_snapshots_now(campaign_slug)
             self._player_snapshot_sync_completed_at[campaign_slug] = time.monotonic()
+        finally:
+            self._player_snapshot_sync_lock.release()
 
     def _sync_player_character_snapshots_now(self, campaign_slug: str) -> None:
         combatants = self.store.list_combatants(campaign_slug)

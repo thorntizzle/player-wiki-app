@@ -3378,7 +3378,7 @@ def create_app() -> Flask:
         combat_dm_view: str | None = None,
     ) -> dict[str, object]:
         combat_service = get_campaign_combat_service()
-        combat_service.sync_player_character_snapshots(campaign_slug)
+        combat_service.sync_player_character_snapshots(campaign_slug, blocking=False)
         if selected_combatant_id is None:
             selected_combatant_id = parse_requested_combatant_id()
         return {

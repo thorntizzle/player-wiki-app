@@ -3865,6 +3865,37 @@ def test_sync_player_character_snapshots_throttles_repeated_refreshes(
     ]
 
 
+def test_combat_live_metadata_uses_nonblocking_player_snapshot_sync(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    with app.app_context():
+        combat_service = app.extensions["campaign_combat_service"]
+
+    sync_calls: list[tuple[str, bool]] = []
+    original_sync = combat_service.sync_player_character_snapshots
+
+    def track_sync(campaign_slug: str, *, blocking: bool = True):
+        sync_calls.append((campaign_slug, blocking))
+        return original_sync(campaign_slug, blocking=blocking)
+
+    monkeypatch.setattr(combat_service, "sync_player_character_snapshots", track_sync)
+
+    response = client.get("/campaigns/linden-pass/combat/live-state", headers=_async_headers())
+    assert response.status_code == 200
+    assert sync_calls == [("linden-pass", False)]
+
+
 def test_combat_live_requests_sync_player_snapshots_once_per_request(
     app,
     client,
@@ -3884,12 +3915,12 @@ def test_combat_live_requests_sync_player_snapshots_once_per_request(
     with app.app_context():
         combat_service = app.extensions["campaign_combat_service"]
 
-    sync_calls: list[str] = []
+    sync_calls: list[tuple[str, bool]] = []
     original_sync = combat_service.sync_player_character_snapshots
 
-    def count_sync(campaign_slug: str):
-        sync_calls.append(campaign_slug)
-        return original_sync(campaign_slug)
+    def count_sync(campaign_slug: str, *, blocking: bool = True):
+        sync_calls.append((campaign_slug, blocking))
+        return original_sync(campaign_slug, blocking=blocking)
 
     monkeypatch.setattr(combat_service, "sync_player_character_snapshots", count_sync)
 
@@ -3898,7 +3929,7 @@ def test_combat_live_requests_sync_player_snapshots_once_per_request(
         headers=_async_headers(),
     )
     assert combat_live_state.status_code == 200
-    assert sync_calls == ["linden-pass"]
+    assert sync_calls == [("linden-pass", False)]
 
     sync_calls.clear()
 
@@ -3907,5 +3938,65 @@ def test_combat_live_requests_sync_player_snapshots_once_per_request(
         headers=_async_headers(),
     )
     assert status_live_state.status_code == 200
-    assert sync_calls == ["linden-pass"]
+    assert sync_calls == [("linden-pass", False)]
+
+
+def test_sync_player_character_snapshots_nonblocking_mode_avoids_lookup_when_locked(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    with app.app_context():
+        combat_service = app.extensions["campaign_combat_service"]
+
+    combat_service.player_snapshot_sync_interval_seconds = 5.0
+    combat_service._player_snapshot_sync_completed_at["linden-pass"] = 0.0
+
+    lookup_calls: list[tuple[str, str]] = []
+    original_get_visible_character = combat_service.character_repository.get_visible_character
+
+    def count_lookup(campaign_slug: str, character_slug: str):
+        lookup_calls.append((campaign_slug, character_slug))
+        return original_get_visible_character(campaign_slug, character_slug)
+
+    class _ContendedLock:
+        def __init__(self):
+            self.acquire_calls: list[bool] = []
+
+        def acquire(self, blocking: bool = True, timeout: float = -1.0) -> bool:
+            self.acquire_calls.append(blocking)
+            return False if not blocking else True
+
+        def __enter__(self):
+            acquired = self.acquire()
+            if not acquired:
+                raise AssertionError("Blocking lock acquisition should not happen in nonblocking mode.")
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def release(self):
+            return None
+
+    contended_lock = _ContendedLock()
+    current_time = {"value": 100.0}
+
+    monkeypatch.setattr(campaign_combat_service_module.time, "monotonic", lambda: current_time["value"])
+    monkeypatch.setattr(combat_service.character_repository, "get_visible_character", count_lookup)
+    monkeypatch.setattr(combat_service, "_player_snapshot_sync_lock", contended_lock)
+
+    combat_service.sync_player_character_snapshots("linden-pass", blocking=False)
+
+    assert lookup_calls == []
+    assert contended_lock.acquire_calls == [False]
 
