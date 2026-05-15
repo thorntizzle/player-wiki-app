@@ -3,10 +3,33 @@ from __future__ import annotations
 from scripts.measure_live_latency import (
     build_checklist_evaluation,
     build_pressure_projection,
+    build_surface_path,
     parse_server_timing,
     percentile,
+    render_markdown_report,
+    SURFACE_SPECS,
     summarize_samples,
 )
+
+
+def test_surface_specs_cover_dm_combat_livestream_views():
+    spec_by_name = {spec.name: spec for spec in SURFACE_SPECS}
+
+    assert "combat_dm_status" in spec_by_name
+    assert spec_by_name["combat_dm_status"].page_path_template == "/campaigns/{campaign}/combat/dm"
+    assert spec_by_name["combat_dm_status"].root_selector == "[data-combat-live-root]"
+    assert spec_by_name["combat_dm_status"].metric_view == "combat"
+
+    assert "combat_dm_controls" in spec_by_name
+    assert spec_by_name["combat_dm_controls"].page_path_template == "/campaigns/{campaign}/combat/dm?view=controls"
+    assert spec_by_name["combat_dm_controls"].root_selector == "[data-combat-live-root]"
+    assert spec_by_name["combat_dm_controls"].metric_view == "combat"
+
+
+def test_build_surface_path_keeps_dm_controls_query():
+    spec = next(spec for spec in SURFACE_SPECS if spec.name == "combat_dm_controls")
+
+    assert build_surface_path(spec, "campaign-1") == "/campaigns/campaign-1/combat/dm?view=controls"
 
 
 def test_parse_server_timing_extracts_named_durations():
@@ -150,3 +173,45 @@ def test_build_checklist_evaluation_marks_pressure_reduction_passes():
     assert evaluation["combat"]["idle_server_pass"] is True
     assert evaluation["combat"]["active_payload_pass"] is True
     assert evaluation["combat"]["active_server_pass"] is True
+
+
+def test_render_markdown_report_includes_dm_surfaces_for_timing_summary():
+    sample = {
+        "requestMs": 12.0,
+        "applyMs": 2.0,
+        "payloadBytes": 150.0,
+        "queryCount": 3.0,
+        "queryTimeMs": 1.0,
+        "requestTimeMs": 4.0,
+        "serverTimingParsed": {"state-check": 0.2, "db": 0.9, "render": 0.8, "total": 4.0},
+        "changed": False,
+    }
+    summary = summarize_samples([sample])
+    report = {
+        "base_url": "http://localhost:5000",
+        "campaign": "campaign-1",
+        "mode": "local",
+        "run_started_at": "2026-05-15T00:00:00+00:00",
+        "surfaces": {
+            "combat_dm_status": {
+                "scenarios": {
+                    "cold": {"samples": [sample], "summary": summary},
+                },
+                "pressure_projection": {},
+            },
+            "combat_dm_controls": {
+                "scenarios": {
+                    "cold": {"samples": [sample], "summary": summary},
+                },
+                "pressure_projection": {},
+            },
+        },
+        "checklist_evaluation": {},
+        "notes": [],
+    }
+
+    markdown = render_markdown_report(report)
+
+    assert "combat_dm_status" in markdown
+    assert "combat_dm_controls" in markdown
+    assert "| Scenario |" in markdown

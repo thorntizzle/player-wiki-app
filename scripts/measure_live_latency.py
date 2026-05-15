@@ -44,6 +44,20 @@ SURFACE_SPECS = (
         kind="live",
     ),
     SurfaceSpec(
+        name="combat_dm_status",
+        page_path_template="/campaigns/{campaign}/combat/dm",
+        root_selector="[data-combat-live-root]",
+        metric_view="combat",
+        kind="live",
+    ),
+    SurfaceSpec(
+        name="combat_dm_controls",
+        page_path_template="/campaigns/{campaign}/combat/dm?view=controls",
+        root_selector="[data-combat-live-root]",
+        metric_view="combat",
+        kind="live",
+    ),
+    SurfaceSpec(
         name="combat_status",
         page_path_template="/campaigns/{campaign}/combat/status",
         root_selector="[data-combat-status-live-root]",
