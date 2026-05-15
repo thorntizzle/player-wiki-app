@@ -1660,6 +1660,119 @@ def test_owner_player_combat_live_state_keeps_combatant_revision_guards_in_works
     _assert_expected_combatant_revision_field(payload["summary_html"], arden.revision, at_least=4)
 
 
+def test_owner_player_combat_live_state_reuses_player_workspace_sections_when_detail_state_token_unchanged(
+    app, client, sign_in, users, monkeypatch
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    hound = _find_combatant(app, name="Clockwork Hound")
+    assert arden is not None
+    assert hound is not None
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    original_render_template = app_module.render_template
+    render_calls = {"combat_player_workspace_sections": 0}
+
+    def _count_player_workspace_sections(template_name, **context):
+        if template_name == "_combat_player_workspace_sections.html":
+            render_calls["combat_player_workspace_sections"] += 1
+        return original_render_template(template_name, **context)
+
+    monkeypatch.setattr(app_module, "render_template", _count_player_workspace_sections)
+
+    initial_live_state = client.get(
+        f"/campaigns/linden-pass/combat/live-state?combatant={arden.id}",
+        headers=_async_headers(),
+    )
+    assert initial_live_state.status_code == 200
+    initial_payload = initial_live_state.get_json()
+    assert initial_payload["changed"] is True
+    assert "tracker_html" in initial_payload
+    assert "summary_html" in initial_payload
+    assert initial_payload["combatant_detail_state_token"]
+    initial_summary_html = initial_payload["summary_html"]
+    initial_tracker_render_calls = render_calls["combat_player_workspace_sections"]
+    assert initial_tracker_render_calls == 1
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        f"/campaigns/linden-pass/combat/combatants/{hound.id}/turn",
+        data={
+            "expected_combatant_revision": hound.revision,
+            "turn_value": 8,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    unchanged_live_state = client.get(
+        f"/campaigns/linden-pass/combat/live-state?combatant={arden.id}",
+        headers=_live_poll_headers(
+            initial_payload["live_revision"],
+            initial_payload["live_view_token"],
+            initial_payload["combatant_detail_state_token"],
+        ),
+    )
+    assert unchanged_live_state.status_code == 200
+    unchanged_payload = unchanged_live_state.get_json()
+    assert unchanged_payload["changed"] is True
+    assert unchanged_payload["selected_combatant_id"] == arden.id
+    assert unchanged_payload["combatant_detail_state_token"] == initial_payload["combatant_detail_state_token"]
+    assert "tracker_html" not in unchanged_payload
+    assert "summary_html" in unchanged_payload
+    assert unchanged_payload["summary_html"] != initial_summary_html
+    assert render_calls["combat_player_workspace_sections"] == initial_tracker_render_calls
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    assert arden is not None
+    client.post(
+        f"/campaigns/linden-pass/combat/combatants/{arden.id}/resources",
+        data={
+            "expected_combatant_revision": arden.revision,
+            "movement_remaining": 8,
+            "has_action": "1",
+            "has_bonus_action": "1",
+            "has_reaction": "1",
+        },
+        follow_redirects=False,
+    )
+
+    changed_detail_live_state = client.get(
+        f"/campaigns/linden-pass/combat/live-state?combatant={arden.id}",
+        headers=_live_poll_headers(
+            unchanged_payload["live_revision"],
+            unchanged_payload["live_view_token"],
+            unchanged_payload["combatant_detail_state_token"],
+        ),
+    )
+    assert changed_detail_live_state.status_code == 200
+    changed_detail_payload = changed_detail_live_state.get_json()
+    assert changed_detail_payload["changed"] is True
+    assert changed_detail_payload["combatant_detail_state_token"] != unchanged_payload["combatant_detail_state_token"]
+    assert "tracker_html" in changed_detail_payload
+    assert render_calls["combat_player_workspace_sections"] == initial_tracker_render_calls + 1
+
+
 def test_dm_combat_dm_live_state_keeps_selected_combatant_revision_guards(
     app, client, sign_in, users
 ):
