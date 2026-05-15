@@ -146,6 +146,7 @@ from .campaign_combat_service import (
     CampaignCombatRevisionConflictError,
     CampaignCombatService,
     CampaignCombatValidationError,
+    PlayerCharacterSnapshotSyncMetrics,
 )
 from .campaign_combat_store import CampaignCombatStore
 from .campaign_content_service import (
@@ -3303,6 +3304,7 @@ def create_app() -> Flask:
         changed: bool,
         state_check_ms: float,
         render_ms: float,
+        snapshot_sync_metrics: PlayerCharacterSnapshotSyncMetrics | None = None,
         live_revision: int | None = None,
     ):
         query_metrics = get_db_query_metrics()
@@ -3327,6 +3329,9 @@ def create_app() -> Flask:
             "render_ms": round(render_ms, 2),
             "payload_bytes": payload_bytes,
         }
+        if snapshot_sync_metrics is not None:
+            live_response_summary.update(snapshot_sync_metrics.to_diagnostics_payload())
+
         slow_log_threshold_ms = float(app.config.get("LIVE_SLOW_LOG_THRESHOLD_MS") or 0.0)
 
         if app.config["LIVE_DIAGNOSTICS"]:
@@ -3345,6 +3350,11 @@ def create_app() -> Flask:
             response.headers["X-Live-Query-Time-Ms"] = f"{query_time_ms:.2f}"
             response.headers["X-Live-Request-Time-Ms"] = f"{request_time_ms:.2f}"
             response.headers["X-Live-View"] = view_name
+            if snapshot_sync_metrics is not None:
+                response.headers["X-Live-Snapshot-Sync"] = json.dumps(
+                    snapshot_sync_metrics.to_diagnostics_payload(),
+                    sort_keys=True,
+                )
             app.logger.info("live_response %s", json.dumps(live_response_summary, sort_keys=True))
 
         if slow_log_threshold_ms > 0 and request_time_ms >= slow_log_threshold_ms:
@@ -3359,6 +3369,7 @@ def create_app() -> Flask:
         live_revision: int | None,
         state_check_ms: float,
         render_ms: float,
+        snapshot_sync_metrics: PlayerCharacterSnapshotSyncMetrics | None = None,
     ):
         response = jsonify(payload)
         return attach_live_response_diagnostics(
@@ -3368,6 +3379,7 @@ def create_app() -> Flask:
             live_revision=live_revision,
             state_check_ms=state_check_ms,
             render_ms=render_ms,
+            snapshot_sync_metrics=snapshot_sync_metrics,
         )
 
     def build_combat_live_metadata(
@@ -3378,10 +3390,14 @@ def create_app() -> Flask:
         combat_dm_view: str | None = None,
     ) -> dict[str, object]:
         combat_service = get_campaign_combat_service()
-        combat_service.sync_player_character_snapshots(campaign_slug, blocking=False)
+        snapshot_sync_metrics = combat_service.sync_player_character_snapshots(
+            campaign_slug,
+            blocking=False,
+        )
         if selected_combatant_id is None:
             selected_combatant_id = parse_requested_combatant_id()
         return {
+            "snapshot_sync_metrics": snapshot_sync_metrics,
             "live_revision": combat_service.get_live_revision(campaign_slug),
             "live_view_token": build_combat_live_view_token(
                 campaign_slug,
@@ -10787,6 +10803,7 @@ def create_app() -> Flask:
     def campaign_combat_live_state(campaign_slug: str):
         state_check_started_at = time.perf_counter()
         live_metadata = build_combat_live_metadata(campaign_slug, "combat")
+        snapshot_sync_metrics = live_metadata.get("snapshot_sync_metrics")
         state_check_ms = (time.perf_counter() - state_check_started_at) * 1000
         if should_short_circuit_live_response(
             live_revision=int(live_metadata["live_revision"] or 0),
@@ -10800,6 +10817,7 @@ def create_app() -> Flask:
                 view_name="combat",
                 changed=False,
                 live_revision=int(live_metadata["live_revision"] or 0),
+                snapshot_sync_metrics=snapshot_sync_metrics,
                 state_check_ms=state_check_ms,
                 render_ms=0.0,
             )
@@ -10819,6 +10837,7 @@ def create_app() -> Flask:
             view_name="combat",
             changed=True,
             live_revision=int(live_metadata["live_revision"] or 0),
+            snapshot_sync_metrics=snapshot_sync_metrics,
             state_check_ms=state_check_ms,
             render_ms=render_ms,
         )
@@ -10857,6 +10876,7 @@ def create_app() -> Flask:
             selected_combatant_id=selected_combatant_id,
             combat_dm_view=combat_dm_view,
         )
+        snapshot_sync_metrics = live_metadata.get("snapshot_sync_metrics")
         state_check_ms = (time.perf_counter() - state_check_started_at) * 1000
         if should_short_circuit_live_response(
             live_revision=int(live_metadata["live_revision"] or 0),
@@ -10870,6 +10890,7 @@ def create_app() -> Flask:
                 view_name="combat-dm",
                 changed=False,
                 live_revision=int(live_metadata["live_revision"] or 0),
+                snapshot_sync_metrics=snapshot_sync_metrics,
                 state_check_ms=state_check_ms,
                 render_ms=0.0,
             )
@@ -10903,6 +10924,7 @@ def create_app() -> Flask:
             view_name="combat-dm",
             changed=True,
             live_revision=int(live_metadata["live_revision"] or 0),
+            snapshot_sync_metrics=snapshot_sync_metrics,
             state_check_ms=state_check_ms,
             render_ms=render_ms,
         )
@@ -10924,6 +10946,7 @@ def create_app() -> Flask:
             "status",
             selected_combatant_id=selected_combatant_id,
         )
+        snapshot_sync_metrics = live_metadata.get("snapshot_sync_metrics")
         state_check_ms = (time.perf_counter() - state_check_started_at) * 1000
         if should_short_circuit_live_response(
             live_revision=int(live_metadata["live_revision"] or 0),
@@ -10937,6 +10960,7 @@ def create_app() -> Flask:
                 view_name="combat-status",
                 changed=False,
                 live_revision=int(live_metadata["live_revision"] or 0),
+                snapshot_sync_metrics=snapshot_sync_metrics,
                 state_check_ms=state_check_ms,
                 render_ms=0.0,
             )
@@ -10967,6 +10991,7 @@ def create_app() -> Flask:
             view_name="combat-status",
             changed=True,
             live_revision=int(live_metadata["live_revision"] or 0),
+            snapshot_sync_metrics=snapshot_sync_metrics,
             state_check_ms=state_check_ms,
             render_ms=render_ms,
         )
@@ -10988,6 +11013,7 @@ def create_app() -> Flask:
     def campaign_combat_character_live_state(campaign_slug: str):
         state_check_started_at = time.perf_counter()
         live_metadata = build_combat_live_metadata(campaign_slug, "character")
+        snapshot_sync_metrics = live_metadata.get("snapshot_sync_metrics")
         state_check_ms = (time.perf_counter() - state_check_started_at) * 1000
         if should_short_circuit_live_response(
             live_revision=int(live_metadata["live_revision"] or 0),
@@ -11001,6 +11027,7 @@ def create_app() -> Flask:
                 view_name="combat-character",
                 changed=False,
                 live_revision=int(live_metadata["live_revision"] or 0),
+                snapshot_sync_metrics=snapshot_sync_metrics,
                 state_check_ms=state_check_ms,
                 render_ms=0.0,
             )
@@ -11018,6 +11045,7 @@ def create_app() -> Flask:
             view_name="combat-character",
             changed=True,
             live_revision=int(live_metadata["live_revision"] or 0),
+            snapshot_sync_metrics=snapshot_sync_metrics,
             state_check_ms=state_check_ms,
             render_ms=render_ms,
         )

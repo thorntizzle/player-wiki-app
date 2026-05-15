@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import re
 import threading
 import time
@@ -25,6 +26,33 @@ from .combat_models import (
 )
 
 MOVEMENT_VALUE_PATTERN = re.compile(r"(?P<distance>\d+)")
+
+
+@dataclass
+class PlayerCharacterSnapshotSyncMetrics:
+    status: str
+    lock_wait_ms: float = 0.0
+    sync_elapsed_ms: float = 0.0
+    sync_ran: bool = False
+    sync_changed: bool = False
+    lock_acquired: bool = False
+
+    def to_diagnostics_payload(self) -> dict[str, object]:
+        return {
+            "snapshot_sync_status": self.status,
+            "snapshot_sync_lock_wait_ms": round(self.lock_wait_ms, 2),
+            "snapshot_sync_ms": round(self.sync_elapsed_ms, 2),
+            "snapshot_sync_ran": self.sync_ran,
+            "snapshot_sync_changed": self.sync_changed,
+            "snapshot_sync_lock_acquired": self.lock_acquired,
+        }
+
+
+SNAPSHOT_SYNC_STATUS_DISABLED_INTERVAL = "interval_disabled"
+SNAPSHOT_SYNC_STATUS_PRE_LOCK_THROTTLED = "skipped_throttle_pre_lock"
+SNAPSHOT_SYNC_STATUS_POST_LOCK_THROTTLED = "skipped_throttle_post_lock"
+SNAPSHOT_SYNC_STATUS_LOCK_HELD = "skipped_lock_busy_nonblocking"
+SNAPSHOT_SYNC_STATUS_SYNCED = "synced"
 
 
 class CampaignCombatValidationError(ValueError):
@@ -544,34 +572,53 @@ class CampaignCombatService:
         campaign_slug: str,
         *,
         blocking: bool = True,
-    ) -> None:
+    ) -> PlayerCharacterSnapshotSyncMetrics:
         sync_interval_seconds = self.player_snapshot_sync_interval_seconds
+        metrics = PlayerCharacterSnapshotSyncMetrics(status=SNAPSHOT_SYNC_STATUS_DISABLED_INTERVAL)
         if sync_interval_seconds <= 0:
-            self._sync_player_character_snapshots_now(campaign_slug)
-            return
+            sync_started_at = time.perf_counter()
+            metrics.sync_changed = self._sync_player_character_snapshots_now(campaign_slug)
+            metrics.sync_ran = True
+            metrics.sync_elapsed_ms = (time.perf_counter() - sync_started_at) * 1000
+            return metrics
 
         now = time.monotonic()
         last_synced_at = self._player_snapshot_sync_completed_at.get(campaign_slug)
         if last_synced_at is not None and (now - last_synced_at) < sync_interval_seconds:
-            return
+            metrics.status = SNAPSHOT_SYNC_STATUS_PRE_LOCK_THROTTLED
+            return metrics
 
+        lock_started_at = time.perf_counter()
         if not blocking:
             if not self._player_snapshot_sync_lock.acquire(blocking=False):
-                return
+                metrics.status = SNAPSHOT_SYNC_STATUS_LOCK_HELD
+                return metrics
+            metrics.lock_acquired = True
+            metrics.lock_wait_ms = (time.perf_counter() - lock_started_at) * 1000
         else:
             self._player_snapshot_sync_lock.acquire()
+            metrics.lock_acquired = True
+            metrics.lock_wait_ms = (time.perf_counter() - lock_started_at) * 1000
 
         try:
             last_synced_at = self._player_snapshot_sync_completed_at.get(campaign_slug)
             now = time.monotonic()
             if last_synced_at is not None and (now - last_synced_at) < sync_interval_seconds:
-                return
-            self._sync_player_character_snapshots_now(campaign_slug)
+                metrics.status = SNAPSHOT_SYNC_STATUS_POST_LOCK_THROTTLED
+                return metrics
+            metrics.status = SNAPSHOT_SYNC_STATUS_SYNCED
+            sync_started_at = time.perf_counter()
+            metrics.sync_changed = self._sync_player_character_snapshots_now(campaign_slug)
+            metrics.sync_ran = True
+            metrics.sync_elapsed_ms = (time.perf_counter() - sync_started_at) * 1000
             self._player_snapshot_sync_completed_at[campaign_slug] = time.monotonic()
         finally:
-            self._player_snapshot_sync_lock.release()
+            if metrics.lock_acquired:
+                self._player_snapshot_sync_lock.release()
 
-    def _sync_player_character_snapshots_now(self, campaign_slug: str) -> None:
+        return metrics
+
+    def _sync_player_character_snapshots_now(self, campaign_slug: str) -> bool:
         combatants = self.store.list_combatants(campaign_slug)
         any_changed = False
         for combatant in combatants:
@@ -611,6 +658,7 @@ class CampaignCombatService:
                 ) from exc
         if any_changed:
             self.store.bump_tracker_revision(campaign_slug)
+        return any_changed
 
     def _refresh_combatant_turn_resources(
         self,

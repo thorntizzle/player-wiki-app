@@ -41,6 +41,11 @@ def _assert_live_diagnostics_headers(response):
     assert "total;dur=" in response.headers["Server-Timing"]
 
 
+def _live_snapshot_sync_summary(response):
+    summary_header = response.headers["X-Live-Snapshot-Sync"]
+    return json.loads(summary_header)
+
+
 def _get_tracker(app):
     with app.app_context():
         return app.extensions["campaign_combat_service"].get_tracker("linden-pass")
@@ -3999,4 +4004,122 @@ def test_sync_player_character_snapshots_nonblocking_mode_avoids_lookup_when_loc
 
     assert lookup_calls == []
     assert contended_lock.acquire_calls == [False]
+
+
+def test_combat_live_state_records_pre_lock_snapshot_sync_throttle_metric(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    with app.app_context():
+        combat_service = app.extensions["campaign_combat_service"]
+
+    app.config.update(LIVE_DIAGNOSTICS=True)
+    combat_service.player_snapshot_sync_interval_seconds = 5.0
+    combat_service._player_snapshot_sync_completed_at["linden-pass"] = 100.0
+
+    monkeypatch.setattr(
+        campaign_combat_service_module.time,
+        "monotonic",
+        lambda: 102.0,
+    )
+
+    response = client.get("/campaigns/linden-pass/combat/live-state", headers=_async_headers())
+    assert response.status_code == 200
+
+    summary = _live_snapshot_sync_summary(response)
+    assert summary["snapshot_sync_status"] == "skipped_throttle_pre_lock"
+    assert summary["snapshot_sync_ran"] is False
+    assert summary["snapshot_sync_changed"] is False
+    assert summary["snapshot_sync_lock_acquired"] is False
+
+
+def test_combat_live_state_records_nonblocking_lock_skip_metric(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    with app.app_context():
+        combat_service = app.extensions["campaign_combat_service"]
+
+    app.config.update(LIVE_DIAGNOSTICS=True)
+    combat_service.player_snapshot_sync_interval_seconds = 5.0
+    combat_service._player_snapshot_sync_completed_at["linden-pass"] = 0.0
+
+    class _ContendedLock:
+        def acquire(self, blocking: bool = True, timeout: float = -1.0) -> bool:
+            assert not blocking
+            return False
+
+        def release(self):
+            raise AssertionError("release() should not be called when lock acquisition fails.")
+
+    monkeypatch.setattr(campaign_combat_service_module.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(combat_service, "_player_snapshot_sync_lock", _ContendedLock())
+
+    response = client.get("/campaigns/linden-pass/combat/live-state", headers=_async_headers())
+    assert response.status_code == 200
+
+    summary = _live_snapshot_sync_summary(response)
+    assert summary["snapshot_sync_status"] == "skipped_lock_busy_nonblocking"
+    assert summary["snapshot_sync_ran"] is False
+    assert summary["snapshot_sync_lock_acquired"] is False
+
+
+def test_combat_live_state_records_snapshot_sync_execution_metrics(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    with app.app_context():
+        combat_service = app.extensions["campaign_combat_service"]
+
+    app.config.update(LIVE_DIAGNOSTICS=True)
+    combat_service.player_snapshot_sync_interval_seconds = 5.0
+    combat_service._player_snapshot_sync_completed_at["linden-pass"] = 0.0
+
+    perf_counter_calls = {"count": 1000.0}
+
+    def fake_perf_counter() -> float:
+        perf_counter_calls["count"] += 1.0
+        return perf_counter_calls["count"]
+
+    monkeypatch.setattr(campaign_combat_service_module.time, "perf_counter", fake_perf_counter)
+    monkeypatch.setattr(campaign_combat_service_module.time, "monotonic", lambda: 100.0)
+
+    response = client.get("/campaigns/linden-pass/combat/live-state", headers=_async_headers())
+    assert response.status_code == 200
+
+    summary = _live_snapshot_sync_summary(response)
+    assert summary["snapshot_sync_status"] == "synced"
+    assert summary["snapshot_sync_ran"] is True
+    assert summary["snapshot_sync_ms"] > 0.0
+    assert summary["snapshot_sync_lock_wait_ms"] > 0.0
 
