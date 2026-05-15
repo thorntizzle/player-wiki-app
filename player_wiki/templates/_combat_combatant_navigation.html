@@ -11,7 +11,10 @@
 {% set combatant_navigation_is_carousel = combatant_navigation_mode == "carousel" %}
 {% set jump_selected_combatant_id = selected_combatant_id %}
 {% if combatant_navigation_is_carousel and jump_selected_combatant_id is none %}
-  {% set jump_selected_combatant_id = ((combat_tracker.combatants | selectattr('is_current_turn') | map(attribute='id') | first) or combat_tracker.combatants[0].id) %}
+  {% set jump_selected_combatant_id = combat_tracker.combatants | selectattr('is_current_turn') | map(attribute='id') | first %}
+  {% if jump_selected_combatant_id is none and combat_tracker.combatants %}
+    {% set jump_selected_combatant_id = combat_tracker.combatants[0].id %}
+  {% endif %}
 {% endif %}
 
 <section class="card sidebar-card">

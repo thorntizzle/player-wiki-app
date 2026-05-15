@@ -24,6 +24,8 @@
     const idleThresholdMs = Number.parseInt(liveRoot.dataset.liveIdleThresholdMs || "30000", 10) || 30000;
     const diagnosticsEnabled = liveRoot.dataset.liveDiagnosticsEnabled === "1";
     const diagnosticsTools = diagnosticsEnabled ? window.__playerWikiLiveDiagnosticsTools : null;
+    const isDmStatusLiveRoot = liveRoot.dataset.combatSubpage === "dm"
+      && (liveRoot.dataset.combatDmView === "status" || !liveRoot.dataset.combatDmView);
     let monsterSearchAbortController = null;
     let monsterSearchTimerId = 0;
     let pollTimerId = 0;
@@ -364,6 +366,113 @@
 
     const markCombatantCarouselUserIntent = () => {
       combatantCarouselUserIntentObserved = true;
+    };
+
+    const buildDmStatusCombatantLiveUrl = (combatantId) => {
+      if (!pollUrl) {
+        return "";
+      }
+      const normalizedCombatantId = String(combatantId || "").trim();
+      if (!normalizedCombatantId) {
+        return "";
+      }
+      const nextPollUrl = new URL(pollUrl, window.location.origin);
+      nextPollUrl.searchParams.set("combatant", normalizedCombatantId);
+      nextPollUrl.searchParams.delete("view");
+      return `${nextPollUrl.pathname}${nextPollUrl.search}${nextPollUrl.hash}`;
+    };
+
+    const buildDmStatusPageUrl = (combatantId) => {
+      const normalizedCombatantId = String(combatantId || "").trim();
+      if (!normalizedCombatantId) {
+        return "";
+      }
+      const nextPage = new URL(window.location.pathname, window.location.origin);
+      nextPage.search = "";
+      nextPage.searchParams.set("combatant", normalizedCombatantId);
+      return `${nextPage.pathname}${nextPage.search}${nextPage.hash}`;
+    };
+
+    const fetchDmStatusCombatant = async (combatantId, { carousel = null } = {}) => {
+      if (!isDmStatusLiveRoot || requestInFlight) {
+        return false;
+      }
+      const normalizedCombatantId = String(combatantId || "").trim();
+      if (!normalizedCombatantId) {
+        return false;
+      }
+      const nextPollUrl = buildDmStatusCombatantLiveUrl(normalizedCombatantId);
+      const nextPageUrl = buildDmStatusPageUrl(normalizedCombatantId);
+      if (!nextPollUrl) {
+        if (nextPageUrl) {
+          window.location.assign(nextPageUrl);
+        }
+        return false;
+      }
+
+      const controls = [];
+      if (carousel instanceof HTMLElement) {
+        const jumpSelect = carousel.closest("section")?.querySelector("[data-combatant-carousel-jump-select]");
+        if (jumpSelect instanceof HTMLSelectElement) {
+          controls.push(jumpSelect);
+        }
+        for (const button of Array.from(
+          carousel.querySelectorAll("[data-combatant-carousel-prev], [data-combatant-carousel-next]"),
+        )) {
+          if (button instanceof HTMLButtonElement) {
+            controls.push(button);
+          }
+        }
+        const cards = Array.from(carousel.querySelectorAll("[data-combatant-carousel-card]"));
+        controls.push(...cards);
+      }
+
+      requestInFlight = true;
+      liveRoot.dataset.loading = "1";
+      for (const control of controls) {
+        if (control instanceof HTMLElement) {
+          control.ariaBusy = "true";
+          control.setAttribute("aria-disabled", "true");
+        }
+      }
+
+      markActivity();
+      try {
+        const response = await fetch(nextPollUrl, {
+          headers: buildLiveHeaders({ allowShortCircuit: false }),
+          cache: "no-store",
+          credentials: "same-origin",
+        });
+        if (!response.ok) {
+          if (nextPageUrl) {
+            window.location.assign(nextPageUrl);
+          }
+          return false;
+        }
+
+        const payload = await response.json();
+        syncLiveMetadata(payload, response);
+        logLiveDiagnostics("combat-dm-status-navigation", response, payload);
+        pollUrl = nextPollUrl;
+        liveRoot.dataset.combatLiveUrl = pollUrl;
+        renderPayload(payload, { force: true });
+        return true;
+      } catch (_) {
+        if (nextPageUrl) {
+          window.location.assign(nextPageUrl);
+        }
+        return false;
+      } finally {
+        requestInFlight = false;
+        liveRoot.dataset.loading = "0";
+        for (const control of controls) {
+          if (control instanceof HTMLElement) {
+            control.ariaBusy = "false";
+            control.setAttribute("aria-disabled", "false");
+          }
+        }
+        scheduleNextPoll(activeIntervalMs);
+      }
     };
 
     const getDefaultCombatantCarouselCard = (carousel) => {
@@ -757,6 +866,11 @@
       markInlineFormState(liveRoot);
       combatStateToken = nextToken;
       liveRoot.dataset.combatStateToken = combatStateToken;
+      if (payload.selected_combatant_id) {
+        liveRoot.dataset.selectedCombatantId = String(payload.selected_combatant_id);
+      } else {
+        liveRoot.dataset.selectedCombatantId = "";
+      }
       syncViewUrls(payload);
       initializeCombatantCarousels(liveRoot);
       // Initial defaulting for carousel position is intentionally one-time and handled during page boot.
@@ -903,6 +1017,18 @@
         const card = event.target instanceof HTMLElement ? event.target.closest("[data-combatant-carousel-card]") : null;
         if (card instanceof HTMLElement && event.isTrusted) {
           markCombatantCarouselUserIntent();
+          const carousel = getCombatantCarouselFromTarget(card);
+          const selectedCombatantId = card instanceof HTMLElement
+            ? String(card.dataset.combatantId || "").trim()
+            : "";
+          if (isDmStatusLiveRoot && selectedCombatantId) {
+            event.preventDefault();
+            setCombatantCarouselSelectedById(carousel, selectedCombatantId);
+            if (selectedCombatantId !== String(liveRoot.dataset.selectedCombatantId || "")) {
+              void fetchDmStatusCombatant(selectedCombatantId, { carousel });
+            }
+            return;
+          }
         }
         return;
       }
@@ -1001,6 +1127,10 @@
         if (selectedCard instanceof HTMLElement) {
           selectedCard.focus({ preventScroll: true });
           focusCombatantCarouselCard(selectedCard);
+        }
+        if (isDmStatusLiveRoot && selectedCombatantId) {
+          await fetchDmStatusCombatant(selectedCombatantId, { carousel });
+          return;
         }
         return;
       }

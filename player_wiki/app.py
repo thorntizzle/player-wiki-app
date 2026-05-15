@@ -427,7 +427,7 @@ SESSION_CHARACTER_PERMISSION_NOTE = (
 COMBAT_SUBPAGE_LABELS = {
     "combat": "Combat",
     "character": "Character",
-    "status": "Encounter status",
+    "status": "DM status",
     "dm": "Encounter controls",
 }
 COMBAT_SOURCE_LABELS = {
@@ -1757,6 +1757,11 @@ def normalize_combat_return_view(value: str) -> str:
     return "combat"
 
 
+def normalize_combat_dm_view(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    return "controls" if normalized == "controls" else "status"
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
     app.config.from_object(Config)
@@ -3019,13 +3024,19 @@ def create_app() -> Flask:
         *,
         anchor: str | None = None,
         combatant_id: int | None = None,
+        combat_dm_view: str | None = None,
     ):
+        route_values = {
+            "campaign_slug": campaign_slug,
+            "combatant": combatant_id,
+            "_anchor": anchor,
+        }
+        if normalize_combat_dm_view(combat_dm_view or "") == "controls":
+            route_values["view"] = "controls"
         return redirect(
             url_for(
                 "campaign_combat_dm_view",
-                campaign_slug=campaign_slug,
-                combatant=combatant_id,
-                _anchor=anchor,
+                **route_values,
             )
         )
 
@@ -3102,10 +3113,12 @@ def create_app() -> Flask:
         combat_subpage: str,
         *,
         selected_combatant_id: int | None = None,
+        combat_dm_view: str | None = None,
     ) -> str:
         return build_live_hash(
             "combat",
             combat_subpage,
+            normalize_combat_dm_view(combat_dm_view or "") if combat_subpage == "dm" else "",
             "1" if can_manage_campaign_combat(campaign_slug) else "0",
             str(selected_combatant_id or ""),
             *sorted(get_owned_character_slugs(campaign_slug)),
@@ -3268,6 +3281,7 @@ def create_app() -> Flask:
         combat_subpage: str,
         *,
         selected_combatant_id: int | None = None,
+        combat_dm_view: str | None = None,
     ) -> dict[str, object]:
         combat_service = get_campaign_combat_service()
         combat_service.sync_player_character_snapshots(campaign_slug)
@@ -3279,6 +3293,7 @@ def create_app() -> Flask:
                 campaign_slug,
                 combat_subpage,
                 selected_combatant_id=selected_combatant_id,
+                combat_dm_view=combat_dm_view,
             ),
         }
 
@@ -3579,11 +3594,16 @@ def create_app() -> Flask:
         *,
         combat_subpage: str,
         selected_combatant_id: int | None = None,
+        combat_dm_view: str | None = None,
     ) -> dict[str, str]:
         route_values = build_combat_route_values(
             campaign_slug,
             selected_combatant_id=selected_combatant_id,
         )
+        if combat_subpage == "dm":
+            normalized_dm_view = normalize_combat_dm_view(combat_dm_view or "")
+            if normalized_dm_view == "controls":
+                route_values["view"] = "controls"
         view_endpoint = {
             "combat": "campaign_combat_view",
             "dm": "campaign_combat_dm_view",
@@ -3742,6 +3762,8 @@ def create_app() -> Flask:
                 }
             )
         if can_manage_campaign_combat(campaign_slug):
+            dm_route_values = dict(focused_route_values)
+            dm_route_values["view"] = "controls"
             subpages.append(
                 {
                     "slug": "status",
@@ -3754,7 +3776,7 @@ def create_app() -> Flask:
                 {
                     "slug": "dm",
                     "label": COMBAT_SUBPAGE_LABELS["dm"],
-                    "href": url_for("campaign_combat_dm_view", **focused_route_values),
+                    "href": url_for("campaign_combat_dm_view", **dm_route_values),
                     "is_active": current_subpage == "dm",
                 }
             )
@@ -6663,11 +6685,17 @@ def create_app() -> Flask:
         combat_subpage: str = "combat",
         selected_combatant_id: int | None = None,
         sync_player_character_snapshots: bool = True,
+        combat_dm_view: str | None = None,
     ) -> dict[str, object]:
         requested_combatant_id = (
             selected_combatant_id
             if selected_combatant_id is not None
             else parse_requested_combatant_id()
+        )
+        normalized_combat_dm_view = (
+            normalize_combat_dm_view(combat_dm_view or request.values.get("view", ""))
+            if combat_subpage == "dm"
+            else "status"
         )
         campaign = load_campaign_context(campaign_slug)
         can_manage_combat = can_manage_campaign_combat(campaign_slug)
@@ -6842,6 +6870,7 @@ def create_app() -> Flask:
             campaign_slug,
             combat_subpage,
             selected_combatant_id=requested_combatant_id,
+            combat_dm_view=normalized_combat_dm_view,
         )
         selected_combat_character_row = next(
             (
@@ -6910,6 +6939,7 @@ def create_app() -> Flask:
             "combat_poll_idle_interval_ms": combat_poll_settings["idle_interval_ms"],
             "combat_poll_idle_threshold_ms": combat_poll_settings["idle_threshold_ms"],
             "combat_subpage": combat_subpage,
+            "combat_dm_view": normalized_combat_dm_view if combat_subpage == "dm" else "status",
             "combat_subpages": build_combat_subpages(
                 campaign_slug,
                 current_subpage=combat_subpage,
@@ -6946,6 +6976,29 @@ def create_app() -> Flask:
             "_selected_combatant_record": selected_combatant_record,
         }
         context.update(player_workspace_detail_context)
+        if combat_subpage == "dm":
+            resolved_selected_combatant_id = context["selected_combatant_id"]
+            status_dm_route_values = build_combat_route_values(
+                campaign_slug,
+                selected_combatant_id=resolved_selected_combatant_id,
+            )
+            controls_dm_route_values = dict(status_dm_route_values)
+            controls_dm_route_values["view"] = "controls"
+            context["combat_dm_view_status_url"] = url_for(
+                "campaign_combat_dm_view",
+                **status_dm_route_values,
+            )
+            context["combat_dm_view_controls_url"] = url_for(
+                "campaign_combat_dm_view",
+                **controls_dm_route_values,
+            )
+            dm_surface_urls = build_combat_surface_urls(
+                campaign_slug,
+                combat_subpage="dm",
+                selected_combatant_id=resolved_selected_combatant_id,
+                combat_dm_view=normalized_combat_dm_view,
+            )
+            context["combat_dm_live_url"] = dm_surface_urls["live_url"]
         return context
 
     def build_campaign_combat_character_context(
@@ -8451,29 +8504,52 @@ def create_app() -> Flask:
         mutation_succeeded: bool | None = None,
         anchor: str | None = None,
         selected_combatant_id: int | None = None,
+        combat_dm_view: str | None = None,
         live_revision: int | None = None,
         live_view_token: str | None = None,
         sync_player_character_snapshots: bool = True,
     ) -> dict[str, object]:
+        normalized_combat_dm_view = normalize_combat_dm_view(combat_dm_view or "")
         context = build_campaign_combat_page_context(
             campaign_slug,
             include_control_choices=True,
             combat_subpage="dm",
             selected_combatant_id=selected_combatant_id,
+            combat_dm_view=normalized_combat_dm_view,
             sync_player_character_snapshots=sync_player_character_snapshots,
         )
         if live_revision is None:
             live_revision = int(context["combat_live_revision"] or 0)
         if live_view_token is None:
             live_view_token = str(context["combat_live_view_token"] or "")
+        summary_context = dict(context)
+        summary_context["combat_summary_compact"] = normalized_combat_dm_view == "status"
+        summary_context["combat_summary_show_focus_picker"] = normalized_combat_dm_view == "controls"
+        summary_template = "_combat_summary_card.html"
+        if normalized_combat_dm_view == "status":
+            tracker_template = (
+                render_template(
+                    "_combat_combatant_navigation.html",
+                    combatant_navigation_mode="carousel",
+                    **context,
+                )
+                + render_template("_combat_dm_focus_card.html", **context)
+                + render_template("_combat_dm_selected_authority.html", **context)
+            )
+        else:
+            tracker_template = render_template("_combat_dm_focus_card.html", **context)
         payload = {
             "changed": True,
             "live_revision": live_revision,
             "live_view_token": live_view_token,
             "combat_state_token": context["combat_live_state_token"],
-            "summary_html": render_template("_combat_summary_card.html", **context),
-            "tracker_html": render_template("_combat_dm_focus_card.html", **context),
-            "controls_html": render_template("_combat_dm_controls.html", **context),
+            "summary_html": render_template(summary_template, **summary_context),
+            "tracker_html": tracker_template,
+            "controls_html": (
+                render_template("_combat_dm_controls.html", **context)
+                if normalized_combat_dm_view == "controls"
+                else ""
+            ),
             "selected_combatant_id": context["selected_combatant_id"],
         }
         payload.update(
@@ -8481,6 +8557,7 @@ def create_app() -> Flask:
                 campaign_slug,
                 combat_subpage="dm",
                 selected_combatant_id=context["selected_combatant_id"],
+                combat_dm_view=normalized_combat_dm_view,
             )
         )
         if include_flash:
@@ -8595,6 +8672,7 @@ def create_app() -> Flask:
         ignore_requested_combatant_for_dm: bool = False,
     ):
         combat_return_view = normalize_combat_return_view(request.values.get("combat_view", ""))
+        combat_dm_view = normalize_combat_dm_view(request.values.get("view", ""))
         selected_combatant_id = (
             None
             if ignore_requested_combatant_for_dm and combat_return_view == "dm"
@@ -8609,6 +8687,7 @@ def create_app() -> Flask:
                         mutation_succeeded=mutation_succeeded,
                         anchor=anchor,
                         selected_combatant_id=selected_combatant_id,
+                        combat_dm_view=combat_dm_view,
                     )
                 )
             if combat_return_view == "status":
@@ -8634,6 +8713,7 @@ def create_app() -> Flask:
                 campaign_slug,
                 anchor=anchor,
                 combatant_id=selected_combatant_id,
+                combat_dm_view=combat_dm_view,
             )
         if combat_return_view == "status":
             return redirect_to_campaign_combat_status(
@@ -10493,10 +10573,12 @@ def create_app() -> Flask:
     def campaign_combat_dm_view(campaign_slug: str):
         if not can_manage_campaign_combat(campaign_slug):
             abort(403)
+        combat_dm_view = normalize_combat_dm_view(request.values.get("view", ""))
         context = build_campaign_combat_page_context(
             campaign_slug,
             include_control_choices=True,
             combat_subpage="dm",
+            combat_dm_view=combat_dm_view,
         )
         return render_template("combat_dm.html", **context)
 
@@ -10506,11 +10588,13 @@ def create_app() -> Flask:
         if not can_manage_campaign_combat(campaign_slug):
             abort(403)
         selected_combatant_id = parse_requested_combatant_id()
+        combat_dm_view = normalize_combat_dm_view(request.values.get("view", ""))
         state_check_started_at = time.perf_counter()
         live_metadata = build_combat_live_metadata(
             campaign_slug,
             "dm",
             selected_combatant_id=selected_combatant_id,
+            combat_dm_view=combat_dm_view,
         )
         state_check_ms = (time.perf_counter() - state_check_started_at) * 1000
         if should_short_circuit_live_response(
@@ -10533,6 +10617,7 @@ def create_app() -> Flask:
         payload = build_campaign_combat_dm_live_state(
             campaign_slug,
             selected_combatant_id=selected_combatant_id,
+            combat_dm_view=combat_dm_view,
             live_revision=int(live_metadata["live_revision"] or 0),
             live_view_token=str(live_metadata["live_view_token"] or ""),
             sync_player_character_snapshots=False,
@@ -10991,7 +11076,10 @@ def create_app() -> Flask:
             campaign_slug,
             mutation_succeeded=mutation_succeeded,
             anchor="combat-summary",
-            ignore_requested_combatant_for_dm=True,
+            ignore_requested_combatant_for_dm=(
+                normalize_combat_return_view(request.values.get("combat_view", "")) == "dm"
+                and request.values.get("view", "").strip().lower() != "status"
+            ),
         )
 
     @app.post("/campaigns/<campaign_slug>/combat/clear")

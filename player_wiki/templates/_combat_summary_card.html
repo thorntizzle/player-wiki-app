@@ -1,6 +1,7 @@
 {% set _summary_compact = combat_summary_compact | default(false) %}
 <article class="card combat-summary-card{% if _summary_compact %} combat-summary-card--compact{% endif %}" id="combat-summary">
   {% set return_to_dm = combat_return_view == 'dm' %}
+  {% set _combat_dm_view = combat_dm_view | default('status') %}
   <div class="combat-summary-grid{% if _summary_compact %} combat-summary-grid--compact{% endif %}">
     <div>
       <p class="card-kicker">Round</p>
@@ -21,7 +22,7 @@
       <h2>{{ combat_tracker.combatant_count }}</h2>
     </div>
   </div>
-  {% if combat_subpage == "dm" %}
+  {% if combat_subpage == "dm" and combat_summary_show_focus_picker | default(false) %}
     <div class="combat-focus-picker">
       <p class="card-kicker">Focus combatant</p>
       {% if dm_focus_combatant_choices %}
@@ -54,8 +55,9 @@
       >
         {% if return_to_dm %}
           <input type="hidden" name="combat_view" value="dm">
+          <input type="hidden" name="view" value="{{ _combat_dm_view }}">
         {% endif %}
-        {% if requested_combatant_id and not return_to_dm %}
+        {% if requested_combatant_id and (not return_to_dm or _combat_dm_view == 'status') %}
           <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
         {% endif %}
         <button type="submit">Advance turn</button>

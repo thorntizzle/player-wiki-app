@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 
-{% block title %}Encounter controls (formerly DM page) | {{ campaign.title }}{% endblock %}
+{% block title %}{% if combat_dm_view == 'controls' %}Encounter controls{% else %}DM status{% endif %} (formerly DM page) | {{ campaign.title }}{% endblock %}
 
 {% block content %}
   <section class="hero compact">
-    <p class="eyebrow">Encounter controls</p>
-    <h1>{{ campaign.title }} Encounter controls</h1>
+    <p class="eyebrow">{% if combat_dm_view == 'controls' %}Encounter controls{% else %}DM status{% endif %}</p>
+    <h1>{{ campaign.title }} {% if combat_dm_view == 'controls' %}Encounter controls{% else %}DM status{% endif %}</h1>
     <p class="lede">
       Manage encounter setup, seeding, cleanup, and other authority-heavy changes without crowding the live status view.
     </p>
@@ -13,6 +13,20 @@
     <div class="hero-actions">
       {% include "_combat_view_switch.html" %}
     </div>
+    <nav aria-label="DM encounter subview">
+      <a
+        class="{% if combat_dm_view == 'status' %}button-link{% else %}ghost-button{% endif %}"
+        href="{{ combat_dm_view_status_url }}"
+      >
+        DM status
+      </a>
+      <a
+        class="{% if combat_dm_view == 'controls' %}button-link{% else %}ghost-button{% endif %}"
+        href="{{ combat_dm_view_controls_url }}"
+      >
+        Controls
+      </a>
+    </nav>
   </section>
 
   {% if not combat_system_supported %}
@@ -27,8 +41,11 @@
     <div
       class="page-layout combat-layout"
       data-combat-live-root
+      data-combat-subpage="dm"
+      data-combat-dm-view="{{ combat_dm_view }}"
+      data-selected-combatant-id="{{ selected_combatant_id or '' }}"
       data-loading="0"
-      data-combat-live-url="{{ url_for('campaign_combat_dm_live_state', campaign_slug=campaign.slug, combatant=selected_combatant_id) }}"
+      data-combat-live-url="{{ combat_dm_live_url }}"
       data-combat-state-token="{{ combat_live_state_token }}"
       data-live-revision="{{ combat_live_revision }}"
       data-live-view-token="{{ combat_live_view_token }}"
@@ -39,19 +56,30 @@
     >
       <section class="section-list">
         <div data-combat-summary-root>
+          {% set combat_summary_compact = combat_dm_view == 'status' %}
+          {% set combat_summary_show_focus_picker = combat_dm_view == 'controls' %}
           {% include "_combat_summary_card.html" %}
         </div>
 
         <div data-combat-tracker-root>
-          {% include "_combat_dm_focus_card.html" %}
+          {% if combat_dm_view == 'status' %}
+            {% set combatant_navigation_mode = "carousel" %}
+            {% include "_combat_combatant_navigation.html" %}
+            {% include "_combat_dm_focus_card.html" %}
+            {% include "_combat_dm_selected_authority.html" %}
+          {% else %}
+            {% include "_combat_dm_focus_card.html" %}
+          {% endif %}
         </div>
       </section>
 
-      <aside class="sidebar combat-sidebar-stack" id="combat-controls">
-        <div data-combat-controls-root>
-          {% include "_combat_dm_controls.html" %}
-        </div>
-      </aside>
+      {% if combat_dm_view == 'controls' %}
+        <aside class="sidebar combat-sidebar-stack" id="combat-controls">
+          <div data-combat-controls-root>
+            {% include "_combat_dm_controls.html" %}
+          </div>
+        </aside>
+      {% endif %}
     </div>
   {% endif %}
 {% endblock %}
