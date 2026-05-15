@@ -23,10 +23,12 @@ def _async_headers():
     }
 
 
-def _live_poll_headers(revision: int, view_token: str):
+def _live_poll_headers(revision: int, view_token: str, detail_state_token: str | None = None):
     headers = _async_headers()
     headers["X-Live-Revision"] = str(revision)
     headers["X-Live-View-Token"] = view_token
+    if detail_state_token is not None:
+        headers["X-Live-Detail-State-Token"] = detail_state_token
     return headers
 
 
@@ -1320,8 +1322,14 @@ def test_dm_status_async_resource_update_returns_dm_status_live_payload(
     assert payload["selected_combatant_id"] == hound.id
     assert payload["page_url"] == f"/campaigns/linden-pass/combat/dm?combatant={hound.id}"
     assert payload["live_url"] == f"/campaigns/linden-pass/combat/dm/live-state?combatant={hound.id}"
-    assert "Status edits" in payload["tracker_html"]
-    assert f'data-combatant-id="{hound.id}"' in payload["tracker_html"]
+    assert "Status edits" in payload["tracker_detail_html"]
+    refreshed_hound = _find_combatant(app, name="Clockwork Hound")
+    assert refreshed_hound is not None
+    _assert_expected_combatant_revision_field(
+        payload["tracker_detail_html"],
+        refreshed_hound.revision,
+        at_least=3,
+    )
 
 
 def test_dm_can_add_player_character_and_npc_combatants_and_turn_order_sorts_high_to_low(
@@ -1556,8 +1564,9 @@ def test_dm_combat_dm_live_state_keeps_selected_combatant_revision_guards(
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["selected_combatant_id"] == hound.id
-    assert "Selected combatant authority" in payload["tracker_html"]
-    _assert_expected_combatant_revision_field(payload["tracker_html"], hound.revision, at_least=3)
+    assert "Selected combatant authority" in payload["tracker_authority_html"]
+    _assert_expected_combatant_revision_field(payload["tracker_detail_html"], hound.revision, at_least=3)
+    _assert_expected_combatant_revision_field(payload["tracker_authority_html"], hound.revision, at_least=1)
 
 
 def test_owner_player_combat_page_uses_character_workspace_layout(app, client, sign_in, users):
@@ -2403,6 +2412,84 @@ def test_dm_live_state_renders_only_selected_combatant_card(app, client, sign_in
     assert 'data-combatant-selected="true"' in payload["tracker_html"]
 
 
+def test_dm_status_live_state_reuses_selected_detail_when_unchanged(
+    app, client, sign_in, users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    hound = _find_combatant(app, name="Clockwork Hound")
+    assert arden is not None
+    assert hound is not None
+
+    response = client.get(
+        f"/campaigns/linden-pass/combat/dm/live-state?combatant={hound.id}",
+        headers=_async_headers(),
+    )
+    assert response.status_code == 200
+    initial_payload = response.get_json()
+    initial_detail_token = initial_payload["combatant_detail_state_token"]
+    assert "tracker_detail_html" in initial_payload
+
+    client.post(
+        f"/campaigns/linden-pass/combat/combatants/{arden.id}/resources",
+        data={
+            "combat_view": "dm",
+            "view": "status",
+            "combatant": arden.id,
+            "has_action": "1",
+            "expected_combatant_revision": arden.revision,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    unchanged_poll = client.get(
+        f"/campaigns/linden-pass/combat/dm/live-state?combatant={hound.id}",
+        headers=_live_poll_headers(
+            initial_payload["live_revision"],
+            initial_payload["live_view_token"],
+            initial_detail_token,
+        ),
+    )
+    assert unchanged_poll.status_code == 200
+    unchanged_payload = unchanged_poll.get_json()
+    assert unchanged_payload["changed"] is True
+    assert unchanged_payload["selected_combatant_id"] == hound.id
+    assert unchanged_payload["combatant_detail_state_token"] == initial_detail_token
+    assert "tracker_detail_html" not in unchanged_payload
+    assert f'data-combatant-id="{hound.id}"' in unchanged_payload["tracker_html"]
+
+    focus_payload = client.get(
+        f"/campaigns/linden-pass/combat/dm/live-state?combatant={arden.id}",
+        headers=_live_poll_headers(
+            unchanged_payload["live_revision"],
+            unchanged_payload["live_view_token"],
+            unchanged_payload["combatant_detail_state_token"],
+        ),
+    ).get_json()
+    assert focus_payload["selected_combatant_id"] == arden.id
+    assert "tracker_detail_html" in focus_payload
+    assert "Arden March" in focus_payload["tracker_detail_html"]
+
+
 def test_dm_live_state_does_not_short_circuit_when_focus_changes(app, client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
     client.post(
@@ -3071,6 +3158,107 @@ def test_status_live_state_short_circuits_for_unchanged_selected_target(
     assert unchanged_live_state.headers["X-Live-State-Changed"] == "false"
     _assert_live_diagnostics_headers(initial_live_state)
     _assert_live_diagnostics_headers(unchanged_live_state)
+
+
+def test_status_live_state_reuses_selected_detail_html_only_when_state_changes(
+    app, client, sign_in, users, tmp_path
+):
+    goblin_entry_key = _import_systems_goblin(app, tmp_path)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/systems-monsters",
+        data={"entry_key": goblin_entry_key},
+        follow_redirects=False,
+    )
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    goblin = _find_combatant(app, name="Goblin")
+    assert arden is not None
+    assert goblin is not None
+
+    initial_live_state = client.get(
+        f"/campaigns/linden-pass/combat/status/live-state?combatant={goblin.id}",
+        headers=_async_headers(),
+    )
+    assert initial_live_state.status_code == 200
+    initial_payload = initial_live_state.get_json()
+    assert "detail_html" in initial_payload
+    initial_detail_token = initial_payload["combatant_detail_state_token"]
+
+    client.post(
+        f"/campaigns/linden-pass/combat/combatants/{arden.id}/resources",
+        data={
+            "combat_view": "status",
+            "combatant": arden.id,
+            "has_action": "1",
+            "expected_combatant_revision": arden.revision,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    unchanged_detail_token_poll = client.get(
+        f"/campaigns/linden-pass/combat/status/live-state?combatant={goblin.id}",
+        headers=_live_poll_headers(
+            initial_payload["live_revision"],
+            initial_payload["live_view_token"],
+            initial_detail_token,
+        ),
+    )
+    assert unchanged_detail_token_poll.status_code == 200
+    unchanged_payload = unchanged_detail_token_poll.get_json()
+    assert unchanged_payload["changed"] is True
+    assert unchanged_payload["selected_combatant_id"] == goblin.id
+    assert unchanged_payload["combatant_detail_state_token"] == initial_detail_token
+    assert "detail_html" not in unchanged_payload
+    assert "board_html" in unchanged_payload
+    assert f'data-combatant-id="{arden.id}"' in unchanged_payload["board_html"]
+
+    focus_payload_response = client.get(
+        f"/campaigns/linden-pass/combat/status/live-state?combatant={arden.id}",
+        headers=_live_poll_headers(
+            unchanged_payload["live_revision"],
+            unchanged_payload["live_view_token"],
+            unchanged_payload["combatant_detail_state_token"],
+        ),
+    )
+    assert focus_payload_response.status_code == 200
+    focus_payload = focus_payload_response.get_json()
+    assert focus_payload["selected_combatant_id"] == arden.id
+    assert "detail_html" in focus_payload
+    focus_detail_token = focus_payload["combatant_detail_state_token"]
+    assert focus_detail_token != initial_detail_token
+    assert "Arden March" in focus_payload["detail_html"]
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    assert arden is not None
+    client.post(
+        f"/campaigns/linden-pass/combat/combatants/{arden.id}/resources",
+        data={
+            "combat_view": "status",
+            "combatant": arden.id,
+            "movement_remaining": 8,
+            "expected_combatant_revision": arden.revision,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    tactical_change_payload = client.get(
+        f"/campaigns/linden-pass/combat/status/live-state?combatant={arden.id}",
+        headers=_live_poll_headers(
+            focus_payload["live_revision"],
+            focus_payload["live_view_token"],
+            focus_detail_token,
+        ),
+    )
+    assert tactical_change_payload.status_code == 200
+    tactical_payload = tactical_change_payload.get_json()
+    assert tactical_payload["combatant_detail_state_token"] != focus_detail_token
+    assert "detail_html" in tactical_payload
 
 
 def test_combat_surface_live_payloads_report_canonical_focus_urls(app, client, sign_in, users):

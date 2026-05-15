@@ -14,6 +14,7 @@
     const workspaceTools = window.__playerWikiCombatWorkspace || null;
     let combatStateToken = liveRoot.dataset.combatStateToken || "";
     let selectedCombatantId = liveRoot.dataset.selectedCombatantId || "";
+    let selectedCombatantDetailStateToken = liveRoot.dataset.combatDetailStateToken || "";
     let activeCombatSection = workspaceTools ? workspaceTools.capture(detailRoot) : "";
     let liveRevision = Number.parseInt(liveRoot.dataset.liveRevision || "0", 10);
     if (!Number.isFinite(liveRevision) || liveRevision < 0) {
@@ -81,6 +82,9 @@
         headers["X-Live-Revision"] = String(liveRevision);
         if (liveViewToken) {
           headers["X-Live-View-Token"] = liveViewToken;
+        }
+        if (selectedCombatantDetailStateToken) {
+          headers["X-Live-Detail-State-Token"] = selectedCombatantDetailStateToken;
         }
       }
       return headers;
@@ -183,12 +187,19 @@
 
     const renderPayload = (payload, { force = false, forceFlash = false, updateHistory = false } = {}) => {
       const nextToken = payload.combat_state_token ? String(payload.combat_state_token) : "";
+      const nextDetailStateToken = payload.combatant_detail_state_token
+        ? String(payload.combatant_detail_state_token)
+        : selectedCombatantDetailStateToken;
       const requestedCombatSection = workspaceTools
         ? (workspaceTools.capture(detailRoot) || activeCombatSection)
         : "";
       const focusState = uiStateTools ? uiStateTools.captureFocus(liveRoot) : null;
       const viewportAnchor = uiStateTools ? uiStateTools.captureViewportAnchor(liveRoot) : null;
       if (!force && nextToken === combatStateToken) {
+        if (typeof payload.combatant_detail_state_token === "string") {
+          selectedCombatantDetailStateToken = String(payload.combatant_detail_state_token);
+          liveRoot.dataset.combatDetailStateToken = selectedCombatantDetailStateToken;
+        }
         syncViewUrls(payload);
         return;
       }
@@ -205,8 +216,10 @@
 
       selectedCombatantId = payload.selected_combatant_id ? String(payload.selected_combatant_id) : "";
       combatStateToken = nextToken;
+      selectedCombatantDetailStateToken = nextDetailStateToken;
       liveRoot.dataset.selectedCombatantId = selectedCombatantId;
       liveRoot.dataset.combatStateToken = combatStateToken;
+      liveRoot.dataset.combatDetailStateToken = selectedCombatantDetailStateToken;
       if (workspaceTools) {
         const restoredCombatSection = workspaceTools.restore(
           detailRoot instanceof HTMLElement ? detailRoot : liveRoot,

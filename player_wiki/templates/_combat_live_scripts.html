@@ -8,6 +8,9 @@
     const flashRoot = document.querySelector("[data-flash-stack-root]");
     const summaryRoot = document.querySelector("[data-combat-summary-root]");
     const trackerRoot = document.querySelector("[data-combat-tracker-root]");
+    const statusTrackerRoot = document.querySelector("[data-combat-status-tracker-root]");
+    const trackerDetailRoot = document.querySelector("[data-combat-status-detail-root]");
+    const statusAuthorityRoot = document.querySelector("[data-combat-status-authority-root]");
     const contextRoot = document.querySelector("[data-combat-context-root]");
     const controlsRoot = document.querySelector("[data-combat-controls-root]");
     let pollUrl = liveRoot.dataset.combatLiveUrl || "";
@@ -26,6 +29,7 @@
     const diagnosticsTools = diagnosticsEnabled ? window.__playerWikiLiveDiagnosticsTools : null;
     const isDmStatusLiveRoot = liveRoot.dataset.combatSubpage === "dm"
       && (liveRoot.dataset.combatDmView === "status" || !liveRoot.dataset.combatDmView);
+    let selectedCombatantDetailStateToken = liveRoot.dataset.combatDetailStateToken || "";
     let monsterSearchAbortController = null;
     let monsterSearchTimerId = 0;
     let pollTimerId = 0;
@@ -182,6 +186,9 @@
         headers["X-Live-Revision"] = String(liveRevision);
         if (liveViewToken) {
           headers["X-Live-View-Token"] = liveViewToken;
+        }
+        if (selectedCombatantDetailStateToken) {
+          headers["X-Live-Detail-State-Token"] = selectedCombatantDetailStateToken;
         }
       }
       return headers;
@@ -823,6 +830,9 @@
 
     const renderPayload = (payload, { force = false, forceFlash = false } = {}) => {
       const nextToken = payload.combat_state_token ? String(payload.combat_state_token) : "";
+      const nextDetailStateToken = payload.combatant_detail_state_token
+        ? String(payload.combatant_detail_state_token)
+        : selectedCombatantDetailStateToken;
       const focusState = uiStateTools ? uiStateTools.captureFocus(liveRoot) : null;
       const viewportAnchor = uiStateTools ? uiStateTools.captureViewportAnchor(liveRoot) : null;
       const workspaceSectionState = combatWorkspaceTools ? combatWorkspaceTools.capture(liveRoot) : "";
@@ -830,6 +840,10 @@
       const controlsFormState = captureControlsFormState();
       const systemsMonsterSearchState = captureSystemsMonsterSearchState();
       if (!force && nextToken === combatStateToken) {
+        if (typeof payload.combatant_detail_state_token === "string") {
+          selectedCombatantDetailStateToken = String(payload.combatant_detail_state_token);
+          liveRoot.dataset.combatDetailStateToken = selectedCombatantDetailStateToken;
+        }
         syncViewUrls(payload);
         if (forceFlash && flashRoot && typeof payload.flash_html === "string") {
           flashRoot.innerHTML = payload.flash_html;
@@ -841,8 +855,16 @@
       if (summaryRoot && typeof payload.summary_html === "string") {
         summaryRoot.innerHTML = payload.summary_html;
       }
-      if (trackerRoot && typeof payload.tracker_html === "string") {
+      if (isDmStatusLiveRoot && statusTrackerRoot && typeof payload.tracker_html === "string") {
+        statusTrackerRoot.innerHTML = payload.tracker_html;
+      } else if (trackerRoot && typeof payload.tracker_html === "string") {
         trackerRoot.innerHTML = payload.tracker_html;
+      }
+      if (trackerDetailRoot && typeof payload.tracker_detail_html === "string") {
+        trackerDetailRoot.innerHTML = payload.tracker_detail_html;
+      }
+      if (isDmStatusLiveRoot && statusAuthorityRoot && typeof payload.tracker_authority_html === "string") {
+        statusAuthorityRoot.innerHTML = payload.tracker_authority_html;
       }
       if (contextRoot && typeof payload.context_html === "string") {
         contextRoot.innerHTML = payload.context_html;
@@ -866,6 +888,8 @@
       markInlineFormState(liveRoot);
       combatStateToken = nextToken;
       liveRoot.dataset.combatStateToken = combatStateToken;
+      selectedCombatantDetailStateToken = nextDetailStateToken;
+      liveRoot.dataset.combatDetailStateToken = selectedCombatantDetailStateToken;
       if (payload.selected_combatant_id) {
         liveRoot.dataset.selectedCombatantId = String(payload.selected_combatant_id);
       } else {

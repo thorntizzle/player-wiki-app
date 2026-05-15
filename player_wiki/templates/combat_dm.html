@@ -40,6 +40,7 @@
       data-combat-live-root
       data-combat-subpage="dm"
       data-combat-dm-view="{{ combat_dm_view }}"
+      data-combat-detail-state-token="{% if combat_dm_view == 'status' %}{{ combat_status_state_token }}{% else %}{% endif %}"
       data-selected-combatant-id="{{ selected_combatant_id or '' }}"
       data-loading="0"
       data-combat-live-url="{{ combat_dm_live_url }}"
@@ -60,10 +61,16 @@
 
         <div data-combat-tracker-root>
           {% if combat_dm_view == 'status' %}
-            {% set combatant_navigation_mode = "carousel" %}
-            {% include "_combat_combatant_navigation.html" %}
-            {% include "_combat_status_detail.html" %}
-            {% include "_combat_dm_selected_authority.html" %}
+            <div data-combat-status-tracker-root>
+              {% set combatant_navigation_mode = "carousel" %}
+              {% include "_combat_combatant_navigation.html" %}
+            </div>
+            <div data-combat-status-detail-root>
+              {% include "_combat_status_detail.html" %}
+            </div>
+            <div data-combat-status-authority-root>
+              {% include "_combat_dm_selected_authority.html" %}
+            </div>
           {% else %}
             {% include "_combat_dm_focus_card.html" %}
           {% endif %}

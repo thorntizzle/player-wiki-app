@@ -3180,6 +3180,18 @@ def create_app() -> Flask:
     def parse_live_view_token_header() -> str:
         return request.headers.get("X-Live-View-Token", "").strip()
 
+    def parse_live_detail_state_token_header() -> str:
+        return request.headers.get("X-Live-Detail-State-Token", "").strip()
+
+    def should_skip_selected_combatant_detail_render(
+        *,
+        requested_detail_state_token: str,
+        selected_detail_state_token: str,
+    ) -> bool:
+        if not requested_detail_state_token:
+            return False
+        return requested_detail_state_token == selected_detail_state_token
+
     def should_short_circuit_live_response(
         *,
         live_revision: int,
@@ -3362,6 +3374,7 @@ def create_app() -> Flask:
                         "1" if combatant.get("has_bonus_action") else "0",
                         "1" if combatant.get("has_reaction") else "0",
                         "1" if combatant.get("is_current_turn") else "0",
+                        str(combatant.get("source_identity", "")),
                         condition_text,
                     ]
                 )
@@ -3379,7 +3392,19 @@ def create_app() -> Flask:
                 "round_number": tracker_view.get("round_number", 1),
                 "current_turn_label": tracker_view.get("current_turn_label", ""),
                 "combatant_count": 1,
-                "combatants": [selected_combatant],
+                "combatants": [
+                    {
+                        **selected_combatant,
+                        "source_identity": "|".join(
+                            [
+                                str(selected_combatant.get("source_kind", "")),
+                                str(selected_combatant.get("source_ref", "")),
+                                str(selected_combatant.get("combatant_revision", "")),
+                                str(selected_combatant.get("state_revision", "")),
+                            ]
+                        ),
+                    }
+                ],
             }
         )
 
@@ -8579,6 +8604,8 @@ def create_app() -> Flask:
         live_revision: int | None = None,
         live_view_token: str | None = None,
         sync_player_character_snapshots: bool = True,
+        include_selected_detail: bool = True,
+        context: dict[str, object] | None = None,
     ) -> dict[str, object]:
         normalized_combat_dm_view = normalize_combat_dm_view(combat_dm_view or "")
         if normalized_combat_dm_view == "controls":
@@ -8591,7 +8618,7 @@ def create_app() -> Flask:
                 sync_player_character_snapshots=sync_player_character_snapshots,
             )
         else:
-            context = build_campaign_combat_dm_status_context(
+            context = context or build_campaign_combat_dm_status_context(
                 campaign_slug,
                 selected_combatant_id=selected_combatant_id,
                 sync_player_character_snapshots=sync_player_character_snapshots,
@@ -8605,24 +8632,26 @@ def create_app() -> Flask:
         summary_context["combat_summary_show_focus_picker"] = normalized_combat_dm_view == "controls"
         summary_template = "_combat_summary_card.html"
         if normalized_combat_dm_view == "status":
-            tracker_template = (
-                render_template(
-                    "_combat_combatant_navigation.html",
-                    combatant_navigation_mode="carousel",
-                    **context,
-                )
-                + render_template("_combat_status_detail.html", **context)
-                + render_template("_combat_dm_selected_authority.html", **context)
+            tracker_template = render_template(
+                "_combat_combatant_navigation.html",
+                combatant_navigation_mode="carousel",
+                **context,
             )
+            detail_template = render_template("_combat_status_detail.html", **context) if include_selected_detail else None
+            authority_template = render_template("_combat_dm_selected_authority.html", **context)
         else:
             tracker_template = render_template("_combat_dm_focus_card.html", **context)
+            detail_template = None
+            authority_template = ""
         payload = {
             "changed": True,
             "live_revision": live_revision,
             "live_view_token": live_view_token,
             "combat_state_token": context["combat_live_state_token"],
+            "combatant_detail_state_token": str(context.get("combat_status_state_token") or ""),
             "summary_html": render_template(summary_template, **summary_context),
             "tracker_html": tracker_template,
+            "tracker_authority_html": authority_template,
             "controls_html": (
                 render_template("_combat_dm_controls.html", **context)
                 if normalized_combat_dm_view == "controls"
@@ -8630,6 +8659,8 @@ def create_app() -> Flask:
             ),
             "selected_combatant_id": context["selected_combatant_id"],
         }
+        if detail_template is not None:
+            payload["tracker_detail_html"] = detail_template
         payload.update(
             build_combat_surface_urls(
                 campaign_slug,
@@ -8678,26 +8709,35 @@ def create_app() -> Flask:
         live_revision: int | None = None,
         live_view_token: str | None = None,
         sync_player_character_snapshots: bool = True,
+        include_selected_detail: bool = True,
+        context: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        context = build_campaign_combat_status_context(
-            campaign_slug,
-            selected_combatant_id=selected_combatant_id,
-            sync_player_character_snapshots=sync_player_character_snapshots,
-            strict_selected_combatant=False,
+        context = (
+            context
+            if context is not None
+            else build_campaign_combat_status_context(
+                campaign_slug,
+                selected_combatant_id=selected_combatant_id,
+                sync_player_character_snapshots=sync_player_character_snapshots,
+                strict_selected_combatant=False,
+            )
         )
         if live_revision is None:
             live_revision = int(context["combat_live_revision"] or 0)
         if live_view_token is None:
             live_view_token = str(context["combat_live_view_token"] or "")
+        selected_combatant_state_token = str(context["combat_status_state_token"] or "")
         payload = {
             "changed": True,
             "live_revision": live_revision,
             "live_view_token": live_view_token,
             "combat_state_token": context["combat_live_state_token"],
+            "combatant_detail_state_token": selected_combatant_state_token,
             "board_html": render_template("_combat_status_board.html", **context),
-            "detail_html": render_template("_combat_status_detail.html", **context),
             "selected_combatant_id": context["selected_combatant_id"],
         }
+        if include_selected_detail:
+            payload["detail_html"] = render_template("_combat_status_detail.html", **context)
         payload.update(
             build_combat_surface_urls(
                 campaign_slug,
@@ -10677,6 +10717,7 @@ def create_app() -> Flask:
             abort(403)
         selected_combatant_id = parse_requested_combatant_id()
         combat_dm_view = normalize_combat_dm_view(request.values.get("view", ""))
+        requested_detail_state_token = parse_live_detail_state_token_header()
         state_check_started_at = time.perf_counter()
         live_metadata = build_combat_live_metadata(
             campaign_slug,
@@ -10702,6 +10743,18 @@ def create_app() -> Flask:
             )
 
         render_started_at = time.perf_counter()
+        include_selected_detail = True
+        dm_status_context = None
+        if combat_dm_view == "status":
+            dm_status_context = build_campaign_combat_dm_status_context(
+                campaign_slug,
+                selected_combatant_id=selected_combatant_id,
+                sync_player_character_snapshots=False,
+            )
+            include_selected_detail = not should_skip_selected_combatant_detail_render(
+                requested_detail_state_token=requested_detail_state_token,
+                selected_detail_state_token=str(dm_status_context["combat_status_state_token"] or ""),
+            )
         payload = build_campaign_combat_dm_live_state(
             campaign_slug,
             selected_combatant_id=selected_combatant_id,
@@ -10709,6 +10762,8 @@ def create_app() -> Flask:
             live_revision=int(live_metadata["live_revision"] or 0),
             live_view_token=str(live_metadata["live_view_token"] or ""),
             sync_player_character_snapshots=False,
+            include_selected_detail=include_selected_detail,
+            context=dm_status_context,
         )
         render_ms = (time.perf_counter() - render_started_at) * 1000
         return build_live_json_response(
@@ -10730,6 +10785,7 @@ def create_app() -> Flask:
     @campaign_scope_access_required("combat")
     def campaign_combat_status_live_state(campaign_slug: str):
         selected_combatant_id = parse_requested_combatant_id()
+        requested_detail_state_token = parse_live_detail_state_token_header()
         state_check_started_at = time.perf_counter()
         live_metadata = build_combat_live_metadata(
             campaign_slug,
@@ -10754,12 +10810,24 @@ def create_app() -> Flask:
             )
 
         render_started_at = time.perf_counter()
+        status_context = build_campaign_combat_status_context(
+            campaign_slug,
+            selected_combatant_id=selected_combatant_id,
+            sync_player_character_snapshots=False,
+            strict_selected_combatant=False,
+        )
+        include_selected_detail = not should_skip_selected_combatant_detail_render(
+            requested_detail_state_token=requested_detail_state_token,
+            selected_detail_state_token=str(status_context["combat_status_state_token"] or ""),
+        )
         payload = build_campaign_combat_status_live_state(
             campaign_slug,
             selected_combatant_id=selected_combatant_id,
             live_revision=int(live_metadata["live_revision"] or 0),
             live_view_token=str(live_metadata["live_view_token"] or ""),
             sync_player_character_snapshots=False,
+            include_selected_detail=include_selected_detail,
+            context=status_context,
         )
         render_ms = (time.perf_counter() - render_started_at) * 1000
         return build_live_json_response(
