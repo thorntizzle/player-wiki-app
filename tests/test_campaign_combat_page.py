@@ -857,6 +857,79 @@ def test_dm_page_async_mutations_return_controls_partial_and_non_async_redirects
     assert "Add player character" in async_payload["controls_html"]
 
 
+def test_dm_async_advance_turn_defaults_focus_to_new_current_turn(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    hound = _find_combatant(app, name="Clockwork Hound")
+    assert arden is not None
+    assert hound is not None
+
+    set_current = client.post(f"/campaigns/linden-pass/combat/combatants/{arden.id}/set-current", follow_redirects=False)
+    assert set_current.status_code in {200, 302}
+
+    dm_page = client.get(f"/campaigns/linden-pass/combat/dm?combatant={arden.id}")
+    assert dm_page.status_code == 200
+    dm_page_html = dm_page.get_data(as_text=True)
+    assert "Focus combatant" in dm_page_html
+    assert re.search(
+        rf'<option[^>]*value="{arden.id}"[^>]*selected[^>]*>',
+        dm_page_html,
+    )
+
+    advance_form_match = re.search(
+        r'<form[^>]+action="/campaigns/linden-pass/combat/advance-turn"[^>]*>([\s\S]*?)</form>',
+        dm_page_html,
+    )
+    assert advance_form_match is not None
+    advance_turn_form = advance_form_match.group(0)
+    assert 'name="combatant"' not in advance_turn_form
+    assert 'name="combat_view" value="dm"' in advance_turn_form
+
+    async_advance_response = client.post(
+        "/campaigns/linden-pass/combat/advance-turn",
+        data={"combat_view": "dm"},
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    assert async_advance_response.status_code == 200
+    payload = async_advance_response.get_json()
+    assert payload["ok"] is True
+    assert payload["selected_combatant_id"] == hound.id
+    assert payload["page_url"] == f"/campaigns/linden-pass/combat/dm?combatant={hound.id}"
+    assert payload["live_url"] == f"/campaigns/linden-pass/combat/dm/live-state?combatant={hound.id}"
+    assert "Focus combatant" in payload["summary_html"]
+    assert re.search(
+        rf'<option[^>]*value="{hound.id}"[^>]*selected[^>]*>',
+        payload["summary_html"],
+    )
+    assert not re.search(
+        rf'<option[^>]*value="{arden.id}"[^>]*selected[^>]*>',
+        payload["summary_html"],
+    )
+    assert f'id="combatant-{hound.id}"' in payload["tracker_html"]
+    assert f'id="combatant-{arden.id}"' not in payload["tracker_html"]
+    assert "Current turn" in payload["tracker_html"]
+
+
 def test_async_combat_resource_update_rejects_stale_combatant_revision(app, client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 

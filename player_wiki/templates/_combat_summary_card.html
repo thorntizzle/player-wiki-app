@@ -55,7 +55,7 @@
         {% if return_to_dm %}
           <input type="hidden" name="combat_view" value="dm">
         {% endif %}
-        {% if requested_combatant_id %}
+        {% if requested_combatant_id and not return_to_dm %}
           <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
         {% endif %}
         <button type="submit">Advance turn</button>
