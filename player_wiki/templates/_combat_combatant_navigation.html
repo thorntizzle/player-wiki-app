@@ -47,9 +47,9 @@
             {% set is_selected_combatant = combatant.id == selected_combatant_id %}
             {% set combatant_context = combatant.type_label %}
             {% if combatant.source_label %}
-              {% set combatant_context = combatant_context ~ " &middot; " ~ combatant.source_label %}
+              {% set combatant_context = combatant_context ~ " · " ~ combatant.source_label %}
             {% elif combatant.subtitle %}
-              {% set combatant_context = combatant_context ~ " &middot; " ~ combatant.subtitle %}
+              {% set combatant_context = combatant_context ~ " · " ~ combatant.subtitle %}
             {% endif %}
             <article
               class="combat-turn-order-row{% if combatant.id == selected_combatant_id %} combat-turn-order-row--selected{% endif %}{% if combatant.is_current_turn %} combat-turn-order-row--current{% endif %}"

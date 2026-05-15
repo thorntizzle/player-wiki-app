@@ -282,6 +282,10 @@ def test_combat_page_player_workspace_carousel_renders_jump_dropdown_options(
     assert "Jump to combatant" in body
     assert "Arden March - Turn 18" in body
     assert "Clockwork Hound - Turn 12" in body
+    assert "Player character · Character" in body
+    assert "Arden March - Player character · Character - Turn 18" in body
+    assert "&middot;" not in body
+    assert "&MIDDOT;" not in body
     assert body.find("data-combatant-carousel-jump") > body.find("combat-turn-order-control--next")
     selected_option_match = re.search(r'<option[^>]*value="(\d+)"[^>]*selected="selected"', body)
     assert selected_option_match is not None
