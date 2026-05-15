@@ -407,6 +407,9 @@ def test_combat_page_tracks_carousel_intent_for_live_rerender_autoscroll(app, cl
         follow_redirects=False,
     )
 
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
     response = client.get("/campaigns/linden-pass/combat")
     assert response.status_code == 200
     body = response.get_data(as_text=True)
@@ -439,6 +442,9 @@ def test_combat_page_render_payload_restores_carousel_state_on_user_intent(app, 
         },
         follow_redirects=False,
     )
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
 
     response = client.get("/campaigns/linden-pass/combat")
     assert response.status_code == 200
@@ -506,6 +512,9 @@ def test_combat_page_carousel_jump_select_updates_local_inspected_state_without_
         follow_redirects=False,
     )
 
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
     response = client.get("/campaigns/linden-pass/combat")
     assert response.status_code == 200
     body = response.get_data(as_text=True)
@@ -560,6 +569,9 @@ def test_combat_page_carousel_controls_scroll_without_state_mutation(app, client
         follow_redirects=False,
     )
 
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
     response = client.get("/campaigns/linden-pass/combat")
     assert response.status_code == 200
     body = response.get_data(as_text=True)
@@ -588,9 +600,11 @@ def test_xianxia_combat_routes_show_friendly_unsupported_system_fallback(
         payload["systems_library"] = "xianxia"
 
     _write_campaign_config(app, _mutate)
-    sign_in(users["dm"]["email"], users["dm"]["password"])
+    sign_in(users["party"]["email"], users["party"]["password"])
 
     combat_page = client.get("/campaigns/linden-pass/combat")
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
     controls_page = client.get("/campaigns/linden-pass/combat/dm")
     status_page = client.get("/campaigns/linden-pass/combat/status")
 
@@ -600,11 +614,45 @@ def test_xianxia_combat_routes_show_friendly_unsupported_system_fallback(
         assert "Combat tracker not configured for Xianxia yet" in html
         assert "current combat tracker is" in html
         assert "DND-5E-only" in html
-        assert "/campaigns/linden-pass/characters" in html
         assert "/campaigns/linden-pass/session" in html
         assert "Add player character" not in html
         assert "Add NPC from Systems" not in html
         assert "data-combat-live-url=" not in html
+
+
+def test_combat_route_redirects_dm_and_admin_users_to_dm_workspace_and_preserves_focus(
+    app, client, sign_in, users
+):
+    sign_in(users["party"]["email"], users["party"]["password"])
+    player_response = client.get("/campaigns/linden-pass/combat")
+    assert player_response.status_code == 200
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    combatant = _find_combatant(app, character_slug="arden-march")
+    assert combatant is not None
+
+    dm_redirect = client.get(
+        f"/campaigns/linden-pass/combat?combatant={combatant.id}",
+        follow_redirects=False,
+    )
+    assert dm_redirect.status_code == 302
+    assert dm_redirect.headers["Location"] == f"/campaigns/linden-pass/combat/dm?combatant={combatant.id}"
+
+    dm_base_redirect = client.get("/campaigns/linden-pass/combat", follow_redirects=False)
+    assert dm_base_redirect.status_code == 302
+    assert dm_base_redirect.headers["Location"] == "/campaigns/linden-pass/combat/dm"
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    admin_redirect = client.get("/campaigns/linden-pass/combat", follow_redirects=False)
+    assert admin_redirect.status_code == 302
+    assert admin_redirect.headers["Location"] == "/campaigns/linden-pass/combat/dm"
 
 
 def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, sign_in, users):
@@ -620,21 +668,26 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
     dm_html = dm_page.get_data(as_text=True)
     dm_controls_html = dm_controls_page.get_data(as_text=True)
     status_html = status_page.get_data(as_text=True)
-    assert "Encounter controls" in dm_html
+    assert "DM status" in dm_html
     assert "DM encounter subview" in dm_html
     assert 'href="/campaigns/linden-pass/combat/dm"' in dm_html
     assert 'href="/campaigns/linden-pass/combat/dm?view=controls"' in dm_html
-    assert "Combat" in dm_html
     assert "/campaigns/linden-pass/combat/character" not in dm_html
     assert "DM status" in dm_html
-    assert "Encounter controls" in dm_html
+    assert "Controls" in dm_html
     assert "Formerly DM page. Existing /combat/dm links and bookmarks still work during the transition." in dm_html
+    assert 'aria-label="Combat pages"' not in dm_html
+    assert 'class="page-layout combat-layout combat-layout--workspace"' in dm_html
+    assert 'class="page-layout combat-layout"' in dm_controls_html
+    assert "combat-layout--workspace" not in dm_controls_html
     assert "Add player character" not in dm_html
     assert "Add NPC from Systems" not in dm_html
     assert "Add custom NPC combatant" not in dm_html
     assert "Add player character" in dm_controls_html
     assert "Add NPC from Systems" in dm_controls_html
     assert "Add custom NPC combatant" in dm_controls_html
+    assert "Encounter controls" in dm_controls_html
+    assert "combat-dm-view=\"controls\"" in dm_controls_html
     assert 'data-loading="0"' in dm_html
     assert "captureSystemsMonsterSearchState" in dm_html
     assert 'liveRoot.dataset.loading = "1";' in dm_html
@@ -646,6 +699,8 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
     assert "window.location.assign(nextUrl);" not in dm_html
     assert "DM status (formerly Status)" in status_html
     assert "Formerly Status. Existing /combat/status links and bookmarks still work during the transition." in status_html
+    assert 'aria-label="Combat pages"' not in status_html
+    assert 'class="page-layout combat-status-layout"' in status_html
     assert 'data-live-active-interval-ms="500"' in dm_html
     assert 'data-live-idle-interval-ms="3000"' in dm_html
     assert 'data-live-active-interval-ms="1500"' in status_html
@@ -1687,7 +1742,8 @@ def test_owner_player_can_open_combat_character_page_for_assigned_tracked_pc(app
     assert response.status_code == 200
     combat_html = combat_page.get_data(as_text=True)
     body = response.get_data(as_text=True)
-    assert f"/campaigns/linden-pass/combat/character?combatant={combatant.id}" in combat_html
+    assert 'aria-label="Combat pages"' not in combat_html
+    assert f'data-combat-live-url="/campaigns/linden-pass/combat/live-state?combatant={combatant.id}"' in combat_html
     assert "Combat Character" in body
     assert "Arden March" in body
     assert "Combat snapshot" in body
@@ -2278,25 +2334,16 @@ def test_combat_page_renders_context_panel_and_dm_page_focuses_selected_combatan
         follow_redirects=False,
     )
 
-    combat_page = client.get("/campaigns/linden-pass/combat")
+    combat_page = client.get("/campaigns/linden-pass/combat", follow_redirects=False)
     dm_page = client.get(f"/campaigns/linden-pass/combat/dm?combatant={hound.id}")
     dm_controls_page = client.get(f"/campaigns/linden-pass/combat/dm?combatant={hound.id}&view=controls")
 
-    assert combat_page.status_code == 200
+    assert combat_page.status_code == 302
+    assert combat_page.headers["Location"] == "/campaigns/linden-pass/combat/dm"
     assert dm_page.status_code == 200
     assert dm_controls_page.status_code == 200
-    combat_html = combat_page.get_data(as_text=True)
     dm_html = dm_page.get_data(as_text=True)
     dm_controls_html = dm_controls_page.get_data(as_text=True)
-    assert "Encounter context" in combat_html
-    assert "Arden March" in combat_html
-    assert "Advance turn" not in combat_html
-    assert "Clear tracker" not in combat_html
-    assert "Set current" not in combat_html
-    assert "Remove combatant" not in combat_html
-    assert 'class="combat-badge combat-badge--editable"' not in combat_html
-    assert 'aria-label="Speed for Clockwork Hound"' not in combat_html
-    assert "Encounter controls owns setup, seeding, turn-order authority, structural NPC edits, removal, and cleanup." in combat_html
     assert "data-combatant-carousel" in dm_html
     assert "combat-turn-order-carousel" in dm_html
     assert 'data-combat-navigation-mode="carousel"' in dm_html
@@ -2479,21 +2526,24 @@ def test_selected_combatant_pages_seed_canonical_focus_urls(app, client, sign_in
     hound = _find_combatant(app, name="Clockwork Hound")
     assert hound is not None
 
-    combat_response = client.get(f"/campaigns/linden-pass/combat?combatant={hound.id}")
+    combat_response = client.get(
+        f"/campaigns/linden-pass/combat?combatant={hound.id}",
+        follow_redirects=False,
+    )
     controls_response = client.get(f"/campaigns/linden-pass/combat/dm?combatant={hound.id}")
     status_response = client.get(f"/campaigns/linden-pass/combat/status?combatant={hound.id}")
 
-    assert combat_response.status_code == 200
+    assert combat_response.status_code == 302
+    assert (
+        combat_response.headers["Location"]
+        == f"/campaigns/linden-pass/combat/dm?combatant={hound.id}"
+    )
     assert controls_response.status_code == 200
     assert status_response.status_code == 200
 
-    combat_body = combat_response.get_data(as_text=True)
     controls_body = controls_response.get_data(as_text=True)
     status_body = status_response.get_data(as_text=True)
 
-    assert f'data-combat-live-url="/campaigns/linden-pass/combat/live-state?combatant={hound.id}"' in combat_body
-    assert f"/campaigns/linden-pass/combat/status?combatant={hound.id}" in combat_body
-    assert f"/campaigns/linden-pass/combat/dm?combatant={hound.id}" in combat_body
     assert f'data-combat-live-url="/campaigns/linden-pass/combat/dm/live-state?combatant={hound.id}"' in controls_body
     assert f'data-combat-live-url="/campaigns/linden-pass/combat/status/live-state?combatant={hound.id}"' in status_body
 

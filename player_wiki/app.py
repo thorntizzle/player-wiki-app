@@ -10601,6 +10601,11 @@ def create_app() -> Flask:
     @app.get("/campaigns/<campaign_slug>/combat")
     @campaign_scope_access_required("combat")
     def campaign_combat_view(campaign_slug: str):
+        if can_manage_campaign_combat(campaign_slug):
+            return redirect_to_campaign_combat_dm(
+                campaign_slug,
+                combatant_id=parse_requested_combatant_id(),
+            )
         context = build_campaign_combat_page_context(
             campaign_slug,
             combat_subpage="combat",
