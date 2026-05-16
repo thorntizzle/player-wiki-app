@@ -400,6 +400,25 @@
       return `${nextPage.pathname}${nextPage.search}${nextPage.hash}`;
     };
 
+    const getPayloadSelectedCombatantId = (payload = {}) => {
+      if (typeof payload.selected_combatant_id === "number") {
+        return String(payload.selected_combatant_id);
+      }
+      if (typeof payload.selected_combatant_id === "string" && payload.selected_combatant_id.trim()) {
+        return payload.selected_combatant_id.trim();
+      }
+      return "";
+    };
+
+    const isStaleDmStatusPayload = (payload = {}) => {
+      if (!isDmStatusLiveRoot) {
+        return false;
+      }
+      const currentSelectedCombatantId = String(liveRoot.dataset.selectedCombatantId || "").trim();
+      const payloadSelectedCombatantId = getPayloadSelectedCombatantId(payload);
+      return Boolean(currentSelectedCombatantId && payloadSelectedCombatantId && currentSelectedCombatantId !== payloadSelectedCombatantId);
+    };
+
     const fetchDmStatusCombatant = async (combatantId, { carousel = null } = {}) => {
       if (!isDmStatusLiveRoot || requestInFlight) {
         return false;
@@ -417,6 +436,9 @@
         return false;
       }
 
+      pollUrl = nextPollUrl;
+      liveRoot.dataset.combatLiveUrl = pollUrl;
+      liveRoot.dataset.selectedCombatantId = normalizedCombatantId;
       const controls = [];
       if (carousel instanceof HTMLElement) {
         const jumpSelect = carousel.closest("section")?.querySelector("[data-combatant-carousel-jump-select]");
@@ -459,9 +481,9 @@
 
         const payload = await response.json();
         syncLiveMetadata(payload, response);
+        liveRoot.dataset.selectedCombatantId = getPayloadSelectedCombatantId(payload) || normalizedCombatantId;
         logLiveDiagnostics("combat-dm-status-navigation", response, payload);
-        pollUrl = nextPollUrl;
-        liveRoot.dataset.combatLiveUrl = pollUrl;
+        syncViewUrls(payload);
         renderPayload(payload, { force: true });
         return true;
       } catch (_) {
@@ -851,6 +873,9 @@
         scrollToAnchor(payload.anchor || "");
         return;
       }
+      if (!force && isStaleDmStatusPayload(payload)) {
+        return;
+      }
 
       if (summaryRoot && typeof payload.summary_html === "string") {
         summaryRoot.innerHTML = payload.summary_html;
@@ -939,6 +964,11 @@
         }
 
         const payload = await response.json();
+        if (isStaleDmStatusPayload(payload)) {
+          logLiveDiagnostics("combat-stale", response, payload);
+          const requestMs = performance.now() - requestStartedAt;
+          return buildLiveMetric(response, payload, { mode: "stale", requestMs, applyMs: 0 });
+        }
         syncLiveMetadata(payload, response);
         logLiveDiagnostics("combat", response, payload);
         const requestMs = performance.now() - requestStartedAt;

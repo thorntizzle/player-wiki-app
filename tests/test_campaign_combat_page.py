@@ -2654,6 +2654,67 @@ def test_dm_live_state_renders_only_selected_combatant_card(app, client, sign_in
     assert 'data-combatant-selected="true"' in payload["tracker_html"]
 
 
+def test_dm_status_combined_page_script_hydrates_selected_combatant_live_state_and_urls(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    hound = _find_combatant(app, name="Clockwork Hound")
+    assert arden is not None
+    assert hound is not None
+
+    page = client.get(f"/campaigns/linden-pass/combat/dm?combatant={hound.id}")
+    assert page.status_code == 200
+    body = page.get_data(as_text=True)
+    assert "const fetchDmStatusCombatant = async (combatantId, { carousel = null } = {}) => {" in body
+    assert "const getPayloadSelectedCombatantId = (payload = {}) => {" in body
+    assert "const isStaleDmStatusPayload = (payload = {}) => {" in body
+    assert 'if (target.matches("[data-combatant-carousel-jump-select]")) {' in body
+    assert "if (isDmStatusLiveRoot && selectedCombatantId) {" in body
+    assert "void fetchDmStatusCombatant(selectedCombatantId, { carousel });" in body
+    assert "await fetchDmStatusCombatant(selectedCombatantId, { carousel });" in body
+    assert "pollUrl = nextPollUrl;" in body
+    assert "liveRoot.dataset.selectedCombatantId = normalizedCombatantId;" in body
+    assert "if (isStaleDmStatusPayload(payload)) {" in body
+    assert 'logLiveDiagnostics("combat-stale", response, payload);' in body
+    assert 'data-combat-live-url="/campaigns/linden-pass/combat/dm/live-state?combatant=' in body
+    assert f'data-selected-combatant-id="{hound.id}"' in body
+
+    initial_payload = client.get(
+        f"/campaigns/linden-pass/combat/dm/live-state?combatant={hound.id}",
+        headers=_async_headers(),
+    ).get_json()
+    next_payload = client.get(
+        f"/campaigns/linden-pass/combat/dm/live-state?combatant={arden.id}",
+        headers=_async_headers(),
+    ).get_json()
+    assert next_payload["selected_combatant_id"] == arden.id
+    assert next_payload["page_url"] == f"/campaigns/linden-pass/combat/dm?combatant={arden.id}"
+    assert next_payload["live_url"] == f"/campaigns/linden-pass/combat/dm/live-state?combatant={arden.id}"
+    assert initial_payload["selected_combatant_id"] == hound.id
+
+
 def test_dm_status_live_state_reuses_selected_detail_when_unchanged(
     app, client, sign_in, users,
 ):
