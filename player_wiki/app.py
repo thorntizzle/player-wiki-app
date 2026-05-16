@@ -522,6 +522,9 @@ COMBAT_NPC_HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
 COMBAT_NPC_STATBLOCK_ABILITY_PATTERN = re.compile(
     r"(?i)\b(?P<key>STR|DEX|CON|INT|WIS|CHA)\s+(?P<score>\d+)(?:\s*\((?P<modifier>[+-]?\d+)\))?"
 )
+COMBAT_NPC_WORKSPACE_ENTRY_HEADING_WITH_SUFFIX_PATTERN = re.compile(
+    r"(?i)^(?P<name>.+?)\s*\(.*\)\s*$"
+)
 BUILDER_RELEVANT_CAMPAIGN_SECTIONS = frozenset(
     {
         CAMPAIGN_MECHANICS_SECTION,
@@ -6158,6 +6161,16 @@ def create_app() -> Flask:
         entry_section_slug = COMBAT_NPC_WORKSPACE_SECTION_ENTRY_ALIASES.get(normalized, "")
         if entry_section_slug:
             return entry_section_slug, True
+        heading_text = _combat_npc_heading_text(value)
+        match = COMBAT_NPC_WORKSPACE_ENTRY_HEADING_WITH_SUFFIX_PATTERN.match(heading_text)
+        if match:
+            normalized_without_suffix = normalize_lookup(match.group("name"))
+            entry_section_slug = COMBAT_NPC_WORKSPACE_SECTION_ENTRY_ALIASES.get(
+                normalized_without_suffix,
+                "",
+            )
+            if entry_section_slug:
+                return entry_section_slug, True
         return "", False
 
     def _combat_npc_format_bonus(value: object) -> str:

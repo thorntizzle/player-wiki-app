@@ -3261,19 +3261,19 @@ speed: 30 ft.
 initiative_bonus: 3
 ---
 
-## At-A-Glance
+## AT-A-GLANCE (Quick Reference)
 
 A cautious infiltrator who prefers disguise, distance, and retreat routes over fair fights.
 
-## Statblock
+## STATBLOCK (5e Format)
 
 Medium humanoid, neutral
 
-## Tactics
+## TACTICS (DM Guidance)
 
 Mirror Spy opens from range and only closes when an ally has already pinned the target.
 
-## Scaling Notes
+## SCALING NOTES (optional)
 
 Increase hit points to 36 and add one extra reaction each round for a tougher version.
 
@@ -3313,10 +3313,10 @@ Can alter appearance between encounters to re-enter a scene under a different id
     assert 'data-combat-section-toggle="reference"' in payload["detail_html"]
     assert 'data-combat-section-panel="reference"' in payload["detail_html"]
     assert 'data-combat-section-toggle="actions"' in payload["detail_html"]
-    assert "At-A-Glance" in payload["detail_html"]
-    assert "Statblock" in payload["detail_html"]
-    assert "Tactics" in payload["detail_html"]
-    assert "Scaling Notes" in payload["detail_html"]
+    assert "AT-A-GLANCE (Quick Reference)" in payload["detail_html"]
+    assert "STATBLOCK (5e Format)" in payload["detail_html"]
+    assert "TACTICS (DM Guidance)" in payload["detail_html"]
+    assert "SCALING NOTES (optional)" in payload["detail_html"]
     assert "Notes" in payload["detail_html"]
     assert "Changeling" in payload["detail_html"]
     assert "Dagger" in payload["detail_html"]
