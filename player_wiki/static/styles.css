@@ -2557,27 +2557,6 @@ button {
   background: var(--surface-soft-strong);
 }
 
-.combat-turn-order-list--carousel::before,
-.combat-turn-order-list--carousel::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 1.25rem;
-  pointer-events: none;
-  z-index: 1;
-}
-
-.combat-turn-order-list--carousel::before {
-  left: 0.35rem;
-  background: linear-gradient(90deg, var(--surface-raised), transparent);
-}
-
-.combat-turn-order-list--carousel::after {
-  right: 0.35rem;
-  background: linear-gradient(270deg, var(--surface-raised), transparent);
-}
-
 .combat-turn-order-row {
   display: grid;
   gap: 0.65rem;
