@@ -2356,6 +2356,81 @@ button {
   margin: 0.25rem 0 0;
 }
 
+.combat-condition-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  justify-content: flex-end;
+  align-items: flex-start;
+}
+
+.combat-condition-editor {
+  position: relative;
+  display: inline-grid;
+  justify-items: end;
+}
+
+.combat-condition-editor summary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.4rem;
+  padding: 0.5rem 0.95rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+  color: var(--ink);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.combat-condition-editor summary::-webkit-details-marker {
+  display: none;
+}
+
+.combat-condition-editor summary:hover,
+.combat-condition-editor summary:focus-visible {
+  border-color: var(--border-accent);
+  background: var(--surface-soft-strong);
+  outline: none;
+}
+
+.combat-condition-editor[open] summary {
+  border-color: var(--border-accent);
+  background: var(--overlay-accent);
+  color: var(--accent-deep);
+}
+
+.combat-condition-editor__form {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) minmax(12rem, 1fr) auto;
+  gap: 0.65rem;
+  align-items: end;
+  width: min(100%, 46rem);
+  margin-top: 0.65rem;
+  padding: 0.75rem;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+}
+
+.combat-condition-editor:not(.combat-condition-editor--add) .combat-condition-editor__form {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 4;
+  width: min(42rem, calc(100vw - 3rem));
+  box-shadow: var(--shadow-soft);
+}
+
+.combat-condition-editor--add {
+  justify-items: start;
+}
+
+.combat-condition-editor--add .combat-condition-editor__form {
+  width: 100%;
+}
+
 .combat-target-list {
   display: grid;
   gap: 0.65rem;
@@ -2403,11 +2478,23 @@ button {
 }
 
 .combat-status-snapshot,
-.combat-status-snapshot__top,
+.combat-status-snapshot__heading,
 .combat-status-snapshot__meta,
 .combat-status-detail-heading {
   display: grid;
   gap: 0.85rem;
+}
+
+.combat-status-snapshot__heading {
+  align-items: start;
+}
+
+.combat-status-snapshot__heading .combatant-badges form {
+  display: inline-flex;
+}
+
+.combat-status-snapshot__set-current {
+  min-height: auto;
 }
 
 .combat-status-selection-loading {
@@ -2773,6 +2860,24 @@ button {
   .audit-row__header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .combat-condition-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .combat-condition-editor {
+    justify-items: stretch;
+    width: 100%;
+  }
+
+  .combat-condition-editor__form,
+  .combat-condition-editor:not(.combat-condition-editor--add) .combat-condition-editor__form {
+    position: static;
+    width: 100%;
+    grid-template-columns: 1fr;
+    box-shadow: none;
   }
 
   .session-form-mode-toggle {

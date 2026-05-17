@@ -185,6 +185,43 @@
       detailRoot.dataset.loading = isBusy ? "1" : "0";
     };
 
+    const buildInlineFormState = (form) => {
+      if (!(form instanceof HTMLFormElement)) {
+        return "";
+      }
+      const params = new URLSearchParams();
+      for (const [name, value] of new FormData(form).entries()) {
+        params.append(name, typeof value === "string" ? value : "");
+      }
+      return params.toString();
+    };
+
+    const markInlineFormState = (root = liveRoot) => {
+      if (!(root instanceof HTMLElement)) {
+        return;
+      }
+      root.querySelectorAll("[data-combat-inline-autosubmit]").forEach((form) => {
+        if (!(form instanceof HTMLFormElement)) {
+          return;
+        }
+        form.dataset.combatInlineState = buildInlineFormState(form);
+      });
+    };
+
+    const queueInlineSubmit = (form) => {
+      if (!(form instanceof HTMLFormElement) || requestInFlight) {
+        return;
+      }
+      if (buildInlineFormState(form) === String(form.dataset.combatInlineState || "")) {
+        return;
+      }
+      if (typeof form.requestSubmit === "function") {
+        form.requestSubmit();
+        return;
+      }
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    };
+
     const renderPayload = (payload, { force = false, forceFlash = false, updateHistory = false } = {}) => {
       const nextToken = payload.combat_state_token ? String(payload.combat_state_token) : "";
       const nextDetailStateToken = payload.combatant_detail_state_token
@@ -228,6 +265,7 @@
         activeCombatSection =
           restoredCombatSection || requestedCombatSection || activeCombatSection;
       }
+      markInlineFormState(liveRoot);
       if (uiStateTools) {
         uiStateTools.restoreFocus(liveRoot, focusState);
         uiStateTools.restoreViewportAnchor(liveRoot, viewportAnchor);
@@ -393,6 +431,40 @@
       }
     });
 
+    liveRoot.addEventListener(
+      "focusout",
+      (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) {
+          return;
+        }
+        const form = target.closest("[data-combat-inline-autosubmit]");
+        if (!(form instanceof HTMLFormElement)) {
+          return;
+        }
+        const nextFocused = event.relatedTarget;
+        if (nextFocused instanceof HTMLElement && form.contains(nextFocused)) {
+          return;
+        }
+        queueInlineSubmit(form);
+      },
+      true,
+    );
+
+    liveRoot.addEventListener("change", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      const form = target.closest("[data-combat-inline-autosubmit]");
+      if (!(form instanceof HTMLFormElement)) {
+        return;
+      }
+      if (form.dataset.combatInlineSubmitOnChange === "1") {
+        queueInlineSubmit(form);
+      }
+    });
+
     ["pointerdown", "keydown", "focusin"].forEach((eventName) => {
       liveRoot.addEventListener(eventName, markActivity, true);
     });
@@ -409,6 +481,7 @@
     });
 
     scheduleNextPoll(activeIntervalMs);
+    markInlineFormState(liveRoot);
     if (diagnosticsEnabled && diagnosticsTools) {
       diagnosticsTools.ensureMetricsStore();
       diagnosticsTools.registerSampler("combat_status", async (options = {}) => {

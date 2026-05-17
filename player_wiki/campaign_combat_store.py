@@ -496,6 +496,31 @@ class CampaignCombatStore:
             raise RuntimeError("Failed to persist combat condition.")
         return condition
 
+    def update_condition(
+        self,
+        campaign_slug: str,
+        condition_id: int,
+        *,
+        name: str,
+        duration_text: str = "",
+    ) -> CampaignCombatConditionRecord | None:
+        condition = self.get_condition(campaign_slug, condition_id)
+        if condition is None:
+            return None
+
+        connection = get_db()
+        connection.execute(
+            """
+            UPDATE campaign_combat_conditions
+            SET name = ?, duration_text = ?
+            WHERE id = ?
+            """,
+            (name, duration_text, condition_id),
+        )
+        connection.commit()
+
+        return self.get_condition(campaign_slug, condition_id)
+
     def delete_condition(
         self,
         campaign_slug: str,

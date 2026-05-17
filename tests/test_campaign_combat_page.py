@@ -1357,6 +1357,11 @@ def test_dm_pages_split_tactical_status_edits_from_control_authority_actions(
     )
     hound = _find_combatant(app, name="Clockwork Hound")
     assert hound is not None
+    client.post(
+        f"/campaigns/linden-pass/combat/combatants/{hound.id}/conditions",
+        data={"condition_name": "Grappled", "duration_text": "Until escaped"},
+        follow_redirects=False,
+    )
 
     status_response = client.get(f"/campaigns/linden-pass/combat/status?combatant={hound.id}")
     status_dm_response = client.get(f"/campaigns/linden-pass/combat/dm?combatant={hound.id}")
@@ -1372,15 +1377,24 @@ def test_dm_pages_split_tactical_status_edits_from_control_authority_actions(
     status_dm_body = status_dm_response.get_data(as_text=True)
     controls_body = controls_response.get_data(as_text=True)
 
-    assert "Status edits" in status_body
+    assert "Status edits" not in status_body
+    assert 'id="combat-status-snapshot"' in status_body
     assert 'name="combat_view" value="status"' in status_body
-    assert "Save HP" in status_body
-    assert "Save temp HP" in status_body
-    assert "Save movement" in status_body
-    assert "Save action economy" in status_body
-    assert "Set current turn" in status_body
+    assert 'data-combat-inline-autosubmit' in status_body
+    assert 'aria-label="Current HP for Clockwork Hound"' in status_body
+    assert 'aria-label="Temp HP for Clockwork Hound"' in status_body
+    assert 'aria-label="Remaining movement for Clockwork Hound"' in status_body
+    assert "Save HP" not in status_body
+    assert "Save temp HP" not in status_body
+    assert "Save movement" not in status_body
+    assert "Save action economy" not in status_body
+    assert "Set current" in status_body
+    assert "Add condition" in status_body
+    assert "Save condition" in status_body
+    assert "Remove" in status_body
     assert "combat-status-mutation" in status_body
     assert "hasFocusedFormControl" in status_body
+    assert "queueInlineSubmit" in status_body
     _assert_expected_combatant_revision_field(status_body, hound.revision, at_least=4)
 
     assert "Selected combatant authority" in status_dm_body
@@ -1434,9 +1448,11 @@ def test_status_page_async_mutations_return_status_partials_and_keep_selected_ta
     assert payload["ok"] is True
     assert payload["selected_combatant_id"] == hound.id
     assert "Combat resources updated." in payload["flash_html"]
-    assert "Status edits" in payload["detail_html"]
+    assert "combat-status-snapshot" in payload["detail_html"]
     assert 'name="combat_view" value="status"' in payload["detail_html"]
-    assert "Save movement" in payload["detail_html"]
+    assert 'data-combat-inline-autosubmit' in payload["detail_html"]
+    assert 'aria-label="Remaining movement for Clockwork Hound"' in payload["detail_html"]
+    assert "Save movement" not in payload["detail_html"]
     assert "Turn order" in payload["board_html"]
     refreshed = _find_combatant(app, name="Clockwork Hound")
     assert refreshed is not None
@@ -1485,7 +1501,10 @@ def test_dm_status_async_resource_update_returns_dm_status_live_payload(
     assert payload["selected_combatant_id"] == hound.id
     assert payload["page_url"] == f"/campaigns/linden-pass/combat/dm?combatant={hound.id}"
     assert payload["live_url"] == f"/campaigns/linden-pass/combat/dm/live-state?combatant={hound.id}"
-    assert "Status edits" in payload["tracker_detail_html"]
+    assert "combat-status-snapshot" in payload["tracker_detail_html"]
+    assert 'data-combat-inline-autosubmit' in payload["tracker_detail_html"]
+    assert 'aria-label="Remaining movement for Clockwork Hound"' in payload["tracker_detail_html"]
+    assert "Save movement" not in payload["tracker_detail_html"]
     refreshed_hound = _find_combatant(app, name="Clockwork Hound")
     assert refreshed_hound is not None
     _assert_expected_combatant_revision_field(
@@ -1493,6 +1512,94 @@ def test_dm_status_async_resource_update_returns_dm_status_live_payload(
         refreshed_hound.revision,
         at_least=3,
     )
+
+
+def test_dm_status_async_condition_mutations_keep_selected_combatant(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Clockwork Hound",
+            "turn_value": 12,
+            "current_hp": 22,
+            "max_hp": 22,
+            "temp_hp": 0,
+            "movement_total": 40,
+        },
+        follow_redirects=False,
+    )
+    hound = _find_combatant(app, name="Clockwork Hound")
+    assert hound is not None
+
+    add_response = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{hound.id}/conditions",
+        data={
+            "combat_view": "dm",
+            "view": "status",
+            "combatant": hound.id,
+            "condition_name": "Grappled",
+            "duration_text": "Until escaped",
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert add_response.status_code == 200
+    add_payload = add_response.get_json()
+    assert add_payload["ok"] is True
+    assert add_payload["selected_combatant_id"] == hound.id
+    assert "Grappled" in add_payload["tracker_detail_html"]
+    assert "Until escaped" in add_payload["tracker_detail_html"]
+
+    conditions = _list_conditions(app, hound.id)
+    assert len(conditions) == 1
+
+    update_response = client.post(
+        f"/campaigns/linden-pass/combat/conditions/{conditions[0].id}",
+        data={
+            "combat_view": "dm",
+            "view": "status",
+            "combatant": hound.id,
+            "condition_name": "Restrained",
+            "duration_text": "One minute",
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert update_response.status_code == 200
+    update_payload = update_response.get_json()
+    assert update_payload["ok"] is True
+    assert update_payload["selected_combatant_id"] == hound.id
+    assert "Restrained" in update_payload["tracker_detail_html"]
+    assert "One minute" in update_payload["tracker_detail_html"]
+    assert "Grappled" not in update_payload["tracker_detail_html"]
+
+    conditions = _list_conditions(app, hound.id)
+    assert len(conditions) == 1
+
+    delete_response = client.post(
+        f"/campaigns/linden-pass/combat/conditions/{conditions[0].id}/delete",
+        data={
+            "combat_view": "dm",
+            "view": "status",
+            "combatant": hound.id,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert delete_response.status_code == 200
+    delete_payload = delete_response.get_json()
+    assert delete_payload["ok"] is True
+    assert delete_payload["selected_combatant_id"] == hound.id
+    assert "No conditions are active on this combatant." in delete_payload["tracker_detail_html"]
+    assert _list_conditions(app, hound.id) == []
 
 
 def test_dm_can_add_player_character_and_npc_combatants_and_turn_order_sorts_high_to_low(
@@ -2376,6 +2483,19 @@ def test_dm_can_manage_npc_vitals_resources_and_conditions(app, client, sign_in,
     assert updated_combatant.movement_remaining == 10
     assert len(conditions) == 1
     assert conditions[0].name == "Blinded"
+    assert conditions[0].duration_text == "Until end of next turn"
+
+    update_condition = client.post(
+        f"/campaigns/linden-pass/combat/conditions/{conditions[0].id}",
+        data={"condition_name": "Restrained", "duration_text": "One minute"},
+        follow_redirects=False,
+    )
+    assert update_condition.status_code == 302
+
+    conditions = _list_conditions(app, combatant.id)
+    assert len(conditions) == 1
+    assert conditions[0].name == "Restrained"
+    assert conditions[0].duration_text == "One minute"
 
     delete_condition = client.post(
         f"/campaigns/linden-pass/combat/conditions/{conditions[0].id}/delete",
@@ -3079,7 +3199,9 @@ def test_dm_status_page_renders_only_selected_pc_detail(app, client, sign_in, us
     assert body.index("data-combat-status-detail-root") < body.index("data-combat-status-board-root")
     assert f"/campaigns/linden-pass/combat/status?combatant={arden.id}" in body
     assert 'id="combat-status-snapshot"' in body
-    assert "Compact encounter status first" in body
+    assert "Compact encounter status first" not in body
+    assert 'data-combat-inline-autosubmit' in body
+    assert 'aria-label="Current HP for Arden March"' in body
     assert "Character sections" in body
     assert 'data-combat-section-group' in body
     assert 'data-combat-section-toggle="actions"' in body

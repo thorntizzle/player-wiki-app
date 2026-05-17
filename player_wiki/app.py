@@ -11848,6 +11848,45 @@ def create_app() -> Flask:
             anchor=f"combatant-{deleted_condition.combatant_id}",
         )
 
+    @app.post("/campaigns/<campaign_slug>/combat/conditions/<int:condition_id>")
+    @campaign_scope_access_required("combat")
+    def campaign_combat_update_condition(campaign_slug: str, condition_id: int):
+        if not can_manage_campaign_combat(campaign_slug):
+            abort(403)
+        if require_supported_combat_system(campaign_slug) is None:
+            return respond_to_campaign_combat_mutation(
+                campaign_slug,
+                mutation_succeeded=False,
+                anchor="combat-tracker",
+            )
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        mutation_succeeded = False
+        combatant_id = get_requested_combatant_id_from_values()
+        try:
+            updated_condition = get_campaign_combat_service().update_condition(
+                campaign_slug,
+                condition_id,
+                name=request.form.get("condition_name", ""),
+                duration_text=request.form.get("duration_text", ""),
+                updated_by_user_id=user.id,
+            )
+            combatant_id = updated_condition.combatant_id
+        except CampaignCombatValidationError as exc:
+            flash(str(exc), "error")
+        else:
+            flash("Condition updated.", "success")
+            mutation_succeeded = True
+
+        return respond_to_campaign_combat_mutation(
+            campaign_slug,
+            mutation_succeeded=mutation_succeeded,
+            anchor=f"combatant-{combatant_id}" if combatant_id is not None else "combat-tracker",
+        )
+
     @app.post("/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/delete")
     @campaign_scope_access_required("combat")
     def campaign_combat_delete_combatant(campaign_slug: str, combatant_id: int):

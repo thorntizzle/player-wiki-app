@@ -480,6 +480,36 @@ class CampaignCombatService:
         self.store.bump_tracker_revision(campaign_slug)
         return condition
 
+    def update_condition(
+        self,
+        campaign_slug: str,
+        condition_id: int,
+        *,
+        name: str,
+        duration_text: str = "",
+        updated_by_user_id: int | None = None,
+    ) -> CampaignCombatConditionRecord:
+        normalized_name = (name or "").strip()
+        if not normalized_name:
+            raise CampaignCombatValidationError("Condition name is required.")
+        if len(normalized_name) > 80:
+            raise CampaignCombatValidationError("Condition names must stay under 80 characters.")
+
+        normalized_duration = (duration_text or "").strip()
+        if len(normalized_duration) > 120:
+            raise CampaignCombatValidationError("Condition duration text must stay under 120 characters.")
+
+        condition = self.store.update_condition(
+            campaign_slug,
+            condition_id,
+            name=normalized_name,
+            duration_text=normalized_duration,
+        )
+        if condition is None:
+            raise CampaignCombatValidationError("That condition could not be found.")
+        self.store.bump_tracker_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
+        return condition
+
     def delete_combatant(
         self,
         campaign_slug: str,
