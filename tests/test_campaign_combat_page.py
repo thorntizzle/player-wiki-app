@@ -78,6 +78,17 @@ def _assert_expected_combatant_revision_field(html: str, revision: int, *, at_le
     assert html.count(marker) >= at_least
 
 
+def test_combat_async_form_posts_include_clicked_submit_button():
+    templates_dir = Path(__file__).resolve().parents[1] / "player_wiki" / "templates"
+    combat_script = (templates_dir / "_combat_live_scripts.html").read_text(encoding="utf-8")
+    status_script = (templates_dir / "_combat_status_live_scripts.html").read_text(encoding="utf-8")
+
+    for script in (combat_script, status_script):
+        assert "const buildCombatFormData = (form, submitter) =>" in script
+        assert "formData.append(submitter.name, submitter.value);" in script
+        assert "body: buildCombatFormData(form, event.submitter)" in script
+
+
 def _inventory_item(record, item_id: str) -> dict:
     return next(
         item
@@ -2341,6 +2352,21 @@ def test_owner_player_can_update_own_pc_resources_from_combat_views(
     spell_slots = {item["level"]: item for item in record.state_record.state["spell_slots"]}
     assert spell_slots[2]["used"] == 2
 
+    spell_delta_response = client.post(
+        f"/campaigns/linden-pass/combat/character/combatants/{combatant.id}/spell-slots/2",
+        data={
+            "expected_revision": record.state_record.revision,
+            "used": 2,
+            "delta_used": 1,
+        },
+        follow_redirects=False,
+    )
+
+    assert spell_delta_response.status_code == 302
+    record = get_character("arden-march")
+    spell_slots = {item["level"]: item for item in record.state_record.state["spell_slots"]}
+    assert spell_slots[2]["used"] == 3
+
 
 def test_owner_player_can_update_equipment_state_from_combat_workspace(
     app, client, sign_in, users, get_character
@@ -3521,6 +3547,30 @@ def test_dm_status_can_update_selected_pc_resources_and_spell_slots(
     record = get_character("arden-march")
     spell_slots = {item["level"]: item for item in record.state_record.state["spell_slots"]}
     assert spell_slots[2]["used"] == 2
+
+    spell_delta_response = client.post(
+        f"/campaigns/linden-pass/combat/character/combatants/{arden.id}/spell-slots/2",
+        data={
+            "expected_revision": record.state_record.revision,
+            "combat_view": "dm",
+            "view": "status",
+            "combatant": arden.id,
+            "used": 2,
+            "delta_used": 1,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert spell_delta_response.status_code == 200
+    spell_delta_payload = spell_delta_response.get_json()
+    assert spell_delta_payload["ok"] is True
+    assert spell_delta_payload["selected_combatant_id"] == arden.id
+    assert "Spell slot usage updated." in spell_delta_payload["flash_html"]
+
+    record = get_character("arden-march")
+    spell_slots = {item["level"]: item for item in record.state_record.state["spell_slots"]}
+    assert spell_slots[2]["used"] == 3
 
 
 def test_status_live_state_renders_npc_workspace_sections_for_selected_systems_monster(

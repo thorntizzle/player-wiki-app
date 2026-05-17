@@ -39,6 +39,17 @@
     let requestInFlight = false;
     let lastActivityAt = Date.now();
 
+    const buildCombatFormData = (form, submitter) => {
+      const formData = new FormData(form);
+      if (
+        (submitter instanceof HTMLButtonElement || submitter instanceof HTMLInputElement) &&
+        submitter.name
+      ) {
+        formData.append(submitter.name, submitter.value);
+      }
+      return formData;
+    };
+
     const buildFormStateKey = (form, index) => {
       const method = String(form.getAttribute("method") || "get").toLowerCase();
       const action = String(form.getAttribute("action") || "");
@@ -1038,7 +1049,7 @@
             "X-Requested-With": "XMLHttpRequest",
             "Accept": "application/json",
           },
-          body: new FormData(form),
+          body: buildCombatFormData(form, event.submitter),
           credentials: "same-origin",
         });
         if (!response.ok) {
