@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -19,6 +21,15 @@ class CampaignCharacterConfig:
     characters_dir: Path
     source_root: Path
     source_glob: str
+
+
+@dataclass(slots=True)
+class _CharacterPayloadCacheRecord:
+    definition_signature: tuple[int, int]
+    import_signature: tuple[int, int]
+    system: str
+    definition_payload: Any
+    import_payload: Any
 
 
 def load_campaign_character_config(campaigns_dir: Path, campaign_slug: str) -> CampaignCharacterConfig:
@@ -46,6 +57,49 @@ class CharacterRepository:
     def __init__(self, campaigns_dir: Path, state_store: CharacterStateStore) -> None:
         self.campaigns_dir = campaigns_dir
         self.state_store = state_store
+        self._character_payload_cache: dict[tuple[str, str], _CharacterPayloadCacheRecord] = {}
+
+    @staticmethod
+    def _file_signature(path: Path) -> tuple[int, int]:
+        stats = path.stat()
+        return (stats.st_mtime_ns, stats.st_size)
+
+    @staticmethod
+    def _load_yaml_payload(path: Path) -> Any:
+        raw_payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        return raw_payload
+
+    def _get_cached_character_payloads(
+        self,
+        *,
+        campaign_slug: str,
+        character_slug: str,
+        definition_path: Path,
+        import_path: Path,
+        system: str,
+    ) -> tuple[Any, Any]:
+        definition_signature = self._file_signature(definition_path)
+        import_signature = self._file_signature(import_path)
+        cache_key = (campaign_slug, character_slug)
+        cached = self._character_payload_cache.get(cache_key)
+        if (
+            cached is not None
+            and cached.system == system
+            and cached.definition_signature == definition_signature
+            and cached.import_signature == import_signature
+        ):
+            return deepcopy(cached.definition_payload), deepcopy(cached.import_payload)
+
+        definition_payload = self._load_yaml_payload(definition_path)
+        import_payload = self._load_yaml_payload(import_path)
+        self._character_payload_cache[cache_key] = _CharacterPayloadCacheRecord(
+            definition_signature=definition_signature,
+            import_signature=import_signature,
+            system=system,
+            definition_payload=deepcopy(definition_payload),
+            import_payload=deepcopy(import_payload),
+        )
+        return deepcopy(definition_payload), deepcopy(import_payload)
 
     @staticmethod
     def is_character_visible(record: CharacterRecord) -> bool:
@@ -75,9 +129,15 @@ class CharacterRepository:
         if not definition_path.exists() or not import_path.exists():
             return None
 
-        definition_payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
+        definition_payload, import_payload = self._get_cached_character_payloads(
+            campaign_slug=campaign_slug,
+            character_slug=character_slug,
+            definition_path=definition_path,
+            import_path=import_path,
+            system=config.system,
+        )
+        definition_payload = deepcopy(definition_payload)
         definition_payload.setdefault("system", config.system)
-        import_payload = yaml.safe_load(import_path.read_text(encoding="utf-8")) or {}
         definition = CharacterDefinition.from_dict(definition_payload)
         state_record = self.state_store.get_state(campaign_slug, character_slug)
         if state_record is None:
