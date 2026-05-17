@@ -12,6 +12,8 @@ from player_wiki.character_service import (
 )
 from player_wiki.system_policy import DND_5E_SYSTEM_CODE, XIANXIA_SYSTEM_CODE
 from player_wiki.xianxia_character_model import (
+    XIANXIA_ITEM_TYPES,
+    XIANXIA_ITEM_NATURES,
     XIANXIA_CHARACTER_DEFINITION_SCHEMA_VERSION,
     XIANXIA_CHARACTER_STATE_SCHEMA_VERSION,
     XIANXIA_DEFINITION_FIELD_KEYS,
@@ -21,6 +23,9 @@ from player_wiki.xianxia_character_model import (
     derive_xianxia_check_formula_strings,
     derive_xianxia_defense,
     derive_xianxia_effort_damage_strings,
+    normalize_xianxia_inventory_legacy_tags,
+    normalize_xianxia_item_nature,
+    normalize_xianxia_item_type,
     validate_xianxia_definition_payload,
     xianxia_definition_validation_errors,
 )
@@ -835,9 +840,13 @@ def test_xianxia_state_normalizes_requirement_sketch_aliases_without_deferred_co
     assert xianxia_state["active_stance"] == {"name": "Stone Root"}
     assert xianxia_state["active_aura"] == {"name": "Azure Bell", "systems_ref": {"slug": "azure-bell"}}
     assert xianxia_state["currency"] == {"coin": 0, "supply": 0, "spirit_stones": 0}
-    assert xianxia_state["inventory"] == {
-        "enabled": True,
-        "quantities": [{"id": "spirit-rice", "name": "Spirit rice", "quantity": 2}],
+    assert xianxia_state["inventory"]["enabled"] is True
+    assert xianxia_state["inventory"]["quantities"][0] == {
+        "id": "spirit-rice",
+        "name": "Spirit rice",
+        "quantity": 2,
+        "item_type": "Miscellaneous",
+        "item_nature": "Mundane",
     }
     assert xianxia_state["notes"] == {"player_notes_markdown": "Watch for the Azure Bell timer."}
     for deferred_key in (
@@ -955,6 +964,140 @@ def test_merge_xianxia_state_with_definition_clamps_existing_pools_when_maxima_s
         "supply": 0,
         "spirit_stones": 0,
     }
+
+
+@pytest.mark.parametrize("raw_nature,expected", [
+    ("mundane", XIANXIA_ITEM_NATURES[0]),
+    ("MUNDANE", XIANXIA_ITEM_NATURES[0]),
+    ("  Re-LiC  ", XIANXIA_ITEM_NATURES[1]),
+])
+def test_normalize_xianxia_item_nature_accepts_aliases(raw_nature: str, expected: str):
+    assert normalize_xianxia_item_nature(raw_nature) == expected
+
+
+@pytest.mark.parametrize(
+    "raw_type,expected",
+    [
+        ("weapon", XIANXIA_ITEM_TYPES[0]),
+        ("ARMOR", XIANXIA_ITEM_TYPES[1]),
+        ("  aRtiFacts!! ", XIANXIA_ITEM_TYPES[2]),
+        ("consumable", XIANXIA_ITEM_TYPES[3]),
+        ("tool", XIANXIA_ITEM_TYPES[4]),
+    ],
+)
+def test_normalize_xianxia_item_type_accepts_aliases(raw_type: str, expected: str):
+    assert normalize_xianxia_item_type(raw_type) == expected
+
+
+def test_normalize_xianxia_inventory_legacy_tags_map_known_tags_and_preserves_unknown():
+    item_type, tags, legacy_tags = normalize_xianxia_inventory_legacy_tags(
+        ["weapon", "sigil mark", "mystery mark"],
+        item_type="",
+    )
+
+    assert item_type == XIANXIA_ITEM_TYPES[0]
+    assert tags == ["weapon", "sigil mark", "mystery mark"]
+    assert legacy_tags == ["sigil mark", "mystery mark"]
+
+    legacy_item_type, legacy_tags_list, legacy_unknown = normalize_xianxia_inventory_legacy_tags(
+        ["consumable", "treasure"],
+        item_type="",
+    )
+    assert legacy_item_type == XIANXIA_ITEM_TYPES[3]
+    assert legacy_tags_list == ["consumable", "treasure"]
+    assert legacy_unknown == []
+
+
+def test_xianxia_state_normalization_maps_legacy_inventory_tags_to_item_fields():
+    definition = CharacterDefinition.from_dict(
+        _minimal_definition_payload(
+            system="xianxia",
+            xianxia={
+                "energy_maxima": {"jing": 1, "qi": 1, "shen": 1},
+                "yin_yang": {"yin_max": 1, "yang_max": 1},
+                "durability": {"hp_max": 10, "stance_max": 10},
+            },
+        )
+    )
+
+    state = validate_state(
+        definition,
+        {
+            "status": "active",
+            "inventory": [
+                {
+                    "name": "Spirit rice",
+                    "quantity": "4",
+                    "tags": ["consumable", "sigil-mark"],
+                },
+                {
+                    "name": "Uncertain shard",
+                    "quantity": 1,
+                    "tags": ["tool"],
+                },
+                {
+                    "name": "Old blade",
+                    "quantity": 1,
+                    "tags": ["blade"],
+                },
+            ],
+            "currency": {},
+            "attunement": {},
+            "notes": {},
+            "vitals": {"current_hp": 8, "temp_hp": 0},
+            "xianxia": {},
+        },
+    )
+
+    normalized = state["xianxia"]["inventory"]["quantities"]
+    assert normalized[0]["item_type"] == "Consumable"
+    assert normalized[0]["item_nature"] == "Mundane"
+    assert normalized[0]["legacy_tags"] == ["sigil-mark"]
+    assert normalized[1]["item_type"] == "Miscellaneous"
+    assert normalized[2]["item_type"] == "Weapon"
+
+
+def test_dnd5e_state_validation_is_not_influenced_by_xianxia_inventory_helpers():
+    definition = CharacterDefinition.from_dict(
+        _minimal_definition_payload(
+            system="dnd5e",
+            stats={"max_hp": 12},
+        )
+    )
+
+    state = validate_state(
+        definition,
+        {
+            "status": "active",
+            "vitals": {"current_hp": 12, "temp_hp": 0},
+            "resources": [],
+            "spell_slots": [],
+            "inventory": [{"name": "Copper key", "quantity": 2, "tags": ["weapon", "mystery"]}],
+            "currency": {},
+            "attunement": {},
+            "notes": {},
+        },
+    )
+
+    assert "xianxia" not in state
+    assert state["inventory"] == [
+        {
+            "name": "Copper key",
+            "quantity": 2,
+            "tags": ["weapon", "mystery"],
+            "id": None,
+            "catalog_ref": None,
+            "weight": None,
+            "is_equipped": False,
+            "is_attuned": False,
+            "notes": "",
+            "charges_current": None,
+            "charges_max": None,
+        },
+    ]
+    assert "item_type" not in state["inventory"][0]
+    assert "item_nature" not in state["inventory"][0]
+    assert "legacy_tags" not in state["inventory"][0]
 
 
 def test_dnd5e_initial_state_does_not_emit_xianxia_mutable_state():

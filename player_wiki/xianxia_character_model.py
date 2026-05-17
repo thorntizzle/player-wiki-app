@@ -46,6 +46,116 @@ XIANXIA_CURRENCY_DESCRIPTIONS = {
         "Consumable. Out of battle: gain +1 Insight. In battle: restore ALL Energy."
     ),
 }
+XIANXIA_ITEM_NATURES = ("Mundane", "Relic")
+XIANXIA_ITEM_TYPES = ("Weapon", "Armor", "Artifact", "Consumable", "Miscellaneous")
+XIANXIA_ITEM_NATURE_DEFAULT = XIANXIA_ITEM_NATURES[0]
+XIANXIA_ITEM_TYPE_DEFAULT = XIANXIA_ITEM_TYPES[4]
+
+_XIANXIA_ITEM_NATURE_ALIASES = {
+    "mundane": "Mundane",
+    "relic": "Relic",
+    "relics": "Relic",
+    "re_lic": "Relic",
+}
+
+_XIANXIA_ITEM_TYPE_ALIASES = {
+    "weapon": "Weapon",
+    "weapons": "Weapon",
+    "blade": "Weapon",
+    "blade_weapon": "Weapon",
+    "armor": "Armor",
+    "armour": "Armor",
+    "armors": "Armor",
+    "armours": "Armor",
+    "artifact": "Artifact",
+    "artifacts": "Artifact",
+    "relic": "Artifact",
+    "relics": "Artifact",
+    "consumable": "Consumable",
+    "consumables": "Consumable",
+    "tool": "Miscellaneous",
+    "tools": "Miscellaneous",
+    "treasure": "Miscellaneous",
+    "misc": "Miscellaneous",
+    "miscellaneous": "Miscellaneous",
+    "misc_item": "Miscellaneous",
+}
+
+_XIANXIA_INVENTORY_TAG_TYPE_ALIASES = {
+    "weapon": "Weapon",
+    "weapons": "Weapon",
+    "blade": "Weapon",
+    "blade_weapon": "Weapon",
+    "armor": "Armor",
+    "armour": "Armor",
+    "armors": "Armor",
+    "armours": "Armor",
+    "artifact": "Artifact",
+    "artifacts": "Artifact",
+    "relic": "Artifact",
+    "relics": "Artifact",
+    "consumable": "Consumable",
+    "consumables": "Consumable",
+    "treasure": "Miscellaneous",
+    "tool": "Miscellaneous",
+    "tools": "Miscellaneous",
+    "equipment": "Miscellaneous",
+}
+
+
+def normalize_xianxia_item_nature(value: Any, *, default: str = XIANXIA_ITEM_NATURE_DEFAULT) -> str:
+    normalized = _normalize_token(value)
+    if not normalized:
+        return default
+    return _XIANXIA_ITEM_NATURE_ALIASES.get(normalized, default)
+
+
+def normalize_xianxia_item_type(value: Any, *, default: str = XIANXIA_ITEM_TYPE_DEFAULT) -> str:
+    normalized = _normalize_token(value)
+    if not normalized:
+        return default
+    return _XIANXIA_ITEM_TYPE_ALIASES.get(normalized, default)
+
+
+def normalize_xianxia_inventory_legacy_tags(
+    tags: Any,
+    *,
+    item_type: str = "",
+) -> tuple[str, list[str], list[str]]:
+    """Return inferred item type and both mapped and unknown legacy tags."""
+
+    explicit_type = normalize_xianxia_item_type(item_type, default="")
+    normalized: list[str] = []
+    unknown_tags: list[str] = []
+    inferred_types: set[str] = set()
+    non_misc_inferred_types: set[str] = set()
+
+    raw_tags = list(tags or []) if isinstance(tags, (list, tuple)) else [tags]
+    for raw_tag in raw_tags:
+        normalized_tag = _normalize_text(raw_tag)
+        if not normalized_tag:
+            continue
+        normalized.append(normalized_tag)
+        mapped_type = _XIANXIA_INVENTORY_TAG_TYPE_ALIASES.get(_normalize_token(normalized_tag))
+        if mapped_type:
+            inferred_types.add(mapped_type)
+            if mapped_type != XIANXIA_ITEM_TYPE_DEFAULT:
+                non_misc_inferred_types.add(mapped_type)
+        else:
+            unknown_tags.append(normalized_tag)
+
+    if explicit_type:
+        return explicit_type, normalized, unknown_tags
+
+    if len(non_misc_inferred_types) == 1:
+        return next(iter(non_misc_inferred_types)), normalized, unknown_tags
+    if len(non_misc_inferred_types) > 1:
+        return XIANXIA_ITEM_TYPE_DEFAULT, normalized, unknown_tags
+
+    if len(inferred_types) == 1:
+        return next(iter(inferred_types)), normalized, unknown_tags
+    return XIANXIA_ITEM_TYPE_DEFAULT, normalized, unknown_tags
+
 XIANXIA_DEFENSE_BASE = 10
 XIANXIA_CHECK_FORMULA = "1d20 + Attribute + Realm modifier + situational modifiers"
 XIANXIA_CHECK_SPEND_BONUS = "+1d6"
@@ -1487,9 +1597,17 @@ def _normalize_xianxia_inventory_quantities(values: Any) -> list[dict[str, Any]]
         raw_tags = value.get("tags")
         tags = [
             _normalize_text(tag)
-            for tag in (raw_tags if isinstance(raw_tags, list) else ([] if raw_tags is None else [raw_tags]))
+            for tag in (
+                raw_tags
+                if isinstance(raw_tags, list)
+                else ([] if raw_tags is None else [raw_tags])
+            )
             if _normalize_text(tag)
         ]
+        item_type, normalized_tags, legacy_tags = normalize_xianxia_inventory_legacy_tags(
+            tags,
+            item_type=value.get("item_type"),
+        )
         quantity = value.get("quantity") if "quantity" in value else value.get("default_quantity")
         record: dict[str, Any] = {"quantity": _normalize_int(quantity, default=0)}
         if item_id:
@@ -1498,10 +1616,17 @@ def _normalize_xianxia_inventory_quantities(values: Any) -> list[dict[str, Any]]
             record["catalog_ref"] = catalog_ref
         if name:
             record["name"] = name
+        item_nature = normalize_xianxia_item_nature(value.get("item_nature"))
+        if item_nature:
+            record["item_nature"] = item_nature
+        if item_type:
+            record["item_type"] = item_type
         if notes:
             record["notes"] = notes
-        if tags:
-            record["tags"] = tags
+        if normalized_tags:
+            record["tags"] = normalized_tags
+        if legacy_tags:
+            record["legacy_tags"] = legacy_tags
         records.append(record)
     return records
 

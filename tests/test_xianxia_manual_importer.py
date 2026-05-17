@@ -366,15 +366,17 @@ def test_manual_importer_preserves_inventory_rows_with_notes_and_tags():
 
     inventory = initial_state["xianxia"]["inventory"]["quantities"]
     assert initial_state["xianxia"]["inventory"]["enabled"] is True
-    assert inventory == [
-        {
-            "name": "Spirit Rice",
-            "quantity": 3,
-            "notes": "Emergency cache",
-            "tags": ["ritual", "fragile"],
-        },
-        {"name": "Field Rations", "quantity": 2},
-    ]
+    assert inventory[0]["name"] == "Spirit Rice"
+    assert inventory[0]["quantity"] == 3
+    assert inventory[0]["notes"] == "Emergency cache"
+    assert inventory[0]["tags"] == ["ritual", "fragile"]
+    assert inventory[0]["item_type"] == "Miscellaneous"
+    assert inventory[0]["item_nature"] == "Mundane"
+    assert inventory[0]["legacy_tags"] == ["ritual", "fragile"]
+    assert inventory[1]["name"] == "Field Rations"
+    assert inventory[1]["quantity"] == 2
+    assert inventory[1]["item_type"] == "Miscellaneous"
+    assert inventory[1]["item_nature"] == "Mundane"
 
 
 def test_xianxia_manual_import_route_previews_then_creates_native_sheet(
@@ -489,12 +491,14 @@ def test_xianxia_manual_import_route_previews_then_creates_native_sheet(
     }
     assert state["xianxia"].get("active_stance") is None
     assert state["xianxia"].get("active_aura") is None
-    assert state["xianxia"]["inventory"]["quantities"][0] == {
-        "name": "Spirit rice",
-        "quantity": 3,
-        "notes": "Emergency cache",
-        "tags": ["consumable", "treasure"],
-    }
+    state_inventory_row = state["xianxia"]["inventory"]["quantities"][0]
+    assert state_inventory_row["name"] == "Spirit rice"
+    assert state_inventory_row["quantity"] == 3
+    assert state_inventory_row["notes"] == "Emergency cache"
+    assert state_inventory_row["tags"] == ["consumable", "treasure"]
+    assert state_inventory_row["item_type"] == "Consumable"
+    assert state_inventory_row["item_nature"] == "Mundane"
+    assert "legacy_tags" not in state_inventory_row
     assert state["inventory"][0]["tags"] == ["consumable", "treasure"]
 
     martial_html = unescape(
