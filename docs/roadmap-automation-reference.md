@@ -30,6 +30,74 @@ General notes:
 - `--live-sync-mode auto` tells the worker to sync DB-backed or content changes that a code deploy would not carry.
 - `--finish-mode local-only` keeps the pass local and suppresses commit, push, deploy, and live sync.
 
+## Roadmap Authoring Pattern
+
+Use this pattern when turning a new app feature into roadmap work for Codex-driven implementation.
+
+The goal is not just to capture requirements. The goal is to shape the roadmap so each unchecked checkbox can become one precise worker assignment with a small file ownership surface, clear verification, and a clean close-out note.
+
+### Feature Intake
+
+Start each feature section with the durable product facts:
+
+- Name the feature and the user-facing outcome.
+- State the system lane or app surface it belongs to, such as Xianxia character sheets, Systems Wiki, live session, or DND-5E character tools.
+- Record the key domain vocabulary and canonical values.
+- Decide what is deliberately out of scope for this milestone.
+- Call out compatibility boundaries, especially behavior that must not change in other systems.
+
+### Checklist Shape
+
+Write one unchecked checkbox per implementation step. Each checkbox should be small enough that a nested worker can implement it without solving the whole feature.
+
+Prefer steps in this order:
+
+- [ ] Vocabulary, constants, and normalization helpers.
+- [ ] Policy helpers or capability gates.
+- [ ] Storage schema, data shape, or migration/preservation behavior.
+- [ ] Source, catalog, seed, or Systems-entry representation.
+- [ ] Importer or legacy-data conversion behavior.
+- [ ] Mutation routes, services, or command handlers.
+- [ ] Presenter/context changes.
+- [ ] Template or frontend controls.
+- [ ] Focused tests and regression coverage.
+- [ ] Skill docs, repo-map, and roadmap close-out updates.
+- [ ] Explicit non-goals that keep later milestones from leaking into the current pass.
+
+Do not bury several implementation phases under one checkbox. If a worker would need to touch unrelated modules, split the item.
+
+### Worker-Sized Item Template
+
+Use this sentence shape when a checklist item needs more precision:
+
+```markdown
+- [ ] Add <specific behavior> in <owned file/module/surface>, covering <inputs/state/UI>, preserving <compatibility boundary>, and validating with <focused test target>.
+```
+
+Good checklist items usually name at least one of these:
+
+- The data contract or canonical vocabulary being introduced.
+- The existing helper, route lane, presenter, template, or store that should own the change.
+- The backward-compatibility or preservation requirement.
+- The smallest realistic test or workflow check.
+- The thing this item must not implement.
+
+### Completion Notes
+
+When a worker finishes a checkbox, leave the roadmap useful for the next worker:
+
+- Mark only the completed checkbox.
+- Add a short `Completed scope:` note under that item.
+- Mention the important files, behavior, and intentionally deferred scope.
+- Add the exact validation command and result when tests or workflow checks ran.
+- If the implementation changed routing, ownership, or app architecture assumptions, update the relevant skill reference docs and repo map in the same pass.
+
+### Scope Guardrails
+
+Every feature roadmap should keep deferred work visible but separate. Use explicit boundary items when a feature sits next to tempting larger work, such as combat automation, deploy behavior, live sync, source-policy changes, or cross-system DND-5E behavior.
+
+When a roadmap item is only planning or documentation, say so in its completion note. When it changes shipped app behavior, the worker should follow the normal ship close-out: tests, roadmap update, skill-doc maintenance when applicable, commit, and push unless the run is explicitly local-only.
+
 ## Systems Roadmap
 
 Script:
