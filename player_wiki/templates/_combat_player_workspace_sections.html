@@ -165,6 +165,8 @@
         {% endif %}
       {% elif section.slug == 'spells' %}
         {% if section.spellcasting %}
+          {% set spell_row_sections = section.spellcasting.row_sections | list %}
+          {% set primary_section = (spell_row_sections | first) if spell_row_sections and not section.spellcasting.is_multiclass else none %}
           <article class="detail-card combat-spellcasting-panel">
             <div class="combat-spellcasting-panel__summary">
               {% if section.spellcasting.is_multiclass %}
@@ -173,7 +175,6 @@
                   <p>{{ section.spellcasting.multiclass_summary }}</p>
                 </div>
               {% else %}
-                {% set primary_section = (section.spellcasting.row_sections | list | first) if section.spellcasting.row_sections else none %}
                 <div class="combat-spellcasting-summary">
                   <h3>{{ (primary_section.title if primary_section else section.spellcasting.spellcasting_class) or "Spellcasting" }}</h3>
                   <p>
@@ -241,19 +242,17 @@
             {% endfor %}
           </article>
 
-          {% if section.spellcasting.row_sections %}
-            {% for spell_section in section.spellcasting.row_sections %}
-              {% if section.spellcasting.is_multiclass or section.spellcasting.row_sections|length > 1 %}
+          {% if spell_row_sections %}
+            {% for spell_section in spell_row_sections %}
+              {% set duplicates_primary_summary = (
+                primary_section
+                and spell_section.class_row_id == primary_section.class_row_id
+                and spell_section.title == primary_section.title
+              ) %}
+              {% if (section.spellcasting.is_multiclass or spell_row_sections|length > 1) and not duplicates_primary_summary %}
                 <div class="section-heading">
                   <div>
                     <h3>{{ spell_section.title }}</h3>
-                    {% if spell_section.spellcasting_ability %}
-                      <p class="meta">
-                        {{ spell_section.spellcasting_ability }} spellcasting
-                        {% if spell_section.spell_save_dc %}| Save DC {{ spell_section.spell_save_dc }}{% endif %}
-                        {% if spell_section.spell_attack_bonus %}| Attack {{ spell_section.spell_attack_bonus }}{% endif %}
-                      </p>
-                    {% endif %}
                   </div>
                 </div>
               {% endif %}

@@ -1954,6 +1954,51 @@ def test_dm_combat_dm_live_state_keeps_selected_combatant_revision_guards(
 
 def test_owner_player_combat_page_uses_character_workspace_layout(app, client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
+    definition_path = (
+        Path(app.config["TEST_CAMPAIGNS_DIR"])
+        / "linden-pass"
+        / "characters"
+        / "arden-march"
+        / "definition.yaml"
+    )
+    definition_payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
+    spellcasting = dict(definition_payload.get("spellcasting") or {})
+    source_row_id = "feature-spell-source:test-mage-initiate"
+    spellcasting["class_rows"] = [
+        {
+            "class_row_id": "class-row-1",
+            "class_name": "Sorcerer",
+            "level": 5,
+            "spellcasting_ability": "Charisma",
+            "spell_save_dc": 15,
+            "spell_attack_bonus": 7,
+            "spell_mode": "known",
+        }
+    ]
+    spellcasting["source_rows"] = [
+        {
+            "source_row_id": source_row_id,
+            "source_row_kind": "feat",
+            "title": "Test Mage Initiate",
+        }
+    ]
+    spellcasting["spells"] = list(spellcasting.get("spells") or []) + [
+        {
+            "name": "Borrowed Spark",
+            "mark": "Known",
+            "casting_time": "1 action",
+            "range": "Self",
+            "duration": "Instantaneous",
+            "components": "V",
+            "spell_source_row_id": source_row_id,
+            "spell_source_row_kind": "feat",
+            "spell_source_row_title": "Test Mage Initiate",
+            "grant_source_label": "Test Mage Initiate",
+        }
+    ]
+    definition_payload["spellcasting"] = spellcasting
+    definition_path.write_text(yaml.safe_dump(definition_payload, sort_keys=False), encoding="utf-8")
+
     client.post(
         "/campaigns/linden-pass/combat/player-combatants",
         data={"character_slug": "arden-march", "turn_value": 18},
@@ -1994,6 +2039,10 @@ def test_owner_player_combat_page_uses_character_workspace_layout(app, client, s
     assert body.count("combat-spellcasting-summary") == 1
     assert body.count("Save DC 15") == 1
     assert body.count("Attack +7") == 1
+    normalized_body = re.sub(r"\s+", " ", body)
+    assert normalized_body.count("Charisma spellcasting | Save DC 15 | Attack +7") == 1
+    assert "Test Mage Initiate" in body
+    assert "Borrowed Spark" in body
     assert "Current limits" not in body
     assert "Encounter context" not in body
 
