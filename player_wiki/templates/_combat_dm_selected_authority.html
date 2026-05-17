@@ -23,8 +23,7 @@
           type="number"
           name="initiative_priority"
           min="1"
-          value="{{ selected_combatant.initiative_priority if selected_combatant.initiative_priority else '' }}"
-          placeholder="No priority"
+          value="{{ selected_combatant.initiative_priority }}"
         >
       </label>
       <p class="meta">Dex tie-breaker: {{ selected_combatant.dexterity_modifier_label }}.</p>

@@ -7,7 +7,7 @@
   <div class="section-heading">
     <div>
       <h2>Turn order priorities</h2>
-      <p class="meta">Turn order resolves by turn value first, then Dex mod, then DM priority. Priority 1 acts before priority 2.</p>
+      <p class="meta">Turn order resolves by turn value first, then Dex mod, then DM priority. Priority defaults to 1, and 1 acts before 2.</p>
     </div>
   </div>
   {% if combat_tracker.combatants %}
@@ -55,8 +55,7 @@
                 type="number"
                 name="initiative_priority"
                 min="1"
-                value="{{ combatant.initiative_priority if combatant.initiative_priority else '' }}"
-                placeholder="No priority"
+                value="{{ combatant.initiative_priority }}"
               >
             </label>
             <button type="submit">Save order</button>
@@ -97,7 +96,7 @@
       </label>
       <label class="field">
         <span>Priority</span>
-        <input type="number" name="initiative_priority" min="1" placeholder="No priority">
+        <input type="number" name="initiative_priority" min="1" value="1">
       </label>
       <button type="submit">Add player character</button>
     </form>
@@ -149,7 +148,7 @@
         </label>
         <label class="field">
           <span>Priority</span>
-          <input type="number" name="initiative_priority" min="1" placeholder="No priority">
+          <input type="number" name="initiative_priority" min="1" value="1">
         </label>
         <button type="submit" data-systems-monster-submit disabled>Add from Systems</button>
       </form>
@@ -189,7 +188,7 @@
           </label>
           <label class="field">
             <span>Priority</span>
-            <input type="number" name="initiative_priority" min="1" placeholder="No priority">
+            <input type="number" name="initiative_priority" min="1" value="1">
           </label>
           <button type="submit">Add from DM Content</button>
         </form>
@@ -226,7 +225,7 @@
     </label>
     <label class="field">
       <span>Priority</span>
-      <input type="number" name="initiative_priority" min="1" placeholder="No priority">
+      <input type="number" name="initiative_priority" min="1" value="1">
     </label>
     <label class="field">
       <span>Current HP</span>

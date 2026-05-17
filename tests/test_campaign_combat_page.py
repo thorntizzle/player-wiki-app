@@ -1682,6 +1682,7 @@ def test_dm_can_add_player_character_and_npc_combatants_and_turn_order_sorts_hig
     assert combatants[1].current_hp == 22
     assert combatants[1].movement_total == 40
     assert combatants[1].dexterity_modifier == 0
+    assert combatants[1].initiative_priority == 1
 
 
 def test_turn_order_uses_dexterity_modifier_then_dm_priority_for_ties(
@@ -1789,15 +1790,38 @@ def test_turn_order_uses_dexterity_modifier_then_dm_priority_for_ties(
     combatants = _list_combatants(app)
     assert [combatant.display_name for combatant in combatants] == [
         "Beta Guard",
-        "Alpha Guard",
         "Gamma Guard",
         "Selene Brook",
         "Zeta Guard",
+        "Alpha Guard",
         "Arden March",
         "Slow Guard",
     ]
     assert _find_combatant(app, character_slug="arden-march").dexterity_modifier == 2
     assert _find_combatant(app, name="Beta Guard").initiative_priority == 1
+    assert _find_combatant(app, name="Alpha Guard").initiative_priority == 2
+
+    alpha = _find_combatant(app, name="Alpha Guard")
+    assert alpha is not None
+    client.post(
+        f"/campaigns/linden-pass/combat/combatants/{alpha.id}/turn",
+        data={
+            "turn_value": 15,
+            "initiative_priority": "",
+            "expected_combatant_revision": alpha.revision,
+        },
+        follow_redirects=False,
+    )
+
+    combatants = _list_combatants(app)
+    assert _find_combatant(app, name="Alpha Guard").initiative_priority == 1
+    assert [combatant.display_name for combatant in combatants][:5] == [
+        "Alpha Guard",
+        "Beta Guard",
+        "Gamma Guard",
+        "Selene Brook",
+        "Zeta Guard",
+    ]
 
 
 def test_dm_can_set_current_turn_and_advance_turn_refreshing_resources(app, client, sign_in, users):
@@ -3112,7 +3136,7 @@ def test_init_db_backfills_legacy_combatant_source_identity_and_revision(tmp_pat
             "source_ref": "arden-march",
             "revision": 1,
             "dexterity_modifier": 3,
-            "initiative_priority": 0,
+            "initiative_priority": 1,
         },
         {
             "display_name": "Clockwork Hound",
@@ -3121,7 +3145,7 @@ def test_init_db_backfills_legacy_combatant_source_identity_and_revision(tmp_pat
             "source_ref": "",
             "revision": 1,
             "dexterity_modifier": 2,
-            "initiative_priority": 0,
+            "initiative_priority": 1,
         },
     ]
 
@@ -3178,6 +3202,8 @@ def test_combat_page_renders_context_panel_and_dm_page_focuses_selected_combatan
     assert "Current turn" in dm_html
     assert f'data-combatant-id="{hound.id}"' in dm_html
     assert f'data-combatant-id="{arden.id}"' in dm_html
+    assert 'name="turn_value"' in dm_html
+    assert 'name="initiative_priority"' in dm_html
     assert dm_html.count('id="combat-status-snapshot"') == 1
     assert "Advance turn" in dm_html
     assert "Clear tracker" not in dm_html

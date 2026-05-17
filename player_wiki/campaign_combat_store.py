@@ -154,10 +154,7 @@ class CampaignCombatStore:
             ORDER BY
                 turn_value DESC,
                 dexterity_modifier DESC,
-                CASE
-                    WHEN initiative_priority > 0 THEN initiative_priority
-                    ELSE 1000000
-                END ASC,
+                initiative_priority ASC,
                 display_name COLLATE NOCASE ASC,
                 id ASC
             """,
@@ -178,7 +175,7 @@ class CampaignCombatStore:
         turn_value: int = 0,
         initiative_bonus: int = 0,
         dexterity_modifier: int = 0,
-        initiative_priority: int = 0,
+        initiative_priority: int = 1,
         current_hp: int = 0,
         max_hp: int = 0,
         temp_hp: int = 0,
@@ -595,7 +592,7 @@ class CampaignCombatStore:
             turn_value=int(row["turn_value"] or 0),
             initiative_bonus=int(row["initiative_bonus"] or 0),
             dexterity_modifier=int(row["dexterity_modifier"] or 0),
-            initiative_priority=max(0, int(row["initiative_priority"] or 0)),
+            initiative_priority=max(1, int(row["initiative_priority"] or 1)),
             current_hp=int(row["current_hp"] or 0),
             max_hp=int(row["max_hp"] or 0),
             temp_hp=int(row["temp_hp"] or 0),

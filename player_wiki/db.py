@@ -263,7 +263,7 @@ CREATE TABLE IF NOT EXISTS campaign_combatants (
     turn_value INTEGER NOT NULL DEFAULT 0,
     initiative_bonus INTEGER NOT NULL DEFAULT 0,
     dexterity_modifier INTEGER NOT NULL DEFAULT 0,
-    initiative_priority INTEGER NOT NULL DEFAULT 0,
+    initiative_priority INTEGER NOT NULL DEFAULT 1,
     current_hp INTEGER NOT NULL DEFAULT 0,
     max_hp INTEGER NOT NULL DEFAULT 0,
     temp_hp INTEGER NOT NULL DEFAULT 0,
@@ -883,7 +883,7 @@ def _migrate_campaign_combatants_for_tie_breakers(connection: sqlite3.Connection
         connection.execute(
             """
             ALTER TABLE campaign_combatants
-            ADD COLUMN initiative_priority INTEGER NOT NULL DEFAULT 0
+            ADD COLUMN initiative_priority INTEGER NOT NULL DEFAULT 1
             """
         )
 
@@ -899,8 +899,8 @@ def _migrate_campaign_combatants_for_tie_breakers(connection: sqlite3.Connection
         """
         UPDATE campaign_combatants
         SET initiative_priority = CASE
-            WHEN initiative_priority IS NULL OR initiative_priority < 0
-                THEN 0
+            WHEN initiative_priority IS NULL OR initiative_priority < 1
+                THEN 1
             ELSE initiative_priority
         END
         """

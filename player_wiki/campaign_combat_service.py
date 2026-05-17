@@ -145,7 +145,7 @@ class CampaignCombatService:
         )
         normalized_initiative_priority = self._parse_initiative_priority(
             initiative_priority,
-            default=0,
+            default=1,
         )
 
         try:
@@ -212,7 +212,7 @@ class CampaignCombatService:
         )
         normalized_initiative_priority = self._parse_initiative_priority(
             initiative_priority,
-            default=0,
+            default=1,
         )
         normalized_max_hp = self._parse_int(max_hp, label="Max HP", default=None, minimum=0)
         normalized_current_hp = self._parse_int(
@@ -796,10 +796,10 @@ class CampaignCombatService:
 
     def _parse_initiative_priority(self, value: Any | None, *, default: int) -> int:
         if value is None:
-            return max(0, int(default or 0))
+            return max(1, int(default or 1))
         normalized = str(value).strip()
         if not normalized:
-            return 0
+            return 1
         try:
             parsed = int(normalized)
         except ValueError as exc:

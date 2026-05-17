@@ -2230,6 +2230,8 @@ button {
 .combat-inline-badge-form,
 .combat-inline-resource-form {
   display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
 }
 
 .combat-badge,
