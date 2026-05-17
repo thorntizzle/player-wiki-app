@@ -7,6 +7,7 @@ from typing import Any
 from .character_models import CharacterRecord, CharacterStateRecord
 from .character_spell_slots import normalize_spell_slot_lane_id, spell_slot_lane_title_map
 from .character_store import CharacterStateStore
+from .repository import slugify
 from .system_policy import is_xianxia_system
 from .xianxia_character_model import (
     XIANXIA_CURRENCY_KEYS,
@@ -16,6 +17,7 @@ from .xianxia_character_model import (
     xianxia_stance_max,
     xianxia_yang_max,
     xianxia_yin_max,
+    normalize_xianxia_inventory_row,
 )
 
 
@@ -185,6 +187,105 @@ class CharacterStateService:
     ) -> CharacterStateRecord:
         state = deepcopy(record.state_record.state)
         self._apply_inventory_quantity_update(state, item_id, quantity=quantity, delta=delta)
+        return self._replace_state(
+            record,
+            state,
+            expected_revision=expected_revision,
+            updated_by_user_id=updated_by_user_id,
+        )
+
+    def add_xianxia_inventory_item(
+        self,
+        record: CharacterRecord,
+        item: dict[str, Any],
+        *,
+        expected_revision: int,
+        updated_by_user_id: int | None = None,
+    ) -> CharacterStateRecord:
+        self._require_xianxia_record(record)
+        state = deepcopy(record.state_record.state)
+        state = self._normalize_xianxia_inventory_state_payload(state)
+        self._apply_xianxia_inventory_add_item(state, item)
+        return self._replace_state(
+            record,
+            state,
+            expected_revision=expected_revision,
+            updated_by_user_id=updated_by_user_id,
+        )
+
+    def update_xianxia_inventory_item(
+        self,
+        record: CharacterRecord,
+        item_id: str,
+        item: dict[str, Any],
+        *,
+        expected_revision: int,
+        updated_by_user_id: int | None = None,
+    ) -> CharacterStateRecord:
+        self._require_xianxia_record(record)
+        state = deepcopy(record.state_record.state)
+        state = self._normalize_xianxia_inventory_state_payload(state)
+        self._apply_xianxia_inventory_edit_item(state, item_id, item)
+        return self._replace_state(
+            record,
+            state,
+            expected_revision=expected_revision,
+            updated_by_user_id=updated_by_user_id,
+        )
+
+    def remove_xianxia_inventory_item(
+        self,
+        record: CharacterRecord,
+        item_id: str,
+        *,
+        expected_revision: int,
+        updated_by_user_id: int | None = None,
+    ) -> CharacterStateRecord:
+        self._require_xianxia_record(record)
+        state = deepcopy(record.state_record.state)
+        state = self._normalize_xianxia_inventory_state_payload(state)
+        self._apply_xianxia_inventory_remove_item(state, item_id)
+        return self._replace_state(
+            record,
+            state,
+            expected_revision=expected_revision,
+            updated_by_user_id=updated_by_user_id,
+        )
+
+    def update_xianxia_inventory_quantity(
+        self,
+        record: CharacterRecord,
+        item_id: str,
+        *,
+        expected_revision: int,
+        quantity: Any | None = None,
+        delta: Any | None = None,
+        updated_by_user_id: int | None = None,
+    ) -> CharacterStateRecord:
+        self._require_xianxia_record(record)
+        state = deepcopy(record.state_record.state)
+        state = self._normalize_xianxia_inventory_state_payload(state)
+        self._apply_xianxia_inventory_quantity_update(state, item_id, quantity=quantity, delta=delta)
+        return self._replace_state(
+            record,
+            state,
+            expected_revision=expected_revision,
+            updated_by_user_id=updated_by_user_id,
+        )
+
+    def update_xianxia_inventory_equipped_state(
+        self,
+        record: CharacterRecord,
+        item_id: str,
+        *,
+        expected_revision: int,
+        is_equipped: bool,
+        updated_by_user_id: int | None = None,
+    ) -> CharacterStateRecord:
+        self._require_xianxia_record(record)
+        state = deepcopy(record.state_record.state)
+        state = self._normalize_xianxia_inventory_state_payload(state)
+        self._apply_xianxia_inventory_equipped_state(state, item_id, is_equipped)
         return self._replace_state(
             record,
             state,
@@ -589,6 +690,333 @@ class CharacterStateService:
         if delta is not None and str(delta).strip() != "":
             next_quantity += int(delta)
         item["quantity"] = next_quantity
+
+    def _require_xianxia_record(self, record: CharacterRecord) -> None:
+        if not is_xianxia_system(record.definition.system):
+            raise ValueError("Xianxia inventory operations require a Xianxia character.")
+
+    def _coerce_text(self, value: Any) -> str:
+        return " ".join(str(value or "").split()).strip()
+
+    def _coerce_bool(self, value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(int(value))
+        return self._coerce_text(value).casefold() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+            "equipped",
+            "enabled",
+            "used",
+            "recorded",
+        }
+
+    def _coerce_tags(self, value: Any) -> list[str]:
+        if value is None:
+            return []
+        raw_values: list[Any]
+        if isinstance(value, list):
+            raw_values = list(value)
+        elif isinstance(value, tuple):
+            raw_values = list(value)
+        elif isinstance(value, str):
+            raw_values = value.split(",")
+        else:
+            raw_values = [value]
+        return [self._coerce_text(item) for item in raw_values if self._coerce_text(item)]
+
+    def _normalize_xianxia_inventory_state_payload(self, state: dict[str, Any]) -> dict[str, Any]:
+        xianxia_state = dict(state.get("xianxia") or {})
+        raw_inventory = dict(xianxia_state.get("inventory") or {})
+        raw_quantities = raw_inventory.get("quantities", raw_inventory.get("items", []))
+        quantities = (
+            [
+                {"id": str(key), "quantity": value}
+                for key, value in dict(raw_quantities).items()
+            ]
+            if isinstance(raw_quantities, dict)
+            else list(raw_quantities)
+        )
+        if not isinstance(quantities, list):
+            quantities = []
+        normalized_quantities = self._coerce_xianxia_inventory_items(quantities)
+        xianxia_state["inventory"] = {
+            "enabled": bool(normalized_quantities),
+            "quantities": normalized_quantities,
+        }
+        state["xianxia"] = xianxia_state
+        self._sync_top_level_xianxia_inventory(state, normalized_quantities)
+        return state
+
+    def _coerce_xianxia_inventory_row(self, value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            return {}
+        payload = normalize_xianxia_inventory_row(value)
+        if not payload:
+            return {}
+        quantity = int(payload.get("quantity") or 0)
+        payload["quantity"] = quantity
+        if "id" not in payload or not payload["id"]:
+            return payload
+        payload["id"] = self._coerce_text(payload["id"])
+        return payload
+
+    def _xianxia_inventory_rows(self, state: dict[str, Any]) -> list[dict[str, Any]]:
+        xianxia_state = dict(state.get("xianxia") or {})
+        raw_inventory = dict(xianxia_state.get("inventory") or {})
+        return [self._coerce_xianxia_inventory_row(item) for item in list(raw_inventory.get("quantities") or [])]
+
+    def _existing_inventory_ids(self, items: list[dict[str, Any]]) -> set[str]:
+        return {self._coerce_text(item.get("id")) for item in items if self._coerce_text(item.get("id"))}
+
+    def _derive_inventory_id(self, row: dict[str, Any], existing_ids: set[str]) -> str:
+        item_type = self._coerce_text(row.get("item_type"))
+        name = self._coerce_text(row.get("name") or row.get("label"))
+        catalog_ref = self._coerce_text(row.get("catalog_ref"))
+        base = slugify(f"{item_type} {name}" if name else item_type) or slugify(catalog_ref)
+        if not base:
+            base = "item"
+        candidate = base
+        if candidate not in existing_ids:
+            return candidate
+        counter = 2
+        while True:
+            suffixed = f"{base}-{counter}"
+            if suffixed not in existing_ids:
+                return suffixed
+            counter += 1
+
+    def _sync_top_level_xianxia_inventory(
+        self,
+        state: dict[str, Any],
+        quantities: list[dict[str, Any]],
+    ) -> None:
+        xianxia_state = dict(state.get("xianxia") or {})
+        xianxia_state["inventory"] = {
+            "enabled": bool(quantities),
+            "quantities": quantities,
+        }
+        state["xianxia"] = xianxia_state
+
+        top_level_inventory: list[dict[str, Any]] = []
+        for item in quantities:
+            top_level_inventory.append(
+                {
+                    "id": item.get("id"),
+                    "catalog_ref": item.get("catalog_ref"),
+                    "name": item.get("name"),
+                    "quantity": int(item.get("quantity") or 0),
+                    "item_type": item.get("item_type"),
+                    "item_nature": item.get("item_nature"),
+                    "equippable": bool(item.get("equippable", False)),
+                    "is_equipped": bool(item.get("is_equipped", False)),
+                    "weight": item.get("weight"),
+                    "is_attuned": bool(item.get("is_attuned", False)),
+                    "charges_current": item.get("charges_current"),
+                    "charges_max": item.get("charges_max"),
+                    "notes": item.get("notes", ""),
+                    "tags": list(item.get("tags") or []),
+                    "legacy_tags": list(item.get("legacy_tags") or []),
+                    "systems_ref": item.get("systems_ref"),
+                }
+            )
+        state["inventory"] = top_level_inventory
+
+    def _coerce_inventory_systems_ref(self, systems_ref: Any) -> dict[str, str] | None:
+        if isinstance(systems_ref, dict):
+            payload: dict[str, str] = {}
+            for key, value in systems_ref.items():
+                normalized_key = self._coerce_text(key)
+                if not normalized_key:
+                    continue
+                normalized_value = self._coerce_text(value)
+                if not normalized_value:
+                    continue
+                payload[normalized_key] = normalized_value
+            return payload if payload else None
+        if not isinstance(systems_ref, str):
+            return None
+        normalized = self._coerce_text(systems_ref)
+        if not normalized:
+            return None
+        return {"slug": normalized}
+
+    def _payload_to_xianxia_inventory_row(self, item: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(item, dict):
+            return {}
+        row = {
+            "id": self._coerce_text(item.get("id")),
+            "catalog_ref": self._coerce_text(item.get("catalog_ref")),
+            "name": self._coerce_text(item.get("name") or item.get("label")),
+            "quantity": int(item.get("quantity")) if item.get("quantity") not in (None, "") else 1,
+            "notes": self._coerce_text(item.get("notes") or item.get("note")),
+            "tags": self._coerce_tags(item.get("tags")),
+            "item_type": self._coerce_text(item.get("item_type")),
+            "item_nature": self._coerce_text(item.get("item_nature")),
+            "equippable": item.get("equippable") if "equippable" in item else None,
+            "is_equipped": item.get("is_equipped") if "is_equipped" in item else None,
+            "systems_ref": None,
+        }
+        systems_ref = item.get("systems_ref")
+        if isinstance(systems_ref, dict):
+            row["systems_ref"] = self._coerce_inventory_systems_ref(systems_ref)
+        elif isinstance(systems_ref, str):
+            normalized = self._coerce_text(systems_ref)
+            if normalized:
+                row["systems_ref"] = {"slug": normalized}
+
+        return {key: value for key, value in row.items() if value is not None and value != []}
+
+    def _merge_xianxia_inventory_row(
+        self,
+        base_row: dict[str, Any],
+        update: dict[str, Any],
+    ) -> dict[str, Any]:
+        merged: dict[str, Any] = dict(base_row)
+        explicit_equippable = "equippable" in update
+        if "item_type" in update and update["item_type"]:
+            merged["item_type"] = update["item_type"]
+        if "item_nature" in update:
+            merged["item_nature"] = self._coerce_text(update.get("item_nature"))
+        if "name" in update:
+            merged["name"] = self._coerce_text(update.get("name"))
+        if "quantity" in update:
+            merged["quantity"] = int(update.get("quantity") or 0)
+        if "notes" in update:
+            merged["notes"] = self._coerce_text(update.get("notes"))
+        if "tags" in update:
+            merged["tags"] = self._coerce_tags(update.get("tags"))
+        if "catalog_ref" in update:
+            merged["catalog_ref"] = self._coerce_text(update.get("catalog_ref"))
+        if "equippable" in update:
+            merged["equippable"] = self._coerce_bool(update.get("equippable"))
+        if "is_equipped" in update:
+            merged["is_equipped"] = self._coerce_bool(update.get("is_equipped"))
+        if "systems_ref" in update:
+            systems_ref = update.get("systems_ref")
+            merged["systems_ref"] = (
+                self._coerce_inventory_systems_ref(systems_ref)
+                if systems_ref is not None
+                else None
+            )
+            if merged.get("systems_ref") is None:
+                merged.pop("systems_ref", None)
+
+        if not explicit_equippable:
+            merged.pop("equippable", None)
+
+        normalized = normalize_xianxia_inventory_row(merged)
+        if not bool(normalized.get("equippable", False)):
+            normalized["is_equipped"] = False
+
+        return normalized
+
+    def _apply_xianxia_inventory_add_item(self, state: dict[str, Any], item: dict[str, Any]) -> None:
+        payload = self._payload_to_xianxia_inventory_row(item)
+        if "name" not in payload and "catalog_ref" not in payload:
+            raise ValueError("Inventory item requires a name.")
+        if "quantity" not in payload:
+            payload["quantity"] = 1
+
+        quantities = self._xianxia_inventory_rows(state)
+        existing_ids = self._existing_inventory_ids(quantities)
+        if not payload.get("id"):
+            payload["id"] = self._derive_inventory_id(payload, existing_ids)
+        elif payload["id"] in existing_ids:
+            raise ValueError(f"Duplicate inventory item id: {payload['id']}")
+        normalized = self._coerce_xianxia_inventory_row(payload)
+        if normalized.get("is_equipped") and not bool(normalized.get("equippable", False)):
+            raise ValueError("Cannot equip non-equippable item.")
+
+        quantities.append(normalized)
+        self._sync_top_level_xianxia_inventory(state, self._coerce_xianxia_inventory_items(quantities))
+
+    def _coerce_xianxia_inventory_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        normalized_items: list[dict[str, Any]] = []
+        existing_ids: set[str] = set()
+        for item in items:
+            normalized = self._coerce_xianxia_inventory_row(item)
+            if not normalized:
+                continue
+            row_id = self._coerce_text(normalized.get("id"))
+            if row_id and row_id in existing_ids:
+                normalized["id"] = self._derive_inventory_id(normalized, existing_ids)
+            elif not row_id:
+                normalized["id"] = self._derive_inventory_id(normalized, existing_ids)
+            existing_ids.add(self._coerce_text(normalized["id"]))
+            normalized_items.append(normalize_xianxia_inventory_row(normalized))
+        return normalized_items
+
+    def _apply_xianxia_inventory_remove_item(self, state: dict[str, Any], item_id: str) -> None:
+        quantities = self._xianxia_inventory_rows(state)
+        next_quantities = [item for item in quantities if item.get("id") != item_id]
+        if len(next_quantities) == len(quantities):
+            raise ValueError(f"Unknown Xianxia inventory item: {item_id}")
+        self._sync_top_level_xianxia_inventory(
+            state,
+            self._coerce_xianxia_inventory_items(next_quantities),
+        )
+
+    def _apply_xianxia_inventory_edit_item(self, state: dict[str, Any], item_id: str, item: dict[str, Any]) -> None:
+        quantities = self._xianxia_inventory_rows(state)
+        for index, existing in enumerate(quantities):
+            if existing.get("id") == item_id:
+                payload = self._payload_to_xianxia_inventory_row(item)
+                merged = self._merge_xianxia_inventory_row(existing, payload)
+                merged["id"] = item_id
+                quantities[index] = merged
+                self._sync_top_level_xianxia_inventory(
+                    state,
+                    self._coerce_xianxia_inventory_items(quantities),
+                )
+                return
+        raise ValueError(f"Unknown Xianxia inventory item: {item_id}")
+
+    def _apply_xianxia_inventory_quantity_update(
+        self,
+        state: dict[str, Any],
+        item_id: str,
+        *,
+        quantity: Any | None = None,
+        delta: Any | None = None,
+    ) -> None:
+        quantities = self._xianxia_inventory_rows(state)
+        for row in quantities:
+            if row.get("id") == item_id:
+                next_quantity = int(row.get("quantity") or 0)
+                if quantity is not None and str(quantity).strip() != "":
+                    next_quantity = int(quantity)
+                if delta is not None and str(delta).strip() != "":
+                    next_quantity += int(delta)
+                row["quantity"] = next_quantity
+                self._sync_top_level_xianxia_inventory(
+                    state,
+                    self._coerce_xianxia_inventory_items(quantities),
+                )
+                return
+        raise ValueError(f"Unknown Xianxia inventory item: {item_id}")
+
+    def _apply_xianxia_inventory_equipped_state(
+        self,
+        state: dict[str, Any],
+        item_id: str,
+        is_equipped: bool,
+    ) -> None:
+        quantities = self._xianxia_inventory_rows(state)
+        for row in quantities:
+            if row.get("id") == item_id:
+                if is_equipped and not bool(row.get("equippable", False)):
+                    raise ValueError("Cannot equip a non-equippable item.")
+                row["is_equipped"] = bool(is_equipped)
+                self._sync_top_level_xianxia_inventory(
+                    state,
+                    self._coerce_xianxia_inventory_items(quantities),
+                )
+                return
+        raise ValueError(f"Unknown Xianxia inventory item: {item_id}")
 
     def _apply_currency_update(
         self,

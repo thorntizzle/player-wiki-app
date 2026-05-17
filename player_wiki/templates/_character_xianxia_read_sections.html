@@ -679,6 +679,27 @@
           <p class="meta">No necessary tools are recorded on this sheet yet.</p>
         {% endif %}
       </article>
+      <article class="detail-card">
+        <h3>Equipped inventory</h3>
+        {% if xianxia_sheet.equipment.equipped_items %}
+          <ul class="plain-list slot-list">
+            {% for item in xianxia_sheet.equipment.equipped_items %}
+              <li>
+                <span>{{ item.name }}</span>
+                <strong>{{ item.item_type }}</strong>
+              </li>
+              {% if item.item_type == 'Armor' %}
+                <li class="meta">Armor is displayed here only; Defense still uses the manual armor bonus above.</li>
+              {% endif %}
+              {% if item.notes %}
+                <li class="meta">{{ item.notes }}</li>
+              {% endif %}
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="meta">No equippable inventory is currently marked equipped.</p>
+        {% endif %}
+      </article>
     </div>
   </section>
 {% endif %}
@@ -732,6 +753,80 @@
         {% endfor %}
       {% endif %}
     </div>
+    {% if is_session_mode | default(false) %}
+      <article class="detail-card session-card" id="xianxia-inventory-add">
+        <h3>Add inventory item</h3>
+        <form
+          class="stack-form"
+          data-character-sheet-edit-form="xianxia-inventory-add"
+          method="post"
+          action="{{ url_for('character_session_xianxia_inventory_add', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+        >
+          <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+          <input type="hidden" name="mode" value="session">
+          <input type="hidden" name="page" value="{{ character_subpage }}">
+          {% if session_return_view | default("") %}
+            <input type="hidden" name="return_view" value="{{ session_return_view }}">
+          {% endif %}
+          <div class="builder-field-grid">
+            <label class="session-field">
+              <span>Name</span>
+              <input type="text" name="name" required>
+            </label>
+            <label class="session-field">
+              <span>Quantity</span>
+              <input type="number" name="quantity" value="1" min="0">
+            </label>
+            <label class="session-field">
+              <span>Nature</span>
+              <select name="item_nature">
+                <option value="Mundane">Mundane</option>
+                <option value="Relic">Relic</option>
+              </select>
+            </label>
+            <label class="session-field">
+              <span>Type</span>
+              <select name="item_type">
+                <option value="Weapon">Weapon</option>
+                <option value="Armor">Armor</option>
+                <option value="Artifact">Artifact</option>
+                <option value="Consumable">Consumable</option>
+                <option value="Miscellaneous" selected>Miscellaneous</option>
+              </select>
+            </label>
+            <label class="session-field">
+              <span>Tags</span>
+              <input type="text" name="tags" placeholder="comma separated">
+            </label>
+            <label class="session-field">
+              <span>Systems slug</span>
+              <input type="text" name="systems_ref_slug">
+            </label>
+            <label class="session-field">
+              <span>Systems type</span>
+              <select name="systems_ref_entry_type">
+                <option value="">Unlinked</option>
+                <option value="equipment">Equipment</option>
+                <option value="armor">Armor</option>
+              </select>
+            </label>
+            <label class="session-field">
+              <span>Equippable override</span>
+              <select name="equippable">
+                <option value="">Use type default</option>
+                <option value="1">Equippable</option>
+                <option value="0">Not equippable</option>
+              </select>
+            </label>
+          </div>
+          <label class="session-field">
+            <span>Notes</span>
+            <textarea name="notes" rows="2"></textarea>
+          </label>
+          <button class="button-link" type="submit">Add item</button>
+        </form>
+      </article>
+    {% endif %}
     {% if xianxia_sheet.inventory.quantities %}
       <div class="inventory-list">
         {% for item in xianxia_sheet.inventory.quantities %}
@@ -740,6 +835,11 @@
               <h3>{{ item.name }}</h3>
               <strong>x{{ item.quantity }}</strong>
             </div>
+            <p class="meta">
+              {{ item.item_nature }} {{ item.item_type }}
+              {% if item.equippable %} | Equippable{% endif %}
+              {% if item.is_equipped %} | Equipped{% endif %}
+            </p>
             {% if item.catalog_ref or item.id %}
               <p class="meta">
                 {% if item.catalog_ref %}{{ item.catalog_ref }}{% else %}{{ item.id }}{% endif %}
@@ -750,6 +850,128 @@
             {% endif %}
             {% if item.notes %}
               <p>{{ item.notes }}</p>
+            {% endif %}
+            {% if is_session_mode | default(false) %}
+              <div class="detail-cluster">
+                <form
+                  class="session-vitals-form"
+                  data-character-sheet-edit-form="xianxia-inventory-quantity"
+                  method="post"
+                  action="{{ url_for('character_session_inventory', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
+                >
+                  <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                  <input type="hidden" name="mode" value="session">
+                  <input type="hidden" name="page" value="{{ character_subpage }}">
+                  {% if session_return_view | default("") %}
+                    <input type="hidden" name="return_view" value="{{ session_return_view }}">
+                  {% endif %}
+                  <label class="session-field">
+                    <span>Quantity</span>
+                    <input type="number" name="quantity" value="{{ item.quantity }}" min="0">
+                  </label>
+                  <button class="button-link subtle" type="submit">Save quantity</button>
+                </form>
+                {% if item.equippable %}
+                  <form
+                    class="session-vitals-form"
+                    data-character-sheet-edit-form="xianxia-inventory-equipped"
+                    method="post"
+                    action="{{ url_for('character_session_xianxia_inventory_equipped', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
+                  >
+                    <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                    <input type="hidden" name="mode" value="session">
+                    <input type="hidden" name="page" value="{{ character_subpage }}">
+                    {% if session_return_view | default("") %}
+                      <input type="hidden" name="return_view" value="{{ session_return_view }}">
+                    {% endif %}
+                    <input type="hidden" name="is_equipped" value="{% if item.is_equipped %}0{% else %}1{% endif %}">
+                    <button class="button-link subtle" type="submit">{% if item.is_equipped %}Unequip{% else %}Equip{% endif %}</button>
+                  </form>
+                {% endif %}
+                <details class="detail-card">
+                  <summary>Edit item</summary>
+                  <form
+                    class="stack-form"
+                    data-character-sheet-edit-form="xianxia-inventory-edit"
+                    method="post"
+                    action="{{ url_for('character_session_xianxia_inventory_update', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
+                  >
+                    <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                    <input type="hidden" name="mode" value="session">
+                    <input type="hidden" name="page" value="{{ character_subpage }}">
+                    {% if session_return_view | default("") %}
+                      <input type="hidden" name="return_view" value="{{ session_return_view }}">
+                    {% endif %}
+                    <div class="builder-field-grid">
+                      <label class="session-field">
+                        <span>Name</span>
+                        <input type="text" name="name" value="{{ item.name }}" required>
+                      </label>
+                      <label class="session-field">
+                        <span>Quantity</span>
+                        <input type="number" name="quantity" value="{{ item.quantity }}" min="0">
+                      </label>
+                      <label class="session-field">
+                        <span>Nature</span>
+                        <select name="item_nature">
+                          <option value="Mundane" {% if item.item_nature == 'Mundane' %}selected{% endif %}>Mundane</option>
+                          <option value="Relic" {% if item.item_nature == 'Relic' %}selected{% endif %}>Relic</option>
+                        </select>
+                      </label>
+                      <label class="session-field">
+                        <span>Type</span>
+                        <select name="item_type">
+                          {% for item_type in ['Weapon', 'Armor', 'Artifact', 'Consumable', 'Miscellaneous'] %}
+                            <option value="{{ item_type }}" {% if item.item_type == item_type %}selected{% endif %}>{{ item_type }}</option>
+                          {% endfor %}
+                        </select>
+                      </label>
+                      <label class="session-field">
+                        <span>Tags</span>
+                        <input type="text" name="tags" value="{{ item.tags | join(', ') }}">
+                      </label>
+                      <label class="session-field">
+                        <span>Systems slug</span>
+                        <input type="text" name="systems_ref_slug" value="{{ item.systems_ref.slug or '' }}">
+                      </label>
+                      <label class="session-field">
+                        <span>Systems type</span>
+                        <select name="systems_ref_entry_type">
+                          <option value="">Unlinked</option>
+                          <option value="equipment" {% if item.systems_ref.entry_type == 'equipment' %}selected{% endif %}>Equipment</option>
+                          <option value="armor" {% if item.systems_ref.entry_type == 'armor' %}selected{% endif %}>Armor</option>
+                        </select>
+                      </label>
+                      <label class="session-field">
+                        <span>Equippable</span>
+                        <select name="equippable">
+                          <option value="1" {% if item.equippable %}selected{% endif %}>Equippable</option>
+                          <option value="0" {% if not item.equippable %}selected{% endif %}>Not equippable</option>
+                        </select>
+                      </label>
+                    </div>
+                    <label class="session-field">
+                      <span>Notes</span>
+                      <textarea name="notes" rows="2">{{ item.notes }}</textarea>
+                    </label>
+                    <button class="button-link" type="submit">Save item</button>
+                  </form>
+                  <form
+                    class="session-vitals-form"
+                    data-character-sheet-edit-form="xianxia-inventory-remove"
+                    method="post"
+                    action="{{ url_for('character_session_xianxia_inventory_remove', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
+                  >
+                    <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                    <input type="hidden" name="mode" value="session">
+                    <input type="hidden" name="page" value="{{ character_subpage }}">
+                    {% if session_return_view | default("") %}
+                      <input type="hidden" name="return_view" value="{{ session_return_view }}">
+                    {% endif %}
+                    <button class="button-link subtle" type="submit">Remove item</button>
+                  </form>
+                </details>
+              </div>
             {% endif %}
           </article>
         {% endfor %}

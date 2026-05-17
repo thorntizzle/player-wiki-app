@@ -24,6 +24,7 @@ from player_wiki.xianxia_character_model import (
     derive_xianxia_defense,
     derive_xianxia_effort_damage_strings,
     normalize_xianxia_inventory_legacy_tags,
+    normalize_xianxia_inventory_row,
     normalize_xianxia_item_nature,
     normalize_xianxia_item_type,
     validate_xianxia_definition_payload,
@@ -847,6 +848,8 @@ def test_xianxia_state_normalizes_requirement_sketch_aliases_without_deferred_co
         "quantity": 2,
         "item_type": "Miscellaneous",
         "item_nature": "Mundane",
+        "equippable": False,
+        "is_equipped": False,
     }
     assert xianxia_state["notes"] == {"player_notes_markdown": "Watch for the Azure Bell timer."}
     for deferred_key in (
@@ -1006,6 +1009,49 @@ def test_normalize_xianxia_inventory_legacy_tags_map_known_tags_and_preserves_un
     assert legacy_item_type == XIANXIA_ITEM_TYPES[3]
     assert legacy_tags_list == ["consumable", "treasure"]
     assert legacy_unknown == []
+
+
+def test_normalize_xianxia_inventory_row_applies_equippable_defaults_without_explicit_override():
+    weapon = normalize_xianxia_inventory_row({"name": "Jian", "item_type": "Weapon", "quantity": 2})
+    assert weapon["equippable"] is True
+    assert weapon["is_equipped"] is False
+    assert weapon["item_type"] == XIANXIA_ITEM_TYPES[0]
+
+    armor = normalize_xianxia_inventory_row({"name": "Scale Mail", "item_type": "Armor", "equippable": 0})
+    assert armor["equippable"] is False
+
+    artifact = normalize_xianxia_inventory_row(
+        {"name": "Dragon Amulet", "item_type": "Artifact", "equippable": 1}
+    )
+    assert artifact["equippable"] is True
+    assert artifact["is_equipped"] is False
+
+    relic_default = normalize_xianxia_inventory_row({"name": "Dragon Seal", "item_type": "Artifact"})
+    assert relic_default["equippable"] is False
+    assert relic_default["is_equipped"] is False
+
+    consumable = normalize_xianxia_inventory_row({"name": "Spirit Rice", "item_type": "Consumable"})
+    assert consumable["equippable"] is False
+
+    misc = normalize_xianxia_inventory_row({"name": "Rope", "item_type": "Miscellaneous"})
+    assert misc["equippable"] is False
+
+
+def test_normalize_xianxia_inventory_row_preserves_legacy_tags_and_systems_ref():
+    row = normalize_xianxia_inventory_row(
+        {
+            "name": "Rune Ring",
+            "item_type": "Artifact",
+            "tags": ["artifact", "moonstone", "sigil-mark"],
+            "notes": "Bound at the Gate",
+            "systems_ref": {"slug": "rune-ring", "entry_type": "artifact"},
+        }
+    )
+
+    assert row["item_type"] == XIANXIA_ITEM_TYPES[2]
+    assert row["tags"] == ["artifact", "moonstone", "sigil-mark"]
+    assert row["legacy_tags"] == ["moonstone", "sigil-mark"]
+    assert row["systems_ref"] == {"slug": "rune-ring", "entry_type": "artifact"}
 
 
 def test_xianxia_state_normalization_maps_legacy_inventory_tags_to_item_fields():

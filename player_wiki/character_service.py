@@ -13,6 +13,7 @@ from .character_spell_slots import (
 from .system_policy import is_xianxia_system
 from .xianxia_character_model import (
     build_xianxia_initial_state_payload,
+    normalize_xianxia_inventory_row,
     normalize_xianxia_state_payload,
     xianxia_hp_max,
 )
@@ -497,6 +498,12 @@ def validate_state(definition: CharacterDefinition, state: dict[str, Any]) -> di
             raise CharacterStateValidationError(
                 f"inventory quantity for '{item.get('name')}' cannot be negative"
             )
+        if is_xianxia:
+            normalized_item = normalize_xianxia_inventory_row(item)
+            if not normalized_item:
+                continue
+            normalized_inventory.append(normalized_item)
+            continue
         normalized_inventory.append(
             {
                 "id": item.get("id"),

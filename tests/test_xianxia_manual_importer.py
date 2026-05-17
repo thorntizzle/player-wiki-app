@@ -379,6 +379,61 @@ def test_manual_importer_preserves_inventory_rows_with_notes_and_tags():
     assert inventory[1]["item_nature"] == "Mundane"
 
 
+def test_manual_importer_inventory_text_supports_extended_fields():
+    payload = _base_payload()
+    payload["inventory_text"] = (
+        "Spirit Rice | 3 | consumable, treasure | Emergency cache | "
+        "systems_ref_slug=spirit-rice | equippable=true\n"
+        "Dragon Sigil | 1 | artifact | Legacy marking\n"
+        "Obsidian Fang | 2 | weapon | Reforged edge | systems_ref_slug=obsidian-fang | systems_ref_entry_type=artifact | item_nature=Relic | item_type=Weapon"
+    )
+
+    _, _, initial_state = build_xianxia_manual_import_character(payload)
+
+    inventory = initial_state["xianxia"]["inventory"]["quantities"]
+    assert len(inventory) == 3
+    assert inventory[0]["name"] == "Spirit Rice"
+    assert inventory[0]["quantity"] == 3
+    assert inventory[0]["item_type"] == "Consumable"
+    assert inventory[0]["item_nature"] == "Mundane"
+    assert inventory[0]["tags"] == ["consumable", "treasure"]
+    assert inventory[0]["notes"] == "Emergency cache"
+    assert inventory[0]["equippable"] is True
+    assert inventory[0]["systems_ref"] == {"slug": "spirit-rice"}
+
+    assert inventory[1]["name"] == "Dragon Sigil"
+    assert inventory[1]["quantity"] == 1
+    assert inventory[1]["item_type"] == "Artifact"
+    assert inventory[1]["equippable"] is False
+
+    assert inventory[2]["name"] == "Obsidian Fang"
+    assert inventory[2]["item_type"] == "Weapon"
+    assert inventory[2]["item_nature"] == "Relic"
+    assert inventory[2]["equippable"] is True
+    assert inventory[2]["systems_ref"] == {
+        "slug": "obsidian-fang",
+        "entry_type": "artifact",
+    }
+
+
+def test_manual_importer_inventory_text_remains_backward_compatible():
+    payload = _base_payload()
+    payload["inventory_text"] = "Spirit Rice | 3 | consumable, treasure | Emergency cache\n"
+
+    _, _, initial_state = build_xianxia_manual_import_character(payload)
+
+    inventory = initial_state["xianxia"]["inventory"]["quantities"]
+    assert len(inventory) == 1
+    assert inventory[0]["quantity"] == 3
+    assert inventory[0]["name"] == "Spirit Rice"
+    assert inventory[0]["item_type"] == "Consumable"
+    assert inventory[0]["item_nature"] == "Mundane"
+    assert inventory[0]["notes"] == "Emergency cache"
+    assert inventory[0]["equippable"] is False
+    assert inventory[0]["is_equipped"] is False
+    assert inventory[0]["tags"] == ["consumable", "treasure"]
+
+
 def test_xianxia_manual_import_route_previews_then_creates_native_sheet(
     app,
     client,

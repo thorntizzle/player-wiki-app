@@ -117,6 +117,19 @@ def normalize_xianxia_item_type(value: Any, *, default: str = XIANXIA_ITEM_TYPE_
     return _XIANXIA_ITEM_TYPE_ALIASES.get(normalized, default)
 
 
+def normalize_xianxia_inventory_equippable(
+    value: Any,
+    *,
+    item_type: str = "",
+    explicit: bool = False,
+) -> bool:
+    if explicit:
+        return _normalize_bool(value)
+
+    normalized_item_type = normalize_xianxia_item_type(item_type)
+    return normalized_item_type in {XIANXIA_ITEM_TYPES[0], XIANXIA_ITEM_TYPES[1]}
+
+
 def normalize_xianxia_inventory_legacy_tags(
     tags: Any,
     *,
@@ -155,6 +168,11 @@ def normalize_xianxia_inventory_legacy_tags(
     if len(inferred_types) == 1:
         return next(iter(inferred_types)), normalized, unknown_tags
     return XIANXIA_ITEM_TYPE_DEFAULT, normalized, unknown_tags
+
+
+def normalize_xianxia_inventory_row(value: Any) -> dict[str, Any]:
+    normalized_rows = _normalize_xianxia_inventory_quantities([value])
+    return normalized_rows[0] if normalized_rows else {}
 
 XIANXIA_DEFENSE_BASE = 10
 XIANXIA_CHECK_FORMULA = "1d20 + Attribute + Realm modifier + situational modifiers"
@@ -1608,7 +1626,19 @@ def _normalize_xianxia_inventory_quantities(values: Any) -> list[dict[str, Any]]
             tags,
             item_type=value.get("item_type"),
         )
+        item_nature = normalize_xianxia_item_nature(value.get("item_nature"))
         quantity = value.get("quantity") if "quantity" in value else value.get("default_quantity")
+        has_explicit_equippable = "equippable" in value
+        equippable = normalize_xianxia_inventory_equippable(
+            value.get("equippable") if has_explicit_equippable else None,
+            item_type=item_type,
+            explicit=has_explicit_equippable,
+        )
+        is_equipped = (
+            _normalize_bool(value.get("is_equipped"))
+            if "is_equipped" in value
+            else False
+        ) and equippable
         record: dict[str, Any] = {"quantity": _normalize_int(quantity, default=0)}
         if item_id:
             record["id"] = item_id
@@ -1616,7 +1646,6 @@ def _normalize_xianxia_inventory_quantities(values: Any) -> list[dict[str, Any]]
             record["catalog_ref"] = catalog_ref
         if name:
             record["name"] = name
-        item_nature = normalize_xianxia_item_nature(value.get("item_nature"))
         if item_nature:
             record["item_nature"] = item_nature
         if item_type:
@@ -1625,8 +1654,13 @@ def _normalize_xianxia_inventory_quantities(values: Any) -> list[dict[str, Any]]
             record["notes"] = notes
         if normalized_tags:
             record["tags"] = normalized_tags
+        record["equippable"] = equippable
+        record["is_equipped"] = is_equipped
         if legacy_tags:
             record["legacy_tags"] = legacy_tags
+        systems_ref = value.get("systems_ref")
+        if isinstance(systems_ref, dict):
+            record["systems_ref"] = systems_ref
         records.append(record)
     return records
 

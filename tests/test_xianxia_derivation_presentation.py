@@ -1400,6 +1400,92 @@ def test_xianxia_session_resources_allow_hp_and_temp_hp_updates(
     assert updated.state_record.state["xianxia"]["vitals"]["temp_hp"] == 1
 
 
+def test_xianxia_session_inventory_add_quantity_and_equip_controls(
+    client,
+    sign_in,
+    users,
+    app,
+    get_character,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Session Inventory Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    inventory_response = client.get(
+        "/campaigns/linden-pass/session/character?character=session-inventory-crane&page=inventory"
+    )
+    assert inventory_response.status_code == 200
+    inventory_html = unescape(inventory_response.get_data(as_text=True))
+    assert 'id="xianxia-inventory-add"' in inventory_html
+    assert 'name="item_type"' in inventory_html
+
+    record = get_character("session-inventory-crane")
+    assert record is not None
+    add_response = client.post(
+        "/campaigns/linden-pass/characters/session-inventory-crane/session/xianxia-inventory/add",
+        data={
+            "expected_revision": record.state_record.revision,
+            "name": "Training Jian",
+            "quantity": "2",
+            "item_nature": "Relic",
+            "item_type": "Weapon",
+            "tags": "weapon, ritual",
+            "notes": "Bound practice blade",
+            "systems_ref_slug": "training-jian",
+            "systems_ref_entry_type": "equipment",
+            "mode": "session",
+            "page": "inventory",
+            "return_view": "session-character",
+        },
+        follow_redirects=False,
+    )
+    assert add_response.status_code == 302
+    assert "#xianxia-inventory" in add_response.headers["Location"]
+
+    updated = get_character("session-inventory-crane")
+    assert updated is not None
+    item = updated.state_record.state["xianxia"]["inventory"]["quantities"][0]
+    assert item["id"] == "weapon-training-jian"
+    assert item["item_nature"] == "Relic"
+    assert item["item_type"] == "Weapon"
+    assert item["equippable"] is True
+    assert item["is_equipped"] is False
+    assert item["systems_ref"] == {"slug": "training-jian", "entry_type": "equipment"}
+    assert updated.state_record.state["inventory"][0]["systems_ref"] == item["systems_ref"]
+
+    equip_response = client.post(
+        "/campaigns/linden-pass/characters/session-inventory-crane/session/xianxia-inventory/weapon-training-jian/equipped",
+        data={
+            "expected_revision": updated.state_record.revision,
+            "is_equipped": "1",
+            "mode": "session",
+            "page": "inventory",
+            "return_view": "session-character",
+        },
+        follow_redirects=False,
+    )
+    assert equip_response.status_code == 302
+
+    equipped = get_character("session-inventory-crane")
+    assert equipped is not None
+    assert equipped.state_record.state["xianxia"]["inventory"]["quantities"][0]["is_equipped"] is True
+
+    equipment_response = client.get(
+        "/campaigns/linden-pass/session/character?character=session-inventory-crane&page=equipment"
+    )
+    assert equipment_response.status_code == 200
+    equipment_html = unescape(equipment_response.get_data(as_text=True))
+    assert "Equipped inventory" in equipment_html
+    assert "Training Jian" in equipment_html
+
+
 def test_xianxia_session_resources_allow_stance_and_temp_stance_updates(
     client,
     sign_in,
@@ -2621,7 +2707,17 @@ def test_xianxia_state_normalizer_clamps_current_pools_without_resetting_referen
     assert state["active_aura"] == {"name": "Azure Bell", "systems_ref": {"slug": "azure-bell"}}
     assert state["inventory"] == {
         "enabled": True,
-        "quantities": [{"id": "spirit-rice", "name": "Spirit rice", "quantity": 2}],
+        "quantities": [
+            {
+                "id": "spirit-rice",
+                "name": "Spirit rice",
+                "quantity": 2,
+                "item_nature": "Mundane",
+                "item_type": "Miscellaneous",
+                "equippable": False,
+                "is_equipped": False,
+            }
+        ],
     }
     assert state["notes"] == {"player_notes_markdown": "Track recovery blockers manually."}
 

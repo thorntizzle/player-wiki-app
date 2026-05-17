@@ -122,6 +122,8 @@ from .xianxia_character_model import (
     XIANXIA_EFFORT_KEYS,
     XIANXIA_EFFORT_LABELS,
     XIANXIA_ENERGY_KEYS,
+    XIANXIA_ITEM_NATURES,
+    XIANXIA_ITEM_TYPES,
 )
 from .xianxia_character_builder import (
     XIANXIA_GM_GRANTED_GENERIC_TECHNIQUE_INPUT,
@@ -14285,6 +14287,40 @@ def create_app() -> Flask:
             action=update_active_state,
         )
 
+    def _xianxia_inventory_item_payload_from_form() -> dict[str, object]:
+        tags = [
+            tag.strip()
+            for tag in request.form.get("tags", "").split(",")
+            if tag.strip()
+        ]
+        payload: dict[str, object] = {
+            "id": request.form.get("item_id", "").strip(),
+            "name": request.form.get("name", "").strip(),
+            "quantity": request.form.get("quantity", "1"),
+            "item_nature": request.form.get("item_nature", XIANXIA_ITEM_NATURES[0]),
+            "item_type": request.form.get("item_type", XIANXIA_ITEM_TYPES[-1]),
+            "notes": request.form.get("notes", "").strip(),
+            "tags": tags,
+            "catalog_ref": request.form.get("catalog_ref", "").strip(),
+        }
+        systems_ref = {
+            key: value
+            for key, value in {
+                "slug": request.form.get("systems_ref_slug", "").strip(),
+                "entry_type": request.form.get("systems_ref_entry_type", "").strip(),
+                "source_id": request.form.get("systems_ref_source_id", "").strip(),
+            }.items()
+            if value
+        }
+        if systems_ref:
+            payload["systems_ref"] = systems_ref
+        equippable_value = request.form.get("equippable", "").strip()
+        if equippable_value:
+            payload["equippable"] = equippable_value == "1"
+        if "is_equipped" in request.form:
+            payload["is_equipped"] = request.form.get("is_equipped") == "1"
+        return payload
+
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/resources/<resource_id>")
     @campaign_scope_access_required("characters")
     def character_session_resource(
@@ -14346,17 +14382,95 @@ def create_app() -> Flask:
         character_slug: str,
         item_id: str,
     ):
-        return run_session_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="session-inventory",
-            success_message="Inventory updated.",
-            action=lambda record, expected_revision, user_id: get_character_state_service().update_inventory_quantity(
+        def update_inventory(record, expected_revision, user_id):
+            if is_xianxia_system(record.definition.system):
+                return get_character_state_service().update_xianxia_inventory_quantity(
+                    record,
+                    item_id,
+                    expected_revision=expected_revision,
+                    quantity=request.form.get("quantity"),
+                    delta=request.form.get("delta"),
+                    updated_by_user_id=user_id,
+                )
+            return get_character_state_service().update_inventory_quantity(
                 record,
                 item_id,
                 expected_revision=expected_revision,
                 quantity=request.form.get("quantity"),
                 delta=request.form.get("delta"),
+                updated_by_user_id=user_id,
+            )
+
+        return run_session_mutation(
+            campaign_slug,
+            character_slug,
+            anchor="session-inventory",
+            success_message="Inventory updated.",
+            action=update_inventory,
+        )
+
+    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/add")
+    @campaign_scope_access_required("characters")
+    def character_session_xianxia_inventory_add(campaign_slug: str, character_slug: str):
+        return run_session_mutation(
+            campaign_slug,
+            character_slug,
+            anchor="xianxia-inventory",
+            success_message="Inventory item added.",
+            action=lambda record, expected_revision, user_id: get_character_state_service().add_xianxia_inventory_item(
+                record,
+                _xianxia_inventory_item_payload_from_form(),
+                expected_revision=expected_revision,
+                updated_by_user_id=user_id,
+            ),
+        )
+
+    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>/update")
+    @campaign_scope_access_required("characters")
+    def character_session_xianxia_inventory_update(campaign_slug: str, character_slug: str, item_id: str):
+        return run_session_mutation(
+            campaign_slug,
+            character_slug,
+            anchor="xianxia-inventory",
+            success_message="Inventory item updated.",
+            action=lambda record, expected_revision, user_id: get_character_state_service().update_xianxia_inventory_item(
+                record,
+                item_id,
+                _xianxia_inventory_item_payload_from_form(),
+                expected_revision=expected_revision,
+                updated_by_user_id=user_id,
+            ),
+        )
+
+    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>/remove")
+    @campaign_scope_access_required("characters")
+    def character_session_xianxia_inventory_remove(campaign_slug: str, character_slug: str, item_id: str):
+        return run_session_mutation(
+            campaign_slug,
+            character_slug,
+            anchor="xianxia-inventory",
+            success_message="Inventory item removed.",
+            action=lambda record, expected_revision, user_id: get_character_state_service().remove_xianxia_inventory_item(
+                record,
+                item_id,
+                expected_revision=expected_revision,
+                updated_by_user_id=user_id,
+            ),
+        )
+
+    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>/equipped")
+    @campaign_scope_access_required("characters")
+    def character_session_xianxia_inventory_equipped(campaign_slug: str, character_slug: str, item_id: str):
+        return run_session_mutation(
+            campaign_slug,
+            character_slug,
+            anchor="xianxia-inventory",
+            success_message="Equipment state updated.",
+            action=lambda record, expected_revision, user_id: get_character_state_service().update_xianxia_inventory_equipped_state(
+                record,
+                item_id,
+                expected_revision=expected_revision,
+                is_equipped=request.form.get("is_equipped") == "1",
                 updated_by_user_id=user_id,
             ),
         )

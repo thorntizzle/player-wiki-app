@@ -51,6 +51,7 @@ from .xianxia_character_model import (
     XIANXIA_EFFORT_KEYS,
     XIANXIA_EFFORT_LABELS,
     XIANXIA_DEFENSE_BASE,
+    XIANXIA_ITEM_TYPES,
     derive_xianxia_actions_per_turn,
     derive_xianxia_check_formula_strings,
     derive_xianxia_defense,
@@ -1750,6 +1751,14 @@ def present_xianxia_read_context(
     active_aura = _coerce_xianxia_active_state_record(xianxia_state.get("active_aura"))
     dao_immolating = dict(xianxia.get("dao_immolating_techniques") or {})
     currency_state = dict(xianxia_state.get("currency") or {})
+    inventory_records = _present_xianxia_inventory_records(
+        dict(xianxia_state.get("inventory") or {}).get("quantities")
+    )
+    equipped_inventory_records = [
+        item
+        for item in inventory_records
+        if item["is_equipped"] and item["item_type"] in XIANXIA_ITEM_TYPES[:3]
+    ]
 
     return {
         "system_label": "Xianxia",
@@ -1850,6 +1859,16 @@ def present_xianxia_read_context(
         "equipment": {
             "manual_armor_bonus": _coerce_int(durability.get("manual_armor_bonus"), default=0),
             "defense": _coerce_int(durability.get("defense"), default=0),
+            "equipped_items": equipped_inventory_records,
+            "equipped_weapons": [
+                item for item in equipped_inventory_records if item["item_type"] == "Weapon"
+            ],
+            "equipped_armor": [
+                item for item in equipped_inventory_records if item["item_type"] == "Armor"
+            ],
+            "equipped_artifacts": [
+                item for item in equipped_inventory_records if item["item_type"] == "Artifact"
+            ],
             "necessary_weapons": _present_xianxia_named_records(
                 dict(xianxia.get("equipment") or {}).get("necessary_weapons")
             ),
@@ -1885,9 +1904,7 @@ def present_xianxia_read_context(
                 }
                 for key in XIANXIA_CURRENCY_KEYS
             ],
-            "quantities": _present_xianxia_inventory_records(
-                dict(xianxia_state.get("inventory") or {}).get("quantities")
-            ),
+            "quantities": inventory_records,
         },
         "approval": {
             "variants": _present_xianxia_named_records(xianxia.get("variants")),
@@ -2248,12 +2265,22 @@ def _present_xianxia_inventory_records(values: Any) -> list[dict[str, Any]]:
                 "quantity": _coerce_int(payload.get("quantity"), default=0),
                 "id": str(payload.get("id") or "").strip(),
                 "catalog_ref": str(payload.get("catalog_ref") or "").strip(),
+                "item_nature": str(payload.get("item_nature") or "Mundane").strip(),
+                "item_type": str(payload.get("item_type") or "Miscellaneous").strip(),
+                "equippable": bool(payload.get("equippable", False)),
+                "is_equipped": bool(payload.get("is_equipped", False)),
                 "notes": str(payload.get("notes") or "").strip(),
                 "tags": [
                     str(tag or "").strip()
                     for tag in list(payload.get("tags") or [])
                     if str(tag or "").strip()
                 ],
+                "legacy_tags": [
+                    str(tag or "").strip()
+                    for tag in list(payload.get("legacy_tags") or [])
+                    if str(tag or "").strip()
+                ],
+                "systems_ref": dict(payload.get("systems_ref") or {}),
             }
         )
     return records

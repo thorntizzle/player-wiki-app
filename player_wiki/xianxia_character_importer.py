@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from copy import deepcopy
 from typing import Any
@@ -724,12 +725,25 @@ def _coerce_inventory_rows_from_form(payload: dict[str, Any]) -> list[dict[str, 
         name = _coerce_text(row.get("name"))
         if not name:
             continue
+        systems_ref = _coerce_inventory_systems_ref(row)
+        item_type = _coerce_text(row.get("item_type"))
+        item_nature = _coerce_text(row.get("item_nature"))
         parsed.append(
             {
                 "name": name,
                 "quantity": _coerce_int(row.get("quantity"), default=1),
                 "notes": _coerce_text(row.get("notes")),
                 "tags": _coerce_tags(row.get("tags")),
+                "item_type": item_type,
+                "item_nature": item_nature,
+                "catalog_ref": _coerce_text(row.get("catalog_ref")),
+                "systems_ref": systems_ref,
+                "equippable": _coerce_bool(row.get("equippable"))
+                if "equippable" in row
+                else None,
+                "is_equipped": _coerce_bool(row.get("is_equipped"))
+                if "is_equipped" in row
+                else None,
             }
         )
     return parsed
@@ -778,8 +792,43 @@ def _parse_inventory_text(value: Any) -> list[dict[str, Any]]:
             row["quantity"] = parts[1]
         if len(parts) > 2:
             row["tags"] = parts[2]
+        extra_note_parts: list[str] = []
         if len(parts) > 3:
-            row["notes"] = " | ".join(parts[3:])
+            row["notes"] = parts[3]
+        for part in parts[4:]:
+            key, value = _coerce_inventory_text_kv(part)
+            if key is None:
+                extra_note_parts.append(part)
+                continue
+            if key == "systems_ref":
+                normalized_systems_ref = _coerce_inventory_systems_ref(
+                    {"systems_ref": value}
+                )
+                if normalized_systems_ref:
+                    row["systems_ref"] = normalized_systems_ref
+                continue
+            if key.startswith("systems_ref_"):
+                normalized_systems_ref = dict(row.get("systems_ref") or {})
+                systems_key = key.replace("systems_ref_", "", 1)
+                normalized_systems_ref[systems_key] = value
+                row["systems_ref"] = normalized_systems_ref
+                continue
+            if key == "equippable":
+                row["equippable"] = _coerce_bool(value)
+                continue
+            if key == "is_equipped":
+                row["is_equipped"] = _coerce_bool(value)
+                continue
+            if key == "tags":
+                row["tags"] = value
+                continue
+            row[key] = value
+        if extra_note_parts:
+            note_parts: list[str] = [part for part in [row.get("notes") or "", *extra_note_parts] if part]
+            if note_parts:
+                row["notes"] = " | ".join(note_parts)
+        if row.get("tags") is not None and isinstance(row.get("tags"), str):
+            row["tags"] = _coerce_tags(row.get("tags"))
         rows.append(row)
     return rows
 
@@ -795,6 +844,11 @@ def _coerce_inventory_quantities(value: Any) -> list[dict[str, Any]]:
                 "quantity": _coerce_int(item.get("quantity"), default=1),
                 "notes": _coerce_text(item.get("notes") or item.get("note")),
                 "tags": _coerce_tags(item.get("tags")),
+                "item_type": _coerce_text(item.get("item_type")),
+                "item_nature": _coerce_text(item.get("item_nature")),
+                "equippable": item.get("equippable"),
+                "is_equipped": item.get("is_equipped"),
+                "systems_ref": _coerce_inventory_systems_ref(item),
             }
             records.append(
                 {
@@ -957,6 +1011,79 @@ def _coerce_int(value: Any, *, default: int = 0) -> int:
         return int(str(value).strip())
     except (TypeError, ValueError):
         return default
+
+
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(int(value))
+    normalized = _coerce_text(value).casefold()
+    return normalized in {
+        "1",
+        "true",
+        "yes",
+        "on",
+        "equipped",
+        "enabled",
+        "used",
+        "recorded",
+    }
+
+
+def _coerce_inventory_text_kv(value: Any) -> tuple[str | None, str]:
+    raw_value = str(value or "").strip()
+    if "=" in raw_value:
+        key, raw_value = raw_value.split("=", 1)
+    elif ":" in raw_value:
+        key, raw_value = raw_value.split(":", 1)
+    else:
+        return None, ""
+    return _coerce_text(key).replace(" ", "_").casefold(), _coerce_text(raw_value)
+
+
+def _coerce_inventory_systems_ref(row: Any) -> dict[str, str] | None:
+    raw_value: Any = row
+    if isinstance(row, dict):
+        raw_value = row.get("systems_ref")
+        if raw_value is None and row.get("systems_ref_slug"):
+            return {"slug": _coerce_text(row.get("systems_ref_slug"))}
+        if not raw_value and row.get("slug"):
+            return {"slug": _coerce_text(row.get("slug"))}
+
+    if raw_value is None:
+        return None
+    if isinstance(raw_value, str):
+        raw_text = raw_value.strip()
+        if not raw_text:
+            return None
+        if raw_text.startswith("{") and raw_text.endswith("}"):
+            try:
+                parsed = json.loads(raw_text)
+            except (TypeError, json.JSONDecodeError):
+                parsed = None
+            else:
+                raw_value = parsed
+    if not isinstance(raw_value, dict):
+        if isinstance(raw_value, str):
+            normalized_slug = _coerce_text(raw_value)
+            return {"slug": normalized_slug} if normalized_slug else None
+        return None
+
+    payload: dict[str, str] = {}
+    for key, raw in raw_value.items():
+        normalized_key = _coerce_text(key)
+        if not normalized_key:
+            continue
+        normalized_value = _coerce_text(raw)
+        if not normalized_value:
+            continue
+        payload[normalized_key] = normalized_value
+    if "slug" in payload:
+        return payload
+    return payload or None
 
 
 def _coerce_text(value: Any) -> str:
