@@ -76,7 +76,9 @@
               >
                 Loading selected combatant...
               </div>
-              {% include "_combat_status_detail.html" %}
+              <div data-combat-status-detail-content-root>
+                {% include "_combat_status_detail.html" %}
+              </div>
             </div>
             <div data-combat-status-authority-root>
               {% include "_combat_dm_selected_authority.html" %}

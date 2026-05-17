@@ -78,6 +78,14 @@ def _assert_expected_combatant_revision_field(html: str, revision: int, *, at_le
     assert html.count(marker) >= at_least
 
 
+def _inventory_item(record, item_id: str) -> dict:
+    return next(
+        item
+        for item in list(record.state_record.state.get("inventory") or [])
+        if str(item.get("catalog_ref") or item.get("id") or "") == item_id
+    )
+
+
 def _write_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -2172,6 +2180,62 @@ def test_owner_player_can_update_own_pc_resources_from_combat_views(
     assert spell_slots[2]["used"] == 2
 
 
+def test_owner_player_can_update_equipment_state_from_combat_workspace(
+    app, client, sign_in, users, get_character
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    combatant = _find_combatant(app, character_slug="arden-march")
+    assert combatant is not None
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    page = client.get(f"/campaigns/linden-pass/combat?combatant={combatant.id}")
+    assert page.status_code == 200
+    body = page.get_data(as_text=True)
+    assert "Save equipment state" in body
+    assert (
+        f"/campaigns/linden-pass/combat/character/combatants/{combatant.id}"
+        "/equipment/quarterstaff-2/state"
+    ) in body
+    assert 'name="combat_view" value="combat"' in body
+    assert 'data-combat-async' in body
+
+    record = get_character("arden-march")
+    assert _inventory_item(record, "quarterstaff-2")["is_equipped"] is True
+
+    update_response = client.post(
+        f"/campaigns/linden-pass/combat/character/combatants/{combatant.id}"
+        "/equipment/quarterstaff-2/state",
+        data={
+            "expected_revision": record.state_record.revision,
+            "combat_view": "combat",
+            "combatant": combatant.id,
+            "weapon_wield_mode": "",
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert update_response.status_code == 200
+    payload = update_response.get_json()
+    assert payload["ok"] is True
+    assert payload["selected_combatant_id"] == combatant.id
+    assert "Equipment state updated." in payload["flash_html"]
+    assert "Save equipment state" in payload["tracker_html"]
+
+    record = get_character("arden-march")
+    updated_item = _inventory_item(record, "quarterstaff-2")
+    assert updated_item["is_equipped"] is False
+    assert not updated_item.get("weapon_wield_mode")
+
+
 def test_owner_player_combat_workspace_resource_mutations_redirect_back_to_combat(
     app, client, sign_in, users, get_character
 ):
@@ -2724,10 +2788,16 @@ def test_dm_status_combined_page_script_hydrates_selected_combatant_live_state_a
     assert "void fetchDmStatusCombatant(selectedCombatantId, { carousel });" in body
     assert "await fetchDmStatusCombatant(selectedCombatantId, { carousel });" in body
     assert 'data-combat-status-selection-loading' in body
+    assert 'data-combat-status-detail-content-root' in body
     assert "Loading selected combatant..." in body
     assert 'role="status"' in body
     assert 'aria-live="polite"' in body
     assert 'aria-atomic="true"' in body
+    assert (
+        'const trackerDetailContentRoot = document.querySelector("[data-combat-status-detail-content-root]");'
+        in body
+    )
+    assert "const trackerDetailTarget = trackerDetailContentRoot || trackerDetailRoot;" in body
     assert "pollUrl = nextPollUrl;" in body
     assert "liveRoot.dataset.selectedCombatantId = normalizedCombatantId;" in body
     assert "if (isStaleDmStatusPayload(payload)) {" in body
@@ -3140,6 +3210,61 @@ def test_status_live_state_renders_player_workspace_sections_for_selected_pc(
     assert 'data-combat-section-group' in payload["detail_html"]
     assert 'data-combat-section-toggle="actions"' in payload["detail_html"]
     assert 'data-combat-section-panel="resources"' in payload["detail_html"]
+
+
+def test_dm_status_can_update_selected_pc_equipment_state(
+    app, client, sign_in, users, get_character
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    assert arden is not None
+
+    page = client.get(f"/campaigns/linden-pass/combat/dm?combatant={arden.id}")
+    assert page.status_code == 200
+    body = page.get_data(as_text=True)
+    assert "Save equipment state" in body
+    assert (
+        f"/campaigns/linden-pass/combat/character/combatants/{arden.id}"
+        "/equipment/quarterstaff-2/state"
+    ) in body
+    assert 'name="combat_view" value="dm"' in body
+    assert 'name="view" value="status"' in body
+
+    record = get_character("arden-march")
+    assert _inventory_item(record, "quarterstaff-2")["is_equipped"] is True
+
+    update_response = client.post(
+        f"/campaigns/linden-pass/combat/character/combatants/{arden.id}"
+        "/equipment/quarterstaff-2/state",
+        data={
+            "expected_revision": record.state_record.revision,
+            "combat_view": "dm",
+            "view": "status",
+            "combatant": arden.id,
+            "weapon_wield_mode": "",
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert update_response.status_code == 200
+    payload = update_response.get_json()
+    assert payload["ok"] is True
+    assert payload["selected_combatant_id"] == arden.id
+    assert "Equipment state updated." in payload["flash_html"]
+    assert "Save equipment state" in payload["tracker_detail_html"]
+    assert f'data-combat-section-panel="equipment"' in payload["tracker_detail_html"]
+
+    record = get_character("arden-march")
+    updated_item = _inventory_item(record, "quarterstaff-2")
+    assert updated_item["is_equipped"] is False
+    assert not updated_item.get("weapon_wield_mode")
 
 
 def test_status_live_state_renders_npc_workspace_sections_for_selected_systems_monster(

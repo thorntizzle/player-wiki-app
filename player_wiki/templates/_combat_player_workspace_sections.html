@@ -53,6 +53,7 @@
       data-combat-section-panel="{{ section.slug }}"
       {% if not section.is_default %}hidden{% endif %}
       {% if section.slug == 'resources' %}id="combat-character-resources"{% endif %}
+      {% if section.slug == 'equipment' %}id="combat-character-equipment"{% endif %}
     >
       <div class="section-heading">
         <h2>{{ section.label }}</h2>
@@ -451,6 +452,50 @@
                 {% endif %}
                 {% if item.notes %}
                   <p>{{ item.notes }}</p>
+                {% endif %}
+                {% if can_edit_combat_equipment_state and selected_combatant_id %}
+                  <form
+                    class="stack-form"
+                    method="post"
+                    action="{{ url_for('campaign_combat_character_equipment_state', campaign_slug=campaign.slug, combatant_id=selected_combatant_id, item_id=item.id) }}"
+                    data-combat-async
+                  >
+                    {{ combat_workspace_return_fields() }}
+                    <input type="hidden" name="combatant" value="{{ selected_combatant_id }}">
+                    <input type="hidden" name="expected_revision" value="{{ selected_combat_character.state_revision }}">
+                    <div class="detail-grid">
+                      {% if item.supports_weapon_wield_mode %}
+                        <label>
+                          Wielding
+                          <select name="weapon_wield_mode">
+                            <option value="">Not equipped</option>
+                            {% for option in item.weapon_wield_options %}
+                              <option value="{{ option.value }}" {% if item.weapon_wield_mode == option.value %}selected{% endif %}>
+                                {{ option.label }}
+                              </option>
+                            {% endfor %}
+                          </select>
+                        </label>
+                      {% else %}
+                        <label class="checkbox-label">
+                          <input type="checkbox" name="is_equipped" value="1" {% if item.is_equipped %}checked{% endif %}>
+                          Equipped
+                        </label>
+                      {% endif %}
+                      {% if item.requires_attunement %}
+                        <label class="checkbox-label">
+                          <input type="checkbox" name="is_attuned" value="1" {% if item.is_attuned %}checked{% endif %}>
+                          Attuned
+                        </label>
+                      {% endif %}
+                    </div>
+                    {% if item.attunement_hint %}
+                      <p class="meta">{{ item.attunement_hint }}</p>
+                    {% endif %}
+                    <div class="hero-actions">
+                      <button type="submit">Save equipment state</button>
+                    </div>
+                  </form>
                 {% endif %}
               </article>
             {% endfor %}

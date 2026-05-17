@@ -5403,6 +5403,73 @@ def create_app() -> Flask:
             anchor=anchor,
         )
 
+    def run_combat_character_definition_mutation(
+        campaign_slug: str,
+        combatant_id: int,
+        *,
+        anchor: str,
+        success_message: str,
+        action,
+    ):
+        combatant = get_campaign_combat_service().get_combatant(campaign_slug, combatant_id)
+        if combatant is None:
+            abort(404)
+        if not combatant.is_player_character or not combatant.character_slug:
+            abort(404)
+        if (
+            combatant.character_slug not in get_owned_character_slugs(campaign_slug)
+            and not can_manage_campaign_combat(campaign_slug)
+        ):
+            abort(403)
+
+        record = get_character_repository().get_visible_character(campaign_slug, combatant.character_slug)
+        if record is None:
+            abort(404)
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        mutation_succeeded = False
+        try:
+            expected_revision = parse_expected_revision()
+            result = action(record)
+            inventory_state_overrides = None
+            if isinstance(result, tuple) and len(result) == 4:
+                definition, import_metadata, inventory_quantity_overrides, inventory_state_overrides = result
+            else:
+                definition, import_metadata, inventory_quantity_overrides = result
+            definition = finalize_character_definition_for_write(campaign_slug, definition)
+            merged_state = merge_state_with_definition(
+                definition,
+                record.state_record.state,
+                inventory_quantity_overrides=inventory_quantity_overrides,
+                inventory_state_overrides=inventory_state_overrides,
+            )
+            character_state_store.replace_state(
+                definition,
+                merged_state,
+                expected_revision=expected_revision,
+                updated_by_user_id=user.id,
+            )
+            config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
+            character_dir = config.characters_dir / combatant.character_slug
+            write_yaml(character_dir / "definition.yaml", definition.to_dict())
+            write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
+        except CharacterStateConflictError:
+            flash("This sheet changed in another session. Refresh the page and try again.", "error")
+        except (CharacterEditValidationError, CharacterStateValidationError, ValueError) as exc:
+            flash(str(exc), "error")
+        else:
+            mutation_succeeded = True
+            flash(success_message, "success")
+
+        return respond_to_campaign_combat_mutation(
+            campaign_slug,
+            mutation_succeeded=mutation_succeeded,
+            anchor=anchor,
+        )
+
     def build_campaign_session_page_context(
         campaign_slug: str,
         *,
@@ -6942,6 +7009,7 @@ def create_app() -> Flask:
         combat_workspace_targets: list[dict[str, object]] = []
         combat_character_state_token = ""
         can_edit_combat_character_state = False
+        can_edit_combat_equipment_state = False
         player_workspace_detail_context: dict[str, object] = {}
         if combat_subpage == "combat" and not can_manage_combat and accessible_combat_character_rows:
             selected_target = resolve_combat_character_target(
@@ -6957,6 +7025,7 @@ def create_app() -> Flask:
                 requested_combatant_id = selected_combatant_id
                 show_player_combat_workspace = True
                 can_edit_combat_character_state = True
+                can_edit_combat_equipment_state = True
                 combat_character_state_token = build_selected_combatant_state_token(
                     tracker_view,
                     selected_combatant,
@@ -7109,6 +7178,7 @@ def create_app() -> Flask:
             "combat_workspace_targets": combat_workspace_targets,
             "combat_character_state_token": combat_character_state_token,
             "can_edit_combat_character_state": can_edit_combat_character_state,
+            "can_edit_combat_equipment_state": can_edit_combat_equipment_state,
             "active_nav": "combat",
             "_combatant_records": combatants,
             "_combat_conditions_by_combatant": conditions_by_combatant,
@@ -7223,6 +7293,7 @@ def create_app() -> Flask:
                 "selected_combatant_id": selected_combatant_id,
                 "combat_character_targets": accessible_targets,
                 "can_edit_combat_character_state": selected_target is not None,
+                "can_edit_combat_equipment_state": selected_target is not None,
                 "combat_character_state_token": build_selected_combatant_state_token(
                     tracker_view,
                     selected_combatant,
@@ -7437,6 +7508,11 @@ def create_app() -> Flask:
                 "combat_status_state_token": build_selected_combatant_state_token(
                     tracker_view,
                     selected_combatant,
+                ),
+                "can_edit_combat_equipment_state": bool(
+                    selected_combatant_record is not None
+                    and selected_combatant_record.is_player_character
+                    and selected_combatant_record.character_slug
                 ),
             }
         )
@@ -11107,6 +11183,28 @@ def create_app() -> Flask:
             ),
         )
 
+    @app.post("/campaigns/<campaign_slug>/combat/character/combatants/<int:combatant_id>/equipment/<item_id>/state")
+    @campaign_scope_access_required("combat")
+    def campaign_combat_character_equipment_state(
+        campaign_slug: str,
+        combatant_id: int,
+        item_id: str,
+    ):
+        item_catalog = build_character_item_catalog(campaign_slug)
+
+        return run_combat_character_definition_mutation(
+            campaign_slug,
+            combatant_id,
+            anchor="combat-character-equipment",
+            success_message="Equipment state updated.",
+            action=lambda record: build_equipment_state_update_result(
+                campaign_slug,
+                record,
+                item_id,
+                item_catalog=item_catalog,
+            ),
+        )
+
     @app.get("/campaigns/<campaign_slug>/combat/systems-monsters/search")
     @campaign_scope_access_required("combat")
     def campaign_combat_search_systems_monsters(campaign_slug: str):
@@ -13910,90 +14008,13 @@ def create_app() -> Flask:
     @campaign_scope_access_required("characters")
     def character_equipment_state_update(campaign_slug: str, character_slug: str, item_id: str):
         item_catalog = build_character_item_catalog(campaign_slug)
+
         def _action(record):
-            inventory_by_ref = {
-                build_character_inventory_item_ref(item): dict(item)
-                for item in list((record.state_record.state or {}).get("inventory") or [])
-                if build_character_inventory_item_ref(item)
-            }
-            if item_id not in inventory_by_ref:
-                raise CharacterEditValidationError("Choose a valid equipment entry to update.")
-            _, support_lookup = build_record_equipment_support_lookup(
-                record,
-                item_catalog=item_catalog,
-            )
-            target_support = dict(support_lookup.get(item_id) or {})
-            if not bool(target_support.get("supports_equipped_state")):
-                raise CharacterEditValidationError(
-                    "That inventory row stays on Inventory because it does not support equipment state."
-                )
-
-            weapon_wield_mode = ""
-            if bool(target_support.get("supports_weapon_wield_mode")):
-                weapon_wield_mode = _normalize_weapon_wield_mode_value(request.form.get("weapon_wield_mode"))
-                allowed_modes = [
-                    _normalize_weapon_wield_mode_value(value)
-                    for value in list(target_support.get("weapon_wield_modes") or [])
-                    if _normalize_weapon_wield_mode_value(value)
-                ]
-                allowed_mode_set = {
-                    _normalize_weapon_wield_mode_value(value)
-                    for value in list(target_support.get("weapon_wield_modes") or [])
-                    if _normalize_weapon_wield_mode_value(value)
-                }
-                if weapon_wield_mode and weapon_wield_mode not in allowed_mode_set:
-                    raise CharacterEditValidationError("Choose a valid wielding mode for that weapon.")
-                if not weapon_wield_mode and bool(request.form.get("is_equipped")) and allowed_modes:
-                    weapon_wield_mode = allowed_modes[0]
-                is_equipped = bool(weapon_wield_mode)
-            else:
-                is_equipped = bool(request.form.get("is_equipped"))
-            requested_attunement = bool(request.form.get("is_attuned"))
-            if requested_attunement and not bool(target_support.get("supports_attunement")):
-                raise CharacterEditValidationError(
-                    "Only items whose durable metadata explicitly requires attunement can be attuned."
-                )
-            is_attuned = bool(requested_attunement and target_support.get("supports_attunement"))
-            attunement_payload = dict((record.state_record.state or {}).get("attunement") or {})
-            max_attuned_items = int(attunement_payload.get("max_attuned_items") or 3)
-            currently_attuned_refs = {
-                item_ref
-                for item_ref, item in inventory_by_ref.items()
-                if (
-                    item_ref != item_id
-                    and bool(item.get("is_attuned", False))
-                    and bool(dict(support_lookup.get(item_ref) or {}).get("supports_attunement"))
-                )
-            }
-            next_attuned_count = len(currently_attuned_refs) + (1 if is_attuned else 0)
-            if max_attuned_items >= 0 and next_attuned_count > max_attuned_items:
-                raise CharacterEditValidationError(
-                    f"This character already has {max_attuned_items} attuned item"
-                    f"{'' if max_attuned_items == 1 else 's'}. Clear one first."
-                )
-
-            definition, import_metadata = apply_equipment_state_edit(
+            return build_equipment_state_update_result(
                 campaign_slug,
-                record.definition,
-                record.import_metadata,
+                record,
+                item_id,
                 item_catalog=item_catalog,
-                systems_service=get_systems_service(),
-                target_item_id=item_id,
-                is_equipped=is_equipped,
-                is_attuned=is_attuned,
-                weapon_wield_mode=weapon_wield_mode,
-            )
-            return (
-                definition,
-                import_metadata,
-                {},
-                {
-                    item_id: {
-                        "is_equipped": is_equipped,
-                        "is_attuned": is_attuned,
-                        "weapon_wield_mode": weapon_wield_mode,
-                    }
-                },
             )
 
         return run_character_definition_mutation(
@@ -14002,6 +14023,98 @@ def create_app() -> Flask:
             anchor="character-equipment-state",
             success_message="Equipment state updated.",
             action=_action,
+        )
+
+    def build_equipment_state_update_result(
+        campaign_slug: str,
+        record,
+        item_id: str,
+        *,
+        item_catalog: list[dict[str, object]],
+    ):
+        inventory_by_ref = {
+            build_character_inventory_item_ref(item): dict(item)
+            for item in list((record.state_record.state or {}).get("inventory") or [])
+            if build_character_inventory_item_ref(item)
+        }
+        if item_id not in inventory_by_ref:
+            raise CharacterEditValidationError("Choose a valid equipment entry to update.")
+        _, support_lookup = build_record_equipment_support_lookup(
+            record,
+            item_catalog=item_catalog,
+        )
+        target_support = dict(support_lookup.get(item_id) or {})
+        if not bool(target_support.get("supports_equipped_state")):
+            raise CharacterEditValidationError(
+                "That inventory row stays on Inventory because it does not support equipment state."
+            )
+
+        weapon_wield_mode = ""
+        if bool(target_support.get("supports_weapon_wield_mode")):
+            weapon_wield_mode = _normalize_weapon_wield_mode_value(request.form.get("weapon_wield_mode"))
+            allowed_modes = [
+                _normalize_weapon_wield_mode_value(value)
+                for value in list(target_support.get("weapon_wield_modes") or [])
+                if _normalize_weapon_wield_mode_value(value)
+            ]
+            allowed_mode_set = {
+                _normalize_weapon_wield_mode_value(value)
+                for value in list(target_support.get("weapon_wield_modes") or [])
+                if _normalize_weapon_wield_mode_value(value)
+            }
+            if weapon_wield_mode and weapon_wield_mode not in allowed_mode_set:
+                raise CharacterEditValidationError("Choose a valid wielding mode for that weapon.")
+            if not weapon_wield_mode and bool(request.form.get("is_equipped")) and allowed_modes:
+                weapon_wield_mode = allowed_modes[0]
+            is_equipped = bool(weapon_wield_mode)
+        else:
+            is_equipped = bool(request.form.get("is_equipped"))
+        requested_attunement = bool(request.form.get("is_attuned"))
+        if requested_attunement and not bool(target_support.get("supports_attunement")):
+            raise CharacterEditValidationError(
+                "Only items whose durable metadata explicitly requires attunement can be attuned."
+            )
+        is_attuned = bool(requested_attunement and target_support.get("supports_attunement"))
+        attunement_payload = dict((record.state_record.state or {}).get("attunement") or {})
+        max_attuned_items = int(attunement_payload.get("max_attuned_items") or 3)
+        currently_attuned_refs = {
+            item_ref
+            for item_ref, item in inventory_by_ref.items()
+            if (
+                item_ref != item_id
+                and bool(item.get("is_attuned", False))
+                and bool(dict(support_lookup.get(item_ref) or {}).get("supports_attunement"))
+            )
+        }
+        next_attuned_count = len(currently_attuned_refs) + (1 if is_attuned else 0)
+        if max_attuned_items >= 0 and next_attuned_count > max_attuned_items:
+            raise CharacterEditValidationError(
+                f"This character already has {max_attuned_items} attuned item"
+                f"{'' if max_attuned_items == 1 else 's'}. Clear one first."
+            )
+
+        definition, import_metadata = apply_equipment_state_edit(
+            campaign_slug,
+            record.definition,
+            record.import_metadata,
+            item_catalog=item_catalog,
+            systems_service=get_systems_service(),
+            target_item_id=item_id,
+            is_equipped=is_equipped,
+            is_attuned=is_attuned,
+            weapon_wield_mode=weapon_wield_mode,
+        )
+        return (
+            definition,
+            import_metadata,
+            {},
+            {
+                item_id: {
+                    "is_equipped": is_equipped,
+                    "is_attuned": is_attuned,
+                    "weapon_wield_mode": weapon_wield_mode,
+                }
+            },
         )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/<item_id>/remove")

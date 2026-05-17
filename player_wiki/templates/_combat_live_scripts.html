@@ -10,6 +10,7 @@
     const trackerRoot = document.querySelector("[data-combat-tracker-root]");
     const statusTrackerRoot = document.querySelector("[data-combat-status-tracker-root]");
     const trackerDetailRoot = document.querySelector("[data-combat-status-detail-root]");
+    const trackerDetailContentRoot = document.querySelector("[data-combat-status-detail-content-root]");
     const statusAuthorityRoot = document.querySelector("[data-combat-status-authority-root]");
     const combatStatusSelectionLoadingRoot = document.querySelector("[data-combat-status-selection-loading]");
     const contextRoot = document.querySelector("[data-combat-context-root]");
@@ -899,8 +900,11 @@
       } else if (trackerRoot && typeof payload.tracker_html === "string") {
         trackerRoot.innerHTML = payload.tracker_html;
       }
-      if (trackerDetailRoot && typeof payload.tracker_detail_html === "string") {
-        trackerDetailRoot.innerHTML = payload.tracker_detail_html;
+      if (typeof payload.tracker_detail_html === "string") {
+        const trackerDetailTarget = trackerDetailContentRoot || trackerDetailRoot;
+        if (trackerDetailTarget) {
+          trackerDetailTarget.innerHTML = payload.tracker_detail_html;
+        }
       }
       if (isDmStatusLiveRoot && statusAuthorityRoot && typeof payload.tracker_authority_html === "string") {
         statusAuthorityRoot.innerHTML = payload.tracker_authority_html;
