@@ -26,6 +26,12 @@
               </div>
               <div class="badge-list">
                 <span class="meta-badge">Turn {{ combatant.turn_value }}</span>
+                {% if combatant.dexterity_modifier_label %}
+                  <span class="meta-badge">Dex {{ combatant.dexterity_modifier_label }}</span>
+                {% endif %}
+                {% if combatant.initiative_priority_label %}
+                  <span class="meta-badge">Priority {{ combatant.initiative_priority_label }}</span>
+                {% endif %}
                 {% if combatant.is_current_turn %}
                   <span class="meta-badge">Current turn</span>
                 {% endif %}

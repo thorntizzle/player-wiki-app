@@ -2407,6 +2407,7 @@ def register_api(app) -> None:
                 campaign_slug,
                 character_slug=str(payload.get("character_slug") or "").strip(),
                 turn_value=payload.get("turn_value"),
+                initiative_priority=payload.get("initiative_priority"),
                 created_by_user_id=user.id,
             )
         except (CampaignCombatValidationError, ValueError) as exc:
@@ -2433,6 +2434,8 @@ def register_api(app) -> None:
                 display_name=str(payload.get("display_name") or "").strip(),
                 turn_value=payload.get("turn_value"),
                 initiative_bonus=payload.get("initiative_bonus"),
+                dexterity_modifier=payload.get("dexterity_modifier"),
+                initiative_priority=payload.get("initiative_priority"),
                 current_hp=payload.get("current_hp"),
                 max_hp=payload.get("max_hp"),
                 temp_hp=payload.get("temp_hp"),
@@ -2474,6 +2477,8 @@ def register_api(app) -> None:
                 display_name=str(payload.get("display_name") or "").strip() or statblock.title,
                 turn_value=payload.get("turn_value") if payload.get("turn_value") not in (None, "") else statblock.initiative_bonus,
                 initiative_bonus=statblock.initiative_bonus,
+                dexterity_modifier=statblock.initiative_bonus,
+                initiative_priority=payload.get("initiative_priority"),
                 current_hp=statblock.max_hp,
                 max_hp=statblock.max_hp,
                 temp_hp=0,
@@ -2518,6 +2523,8 @@ def register_api(app) -> None:
                 display_name=str(payload.get("display_name") or "").strip() or monster_entry.title,
                 turn_value=payload.get("turn_value") if payload.get("turn_value") not in (None, "") else monster_seed.initiative_bonus,
                 initiative_bonus=monster_seed.initiative_bonus,
+                dexterity_modifier=monster_seed.dexterity_modifier,
+                initiative_priority=payload.get("initiative_priority"),
                 current_hp=monster_seed.max_hp,
                 max_hp=monster_seed.max_hp,
                 temp_hp=0,
@@ -2622,6 +2629,7 @@ def register_api(app) -> None:
                     else None
                 ),
                 turn_value=payload.get("turn_value"),
+                initiative_priority=payload.get("initiative_priority"),
                 updated_by_user_id=user.id,
             )
         except CampaignCombatRevisionConflictError:

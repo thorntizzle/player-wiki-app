@@ -151,7 +151,15 @@ class CampaignCombatStore:
             SELECT *
             FROM campaign_combatants
             WHERE campaign_slug = ?
-            ORDER BY turn_value DESC, display_name COLLATE NOCASE ASC, id ASC
+            ORDER BY
+                turn_value DESC,
+                dexterity_modifier DESC,
+                CASE
+                    WHEN initiative_priority > 0 THEN initiative_priority
+                    ELSE 1000000
+                END ASC,
+                display_name COLLATE NOCASE ASC,
+                id ASC
             """,
             (campaign_slug,),
         ).fetchall()
@@ -169,6 +177,8 @@ class CampaignCombatStore:
         source_ref: str = "",
         turn_value: int = 0,
         initiative_bonus: int = 0,
+        dexterity_modifier: int = 0,
+        initiative_priority: int = 0,
         current_hp: int = 0,
         max_hp: int = 0,
         temp_hp: int = 0,
@@ -194,6 +204,8 @@ class CampaignCombatStore:
                     display_name,
                     turn_value,
                     initiative_bonus,
+                    dexterity_modifier,
+                    initiative_priority,
                     current_hp,
                     max_hp,
                     temp_hp,
@@ -207,7 +219,7 @@ class CampaignCombatStore:
                     created_by_user_id,
                     updated_by_user_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     campaign_slug,
@@ -219,6 +231,8 @@ class CampaignCombatStore:
                     display_name,
                     turn_value,
                     initiative_bonus,
+                    dexterity_modifier,
+                    initiative_priority,
                     current_hp,
                     max_hp,
                     temp_hp,
@@ -255,6 +269,8 @@ class CampaignCombatStore:
         source_ref: str | None = None,
         turn_value: int | None = None,
         initiative_bonus: int | None = None,
+        dexterity_modifier: int | None = None,
+        initiative_priority: int | None = None,
         current_hp: int | None = None,
         max_hp: int | None = None,
         temp_hp: int | None = None,
@@ -279,6 +295,10 @@ class CampaignCombatStore:
             assignments.append(("turn_value", turn_value))
         if initiative_bonus is not None:
             assignments.append(("initiative_bonus", initiative_bonus))
+        if dexterity_modifier is not None:
+            assignments.append(("dexterity_modifier", dexterity_modifier))
+        if initiative_priority is not None:
+            assignments.append(("initiative_priority", initiative_priority))
         if current_hp is not None:
             assignments.append(("current_hp", current_hp))
         if max_hp is not None:
@@ -574,6 +594,8 @@ class CampaignCombatStore:
             display_name=str(row["display_name"]),
             turn_value=int(row["turn_value"] or 0),
             initiative_bonus=int(row["initiative_bonus"] or 0),
+            dexterity_modifier=int(row["dexterity_modifier"] or 0),
+            initiative_priority=max(0, int(row["initiative_priority"] or 0)),
             current_hp=int(row["current_hp"] or 0),
             max_hp=int(row["max_hp"] or 0),
             temp_hp=int(row["temp_hp"] or 0),

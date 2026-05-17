@@ -262,6 +262,8 @@ CREATE TABLE IF NOT EXISTS campaign_combatants (
     display_name TEXT NOT NULL,
     turn_value INTEGER NOT NULL DEFAULT 0,
     initiative_bonus INTEGER NOT NULL DEFAULT 0,
+    dexterity_modifier INTEGER NOT NULL DEFAULT 0,
+    initiative_priority INTEGER NOT NULL DEFAULT 0,
     current_hp INTEGER NOT NULL DEFAULT 0,
     max_hp INTEGER NOT NULL DEFAULT 0,
     temp_hp INTEGER NOT NULL DEFAULT 0,
@@ -620,6 +622,7 @@ def init_database() -> None:
     _migrate_campaign_session_articles_for_source_page_ref(connection)
     _migrate_campaign_combatants_for_revision(connection)
     _migrate_campaign_combatants_for_source_identity(connection)
+    _migrate_campaign_combatants_for_tie_breakers(connection)
     _migrate_campaign_dm_statblocks_for_subsections(connection)
     _migrate_campaign_system_policies_for_dm_shared_core_edits(connection)
     connection.commit()
@@ -855,6 +858,64 @@ def _migrate_campaign_combatants_for_source_identity(connection: sqlite3.Connect
             WHEN COALESCE(player_detail_visible, 0) NOT IN (0, 1) THEN 0
             ELSE COALESCE(player_detail_visible, 0)
         END
+        """
+    )
+
+
+def _migrate_campaign_combatants_for_tie_breakers(connection: sqlite3.Connection) -> None:
+    columns = {
+        str(row["name"] or "")
+        for row in connection.execute("PRAGMA table_info(campaign_combatants)").fetchall()
+    }
+    if not columns:
+        return
+
+    added_dexterity_modifier = False
+    if "dexterity_modifier" not in columns:
+        connection.execute(
+            """
+            ALTER TABLE campaign_combatants
+            ADD COLUMN dexterity_modifier INTEGER NOT NULL DEFAULT 0
+            """
+        )
+        added_dexterity_modifier = True
+    if "initiative_priority" not in columns:
+        connection.execute(
+            """
+            ALTER TABLE campaign_combatants
+            ADD COLUMN initiative_priority INTEGER NOT NULL DEFAULT 0
+            """
+        )
+
+    if added_dexterity_modifier:
+        connection.execute(
+            """
+            UPDATE campaign_combatants
+            SET dexterity_modifier = COALESCE(initiative_bonus, 0)
+            """
+        )
+
+    connection.execute(
+        """
+        UPDATE campaign_combatants
+        SET initiative_priority = CASE
+            WHEN initiative_priority IS NULL OR initiative_priority < 0
+                THEN 0
+            ELSE initiative_priority
+        END
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_campaign_combatants_campaign_order_v2
+        ON campaign_combatants(
+            campaign_slug,
+            turn_value DESC,
+            dexterity_modifier DESC,
+            initiative_priority,
+            display_name,
+            id
+        )
         """
     )
 

@@ -17,7 +17,18 @@
         <span>Turn value</span>
         <input type="number" name="turn_value" value="{{ selected_combatant.turn_value }}">
       </label>
-      <button type="submit">Save turn value</button>
+      <label class="field">
+        <span>Priority</span>
+        <input
+          type="number"
+          name="initiative_priority"
+          min="1"
+          value="{{ selected_combatant.initiative_priority if selected_combatant.initiative_priority else '' }}"
+          placeholder="No priority"
+        >
+      </label>
+      <p class="meta">Dex tie-breaker: {{ selected_combatant.dexterity_modifier_label }}.</p>
+      <button type="submit">Save turn order</button>
     </form>
 
     {% if selected_combatant.can_toggle_player_detail_visibility %}

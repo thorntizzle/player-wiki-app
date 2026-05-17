@@ -2823,6 +2823,26 @@ button {
   font-weight: 700;
 }
 
+.combat-turn-order-row--editable {
+  text-align: left;
+}
+
+.combat-turn-order-editor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(7rem, 1fr)) auto;
+  align-items: end;
+  gap: 0.75rem;
+}
+
+.combat-turn-order-editor .field {
+  margin: 0;
+}
+
+.combat-turn-order-editor button {
+  width: 100%;
+  min-height: 2.7rem;
+}
+
 .combat-context-card {
   gap: 0.85rem;
 }
@@ -2933,6 +2953,10 @@ button {
 
   .combat-layout--workspace .combat-turn-order-list--carousel .combat-turn-order-row {
     min-width: min(18.5rem, 100%);
+  }
+
+  .combat-turn-order-editor {
+    grid-template-columns: 1fr;
   }
 
   .hero h1,

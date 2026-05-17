@@ -37,6 +37,8 @@ class CampaignCombatantRecord:
     display_name: str
     turn_value: int
     initiative_bonus: int
+    dexterity_modifier: int
+    initiative_priority: int
     current_hp: int
     max_hp: int
     temp_hp: int

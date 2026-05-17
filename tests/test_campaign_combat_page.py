@@ -1091,7 +1091,8 @@ def test_dm_can_add_systems_monster_to_combat_tracker(app, client, sign_in, user
     payload = response.get_json()
     assert payload["ok"] is True
     assert "NPC combatant added from Systems (MM)." in payload["flash_html"]
-    assert "Goblin" not in payload["controls_html"]
+    assert "Goblin" in payload["controls_html"]
+    assert "Turn order priorities" in payload["controls_html"]
     assert "tracker_html" not in payload
 
     combatant = _find_combatant(app, name="Goblin")
@@ -1443,7 +1444,7 @@ def test_dm_pages_split_tactical_status_edits_from_control_authority_actions(
 
     assert "Selected combatant authority" in status_dm_body
     assert "Open Encounter status" not in controls_body
-    assert "Save turn value" in status_dm_body
+    assert "Save turn order" in status_dm_body
     assert "Show NPC detail to players" in status_dm_body
     assert "Save NPC structure" in status_dm_body
     _assert_expected_combatant_revision_field(status_dm_body, hound.revision, at_least=3)
@@ -1680,6 +1681,123 @@ def test_dm_can_add_player_character_and_npc_combatants_and_turn_order_sorts_hig
     assert combatants[0].turn_value == 18
     assert combatants[1].current_hp == 22
     assert combatants[1].movement_total == 40
+    assert combatants[1].dexterity_modifier == 0
+
+
+def test_turn_order_uses_dexterity_modifier_then_dm_priority_for_ties(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    arden_definition_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "characters"
+        / "arden-march"
+        / "definition.yaml"
+    )
+    arden_payload = yaml.safe_load(arden_definition_path.read_text(encoding="utf-8")) or {}
+    arden_payload["stats"]["initiative_bonus"] = 8
+    arden_definition_path.write_text(yaml.safe_dump(arden_payload, sort_keys=False), encoding="utf-8")
+
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 15},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "selene-brook", "turn_value": 15},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Alpha Guard",
+            "turn_value": 15,
+            "dexterity_modifier": 3,
+            "current_hp": 10,
+            "max_hp": 10,
+            "movement_total": 30,
+        },
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Beta Guard",
+            "turn_value": 15,
+            "dexterity_modifier": 3,
+            "initiative_priority": 1,
+            "current_hp": 10,
+            "max_hp": 10,
+            "movement_total": 30,
+        },
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Slow Guard",
+            "turn_value": 15,
+            "dexterity_modifier": 1,
+            "current_hp": 10,
+            "max_hp": 10,
+            "movement_total": 30,
+        },
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Zeta Guard",
+            "turn_value": 15,
+            "dexterity_modifier": 3,
+            "current_hp": 10,
+            "max_hp": 10,
+            "movement_total": 30,
+        },
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Gamma Guard",
+            "turn_value": 15,
+            "dexterity_modifier": 3,
+            "current_hp": 10,
+            "max_hp": 10,
+            "movement_total": 30,
+        },
+        follow_redirects=False,
+    )
+
+    alpha = _find_combatant(app, name="Alpha Guard")
+    beta = _find_combatant(app, name="Beta Guard")
+    assert alpha is not None
+    assert beta is not None
+
+    client.post(
+        f"/campaigns/linden-pass/combat/combatants/{alpha.id}/turn",
+        data={
+            "turn_value": 15,
+            "initiative_priority": 2,
+            "expected_combatant_revision": alpha.revision,
+        },
+        follow_redirects=False,
+    )
+    combatants = _list_combatants(app)
+    assert [combatant.display_name for combatant in combatants] == [
+        "Beta Guard",
+        "Alpha Guard",
+        "Gamma Guard",
+        "Selene Brook",
+        "Zeta Guard",
+        "Arden March",
+        "Slow Guard",
+    ]
+    assert _find_combatant(app, character_slug="arden-march").dexterity_modifier == 2
+    assert _find_combatant(app, name="Beta Guard").initiative_priority == 1
 
 
 def test_dm_can_set_current_turn_and_advance_turn_refreshing_resources(app, client, sign_in, users):
@@ -2972,7 +3090,14 @@ def test_init_db_backfills_legacy_combatant_source_identity_and_revision(tmp_pat
     connection.row_factory = sqlite3.Row
     rows = connection.execute(
         """
-        SELECT display_name, character_slug, source_kind, source_ref, revision
+        SELECT
+            display_name,
+            character_slug,
+            source_kind,
+            source_ref,
+            revision,
+            dexterity_modifier,
+            initiative_priority
         FROM campaign_combatants
         ORDER BY id ASC
         """
@@ -2986,6 +3111,8 @@ def test_init_db_backfills_legacy_combatant_source_identity_and_revision(tmp_pat
             "source_kind": "character",
             "source_ref": "arden-march",
             "revision": 1,
+            "dexterity_modifier": 3,
+            "initiative_priority": 0,
         },
         {
             "display_name": "Clockwork Hound",
@@ -2993,6 +3120,8 @@ def test_init_db_backfills_legacy_combatant_source_identity_and_revision(tmp_pat
             "source_kind": "manual_npc",
             "source_ref": "",
             "revision": 1,
+            "dexterity_modifier": 2,
+            "initiative_priority": 0,
         },
     ]
 
@@ -3052,7 +3181,7 @@ def test_combat_page_renders_context_panel_and_dm_page_focuses_selected_combatan
     assert dm_html.count('id="combat-status-snapshot"') == 1
     assert "Advance turn" in dm_html
     assert "Clear tracker" not in dm_html
-    assert "Save turn value" in dm_html
+    assert "Save turn order" in dm_html
     assert "Remove combatant" in dm_html
     assert "Clear tracker" in dm_controls_html
     assert "Save turn value" not in dm_controls_html

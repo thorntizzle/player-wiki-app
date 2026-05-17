@@ -772,6 +772,7 @@ class SystemsMonsterCombatSeed:
     movement_total: int
     speed_label: str
     initiative_bonus: int
+    dexterity_modifier: int
 
 
 @dataclass(slots=True)
@@ -3468,6 +3469,7 @@ class SystemsService:
             movement_total=self._extract_max_distance(speed),
             speed_label=self._format_speed_label(speed),
             initiative_bonus=initiative_bonus,
+            dexterity_modifier=initiative_bonus,
         )
 
     def search_entries_for_campaign(

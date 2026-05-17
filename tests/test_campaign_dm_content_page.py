@@ -606,7 +606,7 @@ def test_dm_can_upload_statblock_and_use_it_to_seed_an_npc_combatant(app, client
     assert statblocks[0].movement_total == 40
     assert statblocks[0].initiative_bonus == 2
 
-    combat_page = client.get("/campaigns/linden-pass/combat/dm")
+    combat_page = client.get("/campaigns/linden-pass/combat/dm?view=controls")
     combat_html = combat_page.get_data(as_text=True)
     assert combat_page.status_code == 200
     assert "Add NPC from DM Content" in combat_html
@@ -625,6 +625,7 @@ def test_dm_can_upload_statblock_and_use_it_to_seed_an_npc_combatant(app, client
     assert combatant.current_hp == 55
     assert combatant.movement_total == 40
     assert combatant.initiative_bonus == 2
+    assert combatant.dexterity_modifier == 2
     assert combatant.turn_value == 2
 
 
@@ -725,6 +726,7 @@ def test_dm_can_update_statblock_source_and_combat_parser_fields(app, client, si
     assert combatant.current_hp == 64
     assert combatant.movement_total == 45
     assert combatant.initiative_bonus == 3
+    assert combatant.dexterity_modifier == 3
     assert combatant.turn_value == 3
 
 

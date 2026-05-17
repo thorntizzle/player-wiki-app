@@ -21,6 +21,10 @@
             <span>Turn value</span>
             <input type="number" name="turn_value" placeholder="Defaults to initiative bonus">
           </label>
+          <label class="field">
+            <span>Priority</span>
+            <input type="number" name="initiative_priority" min="1" placeholder="No priority">
+          </label>
           <button type="submit">Add player character</button>
         </form>
       {% else %}
@@ -64,6 +68,10 @@
             <span>Turn value</span>
             <input type="number" name="turn_value" placeholder="Defaults to initiative bonus">
           </label>
+          <label class="field">
+            <span>Priority</span>
+            <input type="number" name="initiative_priority" min="1" placeholder="No priority">
+          </label>
           <button type="submit" data-systems-monster-submit disabled>Add from Systems</button>
         </form>
       </section>
@@ -95,6 +103,10 @@
               <span>Turn value</span>
               <input type="number" name="turn_value" placeholder="Defaults to statblock initiative bonus">
             </label>
+            <label class="field">
+              <span>Priority</span>
+              <input type="number" name="initiative_priority" min="1" placeholder="No priority">
+            </label>
             <button type="submit">Add from DM Content</button>
           </form>
         {% else %}
@@ -118,6 +130,14 @@
         <label class="field">
           <span>Turn value</span>
           <input type="number" name="turn_value" value="0">
+        </label>
+        <label class="field">
+          <span>Dex mod</span>
+          <input type="number" name="dexterity_modifier" value="0">
+        </label>
+        <label class="field">
+          <span>Priority</span>
+          <input type="number" name="initiative_priority" min="1" placeholder="No priority">
         </label>
         <label class="field">
           <span>Current HP</span>

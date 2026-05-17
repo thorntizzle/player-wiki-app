@@ -3468,6 +3468,8 @@ def create_app() -> Flask:
                     [
                         str(combatant.get("id", "")),
                         str(combatant.get("turn_value", "")),
+                        str(combatant.get("dexterity_modifier", "")),
+                        str(combatant.get("initiative_priority", "")),
                         str(combatant.get("current_hp", "")),
                         str(combatant.get("max_hp", "")),
                         str(combatant.get("temp_hp", "")),
@@ -11319,6 +11321,7 @@ def create_app() -> Flask:
                 campaign_slug,
                 character_slug=request.form.get("character_slug", ""),
                 turn_value=request.form.get("turn_value"),
+                initiative_priority=request.form.get("initiative_priority"),
                 created_by_user_id=user.id,
             )
         except CampaignCombatValidationError as exc:
@@ -11355,6 +11358,8 @@ def create_app() -> Flask:
                 campaign_slug,
                 display_name=request.form.get("display_name", ""),
                 turn_value=request.form.get("turn_value"),
+                dexterity_modifier=request.form.get("dexterity_modifier"),
+                initiative_priority=request.form.get("initiative_priority"),
                 current_hp=request.form.get("current_hp"),
                 max_hp=request.form.get("max_hp"),
                 temp_hp=request.form.get("temp_hp"),
@@ -11418,6 +11423,8 @@ def create_app() -> Flask:
                 display_name=request.form.get("display_name", "").strip() or statblock.title,
                 turn_value=request.form.get("turn_value", "").strip() or statblock.initiative_bonus,
                 initiative_bonus=statblock.initiative_bonus,
+                dexterity_modifier=statblock.initiative_bonus,
+                initiative_priority=request.form.get("initiative_priority"),
                 current_hp=statblock.max_hp,
                 max_hp=statblock.max_hp,
                 temp_hp=0,
@@ -11475,6 +11482,8 @@ def create_app() -> Flask:
                 display_name=request.form.get("display_name", "").strip() or monster_entry.title,
                 turn_value=request.form.get("turn_value", "").strip() or monster_seed.initiative_bonus,
                 initiative_bonus=monster_seed.initiative_bonus,
+                dexterity_modifier=monster_seed.dexterity_modifier,
+                initiative_priority=request.form.get("initiative_priority"),
                 current_hp=monster_seed.max_hp,
                 max_hp=monster_seed.max_hp,
                 temp_hp=0,
@@ -11626,6 +11635,7 @@ def create_app() -> Flask:
                 combatant_id,
                 expected_revision=expected_combatant_revision,
                 turn_value=request.form.get("turn_value"),
+                initiative_priority=request.form.get("initiative_priority"),
                 updated_by_user_id=user.id,
             )
         except CampaignCombatRevisionConflictError:

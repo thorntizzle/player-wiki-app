@@ -95,6 +95,16 @@ def present_combat_tracker(
                 "player_detail_visible": player_detail_visible,
                 "turn_value": combatant.turn_value,
                 "initiative_bonus_label": format_signed(combatant.initiative_bonus) if show_detail else "",
+                "dexterity_modifier": combatant.dexterity_modifier if can_manage_combat else None,
+                "dexterity_modifier_label": (
+                    format_signed(combatant.dexterity_modifier) if can_manage_combat else ""
+                ),
+                "initiative_priority": combatant.initiative_priority if can_manage_combat else 0,
+                "initiative_priority_label": (
+                    str(combatant.initiative_priority)
+                    if can_manage_combat and combatant.initiative_priority > 0
+                    else ""
+                ),
                 "current_hp": combatant.current_hp if show_detail else None,
                 "max_hp": combatant.max_hp if show_detail else None,
                 "temp_hp": combatant.temp_hp if show_detail else None,

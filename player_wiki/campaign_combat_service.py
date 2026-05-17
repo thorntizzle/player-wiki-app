@@ -129,6 +129,7 @@ class CampaignCombatService:
         *,
         character_slug: str,
         turn_value: Any | None = None,
+        initiative_priority: Any | None = None,
         created_by_user_id: int | None = None,
     ) -> CampaignCombatantRecord:
         record = self.character_repository.get_visible_character(campaign_slug, character_slug)
@@ -141,6 +142,10 @@ class CampaignCombatService:
             label="Turn value",
             default=snapshot["initiative_bonus"],
             minimum=None,
+        )
+        normalized_initiative_priority = self._parse_initiative_priority(
+            initiative_priority,
+            default=0,
         )
 
         try:
@@ -155,6 +160,8 @@ class CampaignCombatService:
                 display_name=record.definition.name,
                 turn_value=normalized_turn_value,
                 initiative_bonus=snapshot["initiative_bonus"],
+                dexterity_modifier=snapshot["dexterity_modifier"],
+                initiative_priority=normalized_initiative_priority,
                 current_hp=snapshot["current_hp"],
                 max_hp=snapshot["max_hp"],
                 temp_hp=snapshot["temp_hp"],
@@ -176,6 +183,8 @@ class CampaignCombatService:
         display_name: str,
         turn_value: Any | None,
         initiative_bonus: Any | None = 0,
+        dexterity_modifier: Any | None = None,
+        initiative_priority: Any | None = None,
         current_hp: Any | None,
         max_hp: Any | None,
         temp_hp: Any | None = 0,
@@ -194,6 +203,16 @@ class CampaignCombatService:
             label="Initiative bonus",
             default=0,
             minimum=None,
+        )
+        normalized_dexterity_modifier = self._parse_int(
+            dexterity_modifier,
+            label="Dexterity modifier",
+            default=normalized_initiative_bonus,
+            minimum=None,
+        )
+        normalized_initiative_priority = self._parse_initiative_priority(
+            initiative_priority,
+            default=0,
         )
         normalized_max_hp = self._parse_int(max_hp, label="Max HP", default=None, minimum=0)
         normalized_current_hp = self._parse_int(
@@ -228,6 +247,8 @@ class CampaignCombatService:
             display_name=normalized_name,
             turn_value=normalized_turn_value,
             initiative_bonus=normalized_initiative_bonus,
+            dexterity_modifier=normalized_dexterity_modifier,
+            initiative_priority=normalized_initiative_priority,
             current_hp=normalized_current_hp,
             max_hp=normalized_max_hp,
             temp_hp=normalized_temp_hp,
@@ -245,6 +266,7 @@ class CampaignCombatService:
         *,
         expected_revision: int | None = None,
         turn_value: Any | None,
+        initiative_priority: Any | None = None,
         updated_by_user_id: int | None = None,
     ) -> CampaignCombatantRecord:
         combatant = self._require_combatant(campaign_slug, combatant_id)
@@ -254,11 +276,16 @@ class CampaignCombatService:
             default=combatant.turn_value,
             minimum=None,
         )
+        normalized_initiative_priority = self._parse_initiative_priority(
+            initiative_priority,
+            default=combatant.initiative_priority,
+        )
         try:
             combatant = self.store.update_combatant(
                 campaign_slug,
                 combatant_id,
                 turn_value=normalized_turn_value,
+                initiative_priority=normalized_initiative_priority,
                 expected_revision=expected_revision,
                 updated_by_user_id=updated_by_user_id,
             )
@@ -360,6 +387,7 @@ class CampaignCombatService:
                 combatant_id,
                 display_name=record.definition.name,
                 initiative_bonus=int(record.definition.stats.get("initiative_bonus") or 0),
+                dexterity_modifier=self._extract_dexterity_modifier(record.definition.stats),
                 current_hp=int((state_record.state.get("vitals") or {}).get("current_hp") or 0),
                 max_hp=max_hp,
                 temp_hp=int((state_record.state.get("vitals") or {}).get("temp_hp") or 0),
@@ -670,6 +698,7 @@ class CampaignCombatService:
             if (
                 combatant.display_name == record.definition.name
                 and combatant.initiative_bonus == snapshot["initiative_bonus"]
+                and combatant.dexterity_modifier == snapshot["dexterity_modifier"]
                 and combatant.current_hp == snapshot["current_hp"]
                 and combatant.max_hp == snapshot["max_hp"]
                 and combatant.temp_hp == snapshot["temp_hp"]
@@ -683,6 +712,7 @@ class CampaignCombatService:
                     combatant.id,
                     display_name=record.definition.name,
                     initiative_bonus=snapshot["initiative_bonus"],
+                    dexterity_modifier=snapshot["dexterity_modifier"],
                     current_hp=snapshot["current_hp"],
                     max_hp=snapshot["max_hp"],
                     temp_hp=snapshot["temp_hp"],
@@ -727,6 +757,7 @@ class CampaignCombatService:
         stats = dict(record.definition.stats or {})
         return {
             "initiative_bonus": int(stats.get("initiative_bonus") or 0),
+            "dexterity_modifier": self._extract_dexterity_modifier(stats),
             "current_hp": int(vitals.get("current_hp") or 0),
             "max_hp": int(stats.get("max_hp") or 0),
             "temp_hp": int(vitals.get("temp_hp") or 0),
@@ -739,6 +770,43 @@ class CampaignCombatService:
         if not distances:
             return 0
         return max(distances)
+
+    def _extract_dexterity_modifier(self, stats: dict[str, Any]) -> int:
+        raw_ability_scores = stats.get("ability_scores") or {}
+        if not isinstance(raw_ability_scores, dict):
+            return 0
+        ability_scores = dict(raw_ability_scores)
+        dexterity = ability_scores.get("dex") or ability_scores.get("DEX") or {}
+        if not isinstance(dexterity, dict):
+            return 0
+        raw_modifier = dexterity.get("modifier")
+        if raw_modifier is not None and str(raw_modifier).strip() != "":
+            try:
+                return int(raw_modifier)
+            except (TypeError, ValueError):
+                return 0
+
+        raw_score = dexterity.get("score")
+        if raw_score is None or str(raw_score).strip() == "":
+            return 0
+        try:
+            return (int(raw_score) - 10) // 2
+        except (TypeError, ValueError):
+            return 0
+
+    def _parse_initiative_priority(self, value: Any | None, *, default: int) -> int:
+        if value is None:
+            return max(0, int(default or 0))
+        normalized = str(value).strip()
+        if not normalized:
+            return 0
+        try:
+            parsed = int(normalized)
+        except ValueError as exc:
+            raise CampaignCombatValidationError("Priority must be a whole number.") from exc
+        if parsed < 1:
+            raise CampaignCombatValidationError("Priority must be 1 or higher.")
+        return parsed
 
     def _parse_int(
         self,
