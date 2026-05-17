@@ -1,6 +1,6 @@
 {% if selected_combat_character and combat_workspace_sections %}
   {% set combat_workspace_return_view = (
-    "dm" if combat_return_view == "dm" else "combat" if combat_subpage == "combat" else "status"
+    "dm" if combat_return_view == "dm" else "combat" if combat_subpage == "combat" else "character" if combat_subpage == "character" else "status"
   ) %}
   {% macro combat_workspace_return_fields() %}
     {% if combat_workspace_return_view == "dm" %}
@@ -8,6 +8,8 @@
       <input type="hidden" name="view" value="status">
     {% elif combat_workspace_return_view == "combat" %}
       <input type="hidden" name="combat_view" value="combat">
+    {% elif combat_workspace_return_view == "character" %}
+      <input type="hidden" name="combat_view" value="character">
     {% else %}
       <input type="hidden" name="combat_view" value="status">
     {% endif %}
@@ -163,63 +165,69 @@
         {% endif %}
       {% elif section.slug == 'spells' %}
         {% if section.spellcasting %}
-          <div class="detail-grid">
-            <article class="detail-card">
+          <article class="detail-card combat-spellcasting-panel">
+            <div class="combat-spellcasting-panel__summary">
               {% if section.spellcasting.is_multiclass %}
-                <h3>Multiclass Spellcasting</h3>
-                <p>{{ section.spellcasting.multiclass_summary }}</p>
+                <div class="combat-spellcasting-summary">
+                  <h3>Multiclass Spellcasting</h3>
+                  <p>{{ section.spellcasting.multiclass_summary }}</p>
+                </div>
               {% else %}
                 {% set primary_section = (section.spellcasting.row_sections | list | first) if section.spellcasting.row_sections else none %}
-                <h3>{{ (primary_section.title if primary_section else section.spellcasting.spellcasting_class) or "Spellcasting" }}</h3>
-                <p>
-                  {{ (primary_section.spellcasting_ability if primary_section else section.spellcasting.spellcasting_ability) }} spellcasting
-                  {% if (primary_section.spell_save_dc if primary_section else section.spellcasting.spell_save_dc) %}
-                    | Save DC {{ primary_section.spell_save_dc if primary_section else section.spellcasting.spell_save_dc }}
-                  {% endif %}
-                  {% if (primary_section.spell_attack_bonus if primary_section else section.spellcasting.spell_attack_bonus) %}
-                    | Attack {{ primary_section.spell_attack_bonus if primary_section else section.spellcasting.spell_attack_bonus }}
-                  {% endif %}
-                </p>
+                <div class="combat-spellcasting-summary">
+                  <h3>{{ (primary_section.title if primary_section else section.spellcasting.spellcasting_class) or "Spellcasting" }}</h3>
+                  <p>
+                    {{ (primary_section.spellcasting_ability if primary_section else section.spellcasting.spellcasting_ability) }} spellcasting
+                    {% if (primary_section.spell_save_dc if primary_section else section.spellcasting.spell_save_dc) %}
+                      | Save DC {{ primary_section.spell_save_dc if primary_section else section.spellcasting.spell_save_dc }}
+                    {% endif %}
+                    {% if (primary_section.spell_attack_bonus if primary_section else section.spellcasting.spell_attack_bonus) %}
+                      | Attack {{ primary_section.spell_attack_bonus if primary_section else section.spellcasting.spell_attack_bonus }}
+                    {% endif %}
+                  </p>
+                </div>
               {% endif %}
-            </article>
+            </div>
             {% for slot_pool in section.spellcasting.slot_pools %}
               {% if slot_pool.slots %}
                 {% if can_edit_combat_character_state and selected_combatant_id %}
-                  <article class="detail-card" {% if loop.first %}id="combat-character-spell-slots"{% endif %}>
+                  <section class="combat-spell-slot-group" {% if loop.first %}id="combat-character-spell-slots"{% endif %}>
                     <h3>{{ slot_pool.title or section.spellcasting.slots_title or "Spell slots" }}</h3>
-                    <div class="spell-slot-editor-list">
+                    <div class="combat-spell-slot-list">
                       {% for slot in slot_pool.slots %}
-                        <article class="detail-card">
-                            <form
-                              class="session-inline-form"
-                              method="post"
-                              action="{{ url_for('campaign_combat_character_spell_slots', campaign_slug=campaign.slug, combatant_id=selected_combatant_id, level=slot.level) }}"
-                            >
-                              {{ combat_workspace_return_fields() }}
-                              <input type="hidden" name="expected_revision" value="{{ selected_combat_character.state_revision }}">
-                              <input type="hidden" name="slot_lane_id" value="{{ slot.slot_lane_id }}">
-                              <div class="section-heading">
-                                <h3>{{ slot.label }}</h3>
-                                <span class="meta">{{ slot.available }} available / {{ slot.max }}</span>
-                            </div>
-                            <label class="session-field">
-                              <span>Used</span>
-                              <input type="number" name="used" value="{{ slot.used }}" min="0" max="{{ slot.max }}">
-                            </label>
-                            <div class="session-stepper">
-                              <button type="submit" name="delta_used" value="-1">Restore 1</button>
-                              <button type="submit" name="delta_used" value="1">Use 1</button>
-                              <button type="submit">Save</button>
-                            </div>
-                          </form>
-                        </article>
+                        <form
+                          class="combat-spell-slot-row"
+                          method="post"
+                          action="{{ url_for('campaign_combat_character_spell_slots', campaign_slug=campaign.slug, combatant_id=selected_combatant_id, level=slot.level) }}"
+                          {% if combat_workspace_return_view != "character" %}
+                          data-combat-async
+                          {% endif %}
+                        >
+                          {{ combat_workspace_return_fields() }}
+                          <input type="hidden" name="combatant" value="{{ selected_combatant_id }}">
+                          <input type="hidden" name="expected_revision" value="{{ selected_combat_character.state_revision }}">
+                          <input type="hidden" name="slot_lane_id" value="{{ slot.slot_lane_id }}">
+                          <div class="combat-spell-slot-row__label">
+                            <strong>{{ slot.label }}</strong>
+                            <span class="meta">{{ slot.available }} available / {{ slot.max }}</span>
+                          </div>
+                          <label class="combat-compact-field">
+                            <span>Used</span>
+                            <input type="number" name="used" value="{{ slot.used }}" min="0" max="{{ slot.max }}">
+                          </label>
+                          <div class="session-stepper combat-spell-slot-row__actions">
+                            <button type="submit" name="delta_used" value="-1">Restore 1</button>
+                            <button type="submit" name="delta_used" value="1">Use 1</button>
+                            <button type="submit">Save</button>
+                          </div>
+                        </form>
                       {% endfor %}
                     </div>
-                  </article>
+                  </section>
                 {% else %}
-                  <article class="detail-card" {% if loop.first %}id="combat-character-spell-slots"{% endif %}>
+                  <section class="combat-spell-slot-group" {% if loop.first %}id="combat-character-spell-slots"{% endif %}>
                     <h3>{{ slot_pool.title or section.spellcasting.slots_title or "Spell slots" }}</h3>
-                    <ul class="plain-list slot-list">
+                    <ul class="plain-list slot-list combat-spell-slot-list combat-spell-slot-list--readonly">
                       {% for slot in slot_pool.slots %}
                         <li>
                           <span>{{ slot.label }}</span>
@@ -227,26 +235,28 @@
                         </li>
                       {% endfor %}
                     </ul>
-                  </article>
+                  </section>
                 {% endif %}
               {% endif %}
             {% endfor %}
-          </div>
+          </article>
 
           {% if section.spellcasting.row_sections %}
             {% for spell_section in section.spellcasting.row_sections %}
-              <div class="section-heading">
-                <div>
-                  <h3>{{ spell_section.title }}</h3>
-                  {% if spell_section.spellcasting_ability %}
-                    <p class="meta">
-                      {{ spell_section.spellcasting_ability }} spellcasting
-                      {% if spell_section.spell_save_dc %}| Save DC {{ spell_section.spell_save_dc }}{% endif %}
-                      {% if spell_section.spell_attack_bonus %}| Attack {{ spell_section.spell_attack_bonus }}{% endif %}
-                    </p>
-                  {% endif %}
+              {% if section.spellcasting.is_multiclass or section.spellcasting.row_sections|length > 1 %}
+                <div class="section-heading">
+                  <div>
+                    <h3>{{ spell_section.title }}</h3>
+                    {% if spell_section.spellcasting_ability %}
+                      <p class="meta">
+                        {{ spell_section.spellcasting_ability }} spellcasting
+                        {% if spell_section.spell_save_dc %}| Save DC {{ spell_section.spell_save_dc }}{% endif %}
+                        {% if spell_section.spell_attack_bonus %}| Attack {{ spell_section.spell_attack_bonus }}{% endif %}
+                      </p>
+                    {% endif %}
+                  </div>
                 </div>
-              </div>
+              {% endif %}
               {% if spell_section.counts %}
                 <ul class="plain-list slot-list">
                   {% for count in spell_section.counts %}
@@ -303,11 +313,15 @@
               <article class="resource-card">
                 {% if can_edit_combat_character_state and selected_combatant_id %}
                   <form
-                    class="session-inline-form"
+                    class="session-inline-form combat-resource-state-form"
                     method="post"
                     action="{{ url_for('campaign_combat_character_resource', campaign_slug=campaign.slug, combatant_id=selected_combatant_id, resource_id=resource.id) }}"
+                    {% if combat_workspace_return_view != "character" %}
+                    data-combat-async
+                    {% endif %}
                   >
                     {{ combat_workspace_return_fields() }}
+                    <input type="hidden" name="combatant" value="{{ selected_combatant_id }}">
                     <input type="hidden" name="expected_revision" value="{{ selected_combat_character.state_revision }}">
                     <div class="section-heading">
                       <h3>{{ resource.label }}</h3>
@@ -458,7 +472,9 @@
                     class="stack-form"
                     method="post"
                     action="{{ url_for('campaign_combat_character_equipment_state', campaign_slug=campaign.slug, combatant_id=selected_combatant_id, item_id=item.id) }}"
+                    {% if combat_workspace_return_view != "character" %}
                     data-combat-async
+                    {% endif %}
                   >
                     {{ combat_workspace_return_fields() }}
                     <input type="hidden" name="combatant" value="{{ selected_combatant_id }}">

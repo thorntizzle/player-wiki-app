@@ -510,6 +510,14 @@ class CampaignCombatService:
         self.store.bump_tracker_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
         return condition
 
+    def mark_character_state_changed(
+        self,
+        campaign_slug: str,
+        *,
+        updated_by_user_id: int | None = None,
+    ) -> None:
+        self.store.bump_tracker_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
+
     def delete_combatant(
         self,
         campaign_slug: str,

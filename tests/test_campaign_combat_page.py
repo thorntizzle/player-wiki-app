@@ -1988,6 +1988,12 @@ def test_owner_player_combat_page_uses_character_workspace_layout(app, client, s
     assert "Reactions" in body
     assert "Abilities and Skills" in body
     assert "Selected / inspected" in body
+    assert "combat-spellcasting-panel" in body
+    assert "combat-spell-slot-row" in body
+    assert "spell-slot-editor-list" not in body
+    assert body.count("combat-spellcasting-summary") == 1
+    assert body.count("Save DC 15") == 1
+    assert body.count("Attack +7") == 1
     assert "Current limits" not in body
     assert "Encounter context" not in body
 
@@ -3390,6 +3396,82 @@ def test_dm_status_can_update_selected_pc_equipment_state(
     updated_item = _inventory_item(record, "quarterstaff-2")
     assert updated_item["is_equipped"] is False
     assert not updated_item.get("weapon_wield_mode")
+
+
+def test_dm_status_can_update_selected_pc_resources_and_spell_slots(
+    app, client, sign_in, users, get_character
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    assert arden is not None
+
+    page = client.get(f"/campaigns/linden-pass/combat/dm?combatant={arden.id}")
+    assert page.status_code == 200
+    body = page.get_data(as_text=True)
+    assert "combat-resource-state-form" in body
+    assert f"/campaigns/linden-pass/combat/character/combatants/{arden.id}/resources/sorcery-points" in body
+    assert "combat-spell-slot-row" in body
+    assert f"/campaigns/linden-pass/combat/character/combatants/{arden.id}/spell-slots/2" in body
+    assert body.count("combat-spellcasting-summary") == 1
+    assert body.count("Save DC 15") == 1
+    assert body.count("Attack +7") == 1
+    assert 'name="combat_view" value="dm"' in body
+    assert 'name="view" value="status"' in body
+
+    record = get_character("arden-march")
+    resource_response = client.post(
+        f"/campaigns/linden-pass/combat/character/combatants/{arden.id}/resources/sorcery-points",
+        data={
+            "expected_revision": record.state_record.revision,
+            "combat_view": "dm",
+            "view": "status",
+            "combatant": arden.id,
+            "current": 3,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert resource_response.status_code == 200
+    resource_payload = resource_response.get_json()
+    assert resource_payload["ok"] is True
+    assert resource_payload["selected_combatant_id"] == arden.id
+    assert "Resource updated." in resource_payload["flash_html"]
+    assert "combat-resource-state-form" in resource_payload["tracker_detail_html"]
+
+    record = get_character("arden-march")
+    resources = {item["id"]: item for item in record.state_record.state["resources"]}
+    assert resources["sorcery-points"]["current"] == 3
+
+    spell_response = client.post(
+        f"/campaigns/linden-pass/combat/character/combatants/{arden.id}/spell-slots/2",
+        data={
+            "expected_revision": record.state_record.revision,
+            "combat_view": "dm",
+            "view": "status",
+            "combatant": arden.id,
+            "used": 2,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert spell_response.status_code == 200
+    spell_payload = spell_response.get_json()
+    assert spell_payload["ok"] is True
+    assert spell_payload["selected_combatant_id"] == arden.id
+    assert "Spell slot usage updated." in spell_payload["flash_html"]
+    assert "combat-spell-slot-row" in spell_payload["tracker_detail_html"]
+
+    record = get_character("arden-march")
+    spell_slots = {item["level"]: item for item in record.state_record.state["spell_slots"]}
+    assert spell_slots[2]["used"] == 2
 
 
 def test_status_live_state_renders_npc_workspace_sections_for_selected_systems_monster(

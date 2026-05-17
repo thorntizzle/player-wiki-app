@@ -1759,7 +1759,7 @@ def update_xianxia_gathering_insight_definition(
 
 def normalize_combat_return_view(value: str) -> str:
     normalized = (value or "").strip().lower()
-    if normalized in {"dm", "status"}:
+    if normalized in {"character", "dm", "status"}:
         return normalized
     return "combat"
 
@@ -5369,7 +5369,10 @@ def create_app() -> Flask:
             abort(404)
         if not combatant.is_player_character or not combatant.character_slug:
             abort(404)
-        if combatant.character_slug not in get_owned_character_slugs(campaign_slug):
+        if (
+            combatant.character_slug not in get_owned_character_slugs(campaign_slug)
+            and not can_manage_campaign_combat(campaign_slug)
+        ):
             abort(403)
 
         record = get_character_repository().get_visible_character(campaign_slug, combatant.character_slug)
@@ -5380,6 +5383,7 @@ def create_app() -> Flask:
         if user is None:
             abort(403)
 
+        mutation_succeeded = False
         try:
             expected_revision = parse_expected_revision()
             action(record, expected_revision, user.id)
@@ -5388,13 +5392,20 @@ def create_app() -> Flask:
         except (CharacterStateValidationError, ValueError) as exc:
             flash(str(exc), "error")
         else:
+            mutation_succeeded = True
+            get_campaign_combat_service().mark_character_state_changed(
+                campaign_slug,
+                updated_by_user_id=user.id,
+            )
             flash(success_message, "success")
 
-        if str(request.form.get("combat_view") or "").strip().lower() == "combat":
-            return redirect_to_campaign_combat(
+        combat_return_view_raw = str(request.values.get("combat_view") or "").strip().lower()
+        if is_async_request() or combat_return_view_raw in {"character", "combat", "dm", "status"}:
+            return respond_to_campaign_combat_mutation(
                 campaign_slug,
-                combatant_id=combatant_id,
+                mutation_succeeded=mutation_succeeded,
                 anchor=anchor,
+                fallback_combatant_id=combatant_id,
             )
 
         return redirect_to_campaign_combat_character(
@@ -7509,6 +7520,11 @@ def create_app() -> Flask:
                     tracker_view,
                     selected_combatant,
                 ),
+                "can_edit_combat_character_state": bool(
+                    selected_combatant_record is not None
+                    and selected_combatant_record.is_player_character
+                    and selected_combatant_record.character_slug
+                ),
                 "can_edit_combat_equipment_state": bool(
                     selected_combatant_record is not None
                     and selected_combatant_record.is_player_character
@@ -9017,13 +9033,14 @@ def create_app() -> Flask:
         mutation_succeeded: bool,
         anchor: str | None = None,
         ignore_requested_combatant_for_dm: bool = False,
+        fallback_combatant_id: int | None = None,
     ):
         combat_return_view = normalize_combat_return_view(request.values.get("combat_view", ""))
         combat_dm_view = normalize_combat_dm_view(request.values.get("view", ""))
         selected_combatant_id = (
             None
             if ignore_requested_combatant_for_dm and combat_return_view == "dm"
-            else get_requested_combatant_id_from_values()
+            else get_requested_combatant_id_from_values() or fallback_combatant_id
         )
         if is_async_request():
             if combat_return_view == "dm":
@@ -9046,6 +9063,13 @@ def create_app() -> Flask:
                         selected_combatant_id=selected_combatant_id,
                     )
                 )
+            if combat_return_view == "character":
+                payload = build_campaign_combat_character_live_state(campaign_slug)
+                payload["flash_html"] = render_flash_stack_html()
+                payload["ok"] = mutation_succeeded
+                if anchor:
+                    payload["anchor"] = anchor
+                return jsonify(payload)
             return jsonify(
                 build_campaign_combat_live_state(
                     campaign_slug,
@@ -9064,6 +9088,12 @@ def create_app() -> Flask:
             )
         if combat_return_view == "status":
             return redirect_to_campaign_combat_status(
+                campaign_slug,
+                anchor=anchor,
+                combatant_id=selected_combatant_id,
+            )
+        if combat_return_view == "character":
+            return redirect_to_campaign_combat_character(
                 campaign_slug,
                 anchor=anchor,
                 combatant_id=selected_combatant_id,

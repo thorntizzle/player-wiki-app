@@ -1519,6 +1519,75 @@ button {
   margin: 0.2rem 0 0;
 }
 
+.combat-spellcasting-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.combat-spellcasting-panel__summary,
+.combat-spellcasting-summary,
+.combat-spell-slot-group,
+.combat-spell-slot-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.combat-spellcasting-summary {
+  gap: 0.25rem;
+}
+
+.combat-spellcasting-summary h3,
+.combat-spell-slot-group h3 {
+  margin: 0;
+}
+
+.combat-spell-slot-list {
+  gap: 0.55rem;
+}
+
+.combat-spell-slot-row {
+  display: grid;
+  grid-template-columns: minmax(9rem, 1fr) minmax(8rem, 0.65fr) auto;
+  gap: 0.65rem;
+  align-items: end;
+  padding: 0.75rem 0.85rem;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft-muted);
+}
+
+.combat-spell-slot-row__label {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.combat-spell-slot-row__actions {
+  justify-content: flex-end;
+}
+
+.combat-compact-field {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.combat-compact-field span {
+  font-weight: 700;
+}
+
+.combat-compact-field input {
+  min-height: 2.35rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  padding: 0.5rem 0.7rem;
+  color: var(--ink);
+  font: inherit;
+}
+
+.combat-resource-state-form .session-stepper {
+  margin-top: 0.2rem;
+}
+
 .detail-cluster,
 .feature-groups,
 .reference-stack,
@@ -2911,6 +2980,14 @@ button {
     width: 100%;
     grid-template-columns: 1fr;
     box-shadow: none;
+  }
+
+  .combat-spell-slot-row {
+    grid-template-columns: 1fr;
+  }
+
+  .combat-spell-slot-row__actions {
+    justify-content: flex-start;
   }
 
   .session-form-mode-toggle {
