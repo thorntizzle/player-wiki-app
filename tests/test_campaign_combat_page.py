@@ -3199,6 +3199,8 @@ def test_dm_status_page_renders_only_selected_pc_detail(app, client, sign_in, us
     assert body.index("data-combat-status-detail-root") < body.index("data-combat-status-board-root")
     assert f"/campaigns/linden-pass/combat/status?combatant={arden.id}" in body
     assert 'id="combat-status-snapshot"' in body
+    assert 'class="combat-status-identity-line"' in body
+    assert 'aria-label="Combatant details"' in body
     assert "Compact encounter status first" not in body
     assert 'data-combat-inline-autosubmit' in body
     assert 'aria-label="Current HP for Arden March"' in body
@@ -3269,6 +3271,7 @@ def test_dm_status_page_with_selected_systems_monster_includes_npc_workspace_sec
     assert "Systems monster detail" in body
     assert 'name="combat_view" value="dm"' in body
     assert 'name="view" value="status"' in body
+    assert 'class="combat-status-identity-line"' in body
     assert 'data-combat-section-group' in body
     assert 'data-combat-section-toggle="actions"' in body
     assert 'data-combat-section-toggle="abilities_skills"' in body
@@ -3479,6 +3482,8 @@ def test_dm_status_page_can_render_systems_monster_detail(app, client, sign_in, 
     assert response.status_code == 200
     body = response.get_data(as_text=True)
     assert 'id="combat-status-snapshot"' in body
+    assert 'class="combat-status-identity-line"' in body
+    assert 'aria-label="Combatant details"' in body
     assert "NPC sections" in body
     assert "Systems monster detail" in body
     assert 'data-combat-section-group' in body

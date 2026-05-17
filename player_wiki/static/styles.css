@@ -2489,6 +2489,39 @@ button {
   align-items: start;
 }
 
+.combat-status-identity-line,
+.combat-status-identity-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+
+.combat-status-identity-line {
+  gap: 0.45rem 0.75rem;
+}
+
+.combat-status-identity-line h2 {
+  margin: 0;
+}
+
+.combat-status-identity-meta {
+  gap: 0.3rem 0.55rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.combat-status-identity-meta span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+}
+
+.combat-status-identity-meta span + span::before {
+  content: "/";
+  color: var(--border-strong);
+  font-weight: 700;
+}
+
 .combat-status-snapshot__heading .combatant-badges form {
   display: inline-flex;
 }

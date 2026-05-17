@@ -23,16 +23,20 @@
     <div class="section-heading combat-status-snapshot__heading">
       <div class="combat-status-snapshot__meta">
         <p class="card-kicker">Encounter status</p>
-        <h2>{{ selected_combatant.name }}</h2>
-        {% if selected_combatant.subtitle %}
-          <p class="meta">{{ selected_combatant.subtitle }}</p>
-        {% endif %}
-        <p class="meta">{{ selected_combatant.type_label }} | {{ combat_status_source_label or selected_combatant.source_label }}</p>
-        {% if combat_status_source_mode == "dm_statblock" and combat_status_statblock %}
-          <p class="meta">Source file: {{ combat_status_statblock.source_filename }}</p>
-        {% elif combat_status_source_mode == "systems_monster" and combat_status_systems_entry %}
-          <p class="meta">Systems source {{ combat_status_systems_entry.source_id }}</p>
-        {% endif %}
+        <div class="combat-status-identity-line">
+          <h2>{{ selected_combatant.name }}</h2>
+          <div class="combat-status-identity-meta" aria-label="Combatant details">
+            {% if selected_combatant.subtitle %}
+              <span>{{ selected_combatant.subtitle }}</span>
+            {% endif %}
+            <span>{{ selected_combatant.type_label }} | {{ combat_status_source_label or selected_combatant.source_label }}</span>
+            {% if combat_status_source_mode == "dm_statblock" and combat_status_statblock %}
+              <span>Source file: {{ combat_status_statblock.source_filename }}</span>
+            {% elif combat_status_source_mode == "systems_monster" and combat_status_systems_entry %}
+              <span>Systems source {{ combat_status_systems_entry.source_id }}</span>
+            {% endif %}
+          </div>
+        </div>
       </div>
       <div class="combatant-badges">
         <span class="combat-badge">Round {{ combat_tracker.round_number }}</span>
