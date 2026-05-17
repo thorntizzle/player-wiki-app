@@ -686,8 +686,7 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
     assert "Formerly DM page. Existing /combat/dm links and bookmarks still work during the transition." in dm_html
     assert 'aria-label="Combat pages"' not in dm_html
     assert 'class="page-layout combat-layout combat-layout--workspace"' in dm_html
-    assert 'class="page-layout combat-layout"' in dm_controls_html
-    assert "combat-layout--workspace" not in dm_controls_html
+    assert 'class="page-layout combat-layout combat-layout--workspace"' in dm_controls_html
     assert "Add player character" not in dm_html
     assert "Add NPC from Systems" not in dm_html
     assert "Add custom NPC combatant" not in dm_html
@@ -696,6 +695,14 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
     assert "Add custom NPC combatant" in dm_controls_html
     assert "Encounter controls" in dm_controls_html
     assert "combat-dm-view=\"controls\"" in dm_controls_html
+    assert "Current turn" not in dm_controls_html
+    assert "Focus combatant" not in dm_controls_html
+    assert 'id="combat-summary"' not in dm_controls_html
+    assert 'id="combatant-' not in dm_controls_html
+    assert "Open Encounter status" not in dm_controls_html
+    assert 'data-combat-controls-root' in dm_controls_html
+    assert not re.search(r'<div[^>]*data-combat-summary-root[^>]*>', dm_controls_html)
+    assert not re.search(r'<div[^>]*data-combat-tracker-root[^>]*>', dm_controls_html)
     assert 'data-loading="0"' in dm_html
     assert re.search(
         r"<div[^>]*data-combat-status-selection-loading[^>]*>",
@@ -926,6 +933,32 @@ def test_dm_controls_live_state_short_circuits_when_revision_and_view_token_matc
     _assert_live_diagnostics_headers(unchanged_live_state)
 
 
+def test_dm_controls_live_state_omits_status_contract_html(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    assert arden is not None
+
+    response = client.get(
+        f"/campaigns/linden-pass/combat/dm/live-state?combatant={arden.id}&view=controls",
+        headers=_async_headers(),
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+
+    assert payload["selected_combatant_id"] == arden.id
+    assert "summary_html" not in payload
+    assert "tracker_html" not in payload
+    assert "tracker_authority_html" not in payload
+    assert "tracker_detail_html" not in payload
+    assert "controls_html" in payload
+
+
 def test_combat_character_live_state_short_circuits_when_revision_and_view_token_match(
     app, client, sign_in, users
 ):
@@ -1006,7 +1039,8 @@ def test_dm_can_add_systems_monster_to_combat_tracker(app, client, sign_in, user
     payload = response.get_json()
     assert payload["ok"] is True
     assert "NPC combatant added from Systems (MM)." in payload["flash_html"]
-    assert "Goblin" in payload["tracker_html"]
+    assert "Goblin" not in payload["controls_html"]
+    assert "tracker_html" not in payload
 
     combatant = _find_combatant(app, name="Goblin")
     assert combatant is not None
@@ -1056,11 +1090,10 @@ def test_dm_page_async_mutations_return_controls_partial_and_non_async_redirects
     assert async_response.status_code == 200
     async_payload = async_response.get_json()
     assert async_payload["ok"] is True
-    assert "Arden March" in async_payload["tracker_html"]
     assert "Add player character" in async_payload["controls_html"]
 
 
-def test_dm_async_advance_turn_defaults_focus_to_new_current_turn(app, client, sign_in, users):
+def test_dm_controls_view_omits_turn_status_widgets(app, client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
     client.post(
@@ -1092,20 +1125,11 @@ def test_dm_async_advance_turn_defaults_focus_to_new_current_turn(app, client, s
     dm_page = client.get(f"/campaigns/linden-pass/combat/dm?combatant={arden.id}&view=controls")
     assert dm_page.status_code == 200
     dm_page_html = dm_page.get_data(as_text=True)
-    assert "Focus combatant" in dm_page_html
-    assert re.search(
-        rf'<option[^>]*value="{arden.id}"[^>]*selected[^>]*>',
-        dm_page_html,
-    )
-
-    advance_form_match = re.search(
-        r'<form[^>]+action="/campaigns/linden-pass/combat/advance-turn"[^>]*>([\s\S]*?)</form>',
-        dm_page_html,
-    )
-    assert advance_form_match is not None
-    advance_turn_form = advance_form_match.group(0)
-    assert 'name="combatant"' not in advance_turn_form
-    assert 'name="combat_view" value="dm"' in advance_turn_form
+    assert "Focus combatant" not in dm_page_html
+    assert "Open Encounter status" not in dm_page_html
+    assert "Save turn value" not in dm_page_html
+    assert "Save NPC structure" not in dm_page_html
+    assert 'action="/campaigns/linden-pass/combat/advance-turn"' not in dm_page_html
 
     async_advance_response = client.post(
         "/campaigns/linden-pass/combat/advance-turn",
@@ -1119,18 +1143,12 @@ def test_dm_async_advance_turn_defaults_focus_to_new_current_turn(app, client, s
     assert payload["selected_combatant_id"] == hound.id
     assert payload["page_url"] == f"/campaigns/linden-pass/combat/dm?combatant={hound.id}&view=controls"
     assert payload["live_url"] == f"/campaigns/linden-pass/combat/dm/live-state?combatant={hound.id}&view=controls"
-    assert "Focus combatant" in payload["summary_html"]
-    assert re.search(
-        rf'<option[^>]*value="{hound.id}"[^>]*selected[^>]*>',
-        payload["summary_html"],
-    )
-    assert not re.search(
-        rf'<option[^>]*value="{arden.id}"[^>]*selected[^>]*>',
-        payload["summary_html"],
-    )
-    assert f'id="combatant-{hound.id}"' in payload["tracker_html"]
-    assert f'id="combatant-{arden.id}"' not in payload["tracker_html"]
-    assert "Current turn" in payload["tracker_html"]
+    assert "summary_html" not in payload
+    assert "tracker_html" not in payload
+    assert "tracker_authority_html" not in payload
+    assert "tracker_detail_html" not in payload
+    assert "controls_html" in payload
+    assert 'action="/campaigns/linden-pass/combat/advance-turn"' not in payload["controls_html"]
 
 
 def test_dm_status_async_advance_turn_preserves_selected_focus(app, client, sign_in, users):
@@ -1358,7 +1376,7 @@ def test_dm_pages_split_tactical_status_edits_from_control_authority_actions(
     _assert_expected_combatant_revision_field(status_body, hound.revision, at_least=4)
 
     assert "Selected combatant authority" in status_dm_body
-    assert "Open Encounter status" in controls_body
+    assert "Open Encounter status" not in controls_body
     assert "Save turn value" in status_dm_body
     assert "Show NPC detail to players" in status_dm_body
     assert "Save NPC structure" in status_dm_body

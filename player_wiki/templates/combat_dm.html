@@ -36,7 +36,7 @@
     </datalist>
 
     <div
-      class="page-layout combat-layout{% if combat_dm_view == 'status' %} combat-layout--workspace{% endif %}"
+      class="page-layout combat-layout{% if combat_dm_view in ['status', 'controls'] %} combat-layout--workspace{% endif %}"
       data-combat-live-root
       data-combat-subpage="dm"
       data-combat-dm-view="{{ combat_dm_view }}"
@@ -52,15 +52,15 @@
       data-live-idle-threshold-ms="{{ combat_poll_idle_threshold_ms }}"
       data-live-diagnostics-enabled="{{ '1' if live_diagnostics_enabled else '0' }}"
     >
-      <section class="section-list{% if combat_dm_view == 'status' %} combat-workspace-stack{% endif %}">
-        <div data-combat-summary-root>
-          {% set combat_summary_compact = combat_dm_view == 'status' %}
-          {% set combat_summary_show_focus_picker = combat_dm_view == 'controls' %}
-          {% include "_combat_summary_card.html" %}
-        </div>
+      {% if combat_dm_view == 'status' %}
+        <section class="section-list combat-workspace-stack">
+          <div data-combat-summary-root>
+            {% set combat_summary_compact = combat_dm_view == 'status' %}
+            {% set combat_summary_show_focus_picker = combat_dm_view == 'controls' %}
+            {% include "_combat_summary_card.html" %}
+          </div>
 
-        <div data-combat-tracker-root>
-          {% if combat_dm_view == 'status' %}
+          <div data-combat-tracker-root>
             <div data-combat-status-tracker-root>
               {% set combatant_navigation_mode = "carousel" %}
               {% include "_combat_combatant_navigation.html" %}
@@ -81,18 +81,14 @@
             <div data-combat-status-authority-root>
               {% include "_combat_dm_selected_authority.html" %}
             </div>
-          {% else %}
-            {% include "_combat_dm_focus_card.html" %}
-          {% endif %}
-        </div>
-      </section>
-
-      {% if combat_dm_view == 'controls' %}
-        <aside class="sidebar combat-sidebar-stack" id="combat-controls">
+          </div>
+        </section>
+      {% else %}
+        <section class="section-list">
           <div data-combat-controls-root>
             {% include "_combat_dm_controls.html" %}
           </div>
-        </aside>
+        </section>
       {% endif %}
     </div>
   {% endif %}

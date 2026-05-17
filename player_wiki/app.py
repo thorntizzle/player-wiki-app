@@ -8774,49 +8774,41 @@ def create_app() -> Flask:
             live_revision = int(context["combat_live_revision"] or 0)
         if live_view_token is None:
             live_view_token = str(context["combat_live_view_token"] or "")
-        summary_context = dict(context)
-        summary_context["combat_summary_compact"] = normalized_combat_dm_view == "status"
-        summary_context["combat_summary_show_focus_picker"] = normalized_combat_dm_view == "controls"
-        summary_template = "_combat_summary_card.html"
-        if normalized_combat_dm_view == "status":
-            tracker_template = render_template(
-                "_combat_combatant_navigation.html",
-                combatant_navigation_mode="carousel",
-                **context,
-            )
-            detail_template = (
-                _build_cached_combat_status_detail_html(
-                    campaign_slug=campaign_slug,
-                    detail_view="combat-dm-status",
-                    selected_combatant_state_token=str(context.get("combat_status_state_token") or ""),
-                    context=context,
-                )
-                if include_selected_detail
-                else None
-            )
-            authority_template = render_template("_combat_dm_selected_authority.html", **context)
-        else:
-            tracker_template = render_template("_combat_dm_focus_card.html", **context)
-            detail_template = None
-            authority_template = ""
         payload = {
             "changed": True,
             "live_revision": live_revision,
             "live_view_token": live_view_token,
             "combat_state_token": context["combat_live_state_token"],
             "combatant_detail_state_token": str(context.get("combat_status_state_token") or ""),
-            "summary_html": render_template(summary_template, **summary_context),
-            "tracker_html": tracker_template,
-            "tracker_authority_html": authority_template,
-            "controls_html": (
-                render_template("_combat_dm_controls.html", **context)
-                if normalized_combat_dm_view == "controls"
-                else ""
-            ),
             "selected_combatant_id": context["selected_combatant_id"],
         }
-        if detail_template is not None:
-            payload["tracker_detail_html"] = detail_template
+        if normalized_combat_dm_view == "status":
+            summary_context = dict(context)
+            summary_context["combat_summary_compact"] = True
+            summary_context["combat_summary_show_focus_picker"] = False
+            payload.update(
+                {
+                    "summary_html": render_template(
+                        "_combat_summary_card.html",
+                        **summary_context,
+                    ),
+                    "tracker_html": render_template(
+                        "_combat_combatant_navigation.html",
+                        combatant_navigation_mode="carousel",
+                        **context,
+                    ),
+                    "tracker_authority_html": render_template("_combat_dm_selected_authority.html", **context),
+                }
+            )
+            if include_selected_detail:
+                payload["tracker_detail_html"] = _build_cached_combat_status_detail_html(
+                    campaign_slug=campaign_slug,
+                    detail_view="combat-dm-status",
+                    selected_combatant_state_token=str(context.get("combat_status_state_token") or ""),
+                    context=context,
+                )
+        else:
+            payload["controls_html"] = render_template("_combat_dm_controls.html", **context)
         payload.update(
             build_combat_surface_urls(
                 campaign_slug,
