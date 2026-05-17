@@ -697,6 +697,14 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
     assert "Encounter controls" in dm_controls_html
     assert "combat-dm-view=\"controls\"" in dm_controls_html
     assert 'data-loading="0"' in dm_html
+    assert re.search(
+        r"<div[^>]*data-combat-status-selection-loading[^>]*>",
+        dm_html,
+    )
+    assert not re.search(
+        r"<div[^>]*data-combat-status-selection-loading[^>]*>",
+        dm_controls_html,
+    )
     assert "captureSystemsMonsterSearchState" in dm_html
     assert 'liveRoot.dataset.loading = "1";' in dm_html
     assert "const findMatchingForm = (root, descriptor) =>" in dm_html
@@ -2688,12 +2696,20 @@ def test_dm_status_combined_page_script_hydrates_selected_combatant_live_state_a
     assert page.status_code == 200
     body = page.get_data(as_text=True)
     assert "const fetchDmStatusCombatant = async (combatantId, { carousel = null } = {}) => {" in body
+    assert "const setDmStatusSelectionLoading = (isLoading) => {" in body
     assert "const getPayloadSelectedCombatantId = (payload = {}) => {" in body
     assert "const isStaleDmStatusPayload = (payload = {}) => {" in body
     assert 'if (target.matches("[data-combatant-carousel-jump-select]")) {' in body
     assert "if (isDmStatusLiveRoot && selectedCombatantId) {" in body
+    assert "setDmStatusSelectionLoading(true);" in body
+    assert "setDmStatusSelectionLoading(false);" in body
     assert "void fetchDmStatusCombatant(selectedCombatantId, { carousel });" in body
     assert "await fetchDmStatusCombatant(selectedCombatantId, { carousel });" in body
+    assert 'data-combat-status-selection-loading' in body
+    assert "Loading selected combatant..." in body
+    assert 'role="status"' in body
+    assert 'aria-live="polite"' in body
+    assert 'aria-atomic="true"' in body
     assert "pollUrl = nextPollUrl;" in body
     assert "liveRoot.dataset.selectedCombatantId = normalizedCombatantId;" in body
     assert "if (isStaleDmStatusPayload(payload)) {" in body

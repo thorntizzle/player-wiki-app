@@ -11,6 +11,7 @@
     const statusTrackerRoot = document.querySelector("[data-combat-status-tracker-root]");
     const trackerDetailRoot = document.querySelector("[data-combat-status-detail-root]");
     const statusAuthorityRoot = document.querySelector("[data-combat-status-authority-root]");
+    const combatStatusSelectionLoadingRoot = document.querySelector("[data-combat-status-selection-loading]");
     const contextRoot = document.querySelector("[data-combat-context-root]");
     const controlsRoot = document.querySelector("[data-combat-controls-root]");
     let pollUrl = liveRoot.dataset.combatLiveUrl || "";
@@ -137,6 +138,16 @@
 
     const markActivity = () => {
       lastActivityAt = Date.now();
+    };
+
+    const setDmStatusSelectionLoading = (isLoading) => {
+      if (!isDmStatusLiveRoot || !(combatStatusSelectionLoadingRoot instanceof HTMLElement)) {
+        return;
+      }
+      combatStatusSelectionLoadingRoot.textContent = isLoading
+        ? "Loading selected combatant..."
+        : "";
+      combatStatusSelectionLoadingRoot.hidden = !isLoading;
     };
 
     const getNextPollDelay = () => {
@@ -458,6 +469,7 @@
 
       requestInFlight = true;
       liveRoot.dataset.loading = "1";
+      setDmStatusSelectionLoading(true);
       for (const control of controls) {
         if (control instanceof HTMLElement) {
           control.ariaBusy = "true";
@@ -485,6 +497,7 @@
         logLiveDiagnostics("combat-dm-status-navigation", response, payload);
         syncViewUrls(payload);
         renderPayload(payload, { force: true });
+        setDmStatusSelectionLoading(false);
         return true;
       } catch (_) {
         if (nextPageUrl) {
@@ -494,6 +507,7 @@
       } finally {
         requestInFlight = false;
         liveRoot.dataset.loading = "0";
+        setDmStatusSelectionLoading(false);
         for (const control of controls) {
           if (control instanceof HTMLElement) {
             control.ariaBusy = "false";

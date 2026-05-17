@@ -66,6 +66,16 @@
               {% include "_combat_combatant_navigation.html" %}
             </div>
             <div data-combat-status-detail-root>
+              <div
+                class="combat-status-selection-loading"
+                data-combat-status-selection-loading
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+                hidden
+              >
+                Loading selected combatant...
+              </div>
               {% include "_combat_status_detail.html" %}
             </div>
             <div data-combat-status-authority-root>
