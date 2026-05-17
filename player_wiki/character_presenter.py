@@ -549,6 +549,13 @@ def present_character_detail(
             ): dict(slot)
             for slot in list(state.get("spell_slots") or [])
         }
+        legacy_slots_by_level = {}
+        for slot in list(state.get("spell_slots") or []):
+            lane_id = normalize_spell_slot_lane_id(slot.get("slot_lane_id"))
+            level = int(slot.get("level") or 0)
+            if lane_id or level <= 0:
+                continue
+            legacy_slots_by_level.setdefault(level, []).append(dict(slot))
         slot_pools = []
         for lane in slot_lanes:
             lane_id = normalize_spell_slot_lane_id(lane.get("id"))
@@ -556,7 +563,10 @@ def present_character_detail(
             for slot in list(lane.get("slot_progression") or []):
                 level = int(slot.get("level") or 0)
                 max_slots = int(slot.get("max_slots") or 0)
-                state_slot = slot_lookup.get((lane_id, level), {})
+                state_slot = slot_lookup.get((lane_id, level))
+                if state_slot is None and lane_id and legacy_slots_by_level.get(level):
+                    state_slot = legacy_slots_by_level[level].pop(0)
+                state_slot = state_slot or {}
                 used = int(state_slot.get("used") or 0)
                 pool_slots.append(
                     {

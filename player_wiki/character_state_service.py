@@ -665,6 +665,19 @@ class CharacterStateService:
             ),
             None,
         )
+        if slot is None and clean_lane_id:
+            legacy_slot = next(
+                (
+                    item
+                    for item in slots
+                    if int(item.get("level") or 0) == int(level)
+                    and not normalize_spell_slot_lane_id(item.get("slot_lane_id"))
+                ),
+                None,
+            )
+            if legacy_slot is not None:
+                legacy_slot["slot_lane_id"] = clean_lane_id
+                slot = legacy_slot
         if slot is None:
             lane_label = f" in slot lane '{clean_lane_id}'" if clean_lane_id else ""
             raise ValueError(f"Unknown spell slot level: {level}{lane_label}")

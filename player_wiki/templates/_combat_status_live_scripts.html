@@ -30,6 +30,7 @@
     let pollInFlight = false;
     let requestInFlight = false;
     let lastActivityAt = Date.now();
+    const submitterByForm = new WeakMap();
 
     const buildCombatFormData = (form, submitter) => {
       const formData = new FormData(form);
@@ -41,6 +42,53 @@
       }
       return formData;
     };
+
+    const isSubmitterControl = (element) => {
+      if (element instanceof HTMLButtonElement) {
+        return element.type === "submit";
+      }
+      if (element instanceof HTMLInputElement) {
+        const type = String(element.type || "").toLowerCase();
+        return type === "submit" || type === "image";
+      }
+      return false;
+    };
+
+    const resolveCombatSubmitter = (form, submitter) => {
+      if (isSubmitterControl(submitter) && submitter.form === form) {
+        return submitter;
+      }
+      const storedSubmitter = submitterByForm.get(form);
+      if (isSubmitterControl(storedSubmitter) && storedSubmitter.form === form) {
+        return storedSubmitter;
+      }
+      const activeElement = document.activeElement;
+      if (isSubmitterControl(activeElement) && activeElement.form === form) {
+        return activeElement;
+      }
+      return null;
+    };
+
+    document.addEventListener(
+      "click",
+      (event) => {
+        const submitter = event.target instanceof Element
+          ? event.target.closest("button, input[type='submit'], input[type='image']")
+          : null;
+        if (!isSubmitterControl(submitter)) {
+          return;
+        }
+        const form = submitter.form;
+        if (!(form instanceof HTMLFormElement) || !form.matches("[data-combat-async]")) {
+          return;
+        }
+        if (!liveRoot.contains(form)) {
+          return;
+        }
+        submitterByForm.set(form, submitter);
+      },
+      true,
+    );
 
     const markActivity = () => {
       lastActivityAt = Date.now();
@@ -400,7 +448,9 @@
       }
 
       event.preventDefault();
+      const submitter = resolveCombatSubmitter(form, event.submitter);
       if (requestInFlight) {
+        submitterByForm.delete(form);
         return;
       }
 
@@ -419,7 +469,7 @@
             "X-Requested-With": "XMLHttpRequest",
             "Accept": "application/json",
           },
-          body: buildCombatFormData(form, event.submitter),
+          body: buildCombatFormData(form, submitter),
           credentials: "same-origin",
         });
         if (!response.ok) {
@@ -434,6 +484,7 @@
         return;
       } finally {
         requestInFlight = false;
+        submitterByForm.delete(form);
         for (const button of buttons) {
           button.disabled = false;
         }

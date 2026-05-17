@@ -84,9 +84,42 @@ def test_combat_async_form_posts_include_clicked_submit_button():
     status_script = (templates_dir / "_combat_status_live_scripts.html").read_text(encoding="utf-8")
 
     for script in (combat_script, status_script):
+        assert "const submitterByForm = new WeakMap();" in script
         assert "const buildCombatFormData = (form, submitter) =>" in script
+        assert "const resolveCombatSubmitter = (form, submitter) =>" in script
+        assert 'event.target.closest("button, input[type=\'submit\'], input[type=\'image\']")' in script
+        assert "submitterByForm.set(form, submitter);" in script
         assert "formData.append(submitter.name, submitter.value);" in script
-        assert "body: buildCombatFormData(form, event.submitter)" in script
+        assert "const submitter = resolveCombatSubmitter(form, event.submitter);" in script
+        assert "body: buildCombatFormData(form, submitter)" in script
+
+
+def _assert_spell_slot_html_state(html: str, *, used: int, available: int, maximum: int):
+    assert f"{available} available / {maximum}" in html
+    assert f'name="used" value="{used}"' in html
+
+
+def _convert_arden_spell_slots_to_class_lane(app, lane_id: str = "class-row-1-slots"):
+    definition_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "characters"
+        / "arden-march"
+        / "definition.yaml"
+    )
+    payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
+    spellcasting = dict(payload.get("spellcasting") or {})
+    slot_progression = [dict(slot or {}) for slot in list(spellcasting.get("slot_progression") or [])]
+    spellcasting["slot_lanes"] = [
+        {
+            "id": lane_id,
+            "title": "Sorcerer slots",
+            "row_ids": ["class-row-1"],
+            "slot_progression": slot_progression,
+        }
+    ]
+    payload["spellcasting"] = spellcasting
+    definition_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
 def _inventory_item(record, item_id: str) -> dict:
@@ -2368,6 +2401,126 @@ def test_owner_player_can_update_own_pc_resources_from_combat_views(
     assert spell_slots[2]["used"] == 3
 
 
+def test_owner_player_async_spell_slot_delta_returns_updated_workspace_html(
+    app, client, sign_in, users, get_character
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    combatant = _find_combatant(app, character_slug="arden-march")
+    assert combatant is not None
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    page = client.get(f"/campaigns/linden-pass/combat?combatant={combatant.id}")
+    assert page.status_code == 200
+    assert "combat-spell-slot-row" in page.get_data(as_text=True)
+
+    record = get_character("arden-march")
+    response = client.post(
+        f"/campaigns/linden-pass/combat/character/combatants/{combatant.id}/spell-slots/2",
+        data={
+            "expected_revision": record.state_record.revision,
+            "combat_view": "combat",
+            "combatant": combatant.id,
+            "used": 0,
+            "delta_used": 1,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["selected_combatant_id"] == combatant.id
+    assert "Spell slot usage updated." in payload["flash_html"]
+    assert "combat-spell-slot-row" in payload["tracker_html"]
+    _assert_spell_slot_html_state(payload["tracker_html"], used=1, available=2, maximum=3)
+
+    record = get_character("arden-march")
+    spell_slots = {item["level"]: item for item in record.state_record.state["spell_slots"]}
+    assert spell_slots[2]["used"] == 1
+
+
+def test_combat_spell_slot_delta_adopts_legacy_unlaned_state_for_class_lane(
+    app, client, sign_in, users, get_character
+):
+    with app.app_context():
+        record = app.extensions["character_repository"].get_visible_character(
+            "linden-pass",
+            "arden-march",
+        )
+        app.extensions["character_state_service"].update_spell_slots(
+            record,
+            1,
+            expected_revision=record.state_record.revision,
+            used=1,
+        )
+
+    _convert_arden_spell_slots_to_class_lane(app)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    combatant = _find_combatant(app, character_slug="arden-march")
+    assert combatant is not None
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    page = client.get(f"/campaigns/linden-pass/combat?combatant={combatant.id}")
+    assert page.status_code == 200
+    body = page.get_data(as_text=True)
+    assert 'name="slot_lane_id" value="class-row-1-slots"' in body
+    _assert_spell_slot_html_state(body, used=1, available=3, maximum=4)
+
+    record = get_character("arden-march")
+    response = client.post(
+        f"/campaigns/linden-pass/combat/character/combatants/{combatant.id}/spell-slots/1",
+        data={
+            "expected_revision": record.state_record.revision,
+            "combat_view": "combat",
+            "combatant": combatant.id,
+            "slot_lane_id": "class-row-1-slots",
+            "used": 1,
+            "delta_used": 1,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert "Unknown spell slot level" not in payload["flash_html"]
+    _assert_spell_slot_html_state(payload["tracker_html"], used=2, available=2, maximum=4)
+
+    record = get_character("arden-march")
+    matching_slots = [
+        slot
+        for slot in record.state_record.state["spell_slots"]
+        if int(slot.get("level") or 0) == 1
+    ]
+    assert matching_slots == [
+        {
+            "level": 1,
+            "max": 4,
+            "slot_lane_id": "class-row-1-slots",
+            "used": 2,
+        }
+    ]
+
+
 def test_owner_player_can_update_equipment_state_from_combat_workspace(
     app, client, sign_in, users, get_character
 ):
@@ -3567,6 +3720,8 @@ def test_dm_status_can_update_selected_pc_resources_and_spell_slots(
     assert spell_delta_payload["ok"] is True
     assert spell_delta_payload["selected_combatant_id"] == arden.id
     assert "Spell slot usage updated." in spell_delta_payload["flash_html"]
+    assert "combat-spell-slot-row" in spell_delta_payload["tracker_detail_html"]
+    _assert_spell_slot_html_state(spell_delta_payload["tracker_detail_html"], used=3, available=0, maximum=3)
 
     record = get_character("arden-march")
     spell_slots = {item["level"]: item for item in record.state_record.state["spell_slots"]}
