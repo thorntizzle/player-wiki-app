@@ -130,6 +130,19 @@ def _inventory_item(record, item_id: str) -> dict:
     )
 
 
+def _assert_form_has_priority_field(html: str, action: str) -> None:
+    form_match = re.search(
+        rf'<form\b[^>]*action="{re.escape(action)}"[\s\S]*?</form>',
+        html,
+    )
+    assert form_match is not None
+    form_html = form_match.group(0)
+    assert "Priority" in form_html
+    assert 'name="initiative_priority"' in form_html
+    assert 'value="1"' in form_html
+    assert 'min="1"' in form_html
+
+
 def _write_character_definition(app, character_slug: str, mutator) -> None:
     definition_path = (
         app.config["TEST_CAMPAIGNS_DIR"]
@@ -758,6 +771,23 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
     assert "Add player character" in dm_controls_html
     assert "Add NPC from Systems" in dm_controls_html
     assert "Add custom NPC combatant" in dm_controls_html
+    _assert_form_has_priority_field(
+        dm_controls_html,
+        "/campaigns/linden-pass/combat/player-combatants",
+    )
+    _assert_form_has_priority_field(
+        dm_controls_html,
+        "/campaigns/linden-pass/combat/systems-monsters",
+    )
+    _assert_form_has_priority_field(
+        dm_controls_html,
+        "/campaigns/linden-pass/combat/npc-combatants",
+    )
+    if "/campaigns/linden-pass/combat/statblock-combatants" in dm_controls_html:
+        _assert_form_has_priority_field(
+            dm_controls_html,
+            "/campaigns/linden-pass/combat/statblock-combatants",
+        )
     assert "Encounter controls" in dm_controls_html
     assert "combat-dm-view=\"controls\"" in dm_controls_html
     assert "Current turn" not in dm_controls_html
@@ -1459,7 +1489,8 @@ def test_dm_pages_split_tactical_status_edits_from_control_authority_actions(
     assert "Open Encounter status" not in controls_body
     assert "Save turn order" in status_dm_body
     assert "Priority" in status_dm_body
-    assert "Priority" not in controls_body
+    assert "Selected combatant authority" not in controls_body
+    assert "Save turn order" not in controls_body
     assert "Show NPC detail to players" in status_dm_body
     assert "Save NPC structure" in status_dm_body
     _assert_expected_combatant_revision_field(status_dm_body, hound.revision, at_least=3)
@@ -1669,7 +1700,7 @@ def test_dm_can_add_player_character_and_npc_combatants_and_turn_order_sorts_hig
 
     player_add = client.post(
         "/campaigns/linden-pass/combat/player-combatants",
-        data={"character_slug": "arden-march", "turn_value": 18},
+        data={"character_slug": "arden-march", "turn_value": 18, "initiative_priority": 4},
         follow_redirects=False,
     )
     npc_add = client.post(
@@ -1681,6 +1712,7 @@ def test_dm_can_add_player_character_and_npc_combatants_and_turn_order_sorts_hig
             "max_hp": 22,
             "temp_hp": 0,
             "movement_total": 40,
+            "initiative_priority": 2,
         },
         follow_redirects=False,
     )
@@ -1694,10 +1726,11 @@ def test_dm_can_add_player_character_and_npc_combatants_and_turn_order_sorts_hig
         "Clockwork Hound",
     ]
     assert combatants[0].turn_value == 18
+    assert combatants[0].initiative_priority == 4
     assert combatants[1].current_hp == 22
     assert combatants[1].movement_total == 40
     assert combatants[1].dexterity_modifier == 0
-    assert combatants[1].initiative_priority == 1
+    assert combatants[1].initiative_priority == 2
 
 
 def test_turn_order_uses_dexterity_modifier_then_dm_priority_for_ties(
@@ -3341,7 +3374,7 @@ def test_combat_page_renders_context_panel_and_dm_page_focuses_selected_combatan
     assert "Save turn order" in dm_html
     assert "Remove combatant" in dm_html
     assert "Clear tracker" in dm_controls_html
-    assert "Priority" not in dm_controls_html
+    assert "Selected combatant authority" not in dm_controls_html
     assert "Save turn value" not in dm_controls_html
     assert "Remove combatant" not in dm_controls_html
 
