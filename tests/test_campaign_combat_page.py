@@ -1091,8 +1091,8 @@ def test_dm_can_add_systems_monster_to_combat_tracker(app, client, sign_in, user
     payload = response.get_json()
     assert payload["ok"] is True
     assert "NPC combatant added from Systems (MM)." in payload["flash_html"]
-    assert "Goblin" in payload["controls_html"]
-    assert "Turn order priorities" in payload["controls_html"]
+    assert "Add NPC from Systems" in payload["controls_html"]
+    assert "Turn order priorities" not in payload["controls_html"]
     assert "tracker_html" not in payload
 
     combatant = _find_combatant(app, name="Goblin")
@@ -1445,6 +1445,8 @@ def test_dm_pages_split_tactical_status_edits_from_control_authority_actions(
     assert "Selected combatant authority" in status_dm_body
     assert "Open Encounter status" not in controls_body
     assert "Save turn order" in status_dm_body
+    assert "Priority" in status_dm_body
+    assert "Priority" not in controls_body
     assert "Show NPC detail to players" in status_dm_body
     assert "Save NPC structure" in status_dm_body
     _assert_expected_combatant_revision_field(status_dm_body, hound.revision, at_least=3)
@@ -3204,12 +3206,27 @@ def test_combat_page_renders_context_panel_and_dm_page_focuses_selected_combatan
     assert f'data-combatant-id="{arden.id}"' in dm_html
     assert 'name="turn_value"' in dm_html
     assert 'name="initiative_priority"' in dm_html
+    carousel_cards = re.findall(
+        r'<article[^>]*class="combat-turn-order-row[^"]*"[^>]*>.*?</article>',
+        dm_html,
+        flags=re.S,
+    )
+    assert carousel_cards
+    assert all("Priority" not in card for card in carousel_cards)
+    snapshot = re.search(
+        r'<article[^>]*id="combat-status-snapshot"[^>]*>.*?</article>',
+        dm_html,
+        flags=re.S,
+    )
+    assert snapshot is not None
+    assert "Priority" not in snapshot.group(0)
     assert dm_html.count('id="combat-status-snapshot"') == 1
     assert "Advance turn" in dm_html
     assert "Clear tracker" not in dm_html
     assert "Save turn order" in dm_html
     assert "Remove combatant" in dm_html
     assert "Clear tracker" in dm_controls_html
+    assert "Priority" not in dm_controls_html
     assert "Save turn value" not in dm_controls_html
     assert "Remove combatant" not in dm_controls_html
 

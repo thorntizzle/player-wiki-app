@@ -4,71 +4,6 @@
 </section>
 
 <section class="card sidebar-card">
-  <div class="section-heading">
-    <div>
-      <h2>Turn order priorities</h2>
-      <p class="meta">Turn order resolves by turn value first, then Dex mod, then DM priority. Priority defaults to 1, and 1 acts before 2.</p>
-    </div>
-  </div>
-  {% if combat_tracker.combatants %}
-    <div class="combat-turn-order-list combat-turn-order-list--controls">
-      {% for combatant in combat_tracker.combatants %}
-        <form
-          method="post"
-          action="{{ url_for('campaign_combat_update_turn_value', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
-          class="combat-turn-order-row combat-turn-order-row--editable"
-          data-combat-async
-        >
-          <input type="hidden" name="combat_view" value="dm">
-          <input type="hidden" name="view" value="controls">
-          {% if requested_combatant_id %}
-            <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
-          {% endif %}
-          <input type="hidden" name="expected_combatant_revision" value="{{ combatant.combatant_revision }}">
-          <div class="combat-turn-order-row__header">
-            <div>
-              <p class="card-kicker">{{ combatant.type_label }}{% if combatant.source_label %} | {{ combatant.source_label }}{% endif %}</p>
-              <h3>{{ combatant.name }}</h3>
-              {% if combatant.subtitle %}
-                <p class="meta">{{ combatant.subtitle }}</p>
-              {% endif %}
-            </div>
-            <div class="badge-list">
-              <span class="meta-badge">Turn {{ combatant.turn_value }}</span>
-              <span class="meta-badge">Dex {{ combatant.dexterity_modifier_label }}</span>
-              {% if combatant.initiative_priority_label %}
-                <span class="meta-badge">Priority {{ combatant.initiative_priority_label }}</span>
-              {% endif %}
-              {% if combatant.is_current_turn %}
-                <span class="meta-badge">Current turn</span>
-              {% endif %}
-            </div>
-          </div>
-          <div class="combat-turn-order-editor">
-            <label class="field">
-              <span>Turn value</span>
-              <input type="number" name="turn_value" value="{{ combatant.turn_value }}">
-            </label>
-            <label class="field">
-              <span>Priority</span>
-              <input
-                type="number"
-                name="initiative_priority"
-                min="1"
-                value="{{ combatant.initiative_priority }}"
-              >
-            </label>
-            <button type="submit">Save order</button>
-          </div>
-        </form>
-      {% endfor %}
-    </div>
-  {% else %}
-    <p class="meta">Add combatants below, then use this list to resolve tied Dex modifiers with DM priority.</p>
-  {% endif %}
-</section>
-
-<section class="card sidebar-card">
   <h2>Add player character</h2>
   {% if available_character_choices %}
     <form
@@ -93,10 +28,6 @@
       <label class="field">
         <span>Turn value</span>
         <input type="number" name="turn_value" placeholder="Defaults to initiative bonus">
-      </label>
-      <label class="field">
-        <span>Priority</span>
-        <input type="number" name="initiative_priority" min="1" value="1">
       </label>
       <button type="submit">Add player character</button>
     </form>
@@ -146,10 +77,6 @@
           <span>Turn value</span>
           <input type="number" name="turn_value" placeholder="Defaults to initiative bonus">
         </label>
-        <label class="field">
-          <span>Priority</span>
-          <input type="number" name="initiative_priority" min="1" value="1">
-        </label>
         <button type="submit" data-systems-monster-submit disabled>Add from Systems</button>
       </form>
     </section>
@@ -186,10 +113,6 @@
             <span>Turn value</span>
             <input type="number" name="turn_value" placeholder="Defaults to statblock initiative bonus">
           </label>
-          <label class="field">
-            <span>Priority</span>
-            <input type="number" name="initiative_priority" min="1" value="1">
-          </label>
           <button type="submit">Add from DM Content</button>
         </form>
       {% else %}
@@ -222,10 +145,6 @@
     <label class="field">
       <span>Dex mod</span>
       <input type="number" name="dexterity_modifier" value="0">
-    </label>
-    <label class="field">
-      <span>Priority</span>
-      <input type="number" name="initiative_priority" min="1" value="1">
     </label>
     <label class="field">
       <span>Current HP</span>

@@ -44,9 +44,6 @@
         {% if selected_combatant.dexterity_modifier_label %}
           <span class="combat-badge combat-badge--muted">Dex {{ selected_combatant.dexterity_modifier_label }}</span>
         {% endif %}
-        {% if selected_combatant.initiative_priority_label %}
-          <span class="combat-badge combat-badge--muted">Priority {{ selected_combatant.initiative_priority_label }}</span>
-        {% endif %}
         {% if selected_combatant.initiative_bonus_label != "0" %}
           <span class="combat-badge combat-badge--muted">Init {{ selected_combatant.initiative_bonus_label }}</span>
         {% endif %}

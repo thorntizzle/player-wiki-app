@@ -60,17 +60,6 @@
                       aria-label="Turn value for {{ combatant.name }}"
                     >
                   </label>
-                  <label class="combat-badge combat-badge--editable">
-                    <span class="combat-inline-label">Priority</span>
-                    <input
-                      class="combat-badge-input"
-                      type="number"
-                      name="initiative_priority"
-                      min="1"
-                      value="{{ combatant.initiative_priority }}"
-                      aria-label="Priority for {{ combatant.name }}"
-                    >
-                  </label>
                 </form>
               {% else %}
                 <span class="combat-badge">Turn {{ combatant.turn_value }}</span>
@@ -80,9 +69,6 @@
               {% endif %}
               {% if combatant.dexterity_modifier_label %}
                 <span class="combat-badge combat-badge--muted">Dex {{ combatant.dexterity_modifier_label }}</span>
-              {% endif %}
-              {% if combatant.initiative_priority_label %}
-                <span class="combat-badge combat-badge--muted">Priority {{ combatant.initiative_priority_label }}</span>
               {% endif %}
               {% if return_to_dm and combatant.can_manage_combat %}
                 <form
