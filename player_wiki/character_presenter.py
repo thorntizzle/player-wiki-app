@@ -900,29 +900,39 @@ def present_character_detail(
     attack_reminders = present_attack_reminders(stats, attacks)
     defensive_rules = present_defensive_rules(stats)
 
-    inventory = [
-        {
-            "id": str(item.get("id") or ""),
-            "item_ref": str(item.get("catalog_ref") or item.get("id") or "").strip(),
-            "name": str(item.get("name") or "Item"),
-            "href": build_character_entry_href(
-                campaign.slug,
-                systems_ref=equipment_catalog_lookup.get(str(item.get("catalog_ref") or item.get("id") or ""), {}).get(
-                    "systems_ref"
+    inventory = []
+    for item in list(state.get("inventory") or []):
+        item_ref = str(item.get("catalog_ref") or item.get("id") or "").strip()
+        definition_item = equipment_catalog_lookup.get(item_ref, {})
+        href = build_character_entry_href(
+            campaign.slug,
+            systems_ref=definition_item.get("systems_ref"),
+            page_ref=definition_item.get("page_ref"),
+        )
+        inventory.append(
+            {
+                "id": str(item.get("id") or ""),
+                "item_ref": item_ref,
+                "name": str(item.get("name") or "Item"),
+                "href": href,
+                "description_html": (
+                    resolve_item_description_html(
+                        campaign,
+                        definition_item,
+                        systems_service=systems_service,
+                        campaign_page_records=campaign_page_records,
+                    )
+                    if href
+                    else ""
                 ),
-                page_ref=equipment_catalog_lookup.get(str(item.get("catalog_ref") or item.get("id") or ""), {}).get(
-                    "page_ref"
-                ),
-            ),
-            "quantity": int(item.get("quantity") or 0),
-            "weight": str(item.get("weight") or "").strip(),
-            "notes": str(item.get("notes") or "").strip(),
-            "tags": [str(tag).strip() for tag in list(item.get("tags") or []) if str(tag).strip()],
-            "is_equipped": bool(item.get("is_equipped", False)),
-            "is_attuned": bool(item.get("is_attuned", False)),
-        }
-        for item in list(state.get("inventory") or [])
-    ]
+                "quantity": int(item.get("quantity") or 0),
+                "weight": str(item.get("weight") or "").strip(),
+                "notes": str(item.get("notes") or "").strip(),
+                "tags": [str(tag).strip() for tag in list(item.get("tags") or []) if str(tag).strip()],
+                "is_equipped": bool(item.get("is_equipped", False)),
+                "is_attuned": bool(item.get("is_attuned", False)),
+            }
+        )
 
     currency_payload = dict(state.get("currency") or {})
     currency = [
@@ -3303,6 +3313,45 @@ def resolve_feature_description_html(
     if entry is None:
         return ""
     return str(systems_service.build_character_sheet_entry_body_html(campaign.slug, entry) or "").strip()
+
+
+def resolve_item_description_html(
+    campaign: Campaign,
+    item: dict[str, Any],
+    *,
+    systems_service: Any | None = None,
+    campaign_page_records: list[Any] | None = None,
+) -> str:
+    description_markdown = str(item.get("description_markdown") or "").strip()
+    if description_markdown:
+        return render_campaign_markdown(campaign, description_markdown)
+
+    systems_ref = dict(item.get("systems_ref") or {})
+    slug = str(systems_ref.get("slug") or "").strip()
+    if slug and systems_service is not None:
+        entry = systems_service.get_entry_by_slug_for_campaign(campaign.slug, slug)
+        if entry is not None:
+            return str(systems_service.build_character_sheet_entry_body_html(campaign.slug, entry) or "").strip()
+
+    page_slug = normalize_page_ref_slug(item.get("page_ref"))
+    if not page_slug:
+        return ""
+    normalized_page_slug = page_slug.replace("\\", "/").strip().lower()
+    for page_record in list(campaign_page_records or []):
+        record_ref = str(getattr(page_record, "page_ref", "") or "").replace("\\", "/").strip().lower()
+        page = getattr(page_record, "page", None)
+        route_slug = str(getattr(page, "route_slug", "") or "").replace("\\", "/").strip().lower()
+        if normalized_page_slug not in {record_ref, route_slug}:
+            continue
+        body_markdown = str(getattr(page_record, "body_markdown", "") or "").strip()
+        if not body_markdown and page is not None:
+            body_markdown = str(getattr(page, "body_markdown", "") or "").strip()
+        if body_markdown:
+            return render_campaign_markdown(campaign, body_markdown)
+        body_html = str(getattr(page, "body_html", "") or "").strip() if page is not None else ""
+        if body_html:
+            return body_html
+    return ""
 
 
 def should_hide_redundant_choice_feature(

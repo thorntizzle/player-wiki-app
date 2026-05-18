@@ -14,6 +14,23 @@
       <input type="hidden" name="combat_view" value="status">
     {% endif %}
   {% endmacro %}
+  {% macro combat_item_description_details(item) %}
+    {% if item.href and (item.description_html or item.notes) %}
+      <details class="item-description-detail">
+        <summary>Item details</summary>
+        <div class="item-description-detail__body">
+          {% if item.notes %}
+            <p>{{ item.notes }}</p>
+          {% endif %}
+          {% if item.description_html %}
+            <div class="article-body article-body--compact">{{ item.description_html | safe }}</div>
+          {% endif %}
+        </div>
+      </details>
+    {% elif item.notes %}
+      <p>{{ item.notes }}</p>
+    {% endif %}
+  {% endmacro %}
 
   {% set workspace_title = combat_workspace_title | default("Combat sections", true) %}
   {% set workspace_meta = combat_workspace_meta | default("Keep the main combat page open and swap between the parts of the sheet you need most in play.", true) %}
@@ -463,9 +480,7 @@
                 {% if item.tags %}
                   <p class="meta">{{ item.tags | join(", ") }}</p>
                 {% endif %}
-                {% if item.notes %}
-                  <p>{{ item.notes }}</p>
-                {% endif %}
+                {{ combat_item_description_details(item) }}
                 {% if can_edit_combat_equipment_state and selected_combatant_id %}
                   <form
                     class="stack-form"
@@ -565,9 +580,7 @@
                 {% if item.tags %}
                   <p class="meta">{{ item.tags | join(", ") }}</p>
                 {% endif %}
-                {% if item.notes %}
-                  <p>{{ item.notes }}</p>
-                {% endif %}
+                {{ combat_item_description_details(item) }}
               </article>
             {% endfor %}
           </div>

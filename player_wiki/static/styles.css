@@ -1720,6 +1720,54 @@ button {
   max-width: none;
 }
 
+.item-description-detail {
+  margin-top: 0.65rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--border);
+}
+
+.item-description-detail summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  color: var(--link);
+  font-weight: 700;
+  list-style: none;
+}
+
+.item-description-detail summary::-webkit-details-marker {
+  display: none;
+}
+
+.item-description-detail summary::after {
+  content: "\25B8";
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 140ms ease, color 140ms ease;
+}
+
+.item-description-detail[open] summary::after {
+  color: var(--ink);
+  transform: rotate(90deg);
+}
+
+.item-description-detail__body {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 0.55rem;
+}
+
+.item-description-detail__body > :first-child {
+  margin-top: 0;
+}
+
+.item-description-detail__body > :last-child {
+  margin-bottom: 0;
+}
+
 .spell-row__header,
 .inventory-row__header,
 .feature-row__header {

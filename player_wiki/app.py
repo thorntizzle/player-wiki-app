@@ -142,6 +142,7 @@ from .character_presenter import (
     present_character_detail,
     present_character_roster,
     render_campaign_markdown,
+    resolve_item_description_html,
 )
 from .auth_store import AuthStore
 from .campaign_combat_service import (
@@ -2600,6 +2601,7 @@ def create_app() -> Flask:
         record,
         *,
         item_catalog: dict[str, object] | None = None,
+        campaign_page_records: list[object] | None = None,
     ) -> dict[str, object]:
         item_catalog = (
             item_catalog
@@ -2625,6 +2627,11 @@ def create_app() -> Flask:
             }
             systems_ref = dict(definition_item.get("systems_ref") or {})
             page_ref = normalize_character_page_ref(definition_item.get("page_ref"))
+            href = build_character_entry_href(
+                campaign.slug,
+                systems_ref=systems_ref,
+                page_ref=definition_item.get("page_ref"),
+            )
             requires_attunement = bool(support.get("requires_attunement"))
             resolved_weapon_wield_mode = resolve_weapon_wield_mode(
                 support_item,
@@ -2654,10 +2661,16 @@ def create_app() -> Flask:
                         for tag in list(inventory_item.get("tags") or definition_item.get("tags") or [])
                         if str(tag).strip()
                     ],
-                    "href": build_character_entry_href(
-                        campaign.slug,
-                        systems_ref=systems_ref,
-                        page_ref=definition_item.get("page_ref"),
+                    "href": href,
+                    "description_html": (
+                        resolve_item_description_html(
+                            campaign,
+                            definition_item,
+                            systems_service=get_systems_service(),
+                            campaign_page_records=campaign_page_records,
+                        )
+                        if href
+                        else ""
                     ),
                     "is_equipped": is_equipped,
                     "equipped_label": equipped_label,
@@ -4814,6 +4827,7 @@ def create_app() -> Flask:
             campaign,
             record,
             item_catalog=item_catalog,
+            campaign_page_records=campaign_page_records,
         )
         character_subpages = [
             {
@@ -6844,6 +6858,7 @@ def create_app() -> Flask:
             campaign,
             record,
             item_catalog=item_catalog,
+            campaign_page_records=campaign_page_records,
         )
         workspace_sections, workspace_default_section = build_combat_character_workspace_sections(
             character_detail,

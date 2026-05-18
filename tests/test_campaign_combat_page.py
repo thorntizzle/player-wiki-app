@@ -130,6 +130,19 @@ def _inventory_item(record, item_id: str) -> dict:
     )
 
 
+def _write_character_definition(app, character_slug: str, mutator) -> None:
+    definition_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "characters"
+        / character_slug
+        / "definition.yaml"
+    )
+    payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
+    mutator(payload)
+    definition_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+
 def _write_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -2719,6 +2732,64 @@ def test_owner_player_can_update_equipment_state_from_combat_workspace(
     updated_item = _inventory_item(record, "quarterstaff-2")
     assert updated_item["is_equipped"] is False
     assert not updated_item.get("weapon_wield_mode")
+
+
+def test_combat_character_inventory_collapses_linked_item_descriptions(app, client, sign_in, users):
+    def add_inventory_examples(payload):
+        equipment_catalog = list(payload.get("equipment_catalog") or [])
+        equipment_catalog.append(
+            {
+                "id": "stormglass-compass-99",
+                "name": "Stormglass Compass",
+                "default_quantity": 1,
+                "weight": "1 lb.",
+                "notes": "Keep the face covered in bright rain.",
+                "tags": ["wondrous"],
+                "page_ref": {
+                    "slug": "items/stormglass-compass",
+                    "title": "Stormglass Compass",
+                },
+            }
+        )
+        equipment_catalog.append(
+            {
+                "id": "unlinked-field-token-99",
+                "name": "Unlinked Field Token",
+                "default_quantity": 1,
+                "notes": "Marks the safe route.",
+            }
+        )
+        payload["equipment_catalog"] = equipment_catalog
+
+    _write_character_definition(app, "arden-march", add_inventory_examples)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    combatant = _find_combatant(app, character_slug="arden-march")
+    assert combatant is not None
+
+    dm_page = client.get(f"/campaigns/linden-pass/combat/dm?combatant={combatant.id}")
+    assert dm_page.status_code == 200
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    player_page = client.get(f"/campaigns/linden-pass/combat?combatant={combatant.id}")
+    assert player_page.status_code == 200
+
+    for body in [dm_page.get_data(as_text=True), player_page.get_data(as_text=True)]:
+        assert "Stormglass Compass" in body
+        assert 'href="/campaigns/linden-pass/pages/items/stormglass-compass"' in body
+        assert '<details class="item-description-detail">' in body
+        assert "<summary>Item details</summary>" in body
+        assert "This brass compass glows pale blue when a storm front shifts closer to the coast." in body
+        assert '<details class="item-description-detail" open' not in body
+        assert "Unlinked Field Token" in body
+        assert "<p>Marks the safe route.</p>" in body
 
 
 def test_owner_player_combat_workspace_resource_mutations_redirect_back_to_combat(
