@@ -667,13 +667,24 @@ def present_character_detail(
             elif bool(spell.get("is_bonus_known")) and source_label:
                 management_note = f"Granted by {source_label}."
 
+            spell_href = build_character_entry_href(
+                campaign.slug,
+                systems_ref=spell.get("systems_ref"),
+                page_ref=spell.get("page_ref"),
+            )
             presented_spell = (
                 {
                     "name": str(spell.get("name") or "Spell"),
-                    "href": build_character_entry_href(
-                        campaign.slug,
-                        systems_ref=spell.get("systems_ref"),
-                        page_ref=spell.get("page_ref"),
+                    "href": spell_href,
+                    "description_html": (
+                        resolve_spell_description_html(
+                            campaign,
+                            spell,
+                            systems_service=systems_service,
+                            campaign_page_records=campaign_page_records,
+                        )
+                        if spell_href
+                        else ""
                     ),
                     "casting_time": str(spell.get("casting_time") or "--"),
                     "range": str(spell.get("range") or "--"),
@@ -3322,18 +3333,48 @@ def resolve_item_description_html(
     systems_service: Any | None = None,
     campaign_page_records: list[Any] | None = None,
 ) -> str:
-    description_markdown = str(item.get("description_markdown") or "").strip()
+    return resolve_linked_entry_description_html(
+        campaign,
+        item,
+        systems_service=systems_service,
+        campaign_page_records=campaign_page_records,
+    )
+
+
+def resolve_spell_description_html(
+    campaign: Campaign,
+    spell: dict[str, Any],
+    *,
+    systems_service: Any | None = None,
+    campaign_page_records: list[Any] | None = None,
+) -> str:
+    return resolve_linked_entry_description_html(
+        campaign,
+        spell,
+        systems_service=systems_service,
+        campaign_page_records=campaign_page_records,
+    )
+
+
+def resolve_linked_entry_description_html(
+    campaign: Campaign,
+    entry_payload: dict[str, Any],
+    *,
+    systems_service: Any | None = None,
+    campaign_page_records: list[Any] | None = None,
+) -> str:
+    description_markdown = str(entry_payload.get("description_markdown") or "").strip()
     if description_markdown:
         return render_campaign_markdown(campaign, description_markdown)
 
-    systems_ref = dict(item.get("systems_ref") or {})
+    systems_ref = dict(entry_payload.get("systems_ref") or {})
     slug = str(systems_ref.get("slug") or "").strip()
     if slug and systems_service is not None:
         entry = systems_service.get_entry_by_slug_for_campaign(campaign.slug, slug)
         if entry is not None:
             return str(systems_service.build_character_sheet_entry_body_html(campaign.slug, entry) or "").strip()
 
-    page_slug = normalize_page_ref_slug(item.get("page_ref"))
+    page_slug = normalize_page_ref_slug(entry_payload.get("page_ref"))
     if not page_slug:
         return ""
     normalized_page_slug = page_slug.replace("\\", "/").strip().lower()

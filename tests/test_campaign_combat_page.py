@@ -2792,6 +2792,50 @@ def test_combat_character_inventory_collapses_linked_item_descriptions(app, clie
         assert "<p>Marks the safe route.</p>" in body
 
 
+def test_combat_character_spells_collapse_linked_spell_descriptions(app, client, sign_in, users):
+    def link_message_spell(payload):
+        spellcasting = dict(payload.get("spellcasting") or {})
+        spells = []
+        for spell in list(spellcasting.get("spells") or []):
+            spell_payload = dict(spell or {})
+            if str(spell_payload.get("name") or "").strip() == "Message":
+                spell_payload["page_ref"] = {
+                    "slug": "spells/message",
+                    "title": "Message",
+                }
+            spells.append(spell_payload)
+        spellcasting["spells"] = spells
+        payload["spellcasting"] = spellcasting
+
+    _write_character_definition(app, "arden-march", link_message_spell)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    combatant = _find_combatant(app, character_slug="arden-march")
+    assert combatant is not None
+
+    dm_page = client.get(f"/campaigns/linden-pass/combat/dm?combatant={combatant.id}")
+    assert dm_page.status_code == 200
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    player_page = client.get(f"/campaigns/linden-pass/combat?combatant={combatant.id}")
+    assert player_page.status_code == 200
+
+    for body in [dm_page.get_data(as_text=True), player_page.get_data(as_text=True)]:
+        assert "Message" in body
+        assert 'href="/campaigns/linden-pass/pages/spells/message"' in body
+        assert '<details class="item-description-detail">' in body
+        assert "<summary>Spell details</summary>" in body
+        assert "You point toward a creature within range and whisper a short message only it can hear." in body
+        assert '<details class="item-description-detail" open' not in body
+
+
 def test_owner_player_combat_workspace_resource_mutations_redirect_back_to_combat(
     app, client, sign_in, users, get_character
 ):

@@ -31,6 +31,16 @@
       <p>{{ item.notes }}</p>
     {% endif %}
   {% endmacro %}
+  {% macro combat_spell_description_details(spell) %}
+    {% if spell.href and spell.description_html %}
+      <details class="item-description-detail">
+        <summary>Spell details</summary>
+        <div class="item-description-detail__body">
+          <div class="article-body article-body--compact">{{ spell.description_html | safe }}</div>
+        </div>
+      </details>
+    {% endif %}
+  {% endmacro %}
 
   {% set workspace_title = combat_workspace_title | default("Combat sections", true) %}
   {% set workspace_meta = combat_workspace_meta | default("Keep the main combat page open and swap between the parts of the sheet you need most in play.", true) %}
@@ -309,6 +319,7 @@
                           | {{ spell.save_or_hit }}
                         {% endif %}
                       </p>
+                      {{ combat_spell_description_details(spell) }}
                     </article>
                   {% endfor %}
                 </div>
