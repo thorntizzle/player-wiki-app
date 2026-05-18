@@ -900,7 +900,7 @@ def test_custom_conditions_flow_from_dm_content_into_combat_picker_and_can_be_de
     assert definitions[0].name == "Judged by the Tide"
     assert definitions[0].description_markdown == "The target leaves glowing footprints until the next dawn."
 
-    combat_page = client.get("/campaigns/linden-pass/combat")
+    combat_page = client.get("/campaigns/linden-pass/combat/dm")
     combat_html = combat_page.get_data(as_text=True)
     assert '<option value="Judged by the Tide"></option>' in combat_html
     assert '<option value="Marked for Judgment"></option>' not in combat_html

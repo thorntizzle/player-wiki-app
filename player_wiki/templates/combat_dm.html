@@ -1,15 +1,12 @@
 {% extends "base.html" %}
 
-{% block title %}{% if combat_dm_view == 'controls' %}Encounter controls{% else %}DM status{% endif %} (formerly DM page) | {{ campaign.title }}{% endblock %}
+{% block title %}{% if combat_dm_view == 'controls' %}Encounter controls{% else %}DM status{% endif %} | {{ campaign.title }}{% endblock %}
 
 {% block content %}
   <section class="hero compact">
     <p class="eyebrow">{% if combat_dm_view == 'controls' %}Encounter controls{% else %}DM status{% endif %}</p>
     <h1>{{ campaign.title }} {% if combat_dm_view == 'controls' %}Encounter controls{% else %}DM status{% endif %}</h1>
-    <p class="lede">
-      Manage encounter setup, seeding, cleanup, and other authority-heavy changes without crowding the live status view.
-    </p>
-    <p class="meta">Formerly DM page. Existing /combat/dm links and bookmarks still work during the transition.</p>
+    <p class="lede">Encounter setup, seeding, cleanup, and authority changes.</p>
     <nav aria-label="DM encounter subview">
       <a
         class="{% if combat_dm_view == 'status' %}button-link{% else %}ghost-button{% endif %}"

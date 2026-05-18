@@ -404,8 +404,7 @@ COMBAT_AND_SESSION_SESSION_SUMMARY = (
     "the broader live-session workflow, rests, inventory quantities, currency, and player notes"
 )
 SESSION_CHARACTER_PERSONAL_EDIT_BLOCK_MESSAGE = (
-    "Portrait, physical description, and background changes stay on the full character page so "
-    "this Session surface stays focused on live play."
+    "Portrait and personal details are edited on the full character page."
 )
 SESSION_CHARACTER_PERMISSION_RULES = (
     {

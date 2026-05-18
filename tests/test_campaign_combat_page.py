@@ -761,7 +761,6 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
     assert "/campaigns/linden-pass/combat/character" not in dm_html
     assert "DM status" in dm_html
     assert "Controls" in dm_html
-    assert "Formerly DM page. Existing /combat/dm links and bookmarks still work during the transition." in dm_html
     assert 'aria-label="Combat pages"' not in dm_html
     assert 'class="page-layout combat-layout combat-layout--workspace"' in dm_html
     assert 'class="page-layout combat-layout combat-layout--workspace"' in dm_controls_html
@@ -815,8 +814,7 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
     assert "window.history.replaceState(null, \"\", nextPageUrl);" in dm_html
     assert "buildLiveHeaders({ allowShortCircuit: false })" in dm_html
     assert "window.location.assign(nextUrl);" not in dm_html
-    assert "DM status (formerly Status)" in status_html
-    assert "Formerly Status. Existing /combat/status links and bookmarks still work during the transition." in status_html
+    assert "DM status |" in status_html
     assert 'aria-label="Combat pages"' not in status_html
     assert 'class="page-layout combat-status-layout"' in status_html
     assert 'data-live-active-interval-ms="500"' in dm_html

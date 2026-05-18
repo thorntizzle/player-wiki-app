@@ -6807,7 +6807,7 @@ def test_dm_controls_subpage_shows_management_controls(client, sign_in, users):
     assert "Controls" in html
     assert "?page=controls" in html
     assert "Player controls" in html
-    assert "main character sheet edit view" in html
+    assert "Character management controls for campaign staff." in html
     assert "Current owner" in html
     assert "Owner Player" in html
     assert "Delete character" in html
@@ -6828,7 +6828,7 @@ def test_owner_player_controls_subpage_holds_future_player_controls_without_admi
     assert "Controls" in html
     assert "Player controls" in html
     assert "?page=controls" in html
-    assert "main character sheet edit view" in html
+    assert "Player-controls workspace for Arden March." in html
     assert "Delete character" not in html
     assert "Assignment controls" not in html
     assert "Owner Player" in html
@@ -8146,9 +8146,7 @@ def test_sheet_edit_view_makes_first_pass_bounded_scope_explicit(client, sign_in
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Keep first-pass Character-page edits here." in html
-    assert "Help page for the full sheet-edit scope" in html
-    assert "Character versus Session Character versus Combat boundary" in html
+    assert "Sheet edit view" in html
     assert 'href="/campaigns/linden-pass/help#characters"' in html
     assert "Open Character Help" in html
     assert "Sheet edit scope" not in html
@@ -8216,16 +8214,15 @@ def test_sheet_edit_view_exposes_cancel_and_unsaved_change_warning_copy(client, 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert "Cancel pending changes" in html
-    assert "stay local until you save or cancel them" in html
-    assert "the browser will warn you" in html
-    assert "Session Character, Combat, or another tab changes the sheet first" in html
+    assert "Unsaved edits stay local until save/cancel." in html
+    assert "your draft stays available" in html
     assert "The latest sheet was reloaded" in html
     assert "pending draft was restored locally for review" in html
     assert "Compare the refreshed sheet and save again when ready." in html
     assert "Session Character, Combat, or another tab may have changed nearby fields first" in html
     assert "nothing was auto-merged" in html
     assert "beforeunload" in html
-    assert "Pending changes on this page. Save or cancel before you leave." in html
+    assert "Pending changes. Save or cancel before you leave." in html
 
 
 def test_quick_reference_hides_item_backed_attacks_when_the_linked_item_is_not_equipped(app, client, sign_in, users):

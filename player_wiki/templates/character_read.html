@@ -121,24 +121,18 @@
       {% if is_session_mode %}
         <section class="read-section" id="character-sheet-edit-scope">
           <div class="section-heading">
-            <div>
-              <h2>Sheet edit view</h2>
-              <p class="meta">
-                Keep first-pass Character-page edits here. Use the Help page for the full sheet-edit scope, access
-                rules, and the Character versus Session Character versus Combat boundary.
-              </p>
-            </div>
-            <div class="hero-actions">
-              <a class="ghost-button" href="{{ url_for('campaign_help_view', campaign_slug=campaign.slug) }}#characters">
-                Open Character Help
-              </a>
-              {% if character_session_surface_href %}
-                <a class="ghost-button" href="{{ character_session_surface_href }}">Open Session Character</a>
-              {% endif %}
-              {% if character_combat_surface_href and character_combat_surface_action_label %}
-                <a class="ghost-button" href="{{ character_combat_surface_href }}">{{ character_combat_surface_action_label }}</a>
-              {% endif %}
-            </div>
+            <h2>Sheet edit view</h2>
+          </div>
+          <div class="hero-actions">
+            <a class="ghost-button" href="{{ url_for('campaign_help_view', campaign_slug=campaign.slug) }}#characters">
+              Open Character Help
+            </a>
+            {% if character_session_surface_href %}
+              <a class="ghost-button" href="{{ character_session_surface_href }}">Open Session Character</a>
+            {% endif %}
+            {% if character_combat_surface_href and character_combat_surface_action_label %}
+              <a class="ghost-button" href="{{ character_combat_surface_href }}">{{ character_combat_surface_action_label }}</a>
+            {% endif %}
           </div>
         </section>
       {% endif %}
@@ -868,7 +862,7 @@
                 <div class="section-heading">
                   <h3>Add campaign item</h3>
                 </div>
-                <p class="meta">Use this for published campaign wiki gear. The picker is limited to player-visible pages from the Items section.</p>
+                <p class="meta">Published campaign wiki gear. The picker is limited to player-visible Items pages.</p>
                 <form
                   class="stack-form"
                   method="post"
@@ -908,7 +902,7 @@
                 <div class="section-heading">
                   <h3>Add custom item</h3>
                 </div>
-                <p class="meta">Use this for gear that does not come from Systems or a published campaign item page.</p>
+                <p class="meta">Manual gear not sourced from Systems or published item pages.</p>
                 <form
                   class="stack-form"
                   method="post"
@@ -1446,14 +1440,14 @@
           hasPendingChanges = Boolean(payload);
           if (payload) {
             if (!preserveStatus) {
-              setStatus("Pending changes on this page. Save or cancel before you leave.", "pending");
+              setStatus("Pending changes. Save or cancel before you leave.", "pending");
             }
             setSaveDisabled(false);
             setCancelDisabled(false);
             return payload;
           }
           if (!preserveStatus) {
-            setStatus("No pending changes on this page.", "idle");
+            setStatus("No pending changes.", "idle");
           }
           setSaveDisabled(true);
           setCancelDisabled(true);
@@ -1579,7 +1573,7 @@
             resetPendingInputs(form);
           }
           hasPendingChanges = false;
-          setStatus("Discarded pending changes on this page.", "idle");
+          setStatus("Discarded pending changes.", "idle");
           setSaveDisabled(true);
           setCancelDisabled(true);
         };

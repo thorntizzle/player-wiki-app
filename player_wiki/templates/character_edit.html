@@ -7,7 +7,8 @@
     <p class="eyebrow">Character editor</p>
     <h1>Edit {{ character.name }}</h1>
     <p class="lede">
-      Manage broader DND-5E campaign-time adjustments that are outside the native level-up flow. Use the character sheet subpages for everyday equipment and personal updates, and keep this editor for proficiencies, persistent reference text, controlled sheet-math adjustments, custom features with optional trackers, deeper campaign-page links, and supported structured spell replacements tied to linked campaign features.
+      Advanced campaign-time adjustments for this character are managed here; sheet subpages stay the primary editor for
+      everyday updates.
     </p>
     <div class="hero-actions">
       <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">Back to sheet</a>
@@ -115,7 +116,7 @@
           <h2>Custom Features</h2>
         </div>
         {% if edit_context.linked_feature_authoring_supported %}
-          <p class="meta">Use this for campaign boons, curses, training rewards, or other custom rules text. Optional tracker fields let the sheet and combat-facing state treat the feature as a limited-use resource, and linked feat-like pages can surface structured follow-up choices here when the reward grants one.</p>
+          <p class="meta">Campaign boons, curses, training rewards, and other custom feature text.</p>
           <div class="character-edit-stack">
             {% for row in edit_context.feature_rows %}
               <article class="detail-card character-edit-row">
@@ -185,7 +186,7 @@
           </div>
         {% else %}
           <p class="meta">{{ edit_context.linked_feature_authoring_message }}</p>
-          <p class="meta">Other edit sections on this page still stay available while the imported baseline is waiting on progression repair.</p>
+          <p class="meta">Other edit sections stay available while progression repair is pending.</p>
         {% endif %}
       </section>
 
@@ -193,7 +194,6 @@
         <div class="section-heading">
           <h2>Manual Equipment</h2>
         </div>
-        <p class="meta">Use this advanced section when the Inventory and Equipment subpages are not enough and you need broader manual control over supplemental gear.</p>
         {% if edit_context.existing_managed_equipment %}
           <article class="detail-card">
             <h3>Existing built-in equipment</h3>

@@ -1,15 +1,12 @@
 {% extends "base.html" %}
 
-{% block title %}DM status (formerly Status) | {{ campaign.title }}{% endblock %}
+{% block title %}DM status | {{ campaign.title }}{% endblock %}
 
 {% block content %}
   <section class="hero compact">
     <p class="eyebrow">DM status</p>
     <h1>{{ campaign.title }} DM status</h1>
-    <p class="lede">
-      Inspect one selected combatant in detail while keeping the encounter order visible in the sidebar.
-    </p>
-    <p class="meta">Formerly Status. Existing /combat/status links and bookmarks still work during the transition.</p>
+    <p class="lede">Selected combatant detail with encounter order.</p>
   </section>
 
   {% if not combat_system_supported %}

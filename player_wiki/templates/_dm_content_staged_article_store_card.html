@@ -1,6 +1,5 @@
 <article class="card" id="dm-content-staged-article-store" data-dm-content-staged-articles-root>
   <h2>Stage session articles</h2>
-  <p class="meta">Type a new handout, upload markdown, or pull a published wiki or Systems article into the Session DM reveal queue.</p>
   <form
     method="post"
     action="{{ url_for('campaign_dm_content_create_staged_article', campaign_slug=campaign.slug) }}"
@@ -54,7 +53,6 @@
           placeholder="Paste the handout, clue, or scene text you want ready for reveal."
         ></textarea>
       </label>
-      <p class="meta">Optional image shown later on the live Session page if this article is revealed.</p>
       <div class="field session-file-field">
         <span>Image</span>
         <input
@@ -139,16 +137,13 @@
         </label>
       </div>
       <p class="meta">
-        If the markdown references an image in frontmatter or an embedded image tag, upload that image here too.
+        If markdown references an image in frontmatter or an embedded image tag, upload that image here.
       </p>
     </div>
     <div
       class="session-article-mode-panel session-article-mode-panel--wiki"
       data-session-article-mode-panel="wiki"
     >
-      <p class="meta">
-        Search visible published wiki pages and accessible Systems entries, then add one directly to the session reveal queue.
-      </p>
       <label class="field">
         <span>Search</span>
         <input

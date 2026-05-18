@@ -7,17 +7,9 @@
     <article class="detail-card">
       <h3>Player controls</h3>
       {% if character_controls.current_user_is_owner %}
-        <p>
-          This page is where future self-service player controls for {{ character.name }} can live.
-          Current owner-facing sheet edits still happen through the first-pass main character sheet edit view on Quick
-          Reference, Inventory, Personal, and Notes.
-        </p>
+        <p>Player-controls workspace for {{ character.name }}.</p>
       {% else %}
-        <p>
-          This page now holds character management controls, and it is also reserved for future player-owned actions.
-          Current player-facing sheet edits still live on the first-pass main character sheet edit view on Quick
-          Reference, Inventory, Personal, and Notes.
-        </p>
+        <p>Character management controls for campaign staff.</p>
       {% endif %}
     </article>
 

@@ -320,10 +320,7 @@ def test_owner_can_open_session_character_subpage_without_leaving_session_featur
     assert "Enter session mode" not in html
     assert "Save personal details" not in html
     assert "/campaigns/linden-pass/session" in html
-    assert (
-        "Keep chat, revealed articles, and wiki lookup on the main Session page "
-        "so this Character tab stays focused on in-play sheet access."
-    ) in html
+    assert 'href="/campaigns/linden-pass/help#session"' in html
 
 
 def test_session_character_equipment_page_filters_inventory_only_rows(client, sign_in, users):
@@ -355,10 +352,7 @@ def test_session_character_page_keeps_single_sheet_players_out_of_a_redundant_ro
     assert "Live session tools" in html
     assert "Character chooser" not in html
     assert ">Open Session<" in html
-    assert (
-        "When the DM starts a session, the live chat and article lookup stay on the main Session page."
-        in html
-    )
+    assert 'href="/campaigns/linden-pass/help#session"' in html
 
 
 def test_dm_session_character_page_keeps_character_chooser_for_cross_character_access(client, sign_in, users):
@@ -390,10 +384,6 @@ def test_session_character_page_spells_out_role_permissions_for_assigned_player(
         "to the session-safe slice."
     ) in html
     assert "/campaigns/linden-pass/help#session" in html
-    assert (
-        "Use the Help page for the full Session-vs-Session Character-vs-full sheet boundary "
-        "and the role-by-role access rules."
-    ) in html
     assert "Open only their own session-enabled character here." not in html
 
 
@@ -716,10 +706,7 @@ def test_session_character_personal_updates_stay_on_full_character_page(
     assert personal_page.status_code == 200
     personal_html = personal_page.get_data(as_text=True)
     assert "Save personal details" not in personal_html
-    assert (
-        "Portrait, physical description, and background changes stay on the full character page "
-        "so this Session surface stays focused on live play."
-    ) in personal_html
+    assert "Portrait and personal details are edited on the full character page." in personal_html
     assert f'/campaigns/linden-pass/characters/{ASSIGNED_CHARACTER_SLUG}?page=personal' in personal_html
 
     record = get_character(ASSIGNED_CHARACTER_SLUG)
@@ -742,10 +729,7 @@ def test_session_character_personal_updates_stay_on_full_character_page(
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert "Save personal details" not in html
-    assert (
-        "Portrait, physical description, and background changes stay on the full character page "
-        "so this Session surface stays focused on live play."
-    ) in html
+    assert "Portrait and personal details are edited on the full character page." in html
 
     updated = get_character(ASSIGNED_CHARACTER_SLUG)
     assert updated is not None
@@ -980,7 +964,7 @@ def test_dm_can_start_session_and_player_can_post_messages(client, sign_in, user
     assert start.status_code == 200
     start_html = start.get_data(as_text=True)
     assert "Session started. Players can now use the Session page chat." in start_html
-    assert "Players can use the Session page chat" in start_html
+    assert "The session is live for players and the DM." in start_html
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["party"]["email"], users["party"]["password"])
@@ -1011,7 +995,7 @@ def test_session_start_and_message_support_async_partial_updates(client, sign_in
     assert start_payload["ok"] is True
     assert start_payload["active_session_id"] == 1
     assert "Session started. Players can now use the Session page chat." in start_payload["flash_html"]
-    assert "Players can use the Session page chat" in start_payload["status_html"]
+    assert "The session is live for players and the DM." in start_payload["status_html"]
     assert "composer_html" not in start_payload
     assert "Close session" in start_payload["controls_html"]
 
@@ -1164,8 +1148,7 @@ def test_dm_session_article_store_supports_manual_upload_and_lookup_modes(client
     assert 'name="source_ref"' in session_html
     assert "Drag and drop a file here" in session_html
     assert "Browse" in session_html
-    assert "Upload a UTF-8 Markdown file." in session_html
-    assert "Search visible published wiki pages and accessible Systems entries" in session_html
+    assert "The article title comes from markdown frontmatter" in session_html
     assert "Type at least 2 letters to search published wiki pages and Systems entries." in session_html
 
 
@@ -1743,7 +1726,7 @@ def test_dm_session_live_state_endpoint_returns_manager_payload_without_chat_or_
     assert live_state.status_code == 200
     payload = live_state.get_json()
     assert payload["active_session_id"] == 1
-    assert "Players can use the Session page chat" in payload["status_html"]
+    assert "The session is live for players and the DM." in payload["status_html"]
     assert "Close session" in payload["controls_html"]
     assert "chat_html" not in payload
     assert "composer_html" not in payload

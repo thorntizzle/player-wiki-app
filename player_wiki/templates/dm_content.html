@@ -133,15 +133,15 @@
     <h1>{{ campaign.title }} DM Content</h1>
     <p class="lede">
       {% if dm_content_subpage == "player-wiki" %}
-        Maintain published player wiki pages from inside the app.
+        Published player wiki page management.
       {% elif dm_content_subpage == "systems" %}
-        Manage Systems source policy, entry overrides, custom campaign entries, shared-source imports, and import history from one lane.
+        Systems policy, custom entries, imports, and history.
       {% elif dm_content_subpage == "statblocks" %}
-        Upload DM-side statblocks that seed Combat NPCs without exposing them in the player wiki.
+        DM-side statblocks for Combat NPC seeding.
       {% elif dm_content_subpage == "staged-articles" %}
-        Build session reveal articles here, then reveal and manage them from Session DM when you are ready.
+        Session reveal article prep.
       {% else %}
-        Maintain custom conditions that appear in the combat condition picker alongside the standard DND-5E list.
+        Custom combat conditions.
       {% endif %}
     </p>
     <nav class="character-subpage-nav" aria-label="DM Content subpages">
@@ -314,7 +314,7 @@
               <p class="meta">Statblock upload is only implemented for DND-5E right now.</p>
             {% endif %}
           {% else %}
-            <p class="meta">This page is visible to you, but only the DM or an admin can manage its contents.</p>
+            <p class="meta">Visible to you; only the DM or an admin can manage its contents.</p>
           {% endif %}
 
           {% if dm_statblocks %}
@@ -372,7 +372,7 @@
             <div class="section-heading">
               <div>
                 <h2>Staged articles</h2>
-                <p class="meta">This lane stays DM-only because it feeds future session reveals.</p>
+                <p class="meta">DM-only staging lane.</p>
               </div>
             </div>
             <p class="meta">Only the DM or an admin can stage session reveal articles from DM Content.</p>
@@ -400,7 +400,7 @@
               <button type="submit">Save custom condition</button>
             </form>
           {% else %}
-            <p class="meta">This page is visible to you, but only the DM or an admin can manage its contents.</p>
+            <p class="meta">Visible to you; only the DM or an admin can manage its contents.</p>
           {% endif %}
 
           {% if custom_condition_definitions %}
@@ -481,7 +481,7 @@
           {% if active_session %}
             <p class="meta">A session is active now. Reveal timing still happens on Session DM so players only see articles when you choose.</p>
           {% else %}
-            <p class="meta">No session is active right now. You can still queue articles here before the next session begins.</p>
+            <p class="meta">No session is active right now. Queue articles before the next session begins.</p>
           {% endif %}
           <a class="ghost-button" href="{{ url_for('campaign_session_dm_view', campaign_slug=campaign.slug) }}">Open Session DM</a>
         </section>
