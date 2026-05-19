@@ -12,6 +12,7 @@ import yaml
 
 from player_wiki.app import create_app
 from player_wiki.character_builder import (
+    NATIVE_PROGRESSION_FEATURE_SOURCE_KIND,
     _attach_campaign_item_page_support,
     normalize_definition_to_native_model,
     supports_native_level_up,
@@ -2948,6 +2949,7 @@ def test_converge_imported_definition_preserves_native_progression_feat_rows_on_
                 "name": "Lucky",
                 "category": "feat",
                 "source": "PHB",
+                "source_kind": NATIVE_PROGRESSION_FEATURE_SOURCE_KIND,
                 "description_markdown": "",
                 "activation_type": "passive",
                 "tracker_ref": "lucky",
@@ -3001,6 +3003,70 @@ def test_converge_imported_definition_preserves_native_progression_feat_rows_on_
     assert "Lucky" in feature_names
     assert "lucky" in resource_ids
     assert converged.source["native_progression"]["history"][-1]["to_level"] == 4
+
+
+def test_converge_imported_definition_drops_unmarked_repair_only_feat_rows_on_reimport():
+    existing_definition = _minimal_imported_definition(
+        profile={
+            "class_level_text": "Wizard 5",
+            "classes": [{"class_name": "Wizard", "subclass_name": "", "level": 5}],
+        },
+        features=[
+            {
+                "id": "actor-1",
+                "name": "Actor",
+                "category": "feat",
+                "source": "PHB",
+                "description_markdown": "",
+                "activation_type": "passive",
+                "systems_ref": {
+                    "slug": "phb-feat-actor",
+                    "title": "Actor",
+                    "entry_type": "feat",
+                    "source_id": "PHB",
+                },
+            }
+        ],
+    )
+    existing_definition.source["native_progression"] = {
+        "baseline_repaired_at": "2026-03-31T00:00:00Z",
+        "history": [
+            {"kind": "repair", "at": "2026-03-31T00:00:00Z", "target_level": 5},
+        ],
+    }
+    incoming_definition = _minimal_imported_definition(
+        profile={
+            "class_level_text": "Wizard 5",
+            "classes": [{"class_name": "Wizard", "subclass_name": "", "level": 5}],
+        },
+        features=[
+            {
+                "id": "alert-1",
+                "name": "Alert",
+                "category": "feat",
+                "source": "PHB",
+                "description_markdown": "You gain a +5 bonus to initiative.",
+                "activation_type": "passive",
+                "systems_ref": {
+                    "slug": "phb-feat-alert",
+                    "title": "Alert",
+                    "entry_type": "feat",
+                    "source_id": "PHB",
+                },
+            }
+        ],
+    )
+
+    converged = converge_imported_definition(
+        incoming_definition,
+        existing_definition=existing_definition,
+    )
+
+    feature_names = {feature["name"] for feature in converged.features}
+
+    assert "Alert" in feature_names
+    assert "Actor" not in feature_names
+    assert converged.source["native_progression"]["history"][-1]["kind"] == "repair"
 
 
 def test_converge_imported_definition_preserves_egw_subclass_ref_identity():

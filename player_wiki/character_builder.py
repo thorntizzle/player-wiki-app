@@ -84,6 +84,7 @@ PROFILE_ENTRY_MATCH_UNRESOLVED_SOURCE_LOCKED = "unresolved_source_locked"
 PROFILE_ENTRY_MATCH_UNRESOLVED = "unresolved"
 NATIVE_SOURCE_MATRIX_SUBCLASS_ENTRY_TYPES = frozenset({"subclass", "subclassfeature"})
 IMPORTED_CHARACTER_SOURCE_TYPES = frozenset({"markdown_character_sheet", "pdf_character_sheet_annotations"})
+NATIVE_PROGRESSION_FEATURE_SOURCE_KIND = "native_progression"
 CAMPAIGN_FEATURE_CHOICE_SLOTS = 2
 CAMPAIGN_ITEM_CHOICE_SLOTS = 3
 CAMPAIGN_MECHANICS_SECTION = "Mechanics"
@@ -9310,6 +9311,7 @@ def _build_feat_feature_entry(
         "title": feat_title,
         "label": feat_title,
         "slug": feat_slug,
+        "source_kind": NATIVE_PROGRESSION_FEATURE_SOURCE_KIND,
         "systems_entry": feat_entry if isinstance(feat_entry, SystemsEntryRecord) else None,
         "page_ref": str(selection.get("page_ref") or "").strip(),
         "campaign_option": dict(selection.get("campaign_option") or {}) or None,
@@ -15090,6 +15092,9 @@ def _build_feature_payload(
             "name": feature_name,
             "category": "class_feature",
             "source": PHB_SOURCE_ID,
+            "source_kind": str(
+                feature_entry.get("source_kind") or NATIVE_PROGRESSION_FEATURE_SOURCE_KIND
+            ).strip(),
             "description_markdown": "",
             "activation_type": "passive",
             "tracker_ref": None,
@@ -15181,6 +15186,9 @@ def _build_feature_payload(
                 if page_ref
                 else (systems_entry.source_id if isinstance(systems_entry, SystemsEntryRecord) else fallback_source_id)
             ),
+            "source_kind": str(
+                feature_entry.get("source_kind") or NATIVE_PROGRESSION_FEATURE_SOURCE_KIND
+            ).strip(),
             "description_markdown": str(campaign_option.get("description_markdown") or "").strip(),
             "activation_type": "passive",
             "tracker_ref": None,

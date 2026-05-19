@@ -12,6 +12,7 @@ from player_wiki.character_campaign_progression import build_campaign_page_progr
 from player_wiki.character_builder import (
     ABILITY_LABELS,
     CHARACTER_BUILDER_VERSION,
+    NATIVE_PROGRESSION_FEATURE_SOURCE_KIND,
     _attach_campaign_item_page_support,
     _build_item_catalog,
     _build_spell_catalog,
@@ -3877,6 +3878,7 @@ def test_imported_progression_repair_can_restore_refs_and_add_prior_feature_link
     ]
 
     repaired_feature_names = {feature["name"] for feature in repaired_definition.features}
+    repaired_features_by_name = {feature["name"]: feature for feature in repaired_definition.features}
     repaired_normalized = normalize_definition_to_native_model(
         repaired_definition,
         systems_service=systems_service,
@@ -3913,6 +3915,8 @@ def test_imported_progression_repair_can_restore_refs_and_add_prior_feature_link
     assert repaired_definition.profile["background_ref"]["slug"] == acolyte.slug
     assert "Lucky" in repaired_feature_names
     assert "Archery" in repaired_feature_names
+    assert repaired_features_by_name["Lucky"]["source_kind"] == NATIVE_PROGRESSION_FEATURE_SOURCE_KIND
+    assert repaired_features_by_name["Archery"]["source_kind"] == NATIVE_PROGRESSION_FEATURE_SOURCE_KIND
     assert repaired_definition.source["native_progression"]["baseline_repaired_at"]
     assert repaired_import.source_path == "imports://imported-hero.md"
     assert comparable_progression_slice(repaired_normalized) == comparable_progression_slice(native_normalized)
