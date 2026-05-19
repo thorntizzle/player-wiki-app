@@ -90,6 +90,16 @@ REDUNDANT_PASSIVE_FEATURE_NAMES = {
     "martial archetype",
     "psi warrior",
 }
+ARMORER_COMPONENT_PARENT_NAMES = {
+    "armor model": "arcane armor",
+    "guardian": "armor model",
+    "infiltrator": "armor model",
+}
+ARMORER_ARMOR_MODEL_PARENT_NAMES = {
+    "guardian armor:": "guardian",
+    "infiltrator armor:": "infiltrator",
+}
+ARMORER_EMPTY_MODE_SUFFIX_RE = re.compile(r"\s+\((?:STR|DEX|CON|INT|WIS|CHA)\)$", re.IGNORECASE)
 XIANXIA_STANCE_RULE_ENTRY_KEY = f"xianxia|rule|{XIANXIA_HOMEBREW_SOURCE_ID.lower()}|stance"
 XIANXIA_STANCE_ACTIVATION_RULE_ENTRY_KEY = (
     f"xianxia|rule|{XIANXIA_HOMEBREW_SOURCE_ID.lower()}|stance-activation-rules"
@@ -862,6 +872,9 @@ def present_character_detail(
                 ),
             }
         )
+
+    for group_entries in feature_groups_ordered.values():
+        nest_armorer_feature_components(group_entries)
 
     attacks = []
     hidden_attacks: list[dict[str, str]] = []
@@ -3426,6 +3439,79 @@ def should_hide_redundant_choice_feature(
     if feature_name == "feat":
         return has_named_feats
     return False
+
+
+def nest_armorer_feature_components(entries: list[dict[str, Any]]) -> None:
+    if not entries:
+        return
+
+    entries_by_name: dict[str, list[dict[str, Any]]] = {}
+    for entry in entries:
+        entries_by_name.setdefault(normalize_feature_name(entry.get("name")), []).append(entry)
+    if "arcane armor" not in entries_by_name or "armor model" not in entries_by_name:
+        return
+
+    moved_ids: set[int] = set()
+    hidden_ids = {
+        id(entry)
+        for entry in entries
+        if should_hide_empty_armorer_mode_component(entry, entries_by_name)
+    }
+
+    def first_entry(name: str) -> dict[str, Any] | None:
+        for candidate in entries_by_name.get(name, []):
+            if id(candidate) not in hidden_ids:
+                return candidate
+        return None
+
+    def attach_child(parent_name: str, child: dict[str, Any]) -> bool:
+        parent = first_entry(parent_name)
+        if parent is None or parent is child or id(child) in hidden_ids:
+            return False
+        parent.setdefault("children", []).append(child)
+        moved_ids.add(id(child))
+        return True
+
+    for child_name, parent_name in ARMORER_COMPONENT_PARENT_NAMES.items():
+        child = first_entry(child_name)
+        if child is not None:
+            attach_child(parent_name, child)
+
+    for entry in entries:
+        entry_name = normalize_feature_name(entry.get("name"))
+        for prefix, parent_name in ARMORER_ARMOR_MODEL_PARENT_NAMES.items():
+            if entry_name.startswith(prefix):
+                attach_child(parent_name, entry)
+                break
+
+    if not moved_ids and not hidden_ids:
+        return
+    entries[:] = [entry for entry in entries if id(entry) not in moved_ids and id(entry) not in hidden_ids]
+
+
+def should_hide_empty_armorer_mode_component(
+    entry: dict[str, Any],
+    entries_by_name: dict[str, list[dict[str, Any]]],
+) -> bool:
+    name = str(entry.get("name") or "").strip()
+    normalized_name = normalize_feature_name(name)
+    if not any(normalized_name.startswith(prefix) for prefix in ARMORER_ARMOR_MODEL_PARENT_NAMES):
+        return False
+    base_name = ARMORER_EMPTY_MODE_SUFFIX_RE.sub("", name).strip()
+    if not base_name or normalize_feature_name(base_name) == normalized_name:
+        return False
+    if normalize_feature_name(base_name) not in entries_by_name:
+        return False
+    if str(entry.get("href") or "").strip():
+        return False
+    if str(entry.get("description_html") or "").strip():
+        return False
+    metadata = [
+        str(item).strip()
+        for item in list(entry.get("metadata") or [])
+        if str(item).strip() and normalize_feature_name(item) not in {"action", "bonus action", "reaction", "passive"}
+    ]
+    return not metadata
 
 
 def normalize_feature_name(value: Any) -> str:

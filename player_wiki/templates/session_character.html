@@ -302,6 +302,7 @@
                             {% if feature.description_html %}
                               <div class="article-body article-body--compact">{{ feature.description_html | safe }}</div>
                             {% endif %}
+                            {% include "_character_feature_components.html" %}
                           </article>
                         {% endfor %}
                       </div>

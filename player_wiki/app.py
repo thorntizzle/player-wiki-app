@@ -6682,10 +6682,19 @@ def create_app() -> Flask:
         bonus_action_features: list[dict[str, object]] = []
         reaction_features: list[dict[str, object]] = []
         feature_groups = [dict(group or {}) for group in list(character_detail.get("feature_groups") or [])]
+
+        def iter_feature_entries(entries: object):
+            for item in list(entries or []):
+                if not isinstance(item, dict):
+                    continue
+                yield item
+                yield from iter_feature_entries(item.get("children"))
+
         for group in feature_groups:
             group_title = str(group.get("title") or "Features").strip() or "Features"
-            for feature in list(group.get("entries") or []):
+            for feature in iter_feature_entries(group.get("entries")):
                 feature_payload = dict(feature or {})
+                feature_payload.pop("children", None)
                 feature_payload["group_title"] = group_title
                 activation_type = str(feature_payload.get("activation_type") or "").strip().lower()
                 if activation_type == "action":

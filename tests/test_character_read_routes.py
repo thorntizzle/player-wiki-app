@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 from io import BytesIO
+import re
 import yaml
 from datetime import datetime, timezone
 
@@ -9076,6 +9077,108 @@ def test_character_sheet_shows_systems_feature_text_inline_and_hides_source_meta
     assert 'You can cast spells using your force of personality as your spellcasting focus.' in html
     assert 'Unique Source 77' not in html
     assert 'View source entry' not in html
+
+
+def test_character_sheet_nests_armorer_armor_model_components(app, client, sign_in, users):
+    def _mutate_definition(payload: dict) -> None:
+        payload["features"] = [
+            {
+                "id": "arcane-armor-1",
+                "name": "Arcane Armor",
+                "category": "class_feature",
+                "description_markdown": "You turn worn armor into Arcane Armor.",
+                "activation_type": "action",
+            },
+            {
+                "id": "armor-model-2",
+                "name": "Armor Model",
+                "category": "class_feature",
+                "description_markdown": "Choose Guardian or Infiltrator.",
+                "activation_type": "passive",
+            },
+            {
+                "id": "guardian-3",
+                "name": "Guardian",
+                "category": "class_feature",
+                "description_markdown": "You design your armor to be in the front line of conflict.",
+                "activation_type": "passive",
+            },
+            {
+                "id": "guardian-thunder-4",
+                "name": "Guardian Armor: Thunder Gauntlets",
+                "category": "class_feature",
+                "description_markdown": "Each gauntlet deals 1d8 thunder damage.",
+                "activation_type": "action",
+            },
+            {
+                "id": "guardian-field-5",
+                "name": "Guardian Armor: Defensive Field",
+                "category": "class_feature",
+                "description_markdown": "You gain temporary hit points.",
+                "activation_type": "bonus_action",
+                "tracker_ref": "guardian-armor-defensive-field",
+            },
+            {
+                "id": "guardian-thunder-str-6",
+                "name": "Guardian Armor: Thunder Gauntlets (STR)",
+                "category": "class_feature",
+                "description_markdown": "",
+                "activation_type": "action",
+            },
+            {
+                "id": "flash-of-genius-7",
+                "name": "Flash of Genius",
+                "category": "class_feature",
+                "description_markdown": "Add your Intelligence modifier to an ability check or saving throw.",
+                "activation_type": "reaction",
+            },
+        ]
+
+    def _mutate_state(payload: dict) -> None:
+        resources = [
+            dict(resource or {})
+            for resource in list(payload.get("resources") or [])
+            if str((resource or {}).get("id") or "") != "guardian-armor-defensive-field"
+        ]
+        resources.append(
+            {
+                "id": "guardian-armor-defensive-field",
+                "label": "Defensive Field",
+                "current": 3,
+                "max": 3,
+                "reset_on": "long_rest",
+            }
+        )
+        payload["resources"] = resources
+
+    _write_character_definition(app, "arden-march", _mutate_definition)
+    _write_character_state(app, "arden-march", _mutate_state)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    def _assert_armorer_components(html: str) -> None:
+        assert re.search(r"<h4>\s*Arcane Armor\s*</h4>", html)
+        assert re.search(r"<h4>\s*Flash of Genius\s*</h4>", html)
+        for child_name in (
+            "Armor Model",
+            "Guardian",
+            "Guardian Armor: Thunder Gauntlets",
+            "Guardian Armor: Defensive Field",
+        ):
+            assert not re.search(rf"<h4>\s*{re.escape(child_name)}\s*</h4>", html)
+            assert re.search(rf"<h5>\s*{re.escape(child_name)}\s*</h5>", html)
+        assert "feature-row__components" in html
+        assert "Each gauntlet deals 1d8 thunder damage." in html
+        assert "Bonus Action | Defensive Field: 3 / 3 (Long Rest)" in html
+        assert "Guardian Armor: Thunder Gauntlets (STR)" not in html
+
+    read_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=features")
+    session_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=features")
+
+    assert read_response.status_code == 200
+    assert session_response.status_code == 200
+    _assert_armorer_components(read_response.get_data(as_text=True))
+    _assert_armorer_components(session_response.get_data(as_text=True))
 
 
 def test_character_sheet_hides_redundant_choice_placeholder_features(app, client, sign_in, users):

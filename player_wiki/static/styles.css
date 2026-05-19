@@ -1777,9 +1777,37 @@ button {
   align-items: baseline;
 }
 
+.feature-row__components {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.85rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--border);
+}
+
+.feature-row__component {
+  display: grid;
+  gap: 0.35rem;
+  padding-left: 0.8rem;
+  border-left: 2px solid var(--border);
+}
+
+.feature-row__component-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: baseline;
+}
+
+.feature-row__component h5 {
+  margin: 0;
+  font-size: 0.98rem;
+}
+
 .spell-row h3,
 .inventory-row h3,
 .feature-row h4,
+.feature-row__component h5,
 .detail-card h4 {
   margin: 0;
 }
@@ -3028,6 +3056,7 @@ button {
   .feature-detail summary,
   .spell-row__header,
   .feature-row__header,
+  .feature-row__component-header,
   .inventory-row__header,
   .dm-content-item__header,
   .combatant-card__header,

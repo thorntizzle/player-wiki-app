@@ -1,0 +1,28 @@
+{% macro render_feature_components(components) %}
+  {% if components %}
+    <div class="feature-row__components">
+      {% for component in components %}
+        <div class="feature-row__component">
+          <div class="feature-row__component-header">
+            <h5>
+              {% if component.href %}
+                <a href="{{ component.href }}">{{ component.name }}</a>
+              {% else %}
+                {{ component.name }}
+              {% endif %}
+            </h5>
+            {% if component.metadata %}
+              <p class="meta">{{ component.metadata | join(" | ") }}</p>
+            {% endif %}
+          </div>
+          {% if component.description_html %}
+            <div class="article-body article-body--compact">{{ component.description_html | safe }}</div>
+          {% endif %}
+          {{ render_feature_components(component.children) }}
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endmacro %}
+
+{{ render_feature_components(feature.children) }}
