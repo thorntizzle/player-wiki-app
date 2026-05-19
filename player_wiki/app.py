@@ -5335,6 +5335,36 @@ def create_app() -> Flask:
             status_code,
         )
 
+    def run_character_state_mutation(
+        campaign_slug: str,
+        character_slug: str,
+        *,
+        anchor: str,
+        success_message: str,
+        action,
+    ):
+        campaign, record = load_character_context(campaign_slug, character_slug)
+        if not campaign_supports_character_session_routes(campaign):
+            abort(404)
+        if not has_session_mode_access(campaign_slug, character_slug):
+            abort(403)
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        try:
+            expected_revision = parse_expected_revision()
+            action(record, expected_revision, user.id)
+        except CharacterStateConflictError:
+            flash("This sheet changed in another session. Refresh the page and try again.", "error")
+        except (CharacterStateValidationError, ValueError) as exc:
+            flash(str(exc), "error")
+        else:
+            flash(success_message, "success")
+
+        return redirect_to_character_mode(campaign_slug, character_slug, anchor=anchor)
+
     def run_session_mutation(
         campaign_slug: str,
         character_slug: str,
@@ -6537,6 +6567,11 @@ def create_app() -> Flask:
             dict(item or {})
             for item in list((equipment_state_manager or {}).get("rows") or [])
         ]
+        arcane_armor_available = bool(
+            dict(character_detail.get("arcane_armor_state") or {}).get("available")
+            if isinstance(character_detail.get("arcane_armor_state"), dict)
+            else False
+        )
         inventory_rows = [dict(item or {}) for item in list(character_detail.get("inventory") or [])]
         skills = [dict(item or {}) for item in list(character_detail.get("skills") or [])]
         reference_sections = [
@@ -6643,7 +6678,7 @@ def create_app() -> Flask:
                 {
                     "slug": "equipment",
                     "label": SESSION_CHARACTER_SECTION_LABELS["equipment"],
-                    "count": len(equipment_rows),
+                    "count": len(equipment_rows) + int(arcane_armor_available),
                 },
                 {
                     "slug": "inventory",
@@ -6696,6 +6731,9 @@ def create_app() -> Flask:
                 feature_payload = dict(feature or {})
                 feature_payload.pop("children", None)
                 feature_payload["group_title"] = group_title
+                combat_availability = dict(feature_payload.get("combat_availability") or {})
+                if combat_availability and not bool(combat_availability.get("available", True)):
+                    continue
                 activation_type = str(feature_payload.get("activation_type") or "").strip().lower()
                 if activation_type == "action":
                     action_features.append(feature_payload)
@@ -6727,6 +6765,11 @@ def create_app() -> Flask:
                 continue
             hidden_attacks.append({"name": name, "href": ""})
         equipment_rows = [dict(item or {}) for item in list(equipment_state_manager.get("rows") or [])]
+        arcane_armor_state = (
+            dict(character_detail.get("arcane_armor_state") or {})
+            if isinstance(character_detail.get("arcane_armor_state"), dict)
+            else {}
+        )
         inventory_rows = [dict(item or {}) for item in list(character_detail.get("inventory") or [])]
         equipment_item_refs = {
             str(item_ref).strip()
@@ -6816,9 +6859,10 @@ def create_app() -> Flask:
             {
                 "slug": "equipment",
                 "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["equipment"],
-                "count": len(equipment_rows),
-                "has_content": bool(equipment_rows),
+                "count": len(equipment_rows) + int(bool(arcane_armor_state.get("available"))),
+                "has_content": bool(equipment_rows or arcane_armor_state.get("available")),
                 "equipment_state_manager": equipment_state_manager,
+                "arcane_armor_state": arcane_armor_state,
                 "empty_message": "No equipment is listed on this sheet yet.",
             },
             {
@@ -11260,6 +11304,27 @@ def create_app() -> Flask:
             ),
         )
 
+    @app.post("/campaigns/<campaign_slug>/combat/character/combatants/<int:combatant_id>/feature-states/<feature_key>")
+    @campaign_scope_access_required("combat")
+    def campaign_combat_character_feature_state(
+        campaign_slug: str,
+        combatant_id: int,
+        feature_key: str,
+    ):
+        return run_combat_character_mutation(
+            campaign_slug,
+            combatant_id,
+            anchor="combat-character-equipment",
+            success_message="Feature state updated.",
+            action=lambda record, expected_revision, user_id: get_character_state_service().update_feature_state(
+                record,
+                feature_key,
+                expected_revision=expected_revision,
+                enabled=request.form.get("enabled") == "1",
+                updated_by_user_id=user_id,
+            ),
+        )
+
     @app.get("/campaigns/<campaign_slug>/combat/systems-monsters/search")
     @campaign_scope_access_required("combat")
     def campaign_combat_search_systems_monsters(campaign_slug: str):
@@ -14125,6 +14190,23 @@ def create_app() -> Flask:
             anchor="character-equipment-state",
             success_message="Equipment state updated.",
             action=_action,
+        )
+
+    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/feature-states/<feature_key>")
+    @campaign_scope_access_required("characters")
+    def character_feature_state_update(campaign_slug: str, character_slug: str, feature_key: str):
+        return run_character_state_mutation(
+            campaign_slug,
+            character_slug,
+            anchor="character-equipment-state",
+            success_message="Feature state updated.",
+            action=lambda record, expected_revision, user_id: get_character_state_service().update_feature_state(
+                record,
+                feature_key,
+                expected_revision=expected_revision,
+                enabled=request.form.get("enabled") == "1",
+                updated_by_user_id=user_id,
+            ),
         )
 
     def build_equipment_state_update_result(

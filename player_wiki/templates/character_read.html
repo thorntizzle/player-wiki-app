@@ -655,6 +655,19 @@
               <p class="meta">Armor and magic items use equipped state; weapons also track an applicable wielding mode.</p>
             </article>
           </div>
+          {% if character.arcane_armor_state and character.arcane_armor_state.available %}
+            {% set arcane_armor_state = character.arcane_armor_state %}
+            {% set arcane_armor_state_can_edit = can_use_session_mode %}
+            {% set arcane_armor_state_action = url_for('character_feature_state_update', campaign_slug=campaign.slug, character_slug=character.slug, feature_key=character.arcane_armor_state.feature_key) %}
+            {% set arcane_armor_state_expected_revision = character.state_revision %}
+            {% set arcane_armor_state_mode = 'session' if is_session_mode else 'read' %}
+            {% set arcane_armor_state_page = character_subpage %}
+            {% set arcane_armor_state_return_view = '' %}
+            {% set arcane_armor_state_combat_view = '' %}
+            {% set arcane_armor_state_combatant_id = none %}
+            {% set arcane_armor_state_async = false %}
+            {% include "_arcane_armor_state_card.html" %}
+          {% endif %}
 
           {% if equipment_state_manager.rows %}
             <div class="character-edit-stack" id="character-equipment-state">

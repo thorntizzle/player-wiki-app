@@ -99,6 +99,10 @@ ARMORER_ARMOR_MODEL_PARENT_NAMES = {
     "guardian armor:": "guardian",
     "infiltrator armor:": "infiltrator",
 }
+ARCANE_ARMOR_STATE_KEY = "arcane_armor"
+ARCANE_ARMOR_FEATURE_NAME = "arcane armor"
+GUARDIAN_ARMOR_THUNDER_GAUNTLETS_NAME = "guardian armor: thunder gauntlets"
+GUARDIAN_ARMOR_DEFENSIVE_FIELD_NAME = "guardian armor: defensive field"
 ARMORER_EMPTY_MODE_SUFFIX_RE = re.compile(r"\s+\((?:STR|DEX|CON|INT|WIS|CHA)\)$", re.IGNORECASE)
 XIANXIA_STANCE_RULE_ENTRY_KEY = f"xianxia|rule|{XIANXIA_HOMEBREW_SOURCE_ID.lower()}|stance"
 XIANXIA_STANCE_ACTIVATION_RULE_ENTRY_KEY = (
@@ -433,6 +437,12 @@ def present_character_detail(
         for item in list(state.get("inventory") or [])
         if build_character_inventory_item_ref(item)
     }
+    arcane_armor_state = present_arcane_armor_state(
+        definition,
+        state,
+        inventory_lookup=inventory_lookup,
+        equipment_catalog_lookup=equipment_catalog_lookup,
+    )
 
     if is_xianxia_character:
         xianxia_payload = dict(definition.xianxia or {})
@@ -865,6 +875,10 @@ def present_character_detail(
                 ),
                 "activation_type": str(feature.get("activation_type") or "").strip().lower(),
                 "metadata": [part for part in metadata if part],
+                "combat_availability": build_armorer_combat_availability(
+                    feature.get("name"),
+                    arcane_armor_state,
+                ),
                 "description_html": resolve_feature_description_html(
                     campaign,
                     feature,
@@ -896,6 +910,18 @@ def present_character_detail(
             inventory_lookup=inventory_lookup,
             equipment_catalog_lookup=equipment_catalog_lookup,
         )
+        if (
+            bool(arcane_armor_state.get("available"))
+            and is_guardian_thunder_gauntlets_name(attack_name)
+            and not bool(arcane_armor_state.get("thunder_gauntlets_available"))
+        ):
+            hidden_attacks.append(
+                {
+                    "name": attack_name,
+                    "href": attack_href,
+                }
+            )
+            continue
         if attack_is_equipped is False:
             hidden_attacks.append(
                 {
@@ -1069,6 +1095,7 @@ def present_character_detail(
         "xianxia_read": xianxia_read_context,
         "attack_reminders": attack_reminders,
         "defensive_rules": defensive_rules,
+        "arcane_armor_state": arcane_armor_state,
         "death_save_summary": death_save_summary,
         "abilities": abilities,
         "skills": skills,
@@ -1186,6 +1213,105 @@ def resolve_attack_equipped_state(
     if not saw_linked_item:
         return None
     return False
+
+
+def present_arcane_armor_state(
+    definition: Any,
+    state: dict[str, Any],
+    *,
+    inventory_lookup: dict[str, dict[str, Any]],
+    equipment_catalog_lookup: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    if not character_has_feature(definition, ARCANE_ARMOR_FEATURE_NAME):
+        return {"available": False}
+
+    feature_states = dict(state.get("feature_states") or {})
+    arcane_armor_payload = dict(feature_states.get(ARCANE_ARMOR_STATE_KEY) or {})
+    enabled = bool(arcane_armor_payload.get("enabled"))
+    hands_free = armorer_thunder_gauntlets_have_free_hands(
+        inventory_lookup=inventory_lookup,
+        equipment_catalog_lookup=equipment_catalog_lookup,
+    )
+    return {
+        "available": True,
+        "feature_key": ARCANE_ARMOR_STATE_KEY,
+        "label": "Arcane Armor",
+        "enabled": enabled,
+        "status_label": "Enabled" if enabled else "Disabled",
+        "hands_free": hands_free,
+        "hands_label": "Hands free" if hands_free else "Hands occupied",
+        "thunder_gauntlets_available": bool(enabled and hands_free),
+        "defensive_field_available": enabled,
+    }
+
+
+def character_has_feature(definition: Any, feature_name: str) -> bool:
+    target = normalize_feature_name(feature_name)
+    return any(
+        normalize_feature_name(feature.get("name")) == target
+        for feature in list(getattr(definition, "features", []) or [])
+        if isinstance(feature, dict)
+    )
+
+
+def armorer_thunder_gauntlets_have_free_hands(
+    *,
+    inventory_lookup: dict[str, dict[str, Any]],
+    equipment_catalog_lookup: dict[str, dict[str, Any]],
+) -> bool:
+    for item_ref, inventory_item in inventory_lookup.items():
+        equipment_item = dict(equipment_catalog_lookup.get(item_ref) or {})
+        quantity = int(
+            inventory_item.get("quantity")
+            or equipment_item.get("default_quantity")
+            or 0
+        )
+        if quantity <= 0:
+            continue
+        support_item = {
+            **equipment_item,
+            **dict(inventory_item or {}),
+        }
+        support = describe_equipment_state_support(support_item)
+        if not resolve_item_equipped_state(support_item, support=support):
+            continue
+        if bool(support.get("is_weapon")) or armorer_item_occupies_hand(support_item):
+            return False
+    return True
+
+
+def armorer_item_occupies_hand(item: dict[str, Any]) -> bool:
+    systems_ref = dict(item.get("systems_ref") or {})
+    candidate_values = [
+        str(item.get("name") or "").strip(),
+        str(systems_ref.get("title") or "").strip(),
+        str(systems_ref.get("slug") or "").strip(),
+    ]
+    return any(normalize_lookup(value) in {"shield", "phb item shield"} for value in candidate_values if value)
+
+
+def is_guardian_thunder_gauntlets_name(value: Any) -> bool:
+    return normalize_feature_name(value) == GUARDIAN_ARMOR_THUNDER_GAUNTLETS_NAME
+
+
+def is_guardian_defensive_field_name(value: Any) -> bool:
+    return normalize_feature_name(value) == GUARDIAN_ARMOR_DEFENSIVE_FIELD_NAME
+
+
+def build_armorer_combat_availability(
+    name: Any,
+    arcane_armor_state: dict[str, Any],
+) -> dict[str, Any]:
+    if not bool(arcane_armor_state.get("available")):
+        return {"available": True, "reason": ""}
+    if is_guardian_thunder_gauntlets_name(name):
+        if not bool(arcane_armor_state.get("enabled")):
+            return {"available": False, "reason": "Arcane Armor is disabled."}
+        if not bool(arcane_armor_state.get("hands_free")):
+            return {"available": False, "reason": "Hands are occupied."}
+    if is_guardian_defensive_field_name(name) and not bool(arcane_armor_state.get("enabled")):
+        return {"available": False, "reason": "Arcane Armor is disabled."}
+    return {"available": True, "reason": ""}
 
 
 def normalize_attack_equipment_refs(attack: dict[str, Any]) -> list[str]:

@@ -450,99 +450,117 @@
         {% endif %}
       {% elif section.slug == 'equipment' %}
         {% set equipment_state = section.equipment_state_manager %}
-        {% if equipment_state.rows %}
-          <div class="detail-grid">
-            <article class="detail-card">
-              <h3>Attuned items</h3>
-              <p><strong>{{ equipment_state.attuned_count }} / {{ equipment_state.max_attuned_items }}</strong></p>
-              <p class="meta">Attunement is separate from equipped state and usually has room for up to {{ equipment_state.max_attuned_items }} items.</p>
-              {% if equipment_state.over_attunement_limit %}
-                <p class="meta">This sheet is currently over the normal attunement limit.</p>
-              {% endif %}
-            </article>
-            <article class="detail-card">
-              <h3>Equipped items</h3>
-              <p><strong>{{ equipment_state.equipped_count }}</strong></p>
-              <p class="meta">Armor and magic items use equipped state; weapons also track an applicable wielding mode.</p>
-            </article>
-          </div>
-          <div class="character-edit-stack">
-            {% for item in equipment_state.rows %}
-              <article class="detail-card character-edit-row">
-                <div class="section-heading">
-                  <h3>
-                    {% if item.href %}
-                      <a href="{{ item.href }}">{{ item.name }}</a>
-                    {% else %}
-                      {{ item.name }}
-                    {% endif %}
-                  </h3>
-                  <span class="meta">{{ item.source_label }}</span>
-                </div>
-                <p class="meta">
-                  x{{ item.quantity }}
-                  {% if item.weight %} | {{ item.weight }}{% endif %}
-                  {% if item.requires_attunement %} | Requires attunement{% endif %}
-                </p>
-                <p class="meta">
-                  {{ item.equipped_label }}
-                  {% if item.requires_attunement %}
-                    {% if item.is_attuned %} | Attuned{% else %} | Not attuned{% endif %}
-                  {% endif %}
-                </p>
-                {% if item.tags %}
-                  <p class="meta">{{ item.tags | join(", ") }}</p>
-                {% endif %}
-                {{ combat_item_description_details(item) }}
-                {% if can_edit_combat_equipment_state and selected_combatant_id %}
-                  <form
-                    class="stack-form"
-                    method="post"
-                    action="{{ url_for('campaign_combat_character_equipment_state', campaign_slug=campaign.slug, combatant_id=selected_combatant_id, item_id=item.id) }}"
-                    {% if combat_workspace_return_view != "character" %}
-                    data-combat-async
-                    {% endif %}
-                  >
-                    {{ combat_workspace_return_fields() }}
-                    <input type="hidden" name="combatant" value="{{ selected_combatant_id }}">
-                    <input type="hidden" name="expected_revision" value="{{ selected_combat_character.state_revision }}">
-                    <div class="detail-grid">
-                      {% if item.supports_weapon_wield_mode %}
-                        <label>
-                          Wielding
-                          <select name="weapon_wield_mode">
-                            <option value="">Not equipped</option>
-                            {% for option in item.weapon_wield_options %}
-                              <option value="{{ option.value }}" {% if item.weapon_wield_mode == option.value %}selected{% endif %}>
-                                {{ option.label }}
-                              </option>
-                            {% endfor %}
-                          </select>
-                        </label>
-                      {% else %}
-                        <label class="checkbox-label">
-                          <input type="checkbox" name="is_equipped" value="1" {% if item.is_equipped %}checked{% endif %}>
-                          Equipped
-                        </label>
-                      {% endif %}
-                      {% if item.requires_attunement %}
-                        <label class="checkbox-label">
-                          <input type="checkbox" name="is_attuned" value="1" {% if item.is_attuned %}checked{% endif %}>
-                          Attuned
-                        </label>
-                      {% endif %}
-                    </div>
-                    {% if item.attunement_hint %}
-                      <p class="meta">{{ item.attunement_hint }}</p>
-                    {% endif %}
-                    <div class="hero-actions">
-                      <button type="submit">Save equipment state</button>
-                    </div>
-                  </form>
+        {% if equipment_state.rows or (section.arcane_armor_state and section.arcane_armor_state.available) %}
+          {% if equipment_state.rows %}
+            <div class="detail-grid">
+              <article class="detail-card">
+                <h3>Attuned items</h3>
+                <p><strong>{{ equipment_state.attuned_count }} / {{ equipment_state.max_attuned_items }}</strong></p>
+                <p class="meta">Attunement is separate from equipped state and usually has room for up to {{ equipment_state.max_attuned_items }} items.</p>
+                {% if equipment_state.over_attunement_limit %}
+                  <p class="meta">This sheet is currently over the normal attunement limit.</p>
                 {% endif %}
               </article>
-            {% endfor %}
-          </div>
+              <article class="detail-card">
+                <h3>Equipped items</h3>
+                <p><strong>{{ equipment_state.equipped_count }}</strong></p>
+                <p class="meta">Armor and magic items use equipped state; weapons also track an applicable wielding mode.</p>
+              </article>
+            </div>
+          {% endif %}
+          {% if section.arcane_armor_state and section.arcane_armor_state.available %}
+            {% set arcane_armor_state = section.arcane_armor_state %}
+            {% set arcane_armor_state_can_edit = can_edit_combat_equipment_state and selected_combatant_id %}
+            {% set arcane_armor_state_action = url_for('campaign_combat_character_feature_state', campaign_slug=campaign.slug, combatant_id=selected_combatant_id, feature_key=section.arcane_armor_state.feature_key) if selected_combatant_id else '' %}
+            {% set arcane_armor_state_expected_revision = selected_combat_character.state_revision %}
+            {% set arcane_armor_state_mode = '' %}
+            {% set arcane_armor_state_page = '' %}
+            {% set arcane_armor_state_return_view = '' %}
+            {% set arcane_armor_state_combat_view = combat_workspace_return_view %}
+            {% set arcane_armor_state_combatant_id = selected_combatant_id %}
+            {% set arcane_armor_state_async = combat_workspace_return_view != "character" %}
+            {% set arcane_armor_state_anchor = 'combat-character-arcane-armor-state' %}
+            {% include "_arcane_armor_state_card.html" %}
+          {% endif %}
+          {% if equipment_state.rows %}
+            <div class="character-edit-stack">
+              {% for item in equipment_state.rows %}
+                <article class="detail-card character-edit-row">
+                  <div class="section-heading">
+                    <h3>
+                      {% if item.href %}
+                        <a href="{{ item.href }}">{{ item.name }}</a>
+                      {% else %}
+                        {{ item.name }}
+                      {% endif %}
+                    </h3>
+                    <span class="meta">{{ item.source_label }}</span>
+                  </div>
+                  <p class="meta">
+                    x{{ item.quantity }}
+                    {% if item.weight %} | {{ item.weight }}{% endif %}
+                    {% if item.requires_attunement %} | Requires attunement{% endif %}
+                  </p>
+                  <p class="meta">
+                    {{ item.equipped_label }}
+                    {% if item.requires_attunement %}
+                      {% if item.is_attuned %} | Attuned{% else %} | Not attuned{% endif %}
+                    {% endif %}
+                  </p>
+                  {% if item.tags %}
+                    <p class="meta">{{ item.tags | join(", ") }}</p>
+                  {% endif %}
+                  {{ combat_item_description_details(item) }}
+                  {% if can_edit_combat_equipment_state and selected_combatant_id %}
+                    <form
+                      class="stack-form"
+                      method="post"
+                      action="{{ url_for('campaign_combat_character_equipment_state', campaign_slug=campaign.slug, combatant_id=selected_combatant_id, item_id=item.id) }}"
+                      {% if combat_workspace_return_view != "character" %}
+                      data-combat-async
+                      {% endif %}
+                    >
+                      {{ combat_workspace_return_fields() }}
+                      <input type="hidden" name="combatant" value="{{ selected_combatant_id }}">
+                      <input type="hidden" name="expected_revision" value="{{ selected_combat_character.state_revision }}">
+                      <div class="detail-grid">
+                        {% if item.supports_weapon_wield_mode %}
+                          <label>
+                            Wielding
+                            <select name="weapon_wield_mode">
+                              <option value="">Not equipped</option>
+                              {% for option in item.weapon_wield_options %}
+                                <option value="{{ option.value }}" {% if item.weapon_wield_mode == option.value %}selected{% endif %}>
+                                  {{ option.label }}
+                                </option>
+                              {% endfor %}
+                            </select>
+                          </label>
+                        {% else %}
+                          <label class="checkbox-label">
+                            <input type="checkbox" name="is_equipped" value="1" {% if item.is_equipped %}checked{% endif %}>
+                            Equipped
+                          </label>
+                        {% endif %}
+                        {% if item.requires_attunement %}
+                          <label class="checkbox-label">
+                            <input type="checkbox" name="is_attuned" value="1" {% if item.is_attuned %}checked{% endif %}>
+                            Attuned
+                          </label>
+                        {% endif %}
+                      </div>
+                      {% if item.attunement_hint %}
+                        <p class="meta">{{ item.attunement_hint }}</p>
+                      {% endif %}
+                      <div class="hero-actions">
+                        <button type="submit">Save equipment state</button>
+                      </div>
+                    </form>
+                  {% endif %}
+                </article>
+              {% endfor %}
+            </div>
+          {% endif %}
         {% else %}
           <article class="detail-card">
             <p class="meta">{{ section.empty_message }}</p>

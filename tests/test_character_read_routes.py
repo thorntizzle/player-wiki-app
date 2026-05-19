@@ -9181,6 +9181,154 @@ def test_character_sheet_nests_armorer_armor_model_components(app, client, sign_
     _assert_armorer_components(session_response.get_data(as_text=True))
 
 
+def test_arcane_armor_state_gates_guardian_attacks_on_character_sheet(app, client, sign_in, users):
+    def _mutate_definition(payload: dict) -> None:
+        payload["attacks"] = [
+            {
+                "id": "guardian-armor-thunder-gauntlets-1",
+                "name": "Guardian Armor: Thunder Gauntlets",
+                "category": "weapon",
+                "attack_bonus": 8,
+                "damage": "1d8+5 Thunder",
+                "notes": "",
+            }
+        ]
+        payload["features"] = [
+            {
+                "id": "arcane-armor-1",
+                "name": "Arcane Armor",
+                "category": "class_feature",
+                "description_markdown": "You turn worn armor into Arcane Armor.",
+                "activation_type": "action",
+            },
+            {
+                "id": "armor-model-2",
+                "name": "Armor Model",
+                "category": "class_feature",
+                "description_markdown": "Choose Guardian or Infiltrator.",
+                "activation_type": "passive",
+            },
+            {
+                "id": "guardian-3",
+                "name": "Guardian",
+                "category": "class_feature",
+                "description_markdown": "You design your armor to be in the front line of conflict.",
+                "activation_type": "passive",
+            },
+            {
+                "id": "guardian-thunder-4",
+                "name": "Guardian Armor: Thunder Gauntlets",
+                "category": "class_feature",
+                "description_markdown": "Each gauntlet deals 1d8 thunder damage.",
+                "activation_type": "action",
+            },
+            {
+                "id": "guardian-field-5",
+                "name": "Guardian Armor: Defensive Field",
+                "category": "class_feature",
+                "description_markdown": "You gain temporary hit points.",
+                "activation_type": "bonus_action",
+                "tracker_ref": "guardian-armor-defensive-field",
+            },
+        ]
+        for item in list(payload.get("equipment_catalog") or []):
+            item["is_equipped"] = False
+            item.pop("weapon_wield_mode", None)
+
+    def _mutate_state(payload: dict) -> None:
+        payload.pop("feature_states", None)
+        for item in list(payload.get("inventory") or []):
+            item["is_equipped"] = False
+            item.pop("weapon_wield_mode", None)
+
+    _write_character_definition(app, "arden-march", _mutate_definition)
+    _write_character_state(app, "arden-march", _mutate_state)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    with app.app_context():
+        campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert campaign is not None
+        assert record is not None
+        disabled_character = app_module.present_character_detail(
+            campaign,
+            record,
+            systems_service=app.extensions["systems_service"],
+        )
+        assert disabled_character["arcane_armor_state"]["enabled"] is False
+        assert "Guardian Armor: Thunder Gauntlets" not in {
+            attack["name"] for attack in disabled_character["attacks"]
+        }
+        assert "Guardian Armor: Thunder Gauntlets" in {
+            attack["name"] for attack in disabled_character["hidden_attacks"]
+        }
+
+    equipment_page = client.get("/campaigns/linden-pass/characters/arden-march?page=equipment")
+    assert equipment_page.status_code == 200
+    equipment_html = equipment_page.get_data(as_text=True)
+    assert "Arcane Armor enabled" in equipment_html
+    assert "Save Arcane Armor" in equipment_html
+
+    enable_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/feature-states/arcane_armor",
+        data={
+            "expected_revision": _character_state_revision(app, "arden-march"),
+            "mode": "read",
+            "page": "equipment",
+            "enabled": "1",
+        },
+        follow_redirects=False,
+    )
+    assert enable_response.status_code == 302
+
+    with app.app_context():
+        campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert campaign is not None
+        assert record is not None
+        assert record.state_record.state["feature_states"]["arcane_armor"]["enabled"] is True
+        enabled_character = app_module.present_character_detail(
+            campaign,
+            record,
+            systems_service=app.extensions["systems_service"],
+        )
+        assert "Guardian Armor: Thunder Gauntlets" in {
+            attack["name"] for attack in enabled_character["attacks"]
+        }
+
+    def _occupy_hands(payload: dict) -> None:
+        feature_states = dict(payload.get("feature_states") or {})
+        feature_states["arcane_armor"] = {"enabled": True}
+        payload["feature_states"] = feature_states
+        for item in list(payload.get("inventory") or []):
+            item_ref = str(item.get("catalog_ref") or item.get("id") or "").strip()
+            if item_ref == "quarterstaff-2":
+                item["is_equipped"] = True
+                item["weapon_wield_mode"] = "main-hand"
+
+    _write_character_state(app, "arden-march", _occupy_hands)
+
+    with app.app_context():
+        campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
+        record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
+        assert campaign is not None
+        assert record is not None
+        occupied_character = app_module.present_character_detail(
+            campaign,
+            record,
+            systems_service=app.extensions["systems_service"],
+        )
+        assert occupied_character["arcane_armor_state"]["enabled"] is True
+        assert occupied_character["arcane_armor_state"]["hands_free"] is False
+        assert "Guardian Armor: Thunder Gauntlets" not in {
+            attack["name"] for attack in occupied_character["attacks"]
+        }
+        assert "Guardian Armor: Thunder Gauntlets" in {
+            attack["name"] for attack in occupied_character["hidden_attacks"]
+        }
+
+
 def test_character_sheet_hides_redundant_choice_placeholder_features(app, client, sign_in, users):
     def _mutate(payload: dict) -> None:
         features = list(payload.get("features") or [])

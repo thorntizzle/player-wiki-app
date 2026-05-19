@@ -1,0 +1,50 @@
+{% if arcane_armor_state and arcane_armor_state.available %}
+  <article class="detail-card character-edit-row" id="{{ arcane_armor_state_anchor | default('character-arcane-armor-state', true) }}">
+    <div class="section-heading">
+      <h3>{{ arcane_armor_state.label or "Arcane Armor" }}</h3>
+      <span class="meta">
+        {{ arcane_armor_state.status_label }}
+        {% if arcane_armor_state.enabled %} | {{ arcane_armor_state.hands_label }}{% endif %}
+      </span>
+    </div>
+    {% if arcane_armor_state_can_edit and arcane_armor_state_action %}
+      <form
+        class="stack-form"
+        method="post"
+        action="{{ arcane_armor_state_action }}"
+        {% if arcane_armor_state_async %}data-combat-async{% endif %}
+      >
+        {% if arcane_armor_state_combat_view == "dm" %}
+          <input type="hidden" name="combat_view" value="dm">
+          <input type="hidden" name="view" value="status">
+        {% elif arcane_armor_state_combat_view == "combat" %}
+          <input type="hidden" name="combat_view" value="combat">
+        {% elif arcane_armor_state_combat_view == "character" %}
+          <input type="hidden" name="combat_view" value="character">
+        {% elif arcane_armor_state_combat_view == "status" %}
+          <input type="hidden" name="combat_view" value="status">
+        {% endif %}
+        {% if arcane_armor_state_combatant_id %}
+          <input type="hidden" name="combatant" value="{{ arcane_armor_state_combatant_id }}">
+        {% endif %}
+        <input type="hidden" name="expected_revision" value="{{ arcane_armor_state_expected_revision }}">
+        {% if arcane_armor_state_mode %}
+          <input type="hidden" name="mode" value="{{ arcane_armor_state_mode }}">
+        {% endif %}
+        {% if arcane_armor_state_page %}
+          <input type="hidden" name="page" value="{{ arcane_armor_state_page }}">
+        {% endif %}
+        {% if arcane_armor_state_return_view %}
+          <input type="hidden" name="return_view" value="{{ arcane_armor_state_return_view }}">
+        {% endif %}
+        <label class="checkbox-label">
+          <input type="checkbox" name="enabled" value="1" {% if arcane_armor_state.enabled %}checked{% endif %}>
+          Arcane Armor enabled
+        </label>
+        <div class="hero-actions">
+          <button type="submit">Save Arcane Armor</button>
+        </div>
+      </form>
+    {% endif %}
+  </article>
+{% endif %}

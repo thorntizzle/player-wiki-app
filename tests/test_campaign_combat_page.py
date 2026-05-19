@@ -2854,6 +2854,152 @@ def test_combat_equipment_state_update_generates_weapon_attacks_for_unarmed_only
     assert updated_item["weapon_wield_mode"] == "two-handed"
 
 
+def test_arcane_armor_state_gates_guardian_combat_actions(app, client, sign_in, users, get_character):
+    def _workspace_panel(html: str, slug: str) -> str:
+        match = re.search(
+            rf'<section\b[^>]*data-combat-section-panel="{re.escape(slug)}"[\s\S]*?(?=<section\b[^>]*data-combat-section-panel=|</div>\s*$)',
+            html,
+        )
+        assert match is not None
+        return match.group(0)
+
+    def _mutate_definition(payload: dict) -> None:
+        payload["attacks"] = [
+            {
+                "id": "guardian-armor-thunder-gauntlets-1",
+                "name": "Guardian Armor: Thunder Gauntlets",
+                "category": "weapon",
+                "attack_bonus": 8,
+                "damage": "1d8+5 Thunder",
+                "notes": "",
+            }
+        ]
+        payload["features"] = [
+            {
+                "id": "arcane-armor-1",
+                "name": "Arcane Armor",
+                "category": "class_feature",
+                "description_markdown": "You turn worn armor into Arcane Armor.",
+                "activation_type": "action",
+            },
+            {
+                "id": "armor-model-2",
+                "name": "Armor Model",
+                "category": "class_feature",
+                "description_markdown": "Choose Guardian or Infiltrator.",
+                "activation_type": "passive",
+            },
+            {
+                "id": "guardian-3",
+                "name": "Guardian",
+                "category": "class_feature",
+                "description_markdown": "You design your armor to be in the front line of conflict.",
+                "activation_type": "passive",
+            },
+            {
+                "id": "guardian-thunder-4",
+                "name": "Guardian Armor: Thunder Gauntlets",
+                "category": "class_feature",
+                "description_markdown": "Each gauntlet deals 1d8 thunder damage.",
+                "activation_type": "action",
+            },
+            {
+                "id": "guardian-field-5",
+                "name": "Guardian Armor: Defensive Field",
+                "category": "class_feature",
+                "description_markdown": "You gain temporary hit points.",
+                "activation_type": "bonus_action",
+                "tracker_ref": "guardian-armor-defensive-field",
+            },
+        ]
+        payload["resource_templates"] = [
+            {
+                "id": "guardian-armor-defensive-field",
+                "label": "Defensive Field",
+                "category": "class_feature",
+                "initial_current": 3,
+                "max": 3,
+                "reset_on": "long_rest",
+                "reset_to": "max",
+                "rest_behavior": "confirm_before_reset",
+            }
+        ]
+        for item in list(payload.get("equipment_catalog") or []):
+            item["is_equipped"] = False
+            item.pop("weapon_wield_mode", None)
+
+    def _mutate_state(payload: dict) -> None:
+        payload["feature_states"] = {"arcane_armor": {"enabled": False}}
+        payload["resources"] = [
+            {
+                "id": "guardian-armor-defensive-field",
+                "label": "Defensive Field",
+                "category": "class_feature",
+                "current": 3,
+                "max": 3,
+                "reset_on": "long_rest",
+                "reset_to": "max",
+                "rest_behavior": "confirm_before_reset",
+                "display_order": 0,
+            }
+        ]
+        for item in list(payload.get("inventory") or []):
+            item["is_equipped"] = False
+            item.pop("weapon_wield_mode", None)
+
+    _write_character_definition(app, "arden-march", _mutate_definition)
+    _write_character_state(app, "arden-march", _mutate_state)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    combatant = _find_combatant(app, character_slug="arden-march")
+    assert combatant is not None
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    page = client.get(f"/campaigns/linden-pass/combat?combatant={combatant.id}")
+    assert page.status_code == 200
+    body = page.get_data(as_text=True)
+    assert "Save Arcane Armor" in body
+    assert "Arcane Armor enabled" in body
+    assert "Guardian Armor: Defensive Field" not in _workspace_panel(body, "bonus_actions")
+    assert "Guardian Armor: Thunder Gauntlets" not in _workspace_panel(body, "actions")
+
+    record = get_character("arden-march")
+    update_response = client.post(
+        f"/campaigns/linden-pass/combat/character/combatants/{combatant.id}"
+        "/feature-states/arcane_armor",
+        data={
+            "expected_revision": record.state_record.revision,
+            "combat_view": "combat",
+            "combatant": combatant.id,
+            "enabled": "1",
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert update_response.status_code == 200
+    payload = update_response.get_json()
+    assert payload["ok"] is True
+    assert "Feature state updated." in payload["flash_html"]
+    tracker_html = payload["tracker_html"]
+    assert "Guardian Armor: Defensive Field" in _workspace_panel(tracker_html, "bonus_actions")
+    assert "Guardian Armor: Thunder Gauntlets" in _workspace_panel(tracker_html, "actions")
+    attacks_panel = _workspace_panel(tracker_html, "attacks")
+    assert "Guardian Armor: Thunder Gauntlets" in attacks_panel
+    assert "1d8+5 Thunder" in attacks_panel
+
+    record = get_character("arden-march")
+    assert record.state_record.state["feature_states"]["arcane_armor"]["enabled"] is True
+
+
 def test_combat_character_inventory_collapses_linked_item_descriptions(app, client, sign_in, users):
     def add_inventory_examples(payload):
         equipment_catalog = list(payload.get("equipment_catalog") or [])

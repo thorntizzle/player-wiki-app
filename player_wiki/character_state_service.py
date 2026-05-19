@@ -130,6 +130,32 @@ class CharacterStateService:
             updated_by_user_id=updated_by_user_id,
         )
 
+    def update_feature_state(
+        self,
+        record: CharacterRecord,
+        feature_key: str,
+        *,
+        expected_revision: int,
+        enabled: bool,
+        updated_by_user_id: int | None = None,
+    ) -> CharacterStateRecord:
+        normalized_key = self._normalize_feature_state_key(feature_key)
+        if normalized_key == "arcane_armor" and not self._record_has_feature(record, "arcane armor"):
+            raise ValueError("Arcane Armor state is only available for Armorer sheets with Arcane Armor.")
+
+        state = deepcopy(record.state_record.state)
+        feature_states = dict(state.get("feature_states") or {})
+        feature_state = dict(feature_states.get(normalized_key) or {})
+        feature_state["enabled"] = bool(enabled)
+        feature_states[normalized_key] = feature_state
+        state["feature_states"] = feature_states
+        return self._replace_state(
+            record,
+            state,
+            expected_revision=expected_revision,
+            updated_by_user_id=updated_by_user_id,
+        )
+
     def update_resource(
         self,
         record: CharacterRecord,
@@ -707,6 +733,20 @@ class CharacterStateService:
     def _require_xianxia_record(self, record: CharacterRecord) -> None:
         if not is_xianxia_system(record.definition.system):
             raise ValueError("Xianxia inventory operations require a Xianxia character.")
+
+    def _normalize_feature_state_key(self, value: Any) -> str:
+        normalized = self._coerce_text(value).replace("-", "_").replace(" ", "_").casefold()
+        if normalized in {"arcane_armor", "arcanearmor"}:
+            return "arcane_armor"
+        raise ValueError("Choose a supported feature state to update.")
+
+    def _record_has_feature(self, record: CharacterRecord, feature_name: str) -> bool:
+        target = self._coerce_text(feature_name).casefold()
+        return any(
+            self._coerce_text(feature.get("name")).casefold() == target
+            for feature in list(record.definition.features or [])
+            if isinstance(feature, dict)
+        )
 
     def _coerce_text(self, value: Any) -> str:
         return " ".join(str(value or "").split()).strip()

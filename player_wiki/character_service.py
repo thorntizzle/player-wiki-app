@@ -19,6 +19,7 @@ from .xianxia_character_model import (
 )
 
 MANAGED_CUSTOM_TRACKER_PREFIX = "manual-feature-tracker:"
+SUPPORTED_FEATURE_STATE_KEYS = {"arcane_armor"}
 
 
 class CharacterStateValidationError(ValueError):
@@ -540,6 +541,12 @@ def validate_state(definition: CharacterDefinition, state: dict[str, Any]) -> di
 
     payload["attunement"] = _normalize_attunement_state(payload.get("attunement"), normalized_inventory)
     payload["notes"] = _normalize_notes_payload(payload.get("notes"))
+    if "feature_states" in payload:
+        feature_states = _normalize_feature_states_payload(payload.get("feature_states"))
+        if feature_states:
+            payload["feature_states"] = feature_states
+        else:
+            payload.pop("feature_states", None)
     if is_xianxia:
         payload["resources"] = []
         payload["spell_slots"] = []
@@ -552,6 +559,19 @@ def validate_state(definition: CharacterDefinition, state: dict[str, Any]) -> di
         payload.pop("xianxia", None)
     payload["status"] = str(payload.get("status") or definition.status)
     return payload
+
+
+def _normalize_feature_states_payload(value: Any) -> dict[str, Any]:
+    payload = dict(value or {}) if isinstance(value, dict) else {}
+    normalized: dict[str, Any] = {}
+    for key in SUPPORTED_FEATURE_STATE_KEYS:
+        state = dict(payload.get(key) or {}) if isinstance(payload.get(key), dict) else {}
+        if not state:
+            continue
+        normalized[key] = {
+            "enabled": bool(state.get("enabled")),
+        }
+    return normalized
 
 
 def _normalize_notes_payload(value: Any) -> dict[str, Any]:
