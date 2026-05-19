@@ -156,6 +156,21 @@ def _write_character_definition(app, character_slug: str, mutator) -> None:
     definition_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
+def _write_character_state(app, character_slug: str, mutator) -> None:
+    with app.app_context():
+        repository = app.extensions["character_repository"]
+        store = app.extensions["character_state_store"]
+        record = repository.get_character("linden-pass", character_slug)
+        assert record is not None
+        payload = json.loads(json.dumps(record.state_record.state))
+        mutator(payload)
+        store.replace_state(
+            record.definition,
+            payload,
+            expected_revision=record.state_record.revision,
+        )
+
+
 def _write_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -2763,6 +2778,80 @@ def test_owner_player_can_update_equipment_state_from_combat_workspace(
     updated_item = _inventory_item(record, "quarterstaff-2")
     assert updated_item["is_equipped"] is False
     assert not updated_item.get("weapon_wield_mode")
+
+
+def test_combat_equipment_state_update_generates_weapon_attacks_for_unarmed_only_import(
+    app, client, sign_in, users, get_character
+):
+    def _mutate_definition(payload: dict) -> None:
+        payload["source"] = {
+            "source_type": "markdown_character_sheet",
+            "source_path": "imports://arden-march.md",
+            "imported_from": "Arden March.md",
+        }
+        payload["attacks"] = [
+            {
+                "id": "unarmed-strike-1",
+                "name": "Unarmed Strike",
+                "category": "unarmed",
+                "attack_bonus": 3,
+                "damage": "1 Bludgeoning",
+                "notes": "",
+            }
+        ]
+        for item in list(payload.get("equipment_catalog") or []):
+            if str(item.get("id") or "").strip() == "light-crossbow-1":
+                item["is_equipped"] = False
+                item.pop("weapon_wield_mode", None)
+
+    def _mutate_state(payload: dict) -> None:
+        for item in list(payload.get("inventory") or []):
+            if str(item.get("catalog_ref") or item.get("id") or "").strip() == "light-crossbow-1":
+                item["is_equipped"] = False
+                item.pop("weapon_wield_mode", None)
+
+    _write_character_definition(app, "arden-march", _mutate_definition)
+    _write_character_state(app, "arden-march", _mutate_state)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    combatant = _find_combatant(app, character_slug="arden-march")
+    assert combatant is not None
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    record = get_character("arden-march")
+    update_response = client.post(
+        f"/campaigns/linden-pass/combat/character/combatants/{combatant.id}"
+        "/equipment/light-crossbow-1/state",
+        data={
+            "expected_revision": record.state_record.revision,
+            "combat_view": "combat",
+            "combatant": combatant.id,
+            "weapon_wield_mode": "two-handed",
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert update_response.status_code == 200
+    payload = update_response.get_json()
+    assert payload["ok"] is True
+    assert "Light Crossbow" in payload["tracker_html"]
+    assert "1d8+2 piercing" in payload["tracker_html"]
+
+    record = get_character("arden-march")
+    attacks_by_name = {attack["name"]: attack for attack in list(record.definition.attacks or [])}
+    assert attacks_by_name["Light Crossbow"]["equipment_refs"] == ["light-crossbow-1"]
+    updated_item = _inventory_item(record, "light-crossbow-1")
+    assert updated_item["is_equipped"] is True
+    assert updated_item["weapon_wield_mode"] == "two-handed"
 
 
 def test_combat_character_inventory_collapses_linked_item_descriptions(app, client, sign_in, users):

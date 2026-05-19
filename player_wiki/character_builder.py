@@ -11718,6 +11718,12 @@ def _recalculate_definition_attacks(
             equipment_catalog=equipment_catalog,
         )
         for attack in existing_attacks
+    ) and not all(
+        _is_equipment_independent_attack_payload(
+            dict(attack or {}),
+            feature_only_attacks=feature_only_attacks,
+        )
+        for attack in existing_attacks
     ):
         return _normalize_attack_payloads(existing_attacks)
     return _normalize_attack_payloads(
@@ -20679,6 +20685,44 @@ def _attack_matches_equipment_catalog(
             equipment_name_candidates.update(_merge_name_candidates(candidate_value))
         if attack_name_candidates and equipment_name_candidates and attack_name_candidates.intersection(
             equipment_name_candidates
+        ):
+            return True
+    return False
+
+
+def _is_equipment_independent_attack_payload(
+    attack_payload: dict[str, Any],
+    *,
+    feature_only_attacks: list[dict[str, Any]] | None = None,
+) -> bool:
+    payload = dict(attack_payload or {})
+    if _normalize_attack_equipment_refs(
+        payload.get("equipment_refs"),
+        fallback=payload.get("equipment_ref"),
+    ):
+        return False
+    if _normalize_explicit_link_identity(
+        systems_ref=dict(payload.get("systems_ref") or {}),
+        page_ref=_normalize_page_ref_payload(payload.get("page_ref")),
+    ):
+        return False
+
+    mode_key = _infer_attack_mode_key_from_payload(payload)
+    if mode_key and not any(
+        component.startswith("feat:")
+        for component in _attack_mode_components(mode_key)
+    ):
+        return False
+
+    attack_name_candidates = set(_merge_name_candidates(payload.get("name")))
+    if normalize_lookup("Unarmed Strike") in attack_name_candidates:
+        return True
+
+    for feature_attack in list(feature_only_attacks or []):
+        feature_payload = dict(feature_attack or {})
+        feature_name_candidates = set(_merge_name_candidates(feature_payload.get("name")))
+        if attack_name_candidates and feature_name_candidates and attack_name_candidates.intersection(
+            feature_name_candidates
         ):
             return True
     return False

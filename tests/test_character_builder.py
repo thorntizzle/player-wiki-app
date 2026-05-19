@@ -8873,6 +8873,103 @@ def test_recalculate_definition_attacks_preserves_mode_identity_for_supported_va
     )
 
 
+def test_recalculate_definition_attacks_adds_weapon_rows_when_import_only_has_unarmed_strike():
+    dagger = _systems_entry("item", "phb-item-dagger", "Dagger", metadata={"weight": 1})
+    shortbow = _systems_entry("item", "phb-item-shortbow", "Shortbow", metadata={"weight": 2})
+    definition = _minimal_imported_character_definition("rasputin-like", "Rasputin Like")
+    definition.stats["ability_scores"]["dex"] = {"score": 16, "modifier": 3, "save_bonus": 3}
+    definition.proficiencies["weapons"] = ["Simple Weapons"]
+    definition.attacks = [
+        {
+            "id": "unarmed-strike-1",
+            "name": "Unarmed Strike",
+            "category": "unarmed",
+            "attack_bonus": 3,
+            "damage": "1 Bludgeoning",
+            "damage_type": "",
+            "notes": "",
+        }
+    ]
+    definition.equipment_catalog = [
+        {
+            "id": "dagger-2",
+            "name": "Dagger",
+            "default_quantity": 2,
+            "weight": "1 lb.",
+            "notes": "",
+            "is_equipped": False,
+            "systems_ref": _systems_ref(dagger),
+        },
+        {
+            "id": "shortbow-4",
+            "name": "Shortbow",
+            "default_quantity": 1,
+            "weight": "2 lb.",
+            "notes": "",
+            "is_equipped": False,
+            "systems_ref": _systems_ref(shortbow),
+        },
+        {
+            "id": "plus-one-dagger-7",
+            "name": "+1 Dagger",
+            "default_quantity": 1,
+            "weight": "1 lb.",
+            "notes": "",
+            "is_equipped": True,
+            "weapon_wield_mode": "main-hand",
+        },
+    ]
+
+    recalculated = _recalculate_definition_attacks(
+        definition,
+        item_catalog=_build_item_catalog([dagger, shortbow]),
+    )
+    attacks_by_name = {attack["name"]: attack for attack in recalculated}
+
+    assert {"Dagger", "Dagger (thrown)", "Shortbow", "+1 Dagger", "Unarmed Strike"}.issubset(attacks_by_name)
+    assert attacks_by_name["Dagger"]["equipment_refs"] == ["dagger-2"]
+    assert attacks_by_name["Dagger (thrown)"]["equipment_refs"] == ["dagger-2"]
+    assert attacks_by_name["Shortbow"]["equipment_refs"] == ["shortbow-4"]
+    assert attacks_by_name["+1 Dagger"]["attack_bonus"] == 6
+    assert attacks_by_name["+1 Dagger"]["damage"] == "1d4+4 piercing"
+    assert attacks_by_name["+1 Dagger"]["equipment_refs"] == ["plus-one-dagger-7"]
+
+
+def test_recalculate_definition_attacks_keeps_unmatched_custom_attack_list_authoritative():
+    dagger = _systems_entry("item", "phb-item-dagger", "Dagger", metadata={"weight": 1})
+    definition = _minimal_imported_character_definition("moon-duelist", "Moon Duelist")
+    definition.proficiencies["weapons"] = ["Simple Weapons"]
+    definition.attacks = [
+        {
+            "id": "crescent-moon-strike-1",
+            "name": "Crescent Moon Strike",
+            "category": "special action",
+            "attack_bonus": 7,
+            "damage": "2d6 radiant",
+            "damage_type": "radiant",
+            "notes": "Campaign-specific weapon form.",
+        }
+    ]
+    definition.equipment_catalog = [
+        {
+            "id": "dagger-2",
+            "name": "Dagger",
+            "default_quantity": 1,
+            "weight": "1 lb.",
+            "notes": "",
+            "is_equipped": True,
+            "systems_ref": _systems_ref(dagger),
+        }
+    ]
+
+    recalculated = _recalculate_definition_attacks(
+        definition,
+        item_catalog=_build_item_catalog([dagger]),
+    )
+
+    assert [attack["name"] for attack in recalculated] == ["Crescent Moon Strike"]
+
+
 def test_recalculate_definition_attacks_preserves_structured_attack_mode_identity():
     quarterstaff = _systems_entry("item", "phb-item-quarterstaff", "Quarterstaff", metadata={"weight": 4})
     definition = _minimal_character_definition("disciplined-guard", "Disciplined Guard")
