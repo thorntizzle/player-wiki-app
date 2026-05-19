@@ -1156,6 +1156,142 @@ When you cast a spell that has a casting time of 1 action, you can spend 2 sorce
     assert quickened_spell["activation_type"] == "special"
 
 
+def test_parse_character_sheet_text_merges_detached_artificer_action_summary_into_parent_feature():
+    magical_tinkering_summary = (
+        "Imbue a Tiny nonmagical object with a magical property of your choice: 5ft. radius light, "
+        "up to 6 second long recorded message, emits odor or nonverbal sound, static visual effect "
+        "including up to 25 words of text. You can affect a maximum of 5 objects at a time."
+    )
+    markdown = f"""
+## Sheet Summary
+| Field | Value |
+| --- | --- |
+| Sheet Name | Flair Sparkmantle |
+| Class & Level | Artificer 5 |
+| Species | Human |
+| Background | Sage |
+
+## Defenses And Core Stats
+| Metric | Value |
+| --- | --- |
+| Armor Class | 19 |
+| Initiative | +3 |
+| Speed | 30 ft. |
+| Max HP | 43 |
+| Proficiency Bonus | +3 |
+
+## Ability Scores
+| Ability | Score | Modifier | Save |
+| --- | --- | --- | --- |
+| Strength | 10 | +0 | +0 |
+| Dexterity | 16 | +3 | +3 |
+| Constitution | 14 | +2 | +5 |
+| Intelligence | 20 | +5 | +8 |
+| Wisdom | 12 | +1 | +1 |
+| Charisma | 8 | -1 | -1 |
+
+## Skills
+| Skill | Bonus | Proficiency |
+| --- | --- | --- |
+| Arcana | +8 | Proficient |
+
+## Proficiencies And Languages
+- Languages: Common
+
+## Features And Traits
+### Artificer Features
+- Magical Tinkering - TCoE 11
+{magical_tinkering_summary}
+
+- Infuse Item - TCoE 12
+You can imbue mundane objects with certain magical infusions.
+
+## Actions
+### Actions
+{magical_tinkering_summary}
+
+## Personality And Story
+
+## Spellcasting
+| Field | Value |
+| --- | --- |
+| Spellcasting Class | Artificer |
+| Spellcasting Ability | Intelligence |
+| Spell Save DC | 16 |
+| Spell Attack Bonus | +8 |
+
+## Equipment
+| Item | Qty | Weight |
+| --- | --- | --- |
+| Tinker's Tools | 1 | 10 lb. |
+""".strip()
+
+    definition, _ = parse_character_sheet_text(
+        "linden-pass",
+        markdown,
+        source_path="Flair.pdf",
+        source_type="pdf_character_sheet_annotations",
+        imported_from="Flair.pdf",
+        parser_version="test",
+    )
+
+    feature_names = [feature["name"] for feature in definition.features]
+    magical_tinkering = next(feature for feature in definition.features if feature["name"] == "Magical Tinkering")
+
+    assert magical_tinkering_summary not in feature_names
+    assert feature_names.count("Magical Tinkering") == 1
+    assert "Infuse Item" in feature_names
+    assert magical_tinkering["activation_type"] == "action"
+
+
+def test_native_normalizer_compacts_legacy_detached_action_summary_feature_rows():
+    magical_tinkering_summary = (
+        "Imbue a Tiny nonmagical object with a magical property of your choice: 5ft. radius light, "
+        "up to 6 second long recorded message, emits odor or nonverbal sound, static visual effect "
+        "including up to 25 words of text. You can affect a maximum of 5 objects at a time."
+    )
+    definition = _minimal_imported_definition(
+        profile={
+            "class_level_text": "Artificer 5",
+            "classes": [{"class_name": "Artificer", "subclass_name": "Armorer", "level": 5}],
+        },
+        features=[
+            {
+                "id": "artificer-features-magical-tinkering-3",
+                "name": "Magical Tinkering",
+                "category": "class_feature",
+                "source": "TCoE 11",
+                "description_markdown": magical_tinkering_summary,
+                "activation_type": "passive",
+                "systems_ref": {
+                    "entry_key": "dnd-5e|classfeature|tce|magicaltinkering-artificer-tce-1",
+                    "entry_type": "classfeature",
+                    "title": "Magical Tinkering",
+                    "slug": "tce-classfeature-magicaltinkering-artificer-tce-1",
+                    "source_id": "TCE",
+                },
+            },
+            {
+                "id": "actions-imbue-a-tiny-nonmagical-object-3",
+                "name": magical_tinkering_summary,
+                "category": "class_feature",
+                "source": "",
+                "description_markdown": "",
+                "activation_type": "action",
+            },
+        ],
+    )
+
+    normalized = normalize_definition_to_native_model(definition)
+
+    feature_names = [feature["name"] for feature in normalized.features]
+    magical_tinkering = next(feature for feature in normalized.features if feature["name"] == "Magical Tinkering")
+
+    assert magical_tinkering_summary not in feature_names
+    assert feature_names == ["Magical Tinkering"]
+    assert magical_tinkering["activation_type"] == "action"
+
+
 def test_parse_character_sheet_text_merges_source_suffixed_duplicates_and_feat_choice_followups():
     markdown = """
 ## Sheet Summary

@@ -370,25 +370,45 @@ def find_action_feature_merge_target(
     feature: dict[str, Any],
     name_lookup: dict[str, dict[str, Any]],
 ) -> dict[str, Any] | None:
-    if " - " not in str(feature.get("name") or ""):
-        return None
+    feature_name = str(feature.get("name") or "").strip()
     description_key = normalize_feature_text(str(feature.get("description_markdown") or ""))
-    if not description_key:
-        return None
-    for alias in feature_name_aliases(str(feature.get("name") or "")):
-        existing = name_lookup.get(normalize_feature_text(alias))
-        if existing is None:
-            continue
-        existing_description_key = normalize_feature_text(str(existing.get("description_markdown") or ""))
-        if existing_description_key != description_key:
-            continue
-        if (
-            str(existing.get("source") or "").strip()
-            or existing.get("systems_ref")
-            or existing.get("page_ref")
-        ):
-            return existing
+    if " - " in feature_name and description_key:
+        for alias in feature_name_aliases(feature_name):
+            existing = name_lookup.get(normalize_feature_text(alias))
+            if existing is None:
+                continue
+            existing_description_key = normalize_feature_text(str(existing.get("description_markdown") or ""))
+            if existing_description_key != description_key:
+                continue
+            if (
+                str(existing.get("source") or "").strip()
+                or existing.get("systems_ref")
+                or existing.get("page_ref")
+            ):
+                return existing
+    if is_detached_action_summary_feature(feature):
+        summary_key = normalize_feature_text(feature_name)
+        if not summary_key:
+            return None
+        for existing in name_lookup.values():
+            existing_description_key = normalize_feature_text(str(existing.get("description_markdown") or ""))
+            if existing_description_key and existing_description_key == summary_key:
+                return existing
     return None
+
+
+def is_detached_action_summary_feature(feature: dict[str, Any]) -> bool:
+    name = str(feature.get("name") or "").strip()
+    if not name:
+        return False
+    if str(feature.get("description_markdown") or "").strip():
+        return False
+    if str(feature.get("source") or "").strip():
+        return False
+    if feature.get("systems_ref") or feature.get("page_ref"):
+        return False
+    token_count = len(re.findall(r"[A-Za-z0-9]+", name))
+    return token_count >= 12 or len(name) >= 80 or name[-1:] in {".", "!", "?"}
 
 
 def looks_like_action_feature_header(value: str) -> bool:
@@ -474,6 +494,8 @@ def merge_action_features_into_features(
             existing = find_action_feature_merge_target(feature, name_lookup)
         if existing is not None:
             merge_feature_record(existing, feature)
+            continue
+        if is_detached_action_summary_feature(feature):
             continue
         cloned = dict(feature)
         merged_features.append(cloned)

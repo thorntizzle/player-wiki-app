@@ -20342,7 +20342,53 @@ def _normalize_feature_payloads(
         else:
             payload.pop("spell_manager", None)
         normalized_features.append(payload)
-    return normalized_features
+    return _merge_legacy_detached_action_summary_features(normalized_features)
+
+
+def _is_legacy_detached_action_summary_feature(feature_payload: dict[str, Any]) -> bool:
+    name = str(feature_payload.get("name") or "").strip()
+    if not name:
+        return False
+    if str(feature_payload.get("description_markdown") or "").strip():
+        return False
+    if str(feature_payload.get("source") or "").strip():
+        return False
+    if feature_payload.get("systems_ref") or feature_payload.get("page_ref"):
+        return False
+    if feature_payload.get("campaign_option") or feature_payload.get("spell_manager"):
+        return False
+    token_count = len(re.findall(r"[A-Za-z0-9]+", name))
+    return token_count >= 12 or len(name) >= 80 or name[-1:] in {".", "!", "?"}
+
+
+def _merge_legacy_detached_action_summary_features(
+    normalized_features: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    targets_by_description: dict[str, list[dict[str, Any]]] = {}
+    for feature_payload in normalized_features:
+        if _is_legacy_detached_action_summary_feature(feature_payload):
+            continue
+        description_key = normalize_lookup(str(feature_payload.get("description_markdown") or ""))
+        if description_key:
+            targets_by_description.setdefault(description_key, []).append(feature_payload)
+
+    compacted_features: list[dict[str, Any]] = []
+    for feature_payload in normalized_features:
+        if _is_legacy_detached_action_summary_feature(feature_payload):
+            summary_key = normalize_lookup(str(feature_payload.get("name") or ""))
+            targets = targets_by_description.get(summary_key) or []
+            if len(targets) == 1:
+                target = targets[0]
+                incoming_activation = str(feature_payload.get("activation_type") or "").strip().lower()
+                target_activation = str(target.get("activation_type") or "").strip().lower()
+                if incoming_activation and incoming_activation != "passive" and target_activation in {"", "passive"}:
+                    target["activation_type"] = incoming_activation
+                tracker_ref = str(feature_payload.get("tracker_ref") or "").strip()
+                if tracker_ref and not str(target.get("tracker_ref") or "").strip():
+                    target["tracker_ref"] = tracker_ref
+                continue
+        compacted_features.append(feature_payload)
+    return compacted_features
 
 
 def _normalize_resource_template_payloads(
