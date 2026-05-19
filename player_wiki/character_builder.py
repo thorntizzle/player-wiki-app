@@ -1680,6 +1680,8 @@ def _build_imported_spell_repair_rows(
         mark = str(payload.get("mark") or "").strip()
         if not name:
             continue
+        if _spell_payload_source_row_id(payload):
+            continue
         candidate_row_ids = _imported_spell_candidate_row_ids(
             payload,
             spell_row_contexts=spell_row_contexts,

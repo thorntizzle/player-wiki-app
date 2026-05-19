@@ -4110,6 +4110,88 @@ def test_imported_spell_baseline_with_blank_marks_is_repairable():
     assert repair_context["spell_rows"]
 
 
+def test_imported_progression_repair_ignores_item_granted_source_row_spells():
+    wizard = _systems_entry(
+        "class",
+        "phb-class-wizard",
+        "Wizard",
+        metadata={
+            "hit_die": {"faces": 6},
+            "subclass_title": "Arcane Tradition",
+            "spellcasting_ability": "int",
+            "spells_known_progression_fixed": [6],
+            "cantrip_progression": [3],
+            "slot_progression": [[{"level": 1, "max_slots": 2}]],
+        },
+    )
+    evocation = _systems_entry(
+        "subclass",
+        "phb-subclass-evocation",
+        "School of Evocation",
+        metadata={"class_name": "Wizard", "class_source": "PHB"},
+    )
+    human = _systems_entry("race", "phb-race-human", "Human")
+    sage = _systems_entry("background", "phb-background-sage", "Sage")
+    gift_of_alacrity = _systems_entry(
+        "spell",
+        "egw-spell-gift-of-alacrity",
+        "Gift of Alacrity",
+        source_id="EGW",
+        metadata={"level": 1},
+    )
+    systems_service = _FakeSystemsService(
+        {
+            "class": [wizard],
+            "subclass": [evocation],
+            "race": [human],
+            "background": [sage],
+            "spell": [gift_of_alacrity],
+        },
+        class_progression=[{"level": 2, "feature_rows": [{"label": "Arcane Tradition"}]}],
+        enabled_source_ids=["PHB", "EGW"],
+    )
+    definition = _minimal_imported_character_definition("olin-itador", "Olin Itador")
+    definition.profile["class_level_text"] = "Wizard 3"
+    definition.profile["classes"][0] = {
+        "row_id": "class-row-1",
+        "class_name": "Wizard",
+        "subclass_name": "School of Evocation",
+        "level": 3,
+        "systems_ref": _systems_ref(wizard),
+        "subclass_ref": _systems_ref(evocation),
+    }
+    definition.profile["class_ref"] = _systems_ref(wizard)
+    definition.profile["subclass_ref"] = _systems_ref(evocation)
+    definition.profile["background"] = "Sage"
+    definition.profile["background_ref"] = _systems_ref(sage)
+    definition.spellcasting["spells"] = [
+        {
+            "id": "gift-of-alacrity-hourglass",
+            "name": "Gift of Alacrity",
+            "mark": "",
+            "systems_ref": _systems_ref(gift_of_alacrity),
+            "spell_source_row_id": "spell-source:item:hourglass-pendant",
+            "spell_source_row_kind": "item",
+            "spell_source_row_title": "Hourglass Pendant",
+            "spell_source_ability_key": "int",
+            "grant_source_label": "Hourglass Pendant",
+            "spell_access_type": "free_cast",
+            "spell_access_uses": 1,
+            "spell_access_reset_on": "long_rest",
+        }
+    ]
+
+    readiness = native_level_up_readiness(systems_service, "linden-pass", definition)
+    repair_context = build_imported_progression_repair_context(
+        systems_service,
+        "linden-pass",
+        definition,
+    )
+
+    assert readiness["status"] == "ready"
+    assert repair_context["spell_rows"] == []
+
+
 def _repair_form_values_for_spell_rows(
     repair_context: dict[str, Any],
     *,
@@ -9283,6 +9365,89 @@ def test_normalize_definition_to_native_model_applies_hourglass_pendant_spell_an
     assert spells_by_name["Gift of Alacrity"]["spell_access_reset_on"] == "long_rest"
     assert source_rows["spell-source:item:hourglass-pendant"]["title"] == "Hourglass Pendant"
     assert source_rows["spell-source:item:hourglass-pendant"]["spellcasting_ability"] == "Intelligence"
+
+
+@pytest.mark.parametrize(
+    ("is_equipped", "is_attuned"),
+    [
+        (False, True),
+        (True, False),
+    ],
+)
+def test_normalize_definition_to_native_model_requires_hourglass_pendant_worn_and_attuned(
+    is_equipped: bool,
+    is_attuned: bool,
+):
+    gift_of_alacrity = _systems_entry(
+        "spell",
+        "egw-spell-gift-of-alacrity",
+        "Gift of Alacrity",
+        metadata={"level": 1},
+    )
+    definition = _minimal_character_definition("olin-itador", "Olin Itador")
+    definition.profile["class_level_text"] = "Wizard 2"
+    definition.profile["classes"] = [
+        {
+            "row_id": "class-row-1",
+            "class_name": "Wizard",
+            "subclass_name": "Chronurgy Magic",
+            "level": 2,
+        }
+    ]
+    definition.features = [
+        {
+            "id": "chronal-shift-1",
+            "name": "Chronal Shift",
+            "category": "subclass_feature",
+            "source": "EGW",
+            "description_markdown": "",
+            "class_row_id": "class-row-1",
+        }
+    ]
+    definition.equipment_catalog = [
+        {
+            "id": "hourglass-pendant-1",
+            "name": "Hourglass Pendant",
+            "default_quantity": 1,
+            "weight": "--",
+            "notes": "",
+            "is_equipped": is_equipped,
+            "is_attuned": is_attuned,
+            "page_ref": "items/hourglass-pendant",
+        }
+    ]
+
+    item_catalog = _attach_campaign_item_page_support(
+        {},
+        [
+            _campaign_page_record(
+                "items/hourglass-pendant",
+                "Hourglass Pendant",
+                section="Items",
+                body_markdown=(
+                    "*Wondrous item, very rare (requires attunement by a chronurgy wizard)*\n\n"
+                    "While wearing this pendant, you can cast Gift of Alacrity once without expending a spell slot. "
+                    "You regain that use when you finish a long rest. While attuned to the pendant, you gain one additional use of Chronal Shift.\n"
+                ),
+            )
+        ],
+    )
+
+    normalized = normalize_definition_to_native_model(
+        definition,
+        item_catalog=item_catalog,
+        spell_catalog=_build_spell_catalog([gift_of_alacrity]),
+    )
+    spells_by_name = {spell["name"]: spell for spell in normalized.spellcasting["spells"]}
+    source_row_ids = {
+        row["source_row_id"]
+        for row in list(normalized.spellcasting.get("source_rows") or [])
+    }
+    resources_by_id = {resource["id"]: resource for resource in normalized.resource_templates}
+
+    assert "Gift of Alacrity" not in spells_by_name
+    assert "spell-source:item:hourglass-pendant" not in source_row_ids
+    assert resources_by_id["chronal-shift"]["max"] == 2
 
 
 def test_normalize_definition_to_native_model_applies_psionic_circlet_item_effects():
