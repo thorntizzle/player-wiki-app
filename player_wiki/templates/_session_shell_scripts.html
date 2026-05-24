@@ -43,6 +43,45 @@
       }
     };
 
+    const initCharacterPane = () => {
+      if (window.__playerWikiCombatWorkspace && typeof window.__playerWikiCombatWorkspace.init === "function") {
+        window.__playerWikiCombatWorkspace.init(characterPane);
+      }
+    };
+
+    const updateCharacterPaneHtml = (html) => {
+      characterPane.innerHTML = html;
+      initCharacterPane();
+      characterPaneLoaded = true;
+    };
+
+    const fallbackUrlFromResponse = (responseUrl) => {
+      if (!responseUrl) {
+        return "";
+      }
+      try {
+        const url = new URL(responseUrl, window.location.origin);
+        url.searchParams.delete("fragment");
+        return `${url.pathname}${url.search}${url.hash}`;
+      } catch (_error) {
+        return "";
+      }
+    };
+
+    const buildSubmitFormData = (form, submitter) => {
+      let formData;
+      try {
+        formData = submitter ? new FormData(form, submitter) : new FormData(form);
+      } catch (_error) {
+        formData = new FormData(form);
+        if (submitter && submitter.name && !submitter.disabled) {
+          formData.append(submitter.name, submitter.value || "");
+        }
+      }
+      formData.set("fragment", "1");
+      return formData;
+    };
+
     let characterPaneLoaded = false;
     const loadCharacterPane = async (fragmentUrl) => {
       if (!characterPane || !fragmentUrl) {
@@ -64,12 +103,52 @@
       }
 
       const html = await response.text();
-      characterPane.innerHTML = html;
-      if (window.__playerWikiCombatWorkspace && typeof window.__playerWikiCombatWorkspace.init === "function") {
-        window.__playerWikiCombatWorkspace.init(characterPane);
-      }
-      characterPaneLoaded = true;
+      updateCharacterPaneHtml(html);
       return true;
+    };
+
+    const submitCharacterPaneForm = async (event) => {
+      if (!characterPane) {
+        return;
+      }
+      const form = event.target instanceof HTMLFormElement ? event.target : null;
+      if (!form || !characterPane.contains(form)) {
+        return;
+      }
+      const method = String(form.method || "get").toLowerCase();
+      if (method !== "post") {
+        return;
+      }
+      const action = form.getAttribute("action") || "";
+      if (!action) {
+        return;
+      }
+
+      event.preventDefault();
+      const submitter = event.submitter instanceof HTMLElement ? event.submitter : null;
+      const formData = buildSubmitFormData(form, submitter);
+      const response = await fetch(action, {
+        method: "POST",
+        headers: {
+          "X-Requested-With": "XMLHttpRequest",
+        },
+        body: formData,
+        cache: "no-store",
+        credentials: "same-origin",
+      });
+      if (!response.ok) {
+        window.location.assign(action);
+        return;
+      }
+
+      const html = await response.text();
+      updateCharacterPaneHtml(html);
+      const nextUrl = fallbackUrlFromResponse(response.url);
+      if (nextUrl) {
+        history.replaceState({ sessionShellView: "character" }, "", nextUrl);
+      }
+      showOnlyPane("character");
+      syncSwitchButtons("character");
     };
 
     const showShellView = async (target, { url = "", fromHistory = false } = {}) => {
@@ -142,5 +221,16 @@
         }
       });
     });
+
+    if (characterPane) {
+      characterPane.addEventListener("submit", (event) => {
+        submitCharacterPaneForm(event).catch(() => {
+          const form = event.target instanceof HTMLFormElement ? event.target : null;
+          if (form && form.action) {
+            window.location.assign(form.action);
+          }
+        });
+      });
+    }
   })();
 </script>

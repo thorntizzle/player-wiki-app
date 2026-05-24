@@ -39,6 +39,14 @@ def _html_segment_between(html: str, start_marker: str, end_marker: str) -> str:
     return html[start:end]
 
 
+def _inventory_item(record, item_ref: str) -> dict:
+    return next(
+        item
+        for item in record.state_record.state.get("inventory", [])
+        if str(item.get("catalog_ref") or item.get("id") or "") == item_ref
+    )
+
+
 def _async_headers():
     return {
         "X-Requested-With": "XMLHttpRequest",
@@ -447,6 +455,7 @@ def test_session_character_equipment_page_filters_inventory_only_rows(client, si
     assert "Chalk" not in equipment_panel
     assert "Backpack" in inventory_panel
     assert "Not attuned" not in equipment_panel
+    assert "Save equipment state" not in equipment_panel
 
 
 def test_session_character_page_keeps_single_sheet_players_out_of_a_redundant_roster_sidebar(
@@ -1033,6 +1042,211 @@ def test_session_character_active_controls_live_in_matching_dnd_panels(
     assert 'name="page" value="spells"' in spells_panel
     assert 'data-character-sheet-edit-form="resource"' in resources_panel
     assert 'name="page" value="resources"' in resources_panel
+
+
+def test_session_character_equipment_panel_exposes_state_controls_during_active_session(
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+):
+    set_campaign_visibility("linden-pass", characters="players")
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    response = client.get(
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&page=equipment"
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    equipment_panel = _html_segment_between(
+        html,
+        'data-combat-section-panel="equipment"',
+        'data-combat-section-panel="inventory"',
+    )
+    assert 'data-character-sheet-edit-form="equipment-state"' in equipment_panel
+    assert (
+        f"/campaigns/linden-pass/characters/{ASSIGNED_CHARACTER_SLUG}"
+        "/equipment/quarterstaff-2/state"
+    ) in equipment_panel
+    assert 'name="return_view" value="session-character"' in equipment_panel
+    assert 'name="page" value="equipment"' in equipment_panel
+    assert 'name="weapon_wield_mode"' in equipment_panel
+    assert "Save equipment state" in equipment_panel
+
+
+def test_session_character_equipment_state_update_redirects_back_to_session_surface(
+    client,
+    sign_in,
+    users,
+    get_character,
+    set_campaign_visibility,
+):
+    set_campaign_visibility("linden-pass", characters="players")
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    record = get_character(ASSIGNED_CHARACTER_SLUG)
+    assert record is not None
+    assert _inventory_item(record, "quarterstaff-2")["is_equipped"] is True
+
+    response = client.post(
+        f"/campaigns/linden-pass/characters/{ASSIGNED_CHARACTER_SLUG}/equipment/quarterstaff-2/state",
+        data={
+            "expected_revision": record.state_record.revision,
+            "mode": "session",
+            "page": "equipment",
+            "return_view": "session-character",
+            "weapon_wield_mode": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert (
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}"
+        "&page=equipment#character-equipment-state"
+    ) in response.headers["Location"]
+
+    updated = get_character(ASSIGNED_CHARACTER_SLUG)
+    assert updated is not None
+    updated_item = _inventory_item(updated, "quarterstaff-2")
+    assert updated_item["is_equipped"] is False
+    assert not updated_item.get("weapon_wield_mode")
+
+
+def test_session_character_equipment_state_async_fragment_refreshes_character_panel(
+    client,
+    sign_in,
+    users,
+    get_character,
+    set_campaign_visibility,
+):
+    set_campaign_visibility("linden-pass", characters="players")
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    record = get_character(ASSIGNED_CHARACTER_SLUG)
+    assert record is not None
+
+    response = client.post(
+        f"/campaigns/linden-pass/characters/{ASSIGNED_CHARACTER_SLUG}/equipment/quarterstaff-2/state",
+        data={
+            "expected_revision": record.state_record.revision,
+            "mode": "session",
+            "page": "equipment",
+            "return_view": "session-character",
+            "weapon_wield_mode": "",
+            "fragment": "1",
+        },
+        headers=_async_headers(),
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "<html" not in html
+    assert "<body" not in html
+    assert 'data-session-character-flash-stack' in html
+    assert "Equipment state updated." in html
+    assert 'data-combat-section-panel="equipment"' in html
+    assert "Save equipment state" in html
+
+    updated = get_character(ASSIGNED_CHARACTER_SLUG)
+    assert updated is not None
+    assert _inventory_item(updated, "quarterstaff-2")["is_equipped"] is False
+
+
+def test_session_character_stale_async_mutation_returns_character_fragment(
+    client,
+    sign_in,
+    users,
+    get_character,
+    set_campaign_visibility,
+):
+    set_campaign_visibility("linden-pass", characters="players")
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    record = get_character(ASSIGNED_CHARACTER_SLUG)
+    assert record is not None
+    stale_revision = record.state_record.revision
+
+    client.post(
+        f"/campaigns/linden-pass/characters/{ASSIGNED_CHARACTER_SLUG}/session/resources/wild-die",
+        data={"expected_revision": stale_revision, "current": 1},
+        follow_redirects=False,
+    )
+
+    response = client.post(
+        f"/campaigns/linden-pass/characters/{ASSIGNED_CHARACTER_SLUG}/equipment/quarterstaff-2/state",
+        data={
+            "expected_revision": stale_revision,
+            "mode": "session",
+            "page": "equipment",
+            "return_view": "session-character",
+            "weapon_wield_mode": "",
+            "fragment": "1",
+        },
+        headers=_async_headers(),
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "<html" not in html
+    assert 'data-session-character-flash-stack' in html
+    assert "This sheet changed in another session. Refresh the page and try again." in html
+    assert 'data-combat-section-panel="equipment"' in html
+
+    updated = get_character(ASSIGNED_CHARACTER_SLUG)
+    assert updated is not None
+    assert _inventory_item(updated, "quarterstaff-2")["is_equipped"] is True
+
+
+def test_session_character_equipment_state_update_requires_active_session_for_session_surface(
+    client,
+    sign_in,
+    users,
+    get_character,
+    set_campaign_visibility,
+):
+    set_campaign_visibility("linden-pass", characters="players")
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    record = get_character(ASSIGNED_CHARACTER_SLUG)
+    assert record is not None
+    assert _inventory_item(record, "quarterstaff-2")["is_equipped"] is True
+
+    response = client.post(
+        f"/campaigns/linden-pass/characters/{ASSIGNED_CHARACTER_SLUG}/equipment/quarterstaff-2/state",
+        data={
+            "expected_revision": record.state_record.revision,
+            "mode": "session",
+            "page": "equipment",
+            "return_view": "session-character",
+            "weapon_wield_mode": "",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "The live session has ended. Session character editing is no longer available." in html
+    assert "Equipment state updated." not in html
+
+    updated = get_character(ASSIGNED_CHARACTER_SLUG)
+    assert updated is not None
+    assert _inventory_item(updated, "quarterstaff-2")["is_equipped"] is True
 
 
 def test_session_character_route_blocks_unassigned_player_from_explicit_character_access(client, sign_in, users):

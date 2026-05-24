@@ -1,4 +1,9 @@
-﻿  <div class="page-layout session-layout">
+﻿{% if session_character_fragment | default(false) %}
+  <section class="flash-stack" data-session-character-flash-stack>
+    {% include "_flash_stack.html" %}
+  </section>
+{% endif %}
+  <div class="page-layout session-layout">
     <section class="session-column">
       {% if character %}
         {% set is_xianxia_sheet = character.xianxia_read %}

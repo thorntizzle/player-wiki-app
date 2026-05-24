@@ -3102,6 +3102,8 @@ def create_app() -> Flask:
         normalized_confirm_rest = str(confirm_rest or "").strip().lower()
         if normalized_confirm_rest in {"short", "long"}:
             route_values["confirm_rest"] = normalized_confirm_rest
+        if is_async_request() and request.values.get("fragment") == "1":
+            route_values["fragment"] = "1"
         return redirect(url_for("campaign_session_character_view", **route_values))
 
     def redirect_to_campaign_combat(
@@ -4941,6 +4943,14 @@ def create_app() -> Flask:
         if user is None:
             abort(403)
 
+        inactive_session_redirect = ensure_active_session_for_session_character_mutation(
+            campaign_slug,
+            character_slug,
+            anchor=anchor,
+        )
+        if inactive_session_redirect is not None:
+            return inactive_session_redirect
+
         try:
             expected_revision = parse_expected_revision()
             result = action(record)
@@ -5352,6 +5362,14 @@ def create_app() -> Flask:
         user = get_current_user()
         if user is None:
             abort(403)
+
+        inactive_session_redirect = ensure_active_session_for_session_character_mutation(
+            campaign_slug,
+            character_slug,
+            anchor=anchor,
+        )
+        if inactive_session_redirect is not None:
+            return inactive_session_redirect
 
         try:
             expected_revision = parse_expected_revision()
@@ -12083,7 +12101,11 @@ def create_app() -> Flask:
     def campaign_session_character_view(campaign_slug: str):
         context = build_campaign_session_character_page_context(campaign_slug)
         if request.args.get("fragment") == "1":
-            return render_template("_session_character_panel.html", **context)
+            return render_template(
+                "_session_character_panel.html",
+                **context,
+                session_character_fragment=True,
+            )
         return render_template("session_character.html", **context)
 
     @app.get("/campaigns/<campaign_slug>/session/live-state")

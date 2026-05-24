@@ -227,6 +227,51 @@
           {% if item.notes %}
             <p>{{ item.notes }}</p>
           {% endif %}
+          {% if session_character_editing_enabled %}
+            <form
+              class="stack-form"
+              data-character-sheet-edit-form="equipment-state"
+              method="post"
+              action="{{ url_for('character_equipment_state_update', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
+            >
+              <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+              <input type="hidden" name="mode" value="session">
+              <input type="hidden" name="page" value="equipment">
+              <input type="hidden" name="return_view" value="session-character">
+              <div class="detail-grid">
+                {% if item.supports_weapon_wield_mode %}
+                  <label>
+                    Wielding
+                    <select name="weapon_wield_mode">
+                      <option value="">Not equipped</option>
+                      {% for option in item.weapon_wield_options %}
+                        <option value="{{ option.value }}" {% if item.weapon_wield_mode == option.value %}selected{% endif %}>
+                          {{ option.label }}
+                        </option>
+                      {% endfor %}
+                    </select>
+                  </label>
+                {% else %}
+                  <label class="checkbox-label">
+                    <input type="checkbox" name="is_equipped" value="1" {% if item.is_equipped %}checked{% endif %}>
+                    Equipped
+                  </label>
+                {% endif %}
+                {% if item.requires_attunement %}
+                  <label class="checkbox-label">
+                    <input type="checkbox" name="is_attuned" value="1" {% if item.is_attuned %}checked{% endif %}>
+                    Attuned
+                  </label>
+                {% endif %}
+              </div>
+              {% if item.attunement_hint %}
+                <p class="meta">{{ item.attunement_hint }}</p>
+              {% endif %}
+              <div class="hero-actions">
+                <button type="submit">Save equipment state</button>
+              </div>
+            </form>
+          {% endif %}
         </article>
       {% endfor %}
     </div>
