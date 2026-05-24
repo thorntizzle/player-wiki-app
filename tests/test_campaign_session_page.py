@@ -28,6 +28,17 @@ TEST_PNG_BYTES = (
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
+def _html_segment_after(html: str, marker: str, *, length: int = 2000) -> str:
+    start = html.index(marker)
+    return html[start : start + length]
+
+
+def _html_segment_between(html: str, start_marker: str, end_marker: str) -> str:
+    start = html.index(start_marker)
+    end = html.index(end_marker, start + len(start_marker))
+    return html[start:end]
+
+
 def _async_headers():
     return {
         "X-Requested-With": "XMLHttpRequest",
@@ -336,10 +347,23 @@ def test_session_character_page_defaults_to_viewer_assigned_character(client, si
     html = response.get_data(as_text=True)
     assert "Choose a character" not in html
     assert "Arden March" in html
-    assert "Features and traits" not in html
     assert "Character sections" in html
     assert "combat-workspace-card" in html
     assert "combat-workspace-nav" in html
+    assert 'data-combat-section-group' in html
+    assert 'data-combat-default-section="overview"' in html
+    overview_panel = _html_segment_between(
+        html,
+        'data-combat-section-panel="overview"',
+        'data-combat-section-panel="spells"',
+    )
+    features_panel = _html_segment_between(
+        html,
+        'data-combat-section-panel="features"',
+        'data-combat-section-panel="equipment"',
+    )
+    assert "hidden" not in overview_panel
+    assert "hidden" in features_panel
     assert f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&amp;page=spells" in html
     assert f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&amp;page=features" in html
 
@@ -406,12 +430,23 @@ def test_session_character_equipment_page_filters_inventory_only_rows(client, si
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Light Crossbow" in html
-    assert "Quarterstaff" in html
-    assert "Backpack" not in html
-    assert "Crossbow Bolts" not in html
-    assert "Chalk" not in html
-    assert "Not attuned" not in html
+    equipment_panel = _html_segment_between(
+        html,
+        'data-combat-section-panel="equipment"',
+        'data-combat-section-panel="inventory"',
+    )
+    inventory_panel = _html_segment_between(
+        html,
+        'data-combat-section-panel="inventory"',
+        'data-combat-section-panel="abilities_skills"',
+    )
+    assert "Light Crossbow" in equipment_panel
+    assert "Quarterstaff" in equipment_panel
+    assert "Backpack" not in equipment_panel
+    assert "Crossbow Bolts" not in equipment_panel
+    assert "Chalk" not in equipment_panel
+    assert "Backpack" in inventory_panel
+    assert "Not attuned" not in equipment_panel
 
 
 def test_session_character_page_keeps_single_sheet_players_out_of_a_redundant_roster_sidebar(
@@ -535,7 +570,7 @@ def test_session_character_page_shows_edit_controls_only_while_session_is_active
 
     sign_in(users["owner"]["email"], users["owner"]["password"])
     response = client.get(
-        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&page=overview"
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&page=spells"
     )
 
     assert response.status_code == 200
@@ -911,6 +946,93 @@ def test_session_character_page_uses_combat_style_non_combat_section_nav(client,
     assert ">Actions<" not in html
     assert ">Bonus Actions<" not in html
     assert ">Reactions<" not in html
+
+
+def test_session_character_dnd_sections_mount_panels_and_workspace_script(client, sign_in, users):
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get("/campaigns/linden-pass/session/character")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'data-combat-section-group' in html
+    assert 'data-combat-section-toggle="overview"' in html
+    assert 'data-combat-section-toggle="spells"' in html
+    assert 'data-combat-section-panel="overview"' in html
+    assert 'data-combat-section-panel="spells"' in html
+    assert "window.__playerWikiCombatWorkspace" in html
+
+
+def test_session_character_spells_direct_load_selects_spells_panel(client, sign_in, users):
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get(
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&page=spells"
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'data-combat-default-section="spells"' in html
+    spells_panel = _html_segment_between(
+        html,
+        'data-combat-section-panel="spells"',
+        'data-combat-section-panel="resources"',
+    )
+    overview_panel = _html_segment_between(
+        html,
+        'data-combat-section-panel="overview"',
+        'data-combat-section-panel="spells"',
+    )
+    assert "hidden" not in spells_panel
+    assert "hidden" in overview_panel
+    assert 'data-combat-section-toggle="spells"' in html
+    assert 'aria-current="page"' in _html_segment_after(html, 'data-combat-section-toggle="spells"', length=250)
+
+
+def test_session_character_active_controls_live_in_matching_dnd_panels(
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+):
+    set_campaign_visibility("linden-pass", characters="players")
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    response = client.get(
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&page=overview"
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    overview_panel = _html_segment_between(
+        html,
+        'data-combat-section-panel="overview"',
+        'data-combat-section-panel="spells"',
+    )
+    spells_panel = _html_segment_between(
+        html,
+        'data-combat-section-panel="spells"',
+        'data-combat-section-panel="resources"',
+    )
+    resources_panel = _html_segment_between(
+        html,
+        'data-combat-section-panel="resources"',
+        'data-combat-section-panel="features"',
+    )
+    assert "Save vitals" in overview_panel
+    assert 'name="page" value="overview"' in overview_panel
+    assert (
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}"
+        "&amp;page=overview&amp;confirm_rest=short"
+    ) in overview_panel
+    assert 'data-character-sheet-edit-form="spell-slot"' in spells_panel
+    assert "Use 1" in spells_panel
+    assert 'name="page" value="spells"' in spells_panel
+    assert 'data-character-sheet-edit-form="resource"' in resources_panel
+    assert 'name="page" value="resources"' in resources_panel
 
 
 def test_session_character_route_blocks_unassigned_player_from_explicit_character_access(client, sign_in, users):

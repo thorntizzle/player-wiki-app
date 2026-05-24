@@ -65,6 +65,9 @@
 
       const html = await response.text();
       characterPane.innerHTML = html;
+      if (window.__playerWikiCombatWorkspace && typeof window.__playerWikiCombatWorkspace.init === "function") {
+        window.__playerWikiCombatWorkspace.init(characterPane);
+      }
       characterPaneLoaded = true;
       return true;
     };

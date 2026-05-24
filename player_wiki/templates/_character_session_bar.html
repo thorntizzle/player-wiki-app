@@ -1,3 +1,4 @@
+{% set session_character_bar_page = session_character_form_page | default(character_subpage, true) %}
 <section class="session-bar" id="session-vitals">
   <div class="session-bar__summary">
     <p class="eyebrow">Active session</p>
@@ -13,7 +14,7 @@
   >
     <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
     <input type="hidden" name="mode" value="session">
-    <input type="hidden" name="page" value="{{ character_subpage }}">
+    <input type="hidden" name="page" value="{{ session_character_bar_page }}">
     {% if session_return_view %}
       <input type="hidden" name="return_view" value="{{ session_return_view }}">
     {% endif %}
@@ -46,10 +47,10 @@
   </form>
 
   <div class="session-bar__actions" id="session-rest">
-    <a class="ghost-button" href="{% if session_return_view == 'session-character' %}{{ session_surface_short_rest_url }}{% else %}{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='session', confirm_rest='short', page=character_subpage) }}{% endif %}">
+    <a class="ghost-button" href="{% if session_return_view == 'session-character' %}{{ url_for('campaign_session_character_view', campaign_slug=campaign.slug, character=character.slug, page=session_character_bar_page, confirm_rest='short') }}{% else %}{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='session', confirm_rest='short', page=session_character_bar_page) }}{% endif %}">
       Short rest
     </a>
-    <a class="ghost-button" href="{% if session_return_view == 'session-character' %}{{ session_surface_long_rest_url }}{% else %}{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='session', confirm_rest='long', page=character_subpage) }}{% endif %}">
+    <a class="ghost-button" href="{% if session_return_view == 'session-character' %}{{ url_for('campaign_session_character_view', campaign_slug=campaign.slug, character=character.slug, page=session_character_bar_page, confirm_rest='long') }}{% else %}{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='session', confirm_rest='long', page=session_character_bar_page) }}{% endif %}">
       Long rest
     </a>
   </div>

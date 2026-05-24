@@ -1,0 +1,440 @@
+{% set active_session_character_panel = character_subpage if character_subpage else "overview" %}
+
+<section
+  class="read-section combat-workspace-panel"
+  data-combat-section-panel="overview"
+  {% if active_session_character_panel != 'overview' %}hidden{% endif %}
+>
+  {% if session_character_editing_enabled %}
+    {% set session_character_form_page = "overview" %}
+    {% include "_character_session_bar.html" %}
+    {% if rest_preview %}
+      {% set session_character_controls_scope = "overview" %}
+      {% set session_character_form_page = "overview" %}
+      {% include "_character_session_panels.html" %}
+    {% endif %}
+  {% endif %}
+
+  <section id="session-character-overview">
+    <h2>At a glance</h2>
+    <div class="glance-grid">
+      {% for stat in character.overview_stats %}
+        <div class="glance-card">
+          <span class="meta">{{ stat.label }}</span>
+          <strong>{{ stat.value }}</strong>
+        </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  {% if character.defensive_rules %}
+    <section class="read-section">
+      <div class="section-heading">
+        <h2>Defensive rules</h2>
+      </div>
+      <div class="detail-grid">
+        {% for rule in character.defensive_rules %}
+          <article class="detail-card">
+            <div class="section-heading">
+              <h3>{{ rule.title }}</h3>
+              <span class="meta">{{ rule.status_label }}</span>
+            </div>
+            {% for effect in rule.effects %}
+              <p><strong>{{ effect.label }}:</strong> {{ effect.summary }}</p>
+            {% endfor %}
+            {% if rule.condition %}
+              <p class="meta">{{ rule.condition }}</p>
+            {% endif %}
+            {% if not rule.is_active and rule.inactive_reason %}
+              <p class="meta">{{ rule.inactive_reason }}</p>
+            {% endif %}
+          </article>
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+</section>
+
+<section
+  class="read-section combat-workspace-panel"
+  data-combat-section-panel="spells"
+  {% if active_session_character_panel != 'spells' %}hidden{% endif %}
+>
+  {% if character.spellcasting %}
+    {% if session_character_editing_enabled %}
+      {% set session_character_controls_scope = "spells" %}
+      {% set session_character_form_page = "spells" %}
+      {% include "_character_session_panels.html" %}
+      {% set session_character_spell_slot_controls_in_panel = true %}
+    {% endif %}
+    {% set show_spell_list = true %}
+    {% set spell_section_title = "Spells" %}
+    {% include "_character_spellcasting_section.html" %}
+    {% set session_character_spell_slot_controls_in_panel = false %}
+  {% else %}
+    <div class="section-heading">
+      <h2>Spells</h2>
+    </div>
+    <article class="detail-card">
+      <p class="meta">No spellcasting details are recorded on this sheet yet.</p>
+    </article>
+  {% endif %}
+</section>
+
+<section
+  class="read-section combat-workspace-panel"
+  data-combat-section-panel="resources"
+  id="session-character-resources"
+  {% if active_session_character_panel != 'resources' %}hidden{% endif %}
+>
+  <div class="section-heading">
+    <h2>Resources</h2>
+  </div>
+  {% if session_character_editing_enabled and character.resources %}
+    {% set session_character_controls_scope = "resources" %}
+    {% set session_character_form_page = "resources" %}
+    {% include "_character_session_panels.html" %}
+  {% elif character.resources %}
+    <div class="resource-grid">
+      {% for resource in character.resources %}
+        <article class="resource-card">
+          <h3>{{ resource.label }}</h3>
+          <p class="resource-card__value">{{ resource.value }}</p>
+          <p class="meta">Resets: {{ resource.reset_label }}</p>
+          {% if resource.notes %}
+            <p class="meta">{{ resource.notes }}</p>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <article class="detail-card">
+      <p class="meta">No tracked limited-use resources are recorded on this sheet.</p>
+    </article>
+  {% endif %}
+</section>
+
+<section
+  class="read-section combat-workspace-panel"
+  data-combat-section-panel="features"
+  {% if active_session_character_panel != 'features' %}hidden{% endif %}
+>
+  <div class="section-heading">
+    <h2>Features and traits</h2>
+  </div>
+  {% if character.feature_groups %}
+    <div class="feature-groups">
+      {% for group in character.feature_groups %}
+        <section class="feature-group">
+          <h3>{{ group.title }}</h3>
+          <div class="feature-stack">
+            {% for feature in group.entries %}
+              <article class="feature-row">
+                <div class="feature-row__header">
+                  <h4>
+                    {% if feature.href %}
+                      <a href="{{ feature.href }}">{{ feature.name }}</a>
+                    {% else %}
+                      {{ feature.name }}
+                    {% endif %}
+                  </h4>
+                  {% if feature.metadata %}
+                    <p class="meta">{{ feature.metadata | join(" | ") }}</p>
+                  {% endif %}
+                </div>
+                {% if feature.description_html %}
+                  <div class="article-body article-body--compact">{{ feature.description_html | safe }}</div>
+                {% endif %}
+                {% include "_character_feature_components.html" %}
+              </article>
+            {% endfor %}
+          </div>
+        </section>
+      {% endfor %}
+    </div>
+  {% else %}
+    <article class="detail-card">
+      <p class="meta">No feature details are recorded on this sheet yet.</p>
+    </article>
+  {% endif %}
+</section>
+
+<section
+  class="read-section combat-workspace-panel"
+  data-combat-section-panel="equipment"
+  {% if active_session_character_panel != 'equipment' %}hidden{% endif %}
+>
+  <div class="section-heading">
+    <h2>Equipment</h2>
+  </div>
+  <div class="detail-grid">
+    <article class="detail-card">
+      <h3>Attuned items</h3>
+      <p><strong>{{ equipment_state_manager.attuned_count }} / {{ equipment_state_manager.max_attuned_items }}</strong></p>
+      <p class="meta">Attunement is separate from equipped state and usually has room for up to {{ equipment_state_manager.max_attuned_items }} items.</p>
+      {% if equipment_state_manager.over_attunement_limit %}
+        <p class="meta">This sheet is currently over the normal attunement limit.</p>
+      {% endif %}
+    </article>
+    <article class="detail-card">
+      <h3>Equipped items</h3>
+      <p><strong>{{ equipment_state_manager.equipped_count }}</strong></p>
+      <p class="meta">Armor and magic items use equipped state; weapons also track an applicable wielding mode.</p>
+    </article>
+  </div>
+  {% if character.arcane_armor_state and character.arcane_armor_state.available %}
+    {% set arcane_armor_state = character.arcane_armor_state %}
+    {% set arcane_armor_state_can_edit = session_character_editing_enabled %}
+    {% set arcane_armor_state_action = url_for('character_feature_state_update', campaign_slug=campaign.slug, character_slug=character.slug, feature_key=character.arcane_armor_state.feature_key) %}
+    {% set arcane_armor_state_expected_revision = character.state_revision %}
+    {% set arcane_armor_state_mode = 'session' %}
+    {% set arcane_armor_state_page = 'equipment' %}
+    {% set arcane_armor_state_return_view = 'session-character' %}
+    {% set arcane_armor_state_combat_view = '' %}
+    {% set arcane_armor_state_combatant_id = none %}
+    {% set arcane_armor_state_async = false %}
+    {% include "_arcane_armor_state_card.html" %}
+  {% endif %}
+
+  {% if equipment_state_manager.rows %}
+    <div class="character-edit-stack" id="character-equipment-state">
+      {% for item in equipment_state_manager.rows %}
+        <article class="detail-card character-edit-row">
+          <div class="section-heading">
+            <h3>
+              {% if item.href %}
+                <a href="{{ item.href }}">{{ item.name }}</a>
+              {% else %}
+                {{ item.name }}
+              {% endif %}
+            </h3>
+            <span class="meta">{{ item.source_label }}</span>
+          </div>
+          <p class="meta">
+            x{{ item.quantity }}
+            {% if item.weight %} | {{ item.weight }}{% endif %}
+            {% if item.requires_attunement %} | Requires attunement{% endif %}
+          </p>
+          <p class="meta">
+            {{ item.equipped_label }}
+            {% if item.requires_attunement %}
+              {% if item.is_attuned %} | Attuned{% else %} | Not attuned{% endif %}
+            {% endif %}
+          </p>
+          {% if item.tags %}
+            <p class="meta">{{ item.tags | join(", ") }}</p>
+          {% endif %}
+          {% if item.notes %}
+            <p>{{ item.notes }}</p>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <article class="detail-card">
+      <p class="meta">No equipment is listed on this sheet yet.</p>
+    </article>
+  {% endif %}
+</section>
+
+<section
+  class="read-section combat-workspace-panel"
+  data-combat-section-panel="inventory"
+  {% if active_session_character_panel != 'inventory' %}hidden{% endif %}
+>
+  {% if session_character_editing_enabled %}
+    {% set session_character_controls_scope = "inventory" %}
+    {% set session_character_form_page = "inventory" %}
+    {% include "_character_session_panels.html" %}
+  {% endif %}
+  <div class="section-heading">
+    <h2>Inventory and currency</h2>
+  </div>
+  {% if character.inventory %}
+    <div class="inventory-list">
+      {% for item in character.inventory %}
+        <article class="inventory-row">
+          <div class="inventory-row__header">
+            <h3>
+              {% if item.href %}
+                <a href="{{ item.href }}">{{ item.name }}</a>
+              {% else %}
+                {{ item.name }}
+              {% endif %}
+            </h3>
+            <strong>x{{ item.quantity }}</strong>
+          </div>
+          <p class="meta">
+            {% if item.weight %}{{ item.weight }}{% else %}Tracked item{% endif %}
+          </p>
+          {% if item.tags %}
+            <p class="meta">{{ item.tags | join(", ") }}</p>
+          {% endif %}
+          {% if item.notes %}
+            <p>{{ item.notes }}</p>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <div class="detail-grid">
+    <article class="detail-card">
+      <h3>Currency</h3>
+      <ul class="plain-list slot-list">
+        {% for coin in character.currency %}
+          <li>
+            <span>{{ coin.label }}</span>
+            <strong>{{ coin.amount }}</strong>
+          </li>
+        {% endfor %}
+      </ul>
+    </article>
+    {% if character.other_currency %}
+      <article class="detail-card">
+        <h3>Other currency</h3>
+        <p>{{ character.other_currency | join(", ") }}</p>
+      </article>
+    {% endif %}
+  </div>
+  {% if not character.inventory %}
+    <article class="detail-card">
+      <p class="meta">No inventory is listed on this sheet yet.</p>
+    </article>
+  {% endif %}
+</section>
+
+<section
+  class="read-section combat-workspace-panel"
+  data-combat-section-panel="abilities_skills"
+  {% if active_session_character_panel != 'abilities_skills' %}hidden{% endif %}
+>
+  <div class="section-heading">
+    <h2>Abilities and skills</h2>
+  </div>
+  {% if character.abilities or character.skills or character.proficiency_groups %}
+    <div class="ability-grid">
+      {% for ability in character.abilities %}
+        <article class="ability-card">
+          <p class="card-kicker">{{ ability.abbr }}</p>
+          <h3>{{ ability.score }}</h3>
+          <p>{{ ability.name }}</p>
+          <p class="meta">Modifier {{ ability.modifier }} | Save {{ ability.save_bonus }}</p>
+        </article>
+      {% endfor %}
+    </div>
+
+    <div class="detail-cluster">
+      <div>
+        <h3>Skills</h3>
+        <div class="skill-grid">
+          {% for skill in character.skills %}
+            <div class="skill-pill {% if skill.is_proficient %}skill-pill--proficient{% endif %}">
+              <span>{{ skill.name }}</span>
+              <strong>{{ skill.bonus }}</strong>
+              {% if skill.proficiency_label and skill.proficiency_label != 'None' %}
+                <span class="meta">{{ skill.proficiency_label }}</span>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      {% if character.proficiency_groups %}
+        <div>
+          <h3>Proficiencies</h3>
+          <div class="detail-grid">
+            {% for group in character.proficiency_groups %}
+              <article class="detail-card">
+                <h4>{{ group.title }}</h4>
+                <p>{{ group.values_list | join(", ") }}</p>
+              </article>
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+    </div>
+  {% else %}
+    <article class="detail-card">
+      <p class="meta">No ability or skill details are recorded on this sheet yet.</p>
+    </article>
+  {% endif %}
+</section>
+
+<section
+  class="read-section combat-workspace-panel"
+  data-combat-section-panel="notes"
+  {% if active_session_character_panel != 'notes' %}hidden{% endif %}
+>
+  {% if session_character_editing_enabled %}
+    {% set session_character_controls_scope = "notes" %}
+    {% set session_character_form_page = "notes" %}
+    {% include "_character_session_panels.html" %}
+  {% endif %}
+  <div class="section-heading">
+    <h2>Notes</h2>
+  </div>
+  <div class="reference-stack">
+    {% if character.player_notes_html %}
+      <article class="detail-card">
+        <h3>Note</h3>
+        <div class="article-body article-body--compact">{{ character.player_notes_html | safe }}</div>
+      </article>
+    {% endif %}
+    {% for section in character.reference_sections %}
+      <article class="detail-card">
+        <h3>{{ section.title }}</h3>
+        <div class="article-body article-body--compact">{{ section.html | safe }}</div>
+      </article>
+    {% endfor %}
+    {% if not character.player_notes_html and not character.reference_sections %}
+      <article class="detail-card">
+        <p class="meta">No notes yet.</p>
+      </article>
+    {% endif %}
+  </div>
+</section>
+
+<section
+  class="read-section combat-workspace-panel"
+  data-combat-section-panel="personal"
+  {% if active_session_character_panel != 'personal' %}hidden{% endif %}
+>
+  {% if session_character_editing_enabled %}
+    {% set session_character_controls_scope = "personal" %}
+    {% set session_character_form_page = "personal" %}
+    {% include "_character_session_panels.html" %}
+  {% endif %}
+  <div class="section-heading">
+    <h2>Personal</h2>
+  </div>
+  <div class="reference-stack">
+    {% if character.portrait %}
+      <article class="detail-card" id="character-personal-portrait">
+        <figure>
+          <img class="article-image" src="{{ character.portrait.url }}" alt="{{ character.portrait.alt }}">
+          {% if character.portrait.caption %}
+            <figcaption class="meta article-image__caption">{{ character.portrait.caption }}</figcaption>
+          {% endif %}
+        </figure>
+      </article>
+    {% endif %}
+    {% if character.physical_description_html %}
+      <article class="detail-card">
+        <h3>Physical Description</h3>
+        <div class="article-body article-body--compact">{{ character.physical_description_html | safe }}</div>
+      </article>
+    {% endif %}
+    {% if character.personal_background_html %}
+      <article class="detail-card">
+        <h3>Background</h3>
+        <div class="article-body article-body--compact">{{ character.personal_background_html | safe }}</div>
+      </article>
+    {% endif %}
+    {% if not character.portrait and not character.physical_description_html and not character.personal_background_html %}
+      <article class="detail-card">
+        <p class="meta">No personal details yet.</p>
+      </article>
+    {% endif %}
+  </div>
+</section>

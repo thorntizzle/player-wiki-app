@@ -2,7 +2,7 @@
     <section class="session-column">
       {% if character %}
         {% set is_xianxia_sheet = character.xianxia_read %}
-        <article class="article card character-sheet">
+        <article class="article card character-sheet" {% if not is_xianxia_sheet %}data-combat-workspace-root{% endif %}>
           <header class="character-header">
             <p class="eyebrow">Session character</p>
             <h2>{{ character.name }}</h2>
@@ -58,11 +58,22 @@
                 </p>
               </div>
             </div>
-            <nav class="{% if is_xianxia_sheet %}character-subpage-nav{% else %}combat-workspace-nav{% endif %}" aria-label="{% if is_xianxia_sheet %}Character subpages{% else %}Session character sections{% endif %}">
+            <nav
+              class="{% if is_xianxia_sheet %}character-subpage-nav{% else %}combat-workspace-nav{% endif %}"
+              aria-label="{% if is_xianxia_sheet %}Character subpages{% else %}Session character sections{% endif %}"
+              {% if not is_xianxia_sheet %}
+                data-combat-section-group
+                data-combat-default-section="{{ character_subpage }}"
+              {% endif %}
+            >
               {% for subpage in character_subpages %}
                 <a
                   class="{% if is_xianxia_sheet %}{% if subpage.is_active %}button-link{% else %}ghost-button{% endif %}{% else %}ghost-button combat-workspace-button{% if subpage.is_active %} combat-workspace-button--active{% endif %}{% endif %}"
                   href="{{ subpage.href }}"
+                  {% if not is_xianxia_sheet %}
+                    data-combat-section-toggle="{{ subpage.slug }}"
+                    aria-pressed="{{ 'true' if subpage.is_active else 'false' }}"
+                  {% endif %}
                   {% if subpage.is_active %}aria-current="page"{% endif %}
                 >
                   <span>{{ subpage.label }}</span>
@@ -99,6 +110,9 @@
             {% endif %}
           </section>
 
+          {% if not is_xianxia_sheet %}
+            {% include "_session_character_dnd_workspace.html" %}
+          {% else %}
           {% set show_overview_sections = character_subpage == 'overview' %}
           {% set show_quick_sections = character_subpage == 'quick' if is_xianxia_sheet else show_overview_sections %}
           {% set show_spellcasting_sections = character_subpage == 'spells' and not is_xianxia_sheet %}
@@ -505,6 +519,7 @@
                 {% endif %}
               </div>
             </section>
+          {% endif %}
           {% endif %}
         </article>
       {% elif session_character_cards %}

@@ -62,14 +62,16 @@
                 </section>
               {% endif %}
             {% endif %}
-            <ul class="plain-list slot-list session-spellcasting-slot-list">
-              {% for slot in slot_pool.slots %}
-                <li>
-                  <span>{{ slot.label }}</span>
-                  <strong>{{ slot.available }} available / {{ slot.max }}</strong>
-                </li>
-              {% endfor %}
-            </ul>
+            {% if not (session_character_spell_slot_controls_in_panel | default(false)) %}
+              <ul class="plain-list slot-list session-spellcasting-slot-list">
+                {% for slot in slot_pool.slots %}
+                  <li>
+                    <span>{{ slot.label }}</span>
+                    <strong>{{ slot.available }} available / {{ slot.max }}</strong>
+                  </li>
+                {% endfor %}
+              </ul>
+            {% endif %}
           </article>
         {% endif %}
       {% endfor %}
