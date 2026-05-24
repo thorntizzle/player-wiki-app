@@ -283,6 +283,50 @@ def test_session_page_only_shows_character_tab_for_users_with_session_character_
     assert f'/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}' in owner_html
 
 
+def test_session_page_with_character_access_exposes_shell_switch_data_hooks(client, sign_in, users):
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    session_page = client.get("/campaigns/linden-pass/session")
+    assert session_page.status_code == 200
+    html = session_page.get_data(as_text=True)
+
+    assert 'data-session-shell-root' in html
+    assert 'data-session-shell-pane="session"' in html
+    assert 'data-session-shell-pane="character"' in html
+    assert 'data-session-switch="1"' in html
+    assert 'data-session-switch-target="session"' in html
+    assert 'data-session-switch-target="character"' in html
+    assert (
+        f'data-session-switch-fragment-href="/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&amp;fragment=1"'
+        in html
+    )
+    assert (
+        f'data-session-shell-pane-url="/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&amp;fragment=1"'
+        in html
+    )
+    assert "history.pushState" in html
+    assert "showShellView" in html
+
+
+def test_session_page_without_character_access_does_not_expose_shell_fragment_hooks(
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+):
+    set_campaign_visibility("linden-pass", session="public")
+    sign_in(users["observer"]["email"], users["observer"]["password"])
+
+    session_page = client.get("/campaigns/linden-pass/session")
+    assert session_page.status_code == 200
+    html = session_page.get_data(as_text=True)
+
+    assert "Session Character" not in html
+    assert 'data-session-switch-target="character"' not in html
+    assert 'data-session-shell-pane="character"' not in html
+    assert 'data-session-switch-fragment-href="' not in html
+
+
 def test_session_character_page_defaults_to_viewer_assigned_character(client, sign_in, users):
     sign_in(users["owner"]["email"], users["owner"]["password"])
 
@@ -298,6 +342,36 @@ def test_session_character_page_defaults_to_viewer_assigned_character(client, si
     assert "combat-workspace-nav" in html
     assert f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&amp;page=spells" in html
     assert f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&amp;page=features" in html
+
+
+def test_session_character_fragment_route_returns_only_panel_html(client, sign_in, users):
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get(
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&fragment=1"
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "<html" not in html
+    assert "<body" not in html
+    assert '<section class="hero compact">' not in html
+    assert 'data-session-shell-pane' not in html
+    assert 'class="page-layout session-layout"' in html
+    assert "Arden March" in html
+
+
+def test_session_character_route_remains_full_page_when_fragment_not_requested(client, sign_in, users):
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get(f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "<html" in html
+    assert '<section class="hero compact">' in html
+    assert "Session Character" in html
+    assert "data-session-shell-root" not in html
 
 
 def test_owner_can_open_session_character_subpage_without_leaving_session_feature(client, sign_in, users):

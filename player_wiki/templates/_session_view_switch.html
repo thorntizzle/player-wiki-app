@@ -1,12 +1,18 @@
 <a
   class="{% if session_subpage == 'session' %}button-link{% else %}ghost-button{% endif %}"
+  data-session-switch="1"
+  data-session-switch-target="session"
   href="{{ url_for('campaign_session_view', campaign_slug=campaign.slug) }}"
 >
   Session
 </a>
 {% if show_session_character_tab %}
   <a
+    data-session-switch="1"
+    data-session-switch-target="character"
     class="{% if session_subpage == 'character' %}button-link{% else %}ghost-button{% endif %}"
+    data-session-switch-full-href="{{ session_character_switch_href or url_for('campaign_session_character_view', campaign_slug=campaign.slug) }}"
+    data-session-switch-fragment-href="{{ session_character_fragment_href or '' }}"
     href="{{ session_character_switch_href or url_for('campaign_session_character_view', campaign_slug=campaign.slug) }}"
   >
     Character

@@ -5678,6 +5678,16 @@ def create_app() -> Flask:
                 if show_session_character_tab
                 else ""
             ),
+            "session_character_fragment_href": (
+                url_for(
+                    "campaign_session_character_view",
+                    campaign_slug=campaign.slug,
+                    character=default_session_character_slug,
+                    fragment="1",
+                )
+                if show_session_character_tab
+                else ""
+            ),
             "active_nav": "session",
         }
 
@@ -6125,6 +6135,17 @@ def create_app() -> Flask:
                     campaign_slug=campaign.slug,
                     character=selected_character_slug or None,
                     page=character_subpage if selected_character_slug else None,
+                )
+                if accessible_records
+                else ""
+            ),
+            "session_character_fragment_href": (
+                url_for(
+                    "campaign_session_character_view",
+                    campaign_slug=campaign.slug,
+                    character=selected_character_slug or None,
+                    page=character_subpage if selected_character_slug else None,
+                    fragment="1",
                 )
                 if accessible_records
                 else ""
@@ -12061,6 +12082,8 @@ def create_app() -> Flask:
     @campaign_scope_access_required("session")
     def campaign_session_character_view(campaign_slug: str):
         context = build_campaign_session_character_page_context(campaign_slug)
+        if request.args.get("fragment") == "1":
+            return render_template("_session_character_panel.html", **context)
         return render_template("session_character.html", **context)
 
     @app.get("/campaigns/<campaign_slug>/session/live-state")

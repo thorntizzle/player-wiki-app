@@ -1,0 +1,143 @@
+<script>
+  (() => {
+    const shellRoot = document.querySelector("[data-session-shell-root]");
+    if (!shellRoot) {
+      return;
+    }
+
+    const switchLinks = Array.from(shellRoot.querySelectorAll("[data-session-switch='1']"));
+    const sessionPane = shellRoot.querySelector("[data-session-shell-pane='session']");
+    const characterPane = shellRoot.querySelector("[data-session-shell-pane='character']");
+    const characterFragmentUrl = characterPane?.dataset.sessionShellPaneUrl || "";
+    if (!sessionPane) {
+      return;
+    }
+
+    const getTargetFromUrl = () => {
+      const pathname = window.location.pathname || "";
+      if (pathname.includes("/session/character")) {
+        return "character";
+      }
+      return "session";
+    };
+
+    const showOnlyPane = (target) => {
+      const showSession = target === "session";
+      sessionPane.hidden = !showSession;
+      if (characterPane) {
+        characterPane.hidden = showSession;
+      }
+      shellRoot.dataset.sessionShellActive = target;
+    };
+
+    const syncSwitchButtons = (target) => {
+      for (const link of switchLinks) {
+        const linkTarget = link.dataset.sessionSwitchTarget;
+        if (linkTarget === "session") {
+          link.classList.toggle("button-link", target === "session");
+          link.classList.toggle("ghost-button", target !== "session");
+        } else if (linkTarget === "character") {
+          link.classList.toggle("button-link", target === "character");
+          link.classList.toggle("ghost-button", target !== "character");
+        }
+      }
+    };
+
+    let characterPaneLoaded = false;
+    const loadCharacterPane = async (fragmentUrl) => {
+      if (!characterPane || !fragmentUrl) {
+        return false;
+      }
+      if (characterPaneLoaded) {
+        return true;
+      }
+
+      const response = await fetch(fragmentUrl, {
+        headers: {
+          "X-Requested-With": "XMLHttpRequest",
+        },
+        cache: "no-store",
+        credentials: "same-origin",
+      });
+      if (!response.ok) {
+        return false;
+      }
+
+      const html = await response.text();
+      characterPane.innerHTML = html;
+      characterPaneLoaded = true;
+      return true;
+    };
+
+    const showShellView = async (target, { url = "", fromHistory = false } = {}) => {
+      const nextTarget = target === "character" ? "character" : "session";
+      if (nextTarget === "character" && characterPane) {
+        const loaded = await loadCharacterPane(characterFragmentUrl);
+        if (!loaded) {
+          if (url) {
+            window.location.assign(url);
+          }
+          return;
+        }
+      }
+
+      showOnlyPane(nextTarget);
+      syncSwitchButtons(nextTarget);
+      if (!fromHistory && url) {
+        history.pushState({ sessionShellView: nextTarget }, "", url);
+      }
+    };
+
+    const showByHistory = async (target) => {
+      await showShellView(target, { fromHistory: true });
+    };
+
+    const clickHandler = async (event) => {
+      const link = event.target instanceof Element ? event.target.closest("[data-session-switch='1']") : null;
+      if (!link) {
+        return;
+      }
+      if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button === 1) {
+        return;
+      }
+
+      const target = link.dataset.sessionSwitchTarget || "";
+      if (target !== "session" && target !== "character") {
+        return;
+      }
+      if (shellRoot.dataset.sessionShellActive === target) {
+        event.preventDefault();
+        return;
+      }
+
+      const href = link.dataset.sessionSwitchFullHref || link.getAttribute("href") || "";
+      if (!href) {
+        return;
+      }
+
+      event.preventDefault();
+      await showShellView(target, { url: href });
+    };
+
+    showOnlyPane("session");
+    syncSwitchButtons("session");
+    window.addEventListener("popstate", (event) => {
+      const stateTarget = event.state && typeof event.state.sessionShellView === "string" ? event.state.sessionShellView : "";
+      const resolved = stateTarget === "character" ? "character" : getTargetFromUrl();
+      showByHistory(resolved);
+    });
+
+    shellRoot.addEventListener("click", (event) => {
+      clickHandler(event).catch(() => {
+        const clickedLink = event.target instanceof Element ? event.target.closest("[data-session-switch='1']") : null;
+        if (!clickedLink) {
+          return;
+        }
+        const nextUrl = clickedLink.dataset.sessionSwitchFullHref || clickedLink.getAttribute("href");
+        if (nextUrl) {
+          window.location.assign(nextUrl);
+        }
+      });
+    });
+  })();
+</script>
