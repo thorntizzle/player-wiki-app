@@ -36,6 +36,15 @@ SUBSECTION_ORDER = {
         "Venues and Residences": 20,
         "Infrastructure and Underworks": 30,
     },
+    "NPCs": {
+        "Civic Leadership and Justice": 0,
+        "Local Allies and Service Contacts": 10,
+        "Public Hosts and Arena Figures": 20,
+        "Market Weave Case and Hidden Networks": 30,
+        "Foreign Powers and Envoys": 40,
+        "Dranian and Temporal Figures": 50,
+        "Sky Dwarf Airship Crew": 60,
+    },
     "Mechanics": {
         "Variant and House Rules": 0,
         "Class Modifications": 10,
