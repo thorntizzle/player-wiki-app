@@ -736,6 +736,12 @@
         }
 
         event.preventDefault();
+        const confirmMessage = form.dataset.sessionConfirm;
+        if (typeof confirmMessage === "string" && confirmMessage.trim()) {
+          if (!window.confirm(confirmMessage)) {
+            return;
+          }
+        }
         if (requestInFlight) {
           return;
         }

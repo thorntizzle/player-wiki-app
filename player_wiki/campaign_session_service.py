@@ -446,6 +446,32 @@ class CampaignSessionService:
         self.store.bump_state_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
         return deleted_article
 
+    def delete_revealed_articles(
+        self,
+        campaign_slug: str,
+        *,
+        updated_by_user_id: int | None = None,
+    ) -> list[SessionArticleRecord]:
+        revealed_articles = self.store.list_articles(campaign_slug, statuses=("revealed",))
+        deleted_articles: list[SessionArticleRecord] = []
+        for article in revealed_articles:
+            try:
+                deleted_article = self.store.delete_article(campaign_slug, article.id)
+            except CampaignSessionConflictError as exc:
+                if deleted_articles:
+                    self.store.bump_state_revision(
+                        campaign_slug,
+                        updated_by_user_id=updated_by_user_id,
+                    )
+                raise CampaignSessionValidationError(
+                    "That session article could not be deleted. Refresh the page and try again."
+                ) from exc
+            deleted_articles.append(deleted_article)
+
+        if deleted_articles:
+            self.store.bump_state_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
+        return deleted_articles
+
     def attach_article_image(
         self,
         campaign_slug: str,

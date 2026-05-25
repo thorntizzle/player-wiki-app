@@ -12603,6 +12603,43 @@ def create_app() -> Flask:
             redirect_to_dm=True,
         )
 
+    @app.post("/campaigns/<campaign_slug>/session/articles/clear-revealed")
+    @campaign_scope_access_required("session")
+    def campaign_session_clear_revealed_articles(campaign_slug: str):
+        if not can_manage_campaign_session(campaign_slug):
+            abort(403)
+
+        user = get_current_user()
+        if user is None:
+            abort(403)
+
+        try:
+            deleted_articles = get_campaign_session_service().delete_revealed_articles(
+                campaign_slug,
+                updated_by_user_id=user.id,
+            )
+        except CampaignSessionValidationError as exc:
+            flash(str(exc), "error")
+            return respond_to_campaign_session_mutation(
+                campaign_slug,
+                mutation_succeeded=False,
+                anchor="session-revealed-articles",
+                redirect_to_dm=True,
+            )
+
+        deletion_count = len(deleted_articles)
+        if deletion_count:
+            article_label = "article" if deletion_count == 1 else "articles"
+            flash(f"Cleared {deletion_count} revealed session {article_label}.", "success")
+        else:
+            flash("There are no revealed session articles to clear.", "success")
+        return respond_to_campaign_session_mutation(
+            campaign_slug,
+            mutation_succeeded=True,
+            anchor="session-revealed-articles",
+            redirect_to_dm=True,
+        )
+
     @app.post("/campaigns/<campaign_slug>/session/close")
     @campaign_scope_access_required("session")
     def campaign_session_close(campaign_slug: str):

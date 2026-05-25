@@ -2578,6 +2578,100 @@ def test_dm_can_delete_revealed_article_and_remove_it_from_chat_and_logs(client,
     assert "This revealed article should disappear cleanly." not in log_html
 
 
+def test_dm_can_clear_all_revealed_session_articles(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+    client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "Read Aloud Notice",
+            "body_markdown": "This should be cleared in bulk.",
+        },
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "Burn After Reading",
+            "body_markdown": "This should be cleared in bulk too.",
+        },
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "Staged Holdback",
+            "body_markdown": "This should stay staged when bulk clear runs.",
+        },
+        follow_redirects=False,
+    )
+    client.post("/campaigns/linden-pass/session/articles/1/reveal", follow_redirects=False)
+    client.post("/campaigns/linden-pass/session/articles/2/reveal", follow_redirects=False)
+
+    dm_view = client.get("/campaigns/linden-pass/session/dm", follow_redirects=False)
+    assert dm_view.status_code == 200
+    dm_html = dm_view.get_data(as_text=True)
+    assert "Clear all" in dm_html
+    assert "Read Aloud Notice" in dm_html
+    assert "Burn After Reading" in dm_html
+
+    clear_response = client.post(
+        "/campaigns/linden-pass/session/articles/clear-revealed",
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    assert clear_response.status_code == 200
+    clear_payload = clear_response.get_json()
+    assert clear_payload["anchor"] == "session-revealed-articles"
+    assert clear_payload["ok"] is True
+    assert "Read Aloud Notice" not in clear_payload["revealed_articles_html"]
+    assert "Burn After Reading" not in clear_payload["revealed_articles_html"]
+
+    dm_view = client.get("/campaigns/linden-pass/session/dm", follow_redirects=False)
+    assert dm_view.status_code == 200
+    dm_html = dm_view.get_data(as_text=True)
+    assert "Clear all" not in dm_html
+    assert "Read Aloud Notice" not in dm_html
+    assert "Burn After Reading" not in dm_html
+    assert "Staged Holdback" in dm_html
+    assert "This should stay staged when bulk clear runs." in dm_html
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["party"]["email"], users["party"]["password"])
+    player_view = client.get("/campaigns/linden-pass/session")
+    player_html = player_view.get_data(as_text=True)
+    assert player_view.status_code == 200
+    assert "Read Aloud Notice" not in player_html
+    assert "Burn After Reading" not in player_html
+    assert "Staged Holdback" not in player_html
+
+
+def test_player_cannot_clear_all_revealed_session_articles(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+    client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "Protected from clear",
+            "body_markdown": "Only DM should be able to clear this.",
+        },
+        follow_redirects=False,
+    )
+    client.post("/campaigns/linden-pass/session/articles/1/reveal", follow_redirects=False)
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    blocked_clear = client.post(
+        "/campaigns/linden-pass/session/articles/clear-revealed",
+        follow_redirects=False,
+    )
+
+    assert blocked_clear.status_code == 403
+
+
 def test_dm_can_close_session_and_access_chat_log_but_player_cannot(client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
