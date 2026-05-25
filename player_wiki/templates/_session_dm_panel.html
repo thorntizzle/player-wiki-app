@@ -14,6 +14,8 @@
   data-live-diagnostics-enabled="{{ '1' if live_diagnostics_enabled else '0' }}"
 >
   <section class="session-column">
+    {% include "_session_passive_scores_bar.html" %}
+
     <article class="card session-status-card" data-session-status-card>
       {% include "_session_status_card.html" %}
     </article>

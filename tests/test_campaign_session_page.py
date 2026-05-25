@@ -14,6 +14,7 @@ from player_wiki.auth_store import AuthStore
 from player_wiki.config import Config
 from player_wiki.db import init_database
 from player_wiki.systems_importer import Dnd5eSystemsImporter
+from player_wiki.systems_service import XIANXIA_HOMEBREW_SOURCE_ID
 from tests.sample_data import ASSIGNED_CHARACTER_SLUG, TEST_CAMPAIGN_SLUG, build_test_campaigns_dir
 
 
@@ -85,6 +86,56 @@ def _write_character_definition(app, character_slug: str, mutator) -> None:
     payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
     mutator(payload)
     definition_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+
+def _write_campaign_config(app, mutator) -> None:
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    mutator(payload)
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+
+
+def _configure_xianxia_campaign(app) -> None:
+    def _mutate(payload: dict[str, object]) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+                "default_visibility": "dm",
+            }
+        ]
+
+    _write_campaign_config(app, _mutate)
+
+
+def _set_characters_system(app, system_code: str) -> None:
+    characters_root = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "characters"
+    for character_dir in sorted(characters_root.iterdir()):
+        if not character_dir.is_dir():
+            continue
+        definition_path = character_dir / "definition.yaml"
+        if not definition_path.is_file():
+            continue
+        payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
+        payload["system"] = system_code
+        definition_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+
+def _set_character_system(app, character_slug: str, system_code: str) -> None:
+    payload_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "characters"
+        / character_slug
+        / "definition.yaml"
+    )
+    payload = yaml.safe_load(payload_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = system_code
+    payload_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
 def _import_systems_goblin(app, tmp_path) -> str:
@@ -1374,6 +1425,66 @@ def test_dm_can_open_session_page_and_session_dm_page(client, sign_in, users):
     assert "Open DM page" not in dm_html
     assert 'data-live-active-interval-ms="2000"' in dm_html
     assert 'data-live-idle-interval-ms="5000"' in dm_html
+
+
+def test_dm_session_page_shows_passive_scores_for_active_dnd_characters(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    dm_page = client.get("/campaigns/linden-pass/session/dm")
+    dm_html = dm_page.get_data(as_text=True)
+
+    assert dm_page.status_code == 200
+    assert "DM Passive Scores" in dm_html
+    assert 'data-session-passive-scores-bar' in dm_html
+    assert '<h3 class="session-passive-score-card__name">Arden March</h3>' in dm_html
+    assert '<h3 class="session-passive-score-card__name">Selene Brook</h3>' in dm_html
+    assert '<h3 class="session-passive-score-card__name">Tobin Slate</h3>' in dm_html
+    assert "Passive Perception" in dm_html
+    assert "Passive Insight" in dm_html
+    assert "Passive Investigation" in dm_html
+    assert ">12</span>" in dm_html
+
+
+def test_dm_session_page_hides_passive_scores_bar_for_xianxia_campaign(client, app, sign_in, users):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    dm_page = client.get("/campaigns/linden-pass/session/dm")
+    dm_html = dm_page.get_data(as_text=True)
+
+    assert dm_page.status_code == 200
+    assert "DM Passive Scores" not in dm_html
+    assert 'data-session-passive-scores-bar' not in dm_html
+
+
+def test_dm_session_page_filters_non_dnd_characters_from_passive_scores(
+    client, app, sign_in, users
+):
+    _set_character_system(app, "arden-march", "xianxia")
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    dm_page = client.get("/campaigns/linden-pass/session/dm")
+    dm_html = dm_page.get_data(as_text=True)
+
+    assert dm_page.status_code == 200
+    assert "DM Passive Scores" in dm_html
+    assert '<h3 class="session-passive-score-card__name">Arden March</h3>' not in dm_html
+    assert '<h3 class="session-passive-score-card__name">Selene Brook</h3>' in dm_html
+    assert '<h3 class="session-passive-score-card__name">Tobin Slate</h3>' in dm_html
+
+
+def test_dm_session_page_shows_empty_state_when_no_dnd_characters_are_visible(client, app, sign_in, users):
+    _set_characters_system(app, "xianxia")
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    dm_page = client.get("/campaigns/linden-pass/session/dm")
+    dm_html = dm_page.get_data(as_text=True)
+
+    assert dm_page.status_code == 200
+    assert "DM Passive Scores" in dm_html
+    assert 'data-session-passive-scores-bar' in dm_html
+    assert "No visible DND-5E characters are currently available on the DM session surface." in dm_html
+    assert '<article class="session-passive-score-card"' not in dm_html
 
 
 def test_dm_can_start_session_and_player_can_post_messages(client, sign_in, users):

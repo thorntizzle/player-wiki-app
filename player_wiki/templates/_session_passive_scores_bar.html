@@ -1,0 +1,42 @@
+{% if show_session_dm_passive_scores %}
+  <details
+    class="section-block section-block--collapsible session-passive-scores-bar"
+    data-session-passive-scores-bar
+    open
+  >
+    <summary class="section-toggle-summary">
+      <span class="section-toggle-summary__content">
+        <span class="section-title">DM Passive Scores</span>
+        <span class="meta">{{ session_dm_passive_scores|length }} character{% if session_dm_passive_scores|length != 1 %}s{% endif %}</span>
+      </span>
+      <span class="section-toggle-chevron" aria-hidden="true"></span>
+    </summary>
+    <div class="section-block__body">
+      {% if session_dm_passive_scores %}
+        <div class="session-passive-score-list">
+          {% for character in session_dm_passive_scores %}
+            <article class="session-passive-score-card">
+              <h3 class="session-passive-score-card__name">{{ character.name }}</h3>
+              <div class="session-passive-score-grid">
+                <p>
+                  <span class="session-passive-score-label">Passive Perception</span>
+                  <span class="session-passive-score-value">{{ character.passive_perception }}</span>
+                </p>
+                <p>
+                  <span class="session-passive-score-label">Passive Insight</span>
+                  <span class="session-passive-score-value">{{ character.passive_insight }}</span>
+                </p>
+                <p>
+                  <span class="session-passive-score-label">Passive Investigation</span>
+                  <span class="session-passive-score-value">{{ character.passive_investigation }}</span>
+                </p>
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="meta">No visible DND-5E characters are currently available on the DM session surface.</p>
+      {% endif %}
+    </div>
+  </details>
+{% endif %}

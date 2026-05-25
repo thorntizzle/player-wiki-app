@@ -1144,6 +1144,51 @@ button {
   background: var(--surface-soft);
 }
 
+.session-passive-scores-bar {
+  margin-bottom: 0.5rem;
+}
+
+.session-passive-score-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.session-passive-score-card {
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+
+.session-passive-score-card__name {
+  margin: 0 0 0.45rem;
+  font-size: 1rem;
+}
+
+.session-passive-score-grid {
+  display: grid;
+  gap: 0.35rem;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+}
+
+.session-passive-score-grid p {
+  margin: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.7rem;
+}
+
+.session-passive-score-label {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.session-passive-score-value {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .session-feed__entry--article_reveal {
   border-color: var(--border-accent);
   background: var(--surface-accent-strong);
