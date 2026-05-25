@@ -1,22 +1,3 @@
-{% extends "base.html" %}
+{% extends "session.html" %}
 
 {% block title %}Session Character | {{ campaign.title }}{% endblock %}
-
-{% block content %}
-  <section class="hero compact">
-    <p class="eyebrow">Session Character</p>
-    <h1>{{ campaign.title }} Character</h1>
-    <p class="lede">
-      Open a session-enabled character sheet here without leaving the Session feature. Chat, revealed articles, and wiki lookup stay on the main `Session` page while this lighter tab keeps in-play character review and allowed session edits close at hand.
-    </p>
-    <div class="hero-actions">
-      {% include "_session_view_switch.html" %}
-    </div>
-  </section>
-
-  {% include "_session_character_panel.html" %}
-{% endblock %}
-
-{% block scripts %}
-  {% include "_combat_workspace_scripts.html" %}
-{% endblock %}

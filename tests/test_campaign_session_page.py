@@ -315,6 +315,7 @@ def test_session_page_with_character_access_exposes_shell_switch_data_hooks(clie
     assert 'data-session-switch="1"' in html
     assert 'data-session-switch-target="session"' in html
     assert 'data-session-switch-target="character"' in html
+    assert 'data-session-live-view="session"' in html
     assert (
         f'data-session-switch-fragment-href="/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&amp;fragment=1"'
         in html
@@ -393,7 +394,7 @@ def test_session_character_fragment_route_returns_only_panel_html(client, sign_i
     assert "Arden March" in html
 
 
-def test_session_character_route_remains_full_page_when_fragment_not_requested(client, sign_in, users):
+def test_session_character_route_uses_shared_shell_when_fragment_not_requested(client, sign_in, users):
     sign_in(users["owner"]["email"], users["owner"]["password"])
 
     response = client.get(f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}")
@@ -402,8 +403,12 @@ def test_session_character_route_remains_full_page_when_fragment_not_requested(c
     html = response.get_data(as_text=True)
     assert "<html" in html
     assert '<section class="hero compact">' in html
-    assert "Session Character" in html
-    assert "data-session-shell-root" not in html
+    assert "Session Workspace" in html
+    assert "data-session-shell-root" in html
+    assert 'data-session-shell-active="character"' in html
+    assert 'data-session-shell-pane="session"' in html
+    assert 'data-session-shell-pane="character"' in html
+    assert 'data-session-live-view="session"' in html
 
 
 def test_owner_can_open_session_character_subpage_without_leaving_session_feature(client, sign_in, users):
@@ -1350,13 +1355,18 @@ def test_dm_can_open_session_page_and_session_dm_page(client, sign_in, users):
     assert session_page.status_code == 200
     session_html = session_page.get_data(as_text=True)
     assert "Chat window" in session_html
-    assert "Session controls" not in session_html
+    assert "Session controls" in session_html
+    assert 'data-session-shell-active="session"' in session_html
+    assert 'data-session-shell-pane="dm"' in session_html
+    assert 'data-session-live-view="dm"' in session_html
     assert '/campaigns/linden-pass/session/dm' in session_html
     assert "Back to wiki" not in session_html
     assert "Open DM page" not in session_html
 
     assert dm_page.status_code == 200
     dm_html = dm_page.get_data(as_text=True)
+    assert 'data-session-shell-root' in dm_html
+    assert 'data-session-shell-active="dm"' in dm_html
     assert "Session controls" in dm_html
     assert "Session article store" in dm_html
     assert "Chat logs" in dm_html

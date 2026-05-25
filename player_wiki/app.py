@@ -5650,10 +5650,20 @@ def create_app() -> Flask:
             session_logs = present_session_log_summaries(
                 session_service.list_session_logs(campaign_slug, limit=12)
             )
+        requested_session_subpage = str(session_subpage or "").strip().lower()
+        session_shell_active_pane = (
+            requested_session_subpage
+            if requested_session_subpage in {"session", "character", "dm"}
+            else "session"
+        )
         normalized_session_subpage = normalize_session_subpage(session_subpage)
         session_poll_settings = build_session_poll_settings(normalized_session_subpage)
+        session_player_poll_settings = build_session_poll_settings("session")
+        session_dm_poll_settings = build_session_poll_settings("dm")
         session_live_revision = session_service.get_live_revision(campaign_slug)
         session_live_view_token = build_session_live_view_token(campaign_slug, normalized_session_subpage)
+        session_player_live_view_token = build_session_live_view_token(campaign_slug, "session")
+        session_dm_live_view_token = build_session_live_view_token(campaign_slug, "dm")
         accessible_session_character_records = list_session_accessible_character_records(campaign_slug)
         show_session_character_tab = bool(accessible_session_character_records)
         default_session_character_slug = get_default_session_character_slug(
@@ -5681,11 +5691,21 @@ def create_app() -> Flask:
             ),
             "session_live_revision": session_live_revision,
             "session_live_view_token": session_live_view_token,
+            "session_player_live_view_token": session_player_live_view_token,
+            "session_dm_live_view_token": session_dm_live_view_token,
             "live_diagnostics_enabled": app.config["LIVE_DIAGNOSTICS"],
             "session_poll_active_interval_ms": session_poll_settings["active_interval_ms"],
             "session_poll_idle_interval_ms": session_poll_settings["idle_interval_ms"],
             "session_poll_idle_threshold_ms": session_poll_settings["idle_threshold_ms"],
+            "session_player_poll_active_interval_ms": session_player_poll_settings["active_interval_ms"],
+            "session_player_poll_idle_interval_ms": session_player_poll_settings["idle_interval_ms"],
+            "session_player_poll_idle_threshold_ms": session_player_poll_settings["idle_threshold_ms"],
+            "session_dm_poll_active_interval_ms": session_dm_poll_settings["active_interval_ms"],
+            "session_dm_poll_idle_interval_ms": session_dm_poll_settings["idle_interval_ms"],
+            "session_dm_poll_idle_threshold_ms": session_dm_poll_settings["idle_threshold_ms"],
             "session_subpage": normalized_session_subpage,
+            "session_shell_active_pane": session_shell_active_pane,
+            "session_character_panel_loaded": False,
             "show_session_character_tab": show_session_character_tab,
             "session_character_switch_href": (
                 url_for(
@@ -5708,6 +5728,33 @@ def create_app() -> Flask:
             ),
             "active_nav": "session",
         }
+
+    def build_campaign_session_shell_context(
+        campaign_slug: str,
+        *,
+        active_pane: str = "session",
+        character_context: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        normalized_active_pane = str(active_pane or "").strip().lower()
+        if normalized_active_pane not in {"session", "character", "dm"}:
+            normalized_active_pane = "session"
+
+        session_context = build_campaign_session_page_context(
+            campaign_slug,
+            session_subpage=(
+                "dm"
+                if normalized_active_pane == "dm"
+                else "session"
+            ),
+        )
+        session_context["session_shell_active_pane"] = normalized_active_pane
+        if normalized_active_pane == "character":
+            if character_context is None:
+                character_context = build_campaign_session_character_page_context(campaign_slug)
+            session_context.update(character_context)
+            session_context["session_shell_active_pane"] = "character"
+            session_context["session_character_panel_loaded"] = True
+        return session_context
 
     def create_session_article_from_request(
         campaign_slug: str,
@@ -6243,7 +6290,12 @@ def create_app() -> Flask:
             physical_description_draft=physical_description_draft,
             background_draft=background_draft,
         )
-        return render_template("session_character.html", **context), status_code
+        shell_context = build_campaign_session_shell_context(
+            campaign_slug,
+            active_pane="character",
+            character_context=context,
+        )
+        return render_template("session_character.html", **shell_context), status_code
 
     def resolve_combat_character_target(
         tracker_view: dict[str, object],
@@ -12084,7 +12136,7 @@ def create_app() -> Flask:
     @app.get("/campaigns/<campaign_slug>/session")
     @campaign_scope_access_required("session")
     def campaign_session_view(campaign_slug: str):
-        context = build_campaign_session_page_context(campaign_slug, session_subpage="session")
+        context = build_campaign_session_shell_context(campaign_slug, active_pane="session")
         return render_template("session.html", **context)
 
     @app.get("/campaigns/<campaign_slug>/session/dm")
@@ -12093,19 +12145,20 @@ def create_app() -> Flask:
         if not can_manage_campaign_session(campaign_slug):
             abort(403)
 
-        context = build_campaign_session_page_context(campaign_slug, session_subpage="dm")
+        context = build_campaign_session_shell_context(campaign_slug, active_pane="dm")
         return render_template("session_dm.html", **context)
 
     @app.get("/campaigns/<campaign_slug>/session/character")
     @campaign_scope_access_required("session")
     def campaign_session_character_view(campaign_slug: str):
-        context = build_campaign_session_character_page_context(campaign_slug)
         if request.args.get("fragment") == "1":
+            context = build_campaign_session_character_page_context(campaign_slug)
             return render_template(
                 "_session_character_panel.html",
                 **context,
                 session_character_fragment=True,
             )
+        context = build_campaign_session_shell_context(campaign_slug, active_pane="character")
         return render_template("session_character.html", **context)
 
     @app.get("/campaigns/<campaign_slug>/session/live-state")

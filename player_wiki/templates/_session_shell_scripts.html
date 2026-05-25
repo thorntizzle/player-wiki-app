@@ -6,53 +6,62 @@
     }
 
     const switchLinks = Array.from(shellRoot.querySelectorAll("[data-session-switch='1']"));
-    const sessionPane = shellRoot.querySelector("[data-session-shell-pane='session']");
-    const characterPane = shellRoot.querySelector("[data-session-shell-pane='character']");
-    const characterFragmentUrl = characterPane?.dataset.sessionShellPaneUrl || "";
-    if (!sessionPane) {
-      return;
-    }
+    const panes = new Map(
+      Array.from(shellRoot.querySelectorAll("[data-session-shell-pane]"))
+        .map((pane) => [pane.dataset.sessionShellPane || "", pane])
+        .filter(([target]) => target),
+    );
 
     const getTargetFromUrl = () => {
       const pathname = window.location.pathname || "";
       if (pathname.includes("/session/character")) {
         return "character";
       }
+      if (pathname.includes("/session/dm")) {
+        return "dm";
+      }
       return "session";
     };
 
-    const showOnlyPane = (target) => {
-      const showSession = target === "session";
-      sessionPane.hidden = !showSession;
-      if (characterPane) {
-        characterPane.hidden = showSession;
-      }
-      shellRoot.dataset.sessionShellActive = target;
+    const normalizeTarget = (target) => {
+      const normalized = String(target || "").trim().toLowerCase();
+      return panes.has(normalized) ? normalized : "session";
     };
 
-    const syncSwitchButtons = (target) => {
-      for (const link of switchLinks) {
-        const linkTarget = link.dataset.sessionSwitchTarget;
-        if (linkTarget === "session") {
-          link.classList.toggle("button-link", target === "session");
-          link.classList.toggle("ghost-button", target !== "session");
-        } else if (linkTarget === "character") {
-          link.classList.toggle("button-link", target === "character");
-          link.classList.toggle("ghost-button", target !== "character");
+    const initPane = (pane) => {
+      if (!pane) {
+        return;
+      }
+      if (pane.dataset.sessionShellPane === "character") {
+        if (window.__playerWikiCombatWorkspace && typeof window.__playerWikiCombatWorkspace.init === "function") {
+          window.__playerWikiCombatWorkspace.init(pane);
         }
       }
-    };
-
-    const initCharacterPane = () => {
-      if (window.__playerWikiCombatWorkspace && typeof window.__playerWikiCombatWorkspace.init === "function") {
-        window.__playerWikiCombatWorkspace.init(characterPane);
+      if (window.__playerWikiSessionLive && typeof window.__playerWikiSessionLive.init === "function") {
+        window.__playerWikiSessionLive.init(pane);
       }
     };
 
-    const updateCharacterPaneHtml = (html) => {
-      characterPane.innerHTML = html;
-      initCharacterPane();
-      characterPaneLoaded = true;
+    const initMountedPanes = () => {
+      for (const pane of panes.values()) {
+        initPane(pane);
+      }
+    };
+
+    const setActiveLivePane = (pane) => {
+      if (window.__playerWikiSessionLive && typeof window.__playerWikiSessionLive.activatePane === "function") {
+        window.__playerWikiSessionLive.activatePane(pane);
+      }
+    };
+
+    const updatePaneHtml = (target, html) => {
+      const pane = panes.get(target);
+      if (!pane) {
+        return;
+      }
+      pane.innerHTML = html;
+      pane.dataset.sessionShellPaneLoaded = "1";
+      initPane(pane);
     };
 
     const fallbackUrlFromResponse = (responseUrl) => {
@@ -82,12 +91,29 @@
       return formData;
     };
 
-    let characterPaneLoaded = false;
-    const loadCharacterPane = async (fragmentUrl) => {
-      if (!characterPane || !fragmentUrl) {
+    const isPaneLoaded = (target) => {
+      const pane = panes.get(target);
+      if (!pane) {
         return false;
       }
-      if (characterPaneLoaded) {
+      if (pane.dataset.sessionShellPaneLoaded === "1") {
+        return true;
+      }
+      return pane.innerHTML.trim().length > 0;
+    };
+
+    const loadPane = async (target) => {
+      const pane = panes.get(target);
+      if (!pane) {
+        return false;
+      }
+      if (isPaneLoaded(target)) {
+        pane.dataset.sessionShellPaneLoaded = "1";
+        return true;
+      }
+
+      const fragmentUrl = pane.dataset.sessionShellPaneUrl || "";
+      if (!fragmentUrl) {
         return true;
       }
 
@@ -103,11 +129,30 @@
       }
 
       const html = await response.text();
-      updateCharacterPaneHtml(html);
+      updatePaneHtml(target, html);
       return true;
     };
 
+    const showOnlyPane = (target) => {
+      const nextTarget = normalizeTarget(target);
+      for (const [paneTarget, pane] of panes.entries()) {
+        pane.hidden = paneTarget !== nextTarget;
+      }
+      shellRoot.dataset.sessionShellActive = nextTarget;
+      setActiveLivePane(panes.get(nextTarget));
+    };
+
+    const syncSwitchButtons = (target) => {
+      const nextTarget = normalizeTarget(target);
+      for (const link of switchLinks) {
+        const linkTarget = link.dataset.sessionSwitchTarget;
+        link.classList.toggle("button-link", linkTarget === nextTarget);
+        link.classList.toggle("ghost-button", linkTarget !== nextTarget);
+      }
+    };
+
     const submitCharacterPaneForm = async (event) => {
+      const characterPane = panes.get("character");
       if (!characterPane) {
         return;
       }
@@ -142,7 +187,7 @@
       }
 
       const html = await response.text();
-      updateCharacterPaneHtml(html);
+      updatePaneHtml("character", html);
       const nextUrl = fallbackUrlFromResponse(response.url);
       if (nextUrl) {
         history.replaceState({ sessionShellView: "character" }, "", nextUrl);
@@ -152,15 +197,13 @@
     };
 
     const showShellView = async (target, { url = "", fromHistory = false } = {}) => {
-      const nextTarget = target === "character" ? "character" : "session";
-      if (nextTarget === "character" && characterPane) {
-        const loaded = await loadCharacterPane(characterFragmentUrl);
-        if (!loaded) {
-          if (url) {
-            window.location.assign(url);
-          }
-          return;
+      const nextTarget = normalizeTarget(target);
+      const loaded = await loadPane(nextTarget);
+      if (!loaded) {
+        if (url) {
+          window.location.assign(url);
         }
+        return;
       }
 
       showOnlyPane(nextTarget);
@@ -168,10 +211,6 @@
       if (!fromHistory && url) {
         history.pushState({ sessionShellView: nextTarget }, "", url);
       }
-    };
-
-    const showByHistory = async (target) => {
-      await showShellView(target, { fromHistory: true });
     };
 
     const clickHandler = async (event) => {
@@ -184,7 +223,7 @@
       }
 
       const target = link.dataset.sessionSwitchTarget || "";
-      if (target !== "session" && target !== "character") {
+      if (!panes.has(target)) {
         return;
       }
       if (shellRoot.dataset.sessionShellActive === target) {
@@ -201,12 +240,15 @@
       await showShellView(target, { url: href });
     };
 
-    showOnlyPane("session");
-    syncSwitchButtons("session");
+    const initialTarget = normalizeTarget(shellRoot.dataset.sessionShellActive || getTargetFromUrl());
+    initMountedPanes();
+    showOnlyPane(initialTarget);
+    syncSwitchButtons(initialTarget);
+
     window.addEventListener("popstate", (event) => {
       const stateTarget = event.state && typeof event.state.sessionShellView === "string" ? event.state.sessionShellView : "";
-      const resolved = stateTarget === "character" ? "character" : getTargetFromUrl();
-      showByHistory(resolved);
+      const resolved = normalizeTarget(stateTarget || getTargetFromUrl());
+      showShellView(resolved, { fromHistory: true });
     });
 
     shellRoot.addEventListener("click", (event) => {
@@ -222,6 +264,7 @@
       });
     });
 
+    const characterPane = panes.get("character");
     if (characterPane) {
       characterPane.addEventListener("submit", (event) => {
         submitCharacterPaneForm(event).catch(() => {

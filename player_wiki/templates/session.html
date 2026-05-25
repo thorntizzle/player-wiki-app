@@ -3,15 +3,16 @@
 {% block title %}Session | {{ campaign.title }}{% endblock %}
 
 {% block content %}
+  {% set active_session_shell_pane = session_shell_active_pane | default(session_subpage, true) %}
   <div
     class="session-shell"
     data-session-shell-root
-    data-session-shell-active="session"
+    data-session-shell-active="{{ active_session_shell_pane }}"
   >
     <section class="hero compact">
-      <p class="eyebrow">Session</p>
+      <p class="eyebrow">Session Workspace</p>
       <h1>{{ campaign.title }} Session</h1>
-      <p class="lede">Live session feed and table chat.</p>
+      <p class="lede">Live play workspace.</p>
       <div class="hero-actions">
         {% include "_session_view_switch.html" %}
       </div>
@@ -20,48 +21,32 @@
     <div
       class="session-shell-pane"
       data-session-shell-pane="session"
+      {% if active_session_shell_pane != "session" %}hidden{% endif %}
     >
-      <div
-        class="page-layout session-layout"
-        data-session-live-root
-        data-loading="0"
-        data-session-live-url="{{ url_for('campaign_session_live_state', campaign_slug=campaign.slug, view='session') }}"
-        data-active-session-id="{{ active_session_id or '' }}"
-        data-session-manager-state-token="{{ session_manager_state_token }}"
-        data-live-revision="{{ session_live_revision }}"
-        data-live-view-token="{{ session_live_view_token }}"
-        data-live-active-interval-ms="{{ session_poll_active_interval_ms }}"
-        data-live-idle-interval-ms="{{ session_poll_idle_interval_ms }}"
-        data-live-idle-threshold-ms="{{ session_poll_idle_threshold_ms }}"
-        data-live-diagnostics-enabled="{{ '1' if live_diagnostics_enabled else '0' }}"
-      >
-        <section class="session-column">
-          <article class="card session-status-card" data-session-status-card>
-            {% include "_session_status_card.html" %}
-          </article>
-
-          <article class="card session-chat-card" id="session-chat" data-session-chat-card>
-            {% include "_session_chat_card.html" %}
-          </article>
-
-          <div data-session-composer-root>
-            {% include "_session_composer_card.html" %}
-          </div>
-        </section>
-
-        <aside class="session-sidebar">
-          {% include "_session_wiki_lookup_card.html" %}
-        </aside>
-      </div>
+      {% include "_session_player_panel.html" %}
     </div>
 
-    {% if show_session_character_tab %}
+    {% if show_session_character_tab or active_session_shell_pane == "character" %}
       <div
         class="session-shell-pane"
         data-session-shell-pane="character"
         data-session-shell-pane-url="{{ session_character_fragment_href }}"
-        hidden
-      ></div>
+        {% if active_session_shell_pane != "character" %}hidden{% endif %}
+      >
+        {% if session_character_panel_loaded | default(false) %}
+          {% include "_session_character_panel.html" %}
+        {% endif %}
+      </div>
+    {% endif %}
+
+    {% if can_manage_session %}
+      <div
+        class="session-shell-pane"
+        data-session-shell-pane="dm"
+        {% if active_session_shell_pane != "dm" %}hidden{% endif %}
+      >
+        {% include "_session_dm_panel.html" %}
+      </div>
     {% endif %}
   </div>
 {% endblock %}

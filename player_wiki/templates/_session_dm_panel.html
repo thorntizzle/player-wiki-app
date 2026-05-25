@@ -1,0 +1,41 @@
+<div
+  class="page-layout session-layout"
+  data-session-live-root
+  data-session-live-view="dm"
+  data-loading="0"
+  data-session-live-url="{{ url_for('campaign_session_live_state', campaign_slug=campaign.slug, view='dm') }}"
+  data-active-session-id="{{ active_session_id or '' }}"
+  data-session-manager-state-token="{{ session_manager_state_token }}"
+  data-live-revision="{{ session_live_revision }}"
+  data-live-view-token="{{ session_dm_live_view_token | default(session_live_view_token, true) }}"
+  data-live-active-interval-ms="{{ session_dm_poll_active_interval_ms | default(session_poll_active_interval_ms, true) }}"
+  data-live-idle-interval-ms="{{ session_dm_poll_idle_interval_ms | default(session_poll_idle_interval_ms, true) }}"
+  data-live-idle-threshold-ms="{{ session_dm_poll_idle_threshold_ms | default(session_poll_idle_threshold_ms, true) }}"
+  data-live-diagnostics-enabled="{{ '1' if live_diagnostics_enabled else '0' }}"
+>
+  <section class="session-column">
+    <article class="card session-status-card" data-session-status-card>
+      {% include "_session_status_card.html" %}
+    </article>
+
+    <div id="session-controls" data-session-controls-root>
+      {% include "_session_controls_card.html" %}
+    </div>
+
+    <div data-session-staged-root>
+      {% include "_session_staged_articles_card.html" %}
+    </div>
+
+    <div data-session-revealed-root>
+      {% include "_session_revealed_articles_card.html" %}
+    </div>
+  </section>
+
+  <aside class="session-sidebar">
+    {% include "_session_article_store_card.html" %}
+
+    <div data-session-logs-root>
+      {% include "_session_logs_card.html" %}
+    </div>
+  </aside>
+</div>

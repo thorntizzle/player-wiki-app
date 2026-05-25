@@ -1,264 +1,495 @@
 <script>
   (() => {
-    const liveRoot = document.querySelector("[data-session-live-root]");
-    if (!liveRoot) {
-      return;
-    }
+    const controllers = new WeakMap();
+    const controllerSet = new Set();
 
-    const flashRoot = document.querySelector("[data-flash-stack-root]");
-    const statusCard = document.querySelector("[data-session-status-card]");
-    const chatCard = document.querySelector("[data-session-chat-card]");
-    const composerRoot = document.querySelector("[data-session-composer-root]");
-    const controlsRoot = document.querySelector("[data-session-controls-root]");
-    const stagedRoot = document.querySelector("[data-session-staged-root]");
-    const revealedRoot = document.querySelector("[data-session-revealed-root]");
-    const logsRoot = document.querySelector("[data-session-logs-root]");
-    const pollUrl = liveRoot.dataset.sessionLiveUrl;
-    let activeSessionId = liveRoot.dataset.activeSessionId || "";
-    let managerStateToken = liveRoot.dataset.sessionManagerStateToken || "";
-    let liveRevision = Number.parseInt(liveRoot.dataset.liveRevision || "0", 10);
-    if (!Number.isFinite(liveRevision) || liveRevision < 0) {
-      liveRevision = 0;
-    }
-    let liveViewToken = liveRoot.dataset.liveViewToken || "";
-    const activeIntervalMs = Number.parseInt(liveRoot.dataset.liveActiveIntervalMs || "3000", 10) || 3000;
-    const idleIntervalMs = Number.parseInt(liveRoot.dataset.liveIdleIntervalMs || String(activeIntervalMs), 10) || activeIntervalMs;
-    const idleThresholdMs = Number.parseInt(liveRoot.dataset.liveIdleThresholdMs || "30000", 10) || 30000;
-    const diagnosticsEnabled = liveRoot.dataset.liveDiagnosticsEnabled === "1";
-    const diagnosticsTools = diagnosticsEnabled ? window.__playerWikiLiveDiagnosticsTools : null;
-    const uiStateTools = window.__playerWikiLiveUiTools || null;
-    let pollTimerId = 0;
-    let pollInFlight = false;
-    let requestInFlight = false;
-    let lastActivityAt = Date.now();
-    const sessionArticleSourceSearchResetters = new WeakMap();
-
-    const markActivity = () => {
-      lastActivityAt = Date.now();
-    };
-
-    const getNextPollDelay = () => {
-      if (document.hidden) {
-        return idleIntervalMs;
+    const initSessionLiveRoot = (liveRoot, { autoStart = true } = {}) => {
+      if (!(liveRoot instanceof HTMLElement)) {
+        return null;
       }
-      return Date.now() - lastActivityAt >= idleThresholdMs ? idleIntervalMs : activeIntervalMs;
-    };
-
-    const scheduleNextPoll = (delayMs = getNextPollDelay()) => {
-      window.clearTimeout(pollTimerId);
-      pollTimerId = window.setTimeout(() => {
-        pollTimerId = 0;
-        refreshLiveState();
-      }, delayMs);
-    };
-
-    const syncLiveMetadata = (payload = {}, response = null) => {
-      const payloadRevision = Number.parseInt(
-        typeof payload.live_revision === "number" || typeof payload.live_revision === "string"
-          ? String(payload.live_revision)
-          : "",
-        10,
-      );
-      if (Number.isFinite(payloadRevision) && payloadRevision >= 0) {
-        liveRevision = payloadRevision;
-      } else if (response instanceof Response) {
-        const headerRevision = Number.parseInt(response.headers.get("X-Live-Revision") || "", 10);
-        if (Number.isFinite(headerRevision) && headerRevision >= 0) {
-          liveRevision = headerRevision;
-        }
+      if (controllers.has(liveRoot)) {
+        return controllers.get(liveRoot);
       }
 
-      if (typeof payload.live_view_token === "string" && payload.live_view_token) {
-        liveViewToken = payload.live_view_token;
+      const flashRoot = document.querySelector("[data-flash-stack-root]");
+      const statusCard = liveRoot.querySelector("[data-session-status-card]");
+      const chatCard = liveRoot.querySelector("[data-session-chat-card]");
+      const composerRoot = liveRoot.querySelector("[data-session-composer-root]");
+      const controlsRoot = liveRoot.querySelector("[data-session-controls-root]");
+      const stagedRoot = liveRoot.querySelector("[data-session-staged-root]");
+      const revealedRoot = liveRoot.querySelector("[data-session-revealed-root]");
+      const logsRoot = liveRoot.querySelector("[data-session-logs-root]");
+      const pollUrl = liveRoot.dataset.sessionLiveUrl;
+      const liveViewName = liveRoot.dataset.sessionLiveView || "session";
+      const metricName = liveViewName === "dm" ? "session-dm" : "session";
+      let activeSessionId = liveRoot.dataset.activeSessionId || "";
+      let managerStateToken = liveRoot.dataset.sessionManagerStateToken || "";
+      let liveRevision = Number.parseInt(liveRoot.dataset.liveRevision || "0", 10);
+      if (!Number.isFinite(liveRevision) || liveRevision < 0) {
+        liveRevision = 0;
       }
+      let liveViewToken = liveRoot.dataset.liveViewToken || "";
+      const activeIntervalMs = Number.parseInt(liveRoot.dataset.liveActiveIntervalMs || "3000", 10) || 3000;
+      const idleIntervalMs = Number.parseInt(liveRoot.dataset.liveIdleIntervalMs || String(activeIntervalMs), 10) || activeIntervalMs;
+      const idleThresholdMs = Number.parseInt(liveRoot.dataset.liveIdleThresholdMs || "30000", 10) || 30000;
+      const diagnosticsEnabled = liveRoot.dataset.liveDiagnosticsEnabled === "1";
+      const diagnosticsTools = diagnosticsEnabled ? window.__playerWikiLiveDiagnosticsTools : null;
+      const uiStateTools = window.__playerWikiLiveUiTools || null;
+      const sessionArticleSourceSearchResetters = new WeakMap();
+      let pollTimerId = 0;
+      let pollInFlight = false;
+      let requestInFlight = false;
+      let paused = false;
+      let lastActivityAt = Date.now();
 
-      liveRoot.dataset.liveRevision = String(liveRevision);
-      liveRoot.dataset.liveViewToken = liveViewToken;
-    };
-
-    const buildLiveHeaders = () => {
-      const headers = {
-        "X-Requested-With": "XMLHttpRequest",
+      const enclosingPane = () => liveRoot.closest("[data-session-shell-pane]");
+      const isPaneHidden = () => {
+        const pane = enclosingPane();
+        return pane instanceof HTMLElement ? pane.hidden : false;
       };
-      headers["X-Live-Revision"] = String(liveRevision);
-      if (liveViewToken) {
-        headers["X-Live-View-Token"] = liveViewToken;
-      }
-      return headers;
-    };
+      const isPaused = () => paused || isPaneHidden() || !pollUrl;
 
-    const logLiveDiagnostics = (viewName, response, payload = null) => {
-      if (!diagnosticsEnabled || !(response instanceof Response) || typeof console === "undefined" || !console.debug) {
-        return;
-      }
-      console.debug(`[live:${viewName}]`, {
-        changed:
-          typeof payload?.changed === "boolean"
-            ? payload.changed
-            : response.headers.get("X-Live-State-Changed"),
-        revision: response.headers.get("X-Live-Revision") || liveRevision,
-        payloadBytes: response.headers.get("X-Live-Payload-Bytes"),
-        serverTiming: response.headers.get("Server-Timing"),
-      });
-    };
+      const markActivity = () => {
+        lastActivityAt = Date.now();
+      };
 
-    const recordLiveMetric = (metric) => {
-      if (!diagnosticsEnabled || !diagnosticsTools) {
-        return metric;
-      }
-      return diagnosticsTools.recordMetric("session", metric);
-    };
+      const getNextPollDelay = () => {
+        if (document.hidden) {
+          return idleIntervalMs;
+        }
+        return Date.now() - lastActivityAt >= idleThresholdMs ? idleIntervalMs : activeIntervalMs;
+      };
 
-    const buildLiveMetric = (response, payload, { mode, requestMs = 0, applyMs = 0 } = {}) => {
-      const headerChanged = response.headers.get("X-Live-State-Changed");
-      const queryCount = Number.parseInt(response.headers.get("X-Live-Query-Count") || "0", 10);
-      const queryTimeMs = Number.parseFloat(response.headers.get("X-Live-Query-Time-Ms") || "0");
-      const requestTimeMs = Number.parseFloat(response.headers.get("X-Live-Request-Time-Ms") || "0");
-      const payloadBytes = Number.parseInt(response.headers.get("X-Live-Payload-Bytes") || "0", 10);
-      return recordLiveMetric({
-        mode,
-        changed: typeof payload?.changed === "boolean" ? payload.changed : headerChanged === "true",
-        requestMs: Number(requestMs.toFixed(2)),
-        applyMs: Number(applyMs.toFixed(2)),
-        liveRevision,
-        liveViewToken,
-        payloadBytes: Number.isFinite(payloadBytes) ? payloadBytes : 0,
-        queryCount: Number.isFinite(queryCount) ? queryCount : 0,
-        queryTimeMs: Number.isFinite(queryTimeMs) ? Number(queryTimeMs.toFixed(2)) : 0,
-        requestTimeMs: Number.isFinite(requestTimeMs) ? Number(requestTimeMs.toFixed(2)) : 0,
-        serverTiming: response.headers.get("Server-Timing") || "",
-      });
-    };
+      const scheduleNextPoll = (delayMs = getNextPollDelay()) => {
+        window.clearTimeout(pollTimerId);
+        if (isPaused()) {
+          pollTimerId = 0;
+          return;
+        }
+        pollTimerId = window.setTimeout(() => {
+          pollTimerId = 0;
+          refreshLiveState();
+        }, delayMs);
+      };
 
-    const hasFocusedFormControl = () => {
-      const activeElement = document.activeElement;
-      if (!activeElement || !liveRoot.contains(activeElement)) {
-        return false;
-      }
-      return activeElement.matches("input, textarea, select");
-    };
+      const syncLiveMetadata = (payload = {}, response = null) => {
+        const payloadRevision = Number.parseInt(
+          typeof payload.live_revision === "number" || typeof payload.live_revision === "string"
+            ? String(payload.live_revision)
+            : "",
+          10,
+        );
+        if (Number.isFinite(payloadRevision) && payloadRevision >= 0) {
+          liveRevision = payloadRevision;
+        } else if (response instanceof Response) {
+          const headerRevision = Number.parseInt(response.headers.get("X-Live-Revision") || "", 10);
+          if (Number.isFinite(headerRevision) && headerRevision >= 0) {
+            liveRevision = headerRevision;
+          }
+        }
 
-    const updateFileFieldName = (field) => {
-      const input = field.querySelector("[data-session-file-input]");
-      const fileName = field.querySelector("[data-session-file-name]");
-      if (!input || !fileName) {
-        return;
-      }
-      const selectedFile = input.files && input.files.length ? input.files[0] : null;
-      fileName.textContent = selectedFile ? selectedFile.name : "No file selected.";
-    };
+        if (typeof payload.live_view_token === "string" && payload.live_view_token) {
+          liveViewToken = payload.live_view_token;
+        }
 
-    const initializeFileField = (field) => {
-      if (field.dataset.sessionFileInitialized === "1") {
+        liveRoot.dataset.liveRevision = String(liveRevision);
+        liveRoot.dataset.liveViewToken = liveViewToken;
+      };
+
+      const buildLiveHeaders = () => {
+        const headers = {
+          "X-Requested-With": "XMLHttpRequest",
+        };
+        headers["X-Live-Revision"] = String(liveRevision);
+        if (liveViewToken) {
+          headers["X-Live-View-Token"] = liveViewToken;
+        }
+        return headers;
+      };
+
+      const logLiveDiagnostics = (viewName, response, payload = null) => {
+        if (!diagnosticsEnabled || !(response instanceof Response) || typeof console === "undefined" || !console.debug) {
+          return;
+        }
+        console.debug(`[live:${viewName}]`, {
+          changed:
+            typeof payload?.changed === "boolean"
+              ? payload.changed
+              : response.headers.get("X-Live-State-Changed"),
+          revision: response.headers.get("X-Live-Revision") || liveRevision,
+          payloadBytes: response.headers.get("X-Live-Payload-Bytes"),
+          serverTiming: response.headers.get("Server-Timing"),
+        });
+      };
+
+      const recordLiveMetric = (metric) => {
+        if (!diagnosticsEnabled || !diagnosticsTools) {
+          return metric;
+        }
+        return diagnosticsTools.recordMetric(metricName, metric);
+      };
+
+      const buildLiveMetric = (response, payload, { mode, requestMs = 0, applyMs = 0 } = {}) => {
+        const headerChanged = response.headers.get("X-Live-State-Changed");
+        const queryCount = Number.parseInt(response.headers.get("X-Live-Query-Count") || "0", 10);
+        const queryTimeMs = Number.parseFloat(response.headers.get("X-Live-Query-Time-Ms") || "0");
+        const requestTimeMs = Number.parseFloat(response.headers.get("X-Live-Request-Time-Ms") || "0");
+        const payloadBytes = Number.parseInt(response.headers.get("X-Live-Payload-Bytes") || "0", 10);
+        return recordLiveMetric({
+          mode,
+          changed: typeof payload?.changed === "boolean" ? payload.changed : headerChanged === "true",
+          requestMs: Number(requestMs.toFixed(2)),
+          applyMs: Number(applyMs.toFixed(2)),
+          liveRevision,
+          liveViewToken,
+          payloadBytes: Number.isFinite(payloadBytes) ? payloadBytes : 0,
+          queryCount: Number.isFinite(queryCount) ? queryCount : 0,
+          queryTimeMs: Number.isFinite(queryTimeMs) ? Number(queryTimeMs.toFixed(2)) : 0,
+          requestTimeMs: Number.isFinite(requestTimeMs) ? Number(requestTimeMs.toFixed(2)) : 0,
+          serverTiming: response.headers.get("Server-Timing") || "",
+        });
+      };
+
+      const hasFocusedFormControl = () => {
+        const activeElement = document.activeElement;
+        if (!activeElement || !liveRoot.contains(activeElement)) {
+          return false;
+        }
+        return activeElement.matches("input, textarea, select");
+      };
+
+      const updateFileFieldName = (field) => {
+        const input = field.querySelector("[data-session-file-input]");
+        const fileName = field.querySelector("[data-session-file-name]");
+        if (!input || !fileName) {
+          return;
+        }
+        const selectedFile = input.files && input.files.length ? input.files[0] : null;
+        fileName.textContent = selectedFile ? selectedFile.name : "No file selected.";
+      };
+
+      const initializeFileField = (field) => {
+        if (field.dataset.sessionFileInitialized === "1") {
+          updateFileFieldName(field);
+          return;
+        }
+
+        const input = field.querySelector("[data-session-file-input]");
+        const dropzone = field.querySelector("[data-session-file-dropzone]");
+        if (!input || !dropzone) {
+          return;
+        }
+
+        const clearDragging = () => {
+          dropzone.classList.remove("is-dragging");
+        };
+
+        dropzone.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter" && event.key !== " ") {
+            return;
+          }
+          event.preventDefault();
+          input.click();
+        });
+        dropzone.addEventListener("dragenter", (event) => {
+          event.preventDefault();
+          dropzone.classList.add("is-dragging");
+        });
+        dropzone.addEventListener("dragover", (event) => {
+          event.preventDefault();
+          dropzone.classList.add("is-dragging");
+        });
+        dropzone.addEventListener("dragleave", (event) => {
+          if (dropzone.contains(event.relatedTarget)) {
+            return;
+          }
+          clearDragging();
+        });
+        dropzone.addEventListener("drop", (event) => {
+          event.preventDefault();
+          clearDragging();
+          const droppedFiles = event.dataTransfer && event.dataTransfer.files;
+          if (!droppedFiles || !droppedFiles.length) {
+            return;
+          }
+          const transfer = new DataTransfer();
+          transfer.items.add(droppedFiles[0]);
+          input.files = transfer.files;
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+
+        input.addEventListener("change", () => updateFileFieldName(field));
+        field.dataset.sessionFileInitialized = "1";
         updateFileFieldName(field);
-        return;
-      }
-
-      const input = field.querySelector("[data-session-file-input]");
-      const dropzone = field.querySelector("[data-session-file-dropzone]");
-      if (!input || !dropzone) {
-        return;
-      }
-
-      const clearDragging = () => {
-        dropzone.classList.remove("is-dragging");
       };
 
-      dropzone.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") {
+      const initializeFileFields = (root = liveRoot) => {
+        const fileFields = Array.from(root.querySelectorAll(".session-file-field"));
+        for (const field of fileFields) {
+          initializeFileField(field);
+        }
+      };
+
+      const resetSessionArticleSourceSearch = (form) => {
+        const resetter = sessionArticleSourceSearchResetters.get(form);
+        if (typeof resetter === "function") {
+          resetter();
+        }
+      };
+
+      const initializeSessionArticleSourceSearch = (root = liveRoot) => {
+        const forms = root instanceof HTMLFormElement
+          ? [root]
+          : Array.from(root.querySelectorAll("[data-session-article-form]"));
+
+        for (const form of forms) {
+          if (!(form instanceof HTMLFormElement)) {
+            continue;
+          }
+
+          const searchInput = form.querySelector("[data-session-article-source-query]");
+          const resultsSelect = form.querySelector("[data-session-article-source-results]");
+          const status = form.querySelector("[data-session-article-source-status]");
+          const searchUrl = form.dataset.sessionArticleSourceSearchUrl || "";
+          const defaultMessage = "Type at least 2 letters to search published wiki pages and Systems entries.";
+
+          if (
+            !(searchInput instanceof HTMLInputElement)
+            || !(resultsSelect instanceof HTMLSelectElement)
+            || !(status instanceof HTMLElement)
+            || !searchUrl
+          ) {
+            continue;
+          }
+
+          if (form.dataset.sessionArticleSourceSearchInitialized === "1") {
+            resetSessionArticleSourceSearch(form);
+            continue;
+          }
+
+          let searchAbortController = null;
+          let searchTimerId = 0;
+
+          const setStatus = (message) => {
+            status.textContent = message;
+          };
+
+          const resetResults = (message = defaultMessage) => {
+            resultsSelect.innerHTML = "";
+            const option = document.createElement("option");
+            option.value = "";
+            option.textContent = "Search to load matching articles";
+            resultsSelect.append(option);
+            resultsSelect.disabled = true;
+            setStatus(message);
+          };
+
+          const renderResults = (results, message) => {
+            if (!Array.isArray(results) || !results.length) {
+              resetResults(message || "No published wiki or Systems articles matched that search.");
+              return;
+            }
+
+            resultsSelect.innerHTML = "";
+            for (const result of results) {
+              const option = document.createElement("option");
+              option.value = String(result.source_ref || "");
+              option.textContent = String(result.select_label || result.title || "");
+              resultsSelect.append(option);
+            }
+            resultsSelect.disabled = false;
+            resultsSelect.selectedIndex = 0;
+            setStatus(message || `Found ${results.length} matching articles.`);
+          };
+
+          const runSearch = async () => {
+            const query = searchInput.value.trim();
+            if (searchAbortController) {
+              searchAbortController.abort();
+            }
+            if (query.length < 2) {
+              resetResults(defaultMessage);
+              return;
+            }
+
+            setStatus("Searching published wiki pages and Systems entries...");
+            searchAbortController = new AbortController();
+            try {
+              const response = await fetch(`${searchUrl}?q=${encodeURIComponent(query)}`, {
+                headers: {
+                  "X-Requested-With": "XMLHttpRequest",
+                  "Accept": "application/json",
+                },
+                cache: "no-store",
+                credentials: "same-origin",
+                signal: searchAbortController.signal,
+              });
+              if (!response.ok) {
+                resetResults("Could not search article sources right now.");
+                return;
+              }
+
+              const payload = await response.json();
+              renderResults(payload.results, typeof payload.message === "string" ? payload.message : "");
+            } catch (error) {
+              if (error instanceof DOMException && error.name === "AbortError") {
+                return;
+              }
+              resetResults("Could not search article sources right now.");
+            } finally {
+              searchAbortController = null;
+            }
+          };
+
+          searchInput.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+            }
+          });
+          searchInput.addEventListener("input", () => {
+            window.clearTimeout(searchTimerId);
+            searchTimerId = window.setTimeout(runSearch, 250);
+          });
+
+          sessionArticleSourceSearchResetters.set(form, () => {
+            if (searchAbortController) {
+              searchAbortController.abort();
+            }
+            window.clearTimeout(searchTimerId);
+            searchInput.value = "";
+            resetResults(defaultMessage);
+          });
+          form.dataset.sessionArticleSourceSearchInitialized = "1";
+          resetResults(defaultMessage);
+        }
+      };
+
+      const initializeSessionWikiLookup = () => {
+        const root = liveRoot.querySelector("[data-session-wiki-lookup-root]");
+        if (!(root instanceof HTMLElement)) {
           return;
         }
-        event.preventDefault();
-        input.click();
-      });
 
-      dropzone.addEventListener("dragenter", (event) => {
-        event.preventDefault();
-        dropzone.classList.add("is-dragging");
-      });
-
-      dropzone.addEventListener("dragover", (event) => {
-        event.preventDefault();
-        dropzone.classList.add("is-dragging");
-      });
-
-      dropzone.addEventListener("dragleave", (event) => {
-        if (dropzone.contains(event.relatedTarget)) {
-          return;
-        }
-        clearDragging();
-      });
-
-      dropzone.addEventListener("drop", (event) => {
-        event.preventDefault();
-        clearDragging();
-        const droppedFiles = event.dataTransfer && event.dataTransfer.files;
-        if (!droppedFiles || !droppedFiles.length) {
-          return;
-        }
-        const transfer = new DataTransfer();
-        transfer.items.add(droppedFiles[0]);
-        input.files = transfer.files;
-        input.dispatchEvent(new Event("change", { bubbles: true }));
-      });
-
-      input.addEventListener("change", () => updateFileFieldName(field));
-      field.dataset.sessionFileInitialized = "1";
-      updateFileFieldName(field);
-    };
-
-    const initializeFileFields = (root = document) => {
-      const fileFields = Array.from(root.querySelectorAll(".session-file-field"));
-      for (const field of fileFields) {
-        initializeFileField(field);
-      }
-    };
-
-    const resetSessionArticleSourceSearch = (form) => {
-      const resetter = sessionArticleSourceSearchResetters.get(form);
-      if (typeof resetter === "function") {
-        resetter();
-      }
-    };
-
-    const initializeSessionArticleSourceSearch = (root = document) => {
-      const forms = root instanceof HTMLFormElement
-        ? [root]
-        : Array.from(root.querySelectorAll("[data-session-article-form]"));
-
-      for (const form of forms) {
-        if (!(form instanceof HTMLFormElement)) {
-          continue;
-        }
-
-        const searchInput = form.querySelector("[data-session-article-source-query]");
-        const resultsSelect = form.querySelector("[data-session-article-source-results]");
-        const status = form.querySelector("[data-session-article-source-status]");
-        const searchUrl = form.dataset.sessionArticleSourceSearchUrl || "";
-        const defaultMessage = "Type at least 2 letters to search published wiki pages and Systems entries.";
+        const searchInput = root.querySelector("[data-session-wiki-lookup-query]");
+        const resultsSelect = root.querySelector("[data-session-wiki-lookup-results]");
+        const status = root.querySelector("[data-session-wiki-lookup-status]");
+        const previewRoot = root.querySelector("[data-session-wiki-lookup-preview]");
+        const searchUrl = root.dataset.sessionWikiLookupSearchUrl || "";
+        const previewUrl = root.dataset.sessionWikiLookupPreviewUrl || "";
+        const defaultStatus = "Type at least 2 letters to search player-visible wiki articles.";
 
         if (
           !(searchInput instanceof HTMLInputElement)
           || !(resultsSelect instanceof HTMLSelectElement)
           || !(status instanceof HTMLElement)
+          || !(previewRoot instanceof HTMLElement)
           || !searchUrl
+          || !previewUrl
         ) {
-          continue;
+          return;
         }
 
-        if (form.dataset.sessionArticleSourceSearchInitialized === "1") {
-          resetSessionArticleSourceSearch(form);
-          continue;
+        if (root.dataset.sessionWikiLookupInitialized === "1") {
+          return;
         }
 
         let searchAbortController = null;
+        let previewAbortController = null;
         let searchTimerId = 0;
+        let statusTimerId = 0;
+        let persistentStatusMessage = defaultStatus;
 
-        const setStatus = (message) => {
+        const setStatus = (message, { persist = true } = {}) => {
+          if (persist) {
+            persistentStatusMessage = message;
+          }
+          window.clearTimeout(statusTimerId);
           status.textContent = message;
         };
 
-        const resetResults = (message = defaultMessage) => {
+        const restorePersistentStatus = () => {
+          window.clearTimeout(statusTimerId);
+          statusTimerId = window.setTimeout(() => {
+            status.textContent = persistentStatusMessage;
+            statusTimerId = 0;
+          }, 3000);
+        };
+
+        const setPreviewBusyState = (isBusy) => {
+          previewRoot.dataset.loading = isBusy ? "1" : "0";
+          previewRoot.setAttribute("aria-busy", isBusy ? "true" : "false");
+        };
+
+        const setPreviewMessage = (message) => {
+          setPreviewBusyState(false);
+          previewRoot.innerHTML = "";
+          const paragraph = document.createElement("p");
+          paragraph.className = "meta";
+          paragraph.textContent = message;
+          previewRoot.append(paragraph);
+        };
+
+        const loadPreview = async (pageRef) => {
+          if (previewAbortController) {
+            previewAbortController.abort();
+          }
+          if (!pageRef) {
+            setPreviewMessage("Search and choose a player-visible wiki article to read it here.");
+            return;
+          }
+
+          const preserveExistingPreview = previewRoot.querySelector(".session-wiki-lookup-result") !== null;
+          if (preserveExistingPreview) {
+            setPreviewBusyState(true);
+          } else {
+            setPreviewMessage("Loading article preview...");
+          }
+
+          const controller = new AbortController();
+          previewAbortController = controller;
+          try {
+            const response = await fetch(`${previewUrl}?page_ref=${encodeURIComponent(pageRef)}`, {
+              headers: {
+                "X-Requested-With": "XMLHttpRequest",
+                "Accept": "application/json",
+              },
+              cache: "no-store",
+              credentials: "same-origin",
+              signal: controller.signal,
+            });
+            const payload = await response.json();
+            if (typeof payload.preview_html === "string") {
+              previewRoot.innerHTML = payload.preview_html;
+              setPreviewBusyState(false);
+              return;
+            }
+            if (preserveExistingPreview) {
+              setPreviewBusyState(false);
+              setStatus("Could not load that article right now.", { persist: false });
+              restorePersistentStatus();
+              return;
+            }
+            setPreviewMessage("Could not load that article right now.");
+          } catch (error) {
+            if (error instanceof DOMException && error.name === "AbortError") {
+              return;
+            }
+            if (preserveExistingPreview) {
+              setPreviewBusyState(false);
+              setStatus("Could not load that article right now.", { persist: false });
+              restorePersistentStatus();
+              return;
+            }
+            setPreviewMessage("Could not load that article right now.");
+          } finally {
+            if (previewAbortController === controller) {
+              previewAbortController = null;
+              setPreviewBusyState(false);
+            }
+          }
+        };
+
+        const resetResults = (message = defaultStatus) => {
           resultsSelect.innerHTML = "";
           const option = document.createElement("option");
           option.value = "";
@@ -266,24 +497,26 @@
           resultsSelect.append(option);
           resultsSelect.disabled = true;
           setStatus(message);
+          setPreviewMessage("Search and choose a player-visible wiki article to read it here.");
         };
 
         const renderResults = (results, message) => {
           if (!Array.isArray(results) || !results.length) {
-            resetResults(message || "No published wiki or Systems articles matched that search.");
+            resetResults(message || "No player-visible wiki articles matched that search.");
             return;
           }
 
           resultsSelect.innerHTML = "";
           for (const result of results) {
             const option = document.createElement("option");
-            option.value = String(result.source_ref || "");
+            option.value = String(result.page_ref || "");
             option.textContent = String(result.select_label || result.title || "");
             resultsSelect.append(option);
           }
           resultsSelect.disabled = false;
           resultsSelect.selectedIndex = 0;
           setStatus(message || `Found ${results.length} matching articles.`);
+          loadPreview(resultsSelect.value);
         };
 
         const runSearch = async () => {
@@ -292,11 +525,11 @@
             searchAbortController.abort();
           }
           if (query.length < 2) {
-            resetResults(defaultMessage);
+            resetResults(defaultStatus);
             return;
           }
 
-          setStatus("Searching published wiki pages and Systems entries...");
+          setStatus("Searching player-visible wiki articles...");
           searchAbortController = new AbortController();
           try {
             const response = await fetch(`${searchUrl}?q=${encodeURIComponent(query)}`, {
@@ -309,7 +542,7 @@
               signal: searchAbortController.signal,
             });
             if (!response.ok) {
-              resetResults("Could not search article sources right now.");
+              resetResults("Could not search wiki articles right now.");
               return;
             }
 
@@ -319,12 +552,15 @@
             if (error instanceof DOMException && error.name === "AbortError") {
               return;
             }
-            resetResults("Could not search article sources right now.");
+            resetResults("Could not search wiki articles right now.");
           } finally {
             searchAbortController = null;
           }
         };
 
+        resultsSelect.addEventListener("change", () => {
+          loadPreview(resultsSelect.value);
+        });
         searchInput.addEventListener("keydown", (event) => {
           if (event.key === "Enter") {
             event.preventDefault();
@@ -335,470 +571,333 @@
           searchTimerId = window.setTimeout(runSearch, 250);
         });
 
-        sessionArticleSourceSearchResetters.set(form, () => {
-          if (searchAbortController) {
-            searchAbortController.abort();
+        root.dataset.sessionWikiLookupInitialized = "1";
+        resetResults(defaultStatus);
+      };
+
+      const clearSessionArticleForm = (form) => {
+        const selectedMode = form.querySelector('input[name="article_mode"]:checked')?.value || "manual";
+        form.reset();
+        const selectedRadio = form.querySelector(`input[name="article_mode"][value="${selectedMode}"]`);
+        if (selectedRadio) {
+          selectedRadio.checked = true;
+        }
+        initializeFileFields(form);
+        initializeSessionArticleSourceSearch(form);
+      };
+
+      const scrollToAnchor = (anchor) => {
+        if (!anchor) {
+          return;
+        }
+        const target = document.getElementById(anchor);
+        if (target) {
+          target.scrollIntoView({ block: "start" });
+        }
+      };
+
+      const collectOpenSessionArticleIds = (root) => {
+        if (!(root instanceof HTMLElement)) {
+          return [];
+        }
+        return Array.from(root.querySelectorAll("details[data-session-article-id][open]"))
+          .map((detail) => detail.dataset.sessionArticleId || "")
+          .filter(Boolean);
+      };
+
+      const restoreOpenSessionArticleIds = (root, openIds) => {
+        if (!(root instanceof HTMLElement) || !openIds.size) {
+          return;
+        }
+        for (const detail of root.querySelectorAll("details[data-session-article-id]")) {
+          const articleId = detail.dataset.sessionArticleId || "";
+          if (openIds.has(articleId)) {
+            detail.open = true;
           }
-          window.clearTimeout(searchTimerId);
-          searchInput.value = "";
-          resetResults(defaultMessage);
-        });
-        form.dataset.sessionArticleSourceSearchInitialized = "1";
-        resetResults(defaultMessage);
-      }
-    };
-
-    const initializeSessionWikiLookup = () => {
-      const root = document.querySelector("[data-session-wiki-lookup-root]");
-      if (!(root instanceof HTMLElement)) {
-        return;
-      }
-
-      const searchInput = root.querySelector("[data-session-wiki-lookup-query]");
-      const resultsSelect = root.querySelector("[data-session-wiki-lookup-results]");
-      const status = root.querySelector("[data-session-wiki-lookup-status]");
-      const previewRoot = root.querySelector("[data-session-wiki-lookup-preview]");
-      const searchUrl = root.dataset.sessionWikiLookupSearchUrl || "";
-      const previewUrl = root.dataset.sessionWikiLookupPreviewUrl || "";
-      const defaultStatus = "Type at least 2 letters to search player-visible wiki articles.";
-
-      if (
-        !(searchInput instanceof HTMLInputElement)
-        || !(resultsSelect instanceof HTMLSelectElement)
-        || !(status instanceof HTMLElement)
-        || !(previewRoot instanceof HTMLElement)
-        || !searchUrl
-        || !previewUrl
-      ) {
-        return;
-      }
-
-      if (root.dataset.sessionWikiLookupInitialized === "1") {
-        return;
-      }
-
-      let searchAbortController = null;
-      let previewAbortController = null;
-      let searchTimerId = 0;
-      let statusTimerId = 0;
-      let persistentStatusMessage = defaultStatus;
-
-      const setStatus = (message, { persist = true } = {}) => {
-        if (persist) {
-          persistentStatusMessage = message;
         }
-        window.clearTimeout(statusTimerId);
-        status.textContent = message;
       };
 
-      const restorePersistentStatus = () => {
-        window.clearTimeout(statusTimerId);
-        statusTimerId = window.setTimeout(() => {
-          status.textContent = persistentStatusMessage;
-          statusTimerId = 0;
-        }, 3000);
-      };
+      const renderPayload = (payload, { forceManager = false, forceComposer = false, forceFlash = false } = {}) => {
+        const focusState = uiStateTools ? uiStateTools.captureFocus(liveRoot) : null;
+        const viewportAnchor = uiStateTools ? uiStateTools.captureViewportAnchor(liveRoot) : null;
+        const openSessionArticleIds = new Set([
+          ...collectOpenSessionArticleIds(stagedRoot),
+          ...collectOpenSessionArticleIds(revealedRoot),
+        ]);
 
-      const setPreviewBusyState = (isBusy) => {
-        previewRoot.dataset.loading = isBusy ? "1" : "0";
-        previewRoot.setAttribute("aria-busy", isBusy ? "true" : "false");
-      };
-
-      const setPreviewMessage = (message) => {
-        setPreviewBusyState(false);
-        previewRoot.innerHTML = "";
-        const paragraph = document.createElement("p");
-        paragraph.className = "meta";
-        paragraph.textContent = message;
-        previewRoot.append(paragraph);
-      };
-
-      const loadPreview = async (pageRef) => {
-        if (previewAbortController) {
-          previewAbortController.abort();
+        if (statusCard && typeof payload.status_html === "string") {
+          statusCard.innerHTML = payload.status_html;
         }
-        if (!pageRef) {
-          setPreviewMessage("Search and choose a player-visible wiki article to read it here.");
+        if (chatCard && typeof payload.chat_html === "string") {
+          chatCard.innerHTML = payload.chat_html;
+        }
+
+        const nextActiveSessionId = payload.active_session_id ? String(payload.active_session_id) : "";
+        const nextManagerStateToken = payload.manager_state_token ? String(payload.manager_state_token) : "";
+        const sessionChanged = nextActiveSessionId !== activeSessionId;
+        const managerChanged = nextManagerStateToken !== managerStateToken;
+
+        if ((sessionChanged || forceComposer) && composerRoot && typeof payload.composer_html === "string") {
+          composerRoot.innerHTML = payload.composer_html;
+        }
+        if ((sessionChanged || managerChanged || forceManager) && controlsRoot && typeof payload.controls_html === "string") {
+          controlsRoot.innerHTML = payload.controls_html;
+        }
+        if ((sessionChanged || managerChanged || forceManager) && stagedRoot && typeof payload.staged_articles_html === "string") {
+          stagedRoot.innerHTML = payload.staged_articles_html;
+        }
+        if ((sessionChanged || managerChanged || forceManager) && revealedRoot && typeof payload.revealed_articles_html === "string") {
+          revealedRoot.innerHTML = payload.revealed_articles_html;
+        }
+        if ((sessionChanged || managerChanged || forceManager) && logsRoot && typeof payload.logs_html === "string") {
+          logsRoot.innerHTML = payload.logs_html;
+        }
+
+        initializeFileFields(stagedRoot || liveRoot);
+        initializeFileFields(revealedRoot || liveRoot);
+        restoreOpenSessionArticleIds(stagedRoot, openSessionArticleIds);
+        restoreOpenSessionArticleIds(revealedRoot, openSessionArticleIds);
+
+        if (forceFlash && flashRoot && typeof payload.flash_html === "string") {
+          flashRoot.innerHTML = payload.flash_html;
+        }
+
+        activeSessionId = nextActiveSessionId;
+        managerStateToken = nextManagerStateToken;
+        liveRoot.dataset.activeSessionId = activeSessionId;
+        liveRoot.dataset.sessionManagerStateToken = managerStateToken;
+        if (uiStateTools) {
+          uiStateTools.restoreFocus(liveRoot, focusState);
+          uiStateTools.restoreViewportAnchor(liveRoot, viewportAnchor);
+        }
+        scrollToAnchor(payload.anchor || "");
+      };
+
+      const refreshLiveState = async ({
+        forceManager = false,
+        forceComposer = false,
+        allowShortCircuit = true,
+        bypassGuards = false,
+        reschedule = true,
+        mode = allowShortCircuit ? "steady" : "cold",
+      } = {}) => {
+        if (isPaused()) {
+          return;
+        }
+        if (!bypassGuards && (pollInFlight || requestInFlight || document.hidden || hasFocusedFormControl())) {
+          if (reschedule) {
+            scheduleNextPoll();
+          }
           return;
         }
 
-        const preserveExistingPreview = previewRoot.querySelector(".session-wiki-lookup-result") !== null;
-        if (preserveExistingPreview) {
-          setPreviewBusyState(true);
-        } else {
-          setPreviewMessage("Loading article preview...");
-        }
-
-        const controller = new AbortController();
-        previewAbortController = controller;
+        pollInFlight = true;
+        liveRoot.dataset.loading = "1";
         try {
-          const response = await fetch(`${previewUrl}?page_ref=${encodeURIComponent(pageRef)}`, {
-            headers: {
-              "X-Requested-With": "XMLHttpRequest",
-              "Accept": "application/json",
-            },
+          const requestStartedAt = performance.now();
+          const response = await fetch(pollUrl, {
+            headers: allowShortCircuit ? buildLiveHeaders() : { "X-Requested-With": "XMLHttpRequest" },
             cache: "no-store",
             credentials: "same-origin",
-            signal: controller.signal,
-          });
-          const payload = await response.json();
-          if (typeof payload.preview_html === "string") {
-            previewRoot.innerHTML = payload.preview_html;
-            setPreviewBusyState(false);
-            return;
-          }
-          if (preserveExistingPreview) {
-            setPreviewBusyState(false);
-            setStatus("Could not load that article right now.", { persist: false });
-            restorePersistentStatus();
-            return;
-          }
-          setPreviewMessage("Could not load that article right now.");
-        } catch (error) {
-          if (error instanceof DOMException && error.name === "AbortError") {
-            return;
-          }
-          if (preserveExistingPreview) {
-            setPreviewBusyState(false);
-            setStatus("Could not load that article right now.", { persist: false });
-            restorePersistentStatus();
-            return;
-          }
-          setPreviewMessage("Could not load that article right now.");
-        } finally {
-          if (previewAbortController === controller) {
-            previewAbortController = null;
-            setPreviewBusyState(false);
-          }
-        }
-      };
-
-      const resetResults = (message = defaultStatus) => {
-        resultsSelect.innerHTML = "";
-        const option = document.createElement("option");
-        option.value = "";
-        option.textContent = "Search to load matching articles";
-        resultsSelect.append(option);
-        resultsSelect.disabled = true;
-        setStatus(message);
-        setPreviewMessage("Search and choose a player-visible wiki article to read it here.");
-      };
-
-      const renderResults = (results, message) => {
-        if (!Array.isArray(results) || !results.length) {
-          resetResults(message || "No player-visible wiki articles matched that search.");
-          return;
-        }
-
-        resultsSelect.innerHTML = "";
-        for (const result of results) {
-          const option = document.createElement("option");
-          option.value = String(result.page_ref || "");
-          option.textContent = String(result.select_label || result.title || "");
-          resultsSelect.append(option);
-        }
-        resultsSelect.disabled = false;
-        resultsSelect.selectedIndex = 0;
-        setStatus(message || `Found ${results.length} matching articles.`);
-        loadPreview(resultsSelect.value);
-      };
-
-      const runSearch = async () => {
-        const query = searchInput.value.trim();
-        if (searchAbortController) {
-          searchAbortController.abort();
-        }
-        if (query.length < 2) {
-          resetResults(defaultStatus);
-          return;
-        }
-
-        setStatus("Searching player-visible wiki articles...");
-        searchAbortController = new AbortController();
-        try {
-          const response = await fetch(`${searchUrl}?q=${encodeURIComponent(query)}`, {
-            headers: {
-              "X-Requested-With": "XMLHttpRequest",
-              "Accept": "application/json",
-            },
-            cache: "no-store",
-            credentials: "same-origin",
-            signal: searchAbortController.signal,
           });
           if (!response.ok) {
-            resetResults("Could not search wiki articles right now.");
             return;
           }
 
           const payload = await response.json();
-          renderResults(payload.results, typeof payload.message === "string" ? payload.message : "");
-        } catch (error) {
-          if (error instanceof DOMException && error.name === "AbortError") {
-            return;
+          syncLiveMetadata(payload, response);
+          logLiveDiagnostics(`session-${liveViewName}`, response, payload);
+          const requestMs = performance.now() - requestStartedAt;
+          if (payload && payload.changed === false) {
+            return buildLiveMetric(response, payload, { mode, requestMs, applyMs: 0 });
           }
-          resetResults("Could not search wiki articles right now.");
+          const applyStartedAt = performance.now();
+          renderPayload(payload, { forceManager, forceComposer });
+          return buildLiveMetric(response, payload, {
+            mode,
+            requestMs,
+            applyMs: performance.now() - applyStartedAt,
+          });
+        } catch (_) {
+          return;
         } finally {
-          searchAbortController = null;
+          pollInFlight = false;
+          liveRoot.dataset.loading = "0";
+          if (reschedule) {
+            scheduleNextPoll();
+          }
         }
       };
 
-      resultsSelect.addEventListener("change", () => {
-        loadPreview(resultsSelect.value);
-      });
-      searchInput.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-        }
-      });
-      searchInput.addEventListener("input", () => {
-        window.clearTimeout(searchTimerId);
-        searchTimerId = window.setTimeout(runSearch, 250);
-      });
-
-      root.dataset.sessionWikiLookupInitialized = "1";
-      resetResults(defaultStatus);
-    };
-
-    const clearSessionArticleForm = (form) => {
-      const selectedMode = form.querySelector('input[name="article_mode"]:checked')?.value || "manual";
-      form.reset();
-      const selectedRadio = form.querySelector(`input[name="article_mode"][value="${selectedMode}"]`);
-      if (selectedRadio) {
-        selectedRadio.checked = true;
-      }
-      initializeFileFields(form);
-      initializeSessionArticleSourceSearch(form);
-    };
-
-    const scrollToAnchor = (anchor) => {
-      if (!anchor) {
-        return;
-      }
-      const target = document.getElementById(anchor);
-      if (target) {
-        target.scrollIntoView({ block: "start" });
-      }
-    };
-
-    const collectOpenSessionArticleIds = (root) => {
-      if (!(root instanceof HTMLElement)) {
-        return [];
-      }
-      return Array.from(root.querySelectorAll("details[data-session-article-id][open]"))
-        .map((detail) => detail.dataset.sessionArticleId || "")
-        .filter(Boolean);
-    };
-
-    const restoreOpenSessionArticleIds = (root, openIds) => {
-      if (!(root instanceof HTMLElement) || !openIds.size) {
-        return;
-      }
-      for (const detail of root.querySelectorAll("details[data-session-article-id]")) {
-        const articleId = detail.dataset.sessionArticleId || "";
-        if (openIds.has(articleId)) {
-          detail.open = true;
-        }
-      }
-    };
-
-    const renderPayload = (payload, { forceManager = false, forceComposer = false, forceFlash = false } = {}) => {
-      const focusState = uiStateTools ? uiStateTools.captureFocus(liveRoot) : null;
-      const viewportAnchor = uiStateTools ? uiStateTools.captureViewportAnchor(liveRoot) : null;
-      const openSessionArticleIds = new Set([
-        ...collectOpenSessionArticleIds(stagedRoot),
-        ...collectOpenSessionArticleIds(revealedRoot),
-      ]);
-
-      if (statusCard && typeof payload.status_html === "string") {
-        statusCard.innerHTML = payload.status_html;
-      }
-      if (chatCard && typeof payload.chat_html === "string") {
-        chatCard.innerHTML = payload.chat_html;
-      }
-
-      const nextActiveSessionId = payload.active_session_id ? String(payload.active_session_id) : "";
-      const nextManagerStateToken = payload.manager_state_token ? String(payload.manager_state_token) : "";
-      const sessionChanged = nextActiveSessionId !== activeSessionId;
-      const managerChanged = nextManagerStateToken !== managerStateToken;
-
-      if ((sessionChanged || forceComposer) && composerRoot && typeof payload.composer_html === "string") {
-        composerRoot.innerHTML = payload.composer_html;
-      }
-
-      if ((sessionChanged || managerChanged || forceManager) && controlsRoot && typeof payload.controls_html === "string") {
-        controlsRoot.innerHTML = payload.controls_html;
-      }
-      if ((sessionChanged || managerChanged || forceManager) && stagedRoot && typeof payload.staged_articles_html === "string") {
-        stagedRoot.innerHTML = payload.staged_articles_html;
-      }
-      if ((sessionChanged || managerChanged || forceManager) && revealedRoot && typeof payload.revealed_articles_html === "string") {
-        revealedRoot.innerHTML = payload.revealed_articles_html;
-      }
-      if ((sessionChanged || managerChanged || forceManager) && logsRoot && typeof payload.logs_html === "string") {
-        logsRoot.innerHTML = payload.logs_html;
-      }
-
-      initializeFileFields(stagedRoot || document);
-      initializeFileFields(revealedRoot || document);
-      restoreOpenSessionArticleIds(stagedRoot, openSessionArticleIds);
-      restoreOpenSessionArticleIds(revealedRoot, openSessionArticleIds);
-
-      if (forceFlash && flashRoot && typeof payload.flash_html === "string") {
-        flashRoot.innerHTML = payload.flash_html;
-      }
-
-      activeSessionId = nextActiveSessionId;
-      managerStateToken = nextManagerStateToken;
-      liveRoot.dataset.activeSessionId = activeSessionId;
-      liveRoot.dataset.sessionManagerStateToken = managerStateToken;
-      if (uiStateTools) {
-        uiStateTools.restoreFocus(liveRoot, focusState);
-        uiStateTools.restoreViewportAnchor(liveRoot, viewportAnchor);
-      }
-      scrollToAnchor(payload.anchor || "");
-    };
-
-    const refreshLiveState = async ({
-      forceManager = false,
-      forceComposer = false,
-      allowShortCircuit = true,
-      bypassGuards = false,
-      reschedule = true,
-      mode = allowShortCircuit ? "steady" : "cold",
-    } = {}) => {
-      if (!bypassGuards && (pollInFlight || requestInFlight || document.hidden || hasFocusedFormControl())) {
-        if (reschedule) {
-          scheduleNextPoll();
-        }
-        return;
-      }
-
-      pollInFlight = true;
-      liveRoot.dataset.loading = "1";
-      try {
-        const requestStartedAt = performance.now();
-        const response = await fetch(pollUrl, {
-          headers: allowShortCircuit ? buildLiveHeaders() : { "X-Requested-With": "XMLHttpRequest" },
-          cache: "no-store",
-          credentials: "same-origin",
-        });
-        if (!response.ok) {
+      const handleSubmit = async (event) => {
+        const form = event.target;
+        if (!(form instanceof HTMLFormElement) || !form.matches("[data-session-async]") || !liveRoot.contains(form)) {
           return;
         }
 
-        const payload = await response.json();
-        syncLiveMetadata(payload, response);
-        logLiveDiagnostics("session", response, payload);
-        const requestMs = performance.now() - requestStartedAt;
-        if (payload && payload.changed === false) {
-          return buildLiveMetric(response, payload, { mode, requestMs, applyMs: 0 });
-        }
-        const applyStartedAt = performance.now();
-        renderPayload(payload, { forceManager, forceComposer });
-        return buildLiveMetric(response, payload, {
-          mode,
-          requestMs,
-          applyMs: performance.now() - applyStartedAt,
-        });
-      } catch (_) {
-        return;
-      } finally {
-        pollInFlight = false;
-        liveRoot.dataset.loading = "0";
-        if (reschedule) {
-          scheduleNextPoll();
-        }
-      }
-    };
-
-    initializeFileFields();
-    initializeSessionArticleSourceSearch();
-    initializeSessionWikiLookup();
-
-    document.addEventListener("submit", async (event) => {
-      const form = event.target;
-      if (!(form instanceof HTMLFormElement) || !form.matches("[data-session-async]")) {
-        return;
-      }
-
-      event.preventDefault();
-      if (requestInFlight) {
-        return;
-      }
-
-      requestInFlight = true;
-      markActivity();
-      const buttons = Array.from(form.querySelectorAll("button, input[type='submit']"));
-      for (const button of buttons) {
-        button.disabled = true;
-      }
-
-      try {
-        const response = await fetch(form.action, {
-          method: (form.method || "POST").toUpperCase(),
-          headers: {
-            "X-Requested-With": "XMLHttpRequest",
-            "Accept": "application/json",
-          },
-          body: new FormData(form),
-          credentials: "same-origin",
-        });
-        if (!response.ok) {
+        event.preventDefault();
+        if (requestInFlight) {
           return;
         }
 
-        const payload = await response.json();
-        syncLiveMetadata(payload, response);
-        logLiveDiagnostics("session-mutation", response, payload);
-        renderPayload(payload, {
-          forceManager: true,
-          forceComposer: true,
-          forceFlash: true,
-        });
-        if (payload.ok && form.matches("[data-session-article-form]")) {
-          clearSessionArticleForm(form);
-        }
-      } catch (_) {
-        return;
-      } finally {
-        requestInFlight = false;
+        requestInFlight = true;
+        markActivity();
+        const buttons = Array.from(form.querySelectorAll("button, input[type='submit']"));
         for (const button of buttons) {
-          button.disabled = false;
+          button.disabled = true;
         }
-        scheduleNextPoll(activeIntervalMs);
-      }
-    });
 
-    ["pointerdown", "keydown", "input", "focusin"].forEach((eventName) => {
-      liveRoot.addEventListener(eventName, markActivity, true);
-    });
+        try {
+          const response = await fetch(form.action, {
+            method: (form.method || "POST").toUpperCase(),
+            headers: {
+              "X-Requested-With": "XMLHttpRequest",
+              "Accept": "application/json",
+            },
+            body: new FormData(form),
+            credentials: "same-origin",
+          });
+          if (!response.ok) {
+            return;
+          }
 
-    refreshLiveState({ forceManager: true, forceComposer: true });
-    window.addEventListener("pageshow", () => {
-      markActivity();
-      refreshLiveState({ forceManager: true, forceComposer: true });
-    });
-    document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) {
+          const payload = await response.json();
+          syncLiveMetadata(payload, response);
+          logLiveDiagnostics(`session-${liveViewName}-mutation`, response, payload);
+          renderPayload(payload, {
+            forceManager: true,
+            forceComposer: true,
+            forceFlash: true,
+          });
+          if (payload.ok && form.matches("[data-session-article-form]")) {
+            clearSessionArticleForm(form);
+          }
+        } catch (_) {
+          return;
+        } finally {
+          requestInFlight = false;
+          for (const button of buttons) {
+            button.disabled = false;
+          }
+          scheduleNextPoll(activeIntervalMs);
+        }
+      };
+
+      const pause = () => {
+        paused = true;
+        window.clearTimeout(pollTimerId);
+        pollTimerId = 0;
+        liveRoot.dataset.sessionLivePaused = "1";
+        liveRoot.dataset.loading = "0";
+      };
+
+      const resume = ({ refresh = true } = {}) => {
+        paused = false;
+        liveRoot.dataset.sessionLivePaused = "0";
+        markActivity();
+        if (refresh) {
+          refreshLiveState({ forceManager: true, forceComposer: true });
+        } else {
+          scheduleNextPoll(0);
+        }
+      };
+
+      initializeFileFields();
+      initializeSessionArticleSourceSearch();
+      initializeSessionWikiLookup();
+      liveRoot.addEventListener("submit", handleSubmit);
+      ["pointerdown", "keydown", "input", "focusin"].forEach((eventName) => {
+        liveRoot.addEventListener(eventName, markActivity, true);
+      });
+      window.addEventListener("pageshow", () => {
+        if (isPaused()) {
+          return;
+        }
         markActivity();
         refreshLiveState({ forceManager: true, forceComposer: true });
+      });
+      document.addEventListener("visibilitychange", () => {
+        if (isPaused()) {
+          return;
+        }
+        if (!document.hidden) {
+          markActivity();
+          refreshLiveState({ forceManager: true, forceComposer: true });
+          return;
+        }
+        scheduleNextPoll(idleIntervalMs);
+      });
+      if (diagnosticsEnabled && diagnosticsTools) {
+        diagnosticsTools.ensureMetricsStore();
+        diagnosticsTools.registerSampler(metricName, async (options = {}) => {
+          const requestedMode = options && options.mode === "cold" ? "cold" : "steady";
+          return refreshLiveState({
+            forceManager: Boolean(options.forceManager),
+            forceComposer: Boolean(options.forceComposer),
+            allowShortCircuit: requestedMode !== "cold",
+            bypassGuards: true,
+            reschedule: false,
+            mode: requestedMode,
+          });
+        });
+      }
+
+      const controller = {
+        root: liveRoot,
+        pause,
+        resume,
+        refresh: refreshLiveState,
+      };
+      controllers.set(liveRoot, controller);
+      controllerSet.add(controller);
+      if (autoStart) {
+        if (isPaneHidden()) {
+          pause();
+        } else {
+          resume();
+        }
+      }
+      return controller;
+    };
+
+    const init = (root = document, options = {}) => {
+      const roots = root instanceof HTMLElement && root.matches("[data-session-live-root]")
+        ? [root]
+        : Array.from(root.querySelectorAll("[data-session-live-root]"));
+      for (const liveRoot of roots) {
+        initSessionLiveRoot(liveRoot, options);
+      }
+    };
+
+    const activatePane = (pane) => {
+      if (!(pane instanceof HTMLElement)) {
         return;
       }
-      scheduleNextPoll(idleIntervalMs);
-    });
-    if (diagnosticsEnabled && diagnosticsTools) {
-      diagnosticsTools.ensureMetricsStore();
-      diagnosticsTools.registerSampler("session", async (options = {}) => {
-        const requestedMode = options && options.mode === "cold" ? "cold" : "steady";
-        return refreshLiveState({
-          forceManager: Boolean(options.forceManager),
-          forceComposer: Boolean(options.forceComposer),
-          allowShortCircuit: requestedMode !== "cold",
-          bypassGuards: true,
-          reschedule: false,
-          mode: requestedMode,
-        });
-      });
+      const shellRoot = pane.closest("[data-session-shell-root]");
+      const scope = shellRoot || document;
+      const roots = Array.from(scope.querySelectorAll("[data-session-live-root]"));
+      for (const liveRoot of roots) {
+        const controller = initSessionLiveRoot(liveRoot, { autoStart: false });
+        if (!controller) {
+          continue;
+        }
+        if (pane.contains(liveRoot) && !pane.hidden) {
+          controller.resume();
+        } else {
+          controller.pause();
+        }
+      }
+    };
+
+    window.__playerWikiSessionLive = {
+      init,
+      activatePane,
+    };
+
+    const activePane = document.querySelector("[data-session-shell-root] [data-session-shell-pane]:not([hidden])");
+    init(document, { autoStart: !(activePane instanceof HTMLElement) });
+    if (activePane instanceof HTMLElement) {
+      activatePane(activePane);
     }
   })();
 </script>
