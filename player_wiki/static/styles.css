@@ -1132,6 +1132,15 @@ button {
   gap: 1rem;
 }
 
+.session-status-controls-card {
+  gap: 0.85rem;
+}
+
+.session-status-controls__controls {
+  display: grid;
+  gap: 0.7rem;
+}
+
 .session-feed {
   display: grid;
   gap: 0.9rem;

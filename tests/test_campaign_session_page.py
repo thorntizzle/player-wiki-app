@@ -333,6 +333,14 @@ def test_player_session_page_includes_lazy_wiki_lookup_widget(client, sign_in, u
     assert "Search and choose a player-visible wiki article to read it here." in session_html
 
 
+def test_player_cannot_open_dm_session_workspace(client, sign_in, users):
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    dm_page = client.get("/campaigns/linden-pass/session/dm")
+
+    assert dm_page.status_code == 403
+
+
 def test_session_page_only_shows_character_tab_for_users_with_session_character_access(client, sign_in, users):
     sign_in(users["party"]["email"], users["party"]["password"])
 
@@ -1395,6 +1403,7 @@ def test_session_dm_page_preserves_open_article_details_across_live_rerenders(cl
     assert 'const collectOpenSessionArticleIds = (root) => {' in session_html
     assert 'restoreOpenSessionArticleIds(stagedRoot, openSessionArticleIds);' in session_html
     assert 'restoreOpenSessionArticleIds(revealedRoot, openSessionArticleIds);' in session_html
+    assert session_html.count('statusCard = liveRoot.querySelector("[data-session-status-card]");') == 2
 
 
 def test_dm_can_open_session_page_and_session_dm_page(client, sign_in, users):
@@ -1425,6 +1434,44 @@ def test_dm_can_open_session_page_and_session_dm_page(client, sign_in, users):
     assert "Open DM page" not in dm_html
     assert 'data-live-active-interval-ms="2000"' in dm_html
     assert 'data-live-idle-interval-ms="5000"' in dm_html
+
+
+def test_dm_session_layout_places_status_controls_in_sidebar_and_prioritizes_workflow_cards(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    dm_page = client.get("/campaigns/linden-pass/session/dm")
+    dm_html = dm_page.get_data(as_text=True)
+
+    assert dm_page.status_code == 200
+    assert 'id="session-controls"' in dm_html
+    assert 'data-session-controls-root' in dm_html
+    assert dm_html.count('id="session-controls"') == 1
+    assert dm_html.count('<div data-session-controls-root>') == 1
+    assert "Session controls" in dm_html
+    assert "Session article store" in dm_html
+
+    sidebar_start = dm_html.find('<aside class="session-sidebar">')
+    controls_index = dm_html.find('id="session-controls"')
+    article_store_index = dm_html.find('id="session-article-store"')
+    assert sidebar_start != -1 and controls_index != -1 and article_store_index != -1
+    assert sidebar_start < controls_index < article_store_index
+
+    passive_scores_index = dm_html.find('data-session-passive-scores-bar')
+    staged_index = dm_html.find('data-session-staged-root')
+    revealed_index = dm_html.find('data-session-revealed-root')
+    logs_index = dm_html.find('data-session-logs-root')
+    assert passive_scores_index != -1
+    assert staged_index != -1
+    assert revealed_index != -1
+    assert logs_index != -1
+    assert passive_scores_index < staged_index < revealed_index < logs_index
+
+    sidebar_end = dm_html.find("</aside>", sidebar_start)
+    assert sidebar_end != -1
+    sidebar_segment = dm_html[sidebar_start:sidebar_end]
+    assert 'data-session-staged-root' not in sidebar_segment
+    assert 'data-session-revealed-root' not in sidebar_segment
+    assert 'data-session-logs-root' not in sidebar_segment
 
 
 def test_dm_session_page_shows_passive_scores_for_active_dnd_characters(client, sign_in, users):
@@ -2259,6 +2306,8 @@ def test_dm_session_live_state_endpoint_returns_manager_payload_without_chat_or_
     assert payload["active_session_id"] == 1
     assert "The session is live for players and the DM." in payload["status_html"]
     assert "Close session" in payload["controls_html"]
+    assert 'id="session-controls"' in payload["controls_html"]
+    assert "data-session-controls-root" not in payload["controls_html"]
     assert "chat_html" not in payload
     assert "composer_html" not in payload
 

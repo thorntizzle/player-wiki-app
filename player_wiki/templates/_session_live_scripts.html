@@ -12,7 +12,7 @@
       }
 
       const flashRoot = document.querySelector("[data-flash-stack-root]");
-      const statusCard = liveRoot.querySelector("[data-session-status-card]");
+      let statusCard = liveRoot.querySelector("[data-session-status-card]");
       const chatCard = liveRoot.querySelector("[data-session-chat-card]");
       const composerRoot = liveRoot.querySelector("[data-session-composer-root]");
       const controlsRoot = liveRoot.querySelector("[data-session-controls-root]");
@@ -642,6 +642,7 @@
         }
         if ((sessionChanged || managerChanged || forceManager) && controlsRoot && typeof payload.controls_html === "string") {
           controlsRoot.innerHTML = payload.controls_html;
+          statusCard = liveRoot.querySelector("[data-session-status-card]");
         }
         if ((sessionChanged || managerChanged || forceManager) && stagedRoot && typeof payload.staged_articles_html === "string") {
           stagedRoot.innerHTML = payload.staged_articles_html;

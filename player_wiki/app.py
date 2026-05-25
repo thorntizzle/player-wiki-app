@@ -8921,7 +8921,7 @@ def create_app() -> Flask:
         if normalized_session_subpage == "dm":
             payload.update(
                 {
-                    "controls_html": render_template("_session_controls_card.html", **context),
+                    "controls_html": render_template("_session_status_controls_card.html", **context),
                     "staged_articles_html": render_template("_session_staged_articles_card.html", **context),
                     "revealed_articles_html": render_template("_session_revealed_articles_card.html", **context),
                     "logs_html": render_template("_session_logs_card.html", **context),
