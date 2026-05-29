@@ -129,6 +129,13 @@ def _assert_event_contains(event: dict, expected: dict) -> None:
     assert {key: event.get(key) for key in expected} == expected
 
 
+def _read_shell_target_subpages(html: str) -> list[str]:
+    return [
+        match.group(1)
+        for match in re.finditer(r'data-character-read-target-subpage="([^"]+)"', html)
+    ]
+
+
 def _seed_systems_item_entry(
     app,
     *,
@@ -5640,6 +5647,136 @@ def test_character_read_shell_scripts_are_embedded_for_progressive_enhancement(
     assert "event.preventDefault();" in html
     assert "\"X-Requested-With\": \"XMLHttpRequest\"" in html
     assert "if (initialShellState.mode !== \"read\")" in html
+
+
+def test_dnd_read_view_exposes_expected_character_read_shell_subpages_when_manageable(
+    client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+
+    assert "data-character-read-shell-root" in html
+    target_subpages = _read_shell_target_subpages(html)
+    assert target_subpages == [
+        "quick",
+        "spellcasting",
+        "features",
+        "equipment",
+        "inventory",
+        "personal",
+        "notes",
+        "controls",
+    ]
+    assert 'data-character-read-target-subpage="quick"' in html
+    assert 'data-character-read-target-subpage="spellcasting"' in html
+    assert "Quick Reference" in html
+    assert "Spellcasting" in html
+    assert "Features" in html
+    assert "Equipment" in html
+    assert "Inventory" in html
+    assert "Personal" in html
+    assert "Notes" in html
+    assert "Controls" in html
+    assert 'href="/campaigns/linden-pass/characters/arden-march?page=quick"' in html
+    assert 'href="/campaigns/linden-pass/characters/arden-march?page=spellcasting"' in html
+
+
+def test_xianxia_read_view_exposes_xianxia_shell_subpages_and_keeps_cultivation_direct(
+    app, client, sign_in, users
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+        payload["systems_sources"] = [
+            {
+                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+                "enabled": True,
+                "default_visibility": "dm",
+            }
+        ]
+
+    _write_campaign_config(app, _mutate)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Shell Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+    assert create_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/characters/shell-crane"
+    )
+
+    response = client.get("/campaigns/linden-pass/characters/shell-crane?mode=read")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+
+    target_subpages = _read_shell_target_subpages(html)
+    assert target_subpages == [
+        "quick",
+        "martial_arts",
+        "techniques",
+        "resources",
+        "skills",
+        "equipment",
+        "inventory",
+        "personal",
+        "notes",
+        "controls",
+    ]
+    assert "Quick Reference" in html
+    assert "Martial Arts" in html
+    assert "Techniques" in html
+    assert "Resources" in html
+    assert "Skills" in html
+    assert "Equipment" in html
+    assert "Inventory" in html
+    assert "Personal" in html
+    assert "Notes" in html
+    assert "Controls" in html
+    assert "/campaigns/linden-pass/characters/shell-crane/cultivation" in html
+    assert 'data-character-read-target-subpage="cultivation"' not in html
+    assert 'data-character-read-target-subpage="spellcasting"' not in html
+    assert 'data-character-read-target-subpage="features"' not in html
+
+
+def test_sheet_edit_view_session_combat_links_remain_outside_shell_navigation(
+    client, sign_in, users, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=inventory")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Open Character Help" in html
+    assert 'href="/campaigns/linden-pass/help#characters"' in html
+    assert '/campaigns/linden-pass/session/character?character=arden-march&amp;page=inventory' in html
+    assert '>Open Session Character<' in html
+    assert '/campaigns/linden-pass/combat?combatant=' in html
+    assert '>Open Combat<' in html
+    assert "Character-page sheet edit" not in html
+    assert "Combat-context editing" not in html
+    nav_start = html.find('<nav class="character-subpage-nav"')
+    nav_end = html.find("</nav>", nav_start)
+    nav_segment = html[nav_start:nav_end] if nav_start != -1 and nav_end != -1 else ""
+    assert "/campaigns/linden-pass/session/character?character=arden-march&amp;page=inventory" not in nav_segment
+    assert "/campaigns/linden-pass/combat?combatant=" not in nav_segment
 
 
 def test_spellcasting_subpage_is_only_shown_for_casters_and_holds_spell_list(client, sign_in, users):
