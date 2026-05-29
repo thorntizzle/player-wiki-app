@@ -5,6 +5,16 @@
       return;
     }
 
+    const liveUiTools = window.__playerWikiLiveUiTools || {};
+    const captureFocus = typeof liveUiTools.captureFocus === "function" ? liveUiTools.captureFocus : null;
+    const restoreFocus = typeof liveUiTools.restoreFocus === "function" ? liveUiTools.restoreFocus : null;
+    const captureViewportAnchor = typeof liveUiTools.captureViewportAnchor === "function"
+      ? liveUiTools.captureViewportAnchor
+      : null;
+    const restoreViewportAnchor = typeof liveUiTools.restoreViewportAnchor === "function"
+      ? liveUiTools.restoreViewportAnchor
+      : null;
+
     const normalizeMode = (value) => {
       const normalized = String(value || "").trim().toLowerCase();
       return normalized === "session" ? "session" : "read";
@@ -15,38 +25,183 @@
       return normalized || "quick";
     };
 
-    const toShellState = () => {
-      return {
-        mode: normalizeMode(shellRoot.dataset.characterReadShellMode || "read"),
-        subpage: normalizeSubpage(shellRoot.dataset.characterReadShellPage || "quick"),
-      };
+    const toPathFromUrl = (rawUrl) => {
+      try {
+        const url = new URL(rawUrl, window.location.origin);
+        return url.pathname || window.location.pathname;
+      } catch (_error) {
+        return window.location.pathname;
+      }
     };
-    const initialShellState = toShellState();
-    if (initialShellState.mode !== "read") {
-      return;
-    }
 
-    const getPanel = () => shellRoot.querySelector("[data-character-read-shell-panel]");
-    const getPanelLinks = () => Array.from(
-      shellRoot.querySelectorAll("[data-character-read-subpage-link]")
-    );
-
-    const parseShellStateFromUrl = (rawUrl) => {
+    const parseModeAndPageFromUrl = (rawUrl) => {
       try {
         const url = new URL(rawUrl, window.location.origin);
         const params = new URLSearchParams(url.search);
+        const requestedPage = params.get("page");
         return {
-          mode: normalizeMode(params.get("mode") || "read"),
-          subpage: normalizeSubpage(params.get("page") || shellRoot.dataset.characterReadShellPage || "quick"),
+          mode: normalizeMode(params.get("mode")),
+          page: normalizeSubpage(requestedPage || "quick"),
+          hash: url.hash || "",
+          path: url.pathname || window.location.pathname,
           href: `${url.pathname}${url.search}${url.hash}`,
         };
       } catch (_error) {
         return {
           mode: normalizeMode(shellRoot.dataset.characterReadShellMode || "read"),
-          subpage: normalizeSubpage(shellRoot.dataset.characterReadShellPage || "quick"),
-          href: window.location.pathname + window.location.search,
+          page: normalizeSubpage(shellRoot.dataset.characterReadShellPage || "quick"),
+          hash: window.location.hash || "",
+          path: window.location.pathname,
+          href: window.location.pathname + window.location.search + window.location.hash,
         };
       }
+    };
+
+    const buildCharacterReadHref = ({ mode, page, path, hash }) => {
+      const searchParams = new URLSearchParams();
+      const normalizedMode = normalizeMode(mode);
+      const normalizedPage = normalizeSubpage(page);
+      if (normalizedMode === "session") {
+        searchParams.set("mode", "session");
+      }
+      searchParams.set("page", normalizedPage);
+      const query = searchParams.toString();
+      return `${path || window.location.pathname}${query ? `?${query}` : ""}${hash || ""}`;
+    };
+
+    const getPanel = () => shellRoot.querySelector("[data-character-read-shell-panel]");
+    const getPanelLinks = () => Array.from(
+      shellRoot.querySelectorAll("[data-character-read-subpage-link]"),
+    );
+    const getShellState = () => {
+      return {
+        mode: normalizeMode(shellRoot.dataset.characterReadShellMode || "read"),
+        subpage: normalizeSubpage(shellRoot.dataset.characterReadShellPage || "quick"),
+      };
+    };
+
+    const makePanelSnapshotState = (href) => parseModeAndPageFromUrl(href);
+
+    const isTrackableField = (field) => {
+      if (field instanceof HTMLInputElement) {
+        return !["hidden", "submit", "button", "file"].includes(field.type);
+      }
+      return field instanceof HTMLTextAreaElement || field instanceof HTMLSelectElement;
+    };
+
+    const captureMountedState = (root) => {
+      if (!(root instanceof Element)) {
+        return null;
+      }
+      const fields = Array.from(root.querySelectorAll("input, textarea, select"));
+      const trackedFields = [];
+      for (const field of fields) {
+        if (!isTrackableField(field)) {
+          continue;
+        }
+        const index = trackedFields.length;
+        const fieldState = {
+          index,
+          tagName: field.tagName.toLowerCase(),
+          type: field instanceof HTMLInputElement ? String(field.type || "").toLowerCase() : "",
+          name: field.name || "",
+          value: String(field.value || ""),
+        };
+        if (field instanceof HTMLInputElement && (field.type === "checkbox" || field.type === "radio")) {
+          fieldState.checked = !!field.checked;
+        }
+        if (field instanceof HTMLSelectElement) {
+          if (field.multiple) {
+            fieldState.selectedValues = Array.from(field.selectedOptions || []).map(
+              (option) => String(option.value || ""),
+            );
+          } else {
+            fieldState.selectedIndex = Number.isInteger(field.selectedIndex) ? field.selectedIndex : 0;
+          }
+        }
+        trackedFields.push(fieldState);
+      }
+
+      const openDetails = Array.from(root.querySelectorAll("details")).map((details, index) => ({
+        index,
+        open: !!details.open,
+      }));
+      const focusState = captureFocus ? captureFocus(root) : null;
+      const viewportAnchor = captureViewportAnchor ? captureViewportAnchor(root) : null;
+      return {
+        trackedFields,
+        openDetails,
+        focusState,
+        viewportAnchor,
+      };
+    };
+
+    const restoreMountedState = (root, snapshot) => {
+      if (!(root instanceof Element) || !snapshot || typeof snapshot !== "object") {
+        return;
+      }
+      if (Array.isArray(snapshot.trackedFields)) {
+        const fields = Array.from(root.querySelectorAll("input, textarea, select"));
+        const trackedFields = fields.filter(isTrackableField);
+        for (const snapshotField of snapshot.trackedFields) {
+          if (!snapshotField || typeof snapshotField.index !== "number") {
+            continue;
+          }
+          const field = trackedFields[snapshotField.index];
+          if (
+            !(field instanceof HTMLInputElement)
+            && !(field instanceof HTMLTextAreaElement)
+            && !(field instanceof HTMLSelectElement)
+          ) {
+            continue;
+          }
+          if (field instanceof HTMLInputElement && (field.type === "checkbox" || field.type === "radio")) {
+            if (typeof snapshotField.checked === "boolean") {
+              field.checked = snapshotField.checked;
+            }
+            continue;
+          }
+          if (field instanceof HTMLSelectElement) {
+            if (field.multiple && Array.isArray(snapshotField.selectedValues)) {
+              const selectedValues = new Set(snapshotField.selectedValues.map(String));
+              for (const option of Array.from(field.options)) {
+                option.selected = selectedValues.has(String(option.value || ""));
+              }
+              continue;
+            }
+            const selectedIndex = Number.isInteger(snapshotField.selectedIndex) ? snapshotField.selectedIndex : 0;
+            if (selectedIndex >= 0 && selectedIndex < field.options.length) {
+              field.selectedIndex = selectedIndex;
+            }
+            continue;
+          }
+          if (typeof snapshotField.value === "string") {
+            field.value = snapshotField.value;
+          }
+        }
+      }
+
+      const details = Array.from(root.querySelectorAll("details"));
+      if (Array.isArray(snapshot.openDetails)) {
+        for (const detailState of snapshot.openDetails) {
+          const detailsIndex = Number(detailState?.index);
+          const detailsNode = detailState
+            && Number.isInteger(detailsIndex)
+            && details[detailsIndex];
+          if (detailsNode instanceof HTMLDetailsElement) {
+            detailsNode.open = !!detailState.open;
+          }
+        }
+      }
+
+      window.requestAnimationFrame(() => {
+        if (restoreViewportAnchor) {
+          restoreViewportAnchor(root, snapshot.viewportAnchor);
+        }
+        if (restoreFocus) {
+          restoreFocus(root, snapshot.focusState);
+        }
+      });
     };
 
     const syncActiveNav = (targetSubpage) => {
@@ -58,35 +213,60 @@
       }
     };
 
-    const syncShellState = ({ mode, subpage }) => {
+    const syncShellState = ({ mode, subpage, page }) => {
       const nextMode = normalizeMode(mode);
-      const nextSubpage = normalizeSubpage(subpage);
+      const nextSubpage = normalizeSubpage(subpage || page);
       shellRoot.dataset.characterReadShellMode = nextMode;
       shellRoot.dataset.characterReadShellPage = nextSubpage;
       syncActiveNav(nextSubpage);
     };
 
-    const getStateFromHtml = (html) => {
+    const getResponseStateFromHtml = (html) => {
       const parser = new DOMParser();
-      const documentNode = parser.parseFromString(html, "text/html");
-      const responseShellRoot = documentNode.querySelector("[data-character-read-shell-root]");
-      const responsePanel = documentNode.querySelector("[data-character-read-shell-panel]");
+      const responseDocument = parser.parseFromString(html, "text/html");
+      const responseShellRoot = responseDocument.querySelector("[data-character-read-shell-root]");
+      const responsePanel = responseDocument.querySelector("[data-character-read-shell-panel]");
+      const flashStack = responseDocument.querySelector("[data-flash-stack-root]");
       if (!responseShellRoot || !responsePanel) {
         return null;
       }
       return {
-        panelHtml: responsePanel.innerHTML,
-        mode: normalizeMode(responseShellRoot.dataset.characterReadShellMode || ""),
-        subpage: normalizeSubpage(responseShellRoot.dataset.characterReadShellPage || ""),
+        responsePanelHtml: responsePanel.innerHTML,
+        responseMode: normalizeMode(responseShellRoot.dataset.characterReadShellMode || ""),
+        responseSubpage: normalizeSubpage(responseShellRoot.dataset.characterReadShellPage || ""),
+        flashStackHtml: flashStack ? flashStack.innerHTML : "",
       };
     };
 
-    const initSpellcastingSearch = (scope) => {
-      const forms = Array.from(scope.querySelectorAll("[data-character-spell-search-form]"));
-      for (const form of forms) {
-        if (!(form instanceof HTMLFormElement)) {
+    const replaceFlashStack = (flashStackHtml) => {
+      const currentFlashStack = document.querySelector("[data-flash-stack-root]");
+      if (!currentFlashStack || typeof flashStackHtml !== "string") {
+        return;
+      }
+      currentFlashStack.innerHTML = flashStackHtml;
+    };
+
+    const initialPanelState = getShellState();
+    if (initialPanelState.mode !== "read") {
+      return;
+    }
+    const initialState = makePanelSnapshotState(window.location.href);
+    syncActiveNav(initialState.page);
+    const panelMountedStateCache = new Map();
+    const initializedSpellcastingSearchForms = new WeakSet();
+    const initializedSystemsItemSearchForms = new WeakSet();
+    const initPanelScriptForms = (scope) => {
+      if (!(scope instanceof Element)) {
+        return;
+      }
+
+      const castSearchForms = Array.from(scope.querySelectorAll("[data-character-spell-search-form]"));
+      for (const form of castSearchForms) {
+        if (!(form instanceof HTMLFormElement) || initializedSpellcastingSearchForms.has(form)) {
           continue;
         }
+        initializedSpellcastingSearchForms.add(form);
+
         const searchInput = form.querySelector("[data-character-spell-query]");
         const resultsSelect = form.querySelector("[data-character-spell-results]");
         const status = form.querySelector("[data-character-spell-status]");
@@ -195,14 +375,14 @@
 
         resetResults(status.textContent || promptText);
       }
-    };
 
-    const initSystemsItemSearch = (scope) => {
-      const forms = Array.from(scope.querySelectorAll("[data-character-systems-item-search-form]"));
-      for (const form of forms) {
-        if (!(form instanceof HTMLFormElement)) {
+      const systemsSearchForms = Array.from(scope.querySelectorAll("[data-character-systems-item-search-form]"));
+      for (const form of systemsSearchForms) {
+        if (!(form instanceof HTMLFormElement) || initializedSystemsItemSearchForms.has(form)) {
           continue;
         }
+        initializedSystemsItemSearchForms.add(form);
+
         const searchInput = form.querySelector("[data-character-systems-item-query]");
         const resultsSelect = form.querySelector("[data-character-systems-item-results]");
         const status = form.querySelector("[data-character-systems-item-status]");
@@ -299,103 +479,269 @@
       }
     };
 
-    const initPanelScripts = (scope = shellRoot) => {
-      if (!(scope instanceof Element)) {
+    const makeSubmitState = (panel) => {
+      const { mode, subpage } = getShellState();
+      return {
+        mode,
+        subpage,
+        href: buildCharacterReadHref({
+          mode,
+          page: subpage,
+          path: toPathFromUrl(window.location.href),
+          hash: window.location.hash || "",
+        }),
+        mountedState: captureMountedState(panel),
+      };
+    };
+
+    const cachePanelState = (stateKey, panelHtml, mountedState = null) => {
+      panelMountedStateCache.set(stateKey, {
+        panelHtml,
+        mountedState,
+      });
+    };
+
+    const getHistoryKey = (rawUrl) => {
+      const stateFromUrl = parseModeAndPageFromUrl(rawUrl);
+      return buildCharacterReadHref({
+        mode: stateFromUrl.mode,
+        page: stateFromUrl.page,
+        path: stateFromUrl.path,
+        hash: stateFromUrl.hash,
+      });
+    };
+
+    const cacheCurrentPanel = () => {
+      const panel = getPanel();
+      if (!panel) {
         return;
       }
-      initSpellcastingSearch(scope);
-      initSystemsItemSearch(scope);
+      const snapshot = makeSubmitState(panel);
+      snapshot.mountedState = captureMountedState(panel);
+      cachePanelState(snapshot.href, panel.innerHTML, snapshot.mountedState);
+      return snapshot;
     };
 
     const updateHistory = ({ href, replace }) => {
+      const canonical = getHistoryKey(href);
       const state = {
-        characterReadMode: shellRoot.dataset.characterReadShellMode,
-        characterReadSubpage: shellRoot.dataset.characterReadShellPage,
+        characterReadMode: normalizeMode(shellRoot.dataset.characterReadShellMode || "read"),
+        characterReadSubpage: normalizeSubpage(shellRoot.dataset.characterReadShellPage || "quick"),
+        characterReadHref: canonical,
       };
       if (replace) {
-        window.history.replaceState(state, "", href);
+        window.history.replaceState(state, "", canonical);
       } else {
-        window.history.pushState(state, "", href);
+        window.history.pushState(state, "", canonical);
       }
+      return canonical;
     };
 
-    const loadPanelFromResponseText = (responseText, contextHref) => {
+    const restoreFromCache = (stateHref) => {
+      const state = panelMountedStateCache.get(stateHref);
+      if (!state) {
+        return false;
+      }
       const panel = getPanel();
       if (!panel) {
-        window.location.assign(contextHref);
         return false;
       }
-
-      const parsed = getStateFromHtml(responseText);
-      if (!parsed) {
-        window.location.assign(contextHref);
-        return false;
-      }
-
-      panel.innerHTML = parsed.panelHtml;
-      syncShellState(parsed);
-      syncActiveNav(parsed.subpage);
-      initPanelScripts(panel);
+      panel.innerHTML = state.panelHtml;
+      syncShellState(parseModeAndPageFromUrl(stateHref));
+      initPanelScriptForms(panel);
+      restoreMountedState(panel, state.mountedState);
       return true;
     };
-    let inFlightSubpageRequest = null;
-    let latestSubpageRequestId = 0;
 
-    const switchCharacterReadSubpage = async ({ href, replaceHistory = false } = {}) => {
-      const targetHref = typeof href === "string" ? href : "";
-      if (!targetHref) {
+    const loadPanelFromResponseText = (responseText, responseHref, { fallbackPath = "" } = {}) => {
+      const panel = getPanel();
+      if (!panel) {
+        return null;
+      }
+
+      const parsed = getResponseStateFromHtml(responseText);
+      if (!parsed) {
+        return null;
+      }
+
+      const responseUrl = parseModeAndPageFromUrl(responseHref || window.location.href);
+      const canonicalHref = buildCharacterReadHref({
+        mode: parsed.responseMode,
+        page: parsed.responseSubpage,
+        path: fallbackPath || responseUrl.path || window.location.pathname,
+        hash: responseUrl.hash,
+      });
+
+      panel.innerHTML = parsed.responsePanelHtml;
+      replaceFlashStack(parsed.flashStackHtml);
+      syncShellState({
+        mode: parsed.responseMode,
+        subpage: parsed.responseSubpage,
+      });
+      initPanelScriptForms(panel);
+
+      return {
+        mode: parsed.responseMode,
+        page: parsed.responseSubpage,
+        href: canonicalHref,
+        html: parsed.responsePanelHtml,
+      };
+    };
+
+    const buildSubmitPayload = (form, submitter) => {
+      let formData;
+      try {
+        formData = submitter ? new FormData(form, submitter) : new FormData(form);
+      } catch (_error) {
+        formData = new FormData(form);
+        if (
+          submitter
+          && submitter instanceof HTMLButtonElement
+          && submitter.name
+          && !submitter.disabled
+        ) {
+          formData.append(submitter.name, submitter.value || "");
+        }
+      }
+      return formData;
+    };
+
+    const submitFormInPanel = async (form, submitter) => {
+      const action = form.getAttribute("action") || "";
+      if (!action) {
         return;
       }
-      const targetState = parseShellStateFromUrl(targetHref);
-      const previousState = toShellState();
-      if (previousState.mode === targetState.mode && previousState.subpage === targetState.subpage) {
-        const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-        if (currentPath !== targetState.href && replaceHistory) {
+      if (form.method.toLowerCase() !== "post") {
+        return;
+      }
+
+      const previousStateHref = getHistoryKey(window.location.pathname + window.location.search + window.location.hash);
+      cacheCurrentPanel();
+      const payload = buildSubmitPayload(form, submitter);
+      let response;
+      try {
+        response = await fetch(action, {
+          method: "POST",
+          headers: {
+            "X-Requested-With": "XMLHttpRequest",
+            "Accept": "text/html",
+          },
+          body: payload,
+          cache: "no-store",
+          credentials: "same-origin",
+        });
+      } catch (_error) {
+        if (action) {
+          window.location.assign(action);
+        }
+        return;
+      }
+
+      const responseText = await response.text();
+      const shellState = getResponseStateFromHtml(responseText);
+      if (!shellState) {
+        window.location.assign(response.url || action);
+        return;
+      }
+
+      const switched = loadPanelFromResponseText(responseText, response.url, {
+        fallbackPath: window.location.pathname,
+      });
+      if (!switched) {
+        window.location.assign(response.url || action);
+        return;
+      }
+      const canonicalState = parseModeAndPageFromUrl(switched.href);
+      cachePanelState(canonicalState.href, switched.html, null);
+      updateHistory({
+        href: canonicalState.href,
+        replace: true,
+      });
+      const currentPanel = getPanel();
+      if (currentPanel) {
+        const currentMode = shellRoot.dataset.characterReadShellMode;
+        if (currentMode !== "read") {
+          window.location.assign(response.url || action);
+          return;
+        }
+      }
+      if (canonicalState.href !== getHistoryKey(previousStateHref)) {
+        cacheCurrentPanel();
+      }
+    };
+
+    const updateHistoryFromSubpage = async ({ href, replaceHistory = false, fromHistory = false }) => {
+      const targetState = parseModeAndPageFromUrl(href);
+      const currentState = getShellState();
+      if (currentState.mode === targetState.mode && currentState.subpage === targetState.page) {
+        if (fromHistory || replaceHistory) {
+          syncShellState(currentState);
           updateHistory({ href: targetState.href, replace: true });
         }
         return;
       }
 
-      try {
-        latestSubpageRequestId += 1;
-        const requestId = latestSubpageRequestId;
-        if (inFlightSubpageRequest) {
-          inFlightSubpageRequest.abort();
+      const targetKey = getHistoryKey(targetState.href);
+      cacheCurrentPanel();
+      if (restoreFromCache(targetKey)) {
+        if (!fromHistory) {
+          updateHistory({
+            href: targetKey,
+            replace: replaceHistory,
+          });
         }
-        inFlightSubpageRequest = new AbortController();
-        const response = await fetch(targetHref, {
+        return;
+      }
+
+      try {
+        if (window._characterReadShellAbortController) {
+          window._characterReadShellAbortController.abort();
+        }
+        const controller = new AbortController();
+        window._characterReadShellAbortController = controller;
+        const response = await fetch(targetState.href, {
           headers: {
             "X-Requested-With": "XMLHttpRequest",
             "Accept": "text/html",
           },
           cache: "no-store",
           credentials: "same-origin",
-          signal: inFlightSubpageRequest.signal,
+          signal: controller.signal,
         });
-        if (requestId !== latestSubpageRequestId) {
-          return;
-        }
-        inFlightSubpageRequest = null;
-        if (!response.ok) {
-          window.location.assign(targetHref);
+        if (controller.signal.aborted) {
           return;
         }
         const responseText = await response.text();
-        const panelLoaded = loadPanelFromResponseText(responseText, targetState.href);
-        if (!panelLoaded) {
+        const shellState = getResponseStateFromHtml(responseText);
+        if (!shellState) {
+          window.location.assign(targetState.href);
           return;
         }
-        if (!replaceHistory) {
-          updateHistory({ href: targetState.href, replace: false });
+
+        const switched = loadPanelFromResponseText(responseText, response.url, {
+          fallbackPath: targetState.path,
+        });
+        if (!switched) {
+          window.location.assign(targetState.href);
+          return;
+        }
+
+        const shellStateFromHref = getHistoryKey(switched.href);
+        cachePanelState(shellStateFromHref, switched.html, null);
+        if (fromHistory || replaceHistory) {
+          updateHistory({ href: shellStateFromHref, replace: true });
         } else {
-          updateHistory({ href: targetState.href, replace: true });
+          updateHistory({ href: shellStateFromHref, replace: false });
         }
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
           return;
         }
-        inFlightSubpageRequest = null;
-        window.location.assign(targetHref);
+        window.location.assign(targetState.href);
+      } finally {
+        if (window._characterReadShellAbortController && window._characterReadShellAbortController.signal.aborted) {
+          window._characterReadShellAbortController = null;
+        }
       }
     };
 
@@ -418,37 +764,70 @@
         return;
       }
       event.preventDefault();
-      void switchCharacterReadSubpage({ href, replaceHistory: false });
+      void updateHistoryFromSubpage({ href, replaceHistory: false });
     };
 
-    const navigateFromHistory = () => {
-      void switchCharacterReadSubpage({
-        href: window.location.pathname + window.location.search + window.location.hash,
-        replaceHistory: true,
+    const submitHandler = (event) => {
+      const panel = getPanel();
+      const form = event.target instanceof HTMLFormElement ? event.target : null;
+      if (!form || !panel || !panel.contains(form)) {
+        return;
+      }
+
+      const method = String(form.method || "get").trim().toLowerCase();
+      if (method !== "post") {
+        return;
+      }
+      const action = form.getAttribute("action") || "";
+      if (!action) {
+        return;
+      }
+      event.preventDefault();
+      const submitter = event.submitter instanceof HTMLElement ? event.submitter : null;
+      submitFormInPanel(form, submitter).catch(() => {
+        if (action) {
+          window.location.assign(action);
+        }
       });
     };
 
-    const initialState = initialShellState;
-    syncActiveNav(initialState.subpage);
+    window.__playerWikiCharacterReadShell = {
+      initPanelScriptForms,
+      updateHistoryFromSubpage,
+      syncActiveNav,
+      toShellState: getShellState,
+      cache: panelMountedStateCache,
+    };
+
+    cacheCurrentPanel();
+    initPanelScriptForms(shellRoot);
+    const initialCanonicalHref = getHistoryKey(window.location.href);
     window.history.replaceState(
       {
         characterReadMode: initialState.mode,
-        characterReadSubpage: initialState.subpage,
+        characterReadSubpage: initialState.page,
+        characterReadHref: initialCanonicalHref,
       },
       "",
-      window.location.href,
+      initialState.href,
     );
 
-    window.__playerWikiCharacterReadShell = {
-      initPanelScripts,
-      swapToState: switchCharacterReadSubpage,
-      syncActiveNav,
-      toShellState,
-    };
+    const panel = getPanel();
+    if (panel) {
+      syncActiveNav(initialState.page);
+    }
 
     shellRoot.addEventListener("click", clickHandler);
+    shellRoot.addEventListener("submit", submitHandler);
     window.addEventListener("popstate", () => {
-      navigateFromHistory();
+      const stateHref = window.history.state && typeof window.history.state.characterReadHref === "string"
+        ? window.history.state.characterReadHref
+        : window.location.pathname + window.location.search + window.location.hash;
+      void updateHistoryFromSubpage({
+        href: stateHref || window.location.pathname + window.location.search + window.location.hash,
+        replaceHistory: true,
+        fromHistory: true,
+      });
     });
   })();
 </script>

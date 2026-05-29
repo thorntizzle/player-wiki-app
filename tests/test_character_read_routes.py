@@ -5640,13 +5640,16 @@ def test_character_read_shell_scripts_are_embedded_for_progressive_enhancement(
 
     assert "window.__playerWikiCharacterReadShell" in html
     assert "history.pushState" in html
+    assert "new FormData(form, submitter)" in html
     assert "addEventListener(\"popstate\"" in html
     assert "data-character-read-subpage-link" in html
     assert "loadPanelFromResponseText" in html
+    assert "replaceFlashStack" in html
     assert "event.button !== 0" in html
     assert "event.preventDefault();" in html
     assert "\"X-Requested-With\": \"XMLHttpRequest\"" in html
-    assert "if (initialShellState.mode !== \"read\")" in html
+    assert "\"Accept\": \"text/html\"" in html
+    assert "if (initialPanelState.mode !== \"read\")" in html
 
 
 def test_dnd_read_view_exposes_expected_character_read_shell_subpages_when_manageable(
@@ -8283,6 +8286,51 @@ def test_read_mode_note_save_stays_in_read_mode(client, sign_in, users, get_char
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/campaigns/linden-pass/characters/arden-march?page=notes#session-notes")
     assert "mode=session" not in response.headers["Location"]
+
+
+def test_read_mode_note_save_stale_revision_refreshes_read_shell_view(
+    app,
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    get_character,
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    record = get_character("arden-march")
+    assert record is not None
+    stale_revision = record.state_record.revision
+
+    _write_character_state(
+        app,
+        "arden-march",
+        lambda state: (
+            state.__setitem__("notes", {
+                **dict(state.get("notes") or {}),
+                "player_notes_markdown": "Concurrent read-mode edit from elsewhere.",
+            })
+        ),
+    )
+
+    response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/session/notes",
+        data={
+            "expected_revision": stale_revision,
+            "mode": "read",
+            "page": "notes",
+            "player_notes_markdown": "Read mode note save.",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 409
+    html = response.get_data(as_text=True)
+    assert "This sheet changed in another session." in html
+    assert 'data-character-read-shell-mode="read"' in html
+    assert 'data-character-read-shell-page="notes"' in html
+    assert "Read mode note save." in html
 
 
 def test_session_mode_uses_same_subpage_ui_as_read_mode(client, sign_in, users, set_campaign_visibility):

@@ -4800,10 +4800,10 @@ def create_app() -> Flask:
         include_controls_subpage = (
             can_use_session_mode and campaign_supports_character_controls_routes(campaign)
         )
-        requested_mode = request.args.get("mode", "").strip().lower()
+        requested_mode = request.values.get("mode", "").strip().lower()
         is_session_mode = force_session_mode or (requested_mode == "session" and can_use_session_mode)
 
-        confirm_rest = request.args.get("confirm_rest", "").strip().lower() if is_session_mode else ""
+        confirm_rest = request.values.get("confirm_rest", "").strip().lower() if is_session_mode else ""
         rest_preview = None
         if confirm_rest in {"short", "long"}:
             rest_preview = get_character_state_service().preview_rest(record, confirm_rest)
@@ -4849,7 +4849,7 @@ def create_app() -> Flask:
             xianxia_read=xianxia_read_context,
         )
         character_subpage = normalize_character_read_subpage(
-            request.args.get("page", ""),
+            request.values.get("page", ""),
             include_spellcasting=include_spellcasting_subpage,
             include_controls=include_controls_subpage,
             xianxia_read=xianxia_read_context,
