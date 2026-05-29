@@ -5584,6 +5584,64 @@ def test_character_sheet_subpages_show_requested_sections(app, client, sign_in, 
     assert "mode=session&amp;page=features" in html
 
 
+def test_character_read_sheet_exposes_character_shell_data_hooks(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get("/campaigns/linden-pass/characters/arden-march")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+
+    assert 'data-character-read-shell-root' in html
+    assert 'data-character-read-shell-panel' in html
+    assert 'data-character-read-shell-page="quick"' in html
+    assert 'data-character-read-shell-mode="read"' in html
+    assert 'data-character-read-subpage-link' in html
+    assert 'data-character-read-target-subpage="quick"' in html
+    assert 'data-character-read-target-subpage="features"' in html
+
+
+def test_character_read_subpage_nav_links_keep_fallback_hrefs(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    read_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read")
+    read_html = read_response.get_data(as_text=True)
+    assert read_response.status_code == 200
+    assert 'href="/campaigns/linden-pass/characters/arden-march?page=quick"' in read_html
+    assert 'href="/campaigns/linden-pass/characters/arden-march?page=inventory"' in read_html
+    assert 'href="/campaigns/linden-pass/characters/arden-march?page=features"' in read_html
+    assert 'href="/campaigns/linden-pass/characters/arden-march?page=spellcasting"' in read_html
+    assert 'href="/campaigns/linden-pass/characters/arden-march?mode=session&amp;page=quick"' in read_html
+
+    session_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=features")
+    session_html = session_response.get_data(as_text=True)
+    assert session_response.status_code == 200
+    assert 'href="/campaigns/linden-pass/characters/arden-march?mode=session&amp;page=quick"' in session_html
+    assert 'href="/campaigns/linden-pass/characters/arden-march?mode=session&amp;page=features"' in session_html
+    assert 'href="/campaigns/linden-pass/characters/arden-march?mode=session&amp;page=inventory"' in session_html
+
+
+def test_character_read_shell_scripts_are_embedded_for_progressive_enhancement(
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=features")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+
+    assert "window.__playerWikiCharacterReadShell" in html
+    assert "history.pushState" in html
+    assert "addEventListener(\"popstate\"" in html
+    assert "data-character-read-subpage-link" in html
+    assert "loadPanelFromResponseText" in html
+    assert "event.button !== 0" in html
+    assert "event.preventDefault();" in html
+    assert "\"X-Requested-With\": \"XMLHttpRequest\"" in html
+    assert "if (initialShellState.mode !== \"read\")" in html
+
+
 def test_spellcasting_subpage_is_only_shown_for_casters_and_holds_spell_list(client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
@@ -6850,6 +6908,9 @@ def test_read_only_player_controls_request_falls_back_to_quick_reference(
     assert "Delete character" not in html
     assert "Assignment controls" not in html
     assert "?page=controls" not in html
+    assert 'data-character-read-shell-page="quick"' in html
+    assert 'data-character-read-shell-mode="read"' in html
+    assert 'data-character-read-target-subpage="controls"' not in html
 
 
 def test_character_sheet_invalid_subpage_defaults_to_quick_reference(client, sign_in, users):
@@ -6864,6 +6925,8 @@ def test_character_sheet_invalid_subpage_defaults_to_quick_reference(client, sig
     assert "Features and traits" not in html
     assert "Inventory and currency" not in html
     assert "No notes yet." not in html
+    assert 'data-character-read-shell-page="quick"' in html
+    assert 'data-character-read-shell-mode="read"' in html
 
 
 def test_admin_can_reassign_and_clear_owner_from_character_controls(app, client, sign_in, users):

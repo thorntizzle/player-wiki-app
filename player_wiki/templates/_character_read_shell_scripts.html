@@ -1,0 +1,454 @@
+<script>
+  (() => {
+    const shellRoot = document.querySelector("[data-character-read-shell-root]");
+    if (!shellRoot) {
+      return;
+    }
+
+    const normalizeMode = (value) => {
+      const normalized = String(value || "").trim().toLowerCase();
+      return normalized === "session" ? "session" : "read";
+    };
+
+    const normalizeSubpage = (value) => {
+      const normalized = String(value || "").trim().toLowerCase();
+      return normalized || "quick";
+    };
+
+    const toShellState = () => {
+      return {
+        mode: normalizeMode(shellRoot.dataset.characterReadShellMode || "read"),
+        subpage: normalizeSubpage(shellRoot.dataset.characterReadShellPage || "quick"),
+      };
+    };
+    const initialShellState = toShellState();
+    if (initialShellState.mode !== "read") {
+      return;
+    }
+
+    const getPanel = () => shellRoot.querySelector("[data-character-read-shell-panel]");
+    const getPanelLinks = () => Array.from(
+      shellRoot.querySelectorAll("[data-character-read-subpage-link]")
+    );
+
+    const parseShellStateFromUrl = (rawUrl) => {
+      try {
+        const url = new URL(rawUrl, window.location.origin);
+        const params = new URLSearchParams(url.search);
+        return {
+          mode: normalizeMode(params.get("mode") || "read"),
+          subpage: normalizeSubpage(params.get("page") || shellRoot.dataset.characterReadShellPage || "quick"),
+          href: `${url.pathname}${url.search}${url.hash}`,
+        };
+      } catch (_error) {
+        return {
+          mode: normalizeMode(shellRoot.dataset.characterReadShellMode || "read"),
+          subpage: normalizeSubpage(shellRoot.dataset.characterReadShellPage || "quick"),
+          href: window.location.pathname + window.location.search,
+        };
+      }
+    };
+
+    const syncActiveNav = (targetSubpage) => {
+      const normalized = normalizeSubpage(targetSubpage);
+      for (const link of getPanelLinks()) {
+        const isActive = normalizeSubpage(link.dataset.characterReadTargetSubpage || "") === normalized;
+        link.classList.toggle("button-link", isActive);
+        link.classList.toggle("ghost-button", !isActive);
+      }
+    };
+
+    const syncShellState = ({ mode, subpage }) => {
+      const nextMode = normalizeMode(mode);
+      const nextSubpage = normalizeSubpage(subpage);
+      shellRoot.dataset.characterReadShellMode = nextMode;
+      shellRoot.dataset.characterReadShellPage = nextSubpage;
+      syncActiveNav(nextSubpage);
+    };
+
+    const getStateFromHtml = (html) => {
+      const parser = new DOMParser();
+      const documentNode = parser.parseFromString(html, "text/html");
+      const responseShellRoot = documentNode.querySelector("[data-character-read-shell-root]");
+      const responsePanel = documentNode.querySelector("[data-character-read-shell-panel]");
+      if (!responseShellRoot || !responsePanel) {
+        return null;
+      }
+      return {
+        panelHtml: responsePanel.innerHTML,
+        mode: normalizeMode(responseShellRoot.dataset.characterReadShellMode || ""),
+        subpage: normalizeSubpage(responseShellRoot.dataset.characterReadShellPage || ""),
+      };
+    };
+
+    const initSpellcastingSearch = (scope) => {
+      const forms = Array.from(scope.querySelectorAll("[data-character-spell-search-form]"));
+      for (const form of forms) {
+        if (!(form instanceof HTMLFormElement)) {
+          continue;
+        }
+        const searchInput = form.querySelector("[data-character-spell-query]");
+        const resultsSelect = form.querySelector("[data-character-spell-results]");
+        const status = form.querySelector("[data-character-spell-status]");
+        const searchUrl = form.dataset.characterSpellSearchUrl || "";
+        const searchKind = form.dataset.characterSpellSearchKind || "spell";
+        const targetClassRowId = form.dataset.characterSpellSearchTargetRow || "";
+        const emptyLabel = form.dataset.characterSpellSearchEmptyLabel || "Search to load matching spells";
+        const promptText = form.dataset.characterSpellSearchPrompt || "Type at least 2 letters to search eligible class spells.";
+        if (
+          !(searchInput instanceof HTMLInputElement)
+          || !(resultsSelect instanceof HTMLSelectElement)
+          || !(status instanceof HTMLElement)
+          || !searchUrl
+        ) {
+          continue;
+        }
+
+        let searchAbortController = null;
+        let searchTimerId = 0;
+
+        const resetResults = (message) => {
+          resultsSelect.innerHTML = "";
+          const option = document.createElement("option");
+          option.value = "";
+          option.textContent = emptyLabel;
+          resultsSelect.append(option);
+          resultsSelect.disabled = true;
+          status.textContent = message || promptText;
+        };
+
+        const renderResults = (results, message) => {
+          if (!Array.isArray(results) || !results.length) {
+            resetResults(message || "No eligible class spells matched that search.");
+            return;
+          }
+          resultsSelect.innerHTML = "";
+          for (const result of results) {
+            const option = document.createElement("option");
+            option.value = String(result.entry_slug || "");
+            option.textContent = String(result.select_label || result.title || "");
+            resultsSelect.append(option);
+          }
+          resultsSelect.disabled = false;
+          resultsSelect.selectedIndex = 0;
+          status.textContent = message || `Found ${results.length} matching spells.`;
+        };
+
+        const runSearch = async () => {
+          const query = searchInput.value.trim();
+          if (searchAbortController) {
+            searchAbortController.abort();
+          }
+          if (query.length < 2) {
+            resetResults(promptText);
+            return;
+          }
+
+          searchAbortController = new AbortController();
+          status.textContent = "Searching spells...";
+          try {
+            const params = new URLSearchParams({
+              kind: searchKind,
+              q: query,
+            });
+            if (targetClassRowId) {
+              params.set("target_class_row_id", targetClassRowId);
+            }
+            const response = await fetch(
+              `${searchUrl}?${params.toString()}`,
+              {
+                headers: {
+                  "X-Requested-With": "XMLHttpRequest",
+                  "Accept": "application/json",
+                },
+                cache: "no-store",
+                credentials: "same-origin",
+                signal: searchAbortController.signal,
+              },
+            );
+            if (!response.ok) {
+              resetResults("Could not search spells right now.");
+              return;
+            }
+
+            const payload = await response.json();
+            renderResults(payload.results, typeof payload.message === "string" ? payload.message : "");
+          } catch (error) {
+            if (error instanceof DOMException && error.name === "AbortError") {
+              return;
+            }
+            resetResults("Could not search spells right now.");
+          } finally {
+            searchAbortController = null;
+          }
+        };
+
+        searchInput.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+          }
+        });
+        searchInput.addEventListener("input", () => {
+          window.clearTimeout(searchTimerId);
+          searchTimerId = window.setTimeout(runSearch, 250);
+        });
+
+        resetResults(status.textContent || promptText);
+      }
+    };
+
+    const initSystemsItemSearch = (scope) => {
+      const forms = Array.from(scope.querySelectorAll("[data-character-systems-item-search-form]"));
+      for (const form of forms) {
+        if (!(form instanceof HTMLFormElement)) {
+          continue;
+        }
+        const searchInput = form.querySelector("[data-character-systems-item-query]");
+        const resultsSelect = form.querySelector("[data-character-systems-item-results]");
+        const status = form.querySelector("[data-character-systems-item-status]");
+        const searchUrl = form.dataset.characterSystemsItemSearchUrl || "";
+        if (
+          !(searchInput instanceof HTMLInputElement)
+          || !(resultsSelect instanceof HTMLSelectElement)
+          || !(status instanceof HTMLElement)
+          || !searchUrl
+        ) {
+          continue;
+        }
+
+        let searchAbortController = null;
+        let searchTimerId = 0;
+
+        const resetResults = (message) => {
+          resultsSelect.innerHTML = "";
+          const option = document.createElement("option");
+          option.value = "";
+          option.textContent = "Search to load matching items";
+          resultsSelect.append(option);
+          resultsSelect.disabled = true;
+          status.textContent = message;
+        };
+
+        const renderResults = (results, message) => {
+          if (!Array.isArray(results) || !results.length) {
+            resetResults(message || "No enabled Systems items matched that search.");
+            return;
+          }
+          resultsSelect.innerHTML = "";
+          for (const result of results) {
+            const option = document.createElement("option");
+            option.value = String(result.entry_slug || "");
+            option.textContent = String(result.select_label || result.title || "");
+            resultsSelect.append(option);
+          }
+          resultsSelect.disabled = false;
+          resultsSelect.selectedIndex = 0;
+          status.textContent = message || `Found ${results.length} matching Systems items.`;
+        };
+
+        const runSearch = async () => {
+          const query = searchInput.value.trim();
+          if (searchAbortController) {
+            searchAbortController.abort();
+          }
+          if (query.length < 2) {
+            resetResults("Type at least 2 letters to search enabled Systems items.");
+            return;
+          }
+
+          searchAbortController = new AbortController();
+          status.textContent = "Searching Systems items...";
+          try {
+            const response = await fetch(`${searchUrl}?q=${encodeURIComponent(query)}`, {
+              headers: {
+                "X-Requested-With": "XMLHttpRequest",
+                "Accept": "application/json",
+              },
+              cache: "no-store",
+              credentials: "same-origin",
+              signal: searchAbortController.signal,
+            });
+            if (!response.ok) {
+              resetResults("Could not search Systems items right now.");
+              return;
+            }
+
+            const payload = await response.json();
+            renderResults(payload.results, typeof payload.message === "string" ? payload.message : "");
+          } catch (error) {
+            if (error instanceof DOMException && error.name === "AbortError") {
+              return;
+            }
+            resetResults("Could not search Systems items right now.");
+          } finally {
+            searchAbortController = null;
+          }
+        };
+
+        searchInput.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+          }
+        });
+        searchInput.addEventListener("input", () => {
+          window.clearTimeout(searchTimerId);
+          searchTimerId = window.setTimeout(runSearch, 250);
+        });
+
+        resetResults("Type at least 2 letters to search enabled Systems items.");
+      }
+    };
+
+    const initPanelScripts = (scope = shellRoot) => {
+      if (!(scope instanceof Element)) {
+        return;
+      }
+      initSpellcastingSearch(scope);
+      initSystemsItemSearch(scope);
+    };
+
+    const updateHistory = ({ href, replace }) => {
+      const state = {
+        characterReadMode: shellRoot.dataset.characterReadShellMode,
+        characterReadSubpage: shellRoot.dataset.characterReadShellPage,
+      };
+      if (replace) {
+        window.history.replaceState(state, "", href);
+      } else {
+        window.history.pushState(state, "", href);
+      }
+    };
+
+    const loadPanelFromResponseText = (responseText, contextHref) => {
+      const panel = getPanel();
+      if (!panel) {
+        window.location.assign(contextHref);
+        return false;
+      }
+
+      const parsed = getStateFromHtml(responseText);
+      if (!parsed) {
+        window.location.assign(contextHref);
+        return false;
+      }
+
+      panel.innerHTML = parsed.panelHtml;
+      syncShellState(parsed);
+      syncActiveNav(parsed.subpage);
+      initPanelScripts(panel);
+      return true;
+    };
+    let inFlightSubpageRequest = null;
+    let latestSubpageRequestId = 0;
+
+    const switchCharacterReadSubpage = async ({ href, replaceHistory = false } = {}) => {
+      const targetHref = typeof href === "string" ? href : "";
+      if (!targetHref) {
+        return;
+      }
+      const targetState = parseShellStateFromUrl(targetHref);
+      const previousState = toShellState();
+      if (previousState.mode === targetState.mode && previousState.subpage === targetState.subpage) {
+        const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+        if (currentPath !== targetState.href && replaceHistory) {
+          updateHistory({ href: targetState.href, replace: true });
+        }
+        return;
+      }
+
+      try {
+        latestSubpageRequestId += 1;
+        const requestId = latestSubpageRequestId;
+        if (inFlightSubpageRequest) {
+          inFlightSubpageRequest.abort();
+        }
+        inFlightSubpageRequest = new AbortController();
+        const response = await fetch(targetHref, {
+          headers: {
+            "X-Requested-With": "XMLHttpRequest",
+            "Accept": "text/html",
+          },
+          cache: "no-store",
+          credentials: "same-origin",
+          signal: inFlightSubpageRequest.signal,
+        });
+        if (requestId !== latestSubpageRequestId) {
+          return;
+        }
+        inFlightSubpageRequest = null;
+        if (!response.ok) {
+          window.location.assign(targetHref);
+          return;
+        }
+        const responseText = await response.text();
+        const panelLoaded = loadPanelFromResponseText(responseText, targetState.href);
+        if (!panelLoaded) {
+          return;
+        }
+        if (!replaceHistory) {
+          updateHistory({ href: targetState.href, replace: false });
+        } else {
+          updateHistory({ href: targetState.href, replace: true });
+        }
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+        inFlightSubpageRequest = null;
+        window.location.assign(targetHref);
+      }
+    };
+
+    const clickHandler = (event) => {
+      if (event.defaultPrevented || event.button !== 0) {
+        return;
+      }
+      const link = event.target instanceof Element
+        ? event.target.closest("[data-character-read-subpage-link]")
+        : null;
+      if (!link || !shellRoot.contains(link)) {
+        return;
+      }
+      if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) {
+        return;
+      }
+
+      const href = link.getAttribute("href") || "";
+      if (!href) {
+        return;
+      }
+      event.preventDefault();
+      void switchCharacterReadSubpage({ href, replaceHistory: false });
+    };
+
+    const navigateFromHistory = () => {
+      void switchCharacterReadSubpage({
+        href: window.location.pathname + window.location.search + window.location.hash,
+        replaceHistory: true,
+      });
+    };
+
+    const initialState = initialShellState;
+    syncActiveNav(initialState.subpage);
+    window.history.replaceState(
+      {
+        characterReadMode: initialState.mode,
+        characterReadSubpage: initialState.subpage,
+      },
+      "",
+      window.location.href,
+    );
+
+    window.__playerWikiCharacterReadShell = {
+      initPanelScripts,
+      swapToState: switchCharacterReadSubpage,
+      syncActiveNav,
+      toShellState,
+    };
+
+    shellRoot.addEventListener("click", clickHandler);
+    window.addEventListener("popstate", () => {
+      navigateFromHistory();
+    });
+  })();
+</script>

@@ -4,8 +4,14 @@
 
 {% block content %}
   <div class="page-layout character-layout">
-    <article class="article card character-sheet">
-      <header class="character-header">
+    <article
+      class="article card character-sheet"
+      data-character-read-shell-root
+      data-character-read-shell-page="{{ character_subpage }}"
+      data-character-read-shell-mode="{% if is_session_mode %}session{% else %}read{% endif %}"
+    >
+      <div data-character-read-shell-panel>
+        <header class="character-header">
         <p class="eyebrow">{% if is_session_mode %}Sheet edit view{% else %}Character sheet{% endif %}</p>
         <h1>{{ character.name }}</h1>
         <p class="lede">
@@ -112,7 +118,12 @@
 
       <nav class="character-subpage-nav" aria-label="Character subpages">
         {% for subpage in character_subpages %}
-          <a class="{% if subpage.is_active %}button-link{% else %}ghost-button{% endif %}" href="{{ subpage.href }}">
+          <a
+            class="{% if subpage.is_active %}button-link{% else %}ghost-button{% endif %}"
+            href="{{ subpage.href }}"
+            data-character-read-subpage-link
+            data-character-read-target-subpage="{{ subpage.slug }}"
+          >
             {{ subpage.label }}
           </a>
         {% endfor %}
@@ -1194,6 +1205,7 @@
       {% if show_control_sections and character_controls %}
         {% include "_character_controls_panel.html" %}
       {% endif %}
+      </div>
     </article>
   </div>
 {% endblock %}
@@ -1967,4 +1979,5 @@
       })();
     </script>
   {% endif %}
+  {% include "_character_read_shell_scripts.html" %}
 {% endblock %}
