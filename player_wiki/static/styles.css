@@ -1384,6 +1384,13 @@ button {
   gap: 0.85rem;
 }
 
+.character-sheet .resource-grid--compact,
+.character-sheet .resource-grid--editable,
+.character-sheet .spell-slot-editor-list--compact {
+  grid-template-columns: repeat(3, max-content);
+  justify-content: center;
+}
+
 .character-header {
   display: grid;
   gap: 0.35rem;
@@ -1559,6 +1566,29 @@ button {
 
 .glance-grid--quick-row-4 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.character-sheet .glance-grid--quick-row-1,
+.character-sheet .glance-grid--quick-row-2,
+.character-sheet .glance-grid--quick-row-3,
+.character-sheet .glance-grid--quick-row-4 {
+  justify-content: center;
+}
+
+.character-sheet .glance-grid--quick-row-1 {
+  grid-template-columns: repeat(2, max-content);
+}
+
+.character-sheet .glance-grid--quick-row-2 {
+  grid-template-columns: repeat(3, max-content);
+}
+
+.character-sheet .glance-grid--quick-row-3 {
+  grid-template-columns: repeat(4, max-content);
+}
+
+.character-sheet .glance-grid--quick-row-4 {
+  grid-template-columns: repeat(2, max-content);
 }
 
 .glance-card,
@@ -1746,6 +1776,10 @@ button {
   align-items: stretch;
 }
 
+.character-sheet .resource-grid--editable {
+  grid-template-columns: repeat(3, max-content);
+}
+
 .session-resource-list {
   display: grid;
   gap: 0.65rem;
@@ -1780,6 +1814,12 @@ button {
 
 .session-number-inline input {
   min-width: 0;
+}
+
+.character-sheet .session-vitals-form--inline-current .session-number-inline input,
+.character-sheet .session-vitals-form--inline-temp input {
+  width: 8rem;
+  max-width: 100%;
 }
 
 .session-number-inline span {
@@ -1826,6 +1866,15 @@ button {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .character-sheet .glance-grid--quick-row-2,
+  .character-sheet .glance-grid--quick-row-3,
+  .character-sheet .glance-grid--quick-row-4,
+  .character-sheet .resource-grid--compact,
+  .character-sheet .resource-grid--editable,
+  .character-sheet .spell-slot-editor-list--compact {
+    grid-template-columns: repeat(2, max-content);
+  }
+
   .session-resource-row__editor {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1833,6 +1882,16 @@ button {
 
 @media (max-width: 520px) {
   .resource-grid--editable {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .character-sheet .glance-grid--quick-row-1,
+  .character-sheet .glance-grid--quick-row-2,
+  .character-sheet .glance-grid--quick-row-3,
+  .character-sheet .glance-grid--quick-row-4,
+  .character-sheet .resource-grid--compact,
+  .character-sheet .resource-grid--editable,
+  .character-sheet .spell-slot-editor-list--compact {
     grid-template-columns: minmax(0, 1fr);
   }
 }

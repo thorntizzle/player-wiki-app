@@ -81,11 +81,27 @@ def test_character_read_shell_browser_state_and_save_flow(
             expect(page.locator("[data-character-subpage-nav-card]")).to_be_visible(timeout=5000)
             expect(page.locator(".glance-card--vitals input[name='current_hp']")).to_be_visible(timeout=5000)
             expect(page.locator("text=Save vitals")).to_have_count(0)
+            quick_row_columns = page.locator(".glance-grid--quick-row-1").evaluate(
+                "(element) => getComputedStyle(element).gridTemplateColumns.split(' ').filter(Boolean).length"
+            )
+            assert quick_row_columns == 2
+            passive_row_columns = page.locator(".glance-grid--quick-row-3").evaluate(
+                "(element) => getComputedStyle(element).gridTemplateColumns.split(' ').filter(Boolean).length"
+            )
+            assert passive_row_columns == 4
+            resource_columns = page.locator(".resource-grid--editable").evaluate(
+                "(element) => getComputedStyle(element).gridTemplateColumns.split(' ').filter(Boolean).length"
+            )
+            assert resource_columns <= 3
             desktop_columns = page.locator(".ability-grid--skills").evaluate(
                 "(element) => getComputedStyle(element).gridTemplateColumns.split(' ').filter(Boolean).length"
             )
             assert desktop_columns == 6
             page.set_viewport_size({"width": 640, "height": 900})
+            mobile_passive_row_columns = page.locator(".glance-grid--quick-row-3").evaluate(
+                "(element) => getComputedStyle(element).gridTemplateColumns.split(' ').filter(Boolean).length"
+            )
+            assert mobile_passive_row_columns == 2
             mobile_columns = page.locator(".ability-grid--skills").evaluate(
                 "(element) => getComputedStyle(element).gridTemplateColumns.split(' ').filter(Boolean).length"
             )
@@ -126,6 +142,18 @@ def test_character_read_shell_browser_state_and_save_flow(
             expect(page).to_have_url(personal_url_pattern, timeout=5000)
             page.go_back()
             expect(page.locator("h2:has-text('At a glance')")).to_be_visible(timeout=5000)
+
+            page.locator("[data-character-read-target-subpage='spellcasting']").click()
+            expect(page.locator("h2:has-text('Spell slots')")).to_be_visible(timeout=5000)
+            generic_slot_headings = page.locator("h3.spell-slot-pool-title:has-text('Spell slots')")
+            assert generic_slot_headings.count() > 0
+            assert generic_slot_headings.evaluate_all(
+                "(elements) => elements.every((element) => getComputedStyle(element).position === 'absolute')"
+            )
+            spell_slot_columns = page.locator(".spell-slot-editor-list--compact").nth(0).evaluate(
+                "(element) => getComputedStyle(element).gridTemplateColumns.split(' ').filter(Boolean).length"
+            )
+            assert spell_slot_columns <= 3
 
             page.goto(f"{character_slug_path}?mode=read&page=notes")
             expect(page).to_have_url(notes_url_pattern, timeout=5000)

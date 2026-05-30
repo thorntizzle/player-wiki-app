@@ -98,8 +98,10 @@
       </article>
       {% for slot_pool in character.spellcasting.slot_pools %}
         {% if slot_pool.slots %}
+          {% set slot_pool_title = slot_pool.title or character.spellcasting.slots_title or "Spell slots" %}
+          {% set slot_pool_title_is_generic = (slot_pool_title | lower) == "spell slots" %}
           <article class="detail-card">
-            <h3>{{ slot_pool.title or character.spellcasting.slots_title or "Spell slots" }}</h3>
+            <h3 class="{% if slot_pool_title_is_generic %}visually-hidden {% endif %}spell-slot-pool-title">{{ slot_pool_title }}</h3>
             <ul class="plain-list slot-list">
               {% for slot in slot_pool.slots %}
                 <li>

@@ -45,7 +45,7 @@
       <div class="section-heading">
         <h2>Resources</h2>
       </div>
-      <div class="{% if session_character_compact_controls %}resource-grid resource-grid--editable{% else %}resource-grid{% endif %}">
+      <div class="resource-grid{% if session_character_compact_controls %} resource-grid--editable{% endif %} resource-grid--compact">
         {% for resource in character.resources %}
           <article class="resource-card session-resource-card {% if session_character_compact_controls %}session-resource-card--compact{% endif %} {% if resource.is_manual %}session-resource-card--manual{% endif %}">
             <form
@@ -102,10 +102,16 @@
       </div>
       {% for slot_pool in character.spellcasting.slot_pools %}
         {% if slot_pool.slots %}
-          <div class="section-heading">
-            <h3>{{ slot_pool.title or character.spellcasting.slots_title or "Spell slots" }}</h3>
-          </div>
-          <div class="spell-slot-editor-list">
+          {% set slot_pool_title = slot_pool.title or character.spellcasting.slots_title or "Spell slots" %}
+          {% set slot_pool_title_is_generic = (slot_pool_title | lower) == "spell slots" %}
+          {% if slot_pool_title_is_generic %}
+            <h3 class="visually-hidden spell-slot-pool-title">{{ slot_pool_title }}</h3>
+          {% else %}
+            <div class="section-heading">
+              <h3 class="spell-slot-pool-title">{{ slot_pool_title }}</h3>
+            </div>
+          {% endif %}
+          <div class="spell-slot-editor-list spell-slot-editor-list--compact">
             {% for slot in slot_pool.slots %}
               <article class="detail-card">
                 <form

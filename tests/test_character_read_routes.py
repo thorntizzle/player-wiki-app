@@ -5370,6 +5370,10 @@ def test_xianxia_milestone1_dnd5e_read_and_session_spellcasting_surfaces_remain_
     assert "Martial Arts" not in spellcasting_html
     assert "Jing" not in spellcasting_html
     assert "Dao" not in spellcasting_html
+    assert re.search(
+        r'<h3 class="visually-hidden spell-slot-pool-title">',
+        spellcasting_html,
+    ) is not None
 
     assert session_spellcasting.status_code == 200
     session_html = session_spellcasting.get_data(as_text=True)
@@ -8440,6 +8444,7 @@ def test_dnd_character_normal_page_shows_inline_state_controls_for_assigned_play
     assert 'name="temp_hp"' in quick_html
     assert 'id="session-vitals"' in quick_html
     assert 'resource-grid resource-grid--editable' in quick_html
+    assert 'resource-grid resource-grid--editable resource-grid--compact' in quick_html
     assert "glance-grid--quick-row-1" in quick_html
     assert "glance-grid--quick-row-2" in quick_html
     assert "glance-grid--quick-row-3" in quick_html
@@ -8456,6 +8461,9 @@ def test_dnd_character_normal_page_shows_inline_state_controls_for_assigned_play
     assert spell_response.status_code == 200
     spell_html = spell_response.get_data(as_text=True)
     assert 'data-character-sheet-edit-form="spell-slot"' in spell_html
+    assert 'class="spell-slot-editor-list spell-slot-editor-list--compact"' in spell_html
+    assert "<h3>Spell slots</h3>" not in spell_html
+    assert '<h3 class="visually-hidden spell-slot-pool-title">Spell slots</h3>' in spell_html
     assert "Restore 1" in spell_html
     assert "Use 1" in spell_html
     assert "Save pending changes" not in spell_html
