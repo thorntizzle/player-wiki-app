@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 import re
 import threading
 import time
@@ -8,6 +9,8 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 
 from player_wiki import auth as auth_module
+from player_wiki.loading_presenter import select_campaign_loading_image_url
+from player_wiki.models import Campaign, Page
 
 
 def extract_stylesheet_href(html: str) -> str:
@@ -51,6 +54,10 @@ def test_base_template_includes_inline_loading_bootstrap_and_cover(client):
     assert "cpw:app-loading-nav-start" in html
     assert "app-loading-closing" in html
     assert "prefers-reduced-motion" in html
+    assert ".app-loading-cover__media" in html
+    assert "app-loading-cover__message" in html
+    assert "--app-loading-bg" in html
+    assert "Loading campaign player wiki..." in html
 
 
 def test_versioned_stylesheet_response_uses_production_immutable_cache_headers(app, client):
@@ -93,6 +100,239 @@ def test_stylesheet_static_requests_bypass_request_identity(monkeypatch, client)
     assert call_count["count"] == page_request_count
     vary_header = (stylesheet_response.headers.get("Vary") or "").lower()
     assert "cookie" not in vary_header
+
+
+def test_base_template_uses_loading_image_for_campaign_when_available(client):
+    response = client.get("/campaigns/linden-pass")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+
+    assert 'app-loading-cover--with-image' in html
+    assert 'data-app-loading-media-url="/campaigns/linden-pass/assets/' in html
+    assert "force-cache" in html
+
+
+def test_base_template_no_loading_image_for_global_routes(client):
+    response = client.get("/sign-in")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+
+    assert 'app-loading-cover--with-image' not in html
+    assert '<div class="app-loading-cover" role="status"' in html
+
+
+def test_base_template_has_theme_scoped_palette_for_loading_cover(client):
+    response = client.get("/campaigns/linden-pass")
+    assert response.status_code == 200
+
+    html = response.get_data(as_text=True)
+    bg, ink, accent, _ = _loading_theme_palette("parchment")
+    assert 'html[data-theme="parchment"]' in html
+    assert f"--app-loading-bg: {bg};" in html
+    assert f"--app-loading-ink: {ink};" in html
+    assert f"--app-loading-accent: {accent};" in html
+
+
+def _loading_theme_palette(theme_key: str) -> tuple[str, str, str, str]:
+    themes = {
+        "parchment": ("#efe2c5", "#2f241a", "#8c4f31", "0.16"),
+        "moonlit": ("#172331", "#eaf1ff", "#d4b16f", "0.18"),
+        "verdant": ("#dfe9db", "#233126", "#4a7e60", "0.16"),
+        "ember": ("#f0d3bc", "#351d18", "#a34c31", "0.14"),
+    }
+    return themes[theme_key]
+
+
+def _extract_loading_media_url(html: str) -> str | None:
+    match = re.search(r'data-app-loading-media-url="([^"]+)"', html)
+    if not match:
+        return None
+    return match.group(1)
+
+
+def _sign_in_in_browser(page, base_url: str, email: str, password: str):
+    page.goto(f"{base_url}/sign-in", wait_until="load")
+    page.wait_for_selector("input[name='email']")
+    page.fill("input[name='email']", email)
+    page.fill("input[name='password']", password)
+    page.click("button[type='submit']")
+    page.wait_for_load_state("load")
+
+
+def _set_browser_theme(page, base_url: str, theme_key: str):
+    page.goto(f"{base_url}/account", wait_until="load")
+    status = page.evaluate(
+        """async (themeKey) => {
+            const body = new URLSearchParams();
+            body.set("theme_key", themeKey);
+            const response = await fetch("/account/theme", {
+              method: "POST",
+              body,
+              credentials: "same-origin",
+            });
+            return response.status;
+        }""",
+        theme_key,
+    )
+    assert status == 200
+
+
+def _build_loading_presenter_campaign() -> Campaign:
+    return Campaign(
+        title="Loading Image Unit Test",
+        slug="loading-images",
+        summary="Unit fixture for loading image selection.",
+        system="DND-5E",
+        current_session=2,
+        source_wiki_root="",
+        player_content_dir="",
+        assets_dir="",
+        pages={},
+    )
+
+
+def test_select_campaign_loading_image_url_filters_missing_and_ineligible_paths():
+    campaign = _build_loading_presenter_campaign()
+    campaign.pages = {
+        "visible-valid": Page(
+            title="Captain",
+            route_slug="captain",
+            source_path="",
+            body_markdown="",
+            section="NPCs",
+            page_type="npc",
+            image_path="npcs/captain.png",
+        ),
+        "visible-unpublished": Page(
+            title="Hidden",
+            route_slug="hidden",
+            source_path="",
+            body_markdown="",
+            section="NPCs",
+            page_type="npc",
+            published=False,
+            image_path="images/hidden.png",
+        ),
+        "visible-traversal": Page(
+            title="Traversal",
+            route_slug="traversal",
+            source_path="",
+            body_markdown="",
+            section="Lore",
+            page_type="page",
+            image_path="../outside/secret.png",
+        ),
+        "visible-external": Page(
+            title="External",
+            route_slug="external",
+            source_path="",
+            body_markdown="",
+            section="Lore",
+            page_type="page",
+            image_path="https://example.com/artwork.png",
+        ),
+        "visible-missing": Page(
+            title="Missing",
+            route_slug="missing",
+            source_path="",
+            body_markdown="",
+            section="Lore",
+            page_type="page",
+            image_path="missing/no-file.png",
+        ),
+    }
+
+    expected_url = "/campaigns/loading-images/assets/npcs/captain.png"
+    image_url = select_campaign_loading_image_url(
+        campaign,
+        can_access_wiki=True,
+        image_exists=lambda _, image_path: image_path == "npcs/captain.png",
+        build_image_url=lambda _, image_path: f"/campaigns/loading-images/assets/{image_path}",
+        selection_seed="loading-unit-test",
+        selection_date=date(2026, 5, 30),
+    )
+    assert image_url == expected_url
+
+
+def test_select_campaign_loading_image_url_falls_back_when_no_candidates():
+    campaign = _build_loading_presenter_campaign()
+    campaign.pages = {
+        "missing-one": Page(
+            title="Missing",
+            route_slug="missing",
+            source_path="",
+            body_markdown="",
+            section="Lore",
+            page_type="page",
+            image_path="missing/no-file.png",
+        )
+    }
+
+    image_url = select_campaign_loading_image_url(
+        campaign,
+        can_access_wiki=True,
+        image_exists=lambda *_args: False,
+        build_image_url=lambda _, image_path: f"/campaigns/loading-images/assets/{image_path}",
+        selection_seed="loading-unit-test",
+        selection_date=date(2026, 5, 30),
+    )
+    assert image_url is None
+
+
+def test_select_campaign_loading_image_url_stable_for_same_day():
+    campaign = _build_loading_presenter_campaign()
+    campaign.pages = {
+        "first": Page(
+            title="First",
+            route_slug="first",
+            source_path="",
+            body_markdown="",
+            section="Lore",
+            page_type="page",
+            image_path="npcs/captain.png",
+        ),
+        "second": Page(
+            title="Second",
+            route_slug="second",
+            source_path="",
+            body_markdown="",
+            section="Lore",
+            page_type="page",
+            image_path="lore/map.png",
+        ),
+    }
+
+    image_url = lambda: select_campaign_loading_image_url(
+        campaign,
+        can_access_wiki=True,
+        image_exists=lambda _, image_path: True,
+        build_image_url=lambda _, image_path: f"/campaigns/loading-images/assets/{image_path}",
+        selection_date=date(2026, 5, 30),
+    )
+    assert image_url() == image_url()
+
+
+def test_select_campaign_loading_image_url_blocks_inaccessible_campaign_content():
+    campaign = _build_loading_presenter_campaign()
+    campaign.pages = {
+        "visible": Page(
+            title="Locked Page",
+            route_slug="locked",
+            source_path="",
+            body_markdown="",
+            section="Lore",
+            page_type="page",
+            image_path="npcs/captain.png",
+        ),
+    }
+
+    image_url = select_campaign_loading_image_url(
+        campaign,
+        can_access_wiki=False,
+        image_exists=lambda *_args: True,
+        build_image_url=lambda _, image_path: f"/campaigns/loading-images/assets/{image_path}",
+    )
+    assert image_url is None
 
 
 @pytest.fixture
@@ -185,6 +425,137 @@ def test_browser_shows_loading_cover_while_stylesheet_streams(static_asset_live_
             assert paint_timing["cssResponseEnd"] > 0
             if paint_timing["firstContentfulPaint"] > 0:
                 assert paint_timing["firstContentfulPaint"] >= paint_timing["cssResponseEnd"] - 1
+        finally:
+            page.close()
+            browser.close()
+
+
+def _set_viewport_for_theme_checks(page, is_mobile: bool):
+    if is_mobile:
+        page.set_viewport_size({"width": 390, "height": 844})
+    else:
+        page.set_viewport_size({"width": 1280, "height": 900})
+
+
+@pytest.mark.parametrize("theme_key", ["parchment", "moonlit", "verdant", "ember"])
+@pytest.mark.parametrize("is_mobile", [False, True])
+def test_browser_loading_palette_for_themes_during_delayed_stylesheet(
+    static_asset_live_server,
+    users,
+    theme_key,
+    is_mobile,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _set_viewport_for_theme_checks(page, is_mobile)
+            _sign_in_in_browser(
+                page,
+                static_asset_live_server,
+                users["party"]["email"],
+                users["party"]["password"],
+            )
+            _set_browser_theme(page, static_asset_live_server, theme_key)
+
+            expected_bg, expected_ink, expected_accent, expected_media_opacity = _loading_theme_palette(theme_key)
+
+            def delay_stylesheet(route):
+                time.sleep(1.2)
+                route.continue_()
+
+            page.route("**/static/styles.css**", delay_stylesheet)
+            page.goto(f"{static_asset_live_server}/campaigns/linden-pass", wait_until="commit")
+            page.wait_for_timeout(450)
+
+            palette = page.evaluate(
+                """() => {
+                    const root = document.documentElement;
+                    const cover = document.querySelector('.app-loading-cover');
+                    return {
+                      background: getComputedStyle(root).getPropertyValue('--app-loading-bg').trim(),
+                      ink: getComputedStyle(root).getPropertyValue('--app-loading-ink').trim(),
+                      accent: getComputedStyle(root).getPropertyValue('--app-loading-accent').trim(),
+                      mediaOpacity: getComputedStyle(root).getPropertyValue('--app-loading-media-opacity').trim(),
+                      hasLoadingClass: root.classList.contains('app-loading'),
+                      coverOpacity: getComputedStyle(cover).opacity,
+                      pageShellOpacity: getComputedStyle(document.querySelector('.page-shell')).opacity,
+                    };
+                }"""
+            )
+            assert palette["hasLoadingClass"] is True
+            assert palette["coverOpacity"] == "1"
+            assert palette["pageShellOpacity"] == "0"
+            assert palette["background"] == expected_bg
+            assert palette["ink"] == expected_ink
+            assert palette["accent"] == expected_accent
+            assert palette["mediaOpacity"] == expected_media_opacity
+
+            page.unroute("**/static/styles.css**")
+            expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=5000)
+            expect(page.locator(".page-shell")).to_be_visible(timeout=5000)
+        finally:
+            page.close()
+            browser.close()
+
+
+def test_browser_loading_cover_dismisses_when_cover_image_is_blocked(static_asset_live_server):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            baseline_response = page.goto(
+                f"{static_asset_live_server}/campaigns/linden-pass",
+                wait_until="load",
+            )
+            assert baseline_response is not None
+            assert baseline_response.status == 200
+            media_url = _extract_loading_media_url(baseline_response.text())
+            assert media_url is not None
+            assert media_url.startswith("/campaigns/linden-pass/assets/")
+            page.wait_for_timeout(150)
+
+            def block_loading_media(route):
+                if urlsplit(route.request.url).path == media_url:
+                    route.abort()
+                    return
+                route.continue_()
+
+            page.route("**", block_loading_media)
+
+            start_time = time.perf_counter()
+            page.goto(f"{static_asset_live_server}/campaigns/linden-pass", wait_until="commit")
+            page.wait_for_function(
+                "document.documentElement.classList.contains('app-loading')",
+                timeout=2000,
+            )
+            page.wait_for_function(
+                "!document.documentElement.classList.contains('app-loading')",
+                timeout=5000,
+            )
+            hide_ms = (time.perf_counter() - start_time) * 1000
+
+            assert hide_ms < 2500
+            expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=2000)
+            expect(page.locator(".page-shell")).to_be_visible(timeout=2000)
         finally:
             page.close()
             browser.close()
