@@ -10,6 +10,7 @@ import markdown
 from .character_builder import (
     ATTACK_MODE_WEAPON_OFF_HAND,
     ATTACK_MODE_WEAPON_TWO_HANDED,
+    SKILL_ABILITY_KEYS,
     WEAPON_WIELD_MODE_OFF_HAND,
     WEAPON_WIELD_MODE_TWO_HANDED,
     _attack_mode_components,
@@ -470,32 +471,42 @@ def present_character_detail(
                 "value": str((xianxia_defense or {}).get("value", 0)),
             },
         ]
+        overview_stat_rows: list[list[dict[str, str]]] = []
     else:
-        overview_stats = [
+        quick_row_1 = [
             {"label": "Current HP", "value": f"{int(vitals.get('current_hp') or 0)} / {int(stats.get('max_hp') or 0)}"},
             {"label": "Temp HP", "value": str(int(vitals.get("temp_hp") or 0))},
+        ]
+        quick_row_2 = [
             {"label": "Armor Class", "value": str(int(stats.get("armor_class") or 0))},
             {"label": "Initiative", "value": format_signed(stats.get("initiative_bonus"))},
             {"label": "Speed", "value": str(stats.get("speed") or "--")},
+        ]
+        quick_row_3 = [
             {"label": "Proficiency", "value": format_signed(stats.get("proficiency_bonus"))},
             {"label": "Passive Perception", "value": str(int(stats.get("passive_perception") or 0))},
             {"label": "Passive Insight", "value": str(int(stats.get("passive_insight") or 0))},
             {"label": "Passive Investigation", "value": str(int(stats.get("passive_investigation") or 0))},
         ]
+        quick_row_4: list[dict[str, str]] = []
         if stats.get("carrying_capacity") not in (None, ""):
-            overview_stats.append(
+            quick_row_4.append(
                 {
                     "label": "Carrying Capacity",
                     "value": _format_weight_value(stats.get("carrying_capacity")) or "--",
                 }
             )
         if stats.get("push_drag_lift") not in (None, ""):
-            overview_stats.append(
+            quick_row_4.append(
                 {
                     "label": "Push / Drag / Lift",
                     "value": _format_weight_value(stats.get("push_drag_lift")) or "--",
                 }
             )
+        overview_stat_rows = [quick_row_1, quick_row_2, quick_row_3]
+        if quick_row_4:
+            overview_stat_rows.append(quick_row_4)
+        overview_stats = [stat for row in overview_stat_rows for stat in row]
     death_saves = dict(vitals.get("death_saves") or {})
     death_save_summary = None
     if int(death_saves.get("successes") or 0) or int(death_saves.get("failures") or 0):
@@ -512,6 +523,7 @@ def present_character_detail(
         ability = resolve_ability_score_payload(ability_scores, ability_key, legacy_key)
         abilities.append(
             {
+                "key": ability_key,
                 "abbr": ability_key.upper(),
                 "name": ability_name,
                 "score": int(ability.get("score") or 0),
@@ -526,9 +538,19 @@ def present_character_detail(
             "bonus": format_signed(skill.get("bonus")),
             "proficiency_label": humanize_value(skill.get("proficiency_level")),
             "is_proficient": str(skill.get("proficiency_level") or "none") != "none",
+            "ability_key": SKILL_ABILITY_KEYS.get(normalize_lookup(str(skill.get("name") or ""))),
         }
         for skill in sorted(list(definition.skills or []), key=lambda item: str(item.get("name") or "").lower())
     ]
+    ability_skills_map: dict[str, list[dict[str, Any]]] = {
+        str(ability.get("key") or ""): [] for ability in abilities
+    }
+    for skill in skills:
+        ability_key = str(skill.get("ability_key") or "")
+        if ability_key in ability_skills_map:
+            ability_skills_map[ability_key].append(skill)
+    for ability in abilities:
+        ability["skills"] = ability_skills_map.get(str(ability.get("key") or ""), [])
 
     proficiency_groups = []
     proficiencies = dict(definition.proficiencies or {})
@@ -1082,6 +1104,7 @@ def present_character_detail(
             {"label": "Experience", "value": str(profile.get("experience_model") or "").strip()},
         ],
         "overview_stats": overview_stats,
+        "overview_stat_rows": overview_stat_rows,
         "xianxia_defense": xianxia_defense,
         "xianxia_actions": xianxia_actions,
         "xianxia_effort_damage": xianxia_effort_damage,

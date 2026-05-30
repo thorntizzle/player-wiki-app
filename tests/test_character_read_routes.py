@@ -8429,6 +8429,12 @@ def test_dnd_character_normal_page_shows_inline_state_controls_for_assigned_play
     assert 'data-character-sheet-edit-form="resource"' in quick_html
     assert "Save vitals" in quick_html
     assert "Current state" in quick_html
+    assert "glance-grid--quick-row-1" in quick_html
+    assert "glance-grid--quick-row-2" in quick_html
+    assert "glance-grid--quick-row-3" in quick_html
+    assert "glance-grid--quick-row-4" in quick_html
+    assert "ability-skill-list" in quick_html
+    assert "skill-grid" not in quick_html
     assert "Active session" not in quick_html
     assert "Short rest" not in quick_html
     assert "Long rest" not in quick_html
@@ -8496,6 +8502,8 @@ def test_dnd_character_normal_page_hides_inline_state_controls_for_read_only_use
     assert 'data-character-sheet-edit-form="vitals"' not in quick_html
     assert 'data-character-sheet-edit-form="resource"' not in quick_html
     assert "Save vitals" not in quick_html
+    assert "glance-grid--quick-row-1" in quick_html
+    assert "ability-skill-list" in quick_html
 
     assert spell_response.status_code == 200
     spell_html = spell_response.get_data(as_text=True)
@@ -8556,6 +8564,7 @@ def test_dnd_character_normal_page_preserves_advanced_and_management_controls_fo
     assert quick_response.status_code == 200
     quick_html = quick_response.get_data(as_text=True)
     assert "Advanced Editor" in quick_html
+    assert "character-header__actions" in quick_html
     assert "Open sheet edit view" not in quick_html
     assert "Sheet edit view" not in quick_html
     assert 'data-character-sheet-edit-form="vitals"' in quick_html

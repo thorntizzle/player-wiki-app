@@ -1377,6 +1377,25 @@ button {
   gap: 0.55rem;
 }
 
+.character-header__top {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  align-items: flex-start;
+}
+
+.character-header__identity h1 {
+  margin: 0;
+}
+
+.character-header__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
 .character-meta-line {
   display: flex;
   flex-wrap: wrap;
@@ -1492,6 +1511,26 @@ button {
   gap: 0.85rem;
 }
 
+.glance-grid--row {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.glance-grid--quick-row-1 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.glance-grid--quick-row-2 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.glance-grid--quick-row-3 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.glance-grid--quick-row-4 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .glance-card,
 .ability-card,
 .resource-card,
@@ -1517,6 +1556,47 @@ button {
 .attack-card p,
 .detail-card p {
   margin: 0.2rem 0 0;
+}
+
+.ability-grid--skills {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.ability-card--skills {
+  display: grid;
+  gap: 0.75rem;
+  align-content: start;
+}
+
+.ability-skill-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.ability-skill-list__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.15rem 0.45rem;
+  align-items: baseline;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-soft-muted);
+}
+
+.ability-skill-list__item strong {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+}
+
+.ability-skill-list__item .meta {
+  grid-column: 1 / -1;
+}
+
+.ability-skill-list__item--proficient {
+  border-color: var(--border-accent);
+  background: var(--surface-accent-soft);
 }
 
 .combat-spellcasting-panel {
@@ -1586,6 +1666,84 @@ button {
 
 .combat-resource-state-form .session-stepper {
   margin-top: 0.2rem;
+}
+
+.session-bar--compact {
+  padding: 0.8rem 0.9rem;
+  border-radius: 14px;
+  gap: 0.75rem;
+}
+
+.session-bar__title--compact {
+  font-size: 1.05rem;
+}
+
+.session-vitals-form__group {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.session-vitals-form--compact {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  align-items: end;
+}
+
+.session-vitals-form--compact .session-vitals-form__save {
+  justify-self: start;
+}
+
+.session-stepper--compact {
+  gap: 0.35rem;
+}
+
+.session-stepper--compact button {
+  min-height: 2rem;
+  padding: 0.35rem 0.65rem;
+}
+
+.read-section--compact-resource-controls {
+  gap: 0.7rem;
+}
+
+.session-resource-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.session-resource-card--compact {
+  padding: 0.75rem 0.85rem;
+  border-radius: 14px;
+}
+
+.session-inline-form--compact-resource {
+  gap: 0.55rem;
+}
+
+.session-resource-row__summary {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.session-resource-row__editor {
+  display: grid;
+  gap: 0.55rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+@media (max-width: 720px) {
+  .character-header__actions {
+    justify-content: flex-start;
+  }
+
+  .glance-grid--quick-row-2,
+  .glance-grid--quick-row-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .session-resource-row__editor {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .detail-cluster,

@@ -12,8 +12,54 @@
     >
       <div data-character-read-shell-panel>
         <header class="character-header">
-        <p class="eyebrow">Character sheet</p>
-        <h1>{{ character.name }}</h1>
+        <div class="character-header__top">
+          <div class="character-header__identity">
+            <p class="eyebrow">Character sheet</p>
+            <h1>{{ character.name }}</h1>
+          </div>
+          {% if can_use_session_mode or (native_character_tools_supported and (can_level_up or can_prepare_level_up)) or can_use_xianxia_cultivation %}
+            <div class="character-header__actions">
+              {% if can_use_session_mode %}
+                {% if native_character_tools_supported %}
+                  <a class="ghost-button" href="{{ url_for('character_edit_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
+                    Advanced Editor
+                  </a>
+                  {% if can_retrain %}
+                    <a class="ghost-button" href="{{ url_for('character_retraining_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
+                      Retrain
+                    </a>
+                  {% endif %}
+                  {% if can_level_up %}
+                    <a class="ghost-button" href="{{ url_for('character_level_up_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
+                      Level up
+                    </a>
+                  {% elif can_prepare_level_up %}
+                    <a class="ghost-button" href="{{ url_for('character_progression_repair_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
+                      Prepare for level-up
+                    </a>
+                  {% endif %}
+                {% endif %}
+                {% if can_use_xianxia_cultivation %}
+                  <a class="ghost-button" href="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
+                    Cultivation
+                  </a>
+                {% endif %}
+              {% elif native_character_tools_supported and can_level_up %}
+                <a class="ghost-button" href="{{ url_for('character_level_up_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
+                  Level up
+                </a>
+              {% elif native_character_tools_supported and can_prepare_level_up %}
+                <a class="ghost-button" href="{{ url_for('character_progression_repair_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
+                  Prepare for level-up
+                </a>
+              {% elif can_use_xianxia_cultivation %}
+                <a class="ghost-button" href="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
+                  Cultivation
+                </a>
+              {% endif %}
+            </div>
+          {% endif %}
+        </div>
         <p class="lede">
           {% if character.header_segments %}
             {% for segment in character.header_segments %}
@@ -45,52 +91,6 @@
         {% endif %}
         {% if character.death_save_summary %}
           <p class="meta">Death saves: {{ character.death_save_summary }}</p>
-        {% endif %}
-        {% if can_use_session_mode %}
-          <div class="hero-actions">
-            {% if native_character_tools_supported %}
-              <a class="ghost-button" href="{{ url_for('character_edit_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
-                Advanced Editor
-              </a>
-              {% if can_retrain %}
-                <a class="ghost-button" href="{{ url_for('character_retraining_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
-                  Retrain
-                </a>
-              {% endif %}
-              {% if can_level_up %}
-                <a class="ghost-button" href="{{ url_for('character_level_up_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
-                  Level up
-                </a>
-              {% elif can_prepare_level_up %}
-                <a class="ghost-button" href="{{ url_for('character_progression_repair_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
-                  Prepare for level-up
-                </a>
-              {% endif %}
-            {% endif %}
-            {% if can_use_xianxia_cultivation %}
-              <a class="ghost-button" href="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
-                Cultivation
-              </a>
-            {% endif %}
-          </div>
-        {% elif native_character_tools_supported and can_level_up %}
-          <div class="hero-actions">
-            <a class="ghost-button" href="{{ url_for('character_level_up_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
-              Level up
-            </a>
-          </div>
-        {% elif native_character_tools_supported and can_prepare_level_up %}
-          <div class="hero-actions">
-            <a class="ghost-button" href="{{ url_for('character_progression_repair_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
-              Prepare for level-up
-            </a>
-          </div>
-        {% elif can_use_xianxia_cultivation %}
-          <div class="hero-actions">
-            <a class="ghost-button" href="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
-              Cultivation
-            </a>
-          </div>
         {% endif %}
         {% if native_character_tools_supported and level_up_readiness and level_up_readiness.status != 'ready' and level_up_readiness.message %}
           <p class="meta">{{ level_up_readiness.message }}</p>
@@ -133,20 +133,33 @@
 
       {% if show_quick_sections %}
         {% if character_inline_state_controls_enabled %}
-          {% with session_character_form_mode="read", session_character_form_page=character_subpage, session_character_bar_eyebrow="Current state", session_character_show_rest_actions=false %}
+          {% with session_character_form_mode="read", session_character_form_page=character_subpage, session_character_bar_eyebrow="Current state", session_character_show_rest_actions=false, session_character_compact_controls=true %}
             {% include "_character_session_bar.html" %}
           {% endwith %}
         {% endif %}
         <section class="read-section" id="character-quick-overview">
           <h2>At a glance</h2>
-          <div class="glance-grid">
-            {% for stat in character.overview_stats %}
-              <div class="glance-card">
-                <span class="meta">{{ stat.label }}</span>
-                <strong>{{ stat.value }}</strong>
+          {% if character.overview_stat_rows %}
+            {% for row in character.overview_stat_rows %}
+              <div class="glance-grid glance-grid--row glance-grid--quick-row-{{ loop.index }}">
+                {% for stat in row %}
+                  <div class="glance-card">
+                    <span class="meta">{{ stat.label }}</span>
+                    <strong>{{ stat.value }}</strong>
+                  </div>
+                {% endfor %}
               </div>
             {% endfor %}
-          </div>
+          {% else %}
+            <div class="glance-grid">
+              {% for stat in character.overview_stats %}
+                <div class="glance-card">
+                  <span class="meta">{{ stat.label }}</span>
+                  <strong>{{ stat.value }}</strong>
+                </div>
+              {% endfor %}
+            </div>
+          {% endif %}
         </section>
       {% endif %}
 
@@ -437,7 +450,7 @@
       {% endif %}
 
       {% if character_inline_state_controls_enabled and show_quick_sections %}
-        {% with session_character_controls_scope="resources", session_character_form_mode="read", session_character_form_page=character_subpage %}
+        {% with session_character_controls_scope="resources", session_character_form_mode="read", session_character_form_page=character_subpage, session_character_compact_controls=true %}
           {% include "_character_session_panels.html" %}
         {% endwith %}
       {% elif character_inline_state_controls_enabled and show_spellcasting_sections %}
@@ -479,33 +492,35 @@
           <div class="section-heading">
             <h2>Abilities and skills</h2>
           </div>
-          <div class="ability-grid">
+          <div class="ability-grid ability-grid--skills">
             {% for ability in character.abilities %}
-              <article class="ability-card">
-                <p class="card-kicker">{{ ability.abbr }}</p>
-                <h3>{{ ability.score }}</h3>
-                <p>{{ ability.name }}</p>
-                <p class="meta">Modifier {{ ability.modifier }} | Save {{ ability.save_bonus }}</p>
+              <article class="ability-card ability-card--skills">
+                <div>
+                  <p class="card-kicker">{{ ability.abbr }}</p>
+                  <h3>{{ ability.score }}</h3>
+                  <p>{{ ability.name }}</p>
+                  <p class="meta">Modifier {{ ability.modifier }} | Save {{ ability.save_bonus }}</p>
+                </div>
+                {% if ability.skills %}
+                  <ul class="plain-list ability-skill-list">
+                    {% for skill in ability.skills %}
+                      <li class="ability-skill-list__item {% if skill.is_proficient %}ability-skill-list__item--proficient{% endif %}">
+                        <span>{{ skill.name }}</span>
+                        <strong>{{ skill.bonus }}</strong>
+                        {% if skill.proficiency_label and skill.proficiency_label != 'None' %}
+                          <span class="meta">{{ skill.proficiency_label }}</span>
+                        {% endif %}
+                      </li>
+                    {% endfor %}
+                  </ul>
+                {% else %}
+                  <p class="meta">No linked skills</p>
+                {% endif %}
               </article>
             {% endfor %}
           </div>
 
           <div class="detail-cluster">
-            <div>
-              <h3>Skills</h3>
-              <div class="skill-grid">
-                {% for skill in character.skills %}
-                  <div class="skill-pill {% if skill.is_proficient %}skill-pill--proficient{% endif %}">
-                    <span>{{ skill.name }}</span>
-                    <strong>{{ skill.bonus }}</strong>
-                    {% if skill.proficiency_label and skill.proficiency_label != 'None' %}
-                      <span class="meta">{{ skill.proficiency_label }}</span>
-                    {% endif %}
-                  </div>
-                {% endfor %}
-              </div>
-            </div>
-
             {% if character.proficiency_groups %}
               <div>
                 <h3>Proficiencies</h3>

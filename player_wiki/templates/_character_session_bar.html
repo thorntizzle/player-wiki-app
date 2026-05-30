@@ -2,15 +2,16 @@
 {% set session_character_form_mode = session_character_form_mode | default("session", true) %}
 {% set session_character_bar_eyebrow = session_character_bar_eyebrow | default("Active session", true) %}
 {% set session_character_show_rest_actions = session_character_show_rest_actions | default(true) %}
-<section class="session-bar" id="session-vitals">
+{% set session_character_compact_controls = session_character_compact_controls | default(false) %}
+<section class="session-bar{% if session_character_compact_controls %} session-bar--compact{% endif %}" id="session-vitals">
   <div class="session-bar__summary">
     <p class="eyebrow">{{ session_character_bar_eyebrow }}</p>
-    <h2>{{ character.name }}</h2>
+    <h2{% if session_character_compact_controls %} class="session-bar__title--compact"{% endif %}>{{ character.name }}</h2>
     <p class="meta">HP {{ character.current_hp }} / {{ character.max_hp }} | Temp HP {{ character.temp_hp }}</p>
   </div>
 
   <form
-    class="session-vitals-form"
+    class="session-vitals-form{% if session_character_compact_controls %} session-vitals-form--compact{% endif %}"
     data-character-sheet-edit-form="vitals"
     method="post"
     action="{{ url_for('character_session_vitals', campaign_slug=campaign.slug, character_slug=character.slug) }}"
@@ -21,30 +22,34 @@
     {% if session_return_view %}
       <input type="hidden" name="return_view" value="{{ session_return_view }}">
     {% endif %}
-    <label class="session-field">
-      <span>Current HP</span>
-      <input type="number" name="current_hp" value="{{ character.current_hp }}" min="0" max="{{ character.max_hp }}">
-    </label>
-    <div class="session-stepper">
-      <button type="submit" name="hp_delta" value="-5">-5</button>
-      <button type="submit" name="hp_delta" value="-1">-1</button>
-      <button type="submit" name="hp_delta" value="1">+1</button>
-      <button type="submit" name="hp_delta" value="5">+5</button>
+    <div class="session-vitals-form__group">
+      <label class="session-field">
+        <span>Current HP</span>
+        <input type="number" name="current_hp" value="{{ character.current_hp }}" min="0" max="{{ character.max_hp }}">
+      </label>
+      <div class="session-stepper{% if session_character_compact_controls %} session-stepper--compact{% endif %}">
+        <button type="submit" name="hp_delta" value="-5">-5</button>
+        <button type="submit" name="hp_delta" value="-1">-1</button>
+        <button type="submit" name="hp_delta" value="1">+1</button>
+        <button type="submit" name="hp_delta" value="5">+5</button>
+      </div>
     </div>
 
-    <label class="session-field">
-      <span>Temp HP</span>
-      <input type="number" name="temp_hp" value="{{ character.temp_hp }}" min="0">
-    </label>
-    <div class="session-stepper">
-      <button type="submit" name="temp_hp_delta" value="-5">-5</button>
-      <button type="submit" name="temp_hp_delta" value="-1">-1</button>
-      <button type="submit" name="temp_hp_delta" value="1">+1</button>
-      <button type="submit" name="temp_hp_delta" value="5">+5</button>
-      <button type="submit" name="clear_temp_hp" value="1">Clear</button>
+    <div class="session-vitals-form__group">
+      <label class="session-field">
+        <span>Temp HP</span>
+        <input type="number" name="temp_hp" value="{{ character.temp_hp }}" min="0">
+      </label>
+      <div class="session-stepper{% if session_character_compact_controls %} session-stepper--compact{% endif %}">
+        <button type="submit" name="temp_hp_delta" value="-5">-5</button>
+        <button type="submit" name="temp_hp_delta" value="-1">-1</button>
+        <button type="submit" name="temp_hp_delta" value="1">+1</button>
+        <button type="submit" name="temp_hp_delta" value="5">+5</button>
+        <button type="submit" name="clear_temp_hp" value="1">Clear</button>
+      </div>
     </div>
 
-    <button class="button-link" type="submit">Save vitals</button>
+    <button class="button-link session-vitals-form__save" type="submit">Save vitals</button>
   </form>
 
   {% if session_character_show_rest_actions %}

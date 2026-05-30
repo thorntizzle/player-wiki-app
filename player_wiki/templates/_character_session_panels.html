@@ -1,5 +1,6 @@
 {% set session_character_controls_scope = session_character_controls_scope | default("legacy", true) %}
 {% set session_character_form_mode = session_character_form_mode | default("session", true) %}
+{% set session_character_compact_controls = session_character_compact_controls | default(false) %}
 <section class="session-panels">
   {% if rest_preview and session_character_controls_scope in ["legacy", "overview"] %}
     <section class="card session-card">
@@ -40,15 +41,15 @@
   {% endif %}
 
   {% if character.resources and (session_character_controls_scope == "resources" or (session_character_controls_scope == "legacy" and show_quick_sections)) %}
-    <section class="read-section" id="session-resources">
+    <section class="read-section{% if session_character_compact_controls %} read-section--compact-resource-controls{% endif %}" id="session-resources">
       <div class="section-heading">
         <h2>Resources</h2>
       </div>
-      <div class="resource-grid">
+      <div class="{% if session_character_compact_controls %}session-resource-list{% else %}resource-grid{% endif %}">
         {% for resource in character.resources %}
-          <article class="resource-card session-resource-card {% if resource.is_manual %}session-resource-card--manual{% endif %}">
+          <article class="resource-card session-resource-card {% if session_character_compact_controls %}session-resource-card--compact{% endif %} {% if resource.is_manual %}session-resource-card--manual{% endif %}">
             <form
-              class="session-inline-form"
+              class="session-inline-form{% if session_character_compact_controls %} session-inline-form--compact-resource{% endif %}"
               data-character-sheet-edit-form="resource"
               data-character-sheet-edit-row-id="{{ resource.id }}"
               method="post"
@@ -60,25 +61,29 @@
               {% if session_return_view %}
                 <input type="hidden" name="return_view" value="{{ session_return_view }}">
               {% endif %}
-              <div class="section-heading">
-                <h3>{{ resource.label }}</h3>
-                <span class="meta">{{ resource.reset_label }}</span>
+              <div class="session-resource-row__summary">
+                <div class="section-heading">
+                  <h3>{{ resource.label }}</h3>
+                  <span class="meta">{{ resource.reset_label }}</span>
+                </div>
+                <p class="resource-card__value">{{ resource.value }}</p>
               </div>
-              <label class="session-field">
-                <span>Current</span>
-                <input
-                  type="number"
-                  name="current"
-                  value="{{ resource.current }}"
-                  min="0"
-                  {% if resource.max is not none %}max="{{ resource.max }}"{% endif %}
-                >
-              </label>
-              <p class="resource-card__value">{{ resource.value }}</p>
-              <div class="session-stepper">
-                <button type="submit" name="delta" value="-1">-1</button>
-                <button type="submit" name="delta" value="1">+1</button>
-                <button type="submit">Save</button>
+              <div class="session-resource-row__editor">
+                <label class="session-field">
+                  <span>Current</span>
+                  <input
+                    type="number"
+                    name="current"
+                    value="{{ resource.current }}"
+                    min="0"
+                    {% if resource.max is not none %}max="{{ resource.max }}"{% endif %}
+                  >
+                </label>
+                <div class="session-stepper{% if session_character_compact_controls %} session-stepper--compact{% endif %}">
+                  <button type="submit" name="delta" value="-1">-1</button>
+                  <button type="submit" name="delta" value="1">+1</button>
+                  <button type="submit">Save</button>
+                </div>
               </div>
               {% if resource.notes %}
                 <p class="meta">{{ resource.notes }}</p>
