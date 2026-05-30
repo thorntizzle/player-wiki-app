@@ -410,7 +410,7 @@ The detail route renders the structured character definition plus live SQLite-ba
 
 - system-aware subpage navigation: DND-5E sheets include lanes such as `Quick Reference`, `Spellcasting`, `Features`, `Equipment`, `Inventory`, `Personal`, `Notes`, and `Controls`; Xianxia sheets use `Quick Reference`, `Martial Arts`, `Techniques`, `Resources`, `Skills`, `Equipment`, `Inventory`, `Personal`, `Notes`, and `Controls`
 - a read-mode `Equipment` manager for editable users so they can add Systems-linked or custom supplemental gear without opening the advanced editor
-- a portrait slot on `Personal`, stored as a campaign asset and shown in both read mode and the Character-page `Sheet edit view`
+- a portrait slot on `Personal`, stored as a campaign asset and shown in read mode and on editable Character views
 - a permissioned `Controls` subpage for editable users, with room for current admin/DM controls and future player-owned controls
 - current HP and temp HP
 - Xianxia current Stance, Jing/Qi/Shen, Yin/Yang, Dao, and manual active Stance/Aura state on the Resources session lane
@@ -421,30 +421,33 @@ The detail route renders the structured character definition plus live SQLite-ba
 - inventory and currency
 - reference notes and biography
 
-## Character Sheet Edit View
+## Character Edit Paths
 
-Character sheets now support a first-pass Character-page edit lane on the same detail route. The user-facing label is
-`Sheet edit view`; older compatibility links still use:
+Character sheets now use the normal Character page as the default destination for quick state-backed edits. Legacy
+`?mode=session` Character links now resolve to that same page with the requested `page` argument:
 
 - `/campaigns/<campaign-slug>/characters/<character-slug>?mode=session`
 
-The Character-page sheet edit view is available only to:
+That compatibility path is not a separate visible lane.
+
+The quick in-page edit lane on the normal Character page is available to:
 
 - app `admin`
 - campaign `dm`
 - assigned `player` owner of that character
 
-Campaign `observer` users remain read-only and do not get the Character-page sheet edit entry point.
+Campaign `observer` users remain read-only and do not get inline state-edit forms.
 
 The app now keeps the three editing lanes explicit in the browser UI:
 
-- Character-page `Sheet edit view` is the out-of-session batch-save lane on the normal character route
-- `Session Character` is the active-session lane for in-play sheet access and immediate live-session edits
+- The normal Character page is the in-page state-edit lane for quick HP/resource/spell/inventory/currency and notes updates
+- `Advanced Editor` is the durable sheet-structure lane for spell-list edits, level-up, controls, and other definition-level changes
+- `Session Character` is the active-session lane for live play during an active session
 - `Combat` or DM-side `Encounter status` is the encounter-context lane tied to the selected `combatant=<id>` deep link
 
 ### Editable MVP State
 
-The current Character-page sheet edit view supports:
+The current normal Character inline lane supports:
 
 - current HP
 - temp HP
@@ -456,26 +459,12 @@ The current Character-page sheet edit view supports:
 
 ### Save Behavior
 
-The current MVP uses server-rendered forms:
+The inline state forms save immediately by form and follow the same revision-guard pattern used by Session and Combat.
 
-- vitals, trackers, spell slots, inventory quantities, and currency save immediately on submit
-- player notes use explicit save
-- all writes are validated on the server
-- all writes are revision-checked to prevent stale overwrites
+Not every Character subpage is yet fully migrated to this pattern. Profile text and portrait controls remain outside the
+inline state-edit scope for now, while broader sheet maintenance and advancement tooling stay in `Advanced Editor`.
 
 If a stale write is submitted, the app shows a conflict message and asks the user to refresh before trying again.
-
-### Rest Actions
-
-The Character-page sheet edit view still includes short-rest and long-rest confirmation flows.
-
-The app applies only modeled rest behavior:
-
-- resource trackers reset based on their structured `reset_on` and `reset_to` values
-- long rest restores modeled spell slot usage
-- manual trackers remain unchanged
-
-The app does not infer broader tabletop rule effects that are not explicitly represented in character state.
 
 ## Auth Bootstrap And Local User Management
 
@@ -722,7 +711,7 @@ The current tests cover:
 - admin membership and assignment workflow actions
 - wiki access for members versus outsiders
 - character roster and read-mode behavior
-- Character-page sheet-edit access rules
+- Character-page inline state-edit access rules
 - mutable state writes
 - rest previews and applies
 - local backup and restore helpers

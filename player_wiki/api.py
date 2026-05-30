@@ -2912,7 +2912,7 @@ def register_api(app) -> None:
                 personal=payload.get("personal"),
                 updated_by_user_id=user_id,
             ),
-            forbidden_message="You do not have permission to use the Character page sheet edit view for this character.",
+            forbidden_message="You do not have permission to edit Character page state for this character.",
             conflict_message=(
                 "This sheet changed before your batch save finished. Refresh and review the latest sheet before "
                 "saving again. Session Character, Combat, or another tab may have changed nearby fields first; "

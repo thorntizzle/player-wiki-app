@@ -347,7 +347,8 @@ def test_dm_can_open_character_roster_and_read_sheet(client, sign_in, users):
     sheet_html = sheet.get_data(as_text=True)
     assert "At a glance" in sheet_html
     assert "Active session" not in sheet_html
-    assert "Open sheet edit view" in sheet_html
+    assert "Advanced Editor" in sheet_html
+    assert "Open sheet edit view" not in sheet_html
     assert "Enter session mode" not in sheet_html
     assert "Alignment:" in sheet_html
     assert "Chaotic Good" in sheet_html
@@ -470,7 +471,7 @@ def test_non_5e_roster_hides_native_character_builder_affordances(app, client, s
     assert "Create character" not in html
     assert "/campaigns/linden-pass/characters/new" not in html
     assert "PHB level 1 character" not in html
-    assert "open the sheet edit view when you have edit access" in html
+    assert "Open a player sheet for read mode, use inline state controls when authorized, and use Advanced Editor for larger sheet changes." in html
     assert "Native character creation and progression stay hidden here" in html
 
 
@@ -524,9 +525,10 @@ def test_dnd5e_character_routes_keep_native_affordances_with_xianxia_policy_pres
 
     assert sheet.status_code == 200
     sheet_html = sheet.get_data(as_text=True)
-    assert "Edit character" in sheet_html
+    assert "Advanced Editor" in sheet_html
     assert "/campaigns/linden-pass/characters/arden-march/edit" in sheet_html
-    assert "Open sheet edit view" in sheet_html
+    assert "Open sheet edit view" not in sheet_html
+    assert "Sheet edit view" not in sheet_html
     assert "?page=spellcasting" in sheet_html
     assert app_module.NATIVE_CHARACTER_TOOLS_UNSUPPORTED_MESSAGE not in sheet_html
 
@@ -5394,7 +5396,10 @@ def test_non_5e_read_sheet_hides_native_authoring_affordances_and_skips_readines
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Open sheet edit view" in html
+    assert "Open sheet edit view" not in html
+    assert "Sheet edit view" not in html
+    assert "Advanced Editor" not in html
+    assert "Active session" not in html
     assert "Enter session mode" not in html
     assert "Edit character" not in html
     assert "Level up" not in html
@@ -5412,10 +5417,13 @@ def test_non_5e_session_mode_still_works_for_owner_player(
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Active session" in html
-    assert "Sheet edit view" in html
-    assert "Back to character sheet" in html
+    assert "Active session" not in html
+    assert "Sheet edit view" not in html
+    assert "Open sheet edit view" not in html
+    assert "Save pending changes" not in html
+    assert "Back to character sheet" not in html
     assert "Back to read mode" not in html
+    assert "?mode=session&amp;page=quick" in html
     assert "Edit character" not in html
 
 
@@ -5521,14 +5529,15 @@ def test_owner_player_can_open_session_mode_when_character_visibility_allows_pla
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Active session" in html
-    assert "Save pending changes" in html
+    assert "Advanced Editor" in html
+    assert "Active session" not in html
+    assert "Save pending changes" not in html
     assert "Save vitals" not in html
-    assert "Back to character sheet" in html
+    assert "Back to character sheet" not in html
     assert "Back to read mode" not in html
     assert "?mode=session&amp;page=quick" in html
     assert "?mode=session&amp;page=personal" in html
-    assert "Save personal details" not in html
+    assert "Open sheet edit view" not in html
 
 
 def test_unassigned_player_falls_back_to_read_mode_when_character_visibility_allows_players(
@@ -5588,7 +5597,7 @@ def test_character_sheet_subpages_show_requested_sections(app, client, sign_in, 
     assert "At a glance" not in html
     assert "Inventory and currency" not in html
     assert "Keep an eye on the harbor." not in html
-    assert "mode=session&amp;page=features" in html
+    assert "mode=session&amp;page=features" not in html
 
 
 def test_character_read_sheet_exposes_character_shell_data_hooks(client, sign_in, users):
@@ -5617,7 +5626,7 @@ def test_character_read_subpage_nav_links_keep_fallback_hrefs(client, sign_in, u
     assert 'href="/campaigns/linden-pass/characters/arden-march?page=inventory"' in read_html
     assert 'href="/campaigns/linden-pass/characters/arden-march?page=features"' in read_html
     assert 'href="/campaigns/linden-pass/characters/arden-march?page=spellcasting"' in read_html
-    assert 'href="/campaigns/linden-pass/characters/arden-march?mode=session&amp;page=quick"' in read_html
+    assert 'href="/campaigns/linden-pass/characters/arden-march?mode=session&amp;page=quick"' not in read_html
 
     session_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=features")
     session_html = session_response.get_data(as_text=True)
@@ -5767,12 +5776,13 @@ def test_sheet_edit_view_session_combat_links_remain_outside_shell_navigation(
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Open Character Help" in html
-    assert 'href="/campaigns/linden-pass/help#characters"' in html
-    assert '/campaigns/linden-pass/session/character?character=arden-march&amp;page=inventory' in html
-    assert '>Open Session Character<' in html
-    assert '/campaigns/linden-pass/combat?combatant=' in html
-    assert '>Open Combat<' in html
+    assert "Open Character Help" not in html
+    assert 'href="/campaigns/linden-pass/help#characters"' not in html
+    assert '/campaigns/linden-pass/session/character?character=arden-march&amp;page=inventory' not in html
+    assert '>Open Session Character<' not in html
+    assert '/campaigns/linden-pass/combat?combatant=' not in html
+    assert '>Open Combat<' not in html
+    assert "?mode=session&amp;page=inventory" in html
     assert "Character-page sheet edit" not in html
     assert "Combat-context editing" not in html
     nav_start = html.find('<nav class="character-subpage-nav"')
@@ -8092,8 +8102,9 @@ def test_character_personal_portrait_can_be_uploaded_replaced_rendered_and_remov
     session_html = session_personal.get_data(as_text=True)
     assert session_personal.status_code == 200
     assert "/campaigns/linden-pass/characters/arden-march/portrait" in session_html
-    assert "Remove portrait" not in session_html
-    assert "Save portrait" not in session_html
+    assert 'data-character-read-shell-mode="read"' in session_html
+    assert "Remove portrait" in session_html
+    assert "Save portrait" in session_html
 
     portrait_response = client.get("/campaigns/linden-pass/characters/arden-march/portrait")
     assert portrait_response.status_code == 200
@@ -8348,10 +8359,10 @@ def test_session_mode_uses_same_subpage_ui_as_read_mode(client, sign_in, users, 
     assert "?mode=session&amp;page=inventory" in html
     assert "?mode=session&amp;page=personal" in html
     assert "?mode=session&amp;page=notes" in html
-    assert "Save pending changes" in html
-    assert "Save personal details" not in html
+    assert "Save pending changes" not in html
     assert "Save note" not in html
     assert "At a glance" not in html
+    assert "Advanced Editor" in html
 
 
 def test_editable_users_default_to_read_mode(client, sign_in, users, set_campaign_visibility):
@@ -8363,7 +8374,8 @@ def test_editable_users_default_to_read_mode(client, sign_in, users, set_campaig
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert "Active session" not in html
-    assert "Open sheet edit view" in html
+    assert "Open sheet edit view" not in html
+    assert "Advanced Editor" in html
     assert "Enter session mode" not in html
     assert "Back to character sheet" not in html
 
@@ -8377,8 +8389,9 @@ def test_session_active_widget_stays_on_quick_reference_only(client, sign_in, us
 
     assert quick_response.status_code == 200
     quick_html = quick_response.get_data(as_text=True)
-    assert "Active session" in quick_html
-    assert "Save pending changes" in quick_html
+    assert "Active session" not in quick_html
+    assert "Save pending changes" not in quick_html
+    assert "Save note" not in quick_html
     assert "Save vitals" not in quick_html
 
     assert features_response.status_code == 200
@@ -8387,7 +8400,7 @@ def test_session_active_widget_stays_on_quick_reference_only(client, sign_in, us
     assert "Save pending changes" not in features_html
 
 
-def test_sheet_edit_view_makes_first_pass_bounded_scope_explicit(client, sign_in, users, set_campaign_visibility):
+def test_character_view_no_longer_uses_sheet_edit_lane_label(client, sign_in, users, set_campaign_visibility):
     set_campaign_visibility("linden-pass", characters="players")
     sign_in(users["owner"]["email"], users["owner"]["password"])
 
@@ -8395,15 +8408,10 @@ def test_sheet_edit_view_makes_first_pass_bounded_scope_explicit(client, sign_in
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Sheet edit view" in html
-    assert 'href="/campaigns/linden-pass/help#characters"' in html
-    assert "Open Character Help" in html
-    assert "Sheet edit scope" not in html
-    assert "Character-page sheet edit" not in html
-    assert "Compatibility note" not in html
-    assert "Player self-editing" not in html
-    assert "Session-enabled editing" not in html
-    assert "Combat-context editing" not in html
+    assert "Sheet edit view" not in html
+    assert "Open sheet edit view" not in html
+    assert 'href="/campaigns/linden-pass/help#characters"' not in html
+    assert "Open Character Help" not in html
 
 
 def test_sheet_edit_view_links_to_session_character_and_combat_when_both_are_live(
@@ -8426,17 +8434,19 @@ def test_sheet_edit_view_links_to_session_character_and_combat_when_both_are_liv
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Open Character Help" in html
-    assert 'href="/campaigns/linden-pass/help#characters"' in html
-    assert '/campaigns/linden-pass/session/character?character=arden-march&amp;page=inventory' in html
-    assert ">Open Session Character<" in html
-    assert '/campaigns/linden-pass/combat?combatant=' in html
-    assert ">Open Combat<" in html
+    assert "Open Character Help" not in html
+    assert 'href="/campaigns/linden-pass/help#characters"' not in html
+    assert "/campaigns/linden-pass/session/character?character=arden-march&amp;page=inventory" not in html
+    assert ">Open Session Character<" not in html
+    assert '/campaigns/linden-pass/combat?combatant=' not in html
+    assert ">Open Combat<" not in html
     assert "Character-page sheet edit" not in html
     assert "Combat-context editing" not in html
 
 
-def test_sheet_edit_view_explains_player_dm_and_admin_authority(client, sign_in, users, set_campaign_visibility):
+def test_help_copy_distinguishes_inline_state_edits_from_advanced_editor(
+    client, sign_in, users, set_campaign_visibility
+):
     set_campaign_visibility("linden-pass", characters="players")
     sign_in(users["owner"]["email"], users["owner"]["password"])
 
@@ -8444,17 +8454,23 @@ def test_sheet_edit_view_explains_player_dm_and_admin_authority(client, sign_in,
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Who can use sheet edit view" in html
+    assert "Who can use inline state edits" in html
     assert "Current HP, temp HP, tracked resources, and spell slot usage" in html
     assert "Compatibility note" in html
-    assert "Older Character-page links that still use ?mode=session" in html
-    assert "Assigned player owners can use this same sheet edit view for their own characters" in html
-    assert "DMs can open the same sheet edit view for characters they manage" in html
+    assert "?mode=session" in html
+    assert "`?mode=session` is a compatibility alias for the standard Character page." in html
+    assert "Assigned player owners can use inline Character-page state edits for their own characters." in html
+    assert "DMs can use the same inline state edits on managed characters." in html
     assert "Owner assignment stays admin-only on Controls" in html
-    assert "Observers and unassigned players stay on the standard character sheet" in html
+    assert "Observers and unassigned players stay on the standard Character page without inline state-edit affordances." in html
+    assert "Advanced Editor" in html
+    assert "These edits save immediately per form and stay on the Character page rather than opening a separate edit mode." in html
+    assert "Sheet edit view" not in html
 
 
-def test_sheet_edit_view_exposes_cancel_and_unsaved_change_warning_copy(client, sign_in, users, set_campaign_visibility):
+def test_character_copy_no_longer_mentions_batch_sheet_edit_drafts(
+    client, sign_in, users, set_campaign_visibility
+):
     set_campaign_visibility("linden-pass", characters="players")
     sign_in(users["owner"]["email"], users["owner"]["password"])
 
@@ -8462,16 +8478,13 @@ def test_sheet_edit_view_exposes_cancel_and_unsaved_change_warning_copy(client, 
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Cancel pending changes" in html
-    assert "Unsaved edits stay local until save/cancel." in html
-    assert "your draft stays available" in html
-    assert "The latest sheet was reloaded" in html
-    assert "pending draft was restored locally for review" in html
-    assert "Compare the refreshed sheet and save again when ready." in html
-    assert "Session Character, Combat, or another tab may have changed nearby fields first" in html
-    assert "nothing was auto-merged" in html
-    assert "beforeunload" in html
-    assert "Pending changes. Save or cancel before you leave." in html
+    assert "Cancel pending changes" not in html
+    assert "Unsaved edits stay local until save/cancel." not in html
+    assert "pending draft was restored locally for review" not in html
+    assert "Compare the refreshed sheet and save again when ready." not in html
+    assert "beforeunload" not in html
+    assert "Pending changes. Save or cancel before you leave." not in html
+    assert "Save pending changes" not in html
 
 
 def test_quick_reference_hides_item_backed_attacks_when_the_linked_item_is_not_equipped(app, client, sign_in, users):
@@ -9685,7 +9698,7 @@ def test_character_sheet_hides_redundant_choice_placeholder_features(app, client
     assert "Creatures provoke opportunity attacks from you even if they take the Disengage action." in html
 
 
-def test_session_currency_editor_renders_plain_fields_without_adjuster_buttons(
+def test_legacy_session_mode_inventory_renders_normal_character_view_without_batch_currency_editor(
     client, sign_in, users, set_campaign_visibility
 ):
     set_campaign_visibility("linden-pass", characters="players")
@@ -9695,11 +9708,14 @@ def test_session_currency_editor_renders_plain_fields_without_adjuster_buttons(
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert 'name="cp"' in html
-    assert 'name="sp"' in html
-    assert 'name="ep"' in html
-    assert 'name="gp"' in html
-    assert 'name="pp"' in html
+    assert "Inventory and currency" in html
+    assert 'data-character-read-shell-mode="read"' in html
+    assert 'name="cp"' not in html
+    assert 'name="sp"' not in html
+    assert 'name="ep"' not in html
+    assert 'name="gp"' not in html
+    assert 'name="pp"' not in html
+    assert "Save pending changes" not in html
     assert 'value="cp:-1"' not in html
     assert 'value="gp:1"' not in html
 

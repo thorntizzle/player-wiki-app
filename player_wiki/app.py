@@ -365,12 +365,12 @@ SESSION_CHARACTER_ACTIVE_EDIT_SUMMARY = (
 CHARACTER_SHEET_EDIT_FIRST_PASS_SCOPE = (
     "Current HP, temp HP, tracked resources, and spell slot usage",
     "Inventory quantities and currency totals",
-    "Physical description, background, and player notes",
+    "Player notes",
 )
 CHARACTER_SHEET_EDIT_OUTSIDE_FIRST_PASS_SCOPE = (
     "Rests and other relative quick actions",
     "Spell-list changes and other non-slot spell management",
-    "Equipment state, portrait changes, and broader inventory or equipment maintenance",
+    "Profile text (physical description, background), equipment state, portrait changes, and broader inventory/equipment maintenance",
     "Advanced character edit, level-up, retraining, and controls",
 )
 SESSION_CHARACTER_FULL_PAGE_ONLY_SCOPE = (
@@ -383,10 +383,10 @@ SESSION_CHARACTER_FULL_PAGE_ONLY_SUMMARY = (
     "Portrait/background details, spell-list changes, equipment or broader inventory work, and advanced maintenance"
 )
 CHARACTER_SHEET_EDIT_ACCESS_RULES = (
-    "Assigned player owners can use this same sheet edit view for their own characters on the first-pass Character-page sections.",
-    "DMs can open the same sheet edit view for characters they manage without reassigning ownership just to make a sheet correction.",
-    "Admins can always use this sheet edit view. Owner assignment stays admin-only on Controls, and character deletion stays on Controls for DM/admin users.",
-    "Observers and unassigned players stay on the standard character sheet and do not get this edit lane.",
+    "Assigned player owners can use inline Character-page state edits for their own characters.",
+    "DMs can use the same inline state edits on managed characters.",
+    "Admins can always use inline state edits and Advanced Editor. Owner assignment stays admin-only on Controls, and character deletion stays on Controls for DM/admin users.",
+    "Observers and unassigned players stay on the standard Character page without inline state-edit affordances.",
 )
 COMBAT_AND_SESSION_COMBAT_SCOPE = (
     "HP, temp HP, movement, and action economy",
@@ -4171,10 +4171,15 @@ def create_app() -> Flask:
             )
         character_guidance_cards: list[dict[str, object]] = [
             {
-                "title": "Sheet edit view",
-                "body": "Use the out-of-session Character page sheet edit view for the first-pass fields that stay local until you save or cancel them.",
+                "title": "Inline state edits on the Character page",
+                "body": (
+                    "Use the normal Character page for quick session-backed field edits. "
+                    "These edits save immediately per form and stay on the Character page rather than opening a separate edit mode."
+                ),
                 "items": list(CHARACTER_SHEET_EDIT_FIRST_PASS_SCOPE),
-                "meta": "This lane batches one page-local draft through sheet-edit instead of applying immediate Session or Combat deltas.",
+                "meta": (
+                    "Use Advanced Editor for durable edits to spell lists and broader equipment or character maintenance."
+                ),
             },
             {
                 "title": "Keep the full character page for",
@@ -4207,7 +4212,7 @@ def create_app() -> Flask:
         character_guidance_cards.extend(
             [
                 {
-                    "title": "Who can use sheet edit view",
+                    "title": "Who can use inline state edits",
                     "body": "",
                     "items": list(CHARACTER_SHEET_EDIT_ACCESS_RULES),
                     "meta": "",
@@ -4215,9 +4220,9 @@ def create_app() -> Flask:
                 {
                     "title": "Compatibility note",
                     "body": (
-                        "Older Character-page links that still use ?mode=session open this same sheet edit view. "
-                        "The user-facing label stays Sheet edit view so the compatibility route does not keep "
-                        "teaching an old Session-only label."
+                        "`?mode=session` is a compatibility alias for the standard Character page. "
+                        "Legacy links such as `?mode=session&page=...` still resolve to the requested Character-page view instead "
+                        "of switching to a separate edit lane."
                     ),
                     "items": [],
                     "meta": "",
@@ -4801,7 +4806,11 @@ def create_app() -> Flask:
             can_use_session_mode and campaign_supports_character_controls_routes(campaign)
         )
         requested_mode = request.values.get("mode", "").strip().lower()
-        is_session_mode = force_session_mode or (requested_mode == "session" and can_use_session_mode)
+        requested_session_mode = requested_mode == "session"
+        # Session mode for the legacy read-path is now a compatibility-only URL hint.
+        # Keep full-character reads in the read shell while preserving the requested page.
+        is_session_mode = False
+        character_read_mode_param = "session" if (requested_session_mode and can_use_session_mode) else None
 
         confirm_rest = request.values.get("confirm_rest", "").strip().lower() if is_session_mode else ""
         rest_preview = None
@@ -4887,7 +4896,7 @@ def create_app() -> Flask:
                     "character_read_view",
                     campaign_slug=campaign.slug,
                     character_slug=character["slug"],
-                    mode="session" if is_session_mode else None,
+                    mode=character_read_mode_param,
                     page=slug,
                 ),
                 "is_active": slug == character_subpage,
