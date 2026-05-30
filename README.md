@@ -447,7 +447,7 @@ The app now keeps the three editing lanes explicit in the browser UI:
 
 ### Editable MVP State
 
-The current normal Character inline lane supports:
+For DND-5E sheets, the current normal Character inline lane supports:
 
 - current HP
 - temp HP
@@ -461,8 +461,9 @@ The current normal Character inline lane supports:
 
 The inline state forms save immediately by form and follow the same revision-guard pattern used by Session and Combat.
 
-Not every Character subpage is yet fully migrated to this pattern. Profile text and portrait controls remain outside the
-inline state-edit scope for now, while broader sheet maintenance and advancement tooling stay in `Advanced Editor`.
+Not every Character subpage or campaign system is yet fully migrated to this pattern. Xianxia inline controls are still
+tracked as a follow-up slice, profile text and portrait controls remain outside the inline state-edit scope for now, and
+broader sheet maintenance and advancement tooling stay in `Advanced Editor`.
 
 If a stale write is submitted, the app shows a conflict message and asks the user to refresh before trying again.
 

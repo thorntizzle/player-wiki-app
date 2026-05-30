@@ -1,4 +1,5 @@
 {% set session_character_controls_scope = session_character_controls_scope | default("legacy", true) %}
+{% set session_character_form_mode = session_character_form_mode | default("session", true) %}
 <section class="session-panels">
   {% if rest_preview and session_character_controls_scope in ["legacy", "overview"] %}
     <section class="card session-card">
@@ -23,7 +24,7 @@
           action="{{ url_for('character_session_rest', campaign_slug=campaign.slug, character_slug=character.slug, rest_type=rest_preview.rest_type) }}"
         >
           <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
-          <input type="hidden" name="mode" value="session">
+          <input type="hidden" name="mode" value="{{ session_character_form_mode }}">
           <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
           {% if session_return_view %}
             <input type="hidden" name="return_view" value="{{ session_return_view }}">
@@ -54,7 +55,7 @@
               action="{{ url_for('character_session_resource', campaign_slug=campaign.slug, character_slug=character.slug, resource_id=resource.id) }}"
             >
               <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
-              <input type="hidden" name="mode" value="session">
+              <input type="hidden" name="mode" value="{{ session_character_form_mode }}">
               <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
               {% if session_return_view %}
                 <input type="hidden" name="return_view" value="{{ session_return_view }}">
@@ -113,7 +114,7 @@
                   action="{{ url_for('character_session_spell_slots', campaign_slug=campaign.slug, character_slug=character.slug, level=slot.level) }}"
                 >
                   <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
-                  <input type="hidden" name="mode" value="session">
+                  <input type="hidden" name="mode" value="{{ session_character_form_mode }}">
                   <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
                   {% if session_return_view %}
                     <input type="hidden" name="return_view" value="{{ session_return_view }}">
@@ -159,7 +160,7 @@
               action="{{ url_for('character_session_inventory', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
             >
               <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
-              <input type="hidden" name="mode" value="session">
+              <input type="hidden" name="mode" value="{{ session_character_form_mode }}">
               <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
               {% if session_return_view %}
                 <input type="hidden" name="return_view" value="{{ session_return_view }}">
@@ -202,7 +203,7 @@
         action="{{ url_for('character_session_currency', campaign_slug=campaign.slug, character_slug=character.slug) }}"
       >
         <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
-        <input type="hidden" name="mode" value="session">
+        <input type="hidden" name="mode" value="{{ session_character_form_mode }}">
         <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
         {% if session_return_view %}
           <input type="hidden" name="return_view" value="{{ session_return_view }}">
@@ -236,7 +237,7 @@
           action="{{ url_for('character_session_personal', campaign_slug=campaign.slug, character_slug=character.slug) }}"
         >
           <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
-          <input type="hidden" name="mode" value="session">
+          <input type="hidden" name="mode" value="{{ session_character_form_mode }}">
           <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
           {% if session_return_view %}
             <input type="hidden" name="return_view" value="{{ session_return_view }}">
@@ -282,7 +283,7 @@
         action="{{ url_for('character_session_notes', campaign_slug=campaign.slug, character_slug=character.slug) }}"
       >
         <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
-        <input type="hidden" name="mode" value="session">
+        <input type="hidden" name="mode" value="{{ session_character_form_mode }}">
         <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
         {% if session_return_view %}
           <input type="hidden" name="return_view" value="{{ session_return_view }}">

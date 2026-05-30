@@ -5532,7 +5532,9 @@ def test_owner_player_can_open_session_mode_when_character_visibility_allows_pla
     assert "Advanced Editor" in html
     assert "Active session" not in html
     assert "Save pending changes" not in html
-    assert "Save vitals" not in html
+    assert "Save vitals" in html
+    assert 'data-character-sheet-edit-form="vitals"' in html
+    assert 'name="mode" value="read"' in html
     assert "Back to character sheet" not in html
     assert "Back to read mode" not in html
     assert "?mode=session&amp;page=quick" in html
@@ -8380,7 +8382,9 @@ def test_editable_users_default_to_read_mode(client, sign_in, users, set_campaig
     assert "Back to character sheet" not in html
 
 
-def test_session_active_widget_stays_on_quick_reference_only(client, sign_in, users, set_campaign_visibility):
+def test_character_compatibility_url_shows_inline_state_without_active_session_chrome(
+    client, sign_in, users, set_campaign_visibility
+):
     set_campaign_visibility("linden-pass", characters="players")
     sign_in(users["owner"]["email"], users["owner"]["password"])
 
@@ -8390,14 +8394,117 @@ def test_session_active_widget_stays_on_quick_reference_only(client, sign_in, us
     assert quick_response.status_code == 200
     quick_html = quick_response.get_data(as_text=True)
     assert "Active session" not in quick_html
+    assert "Short rest" not in quick_html
+    assert "Long rest" not in quick_html
     assert "Save pending changes" not in quick_html
     assert "Save note" not in quick_html
-    assert "Save vitals" not in quick_html
+    assert "Save vitals" in quick_html
+    assert 'data-character-sheet-edit-form="vitals"' in quick_html
+    assert 'data-character-sheet-edit-form="resource"' in quick_html
+    assert 'name="mode" value="read"' in quick_html
 
     assert features_response.status_code == 200
     features_html = features_response.get_data(as_text=True)
     assert "Active session" not in features_html
     assert "Save pending changes" not in features_html
+    assert 'data-character-sheet-edit-form="vitals"' not in features_html
+
+
+def test_dnd_character_normal_page_shows_inline_state_controls_for_assigned_player(
+    client, sign_in, users, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    quick_response = client.get("/campaigns/linden-pass/characters/arden-march?page=quick")
+    spell_response = client.get("/campaigns/linden-pass/characters/arden-march?page=spellcasting")
+    inventory_response = client.get("/campaigns/linden-pass/characters/arden-march?page=inventory")
+    notes_response = client.get("/campaigns/linden-pass/characters/arden-march?page=notes")
+
+    assert quick_response.status_code == 200
+    quick_html = quick_response.get_data(as_text=True)
+    assert 'data-character-sheet-edit-form="vitals"' in quick_html
+    assert 'data-character-sheet-edit-form="resource"' in quick_html
+    assert "Save vitals" in quick_html
+    assert "Current state" in quick_html
+    assert "Active session" not in quick_html
+    assert "Short rest" not in quick_html
+    assert "Long rest" not in quick_html
+    assert "Save pending changes" not in quick_html
+    assert 'name="mode" value="read"' in quick_html
+
+    assert spell_response.status_code == 200
+    spell_html = spell_response.get_data(as_text=True)
+    assert 'data-character-sheet-edit-form="spell-slot"' in spell_html
+    assert "Restore 1" in spell_html
+    assert "Use 1" in spell_html
+    assert "Save pending changes" not in spell_html
+    assert 'name="mode" value="read"' in spell_html
+
+    assert inventory_response.status_code == 200
+    inventory_html = inventory_response.get_data(as_text=True)
+    assert 'data-character-sheet-edit-form="inventory"' in inventory_html
+    assert 'data-character-sheet-edit-form="currency"' in inventory_html
+    assert 'name="cp"' in inventory_html
+    assert "Save currency" in inventory_html
+    assert "Inventory and currency" in inventory_html
+    assert "Save pending changes" not in inventory_html
+    assert 'name="mode" value="read"' in inventory_html
+
+    assert notes_response.status_code == 200
+    notes_html = notes_response.get_data(as_text=True)
+    assert 'data-character-sheet-edit-form="notes"' in notes_html
+    assert "Save note" in notes_html
+    assert "Save pending changes" not in notes_html
+    assert 'name="mode" value="read"' in notes_html
+
+
+def test_dnd_character_normal_page_hides_inline_state_controls_for_read_only_users(
+    client, sign_in, users, set_campaign_visibility
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    quick_response = client.get("/campaigns/linden-pass/characters/arden-march?page=quick")
+    spell_response = client.get("/campaigns/linden-pass/characters/arden-march?page=spellcasting")
+    inventory_response = client.get("/campaigns/linden-pass/characters/arden-march?page=inventory")
+    notes_response = client.get("/campaigns/linden-pass/characters/arden-march?page=notes")
+
+    assert quick_response.status_code == 200
+    quick_html = quick_response.get_data(as_text=True)
+    assert "At a glance" in quick_html
+    assert 'data-character-sheet-edit-form="vitals"' not in quick_html
+    assert 'data-character-sheet-edit-form="resource"' not in quick_html
+    assert "Save vitals" not in quick_html
+
+    assert spell_response.status_code == 200
+    spell_html = spell_response.get_data(as_text=True)
+    assert "Spellcasting" in spell_html
+    assert 'data-character-sheet-edit-form="spell-slot"' not in spell_html
+
+    assert inventory_response.status_code == 200
+    inventory_html = inventory_response.get_data(as_text=True)
+    assert "Inventory and currency" in inventory_html
+    assert 'data-character-sheet-edit-form="inventory"' not in inventory_html
+    assert 'data-character-sheet-edit-form="currency"' not in inventory_html
+    assert "Save currency" not in inventory_html
+
+    assert notes_response.status_code == 200
+    notes_html = notes_response.get_data(as_text=True)
+    assert "Notes" in notes_html
+    assert 'data-character-sheet-edit-form="notes"' not in notes_html
+    assert "Save note" not in notes_html
+
+    client.post("/sign-out", follow_redirects=False)
+    set_campaign_visibility("linden-pass", characters="public")
+    sign_in(users["observer"]["email"], users["observer"]["password"])
+    observer_response = client.get("/campaigns/linden-pass/characters/arden-march?page=quick")
+
+    assert observer_response.status_code == 200
+    observer_html = observer_response.get_data(as_text=True)
+    assert 'data-character-sheet-edit-form="vitals"' not in observer_html
+    assert 'data-character-sheet-edit-form="resource"' not in observer_html
+    assert "Save vitals" not in observer_html
 
 
 def test_character_view_no_longer_uses_sheet_edit_lane_label(client, sign_in, users, set_campaign_visibility):
@@ -9710,14 +9817,16 @@ def test_legacy_session_mode_inventory_renders_normal_character_view_without_bat
     html = response.get_data(as_text=True)
     assert "Inventory and currency" in html
     assert 'data-character-read-shell-mode="read"' in html
-    assert 'name="cp"' not in html
-    assert 'name="sp"' not in html
-    assert 'name="ep"' not in html
-    assert 'name="gp"' not in html
-    assert 'name="pp"' not in html
+    assert 'data-character-sheet-edit-form="inventory"' in html
+    assert 'data-character-sheet-edit-form="currency"' in html
+    assert 'name="mode" value="read"' in html
+    assert 'name="cp"' in html
+    assert 'name="sp"' in html
+    assert 'name="ep"' in html
+    assert 'name="gp"' in html
+    assert 'name="pp"' in html
     assert "Save pending changes" not in html
-    assert 'value="cp:-1"' not in html
-    assert 'value="gp:1"' not in html
+    assert "Save currency" in html
 
 
 def test_character_sheet_renders_long_form_imported_ability_keys(app, client, sign_in, users):

@@ -130,14 +130,17 @@
       {% set show_note_sections = character_subpage == 'notes' %}
       {% set show_control_sections = character_subpage == 'controls' %}
       {% set character_sheet_batch_save_enabled = is_session_mode and character_subpage in ('quick', 'inventory', 'personal', 'notes') %}
+      {% set character_inline_state_controls_enabled = can_use_session_mode and native_character_tools_supported and not is_session_mode and not is_xianxia_sheet %}
 
       {% if character_sheet_batch_save_enabled %}
         {% include "_character_sheet_batch_save_bar.html" %}
       {% endif %}
 
       {% if show_quick_sections %}
-        {% if is_session_mode %}
-          {% include "_character_session_bar.html" %}
+        {% if character_inline_state_controls_enabled %}
+          {% with session_character_form_mode="read", session_character_form_page=character_subpage, session_character_bar_eyebrow="Current state", session_character_show_rest_actions=false %}
+            {% include "_character_session_bar.html" %}
+          {% endwith %}
         {% endif %}
         <section class="read-section" id="character-quick-overview">
           <h2>At a glance</h2>
@@ -438,8 +441,18 @@
         </section>
       {% endif %}
 
-      {% if is_session_mode %}
-        {% include "_character_session_panels.html" %}
+      {% if character_inline_state_controls_enabled and show_quick_sections %}
+        {% with session_character_controls_scope="resources", session_character_form_mode="read", session_character_form_page=character_subpage %}
+          {% include "_character_session_panels.html" %}
+        {% endwith %}
+      {% elif character_inline_state_controls_enabled and show_spellcasting_sections %}
+        {% with session_character_controls_scope="spells", session_character_form_mode="read", session_character_form_page=character_subpage %}
+          {% include "_character_session_panels.html" %}
+        {% endwith %}
+      {% elif character_inline_state_controls_enabled and show_inventory_sections %}
+        {% with session_character_controls_scope="inventory", session_character_form_mode="read", session_character_form_page=character_subpage %}
+          {% include "_character_session_panels.html" %}
+        {% endwith %}
       {% endif %}
 
       {% if is_xianxia_sheet %}
@@ -450,7 +463,7 @@
         {% include "_character_sheet_batch_save_bar.html" %}
       {% endif %}
 
-      {% if show_quick_sections and character.resources and not is_session_mode %}
+      {% if show_quick_sections and character.resources and not is_session_mode and not character_inline_state_controls_enabled %}
         <section class="read-section" id="character-quick-resources">
           <div class="section-heading">
             <h2>Resources</h2>
@@ -1159,6 +1172,7 @@
                 class="stack-form"
                 method="post"
                 action="{{ url_for('character_session_notes', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+                data-character-sheet-edit-form="notes"
               >
                 <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                 <input type="hidden" name="mode" value="read">
