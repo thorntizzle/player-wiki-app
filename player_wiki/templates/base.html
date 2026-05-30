@@ -4,9 +4,95 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Campaign Player Wiki{% endblock %}</title>
+    <style id="app-loading-inline-styles">
+      html.app-loading {
+        min-height: 100%;
+        background: #f0e6cd;
+      }
+
+      .app-loading-cover {
+        display: none;
+        box-sizing: border-box;
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        width: 100%;
+        min-height: 100%;
+        margin: 0;
+        padding: 2rem;
+        background: #f0e6cd;
+        color: #2f241a;
+        font-family: Georgia, Cambria, "Times New Roman", serif;
+        text-align: center;
+      }
+
+      .app-loading-cover__message {
+        margin: 0;
+      }
+
+      html.app-loading .app-loading-cover {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      html.app-loading .page-shell {
+        display: none;
+      }
+    </style>
+    <script id="app-loading-inline-script">
+      (function () {
+        var root = document.documentElement;
+        var loadingClass = "app-loading";
+        var failOpenDelayMs = 2500;
+        var failOpenTimer = null;
+
+        function removeLoadingState() {
+          var scheduleFrame = window.requestAnimationFrame || function (callback) {
+            return window.setTimeout(callback, 0);
+          };
+
+          scheduleFrame(function () {
+            root.classList.remove(loadingClass);
+          });
+        }
+
+        function clearFailOpenTimer() {
+          if (failOpenTimer !== null) {
+            window.clearTimeout(failOpenTimer);
+            failOpenTimer = null;
+          }
+        }
+
+        failOpenTimer = window.setTimeout(function () {
+          clearFailOpenTimer();
+          root.classList.remove(loadingClass);
+        }, failOpenDelayMs);
+
+        root.classList.add(loadingClass);
+
+        if (document.readyState === "complete") {
+          clearFailOpenTimer();
+          removeLoadingState();
+          return;
+        }
+
+        window.addEventListener(
+          "load",
+          function () {
+            clearFailOpenTimer();
+            removeLoadingState();
+          },
+          { once: true }
+        );
+      }());
+    </script>
     <link rel="stylesheet" href="{{ stylesheet_url() }}">
   </head>
   <body>
+    <div class="app-loading-cover" role="status" aria-live="polite" aria-label="Loading application">
+      <p class="app-loading-cover__message">Loading campaign player wiki...</p>
+    </div>
     {% set header_secondary_content %}{% block header_secondary %}{% endblock %}{% endset %}
     <div class="page-shell">
       <header class="site-header">

@@ -30,6 +30,25 @@ def test_base_template_uses_versioned_stylesheet_url(client):
     assert query["v"][0].strip()
 
 
+def test_base_template_includes_inline_loading_bootstrap_and_cover(client):
+    response = client.get("/campaigns/linden-pass")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+
+    assert 'id="app-loading-inline-styles"' in html
+    assert ".app-loading-cover" in html
+    assert 'id="app-loading-inline-script"' in html
+    assert "requestAnimationFrame" in html
+    assert "setTimeout" in html
+    assert "addEventListener" in html
+    assert 'role="status"' in html
+    assert 'aria-live="polite"' in html
+
+    html_opening_tag = re.search(r"<html[^>]*>", html)
+    assert html_opening_tag is not None
+    assert "app-loading" not in html_opening_tag.group(0)
+
+
 def test_versioned_stylesheet_response_uses_production_immutable_cache_headers(app, client):
     app.config["APP_ENV"] = "production"
 
@@ -88,7 +107,7 @@ def static_asset_live_server(app):
         thread.join(timeout=5)
 
 
-def test_browser_loads_styled_shell_through_versioned_stylesheet(static_asset_live_server):
+def test_browser_shows_loading_cover_while_stylesheet_streams(static_asset_live_server):
     try:
         from playwright.sync_api import expect, sync_playwright
     except Exception as exc:
@@ -103,11 +122,42 @@ def test_browser_loads_styled_shell_through_versioned_stylesheet(static_asset_li
 
         try:
             def delay_stylesheet(route):
-                time.sleep(0.25)
+                time.sleep(1.2)
                 route.continue_()
 
             page.route("**/static/styles.css**", delay_stylesheet)
-            page.goto(f"{static_asset_live_server}/campaigns/linden-pass", wait_until="load")
+
+            page.goto(
+                f"{static_asset_live_server}/campaigns/linden-pass",
+                wait_until="commit",
+            )
+
+            page.wait_for_function(
+                """() => {
+                    const cover = document.querySelector('.app-loading-cover');
+                    return (
+                        document.documentElement.classList.contains('app-loading') &&
+                        cover &&
+                        window.getComputedStyle(cover).display === 'flex'
+                    );
+                }"""
+            )
+            loading_snapshot = page.evaluate(
+                """() => {
+                    const cover = document.querySelector('.app-loading-cover');
+                    return {
+                      hasLoadingClass: document.documentElement.classList.contains('app-loading'),
+                      coverDisplay: cover ? getComputedStyle(cover).display : null,
+                      pageShellDisplay: getComputedStyle(document.querySelector('.page-shell')).display,
+                    };
+                }"""
+            )
+            assert loading_snapshot["hasLoadingClass"] is True
+            assert loading_snapshot["coverDisplay"] == "flex"
+            assert loading_snapshot["pageShellDisplay"] == "none"
+
+            page.wait_for_load_state("load")
+            expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=5000)
             expect(page.locator(".page-shell")).to_be_visible(timeout=5000)
 
             resource_urls = page.evaluate(
@@ -120,7 +170,9 @@ def test_browser_loads_styled_shell_through_versioned_stylesheet(static_asset_li
             assert all("?v=" in url for url in stylesheet_urls)
 
             assert page.evaluate("getComputedStyle(document.body).marginTop") == "0px"
-            assert page.evaluate("getComputedStyle(document.documentElement).backgroundImage") != "none"
+            assert page.evaluate(
+                "getComputedStyle(document.documentElement).backgroundImage"
+            ) != "none"
             paint_timing = page.evaluate(
                 """() => {
                     const cssEntry = performance
