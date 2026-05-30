@@ -413,7 +413,7 @@ The detail route renders the structured character definition plus live SQLite-ba
 - a portrait slot on `Personal`, stored as a campaign asset and shown in read mode and on editable Character views
 - a permissioned `Controls` subpage for editable users, with room for current admin/DM controls and future player-owned controls
 - current HP and temp HP
-- Xianxia current Stance, Jing/Qi/Shen, Yin/Yang, Dao, and manual active Stance/Aura state on the Resources session lane
+- Xianxia current Stance, Jing/Qi/Shen, Yin/Yang, Dao, and manual active Stance/Aura state on the Resources lane for authorized inline editors
 - resource trackers
 - spell slots
 - attacks
@@ -457,12 +457,24 @@ For DND-5E sheets, the current normal Character inline lane supports:
 - currency values
 - player notes
 
+For Xianxia sheets, the current normal Character inline lane supports:
+
+- current HP and temp HP
+- current Stance and temp Stance
+- current Jing, Qi, and Shen
+- current Yin and Yang
+- current Dao
+- manual active Stance and active Aura names
+- modeled inventory add, edit, remove, quantity, equip, and unequip actions
+- Coin, Supply, and Spirit Stones
+- player notes
+- existing Dao Immolating use request forms and DM/admin use-recording forms where already authorized
+
 ### Save Behavior
 
 The inline state forms save immediately by form and follow the same revision-guard pattern used by Session and Combat.
 
-Not every Character subpage or campaign system is yet fully migrated to this pattern. Xianxia inline controls are still
-tracked as a follow-up slice, profile text and portrait controls remain outside the inline state-edit scope for now, and
+Not every Character subpage or campaign system is yet fully migrated to this pattern. Profile text and portrait controls remain outside the inline state-edit scope for now, and
 broader sheet maintenance and advancement tooling stay in `Advanced Editor`.
 
 If a stale write is submitted, the app shows a conflict message and asks the user to refresh before trying again.

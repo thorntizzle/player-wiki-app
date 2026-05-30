@@ -953,7 +953,7 @@ def test_xianxia_read_sheet_uses_system_specific_subpages(
     assert "?page=features" not in quick_html
     assert "?page=spellcasting" not in quick_html
     assert "Features" not in quick_html
-    assert "Spellcasting" not in quick_html
+    assert re.search(r">\s*Spellcasting\s*<", quick_html) is None
 
     spellcasting_response = client.get(
         "/campaigns/linden-pass/characters/subpage-crane?page=spellcasting"
@@ -964,7 +964,7 @@ def test_xianxia_read_sheet_uses_system_specific_subpages(
     assert "?page=spellcasting" not in spellcasting_html
     assert "/spellcasting/" not in spellcasting_html
     assert "Spell slots" not in spellcasting_html
-    assert "Spellcasting" not in spellcasting_html
+    assert re.search(r">\s*Spellcasting\s*<", spellcasting_html) is None
 
     martial_arts_response = client.get(
         "/campaigns/linden-pass/characters/subpage-crane?page=martial_arts"
@@ -1083,7 +1083,9 @@ def test_xianxia_read_sheet_uses_system_specific_subpages(
     inventory_html = unescape(inventory_response.get_data(as_text=True))
     assert "Inventory" in inventory_html
     assert "No inventory quantities are recorded on this sheet yet." in inventory_html
-    assert "Currency" not in inventory_html
+    assert "Currency" in inventory_html
+    assert 'data-character-sheet-edit-form="currency"' in inventory_html
+    assert 'name="mode" value="read"' in inventory_html
 
     controls_response = client.get(
         "/campaigns/linden-pass/characters/subpage-crane?page=controls"
@@ -2040,6 +2042,247 @@ def test_xianxia_inventory_currency_renders_and_updates(
     assert clamped.state_record.state["xianxia"]["currency"]["coin"] == 0
 
 
+def test_xianxia_read_pages_show_xianxia_inline_controls_for_authorized_users(
+    client,
+    sign_in,
+    users,
+    app,
+    get_character,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Read Inline Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+    record = get_character("read-inline-crane")
+    assert record is not None
+
+    resources_response = client.get(
+        "/campaigns/linden-pass/characters/read-inline-crane?page=resources"
+    )
+    assert resources_response.status_code == 200
+    resources_html = unescape(resources_response.get_data(as_text=True))
+    assert 'id="session-vitals"' in resources_html
+    assert 'id="session-active-state"' in resources_html
+    assert 'name="mode" value="read"' in resources_html
+
+    techniques_response = client.get(
+        "/campaigns/linden-pass/characters/read-inline-crane?page=techniques"
+    )
+    assert techniques_response.status_code == 200
+    techniques_html = unescape(techniques_response.get_data(as_text=True))
+    assert 'id="xianxia-dao-immolating-use-request"' in techniques_html
+    assert 'name="dao_immolating_request_name"' in techniques_html
+    assert 'name="mode" value="read"' in techniques_html
+
+    inventory_response = client.get(
+        "/campaigns/linden-pass/characters/read-inline-crane?page=inventory"
+    )
+    assert inventory_response.status_code == 200
+    inventory_html = unescape(inventory_response.get_data(as_text=True))
+    assert 'id="session-currency"' in inventory_html
+    assert 'id="xianxia-inventory-add"' in inventory_html
+    assert 'name="mode" value="read"' in inventory_html
+
+    notes_response = client.get(
+        "/campaigns/linden-pass/characters/read-inline-crane?page=notes"
+    )
+    assert notes_response.status_code == 200
+    notes_html = unescape(notes_response.get_data(as_text=True))
+    assert 'id="session-notes"' in notes_html
+    assert 'data-character-sheet-edit-form="notes"' in notes_html
+    assert 'name="mode" value="read"' in notes_html
+
+    add_response = client.post(
+        "/campaigns/linden-pass/characters/read-inline-crane/session/xianxia-inventory/add",
+        data={
+            "expected_revision": record.state_record.revision,
+            "name": "Training Jian",
+            "quantity": "1",
+            "item_nature": "Mundane",
+            "item_type": "Weapon",
+            "tags": "",
+            "notes": "read-mode smoke test",
+            "equippable": "1",
+            "mode": "read",
+            "page": "inventory",
+        },
+        follow_redirects=False,
+    )
+    assert add_response.status_code == 302
+    assert "/campaigns/linden-pass/characters/read-inline-crane" in add_response.headers["Location"]
+    assert "mode=read" not in add_response.headers["Location"]
+    assert "page=inventory" in add_response.headers["Location"]
+    assert add_response.headers["Location"].endswith("#xianxia-inventory")
+
+    inventory_after_add = client.get(
+        "/campaigns/linden-pass/characters/read-inline-crane?page=inventory"
+    )
+    inventory_after_add_html = unescape(inventory_after_add.get_data(as_text=True))
+    assert 'data-character-sheet-edit-form="xianxia-inventory-quantity"' in inventory_after_add_html
+    assert 'data-character-sheet-edit-form="xianxia-inventory-equipped"' in inventory_after_add_html
+    assert 'data-character-sheet-edit-form="xianxia-inventory-edit"' in inventory_after_add_html
+    assert 'data-character-sheet-edit-form="xianxia-inventory-remove"' in inventory_after_add_html
+    assert 'name="mode" value="read"' in inventory_after_add_html
+
+
+@pytest.mark.parametrize("user_key", ["admin", "owner"])
+def test_xianxia_read_pages_show_xianxia_inline_controls_for_all_authorized_roles(
+    client,
+    sign_in,
+    users,
+    app,
+    get_character,
+    set_campaign_visibility,
+    user_key,
+):
+    character_slug = f"read-inline-{user_key}"
+    _create_assigned_xianxia_session_character(
+        app,
+        client,
+        sign_in,
+        users,
+        set_campaign_visibility,
+        character_slug=character_slug,
+        name=f"Read Inline {user_key.title()} Crane",
+    )
+
+    sign_in(users[user_key]["email"], users[user_key]["password"])
+    response = client.get(
+        f"/campaigns/linden-pass/characters/{character_slug}?page=resources"
+    )
+    assert response.status_code == 200
+    html = unescape(response.get_data(as_text=True))
+    assert 'id="session-vitals"' in html
+    assert 'name="mode" value="read"' in html
+
+
+def test_xianxia_normal_read_pages_accept_mode_read_inline_submissions(
+    client,
+    sign_in,
+    users,
+    app,
+    get_character,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Read Submit Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+    record = get_character("read-submit-crane")
+    assert record is not None
+
+    resource_response = client.post(
+        "/campaigns/linden-pass/characters/read-submit-crane/session/vitals",
+        data={
+            "expected_revision": record.state_record.revision,
+            "current_hp": "8",
+            "temp_hp": "1",
+            "current_stance": "9",
+            "temp_stance": "2",
+            "current_jing": "1",
+            "current_qi": "1",
+            "current_shen": "0",
+            "current_yin": "1",
+            "current_yang": "1",
+            "current_dao": "2",
+            "mode": "read",
+            "page": "resources",
+        },
+        follow_redirects=False,
+    )
+    assert resource_response.status_code == 302
+    assert "/campaigns/linden-pass/characters/read-submit-crane?page=resources" in resource_response.headers["Location"]
+    assert "mode=read" not in resource_response.headers["Location"]
+    assert resource_response.headers["Location"].endswith("#session-vitals")
+
+    record = get_character("read-submit-crane")
+    assert record is not None
+    assert record.state_record.state["xianxia"]["vitals"]["current_hp"] == 8
+    assert record.state_record.state["xianxia"]["vitals"]["current_stance"] == 9
+
+    technique_response = client.post(
+        "/campaigns/linden-pass/characters/read-submit-crane/xianxia/dao-immolating-use-requests",
+        data={
+            "expected_revision": record.state_record.revision,
+            "mode": "read",
+            "page": "techniques",
+            "dao_immolating_request_name": "Lotus-Burning Last Word",
+            "dao_immolating_request_notes": "Normal character read request.",
+        },
+        follow_redirects=False,
+    )
+    assert technique_response.status_code == 302
+    assert (
+        "/campaigns/linden-pass/characters/read-submit-crane?page=techniques"
+        in technique_response.headers["Location"]
+    )
+    assert "mode=read" not in technique_response.headers["Location"]
+    assert (
+        technique_response.headers["Location"].endswith(
+            "#xianxia-dao-immolating-use-request"
+        )
+    )
+
+    updated = get_character("read-submit-crane")
+    assert updated is not None
+    xianxia = updated.definition.to_dict()["xianxia"]
+    assert any(
+        entry["name"] == "Lotus-Burning Last Word"
+        for entry in xianxia["dao_immolating_techniques"]["use_history"]
+    )
+
+    currency_response = client.post(
+        "/campaigns/linden-pass/characters/read-submit-crane/session/currency",
+        data={
+            "expected_revision": updated.state_record.revision,
+            "coin": "2",
+            "supply": "1",
+            "spirit_stones": "0",
+            "mode": "read",
+            "page": "inventory",
+        },
+        follow_redirects=False,
+    )
+    assert currency_response.status_code == 302
+    assert (
+        "/campaigns/linden-pass/characters/read-submit-crane?page=inventory"
+        in currency_response.headers["Location"]
+    )
+    assert "mode=read" not in currency_response.headers["Location"]
+    assert currency_response.headers["Location"].endswith("#session-currency")
+
+    updated = get_character("read-submit-crane")
+    assert updated is not None
+    assert updated.state_record.state["xianxia"]["currency"]["coin"] == 2
+
+    notes_response = client.post(
+        "/campaigns/linden-pass/characters/read-submit-crane/session/notes",
+        data={
+            "expected_revision": updated.state_record.revision,
+            "player_notes_markdown": "Read mode note.",
+            "mode": "read",
+            "page": "notes",
+        },
+        follow_redirects=False,
+    )
+    assert notes_response.status_code == 302
+    assert (
+        "/campaigns/linden-pass/characters/read-submit-crane?page=notes"
+        in notes_response.headers["Location"]
+    )
+    assert "mode=read" not in notes_response.headers["Location"]
+    assert notes_response.headers["Location"].endswith("#session-notes")
+
+
 def test_xianxia_session_notes_allow_editable_users_to_update_notes(
     client,
     sign_in,
@@ -2254,6 +2497,121 @@ def test_xianxia_session_state_permissions_keep_read_only_roles_from_writing(
     assert blocked_vitals.status_code == 403
     assert blocked_active_state.status_code == 403
     assert blocked_notes.status_code == 403
+    updated = get_character(character_slug)
+    assert updated is not None
+    assert updated.state_record.revision == original_revision
+    assert updated.state_record.state == original_state
+
+
+@pytest.mark.parametrize("user_key", ["observer", "party"])
+def test_xianxia_read_pages_keep_read_only_roles_from_writing(
+    client,
+    sign_in,
+    users,
+    app,
+    get_character,
+    set_campaign_visibility,
+    user_key,
+):
+    character_slug = f"xianxia-readonly-read-{user_key}"
+    _create_assigned_xianxia_session_character(
+        app,
+        client,
+        sign_in,
+        users,
+        set_campaign_visibility,
+        character_slug=character_slug,
+        name=f"Readonly Read {user_key.title()} Crane",
+    )
+
+    sign_in(users[user_key]["email"], users[user_key]["password"])
+    resources_response = client.get(
+        f"/campaigns/linden-pass/characters/{character_slug}?page=resources"
+    )
+    assert resources_response.status_code == 200
+    resources_html = unescape(resources_response.get_data(as_text=True))
+    assert 'id="session-vitals"' not in resources_html
+    assert 'data-character-sheet-edit-form="xianxia-active-state"' not in resources_html
+
+    techniques_response = client.get(
+        f"/campaigns/linden-pass/characters/{character_slug}?page=techniques"
+    )
+    assert techniques_response.status_code == 200
+    techniques_html = unescape(techniques_response.get_data(as_text=True))
+    assert 'id="xianxia-dao-immolating-use-request"' not in techniques_html
+    assert 'data-character-sheet-edit-form="xianxia-dao-immolating-use-request"' not in techniques_html
+
+    inventory_response = client.get(
+        f"/campaigns/linden-pass/characters/{character_slug}?page=inventory"
+    )
+    assert inventory_response.status_code == 200
+    inventory_html = unescape(inventory_response.get_data(as_text=True))
+    assert 'id="xianxia-inventory-add"' not in inventory_html
+    assert 'data-character-sheet-edit-form="currency"' not in inventory_html
+
+    notes_response = client.get(
+        f"/campaigns/linden-pass/characters/{character_slug}?page=notes"
+    )
+    assert notes_response.status_code == 200
+    notes_html = unescape(notes_response.get_data(as_text=True))
+    assert 'data-character-sheet-edit-form="notes"' not in notes_html
+    assert "Save note" not in notes_html
+
+    record = get_character(character_slug)
+    assert record is not None
+    original_revision = record.state_record.revision
+    original_state = deepcopy(record.state_record.state)
+
+    blocked_vitals = client.post(
+        f"/campaigns/linden-pass/characters/{character_slug}/session/vitals",
+        data={
+            "expected_revision": original_revision,
+            "mode": "read",
+            "page": "resources",
+            "current_hp": "1",
+            "current_stance": "1",
+            "current_dao": "1",
+        },
+        follow_redirects=False,
+    )
+    blocked_technique = client.post(
+        f"/campaigns/linden-pass/characters/{character_slug}/xianxia/dao-immolating-use-requests",
+        data={
+            "expected_revision": original_revision,
+            "mode": "read",
+            "page": "techniques",
+            "dao_immolating_request_name": "Unauthorized Request",
+        },
+        follow_redirects=False,
+    )
+    blocked_inventory = client.post(
+        f"/campaigns/linden-pass/characters/{character_slug}/session/xianxia-inventory/add",
+        data={
+            "expected_revision": original_revision,
+            "name": "Moon Fang",
+            "quantity": "1",
+            "item_type": "Weapon",
+            "mode": "read",
+            "page": "inventory",
+        },
+        follow_redirects=False,
+    )
+    blocked_notes = client.post(
+        f"/campaigns/linden-pass/characters/{character_slug}/session/notes",
+        data={
+            "expected_revision": original_revision,
+            "page": "notes",
+            "mode": "read",
+            "player_notes_markdown": "Forbidden.",
+        },
+        follow_redirects=False,
+    )
+
+    assert blocked_vitals.status_code == 403
+    assert blocked_technique.status_code == 403
+    assert blocked_inventory.status_code == 403
+    assert blocked_notes.status_code == 403
+
     updated = get_character(character_slug)
     assert updated is not None
     assert updated.state_record.revision == original_revision
