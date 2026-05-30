@@ -76,6 +76,37 @@ def test_character_read_shell_browser_state_and_save_flow(
 
             page.goto(character_slug_path)
             expect(page.locator("h2:has-text('At a glance')")).to_be_visible(timeout=5000)
+            page.evaluate("window.__characterReadShellMarker = 'alive'")
+            hp_field = page.locator("form[data-character-sheet-edit-form='vitals'] input[name='current_hp']")
+            hp_field.fill("12")
+            page.locator("form[data-character-sheet-edit-form='vitals'] button:has-text('Save vitals')").click()
+            expect(page.locator("[data-flash-stack-root] .flash-success")).to_have_text(
+                "Vitals updated.",
+                timeout=3000,
+            )
+            expect(hp_field).to_have_value("12", timeout=5000)
+            assert page.evaluate("window.__characterReadShellMarker") == "alive"
+
+            _write_character_state(
+                app,
+                "arden-march",
+                lambda state: state.__setitem__(
+                    "vitals",
+                    {
+                        "current_hp": 9,
+                        "temp_hp": 0,
+                    },
+                ),
+            )
+            hp_field.fill("4")
+            page.locator("form[data-character-sheet-edit-form='vitals'] button:has-text('Save vitals')").click()
+            expect(page.locator("[data-flash-stack-root] .flash-error")).to_have_text(
+                "This sheet changed in another session. Refresh the page and try again.",
+                timeout=3000,
+            )
+            expect(hp_field).to_have_value("4", timeout=5000)
+            assert page.evaluate("window.__characterReadShellMarker") == "alive"
+
             page.locator("[data-character-read-target-subpage='personal']").click()
             expect(page).to_have_url(personal_url_pattern, timeout=5000)
             page.go_back()
