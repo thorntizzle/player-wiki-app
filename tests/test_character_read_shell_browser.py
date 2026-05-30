@@ -78,10 +78,23 @@ def test_character_read_shell_browser_state_and_save_flow(
             expect(page.locator("h2:has-text('At a glance')")).to_be_visible(timeout=5000)
             expect(page.locator("text=Open sheet edit view")).to_have_count(0)
             expect(page.locator("[data-character-sheet-save-bar]")).to_have_count(0)
+            expect(page.locator("[data-character-subpage-nav-card]")).to_be_visible(timeout=5000)
+            expect(page.locator(".glance-card--vitals input[name='current_hp']")).to_be_visible(timeout=5000)
+            expect(page.locator("text=Save vitals")).to_have_count(0)
+            desktop_columns = page.locator(".ability-grid--skills").evaluate(
+                "(element) => getComputedStyle(element).gridTemplateColumns.split(' ').filter(Boolean).length"
+            )
+            assert desktop_columns == 6
+            page.set_viewport_size({"width": 640, "height": 900})
+            mobile_columns = page.locator(".ability-grid--skills").evaluate(
+                "(element) => getComputedStyle(element).gridTemplateColumns.split(' ').filter(Boolean).length"
+            )
+            assert mobile_columns == 3
+            page.set_viewport_size({"width": 1280, "height": 720})
             page.evaluate("window.__characterReadShellMarker = 'alive'")
             hp_field = page.locator("form[data-character-sheet-edit-form='vitals'] input[name='current_hp']")
             hp_field.fill("12")
-            page.locator("form[data-character-sheet-edit-form='vitals'] button:has-text('Save vitals')").click()
+            hp_field.press("Enter")
             expect(page.locator("[data-flash-stack-root] .flash-success")).to_have_text(
                 "Vitals updated.",
                 timeout=3000,
@@ -101,7 +114,7 @@ def test_character_read_shell_browser_state_and_save_flow(
                 ),
             )
             hp_field.fill("4")
-            page.locator("form[data-character-sheet-edit-form='vitals'] button:has-text('Save vitals')").click()
+            hp_field.press("Enter")
             expect(page.locator("[data-flash-stack-root] .flash-error")).to_have_text(
                 "This sheet changed in another session. Refresh the page and try again.",
                 timeout=3000,

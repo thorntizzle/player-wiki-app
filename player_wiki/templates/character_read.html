@@ -107,18 +107,20 @@
         {% endif %}
       </header>
 
-      <nav class="character-subpage-nav" aria-label="Character subpages">
-        {% for subpage in character_subpages %}
-          <a
-            class="{% if subpage.is_active %}button-link{% else %}ghost-button{% endif %}"
-            href="{{ subpage.href }}"
-            data-character-read-subpage-link
-            data-character-read-target-subpage="{{ subpage.slug }}"
-          >
-            {{ subpage.label }}
-          </a>
-        {% endfor %}
-      </nav>
+      <div class="character-subpage-nav-card" data-character-subpage-nav-card>
+        <nav class="character-subpage-nav" aria-label="Character subpages">
+          {% for subpage in character_subpages %}
+            <a
+              class="{% if subpage.is_active %}button-link{% else %}ghost-button{% endif %}"
+              href="{{ subpage.href }}"
+              data-character-read-subpage-link
+              data-character-read-target-subpage="{{ subpage.slug }}"
+            >
+              {{ subpage.label }}
+            </a>
+          {% endfor %}
+        </nav>
+      </div>
 
       {% set is_xianxia_sheet = character.xianxia_read %}
       {% set show_quick_sections = character_subpage == 'quick' %}
@@ -132,21 +134,64 @@
       {% set character_inline_state_controls_enabled = can_use_session_mode and native_character_tools_supported and not is_session_mode and not is_xianxia_sheet %}
 
       {% if show_quick_sections %}
-        {% if character_inline_state_controls_enabled %}
-          {% with session_character_form_mode="read", session_character_form_page=character_subpage, session_character_bar_eyebrow="Current state", session_character_show_rest_actions=false, session_character_compact_controls=true %}
-            {% include "_character_session_bar.html" %}
-          {% endwith %}
-        {% endif %}
         <section class="read-section" id="character-quick-overview">
           <h2>At a glance</h2>
           {% if character.overview_stat_rows %}
             {% for row in character.overview_stat_rows %}
-              <div class="glance-grid glance-grid--row glance-grid--quick-row-{{ loop.index }}">
+              {% set row_index = loop.index %}
+              <div
+                class="glance-grid glance-grid--row glance-grid--quick-row-{{ row_index }}"
+                {% if row_index == 1 and character_inline_state_controls_enabled %}id="session-vitals"{% endif %}
+              >
                 {% for stat in row %}
-                  <div class="glance-card">
-                    <span class="meta">{{ stat.label }}</span>
-                    <strong>{{ stat.value }}</strong>
-                  </div>
+                  {% if row_index == 1 and not is_xianxia_sheet and character_inline_state_controls_enabled and stat.label in ["Current HP", "Temp HP"] %}
+                    <article class="glance-card glance-card--vitals">
+                      <form
+                        class="session-vitals-form session-vitals-form--inline {% if loop.index == 1 %}session-vitals-form--inline-current{% else %}session-vitals-form--inline-temp{% endif %}"
+                        data-character-sheet-edit-form="vitals"
+                        method="post"
+                        action="{{ url_for('character_session_vitals', campaign_slug=campaign.slug, character_slug=character.slug) }}"
+                      >
+                        <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                        <input type="hidden" name="mode" value="read">
+                        <input type="hidden" name="page" value="{{ character_subpage }}">
+                        {% if loop.index == 1 %}
+                          <label class="session-field session-vitals-form__row">
+                            <span>{{ stat.label }}</span>
+                            <div class="session-number-inline">
+                              <input
+                                type="number"
+                                name="current_hp"
+                                value="{{ character.current_hp }}"
+                                min="0"
+                                max="{{ character.max_hp }}"
+                                aria-label="Current HP"
+                              >
+                              <span>/ {{ character.max_hp }}</span>
+                            </div>
+                          </label>
+                          <button class="visually-hidden" type="submit">Save current HP</button>
+                        {% else %}
+                          <label class="session-field session-vitals-form__row">
+                            <span>{{ stat.label }}</span>
+                            <input
+                              type="number"
+                              name="temp_hp"
+                              value="{{ character.temp_hp }}"
+                              min="0"
+                              aria-label="Temp HP"
+                            >
+                          </label>
+                          <button class="visually-hidden" type="submit">Save temp HP</button>
+                        {% endif %}
+                      </form>
+                    </article>
+                  {% else %}
+                    <div class="glance-card">
+                      <span class="meta">{{ stat.label }}</span>
+                      <strong>{{ stat.value }}</strong>
+                    </div>
+                  {% endif %}
                 {% endfor %}
               </div>
             {% endfor %}

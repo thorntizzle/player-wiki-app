@@ -5532,8 +5532,9 @@ def test_owner_player_can_open_session_mode_when_character_visibility_allows_pla
     assert "Advanced Editor" in html
     assert "Active session" not in html
     assert "Save pending changes" not in html
-    assert "Save vitals" in html
+    assert "Save vitals" not in html
     assert 'data-character-sheet-edit-form="vitals"' in html
+    assert 'class="glance-card glance-card--vitals"' in html
     assert 'name="mode" value="read"' in html
     assert "Back to character sheet" not in html
     assert "Back to read mode" not in html
@@ -8398,10 +8399,12 @@ def test_character_compatibility_url_shows_inline_state_without_active_session_c
     assert "Long rest" not in quick_html
     assert "Save pending changes" not in quick_html
     assert "Save note" not in quick_html
-    assert "Save vitals" in quick_html
+    assert "Save vitals" not in quick_html
     assert 'data-character-sheet-edit-form="vitals"' in quick_html
     assert 'data-character-sheet-edit-form="resource"' in quick_html
     assert 'name="mode" value="read"' in quick_html
+    assert 'class="glance-card glance-card--vitals"' in quick_html
+    assert 'id="session-vitals"' in quick_html
 
     assert features_response.status_code == 200
     features_html = features_response.get_data(as_text=True)
@@ -8427,12 +8430,21 @@ def test_dnd_character_normal_page_shows_inline_state_controls_for_assigned_play
     quick_html = quick_response.get_data(as_text=True)
     assert 'data-character-sheet-edit-form="vitals"' in quick_html
     assert 'data-character-sheet-edit-form="resource"' in quick_html
-    assert "Save vitals" in quick_html
-    assert "Current state" in quick_html
+    assert "Save vitals" not in quick_html
+    assert "Current state" not in quick_html
+    assert 'data-character-subpage-nav-card' in quick_html
+    assert 'class="glance-card glance-card--vitals"' in quick_html
+    assert 'class="session-vitals-form session-vitals-form--inline session-vitals-form--inline-current"' in quick_html
+    assert 'class="session-vitals-form session-vitals-form--inline session-vitals-form--inline-temp"' in quick_html
+    assert 'name="current_hp"' in quick_html
+    assert 'name="temp_hp"' in quick_html
+    assert 'id="session-vitals"' in quick_html
+    assert 'resource-grid resource-grid--editable' in quick_html
     assert "glance-grid--quick-row-1" in quick_html
     assert "glance-grid--quick-row-2" in quick_html
     assert "glance-grid--quick-row-3" in quick_html
     assert "glance-grid--quick-row-4" in quick_html
+    assert 'ability-grid ability-grid--skills' in quick_html
     assert "ability-skill-list" in quick_html
     assert "skill-grid" not in quick_html
     assert "Active session" not in quick_html

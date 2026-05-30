@@ -1238,6 +1238,18 @@ button {
   border: 0;
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .session-file-dropzone {
   display: grid;
   justify-items: start;
@@ -1374,7 +1386,7 @@ button {
 
 .character-header {
   display: grid;
-  gap: 0.55rem;
+  gap: 0.35rem;
 }
 
 .character-header__top {
@@ -1389,6 +1401,15 @@ button {
   margin: 0;
 }
 
+.character-header__identity .eyebrow {
+  margin-bottom: 0.2rem;
+}
+
+.character-header .lede {
+  margin: 0.25rem 0 0;
+  line-height: 1.25;
+}
+
 .character-header__actions {
   display: flex;
   flex-wrap: wrap;
@@ -1399,7 +1420,7 @@ button {
 .character-meta-line {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem 1.1rem;
+  gap: 0.25rem 1.1rem;
   align-items: baseline;
 }
 
@@ -1407,10 +1428,19 @@ button {
   white-space: nowrap;
 }
 
+.character-subpage-nav-card {
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface-soft);
+}
+
 .character-subpage-nav {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 0.55rem;
+  overflow-x: auto;
+  padding-bottom: 0.05rem;
 }
 
 .character-controls-grid {
@@ -1559,29 +1589,35 @@ button {
 }
 
 .ability-grid--skills {
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
 .ability-card--skills {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.6rem;
   align-content: start;
+  min-width: 0;
 }
 
 .ability-skill-list {
   display: grid;
-  gap: 0.45rem;
+  gap: 0.4rem;
 }
 
 .ability-skill-list__item {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.15rem 0.45rem;
+  gap: 0.1rem 0.35rem;
   align-items: baseline;
-  padding: 0.5rem 0.65rem;
+  padding: 0.45rem 0.55rem;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--surface-soft-muted);
+}
+
+.ability-skill-list__item span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .ability-skill-list__item strong {
@@ -1705,6 +1741,11 @@ button {
   gap: 0.7rem;
 }
 
+.resource-grid--editable {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+}
+
 .session-resource-list {
   display: grid;
   gap: 0.65rem;
@@ -1717,6 +1758,34 @@ button {
 
 .session-inline-form--compact-resource {
   gap: 0.55rem;
+}
+
+.session-vitals-form--inline {
+  display: block;
+}
+
+.session-vitals-form__row {
+  gap: 0.45rem;
+}
+
+.session-vitals-form__row input {
+  width: 100%;
+}
+
+.session-number-inline {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.session-number-inline input {
+  min-width: 0;
+}
+
+.session-number-inline span {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-weight: 700;
 }
 
 .session-resource-row__summary {
@@ -1736,12 +1805,34 @@ button {
     justify-content: flex-start;
   }
 
+  .ability-grid--skills {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .ability-card--skills {
+    padding: 0.75rem;
+  }
+
+  .ability-skill-list__item {
+    padding: 0.4rem 0.45rem;
+  }
+
   .glance-grid--quick-row-2,
   .glance-grid--quick-row-3 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .resource-grid--editable {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .session-resource-row__editor {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 520px) {
+  .resource-grid--editable {
     grid-template-columns: minmax(0, 1fr);
   }
 }
