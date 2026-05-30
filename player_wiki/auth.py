@@ -104,6 +104,9 @@ def register_auth(app: Flask) -> None:
 
     @app.before_request
     def load_request_identity() -> None:
+        if request.path.startswith("/static/"):
+            return
+
         g.current_user = None
         g.current_memberships = []
         g.current_session_record = None

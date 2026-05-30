@@ -1948,6 +1948,71 @@ def create_app() -> Flask:
             return None
         return None
 
+    _STATIC_ASSET_VERSION_CACHE: dict[str, tuple[int, int, str]] = {}
+
+    def _resolve_static_asset_version(filename: str) -> str | None:
+        if not filename:
+            return None
+
+        static_root = app.static_folder
+        if not static_root:
+            return None
+
+        static_file = Path(static_root) / filename
+        try:
+            stat = static_file.stat()
+        except OSError:
+            return None
+
+        cache_key = str(static_file.resolve())
+        cache_size = len(_STATIC_ASSET_VERSION_CACHE)
+        cached = _STATIC_ASSET_VERSION_CACHE.get(cache_key)
+        if cached is not None:
+            cached_mtime, cached_size, cached_version = cached
+            if cached_mtime == int(stat.st_mtime_ns) and cached_size == stat.st_size:
+                return cached_version
+
+            if cache_size > 16:
+                _STATIC_ASSET_VERSION_CACHE.clear()
+
+        try:
+            payload = static_file.read_bytes()
+        except OSError:
+            return None
+
+        digest = hashlib.sha1(payload).hexdigest()[:16]
+        _STATIC_ASSET_VERSION_CACHE[cache_key] = (
+            int(stat.st_mtime_ns),
+            stat.st_size,
+            digest,
+        )
+        return digest
+
+    def _build_stylesheet_url(filename: str = "styles.css") -> str:
+        version = _resolve_static_asset_version(filename)
+        if version:
+            return url_for("static", filename=filename, v=version)
+        return url_for("static", filename=filename)
+
+    def _is_stylesheet_request() -> bool:
+        if request.endpoint != "static":
+            return False
+        return request.path.endswith("/static/styles.css")
+
+    def _strip_cookie_vary_header(response):
+        vary_header = response.headers.get("Vary")
+        if not vary_header:
+            return
+        vary_headers = [
+            token.strip()
+            for token in vary_header.split(",")
+            if token.strip().lower() != "cookie"
+        ]
+        if vary_headers:
+            response.headers["Vary"] = ", ".join(vary_headers)
+            return
+        response.headers.pop("Vary", None)
+
     def current_request_duration_ms() -> float:
         request_started_at = getattr(g, "request_started_at", None)
         if not isinstance(request_started_at, float):
@@ -2044,6 +2109,18 @@ def create_app() -> Flask:
                     sort_keys=True,
                 ),
             )
+        return response
+
+    @app.after_request
+    def tune_stylesheet_caching(response):
+        if not _is_stylesheet_request():
+            return response
+
+        if request.args.get("v"):
+            if app.config["APP_ENV"] == "production":
+                response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+
+        _strip_cookie_vary_header(response)
         return response
 
     @app.teardown_request
@@ -9406,6 +9483,7 @@ def create_app() -> Flask:
         return {
             "slugify": slugify,
             "app_metadata": build_app_metadata(app.config),
+            "stylesheet_url": _build_stylesheet_url,
         }
 
     @app.errorhandler(404)

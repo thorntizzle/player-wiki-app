@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Campaign Player Wiki{% endblock %}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <link rel="stylesheet" href="{{ stylesheet_url() }}">
   </head>
   <body>
     {% set header_secondary_content %}{% block header_secondary %}{% endblock %}{% endset %}
