@@ -5,13 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Campaign Player Wiki{% endblock %}</title>
     <style id="app-loading-inline-styles">
+      :root {
+        --app-loading-dismiss-duration: 150ms;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        :root {
+          --app-loading-dismiss-duration: 0ms;
+        }
+      }
+
       html.app-loading {
         min-height: 100%;
         background: #f0e6cd;
       }
 
       .app-loading-cover {
-        display: none;
         box-sizing: border-box;
         position: fixed;
         inset: 0;
@@ -24,6 +33,12 @@
         color: #2f241a;
         font-family: Georgia, Cambria, "Times New Roman", serif;
         text-align: center;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
       }
 
       .app-loading-cover__message {
@@ -31,60 +46,353 @@
       }
 
       html.app-loading .app-loading-cover {
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+      }
+
+      html.app-loading-closing .app-loading-cover {
+        opacity: 0;
+        visibility: visible;
+        pointer-events: none;
+        transition: opacity var(--app-loading-dismiss-duration) ease;
+      }
+
+      .page-shell {
+        opacity: 1;
+        visibility: visible;
       }
 
       html.app-loading .page-shell {
-        display: none;
+        opacity: 0;
+        visibility: hidden;
+      }
+
+      html.app-loading-closing .page-shell {
+        opacity: 1;
+        visibility: visible;
+        transition: opacity var(--app-loading-dismiss-duration) ease;
       }
     </style>
     <script id="app-loading-inline-script">
       (function () {
         var root = document.documentElement;
         var loadingClass = "app-loading";
-        // Keep the page cover visible until either load has fired and one paint frame has passed,
-        // or a long-fail-safe timeout unlocks the page if the normal signal is never received.
+        var closingClass = "app-loading-closing";
+        var navigationStartStorageKey = "cpw:app-loading-nav-start";
         var failOpenDelayMs = 12000;
+        var minimumVisibleMs = 220;
         var failOpenTimer = null;
+        var dismissTimer = null;
+        var navigationStart = 0;
+        var asyncInteractionSelector = "[data-combat-live-root], [data-combat-status-live-root], "
+          + "[data-combat-character-live-root], [data-session-live-root], [data-session-shell-root], "
+          + "[data-character-read-shell-root], [data-combat-async], [data-session-async], "
+          + "[data-combat-inline-autosubmit], [data-character-read-subpage-link]";
 
-        function removeLoadingState() {
-          var scheduleFrame = window.requestAnimationFrame || function (callback) {
-            return window.setTimeout(callback, 0);
-          };
-
-          scheduleFrame(function () {
-            root.classList.remove(loadingClass);
-          });
+        function now() {
+          return Date.now();
         }
 
-        function clearFailOpenTimer() {
-          if (failOpenTimer !== null) {
-            window.clearTimeout(failOpenTimer);
-            failOpenTimer = null;
+        function requestFrame(callback) {
+          var requestAnimationFrame = window.requestAnimationFrame || function (next) {
+            return window.setTimeout(next, 0);
+          };
+          return requestAnimationFrame(callback);
+        }
+
+        function clearTimer(timerId) {
+          if (timerId !== null) {
+            window.clearTimeout(timerId);
+            return null;
+          }
+          return null;
+        }
+
+        function getDismissDurationMs() {
+          return parseFloat(
+            getComputedStyle(root).getPropertyValue("--app-loading-dismiss-duration") || "0ms",
+          );
+        }
+
+        function readNavigationStartFromStorage() {
+          try {
+            var raw = window.sessionStorage.getItem(navigationStartStorageKey);
+            if (!raw) {
+              return 0;
+            }
+            var value = parseInt(raw, 10);
+            if (!Number.isFinite(value) || value <= 0) {
+              return 0;
+            }
+            return value;
+          } catch (_error) {
+            return 0;
           }
         }
 
-        failOpenTimer = window.setTimeout(function () {
-          clearFailOpenTimer();
-          root.classList.remove(loadingClass);
-        }, failOpenDelayMs);
+        function writeNavigationStartToStorage() {
+          var timestamp = now();
+          navigationStart = timestamp;
+          try {
+            window.sessionStorage.setItem(navigationStartStorageKey, String(timestamp));
+          } catch (_error) {
+            navigationStart = 0;
+          }
+        }
 
+        function clearNavigationStartFromStorage() {
+          navigationStart = 0;
+          try {
+            window.sessionStorage.removeItem(navigationStartStorageKey);
+          } catch (_error) {
+            return;
+          }
+        }
+
+        function clearFailOpenTimer() {
+          failOpenTimer = clearTimer(failOpenTimer);
+        }
+
+        function clearDismissTimer() {
+          dismissTimer = clearTimer(dismissTimer);
+        }
+
+        function computeMinimumHoldMs() {
+          var start = navigationStart || 0;
+          if (!start) {
+            return 0;
+          }
+          var age = now() - start;
+          if (age > failOpenDelayMs || age < 0) {
+            return 0;
+          }
+          return age < minimumVisibleMs ? minimumVisibleMs - age : 0;
+        }
+
+        function removeLoadingState() {
+          requestFrame(function () {
+            var dismissMs = getDismissDurationMs();
+            if (dismissMs <= 0) {
+              root.classList.remove(loadingClass);
+              root.classList.remove(closingClass);
+              return;
+            }
+            root.classList.add(closingClass);
+            dismissTimer = clearTimer(dismissTimer);
+            dismissTimer = window.setTimeout(function () {
+              root.classList.remove(closingClass);
+              root.classList.remove(loadingClass);
+            }, dismissMs);
+          });
+        }
+
+        function beginLoadingState() {
+          clearFailOpenTimer();
+          clearDismissTimer();
+          writeNavigationStartToStorage();
+          root.classList.remove(closingClass);
+          root.classList.add(loadingClass);
+          failOpenTimer = window.setTimeout(function () {
+            clearNavigationStartFromStorage();
+            clearFailOpenTimer();
+            removeLoadingState();
+          }, failOpenDelayMs);
+        }
+
+        function onLoad() {
+          var holdMs = computeMinimumHoldMs();
+          clearNavigationStartFromStorage();
+          clearFailOpenTimer();
+          if (holdMs <= 0) {
+            removeLoadingState();
+            return;
+          }
+          clearDismissTimer();
+          dismissTimer = window.setTimeout(function () {
+            removeLoadingState();
+          }, holdMs);
+        }
+
+        function restoreFromHistoryCache() {
+          clearNavigationStartFromStorage();
+          clearFailOpenTimer();
+          clearDismissTimer();
+          root.classList.remove(closingClass);
+          root.classList.remove(loadingClass);
+        }
+
+        function toUrl(rawUrl) {
+          try {
+            return new URL(rawUrl, window.location.href);
+          } catch (_error) {
+            return null;
+          }
+        }
+
+        function isDownloadAnchor(anchor) {
+          return anchor && anchor.hasAttribute("download");
+        }
+
+        function isHashOnlyNavigation(url) {
+          return url.pathname === window.location.pathname
+            && url.search === window.location.search
+            && !!url.hash;
+        }
+
+        function isAllowedProtocol(url) {
+          var protocol = String((url && url.protocol) || "").toLowerCase();
+          return protocol !== "javascript:" && protocol !== "mailto:" && protocol !== "tel:";
+        }
+
+        function isSameOrigin(url) {
+          return !!url && url.origin === window.location.origin;
+        }
+
+        function isAsyncInteractionAncestor(node) {
+          if (!(node instanceof Element)) {
+            return false;
+          }
+          return !!node.closest(asyncInteractionSelector);
+        }
+
+        function isModifiedClick(event) {
+          return !!(event.ctrlKey || event.metaKey || event.shiftKey || event.altKey);
+        }
+
+        function shouldSkipLink(link) {
+          if (!(link instanceof HTMLAnchorElement)) {
+            return true;
+          }
+          if (isDownloadAnchor(link)) {
+            return true;
+          }
+
+          var target = String(link.target || "").toLowerCase();
+          if (target && target !== "_self") {
+            return true;
+          }
+          if (isAsyncInteractionAncestor(link)) {
+            return true;
+          }
+
+          var href = link.getAttribute("href");
+          if (!href) {
+            return true;
+          }
+          var url = toUrl(href);
+          if (!url || !isSameOrigin(url) || !isAllowedProtocol(url) || isHashOnlyNavigation(url)) {
+            return true;
+          }
+          return false;
+        }
+
+        function submitterTarget(submitter) {
+          if (!(submitter instanceof HTMLInputElement || submitter instanceof HTMLButtonElement)) {
+            return "";
+          }
+          return String(submitter.getAttribute("formtarget") || "").toLowerCase();
+        }
+
+        function submitterAction(submitter, form) {
+          if (submitter instanceof HTMLInputElement || submitter instanceof HTMLButtonElement) {
+            var action = submitter.getAttribute("formaction");
+            if (action) {
+              return action;
+            }
+          }
+          return form.getAttribute("action");
+        }
+
+        function shouldSkipSubmit(form, submitter) {
+          if (!(form instanceof HTMLFormElement) || isAsyncInteractionAncestor(form)) {
+            return true;
+          }
+          var method = String(form.method || "get").trim().toLowerCase();
+          if (method !== "get" && method !== "post") {
+            return true;
+          }
+          if (
+            (submitter instanceof HTMLButtonElement || submitter instanceof HTMLInputElement)
+            && submitter.type
+            && submitter.type.toLowerCase() === "submit"
+          ) {
+            var submitterFormMethod = String(submitter.getAttribute("formmethod") || "").toLowerCase();
+            if (submitterFormMethod && submitterFormMethod !== "get" && submitterFormMethod !== "post") {
+              return true;
+            }
+          }
+
+          var target = String(submitterTarget(submitter) || form.getAttribute("target") || "").toLowerCase();
+          if (target && target !== "_self") {
+            return true;
+          }
+
+          var action = submitterAction(submitter, form) || window.location.href;
+          var url = toUrl(action);
+          if (!url || !isSameOrigin(url) || !isAllowedProtocol(url) || isHashOnlyNavigation(url)) {
+            return true;
+          }
+          if (isAsyncInteractionAncestor(form) || isAsyncInteractionAncestor(submitter)) {
+            return true;
+          }
+          return false;
+        }
+
+        function handleClick(event) {
+          if (event.defaultPrevented || event.button !== 0 || isModifiedClick(event)) {
+            return;
+          }
+          var link = event.target instanceof Element
+            ? event.target.closest("a[href]")
+            : null;
+          if (!link || shouldSkipLink(link)) {
+            return;
+          }
+          beginLoadingState();
+        }
+
+        function handleSubmit(event) {
+          if (event.defaultPrevented) {
+            return;
+          }
+          if (shouldSkipSubmit(event.target, event.submitter)) {
+            return;
+          }
+          beginLoadingState();
+        }
+
+        root.classList.remove(closingClass);
+        failOpenTimer = window.setTimeout(function () {
+          clearNavigationStartFromStorage();
+          clearFailOpenTimer();
+          removeLoadingState();
+        }, failOpenDelayMs);
         root.classList.add(loadingClass);
+
+        navigationStart = readNavigationStartFromStorage();
+        if (navigationStart > 0 && now() - navigationStart > failOpenDelayMs) {
+          navigationStart = 0;
+          clearNavigationStartFromStorage();
+        }
+
+        document.addEventListener("click", handleClick);
+        document.addEventListener("submit", handleSubmit);
+        window.addEventListener("pageshow", function (event) {
+          if (event.persisted) {
+            restoreFromHistoryCache();
+          }
+        });
 
         if (document.readyState === "complete") {
           clearFailOpenTimer();
-          removeLoadingState();
+          onLoad();
           return;
         }
 
         window.addEventListener(
           "load",
-          function () {
-            clearFailOpenTimer();
-            removeLoadingState();
-          },
+          onLoad,
           { once: true }
         );
       }());
