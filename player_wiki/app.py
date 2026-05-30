@@ -374,13 +374,13 @@ CHARACTER_SHEET_EDIT_OUTSIDE_FIRST_PASS_SCOPE = (
     "Advanced character edit, level-up, retraining, and controls",
 )
 SESSION_CHARACTER_FULL_PAGE_ONLY_SCOPE = (
-    "Portrait, physical description, and background details",
+    "Portrait management on Character Personal, and physical description/background in Advanced Editor",
     "Spell-list changes and other non-slot spell management",
     "Equipment state and broader inventory or equipment maintenance",
     "Advanced character edit, level-up, retraining, and controls",
 )
 SESSION_CHARACTER_FULL_PAGE_ONLY_SUMMARY = (
-    "Portrait/background details, spell-list changes, equipment or broader inventory work, and advanced maintenance"
+    "portrait management, Advanced Editor reference text, spell-list changes, equipment or broader inventory work, and advanced maintenance"
 )
 CHARACTER_SHEET_EDIT_ACCESS_RULES = (
     "Assigned player owners can use inline Character-page state edits for their own characters.",
@@ -404,8 +404,9 @@ COMBAT_AND_SESSION_SESSION_SCOPE = (
 COMBAT_AND_SESSION_SESSION_SUMMARY = (
     "the broader live-session workflow, rests, inventory quantities, currency, and player notes"
 )
-SESSION_CHARACTER_PERSONAL_EDIT_BLOCK_MESSAGE = (
-    "Portrait and personal details are edited on the full character page."
+SESSION_CHARACTER_PERSONAL_EDIT_BLOCK_MESSAGE = "Personal details are edited outside Session Character."
+SESSION_CHARACTER_ADVANCED_PERSONAL_EDIT_BLOCK_MESSAGE = (
+    "Physical description and background are edited in Advanced Editor."
 )
 SESSION_CHARACTER_PERMISSION_RULES = (
     {
@@ -6012,6 +6013,7 @@ def create_app() -> Flask:
         if not campaign_supports_character_session_routes(campaign):
             abort(404)
         dnd5e_spellcasting_tools_supported = campaign_supports_dnd5e_character_spellcasting_tools(campaign)
+        native_character_tools_supported = campaign_supports_native_character_tools(campaign)
         session_service = get_campaign_session_service()
         can_manage_session = can_manage_campaign_session(campaign_slug)
         can_manage_combat = can_manage_campaign_combat(campaign_slug)
@@ -6071,9 +6073,9 @@ def create_app() -> Flask:
         session_surface_return_url = ""
         session_surface_short_rest_url = ""
         session_surface_long_rest_url = ""
-        session_personal_editing_enabled = False
         session_personal_edit_block_message = ""
         session_personal_edit_block_href = ""
+        session_personal_edit_block_action_label = ""
         session_character_empty_state_title = ""
         session_character_empty_state_message = ""
         session_combat_relationship_available = False
@@ -6204,18 +6206,30 @@ def create_app() -> Flask:
                 page=character_subpage,
                 confirm_rest="long",
             )
-            session_personal_edit_block_href = (
-                build_session_character_read_view_url(
-                    campaign.slug,
-                    selected_character_slug,
-                    "personal",
-                    xianxia_read=xianxia_read_context,
-                )
-                if can_view_full_character_sheet
-                else ""
-            )
             if session_character_editing_enabled:
-                session_personal_edit_block_message = SESSION_CHARACTER_PERSONAL_EDIT_BLOCK_MESSAGE
+                if native_character_tools_supported:
+                    session_personal_edit_block_message = (
+                        SESSION_CHARACTER_ADVANCED_PERSONAL_EDIT_BLOCK_MESSAGE
+                    )
+                    session_personal_edit_block_href = url_for(
+                        "character_edit_view",
+                        campaign_slug=campaign.slug,
+                        character_slug=selected_character_slug,
+                    )
+                    session_personal_edit_block_action_label = "Open Advanced Editor"
+                else:
+                    session_personal_edit_block_message = SESSION_CHARACTER_PERSONAL_EDIT_BLOCK_MESSAGE
+                    session_personal_edit_block_href = (
+                        build_session_character_read_view_url(
+                            campaign.slug,
+                            selected_character_slug,
+                            "personal",
+                            xianxia_read=xianxia_read_context,
+                        )
+                        if can_view_full_character_sheet
+                        else ""
+                    )
+                    session_personal_edit_block_action_label = "Open full character page"
                 if can_access_campaign_scope(campaign_slug, "combat"):
                     tracked_combatant = find_tracked_player_combatant_for_character(
                         campaign_slug,
@@ -6312,9 +6326,9 @@ def create_app() -> Flask:
             "session_character_full_page_only_summary": (
                 SESSION_CHARACTER_FULL_PAGE_ONLY_SUMMARY if session_character_editing_enabled else ""
             ),
-            "session_personal_editing_enabled": session_personal_editing_enabled,
             "session_personal_edit_block_message": session_personal_edit_block_message,
             "session_personal_edit_block_href": session_personal_edit_block_href,
+            "session_personal_edit_block_action_label": session_personal_edit_block_action_label,
             "session_combat_relationship_available": session_combat_relationship_available,
             "session_combat_relationship_surface_label": session_combat_relationship_surface_label,
             "session_combat_relationship_action_label": session_combat_relationship_action_label,
@@ -13632,6 +13646,7 @@ def create_app() -> Flask:
             record.definition,
             campaign_page_records=campaign_page_records,
             form_values=form_values if request.method == "POST" else None,
+            state_notes=dict((record.state_record.state or {}).get("notes") or {}),
             optionalfeature_catalog=optionalfeature_catalog,
             spell_catalog=spell_catalog,
             item_catalog=item_catalog,
@@ -13690,6 +13705,18 @@ def create_app() -> Flask:
                 inventory_quantity_overrides=inventory_quantity_overrides,
                 removed_resource_ids=removed_resource_ids,
             )
+            if (
+                "physical_description_markdown" in form_values
+                or "background_markdown" in form_values
+            ):
+                notes_payload = dict(merged_state.get("notes") or {})
+                notes_payload["physical_description_markdown"] = str(
+                    form_values.get("physical_description_markdown") or ""
+                )
+                notes_payload["background_markdown"] = str(
+                    form_values.get("background_markdown") or ""
+                )
+                merged_state["notes"] = notes_payload
             character_state_store.replace_state(
                 definition,
                 merged_state,
@@ -15075,7 +15102,12 @@ def create_app() -> Flask:
         background_markdown = request.form.get("background_markdown", "")
         return_to_session_mode = request.form.get("mode", "").strip().lower() == "session"
         if is_session_character_return_requested(campaign_slug, character_slug):
-            flash(SESSION_CHARACTER_PERSONAL_EDIT_BLOCK_MESSAGE, "error")
+            flash(
+                SESSION_CHARACTER_ADVANCED_PERSONAL_EDIT_BLOCK_MESSAGE
+                if campaign_supports_native_character_tools(campaign)
+                else SESSION_CHARACTER_PERSONAL_EDIT_BLOCK_MESSAGE,
+                "error",
+            )
             return redirect_to_campaign_session_character(
                 campaign_slug,
                 character_slug,

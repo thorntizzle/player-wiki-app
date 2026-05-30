@@ -2097,6 +2097,28 @@ def test_xianxia_read_pages_show_xianxia_inline_controls_for_authorized_users(
     assert 'data-character-sheet-edit-form="notes"' in notes_html
     assert 'name="mode" value="read"' in notes_html
 
+    personal_response = client.get(
+        "/campaigns/linden-pass/characters/read-inline-crane?page=personal"
+    )
+    assert personal_response.status_code == 200
+    personal_html = unescape(personal_response.get_data(as_text=True))
+    assert "Personal" in personal_html
+    assert "Save portrait" in personal_html
+    assert "Save personal details" not in personal_html
+    assert 'name="physical_description_markdown"' not in personal_html
+    assert 'name="background_markdown"' not in personal_html
+
+    controls_response = client.get(
+        "/campaigns/linden-pass/characters/read-inline-crane?page=controls"
+    )
+    assert controls_response.status_code == 200
+    controls_html = unescape(controls_response.get_data(as_text=True))
+    assert "Controls" in controls_html
+    assert "Delete character" in controls_html
+    assert "Open sheet edit view" not in controls_html
+    assert "Sheet edit view" not in controls_html
+    assert "data-character-sheet-save-bar" not in controls_html
+
     add_response = client.post(
         "/campaigns/linden-pass/characters/read-inline-crane/session/xianxia-inventory/add",
         data={
@@ -2556,6 +2578,25 @@ def test_xianxia_read_pages_keep_read_only_roles_from_writing(
     notes_html = unescape(notes_response.get_data(as_text=True))
     assert 'data-character-sheet-edit-form="notes"' not in notes_html
     assert "Save note" not in notes_html
+
+    personal_response = client.get(
+        f"/campaigns/linden-pass/characters/{character_slug}?page=personal"
+    )
+    assert personal_response.status_code == 200
+    personal_html = unescape(personal_response.get_data(as_text=True))
+    assert "Personal" in personal_html
+    assert "Save portrait" not in personal_html
+    assert "Save personal details" not in personal_html
+    assert 'name="physical_description_markdown"' not in personal_html
+    assert 'name="background_markdown"' not in personal_html
+
+    controls_response = client.get(
+        f"/campaigns/linden-pass/characters/{character_slug}?page=controls"
+    )
+    assert controls_response.status_code == 200
+    controls_html = unescape(controls_response.get_data(as_text=True))
+    assert "Controls" not in controls_html
+    assert 'data-character-read-target-subpage="controls"' not in controls_html
 
     record = get_character(character_slug)
     assert record is not None

@@ -216,37 +216,7 @@
   </section>
   {% endif %}
 
-  {% if (session_character_controls_scope == "personal" or (session_character_controls_scope == "legacy" and show_personal_sections)) and (session_personal_editing_enabled | default(true)) %}
-    <section class="read-section" id="session-personal">
-      <div class="section-heading">
-        <h2>Personal</h2>
-      </div>
-      <article class="detail-card session-card">
-        <form
-          class="stack-form"
-          data-character-sheet-edit-form="personal"
-          method="post"
-          action="{{ url_for('character_session_personal', campaign_slug=campaign.slug, character_slug=character.slug) }}"
-        >
-          <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
-          <input type="hidden" name="mode" value="{{ session_character_form_mode }}">
-          <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
-          {% if session_return_view %}
-            <input type="hidden" name="return_view" value="{{ session_return_view }}">
-          {% endif %}
-          <label class="field">
-            <span>Physical Description</span>
-            <textarea name="physical_description_markdown">{{ character.physical_description_markdown }}</textarea>
-          </label>
-          <label class="field">
-            <span>Background</span>
-            <textarea name="background_markdown">{{ character.personal_background_markdown }}</textarea>
-          </label>
-          <button type="submit">Save personal details</button>
-        </form>
-      </article>
-    </section>
-  {% elif (session_character_controls_scope == "personal" or (session_character_controls_scope == "legacy" and show_personal_sections)) and (session_personal_edit_block_message | default("")) %}
+  {% if (session_character_controls_scope == "personal" or (session_character_controls_scope == "legacy" and show_personal_sections)) and (session_personal_edit_block_message | default("")) %}
     <section class="read-section" id="session-personal-guidance">
       <div class="section-heading">
         <h2>Personal</h2>
@@ -254,7 +224,9 @@
       <article class="detail-card session-card">
         <p>{{ session_personal_edit_block_message }}</p>
         {% if session_personal_edit_block_href | default("") %}
-          <a class="ghost-button" href="{{ session_personal_edit_block_href }}">Open full character page</a>
+          <a class="ghost-button" href="{{ session_personal_edit_block_href }}">
+            {{ session_personal_edit_block_action_label | default("Open full character page", true) }}
+          </a>
         {% endif %}
       </article>
     </section>

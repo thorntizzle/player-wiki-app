@@ -888,8 +888,9 @@ def test_session_character_personal_updates_stay_on_full_character_page(
     assert personal_page.status_code == 200
     personal_html = personal_page.get_data(as_text=True)
     assert "Save personal details" not in personal_html
-    assert "Portrait and personal details are edited on the full character page." in personal_html
-    assert f'/campaigns/linden-pass/characters/{ASSIGNED_CHARACTER_SLUG}?page=personal' in personal_html
+    assert "Physical description and background are edited in Advanced Editor." in personal_html
+    assert f"/campaigns/linden-pass/characters/{ASSIGNED_CHARACTER_SLUG}/edit" in personal_html
+    assert "Open Advanced Editor" in personal_html
 
     record = get_character(ASSIGNED_CHARACTER_SLUG)
     assert record is not None
@@ -911,7 +912,7 @@ def test_session_character_personal_updates_stay_on_full_character_page(
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert "Save personal details" not in html
-    assert "Portrait and personal details are edited on the full character page." in html
+    assert "Physical description and background are edited in Advanced Editor." in html
 
     updated = get_character(ASSIGNED_CHARACTER_SLUG)
     assert updated is not None

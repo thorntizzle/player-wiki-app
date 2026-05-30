@@ -76,6 +76,8 @@ def test_character_read_shell_browser_state_and_save_flow(
 
             page.goto(character_slug_path)
             expect(page.locator("h2:has-text('At a glance')")).to_be_visible(timeout=5000)
+            expect(page.locator("text=Open sheet edit view")).to_have_count(0)
+            expect(page.locator("[data-character-sheet-save-bar]")).to_have_count(0)
             page.evaluate("window.__characterReadShellMarker = 'alive'")
             hp_field = page.locator("form[data-character-sheet-edit-form='vitals'] input[name='current_hp']")
             hp_field.fill("12")
@@ -117,12 +119,14 @@ def test_character_read_shell_browser_state_and_save_flow(
             expect(page.locator("textarea[name='player_notes_markdown']")).to_be_visible(timeout=5000)
 
             notes_draft = "Browser draft to preserve."
-            personal_draft = "Personal draft from browser flow."
+            personal_draft = "Portrait caption draft from browser flow."
             page.locator("textarea[name='player_notes_markdown']").fill(notes_draft)
             page.locator("[data-character-read-target-subpage='personal']").click()
             page.wait_for_function("window.location.search.includes('page=personal')")
             expect(page).to_have_url(personal_url_pattern, timeout=5000)
-            page.locator("textarea[name='background_markdown']").fill(personal_draft)
+            expect(page.locator("textarea[name='background_markdown']")).to_have_count(0)
+            expect(page.locator("button:has-text('Save personal details')")).to_have_count(0)
+            page.locator("input[name='portrait_caption']").fill(personal_draft)
 
             page.go_back()
             expect(page.locator("textarea[name='player_notes_markdown']")).to_have_value(
@@ -132,7 +136,7 @@ def test_character_read_shell_browser_state_and_save_flow(
             expect(page).to_have_url(notes_url_pattern, timeout=5000)
 
             page.go_forward()
-            expect(page.locator("textarea[name='background_markdown']")).to_have_value(
+            expect(page.locator("input[name='portrait_caption']")).to_have_value(
                 personal_draft,
                 timeout=5000,
             )

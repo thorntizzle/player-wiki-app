@@ -8260,9 +8260,9 @@ def test_character_sheet_personal_and_notes_subpages_render_markdown_fields_and_
     assert "Tall, scarred, and always in dark leathers." in personal_html
     assert "Background" in personal_html
     assert "Raised along the harbor and quick to vanish into crowds." in personal_html
-    assert "Save personal details" in personal_html
-    assert 'name="physical_description_markdown"' in personal_html
-    assert 'name="background_markdown"' in personal_html
+    assert "Save personal details" not in personal_html
+    assert 'name="physical_description_markdown"' not in personal_html
+    assert 'name="background_markdown"' not in personal_html
     assert "No personal details yet." not in personal_html
 
     assert notes_response.status_code == 200
@@ -8419,7 +8419,9 @@ def test_dnd_character_normal_page_shows_inline_state_controls_for_assigned_play
     quick_response = client.get("/campaigns/linden-pass/characters/arden-march?page=quick")
     spell_response = client.get("/campaigns/linden-pass/characters/arden-march?page=spellcasting")
     inventory_response = client.get("/campaigns/linden-pass/characters/arden-march?page=inventory")
+    personal_response = client.get("/campaigns/linden-pass/characters/arden-march?page=personal")
     notes_response = client.get("/campaigns/linden-pass/characters/arden-march?page=notes")
+    controls_response = client.get("/campaigns/linden-pass/characters/arden-march?page=controls")
 
     assert quick_response.status_code == 200
     quick_html = quick_response.get_data(as_text=True)
@@ -8451,12 +8453,28 @@ def test_dnd_character_normal_page_shows_inline_state_controls_for_assigned_play
     assert "Save pending changes" not in inventory_html
     assert 'name="mode" value="read"' in inventory_html
 
+    assert personal_response.status_code == 200
+    personal_html = personal_response.get_data(as_text=True)
+    assert "Personal" in personal_html
+    assert "Save portrait" in personal_html
+    assert "Save personal details" not in personal_html
+    assert 'name="physical_description_markdown"' not in personal_html
+    assert 'name="background_markdown"' not in personal_html
+    assert "Open sheet edit view" not in personal_html
+    assert "Sheet edit view" not in personal_html
+
     assert notes_response.status_code == 200
     notes_html = notes_response.get_data(as_text=True)
     assert 'data-character-sheet-edit-form="notes"' in notes_html
     assert "Save note" in notes_html
     assert "Save pending changes" not in notes_html
     assert 'name="mode" value="read"' in notes_html
+
+    assert controls_response.status_code == 200
+    controls_html = controls_response.get_data(as_text=True)
+    assert "Player-controls workspace for Arden March." in controls_html
+    assert "Assignment controls" not in controls_html
+    assert "Delete character" not in controls_html
 
 
 def test_dnd_character_normal_page_hides_inline_state_controls_for_read_only_users(
@@ -8468,7 +8486,9 @@ def test_dnd_character_normal_page_hides_inline_state_controls_for_read_only_use
     quick_response = client.get("/campaigns/linden-pass/characters/arden-march?page=quick")
     spell_response = client.get("/campaigns/linden-pass/characters/arden-march?page=spellcasting")
     inventory_response = client.get("/campaigns/linden-pass/characters/arden-march?page=inventory")
+    personal_response = client.get("/campaigns/linden-pass/characters/arden-march?page=personal")
     notes_response = client.get("/campaigns/linden-pass/characters/arden-march?page=notes")
+    controls_response = client.get("/campaigns/linden-pass/characters/arden-march?page=controls")
 
     assert quick_response.status_code == 200
     quick_html = quick_response.get_data(as_text=True)
@@ -8489,11 +8509,25 @@ def test_dnd_character_normal_page_hides_inline_state_controls_for_read_only_use
     assert 'data-character-sheet-edit-form="currency"' not in inventory_html
     assert "Save currency" not in inventory_html
 
+    assert personal_response.status_code == 200
+    personal_html = personal_response.get_data(as_text=True)
+    assert "Personal" in personal_html
+    assert "Save portrait" not in personal_html
+    assert "Save personal details" not in personal_html
+    assert 'name="physical_description_markdown"' not in personal_html
+    assert 'name="background_markdown"' not in personal_html
+
     assert notes_response.status_code == 200
     notes_html = notes_response.get_data(as_text=True)
     assert "Notes" in notes_html
     assert 'data-character-sheet-edit-form="notes"' not in notes_html
     assert "Save note" not in notes_html
+
+    assert controls_response.status_code == 200
+    controls_html = controls_response.get_data(as_text=True)
+    assert "At a glance" in controls_html
+    assert "Controls" not in controls_html
+    assert 'data-character-read-target-subpage="controls"' not in controls_html
 
     client.post("/sign-out", follow_redirects=False)
     set_campaign_visibility("linden-pass", characters="public")
@@ -8505,6 +8539,52 @@ def test_dnd_character_normal_page_hides_inline_state_controls_for_read_only_use
     assert 'data-character-sheet-edit-form="vitals"' not in observer_html
     assert 'data-character-sheet-edit-form="resource"' not in observer_html
     assert "Save vitals" not in observer_html
+
+
+@pytest.mark.parametrize("user_key", ["dm", "admin"])
+def test_dnd_character_normal_page_preserves_advanced_and_management_controls_for_staff(
+    client, sign_in, users, set_campaign_visibility, user_key
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users[user_key]["email"], users[user_key]["password"])
+
+    quick_response = client.get("/campaigns/linden-pass/characters/arden-march?page=quick")
+    controls_response = client.get("/campaigns/linden-pass/characters/arden-march?page=controls")
+    personal_response = client.get("/campaigns/linden-pass/characters/arden-march?page=personal")
+    edit_response = client.get("/campaigns/linden-pass/characters/arden-march/edit")
+
+    assert quick_response.status_code == 200
+    quick_html = quick_response.get_data(as_text=True)
+    assert "Advanced Editor" in quick_html
+    assert "Open sheet edit view" not in quick_html
+    assert "Sheet edit view" not in quick_html
+    assert 'data-character-sheet-edit-form="vitals"' in quick_html
+    assert 'data-character-sheet-edit-form="resource"' in quick_html
+
+    assert controls_response.status_code == 200
+    controls_html = controls_response.get_data(as_text=True)
+    assert "Controls" in controls_html
+    assert "Delete character" in controls_html
+    assert "Open sheet edit view" not in controls_html
+    if user_key == "admin":
+        assert "Assignment controls" in controls_html
+        assert "Save assignment" in controls_html
+    else:
+        assert "Assignment controls" not in controls_html
+
+    assert personal_response.status_code == 200
+    personal_html = personal_response.get_data(as_text=True)
+    assert "Save portrait" in personal_html
+    assert "Save personal details" not in personal_html
+    assert 'name="physical_description_markdown"' not in personal_html
+    assert 'name="background_markdown"' not in personal_html
+
+    assert edit_response.status_code == 200
+    edit_html = edit_response.get_data(as_text=True)
+    assert "Character editor" in edit_html
+    assert "Advanced campaign-time adjustments and durable reference text" in edit_html
+    assert 'name="physical_description_markdown"' in edit_html
+    assert 'name="background_markdown"' in edit_html
 
 
 def test_character_view_no_longer_uses_sheet_edit_lane_label(client, sign_in, users, set_campaign_visibility):

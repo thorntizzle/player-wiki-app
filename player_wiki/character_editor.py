@@ -1540,12 +1540,14 @@ def build_native_character_edit_context(
     *,
     campaign_page_records: list[Any] | None = None,
     form_values: dict[str, str] | None = None,
+    state_notes: dict[str, Any] | None = None,
     optionalfeature_catalog: dict[str, SystemsEntryRecord] | None = None,
     spell_catalog: dict[str, Any] | None = None,
     item_catalog: dict[str, Any] | None = None,
     linked_feature_authoring_support: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     values = dict(form_values or {})
+    state_note_values = dict(state_notes or {})
     linked_feature_authoring = dict(linked_feature_authoring_support or {})
     linked_feature_authoring_supported = bool(linked_feature_authoring.get("supported", True))
     optionalfeature_catalog = dict(optionalfeature_catalog or {})
@@ -1628,6 +1630,26 @@ def build_native_character_edit_context(
         },
     ]
     reference_fields = [
+        {
+            "name": "physical_description_markdown",
+            "label": "Physical Description",
+            "help_text": "Markdown shown on the Personal page for durable appearance notes.",
+            "value": str(
+                values["physical_description_markdown"]
+                if "physical_description_markdown" in values
+                else state_note_values.get("physical_description_markdown") or ""
+            ),
+        },
+        {
+            "name": "background_markdown",
+            "label": "Background",
+            "help_text": "Markdown shown on the Personal page for durable background notes.",
+            "value": str(
+                values["background_markdown"]
+                if "background_markdown" in values
+                else state_note_values.get("background_markdown") or ""
+            ),
+        },
         {
             "name": "biography_markdown",
             "label": "Biography",

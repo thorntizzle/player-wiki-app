@@ -3216,6 +3216,8 @@ def test_native_character_edits_can_manage_reference_text_and_feature_trackers(
             "armor_proficiencies_text": "Light Armor",
             "weapon_proficiencies_text": "Simple Weapons",
             "tool_proficiencies_text": "Thieves' Tools",
+            "physical_description_markdown": "Weathered armor and a salt-stained cloak.",
+            "background_markdown": "Grew up around the harbor watch.",
             "biography_markdown": "Raised on the storm coast.",
             "personality_markdown": "- Calm under pressure",
             "additional_notes_markdown": "Keeps a weather eye on the harbor.",
@@ -3237,6 +3239,10 @@ def test_native_character_edits_can_manage_reference_text_and_feature_trackers(
     assert record.definition.profile["personality_markdown"] == "- Calm under pressure"
     assert record.definition.reference_notes["additional_notes_markdown"] == "Keeps a weather eye on the harbor."
     assert record.definition.reference_notes["allies_and_organizations_markdown"] == "Harbor Wardens"
+    assert record.state_record.state["notes"]["physical_description_markdown"] == (
+        "Weathered armor and a salt-stained cloak."
+    )
+    assert record.state_record.state["notes"]["background_markdown"] == "Grew up around the harbor watch."
 
     custom_feature = next(
         feature
