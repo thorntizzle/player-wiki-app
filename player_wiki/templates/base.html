@@ -44,7 +44,9 @@
       (function () {
         var root = document.documentElement;
         var loadingClass = "app-loading";
-        var failOpenDelayMs = 2500;
+        // Keep the page cover visible until either load has fired and one paint frame has passed,
+        // or a long-fail-safe timeout unlocks the page if the normal signal is never received.
+        var failOpenDelayMs = 12000;
         var failOpenTimer = null;
 
         function removeLoadingState() {

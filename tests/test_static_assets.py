@@ -40,6 +40,7 @@ def test_base_template_includes_inline_loading_bootstrap_and_cover(client):
     assert 'id="app-loading-inline-script"' in html
     assert "requestAnimationFrame" in html
     assert "setTimeout" in html
+    assert "failOpenDelayMs = 12000" in html
     assert "addEventListener" in html
     assert 'role="status"' in html
     assert 'aria-live="polite"' in html
@@ -122,7 +123,7 @@ def test_browser_shows_loading_cover_while_stylesheet_streams(static_asset_live_
 
         try:
             def delay_stylesheet(route):
-                time.sleep(1.2)
+                time.sleep(4.5)
                 route.continue_()
 
             page.route("**/static/styles.css**", delay_stylesheet)
@@ -132,17 +133,8 @@ def test_browser_shows_loading_cover_while_stylesheet_streams(static_asset_live_
                 wait_until="commit",
             )
 
-            page.wait_for_function(
-                """() => {
-                    const cover = document.querySelector('.app-loading-cover');
-                    return (
-                        document.documentElement.classList.contains('app-loading') &&
-                        cover &&
-                        window.getComputedStyle(cover).display === 'flex'
-                    );
-                }"""
-            )
-            loading_snapshot = page.evaluate(
+            page.wait_for_timeout(3500)
+            loading_snapshot_during_delay = page.evaluate(
                 """() => {
                     const cover = document.querySelector('.app-loading-cover');
                     return {
@@ -152,11 +144,12 @@ def test_browser_shows_loading_cover_while_stylesheet_streams(static_asset_live_
                     };
                 }"""
             )
-            assert loading_snapshot["hasLoadingClass"] is True
-            assert loading_snapshot["coverDisplay"] == "flex"
-            assert loading_snapshot["pageShellDisplay"] == "none"
+            assert loading_snapshot_during_delay["hasLoadingClass"] is True
+            assert loading_snapshot_during_delay["coverDisplay"] == "flex"
+            assert loading_snapshot_during_delay["pageShellDisplay"] == "none"
 
-            page.wait_for_load_state("load")
+            page.wait_for_load_state("load", timeout=12000)
+
             expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=5000)
             expect(page.locator(".page-shell")).to_be_visible(timeout=5000)
 
