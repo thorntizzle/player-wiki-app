@@ -87,7 +87,7 @@ from .character_editor import (
 from .character_importer import write_yaml
 from .character_profile import ensure_profile_class_rows, profile_class_level_text, profile_class_rows, profile_primary_class_ref
 from .character_service import CharacterStateValidationError, build_initial_state, merge_state_with_definition
-from .loading_presenter import select_campaign_loading_image_url
+from .loading_presenter import select_campaign_loading_image_urls
 from .xianxia_advancement import (
     XIANXIA_CONDITIONING_EFFORT_INCREASE,
     XIANXIA_CONDITIONING_HP_INCREASE,
@@ -9481,17 +9481,17 @@ def create_app() -> Flask:
 
     @app.context_processor
     def inject_helpers() -> dict[str, object]:
-        def _build_loading_image_url() -> str | None:
+        def _build_loading_media_urls() -> list[str]:
             view_args = request.view_args or {}
             campaign_slug = str(view_args.get("campaign_slug", "")).strip()
             if not campaign_slug:
-                return None
+                return []
 
             campaign = get_repository().get_campaign(campaign_slug)
             if campaign is None:
-                return None
+                return []
 
-            return select_campaign_loading_image_url(
+            return select_campaign_loading_image_urls(
                 campaign,
                 can_access_wiki=can_access_campaign_scope(campaign_slug, "wiki"),
                 build_image_url=lambda _campaign, image_path: url_for(
@@ -9500,13 +9500,17 @@ def create_app() -> Flask:
                     asset_path=image_path,
                 ),
                 image_exists=lambda _campaign, image_path: get_campaign_asset_file(_campaign, image_path) is not None,
+                max_loading_images=4,
             )
 
+        loading_media_urls = _build_loading_media_urls()
+        loading_image_url = loading_media_urls[0] if loading_media_urls else None
         return {
             "slugify": slugify,
             "app_metadata": build_app_metadata(app.config),
             "stylesheet_url": _build_stylesheet_url,
-            "app_loading_image_url": _build_loading_image_url(),
+            "app_loading_media_urls": loading_media_urls,
+            "app_loading_image_url": loading_image_url,
         }
 
     @app.errorhandler(404)

@@ -92,7 +92,7 @@
         background-image: var(--app-loading-media);
         background-position: center;
         background-repeat: no-repeat;
-        background-size: cover;
+        background-size: contain;
         opacity: 0;
         pointer-events: none;
         filter: saturate(1.05) brightness(0.95);
@@ -152,6 +152,8 @@
         var loadingClass = "app-loading";
         var closingClass = "app-loading-closing";
         var navigationStartStorageKey = "cpw:app-loading-nav-start";
+        var mediaRotationStorageKey = "cpw:app-loading-media-index";
+        var mediaWarmConcurrency = 2;
         var failOpenDelayMs = 12000;
         var minimumVisibleMs = 220;
         var failOpenTimer = null;
@@ -231,6 +233,55 @@
           dismissTimer = clearTimer(dismissTimer);
         }
 
+        function readMediaRotationIndex(mediaCount) {
+          if (!mediaCount || mediaCount <= 0) {
+            return 0;
+          }
+          try {
+            var raw = window.sessionStorage.getItem(mediaRotationStorageKey);
+            if (!raw) {
+              return 0;
+            }
+            var value = parseInt(raw, 10);
+            if (!Number.isFinite(value)) {
+              return 0;
+            }
+            var normalized = value % mediaCount;
+            if (normalized < 0) {
+              normalized = 0;
+            }
+            return normalized;
+          } catch (_error) {
+            return 0;
+          }
+        }
+
+        function setMediaRotationIndex(value, mediaCount) {
+          if (!mediaCount || mediaCount <= 0) {
+            return;
+          }
+          var nextValue = value;
+          while (nextValue < 0) {
+            nextValue += mediaCount;
+          }
+          if (nextValue >= mediaCount) {
+            nextValue = nextValue % mediaCount;
+          }
+          try {
+            window.sessionStorage.setItem(mediaRotationStorageKey, String(nextValue));
+          } catch (_error) {
+            return;
+          }
+        }
+
+        function advanceMediaRotation(mediaCount) {
+          if (!mediaCount || mediaCount <= 0) {
+            return;
+          }
+          var currentIndex = readMediaRotationIndex(mediaCount);
+          setMediaRotationIndex(currentIndex + 1, mediaCount);
+        }
+
         function computeMinimumHoldMs() {
           var start = navigationStart || 0;
           if (!start) {
@@ -279,12 +330,14 @@
           clearFailOpenTimer();
           if (holdMs <= 0) {
             removeLoadingState();
+            advanceLoadingMediaIndex();
             scheduleLoadingMedia();
             return;
           }
           clearDismissTimer();
           dismissTimer = window.setTimeout(function () {
             removeLoadingState();
+            advanceLoadingMediaIndex();
             scheduleLoadingMedia();
           }, holdMs);
         }
@@ -347,21 +400,120 @@
           root.classList.remove(loadingClass);
         }
 
+        function parseLoadingMediaUrls(rawMediaUrls) {
+          if (!rawMediaUrls) {
+            return [];
+          }
+          try {
+            var parsed = JSON.parse(rawMediaUrls);
+            if (!Array.isArray(parsed)) {
+              return [];
+            }
+            var urls = [];
+            for (var i = 0; i < parsed.length; i += 1) {
+              var candidateUrl = parsed[i];
+              if (typeof candidateUrl === "string") {
+                var trimmedUrl = candidateUrl.trim();
+                if (trimmedUrl) {
+                  urls.push(trimmedUrl);
+                }
+              }
+            }
+            return urls;
+          } catch (_error) {
+            return [];
+          }
+        }
+
+        function pickLoadingMediaForCover(cover) {
+          if (!cover) {
+            return null;
+          }
+          var mediaUrls = collectLoadingMediaUrls(cover.getAttribute("data-app-loading-media-urls"));
+          if (!mediaUrls.length) {
+            return null;
+          }
+          var index = readMediaRotationIndex(mediaUrls.length);
+          return {
+            all: mediaUrls,
+            selected: mediaUrls[index],
+          };
+        }
+
+        function collectLoadingMediaUrls(rawMediaUrls) {
+          var rawUrls = parseLoadingMediaUrls(rawMediaUrls);
+          var urls = [];
+          for (var i = 0; i < rawUrls.length; i += 1) {
+            var mediaUrl = rawUrls[i];
+            var parsedMediaUrl = toUrl(mediaUrl);
+            if (!parsedMediaUrl) {
+              continue;
+            }
+            if (parsedMediaUrl.origin !== window.location.origin) {
+              continue;
+            }
+            urls.push(mediaUrl);
+          }
+          return urls;
+        }
+
+        function advanceLoadingMediaIndex() {
+          var cover = document.querySelector(".app-loading-cover[data-app-loading-media-urls]");
+          if (!cover) {
+            return;
+          }
+          advanceMediaRotation(collectLoadingMediaUrls(cover.getAttribute("data-app-loading-media-urls")).length);
+        }
+
+        function warmLoadingMedia(mediaUrls) {
+          if (!window.fetch || !mediaUrls || mediaUrls.length === 0) {
+            return;
+          }
+          var maxConcurrent = mediaWarmConcurrency > 0 ? mediaWarmConcurrency : 1;
+          var mediaIndex = 0;
+          var inFlight = 0;
+          var completed = 0;
+
+          function finishedOne() {
+            inFlight -= 1;
+            completed += 1;
+            processNext();
+          }
+
+          function fetchOne(url) {
+            inFlight += 1;
+            window.fetch(url, { cache: "force-cache", credentials: "same-origin" })
+              .catch(function () { return; })
+              .then(function () { return; })
+              .then(function () { finishedOne(); }, function () { finishedOne(); });
+          }
+
+          function processNext() {
+            while (inFlight < maxConcurrent && mediaIndex < mediaUrls.length && completed < mediaUrls.length) {
+              fetchOne(mediaUrls[mediaIndex]);
+              mediaIndex += 1;
+            }
+          }
+
+          processNext();
+        }
+
         function prepareLoadingMedia() {
-          var cover = document.querySelector(".app-loading-cover[data-app-loading-media-url]");
+          var cover = document.querySelector(".app-loading-cover[data-app-loading-media-urls]");
           if (!cover || !window.fetch) {
             return;
           }
-          var mediaUrl = cover.getAttribute("data-app-loading-media-url");
-          if (!mediaUrl) {
+          var mediaData = pickLoadingMediaForCover(cover);
+          if (!mediaData || !mediaData.selected) {
             return;
           }
-          window.fetch(mediaUrl, { cache: "force-cache", credentials: "same-origin" })
+          warmLoadingMedia(mediaData.all);
+          window.fetch(mediaData.selected, { cache: "force-cache", credentials: "same-origin" })
             .then(function (response) {
               if (!response || !response.ok) {
                 return;
               }
-              cover.style.setProperty("--app-loading-media", "url(" + JSON.stringify(mediaUrl) + ")");
+              cover.style.setProperty("--app-loading-media", "url(" + JSON.stringify(mediaData.selected) + ")");
               cover.classList.add("app-loading-cover--media-ready");
             })
             .catch(function () {
@@ -559,7 +711,7 @@
     <link rel="stylesheet" href="{{ stylesheet_url() }}">
   </head>
   <body>
-    <div class="app-loading-cover{% if app_loading_image_url %} app-loading-cover--with-image{% endif %}" role="status" aria-live="polite" aria-label="Loading application"{% if app_loading_image_url %} data-app-loading-media-url="{{ app_loading_image_url }}"{% endif %}>
+    <div class="app-loading-cover{% if app_loading_media_urls %} app-loading-cover--with-image{% endif %}" role="status" aria-live="polite" aria-label="Loading application"{% if app_loading_media_urls %} data-app-loading-media-urls='{{ app_loading_media_urls | tojson }}' data-app-loading-media-url="{{ app_loading_image_url }}"{% endif %}>
       <div class="app-loading-cover__media" aria-hidden="true"></div>
       <p class="app-loading-cover__message">Loading campaign player wiki...</p>
     </div>

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date
 import re
 import threading
@@ -9,7 +10,10 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 
 from player_wiki import auth as auth_module
-from player_wiki.loading_presenter import select_campaign_loading_image_url
+from player_wiki.loading_presenter import (
+    select_campaign_loading_image_url,
+    select_campaign_loading_image_urls,
+)
 from player_wiki.models import Campaign, Page
 
 
@@ -108,8 +112,10 @@ def test_base_template_uses_loading_image_for_campaign_when_available(client):
     html = response.get_data(as_text=True)
 
     assert 'app-loading-cover--with-image' in html
+    assert 'data-app-loading-media-urls=' in html
     assert 'data-app-loading-media-url="/campaigns/linden-pass/assets/' in html
     assert "force-cache" in html
+    assert "background-size: contain" in html
 
 
 def test_base_template_no_loading_image_for_global_routes(client):
@@ -143,11 +149,25 @@ def _loading_theme_palette(theme_key: str) -> tuple[str, str, str, str]:
     return themes[theme_key]
 
 
-def _extract_loading_media_url(html: str) -> str | None:
-    match = re.search(r'data-app-loading-media-url="([^"]+)"', html)
+def _extract_loading_media_urls(html: str) -> list[str]:
+    match = re.search(r"data-app-loading-media-urls='([^']*)'", html)
     if not match:
+        return []
+    raw_urls = match.group(1)
+    try:
+        parsed_urls = json.loads(raw_urls)
+    except Exception:
+        return []
+    if not isinstance(parsed_urls, list):
+        return []
+    return [url for url in parsed_urls if isinstance(url, str)]
+
+
+def _extract_loading_media_url(html: str) -> str | None:
+    urls = _extract_loading_media_urls(html)
+    if not urls:
         return None
-    return match.group(1)
+    return urls[0]
 
 
 def _sign_in_in_browser(page, base_url: str, email: str, password: str):
@@ -191,7 +211,7 @@ def _build_loading_presenter_campaign() -> Campaign:
     )
 
 
-def test_select_campaign_loading_image_url_filters_missing_and_ineligible_paths():
+def test_select_campaign_loading_image_urls_filters_missing_and_ineligible_paths():
     campaign = _build_loading_presenter_campaign()
     campaign.pages = {
         "visible-valid": Page(
@@ -240,21 +260,92 @@ def test_select_campaign_loading_image_url_filters_missing_and_ineligible_paths(
             page_type="page",
             image_path="missing/no-file.png",
         ),
+        "global-page": Page(
+            title="Global",
+            route_slug="global-page",
+            source_path="global/events/overview",
+            body_markdown="",
+            section="Lore",
+            page_type="page",
+            image_path="npcs/global.png",
+        ),
     }
 
-    expected_url = "/campaigns/loading-images/assets/npcs/captain.png"
-    image_url = select_campaign_loading_image_url(
+    image_urls = select_campaign_loading_image_urls(
         campaign,
         can_access_wiki=True,
         image_exists=lambda _, image_path: image_path == "npcs/captain.png",
         build_image_url=lambda _, image_path: f"/campaigns/loading-images/assets/{image_path}",
         selection_seed="loading-unit-test",
         selection_date=date(2026, 5, 30),
+        max_loading_images=4,
     )
-    assert image_url == expected_url
+    assert image_urls == ["/campaigns/loading-images/assets/npcs/captain.png"]
 
 
-def test_select_campaign_loading_image_url_falls_back_when_no_candidates():
+def test_select_campaign_loading_image_urls_limit_and_stable_for_same_day():
+    campaign = _build_loading_presenter_campaign()
+    campaign.pages = {
+        "first": Page(
+            title="First",
+            route_slug="first",
+            source_path="content/first.md",
+            body_markdown="",
+            section="Lore",
+            page_type="page",
+            image_path="npcs/first.png",
+        ),
+        "second": Page(
+            title="Second",
+            route_slug="second",
+            source_path="content/second.md",
+            body_markdown="",
+            section="Lore",
+            page_type="page",
+            image_path="npcs/second.png",
+        ),
+        "third": Page(
+            title="Third",
+            route_slug="third",
+            source_path="content/third.md",
+            body_markdown="",
+            section="Lore",
+            page_type="page",
+            image_path="npcs/third.png",
+        ),
+        "fourth": Page(
+            title="Fourth",
+            route_slug="fourth",
+            source_path="content/fourth.md",
+            body_markdown="",
+            section="Lore",
+            page_type="page",
+            image_path="npcs/fourth.png",
+        ),
+    }
+
+    select_kwargs = {
+        "can_access_wiki": True,
+        "image_exists": lambda *_args: True,
+        "build_image_url": lambda _, image_path: f"/campaigns/loading-images/assets/{image_path}",
+        "selection_seed": "loading-unit-test",
+        "selection_date": date(2026, 5, 30),
+    }
+    first_result = select_campaign_loading_image_urls(
+        campaign,
+        **select_kwargs,
+        max_loading_images=3,
+    )
+    second_result = select_campaign_loading_image_urls(
+        campaign,
+        **select_kwargs,
+        max_loading_images=3,
+    )
+    assert len(first_result) == 3
+    assert first_result == second_result
+
+
+def test_select_campaign_loading_image_urls_falls_back_when_no_candidates():
     campaign = _build_loading_presenter_campaign()
     campaign.pages = {
         "missing-one": Page(
@@ -268,7 +359,7 @@ def test_select_campaign_loading_image_url_falls_back_when_no_candidates():
         )
     }
 
-    image_url = select_campaign_loading_image_url(
+    image_urls = select_campaign_loading_image_urls(
         campaign,
         can_access_wiki=True,
         image_exists=lambda *_args: False,
@@ -276,7 +367,33 @@ def test_select_campaign_loading_image_url_falls_back_when_no_candidates():
         selection_seed="loading-unit-test",
         selection_date=date(2026, 5, 30),
     )
-    assert image_url is None
+    assert image_urls == []
+
+
+def test_select_campaign_loading_image_url_wraps_list_wrapper():
+    campaign = _build_loading_presenter_campaign()
+    campaign.pages = {
+        "single": Page(
+            title="Single",
+            route_slug="single",
+            source_path="",
+            body_markdown="",
+            section="Lore",
+            page_type="page",
+            image_path="npcs/captain.png",
+        )
+    }
+
+    image_url = select_campaign_loading_image_url(
+        campaign,
+        can_access_wiki=True,
+        image_exists=lambda *_args: True,
+        build_image_url=lambda _, image_path: f"/campaigns/loading-images/assets/{image_path}",
+        selection_seed="loading-unit-test",
+        selection_date=date(2026, 5, 30),
+        max_scanned_pages=4,
+    )
+    assert image_url == "/campaigns/loading-images/assets/npcs/captain.png"
 
 
 def test_select_campaign_loading_image_url_stable_for_same_day():
@@ -528,15 +645,16 @@ def test_browser_loading_cover_dismisses_when_cover_image_is_blocked(static_asse
             )
             assert baseline_response is not None
             assert baseline_response.status == 200
-            media_url = _extract_loading_media_url(baseline_response.text())
-            assert media_url is not None
-            assert media_url.startswith("/campaigns/linden-pass/assets/")
+            media_urls = _extract_loading_media_urls(baseline_response.text())
+            assert media_urls
             page.wait_for_timeout(150)
 
             def block_loading_media(route):
-                if urlsplit(route.request.url).path == media_url:
-                    route.abort()
-                    return
+                request_path = urlsplit(route.request.url).path
+                for media_url in media_urls:
+                    if request_path == urlsplit(media_url).path:
+                        route.abort()
+                        return
                 route.continue_()
 
             page.route("**", block_loading_media)
@@ -556,6 +674,58 @@ def test_browser_loading_cover_dismisses_when_cover_image_is_blocked(static_asse
             assert hide_ms < 2500
             expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=2000)
             expect(page.locator(".page-shell")).to_be_visible(timeout=2000)
+        finally:
+            page.close()
+            browser.close()
+
+
+def test_browser_loading_media_rotation_advances_between_navigation(static_asset_live_server):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            page.route("**/static/styles.css**", lambda route: route.continue_())
+            page.goto(f"{static_asset_live_server}/campaigns/linden-pass", wait_until="load")
+            expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=5000)
+
+            media_urls = _extract_loading_media_urls(page.content())
+            if len(media_urls) < 2:
+                pytest.skip("insufficient loading media candidates for rotation test")
+
+            start_index = page.evaluate(
+                "Number(sessionStorage.getItem('cpw:app-loading-media-index') || 0)"
+            )
+
+            page.evaluate(
+                """
+                () => {
+                  const link = document.createElement('a');
+                  link.id = 'app-loading-rotation-link';
+                  link.href = '/campaigns/linden-pass/overview';
+                  link.textContent = 'overview';
+                  link.style.position = 'relative';
+                  document.body.appendChild(link);
+                }
+                """
+            )
+            page.locator("#app-loading-rotation-link").click()
+
+            expect(page.locator(".app-loading-cover")).to_be_visible(timeout=5000)
+            expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=7000)
+
+            end_index = page.evaluate(
+                "Number(sessionStorage.getItem('cpw:app-loading-media-index') || 0)"
+            )
+            assert start_index != end_index
         finally:
             page.close()
             browser.close()
