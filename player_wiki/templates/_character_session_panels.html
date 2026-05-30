@@ -76,11 +76,9 @@
               </label>
               <p class="resource-card__value">{{ resource.value }}</p>
               <div class="session-stepper">
-                <button type="submit" name="delta" value="-1" data-character-sheet-immediate-action="1" data-character-sheet-reset-pending="1">-1</button>
-                <button type="submit" name="delta" value="1" data-character-sheet-immediate-action="1" data-character-sheet-reset-pending="1">+1</button>
-                {% if not (character_sheet_batch_save_enabled | default(false)) %}
-                  <button type="submit">Save</button>
-                {% endif %}
+                <button type="submit" name="delta" value="-1">-1</button>
+                <button type="submit" name="delta" value="1">+1</button>
+                <button type="submit">Save</button>
               </div>
               {% if resource.notes %}
                 <p class="meta">{{ resource.notes }}</p>
@@ -129,11 +127,9 @@
                     <input type="number" name="used" value="{{ slot.used }}" min="0" max="{{ slot.max }}">
                   </label>
                   <div class="session-stepper">
-                    <button type="submit" name="delta_used" value="-1" data-character-sheet-immediate-action="1" data-character-sheet-reset-pending="1">Restore 1</button>
-                    <button type="submit" name="delta_used" value="1" data-character-sheet-immediate-action="1" data-character-sheet-reset-pending="1">Use 1</button>
-                    {% if not (character_sheet_batch_save_enabled | default(false)) %}
-                      <button type="submit">Save</button>
-                    {% endif %}
+                    <button type="submit" name="delta_used" value="-1">Restore 1</button>
+                    <button type="submit" name="delta_used" value="1">Use 1</button>
+                    <button type="submit">Save</button>
                   </div>
                 </form>
               </article>
@@ -174,11 +170,9 @@
                 <input type="number" name="quantity" value="{{ item.quantity }}" min="0">
               </label>
               <div class="session-stepper">
-                <button type="submit" name="delta" value="-1" data-character-sheet-immediate-action="1" data-character-sheet-reset-pending="1">-1</button>
-                <button type="submit" name="delta" value="1" data-character-sheet-immediate-action="1" data-character-sheet-reset-pending="1">+1</button>
-                {% if not (character_sheet_batch_save_enabled | default(false)) %}
-                  <button type="submit">Save</button>
-                {% endif %}
+                <button type="submit" name="delta" value="-1">-1</button>
+                <button type="submit" name="delta" value="1">+1</button>
+                <button type="submit">Save</button>
               </div>
               {% if item.notes %}
                 <p class="meta">{{ item.notes }}</p>
@@ -216,9 +210,7 @@
             </label>
           </article>
         {% endfor %}
-        {% if not (character_sheet_batch_save_enabled | default(false)) %}
-          <button type="submit">Save currency</button>
-        {% endif %}
+        <button type="submit">Save currency</button>
       </form>
     </article>
   </section>
@@ -250,9 +242,7 @@
             <span>Background</span>
             <textarea name="background_markdown">{{ character.personal_background_markdown }}</textarea>
           </label>
-          {% if not (character_sheet_batch_save_enabled | default(false)) %}
-            <button type="submit">Save personal details</button>
-          {% endif %}
+          <button type="submit">Save personal details</button>
         </form>
       </article>
     </section>
@@ -292,9 +282,7 @@
           <span>Markdown note</span>
           <textarea name="player_notes_markdown">{{ character.player_notes_markdown }}</textarea>
         </label>
-        {% if not (character_sheet_batch_save_enabled | default(false)) %}
-          <button type="submit">Save note</button>
-        {% endif %}
+        <button type="submit">Save note</button>
       </form>
     </article>
   </section>

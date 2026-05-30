@@ -26,10 +26,10 @@
       <input type="number" name="current_hp" value="{{ character.current_hp }}" min="0" max="{{ character.max_hp }}">
     </label>
     <div class="session-stepper">
-      <button type="submit" name="hp_delta" value="-5" data-character-sheet-immediate-action="1" data-character-sheet-reset-pending="1">-5</button>
-      <button type="submit" name="hp_delta" value="-1" data-character-sheet-immediate-action="1" data-character-sheet-reset-pending="1">-1</button>
-      <button type="submit" name="hp_delta" value="1" data-character-sheet-immediate-action="1" data-character-sheet-reset-pending="1">+1</button>
-      <button type="submit" name="hp_delta" value="5" data-character-sheet-immediate-action="1" data-character-sheet-reset-pending="1">+5</button>
+      <button type="submit" name="hp_delta" value="-5">-5</button>
+      <button type="submit" name="hp_delta" value="-1">-1</button>
+      <button type="submit" name="hp_delta" value="1">+1</button>
+      <button type="submit" name="hp_delta" value="5">+5</button>
     </div>
 
     <label class="session-field">
@@ -37,16 +37,14 @@
       <input type="number" name="temp_hp" value="{{ character.temp_hp }}" min="0">
     </label>
     <div class="session-stepper">
-      <button type="submit" name="temp_hp_delta" value="-5" data-character-sheet-immediate-action="1" data-character-sheet-reset-pending="1">-5</button>
-      <button type="submit" name="temp_hp_delta" value="-1" data-character-sheet-immediate-action="1" data-character-sheet-reset-pending="1">-1</button>
-      <button type="submit" name="temp_hp_delta" value="1" data-character-sheet-immediate-action="1" data-character-sheet-reset-pending="1">+1</button>
-      <button type="submit" name="temp_hp_delta" value="5" data-character-sheet-immediate-action="1" data-character-sheet-reset-pending="1">+5</button>
-      <button type="submit" name="clear_temp_hp" value="1" data-character-sheet-immediate-action="1" data-character-sheet-reset-pending="1">Clear</button>
+      <button type="submit" name="temp_hp_delta" value="-5">-5</button>
+      <button type="submit" name="temp_hp_delta" value="-1">-1</button>
+      <button type="submit" name="temp_hp_delta" value="1">+1</button>
+      <button type="submit" name="temp_hp_delta" value="5">+5</button>
+      <button type="submit" name="clear_temp_hp" value="1">Clear</button>
     </div>
 
-    {% if not (character_sheet_batch_save_enabled | default(false)) %}
-      <button class="button-link" type="submit">Save vitals</button>
-    {% endif %}
+    <button class="button-link" type="submit">Save vitals</button>
   </form>
 
   {% if session_character_show_rest_actions %}

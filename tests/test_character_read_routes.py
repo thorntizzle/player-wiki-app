@@ -8592,6 +8592,12 @@ def test_character_copy_no_longer_mentions_batch_sheet_edit_drafts(
     assert "beforeunload" not in html
     assert "Pending changes. Save or cancel before you leave." not in html
     assert "Save pending changes" not in html
+    assert "data-character-sheet-save-bar" not in html
+    assert "data-character-sheet-save-action" not in html
+    assert "data-character-sheet-cancel-action" not in html
+    assert "data-character-sheet-reset-pending" not in html
+    assert "data-character-sheet-immediate-action" not in html
+    assert "characterSheetEditEndpoint" not in html
 
 
 def test_quick_reference_hides_item_backed_attacks_when_the_linked_item_is_not_equipped(app, client, sign_in, users):

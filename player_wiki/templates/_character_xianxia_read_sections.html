@@ -738,9 +738,7 @@
                 {% endif %}
               </article>
             {% endfor %}
-            {% if not (character_sheet_batch_save_enabled | default(false)) %}
-              <button type="submit">Save currency</button>
-            {% endif %}
+            <button type="submit">Save currency</button>
           </form>
         </article>
       {% else %}
@@ -1008,9 +1006,7 @@
           <span>Markdown note</span>
           <textarea name="player_notes_markdown">{{ character.player_notes_markdown }}</textarea>
         </label>
-        {% if not (character_sheet_batch_save_enabled | default(false)) %}
-          <button type="submit">Save note</button>
-        {% endif %}
+        <button type="submit">Save note</button>
       </form>
     </article>
   </section>
