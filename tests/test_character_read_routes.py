@@ -6442,11 +6442,17 @@ def test_spellcasting_subpage_can_prepare_spells_and_protect_always_prepared_ent
     page_html = page_response.get_data(as_text=True)
     assert "Prepared spells" in page_html
     assert "Prepare spell" in page_html
+    assert "Preparation" in page_html
+    assert "Current spells" in page_html
     assert "Always prepared" in page_html
+    assert page_html.count("Cure Wounds") == 1
+    assert page_html.index("Cure Wounds") < page_html.index("Current spells")
 
-    session_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=session&page=spellcasting")
+    session_response = client.get("/campaigns/linden-pass/session/character?character=arden-march&page=spells")
     assert session_response.status_code == 200
-    assert "Always prepared" in session_response.get_data(as_text=True)
+    session_html = session_response.get_data(as_text=True)
+    assert "Always prepared" in session_html
+    assert "Cure Wounds" not in session_html
 
     add_response = client.post(
         "/campaigns/linden-pass/characters/arden-march/spellcasting/add",
@@ -6507,21 +6513,25 @@ def test_spellcasting_subpage_can_prepare_spells_and_protect_always_prepared_ent
     ]
     assert "Guidance" in cantrip_protected_names
 
-    remove_response = client.post(
-        "/campaigns/linden-pass/characters/arden-march/spellcasting/remove",
+    unprepare_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/update",
         data={
             "expected_revision": str(_character_state_revision(app, "arden-march")),
             "mode": "read",
             "page": "spellcasting",
             "spell_key": "phb-spell-detect-magic",
+            "prepared_value": "0",
         },
         follow_redirects=False,
     )
-    assert remove_response.status_code == 302
+    assert unprepare_response.status_code == 302
 
     final_definition = _read_character_definition(app, "arden-march")
-    final_spell_names = [str(spell.get("name") or "") for spell in list((final_definition.get("spellcasting") or {}).get("spells") or [])]
-    assert "Detect Magic" not in final_spell_names
+    final_spells_by_name = {
+        str(spell.get("name") or ""): spell
+        for spell in list((final_definition.get("spellcasting") or {}).get("spells") or [])
+    }
+    assert final_spells_by_name["Detect Magic"]["mark"] == ""
 
 
 def test_spellcasting_subpage_can_manage_wizard_spellbooks_and_prepare_spells(

@@ -223,6 +223,78 @@
 
   {% if show_spell_list and spell_manager and not has_session_spell_workspace %}
     <div class="detail-grid" id="character-spell-manager">
+      {% if character.spellcasting.preparation_row_sections %}
+        <div class="section-heading spellcasting-view-heading spellcasting-view-heading--full" id="character-spell-preparation">
+          <div>
+            <h3>Preparation</h3>
+          </div>
+        </div>
+        {% for prep_section in character.spellcasting.preparation_row_sections %}
+          {% set manager_section = ((spell_manager.sections | selectattr('class_row_id', 'equalto', prep_section.class_row_id) | list | first) if spell_manager else none) %}
+          {% set leveled_spell_count = namespace(value=0) %}
+          {% for prep_spell in prep_section.spells %}
+            {% if not prep_spell.is_cantrip %}
+              {% set leveled_spell_count.value = leveled_spell_count.value + 1 %}
+            {% endif %}
+          {% endfor %}
+          {% if leveled_spell_count.value %}
+            <article class="detail-card session-card spell-preparation-section-card">
+              <div class="section-heading">
+                <div>
+                  <h3>{{ prep_section.title }}</h3>
+                  {% if manager_section and manager_section.counts %}
+                    <dl class="spellcasting-count-grid">
+                      {% for count in manager_section.counts %}
+                        {% if count.label != "Cantrips" %}
+                          <div class="spellcasting-count-grid__item">
+                            <dt>{{ count.label }}</dt>
+                            <dd>{{ count.value }}</dd>
+                          </div>
+                        {% endif %}
+                      {% endfor %}
+                    </dl>
+                  {% endif %}
+                </div>
+              </div>
+              <div class="spell-preparation-grid">
+                {% for prep_spell in prep_section.spells %}
+                  {% if not prep_spell.is_cantrip %}
+                    <article class="spell-preparation-card">
+                      <div>
+                        <p class="meta">{{ prep_spell.level_label }}{% if prep_spell.school %} | {{ prep_spell.school }}{% endif %}</p>
+                        <h4>{{ prep_spell.name }}</h4>
+                        {% if prep_spell.badges %}
+                          <span class="badge-list spell-card__badges">
+                            {% for badge in prep_spell.badges %}
+                              <span class="meta-badge">{{ badge }}</span>
+                            {% endfor %}
+                          </span>
+                        {% endif %}
+                        {% if prep_spell.management_note %}
+                          <p class="meta">{{ prep_spell.management_note }}</p>
+                        {% endif %}
+                      </div>
+                      {% if prep_spell.is_fixed %}
+                        <span class="meta-badge">Locked</span>
+                      {% elif manager_section and manager_section.can_manage and prep_spell.can_toggle_prepared %}
+                        <form method="post" action="{{ spell_manager.update_url }}" class="hero-actions">
+                          <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                          <input type="hidden" name="mode" value="read">
+                          <input type="hidden" name="page" value="{{ character_subpage }}">
+                          <input type="hidden" name="spell_key" value="{{ prep_spell.spell_key }}">
+                          <input type="hidden" name="prepared_value" value="{{ 0 if prep_spell.is_prepared else 1 }}">
+                          <input type="hidden" name="target_class_row_id" value="{{ prep_section.class_row_id }}">
+                          <button type="submit" class="ghost-button">{{ "Unprepare" if prep_spell.is_prepared else "Prepare" }}</button>
+                        </form>
+                      {% endif %}
+                    </article>
+                  {% endif %}
+                {% endfor %}
+              </div>
+            </article>
+          {% endif %}
+        {% endfor %}
+      {% endif %}
       {% for manager_section in spell_manager.sections %}
         {% if can_use_session_mode and not is_session_mode and manager_section.can_manage and manager_section.show_cantrip_form %}
           <article class="detail-card session-card">
@@ -362,6 +434,11 @@
   {% endif %}
 
   {% if show_spell_list %}
+    <div class="section-heading spellcasting-view-heading" id="character-current-spells">
+      <div>
+        <h3>Current spells</h3>
+      </div>
+    </div>
     {% if character.spellcasting.row_sections %}
       {% for spell_section in character.spellcasting.row_sections %}
         {% set spell_section_loop_index = loop.index %}
@@ -439,19 +516,8 @@
                             {{ character_spell_detail_content(spell) }}
                           </div>
                         </dialog>
-                        {% if manager_section and can_use_session_mode and not is_session_mode and manager_section.can_manage and (spell.can_toggle_prepared or spell.can_remove) %}
+                        {% if manager_section and can_use_session_mode and not is_session_mode and manager_section.can_manage and spell.can_remove %}
                           <div class="spell-card__actions hero-actions">
-                            {% if spell.can_toggle_prepared %}
-                              <form method="post" action="{{ spell_manager.update_url }}">
-                                <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
-                                <input type="hidden" name="mode" value="read">
-                                <input type="hidden" name="page" value="{{ character_subpage }}">
-                                <input type="hidden" name="spell_key" value="{{ spell.spell_key }}">
-                                <input type="hidden" name="prepared_value" value="{{ 0 if spell.is_prepared else 1 }}">
-                                <input type="hidden" name="target_class_row_id" value="{{ spell_section.class_row_id }}">
-                                <button type="submit" class="ghost-button">{{ "Unprepare" if spell.is_prepared else "Prepare" }}</button>
-                              </form>
-                            {% endif %}
                             {% if spell.can_remove %}
                               <form method="post" action="{{ spell_manager.remove_url }}">
                                 <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">

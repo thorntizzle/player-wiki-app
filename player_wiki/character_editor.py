@@ -779,6 +779,7 @@ def apply_character_spell_management_edit(
         )
         if resolved_key in catalog_keys:
             raise CharacterEditValidationError("That spell is already on this sheet.")
+        _validate_spell_management_addition(resolved_entry, section=section, clean_kind=clean_kind)
         if clean_kind == "cantrip":
             if not bool(section.get("can_add_cantrip")):
                 raise CharacterEditValidationError("This sheet is already at its current cantrip count.")
@@ -845,15 +846,23 @@ def apply_character_spell_management_edit(
         if not bool(row.get("can_toggle_prepared")):
             raise CharacterEditValidationError("That spell cannot have its prepared state changed here.")
         set_prepared = str(prepared_value or "").strip() in {"1", "true", "yes", "on"}
+        if set_prepared and clean_mode in {"prepared", "wizard"}:
+            spell_level = int(row.get("spell_level") or 0)
+            max_spell_level = int(section.get("max_spell_level") or 0)
+            if spell_level <= 0 or spell_level > max_spell_level:
+                raise CharacterEditValidationError("That spell level is not eligible for this class row.")
         if (
             set_prepared
             and not bool(row.get("is_prepared"))
-            and clean_mode == "wizard"
+            and clean_mode in {"prepared", "wizard"}
             and int(section.get("current_prepared_count") or 0) >= int(section.get("target_prepared_count") or 0)
         ):
-            raise CharacterEditValidationError("This wizard is already at the current prepared-spell count.")
+            raise CharacterEditValidationError("This caster is already at the current prepared-spell count.")
         payload = deepcopy(spells_by_key.get(clean_spell_key) or {})
-        payload["mark"] = "Prepared + Spellbook" if set_prepared else "Spellbook"
+        if clean_mode == "prepared":
+            payload["mark"] = "Prepared" if set_prepared else ""
+        else:
+            payload["mark"] = "Prepared + Spellbook" if set_prepared else "Spellbook"
         spells_by_key[clean_spell_key] = payload
     else:
         raise CharacterEditValidationError("Choose a valid spell-management action.")
@@ -889,6 +898,33 @@ def apply_character_spell_management_edit(
         current_import_metadata,
     )
     return definition, import_metadata, {}
+
+
+def _validate_spell_management_addition(
+    spell_entry: Any | None,
+    *,
+    section: dict[str, Any],
+    clean_kind: str,
+) -> None:
+    if spell_entry is None:
+        raise CharacterEditValidationError("Choose an enabled Systems spell to add.")
+
+    class_name = str(section.get("spell_list_class_name") or section.get("class_name") or "").strip()
+    if not _spell_entry_matches_management_class_list(spell_entry, class_name):
+        raise CharacterEditValidationError("That spell is not eligible for this class row.")
+
+    spell_level = int(_spell_entry_level(spell_entry) or 0)
+    max_spell_level = int(section.get("max_spell_level") or 0)
+    if clean_kind == "cantrip":
+        if spell_level != 0:
+            raise CharacterEditValidationError("Choose an eligible cantrip for this class row.")
+        return
+
+    if spell_level <= 0 or spell_level > max_spell_level:
+        raise CharacterEditValidationError("That spell level is not eligible for this class row.")
+
+    if clean_kind == "ritual_book" and not bool(dict(getattr(spell_entry, "metadata", {}) or {}).get("ritual")):
+        raise CharacterEditValidationError("Choose an eligible ritual spell for this ritual book.")
 
 
 def _spell_management_section_support_kwargs(section: dict[str, Any]) -> dict[str, Any]:
@@ -1081,12 +1117,13 @@ def _build_spell_management_rows(
                     not is_cantrip
                     and (row_kind == "class" or mode == "ritual_book")
                     and not is_fixed
+                    and mode != "prepared"
                 ),
                 "can_toggle_prepared": bool(
                     row_kind == "class"
-                    and mode == "wizard"
+                    and mode in {"prepared", "wizard"}
                     and not is_cantrip
-                    and in_spellbook
+                    and (mode != "wizard" or in_spellbook)
                     and not bool(normalized_payload.get("is_always_prepared"))
                 ),
                 "remove_label": _spell_management_remove_label(

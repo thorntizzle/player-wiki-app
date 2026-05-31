@@ -2961,6 +2961,7 @@ def create_app() -> Flask:
             }
             for section in sections
         ]
+        current_row_sections = [dict(section) for section in row_sections]
         return {
             "spellcasting_class": str(primary_section.get("title") or "Spellcasting").strip() or "Spellcasting",
             "spellcasting_ability": str(primary_section.get("spellcasting_ability") or "").strip(),
@@ -2970,7 +2971,9 @@ def create_app() -> Flask:
             "slots_title": "",
             "slot_pools": [],
             "multiclass_summary": "",
-            "row_sections": row_sections,
+            "row_sections": current_row_sections,
+            "current_row_sections": current_row_sections,
+            "preparation_row_sections": [],
             "is_multiclass": len(row_sections) > 1,
         }
 

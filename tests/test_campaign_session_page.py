@@ -885,6 +885,8 @@ def test_session_character_spells_page_keeps_multiclass_slot_pools_legible(
     assert html.count("Intelligence spellcasting") == 1
     assert html.count("Charisma spellcasting") == 1
     assert "Spell slot pools are shown below" not in html
+    assert "Detect Magic" not in html
+    assert "Hex" in html
 
 
 def test_session_character_personal_updates_stay_on_full_character_page(

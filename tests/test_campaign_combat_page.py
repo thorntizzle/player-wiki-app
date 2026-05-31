@@ -3282,6 +3282,74 @@ def test_combat_character_spells_collapse_linked_spell_descriptions(app, client,
         assert "<summary>Spell details</summary>" not in body
 
 
+def test_combat_character_spells_hide_unprepared_spellbook_rows(app, client, sign_in, users):
+    def make_wizard_spellbook(payload):
+        profile = dict(payload.get("profile") or {})
+        profile["class_level_text"] = "Wizard 5"
+        profile["classes"] = [{"row_id": "class-row-1", "class_name": "Wizard", "level": 5}]
+        payload["profile"] = profile
+        payload["spellcasting"] = {
+            "spellcasting_class": "Wizard",
+            "spellcasting_ability": "Intelligence",
+            "spell_save_dc": 14,
+            "spell_attack_bonus": 6,
+            "slot_progression": [{"level": 1, "max_slots": 4}],
+            "class_rows": [
+                {
+                    "class_row_id": "class-row-1",
+                    "class_name": "Wizard",
+                    "level": 5,
+                    "spell_mode": "wizard",
+                    "spellcasting_ability": "Intelligence",
+                    "spell_save_dc": 14,
+                    "spell_attack_bonus": 6,
+                }
+            ],
+            "spells": [
+                {
+                    "name": "Message",
+                    "level": 0,
+                    "mark": "Cantrip",
+                    "class_row_id": "class-row-1",
+                },
+                {
+                    "name": "Shield",
+                    "level": 1,
+                    "mark": "Prepared + Spellbook",
+                    "class_row_id": "class-row-1",
+                },
+                {
+                    "name": "Magic Missile",
+                    "level": 1,
+                    "mark": "Spellbook",
+                    "class_row_id": "class-row-1",
+                },
+            ],
+        }
+
+    _write_character_definition(app, "arden-march", make_wizard_spellbook)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    combatant = _find_combatant(app, character_slug="arden-march")
+    assert combatant is not None
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    player_page = client.get(f"/campaigns/linden-pass/combat?combatant={combatant.id}")
+
+    assert player_page.status_code == 200
+    body = player_page.get_data(as_text=True)
+    assert "Message" in body
+    assert "Shield" in body
+    assert "Magic Missile" not in body
+
+
 def test_owner_player_combat_workspace_resource_mutations_redirect_back_to_combat(
     app, client, sign_in, users, get_character
 ):
