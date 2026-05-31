@@ -9188,48 +9188,52 @@ def test_quick_reference_hides_shield_master_helper_row_until_shield_is_equipped
 
 def test_quick_reference_renders_shared_defensive_rules_section(app, client, sign_in, users):
     def _mutate(payload: dict) -> None:
-        stats = dict(payload.get("stats") or {})
-        stats["defensive_state"] = {
-            "armor_state": {
-                "wearing_shield": True,
-                "shield_bonus": 2,
-                "equipped_armor_categories": ["heavy"],
-                "stealth_disadvantage": True,
-                "stealth_disadvantage_suppressed": False,
-            },
-            "rules": [
-                {
+        payload["features"] = [
+            {
+                "id": "heavy-armor-master-1",
+                "name": "Heavy Armor Master",
+                "category": "feat",
+                "source": "PHB",
+                "description_markdown": "",
+                "systems_ref": {
+                    "entry_type": "feat",
+                    "slug": "phb-feat-heavy-armor-master",
                     "title": "Heavy Armor Master",
-                    "active": True,
-                    "condition": "Applies only while wearing heavy armor.",
-                    "effects": [
-                        {
-                            "kind": "damage_mitigation",
-                            "label": "Mitigation",
-                            "summary": "Reduce nonmagical bludgeoning, piercing, and slashing damage from weapons by 3.",
-                        }
-                    ],
+                    "source_id": "PHB",
                 },
-                {
+            },
+            {
+                "id": "shield-master-1",
+                "name": "Shield Master",
+                "category": "feat",
+                "source": "PHB",
+                "description_markdown": "",
+                "systems_ref": {
+                    "entry_type": "feat",
+                    "slug": "phb-feat-shield-master",
                     "title": "Shield Master",
-                    "active": True,
-                    "condition": "Applies only while a shield is equipped and you are not incapacitated.",
-                    "effects": [
-                        {
-                            "kind": "saving_throw",
-                            "label": "Dex saves",
-                            "summary": "Add +2 to Dexterity saves against spells or other harmful effects that target only you.",
-                        },
-                        {
-                            "kind": "reaction",
-                            "label": "Reaction",
-                            "summary": "If an effect lets you make a Dexterity save for half damage, you can use your reaction to take no damage on a success.",
-                        },
-                    ],
+                    "source_id": "PHB",
                 },
-            ],
+            },
+        ]
+        payload["equipment_catalog"] = [
+            {
+                "id": "chain-mail-1",
+                "name": "Chain Mail",
+                "default_quantity": 1,
+                "is_equipped": True,
+            },
+            {
+                "id": "shield-1",
+                "name": "Shield",
+                "default_quantity": 1,
+                "is_equipped": True,
+            },
+        ]
+        payload["stats"] = {
+            **dict(payload.get("stats") or {}),
+            "armor_class": 18,
         }
-        payload["stats"] = stats
 
     _write_character_definition(app, "arden-march", _mutate)
 
@@ -9248,7 +9252,7 @@ def test_quick_reference_renders_shared_defensive_rules_section(app, client, sig
     assert html.count(">Active<") >= 2
 
 
-def test_quick_reference_renders_combat_reminders_and_mage_slayer_defense(app, client, sign_in, users):
+def test_quick_reference_hides_combat_reminders_but_keeps_mage_slayer_defense(app, client, sign_in, users):
     def _mutate(payload: dict) -> None:
         payload["attacks"] = [
             {
@@ -9270,74 +9274,47 @@ def test_quick_reference_renders_combat_reminders_and_mage_slayer_defense(app, c
                 "notes": "",
             },
         ]
-        stats = dict(payload.get("stats") or {})
-        stats["attack_reminder_state"] = {
-            "rules": [
-                {
+        payload["features"] = [
+            {
+                "id": "mage-slayer-1",
+                "name": "Mage Slayer",
+                "category": "feat",
+                "source": "PHB",
+                "description_markdown": "",
+                "systems_ref": {
+                    "entry_type": "feat",
+                    "slug": "phb-feat-mage-slayer",
                     "title": "Mage Slayer",
-                    "condition": "Use these reminders when a creature within 5 feet of you casts a spell or is concentrating on one.",
-                    "attack_scope": {
-                        "label": "Melee weapon attacks",
-                        "categories": ["melee weapon"],
-                    },
-                    "effects": [
-                        {
-                            "kind": "reaction",
-                            "label": "Spellcasting trigger",
-                            "summary": "When a creature within 5 feet of you casts a spell, you can use your reaction to make a melee weapon attack against it.",
-                        }
-                    ],
+                    "source_id": "PHB",
                 },
-                {
+            },
+            {
+                "id": "crusher-1",
+                "name": "Crusher",
+                "category": "feat",
+                "source": "TCE",
+                "description_markdown": "",
+                "systems_ref": {
+                    "entry_type": "feat",
+                    "slug": "tce-feat-crusher",
                     "title": "Crusher",
-                    "condition": "Use these reminders only when a visible attack deals bludgeoning damage.",
-                    "attack_scope": {
-                        "label": "Bludgeoning attacks",
-                        "damage_types": ["Bludgeoning"],
-                    },
-                    "effects": [
-                        {
-                            "kind": "forced_movement",
-                            "label": "Once per turn on hit",
-                            "summary": "When you hit a creature with bludgeoning damage, you can move it 5 feet to an unoccupied space if it is no more than one size larger than you.",
-                        }
-                    ],
+                    "source_id": "TCE",
                 },
-                {
+            },
+            {
+                "id": "piercer-1",
+                "name": "Piercer",
+                "category": "feat",
+                "source": "TCE",
+                "description_markdown": "",
+                "systems_ref": {
+                    "entry_type": "feat",
+                    "slug": "tce-feat-piercer",
                     "title": "Piercer",
-                    "condition": "Use these reminders only when a visible attack deals piercing damage.",
-                    "attack_scope": {
-                        "label": "Piercing attacks",
-                        "damage_types": ["Piercing"],
-                    },
-                    "effects": [
-                        {
-                            "kind": "damage_reroll",
-                            "label": "Once per turn on hit",
-                            "summary": "You can reroll one of the attack's damage dice.",
-                        }
-                    ],
+                    "source_id": "TCE",
                 },
-            ]
-        }
-        stats["defensive_state"] = {
-            "armor_state": {},
-            "rules": [
-                {
-                    "title": "Mage Slayer",
-                    "active": True,
-                    "condition": "Applies against spells cast by creatures within 5 feet of you.",
-                    "effects": [
-                        {
-                            "kind": "saving_throw",
-                            "label": "Spell saves",
-                            "summary": "You have advantage on saving throws against spells cast by creatures within 5 feet of you.",
-                        }
-                    ],
-                }
-            ],
-        }
-        payload["stats"] = stats
+            },
+        ]
 
     _write_character_definition(app, "arden-march", _mutate)
 
@@ -9347,14 +9324,14 @@ def test_quick_reference_renders_combat_reminders_and_mage_slayer_defense(app, c
     assert response.status_code == 200
     html = response.get_data(as_text=True)
 
-    assert "Combat reminders" in html
+    assert "Combat reminders" not in html
     assert "Mage Slayer" in html
-    assert "Spellcasting trigger:</strong> When a creature within 5 feet of you casts a spell, you can use your reaction to make a melee weapon attack against it." in html
-    assert "Crusher" in html
-    assert "Eligible attacks: Mace" in html
-    assert "Piercer" in html
-    assert "Eligible attacks: Rapier" in html
-    assert "Linked attacks" in html
+    assert "Spellcasting trigger:</strong> When a creature within 5 feet of you casts a spell, you can use your reaction to make a melee weapon attack against it." not in html
+    assert "Crusher" not in html
+    assert "Eligible attacks: Mace" not in html
+    assert "Piercer" not in html
+    assert "Eligible attacks: Rapier" not in html
+    assert "Linked attacks" not in html
     assert "Defensive rules" in html
     assert "Spell saves:</strong> You have advantage on saving throws against spells cast by creatures within 5 feet of you." in html
 

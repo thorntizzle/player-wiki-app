@@ -3060,6 +3060,82 @@ def test_combat_character_inventory_collapses_linked_item_descriptions(app, clie
         assert re.search(r'class="meta-badge">[^<]*\blb\.?', body) is None
 
 
+def test_combat_character_attacks_panel_keeps_attack_reminders(app, client, sign_in, users):
+    def add_attack_reminders(payload):
+        payload["attacks"] = [
+            {
+                "id": "mace-1",
+                "name": "Mace",
+                "category": "melee weapon",
+                "attack_bonus": 5,
+                "damage": "1d6+3 bludgeoning",
+                "damage_type": "Bludgeoning",
+                "notes": "",
+            },
+            {
+                "id": "rapier-1",
+                "name": "Rapier",
+                "category": "melee weapon",
+                "attack_bonus": 5,
+                "damage": "1d8+3 piercing",
+                "damage_type": "Piercing",
+                "notes": "",
+            },
+        ]
+        payload["features"] = [
+            {
+                "id": "mage-slayer-1",
+                "name": "Mage Slayer",
+                "category": "feat",
+                "source": "PHB",
+                "description_markdown": "",
+                "systems_ref": {
+                    "entry_type": "feat",
+                    "slug": "phb-feat-mage-slayer",
+                    "title": "Mage Slayer",
+                    "source_id": "PHB",
+                },
+            },
+            {
+                "id": "crusher-1",
+                "name": "Crusher",
+                "category": "feat",
+                "source": "TCE",
+                "description_markdown": "",
+                "systems_ref": {
+                    "entry_type": "feat",
+                    "slug": "tce-feat-crusher",
+                    "title": "Crusher",
+                    "source_id": "TCE",
+                },
+            },
+        ]
+
+    _write_character_definition(app, "arden-march", add_attack_reminders)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    combatant = _find_combatant(app, character_slug="arden-march")
+    assert combatant is not None
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    response = client.get(f"/campaigns/linden-pass/combat?combatant={combatant.id}")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "Mage Slayer" in body
+    assert "Spellcasting trigger:</strong> When a creature within 5 feet of you casts a spell, you can use your reaction to make a melee weapon attack against it." in body
+    assert "Crusher" in body
+    assert "Eligible attacks: Mace" in body
+    assert "Linked attacks" in body
+
+
 def test_combat_character_spells_collapse_linked_spell_descriptions(app, client, sign_in, users):
     def link_message_spell(payload):
         spellcasting = dict(payload.get("spellcasting") or {})
