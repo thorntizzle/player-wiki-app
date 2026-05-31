@@ -1402,10 +1402,19 @@ button {
   justify-content: space-between;
   gap: 0.75rem 1rem;
   align-items: flex-start;
+  min-width: 0;
+}
+
+.character-header__identity {
+  flex: 1 1 min(36rem, 100%);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .character-header__identity h1 {
   margin: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .character-header__identity .eyebrow {
@@ -1415,6 +1424,8 @@ button {
 .character-header .lede {
   margin: 0.25rem 0 0;
   line-height: 1.25;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .character-header__actions {
@@ -1422,6 +1433,7 @@ button {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 0.5rem;
+  max-width: 100%;
 }
 
 .character-meta-line {
@@ -1432,20 +1444,25 @@ button {
 }
 
 .character-meta-item {
-  white-space: nowrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .character-subpage-nav-card {
+  box-sizing: border-box;
+  max-width: 100%;
   padding: 0.7rem 0.8rem;
   border: 1px solid var(--border);
   border-radius: 18px;
   background: var(--surface-soft);
+  overflow-x: auto;
 }
 
 .character-subpage-nav {
   display: flex;
   flex-wrap: wrap;
   gap: 0.55rem;
+  min-width: 0;
   overflow-x: auto;
   padding-bottom: 0.05rem;
 }
@@ -1900,10 +1917,15 @@ button {
 .feature-groups,
 .reference-stack,
 .spell-list,
+.spellcasting-summary-grid,
 .inventory-list,
 .feature-stack {
   display: grid;
   gap: 1rem;
+}
+
+.spellcasting-class-card {
+  align-content: start;
 }
 
 .session-spellcasting-workspace,
@@ -2083,6 +2105,19 @@ button {
   justify-content: space-between;
   gap: 1rem;
   align-items: baseline;
+}
+
+.inventory-row__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  margin-top: 0.85rem;
+}
+
+.inventory-row__quantity-form {
+  flex: 1 1 18rem;
+  min-width: min(100%, 18rem);
 }
 
 .feature-row__components {

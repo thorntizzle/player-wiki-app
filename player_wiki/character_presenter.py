@@ -764,7 +764,11 @@ def present_character_detail(
                 and in_spellbook
                 and not always_prepared
             )
-            can_remove = bool((row_kind == "class" or row_mode == "ritual_book") and not is_fixed)
+            can_remove = bool(
+                not is_cantrip
+                and (row_kind == "class" or row_mode == "ritual_book")
+                and not is_fixed
+            )
             presented_spell["spell_key"] = _spell_payload_map_key(dict(spell or {}))
             presented_spell["is_prepared"] = is_prepared
             presented_spell["can_toggle_prepared"] = can_toggle_prepared

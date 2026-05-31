@@ -3,6 +3,23 @@
 {% block title %}{{ character.name }} | {{ campaign.title }}{% endblock %}
 
 {% block content %}
+  {% macro character_item_description_details(item) %}
+    {% if item.href and (item.description_html or item.notes) %}
+      <details class="item-description-detail">
+        <summary>Item details</summary>
+        <div class="item-description-detail__body">
+          {% if item.notes %}
+            <p>{{ item.notes }}</p>
+          {% endif %}
+          {% if item.description_html %}
+            <div class="article-body article-body--compact">{{ item.description_html | safe }}</div>
+          {% endif %}
+        </div>
+      </details>
+    {% elif item.notes %}
+      <p>{{ item.notes }}</p>
+    {% endif %}
+  {% endmacro %}
   <div class="page-layout character-layout">
     <article
       class="article card character-sheet"
@@ -503,7 +520,7 @@
           {% include "_character_session_panels.html" %}
         {% endwith %}
       {% elif character_inline_state_controls_enabled and show_inventory_sections %}
-        {% with session_character_controls_scope="inventory", session_character_form_mode="read", session_character_form_page=character_subpage %}
+        {% with session_character_controls_scope="inventory", session_character_form_mode="read", session_character_form_page=character_subpage, session_character_hide_inventory_controls=true %}
           {% include "_character_session_panels.html" %}
         {% endwith %}
       {% endif %}
@@ -802,7 +819,7 @@
       {% endif %}
 
       {% if show_inventory_sections and not is_session_mode and not is_xianxia_sheet %}
-        <section class="read-section">
+        <section class="read-section" id="session-inventory">
           <div class="section-heading">
             <div>
               <h2>Inventory and currency</h2>
@@ -825,27 +842,57 @@
                         {{ item.name }}
                       {% endif %}
                     </h3>
-                    <strong>x{{ item.quantity }}</strong>
+                    <div class="badge-list">
+                      <span class="meta-badge">x{{ item.quantity }}</span>
+                      {% if item.weight %}
+                        <span class="meta-badge">{{ item.weight }}</span>
+                      {% endif %}
+                      {% if item.is_equipped %}
+                        <span class="meta-badge">Equipped</span>
+                      {% endif %}
+                      {% if item.is_attuned %}
+                        <span class="meta-badge">Attuned</span>
+                      {% endif %}
+                    </div>
                   </div>
-                  <p class="meta">
-                    {% if item.weight %}{{ item.weight }}{% else %}Tracked item{% endif %}
-                  </p>
                   {% if item.tags %}
                     <p class="meta">{{ item.tags | join(", ") }}</p>
                   {% endif %}
-                  {% if item.notes %}
-                    <p>{{ item.notes }}</p>
-                  {% endif %}
-                  {% if can_use_session_mode and inventory_manager and item.item_ref in inventory_manager.removable_item_refs %}
-                    <form
-                      method="post"
-                      action="{{ url_for('character_equipment_remove', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.item_ref) }}"
-                    >
-                      <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
-                      <input type="hidden" name="mode" value="read">
-                      <input type="hidden" name="page" value="{{ character_subpage }}">
-                      <button type="submit" class="ghost-button">Remove from inventory</button>
-                    </form>
+                  {{ character_item_description_details(item) }}
+                  {% if can_use_session_mode %}
+                    <div class="inventory-row__controls">
+                      <form
+                        class="session-inline-form inventory-row__quantity-form"
+                        data-character-sheet-edit-form="inventory"
+                        data-character-sheet-edit-row-id="{{ item.id }}"
+                        method="post"
+                        action="{{ url_for('character_session_inventory', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
+                      >
+                        <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                        <input type="hidden" name="mode" value="read">
+                        <input type="hidden" name="page" value="{{ character_subpage }}">
+                        <label class="session-field">
+                          <span>Quantity</span>
+                          <input type="number" name="quantity" value="{{ item.quantity }}" min="0">
+                        </label>
+                        <div class="session-stepper">
+                          <button type="submit" name="delta" value="-1">-1</button>
+                          <button type="submit" name="delta" value="1">+1</button>
+                          <button type="submit">Save</button>
+                        </div>
+                      </form>
+                      {% if inventory_manager and item.item_ref in inventory_manager.removable_item_refs %}
+                        <form
+                          method="post"
+                          action="{{ url_for('character_equipment_remove', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.item_ref) }}"
+                        >
+                          <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+                          <input type="hidden" name="mode" value="read">
+                          <input type="hidden" name="page" value="{{ character_subpage }}">
+                          <button type="submit" class="ghost-button">Remove from inventory</button>
+                        </form>
+                      {% endif %}
+                    </div>
                   {% endif %}
                 </article>
               {% endfor %}

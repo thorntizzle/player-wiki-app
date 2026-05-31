@@ -151,7 +151,7 @@
     </section>
   {% endif %}
 
-  {% if character.inventory and (session_character_controls_scope == "inventory" or (session_character_controls_scope == "legacy" and show_inventory_sections)) %}
+  {% if character.inventory and not (session_character_hide_inventory_controls | default(false)) and (session_character_controls_scope == "inventory" or (session_character_controls_scope == "legacy" and show_inventory_sections)) %}
     <section class="read-section" id="session-inventory">
       <div class="section-heading">
         <h2>Inventory</h2>

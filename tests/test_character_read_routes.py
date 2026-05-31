@@ -6190,6 +6190,7 @@ def test_spellcasting_subpage_can_search_add_and_remove_known_spells(app, client
     page_html = page_response.get_data(as_text=True)
     assert "Known spells" in page_html
     assert "Add known spell" in page_html
+    assert "Remove cantrip" not in page_html
 
     search_response = client.get(
         "/campaigns/linden-pass/characters/arden-march/spellcasting/spells/search?kind=spell&q=find"
@@ -6390,6 +6391,27 @@ def test_spellcasting_subpage_can_prepare_spells_and_protect_always_prepared_ent
     protected_definition = _read_character_definition(app, "arden-march")
     protected_spell_names = [str(spell.get("name") or "") for spell in list((protected_definition.get("spellcasting") or {}).get("spells") or [])]
     assert "Bless" in protected_spell_names
+
+    cantrip_remove = client.post(
+        "/campaigns/linden-pass/characters/arden-march/spellcasting/remove",
+        data={
+            "expected_revision": str(_character_state_revision(app, "arden-march")),
+            "mode": "read",
+            "page": "spellcasting",
+            "spell_key": "phb-spell-guidance",
+        },
+        follow_redirects=True,
+    )
+    assert cantrip_remove.status_code == 200
+    cantrip_html = cantrip_remove.get_data(as_text=True)
+    assert "cannot be removed here" in cantrip_html
+
+    cantrip_protected_definition = _read_character_definition(app, "arden-march")
+    cantrip_protected_names = [
+        str(spell.get("name") or "")
+        for spell in list((cantrip_protected_definition.get("spellcasting") or {}).get("spells") or [])
+    ]
+    assert "Guidance" in cantrip_protected_names
 
     remove_response = client.post(
         "/campaigns/linden-pass/characters/arden-march/spellcasting/remove",
@@ -9358,6 +9380,106 @@ def test_character_sheet_renders_systems_links_when_present(app, client, sign_in
     assert 'View source entry' not in spellcasting_html
     assert 'View source entry' not in features_html
     assert 'View source entry' not in inventory_html
+
+
+def test_character_sheet_collapses_linked_spell_and_item_descriptions(
+    app, client, sign_in, users, monkeypatch
+):
+    def _mutate(payload: dict) -> None:
+        spellcasting = dict(payload.get("spellcasting") or {})
+        spells = list(spellcasting.get("spells") or [])
+        if spells:
+            spells[0] = {
+                **dict(spells[0]),
+                "systems_ref": {
+                    "entry_type": "spell",
+                    "slug": "phb-spell-message",
+                    "title": "Message",
+                    "source_id": "PHB",
+                },
+            }
+        spellcasting["spells"] = spells
+        payload["spellcasting"] = spellcasting
+
+        equipment_catalog = list(payload.get("equipment_catalog") or [])
+        if len(equipment_catalog) > 4:
+            equipment_catalog[4] = {
+                **dict(equipment_catalog[4]),
+                "systems_ref": {
+                    "entry_type": "item",
+                    "slug": "phb-item-backpack",
+                    "title": "Backpack",
+                    "source_id": "PHB",
+                },
+            }
+        payload["equipment_catalog"] = equipment_catalog
+
+    _write_character_definition(app, "arden-march", _mutate)
+
+    fake_spell = SystemsEntryRecord(
+        id=991,
+        library_slug="DND-5E",
+        source_id="PHB",
+        entry_key="dnd-5e|spell|phb|message",
+        entry_type="spell",
+        slug="phb-spell-message",
+        title="Message",
+        source_page="",
+        source_path="",
+        search_text="message",
+        player_safe_default=True,
+        dm_heavy=False,
+        metadata={},
+        body={"entries": ["Character spell detail body from Systems."]},
+        rendered_html="",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    fake_item = SystemsEntryRecord(
+        id=992,
+        library_slug="DND-5E",
+        source_id="PHB",
+        entry_key="dnd-5e|item|phb|backpack",
+        entry_type="item",
+        slug="phb-item-backpack",
+        title="Backpack",
+        source_page="",
+        source_path="",
+        search_text="backpack",
+        player_safe_default=True,
+        dm_heavy=False,
+        metadata={},
+        body={"entries": ["Character item detail body from Systems."]},
+        rendered_html="",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    systems_service = app.extensions["systems_service"]
+    original_get_entry = systems_service.get_entry_by_slug_for_campaign
+
+    def _fake_get_entry(campaign_slug: str, entry_slug: str):
+        if campaign_slug == "linden-pass" and entry_slug == "phb-spell-message":
+            return fake_spell
+        if campaign_slug == "linden-pass" and entry_slug == "phb-item-backpack":
+            return fake_item
+        return original_get_entry(campaign_slug, entry_slug)
+
+    monkeypatch.setattr(systems_service, "get_entry_by_slug_for_campaign", _fake_get_entry)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    spellcasting_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=spellcasting")
+    inventory_response = client.get("/campaigns/linden-pass/characters/arden-march?mode=read&page=inventory")
+
+    assert spellcasting_response.status_code == 200
+    assert inventory_response.status_code == 200
+
+    spellcasting_html = spellcasting_response.get_data(as_text=True)
+    inventory_html = inventory_response.get_data(as_text=True)
+
+    assert "Spell details" in spellcasting_html
+    assert "Character spell detail body from Systems." in spellcasting_html
+    assert "Item details" in inventory_html
+    assert "Character item detail body from Systems." in inventory_html
 
 
 def test_character_sheet_renders_campaign_page_links_when_present(app, client, sign_in, users):

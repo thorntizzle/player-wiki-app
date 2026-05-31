@@ -1077,7 +1077,11 @@ def _build_spell_management_rows(
                 ),
                 "counts_against_spellbook_total": bool(not is_cantrip and in_spellbook),
                 "counts_against_ritual_book_total": bool(not is_cantrip and in_ritual_book),
-                "can_remove": bool((row_kind == "class" or mode == "ritual_book") and not is_fixed),
+                "can_remove": bool(
+                    not is_cantrip
+                    and (row_kind == "class" or mode == "ritual_book")
+                    and not is_fixed
+                ),
                 "can_toggle_prepared": bool(
                     row_kind == "class"
                     and mode == "wizard"
