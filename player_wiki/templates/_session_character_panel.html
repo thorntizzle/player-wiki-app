@@ -421,11 +421,7 @@
                             {{ item.name }}
                           {% endif %}
                         </h3>
-                        <strong>x{{ item.quantity }}</strong>
                       </div>
-                      <p class="meta">
-                        {% if item.weight %}{{ item.weight }}{% else %}Tracked item{% endif %}
-                      </p>
                       {% if item.tags %}
                         <p class="meta">{{ item.tags | join(", ") }}</p>
                       {% endif %}

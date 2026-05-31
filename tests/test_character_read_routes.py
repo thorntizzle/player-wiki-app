@@ -9585,6 +9585,8 @@ def test_character_sheet_collapses_linked_spell_and_item_descriptions(
     assert "1d4 piercing" in inventory_html
     assert "Finesse, Light, Thrown" in inventory_html
     assert "Character item detail body from Systems." in inventory_html
+    assert 'class="meta-badge">x' not in inventory_html
+    assert re.search(r'class="meta-badge">[^<]*\blb\.?', inventory_html) is None
 
 
 def test_character_sheet_renders_campaign_page_links_when_present(app, client, sign_in, users):
@@ -10247,6 +10249,8 @@ def test_legacy_session_mode_inventory_renders_normal_character_view_without_bat
     assert 'name="delta" value="cp:-1"' in html
     assert "Save pending changes" not in html
     assert "Save currency" not in html
+    assert 'class="meta-badge">x' not in html
+    assert re.search(r'class="meta-badge">[^<]*\blb\.?', html) is None
 
 
 def test_character_sheet_renders_long_form_imported_ability_keys(app, client, sign_in, users):

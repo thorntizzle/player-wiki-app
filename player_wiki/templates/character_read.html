@@ -877,18 +877,16 @@
                         {{ item.name }}
                       {% endif %}
                     </h3>
-                    <div class="badge-list">
-                      <span class="meta-badge">x{{ item.quantity }}</span>
-                      {% if item.weight %}
-                        <span class="meta-badge">{{ item.weight }}</span>
-                      {% endif %}
-                      {% if item.is_equipped %}
-                        <span class="meta-badge">Equipped</span>
-                      {% endif %}
-                      {% if item.is_attuned %}
-                        <span class="meta-badge">Attuned</span>
-                      {% endif %}
-                    </div>
+                    {% if item.is_equipped or item.is_attuned %}
+                      <div class="badge-list">
+                        {% if item.is_equipped %}
+                          <span class="meta-badge">Equipped</span>
+                        {% endif %}
+                        {% if item.is_attuned %}
+                          <span class="meta-badge">Attuned</span>
+                        {% endif %}
+                      </div>
+                    {% endif %}
                   </div>
                   {% if item.tags %}
                     <p class="meta">{{ item.tags | join(", ") }}</p>

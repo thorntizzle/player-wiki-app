@@ -3056,6 +3056,8 @@ def test_combat_character_inventory_collapses_linked_item_descriptions(app, clie
         assert '<details class="item-description-detail" open' not in body
         assert "Unlinked Field Token" in body
         assert "<p>Marks the safe route.</p>" in body
+        assert 'class="meta-badge">x' not in body
+        assert re.search(r'class="meta-badge">[^<]*\blb\.?', body) is None
 
 
 def test_combat_character_spells_collapse_linked_spell_descriptions(app, client, sign_in, users):
