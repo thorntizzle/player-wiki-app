@@ -785,6 +785,16 @@ button {
   gap: 1rem;
 }
 
+.character-sheet .section-heading {
+  flex-wrap: wrap;
+}
+
+.character-sheet .section-heading,
+.character-sheet .section-heading > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .section-heading h2,
 .card h2,
 .card h3 {
@@ -952,6 +962,13 @@ button {
 .character-sheet {
   display: grid;
   gap: 1.5rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.character-sheet > [data-character-read-shell-panel] {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .character-edit-sheet,
@@ -1387,7 +1404,7 @@ button {
 .character-sheet .resource-grid--compact,
 .character-sheet .resource-grid--editable,
 .character-sheet .spell-slot-editor-list--compact {
-  grid-template-columns: repeat(3, max-content);
+  grid-template-columns: repeat(3, minmax(0, min(24rem, 100%)));
   justify-content: center;
 }
 
@@ -1451,6 +1468,7 @@ button {
 .character-subpage-nav-card {
   box-sizing: border-box;
   max-width: 100%;
+  width: 100%;
   padding: 0.7rem 0.8rem;
   border: 1px solid var(--border);
   border-radius: 18px;
@@ -1462,6 +1480,7 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 0.55rem;
+  width: 100%;
   min-width: 0;
   overflow-x: auto;
   padding-bottom: 0.05rem;
@@ -1593,19 +1612,19 @@ button {
 }
 
 .character-sheet .glance-grid--quick-row-1 {
-  grid-template-columns: repeat(2, max-content);
+  grid-template-columns: repeat(2, minmax(0, 13.5rem));
 }
 
 .character-sheet .glance-grid--quick-row-2 {
-  grid-template-columns: repeat(3, max-content);
+  grid-template-columns: repeat(3, minmax(0, 9.5rem));
 }
 
 .character-sheet .glance-grid--quick-row-3 {
-  grid-template-columns: repeat(4, max-content);
+  grid-template-columns: repeat(4, minmax(0, 11.5rem));
 }
 
 .character-sheet .glance-grid--quick-row-4 {
-  grid-template-columns: repeat(2, max-content);
+  grid-template-columns: repeat(2, minmax(0, 12rem));
 }
 
 .glance-card,
@@ -1626,6 +1645,44 @@ button {
 .resource-card__value,
 .ability-card h3 {
   font-size: 1.35rem;
+}
+
+.character-sheet .glance-card,
+.character-sheet .ability-card,
+.character-sheet .resource-card,
+.character-sheet .attack-card,
+.character-sheet .detail-card,
+.character-sheet .feature-row,
+.character-sheet .spell-row,
+.character-sheet .inventory-row {
+  min-width: 0;
+}
+
+.character-sheet .glance-card h3,
+.character-sheet .ability-card h3,
+.character-sheet .resource-card h3,
+.character-sheet .attack-card h3,
+.character-sheet .detail-card h3,
+.character-sheet .feature-row h3,
+.character-sheet .spell-row h3,
+.character-sheet .inventory-row h3,
+.character-sheet .glance-card p,
+.character-sheet .ability-card p,
+.character-sheet .resource-card p,
+.character-sheet .attack-card p,
+.character-sheet .detail-card p,
+.character-sheet .feature-row p,
+.character-sheet .spell-row p,
+.character-sheet .inventory-row p,
+.character-sheet .glance-card .meta,
+.character-sheet .ability-card .meta,
+.character-sheet .resource-card .meta,
+.character-sheet .attack-card .meta,
+.character-sheet .detail-card .meta,
+.character-sheet .feature-row .meta,
+.character-sheet .spell-row .meta,
+.character-sheet .inventory-row .meta {
+  overflow-wrap: anywhere;
 }
 
 .ability-card p,
@@ -1794,7 +1851,7 @@ button {
 }
 
 .character-sheet .resource-grid--editable {
-  grid-template-columns: repeat(3, max-content);
+  grid-template-columns: repeat(3, minmax(0, min(24rem, 100%)));
 }
 
 .session-resource-list {
@@ -1889,7 +1946,7 @@ button {
   .character-sheet .resource-grid--compact,
   .character-sheet .resource-grid--editable,
   .character-sheet .spell-slot-editor-list--compact {
-    grid-template-columns: repeat(2, max-content);
+    grid-template-columns: repeat(2, minmax(0, min(24rem, 100%)));
   }
 
   .session-resource-row__editor {
@@ -1909,7 +1966,7 @@ button {
   .character-sheet .resource-grid--compact,
   .character-sheet .resource-grid--editable,
   .character-sheet .spell-slot-editor-list--compact {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, min(24rem, 100%));
   }
 }
 

@@ -36,11 +36,102 @@ def _write_character_state(app, character_slug: str, mutator) -> None:
         )
 
 
+def _check_no_horizontal_overflow(page, selector: str, viewport_name: str, *, required: bool) -> None:
+    measurements = page.evaluate(
+        """(selector) => {
+            const element = document.querySelector(selector);
+            if (!element) {
+                return { selector, missing: true };
+            }
+
+            const rect = element.getBoundingClientRect();
+            return {
+                selector,
+                missing: false,
+                left: rect.left,
+                right: rect.right,
+                clientWidth: element.clientWidth,
+                scrollWidth: element.scrollWidth,
+            };
+        }""",
+        selector,
+    )
+
+    if required:
+        assert not measurements["missing"], f"{viewport_name}: missing {selector}"
+    elif measurements["missing"]:
+        return
+
+    assert measurements["left"] >= -1, f"{viewport_name}: {selector} starts before viewport start"
+    assert measurements["right"] <= page.viewport_size["width"] + 1, (
+        f"{viewport_name}: {selector} overflows to the right"
+    )
+    assert measurements["scrollWidth"] <= measurements["clientWidth"] + 1, (
+        f"{viewport_name}: {selector} content does not fit its container"
+    )
+
+
+def _assert_character_read_no_overflow(page, viewport_name: str) -> None:
+    required_selectors = [
+        ".page-shell",
+        "[data-character-read-shell-root]",
+        ".character-sheet",
+        ".character-header",
+        ".character-subpage-nav-card",
+        ".character-subpage-nav",
+        ".character-header__identity h1",
+    ]
+    optional_selectors = [
+        ".glance-grid--quick-row-3",
+        ".resource-grid--compact",
+        ".spell-slot-editor-list--compact",
+        ".detail-grid",
+        ".ability-grid--skills",
+    ]
+
+    document_width = page.evaluate(
+        """() => {
+            const root = document.scrollingElement || document.documentElement;
+            return root.scrollWidth;
+        }"""
+    )
+    assert document_width <= page.viewport_size["width"] + 2, (
+        f"{viewport_name}: document overflows horizontally ({document_width} > {page.viewport_size['width']})"
+    )
+
+    for selector in required_selectors:
+        _check_no_horizontal_overflow(page, selector, viewport_name, required=True)
+    for selector in optional_selectors:
+        _check_no_horizontal_overflow(page, selector, viewport_name, required=False)
+
+
+def _set_overflow_test_character_name(page) -> None:
+    page.locator(".character-header__identity h1").evaluate(
+        """(element, value) => {
+            element.textContent = value;
+            element.title = value;
+        }""",
+        "Zigzag Blackscar With an Extremely Long Sheet Name for Overflow Testing",
+    )
+
+
+def _wait_for_app_loading_cover(page) -> None:
+    page.wait_for_function(
+        """() => {
+            const root = document.documentElement;
+            return !root.classList.contains("app-loading")
+                && !root.classList.contains("app-loading-closing");
+        }""",
+        timeout=5000,
+    )
+
+
 def test_character_read_shell_browser_state_and_save_flow(
     app,
     users,
     set_campaign_visibility,
     character_read_shell_live_server,
+    tmp_path,
 ):
     try:
         from playwright.sync_api import expect, sync_playwright
@@ -49,7 +140,7 @@ def test_character_read_shell_browser_state_and_save_flow(
 
     set_campaign_visibility("linden-pass", characters="players")
     base_url = character_read_shell_live_server
-    character_slug_path = f"{base_url}/campaigns/linden-pass/characters/arden-march"
+    arden_character_slug_path = f"{base_url}/campaigns/linden-pass/characters/arden-march"
     notes_url_pattern = re.compile(
         r"^.*/campaigns/linden-pass/characters/arden-march\?.*page=notes.*$"
     )
@@ -74,7 +165,24 @@ def test_character_read_shell_browser_state_and_save_flow(
                 timeout=5000,
             )
 
-            page.goto(character_slug_path)
+            page.set_viewport_size({"width": 1365, "height": 768})
+            page.goto(arden_character_slug_path)
+            expect(page.locator("h2:has-text('At a glance')")).to_be_visible(timeout=5000)
+            _wait_for_app_loading_cover(page)
+            _set_overflow_test_character_name(page)
+            _assert_character_read_no_overflow(page, "desktop-1365")
+            page.screenshot(path=str(tmp_path / "character_read_zigzag_1365.png"))
+
+            page.set_viewport_size({"width": 390, "height": 812})
+            page.reload()
+            expect(page.locator("h2:has-text('At a glance')")).to_be_visible(timeout=5000)
+            _wait_for_app_loading_cover(page)
+            _set_overflow_test_character_name(page)
+            _assert_character_read_no_overflow(page, "mobile-390")
+            page.screenshot(path=str(tmp_path / "character_read_zigzag_390.png"))
+
+            page.goto(arden_character_slug_path)
+            page.set_viewport_size({"width": 1280, "height": 720})
             expect(page.locator("h2:has-text('At a glance')")).to_be_visible(timeout=5000)
             expect(page.locator("text=Open sheet edit view")).to_have_count(0)
             expect(page.locator("[data-character-sheet-save-bar]")).to_have_count(0)
@@ -155,7 +263,7 @@ def test_character_read_shell_browser_state_and_save_flow(
             )
             assert spell_slot_columns <= 3
 
-            page.goto(f"{character_slug_path}?mode=read&page=notes")
+            page.goto(f"{arden_character_slug_path}?mode=read&page=notes")
             expect(page).to_have_url(notes_url_pattern, timeout=5000)
             expect(page.locator("textarea[name='player_notes_markdown']")).to_be_visible(timeout=5000)
 
